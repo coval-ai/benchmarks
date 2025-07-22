@@ -1,0 +1,79 @@
+# Git files
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test files
+test_*.py
+*_test.py
+
+# Audio output files (don't include in image)
+audio_files/*.wav
+audio_files/*.mp3
+outputs/*.csv
+outputs/*.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# AWS/Docker files (don't include in image)
+.aws/
+docker-compose.yml
+Dockerfile*
+deploy.sh
+terraform/
+entrypoint.sh
+
+# Local environment files (secrets should come from AWS)
+.env.local
+.env.development
+.env.production
+
+# Google credentials (will be injected at runtime)
+google-credentials.json
+*.json
