@@ -3,6 +3,9 @@ pandas
 numpy
 sqlalchemy
 python-dotenv
+time
+os 
+wave
 
 # Audio processing
 librosa
@@ -15,6 +18,7 @@ deepgram-sdk
 assemblyai
 rev-ai
 websockets
+cartesia
 
 # ML/AI libraries
 datasets
