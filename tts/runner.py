@@ -10,6 +10,46 @@ import jiwer
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
+import boto3
+import json
+
+def get_secret():
+    """Retrieve secrets from AWS Secrets Manager"""
+    secret_name = os.getenv('SECRET_NAME')
+    region_name = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+    
+    if not secret_name:
+        print("Warning: SECRET_NAME environment variable not set. Using local environment variables.")
+        return {}
+    
+    try:
+        client = boto3.client('secretsmanager', region_name=region_name)
+        response = client.get_secret_value(SecretId=secret_name)
+        secrets = json.loads(response['SecretString'])
+        print(f"Successfully loaded secrets from {secret_name}")
+        return secrets
+    except Exception as e:
+        print(f"Warning: Could not load secrets from AWS Secrets Manager: {e}")
+        print("Falling back to environment variables")
+        return {}
+
+def get_api_key(key_name, secrets=None):
+    """Get a specific API key from secrets or environment variables"""
+    if secrets is None:
+        secrets = get_secret()
+    
+    # Try to get from secrets first, then fallback to environment variables
+    api_key = secrets.get(key_name) or os.getenv(key_name)
+    
+    if not api_key:
+        print(f"Warning: {key_name} not found in secrets or environment variables")
+    
+    return api_key
+
+# Load secrets at startup
+print("Loading API keys from AWS Secrets Manager...")
+secrets = get_secret()
+
 load_dotenv()
 from openai import OpenAI
 from deepgram import DeepgramClient, ClientOptionsFromEnv, PrerecordedOptions
@@ -168,7 +208,7 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
                 wer_result['status'] = 'audio_file_not_found'
                 return [ttfa_result, wer_result]
                 
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = get_api_key('OPENAI_API_KEY', secrets)
             if not api_key:
                 raise ValueError("OPENAI_API_KEY environment variable is required")
             

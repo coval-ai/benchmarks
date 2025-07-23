@@ -17,19 +17,22 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Install Python dependencies (including boto3 for AWS integration)
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt boto3
 
 # Copy the providers directory first (for better layer caching)
 COPY tts/providers/ ./providers/
 
-# Copy main scripts and helper modules
-COPY tts/runner.py tts/stt_script.py tts/wer_calculator.py tts/aws_secrets.py ./
+# Copy main scripts
+COPY tts/runner.py tts/stt_script.py tts/wer_calculator.py ./
+
+# Copy environment file (if present)
+COPY .env* ./
 
 # Copy any additional Python modules
 COPY *.py ./
 
 # Create directories for audio files and outputs
-RUN mkdir -p /app/audio_files /app/outputs /app/test_cases /tmp
+RUN mkdir -p /app/audio_files /app/outputs /app/test_cases
 
 # Set environment variables
 ENV PYTHONPATH=/app
