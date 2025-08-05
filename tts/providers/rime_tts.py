@@ -4,12 +4,15 @@ import time
 import asyncio
 import aiohttp
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from .base import TTS_Benchmark
 
 class Rime_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = os.getenv("RIME_API_KEY")
+        self.api_key = get_api_key('RIME_API_KEY', secrets)
         if not self.api_key:
             raise ValueError("RIME_API_KEY not found in .env file")
     
@@ -164,7 +167,7 @@ class Rime_Benchmark(TTS_Benchmark):
         if audio_chunks:
             filename = f"rime_{self.model}_{int(time.time())}.wav"
             
-            if self.model in ["arcana", "mistv2", "mist"]:
+            if self.model == "arcana":
                 # HTTP streaming returns WAV format directly
                 with open(filename, "wb") as f:
                     for chunk in audio_chunks:

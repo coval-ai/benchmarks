@@ -5,13 +5,16 @@ import time
 import json
 import asyncio
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from .base import TTS_Benchmark
 
 class Playht_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = os.getenv("PLAYHT_API_KEY")
-        self.user_id = os.getenv("PLAYHT_USER_ID")
+        self.api_key = get_api_key('PLAYHT_API_KEY', secrets)
+        self.user_id = get_api_key('PLAYHT_USER_ID', secrets)
         if not self.api_key or not self.user_id:
             raise ValueError("PLAYHT_API_KEY and PLAYHT_USER_ID is required.")
     

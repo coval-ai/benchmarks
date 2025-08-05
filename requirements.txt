@@ -3,9 +3,6 @@ pandas
 numpy
 sqlalchemy
 python-dotenv
-time
-os 
-wave
 
 # Audio processing
 librosa
@@ -19,6 +16,7 @@ assemblyai
 rev-ai
 websockets
 cartesia
+hume
 
 # ML/AI libraries
 datasets
@@ -36,5 +34,5 @@ requests
 aiohttp
 
 # AWS integration
-boto3>=1.28.0
-botocore>=1.31.0
+boto3
+botocore

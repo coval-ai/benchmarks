@@ -3,12 +3,15 @@ from cartesia import AsyncCartesia
 import os
 import wave
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from .base import TTS_Benchmark
 
 class Cartesia_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = os.getenv("CARTESIA_API_KEY")
+        self.api_key = get_api_key('CARTESIA_API_KEY', secrets)
         if not self.api_key:
             raise ValueError("CARTESIA_API_KEY not found in .env file")
 
