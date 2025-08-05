@@ -3,6 +3,9 @@ import time
 import asyncio
 import base64
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from hume import HumeClient, AsyncHumeClient
 from hume.tts import PostedUtterance, FormatWav, PostedUtteranceVoiceWithName, PostedUtteranceVoiceWithId
 
@@ -23,7 +26,7 @@ from .base import TTS_Benchmark
 class Hume_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = os.getenv("HUME_API_KEY")
+        self.api_key = get_api_key('HUME_API_KEY', secrets)
         if not self.api_key:
             raise ValueError("HUME_API_KEY not found in .env file")
 

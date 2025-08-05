@@ -5,12 +5,15 @@ import asyncio
 import os
 import base64
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from .base import TTS_Benchmark
 
 class ElevenLabs_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        self.api_key = get_api_key('ELEVENLABS_API_KEY', secrets)
         if not self.api_key:
             raise ValueError("ELEVENLABS_API_KEY not found in .env file")
 

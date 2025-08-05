@@ -7,6 +7,9 @@ import json
 import asyncio
 import wave
 
+from secretmanager import get_secret, get_api_key, load_all_secrets
+secrets = get_secret("prod/benchmarking")
+
 from .base import TTS_Benchmark
 
 class OpenAI_Benchmark(TTS_Benchmark):
@@ -15,7 +18,7 @@ class OpenAI_Benchmark(TTS_Benchmark):
         self.client = self.setup()
     
     def setup(self):
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = get_api_key('OPENAI_API_KEY', secrets)
         if not api_key:
             raise ValueError("OpenAI API Key not found in .env file")
         return AsyncOpenAI(api_key=api_key)
