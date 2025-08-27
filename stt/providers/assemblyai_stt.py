@@ -77,13 +77,14 @@ class AssemblyAIProvider(STTProvider):
                     session_id = response.get('id')
                     continue
                 
-                # Extract transcript for TTFT measurement
+                # Extract transcript for TTFT measurement (checks both transcript field and words array)
                 transcript = self._extract_transcript(response)
                 if transcript:
                     # TTFT: Record first actual transcript content timing - AssemblyAI uses first content method
                     if result.ttft_seconds is None and result.audio_start_time is not None:
                         result.ttft_seconds = current_time - result.audio_start_time
-                        result.first_token_content = transcript
+                        result.first_token_content = transcript[:30] + "..." if len(transcript) > 30 else transcript
+                        print(f"[{self.name}] First transcript received: '{result.first_token_content}' at {result.ttft_seconds:.3f}s")
                     
                     # Track partial transcripts
                     result.partial_transcripts.append(transcript)
@@ -96,7 +97,7 @@ class AssemblyAIProvider(STTProvider):
                         last_final_turn_time = current_time  # Track when last final turn was received
                         
                         # Check if this looks like a formatted result (has punctuation, proper numbers)
-                        is_formatted = any(char in transcript for char in ['£', '.', '-']) or transcript[0].isupper()
+                        is_formatted = any(char in transcript for char in ['£', '.', '-']) or (transcript and transcript[0].isupper())
                         if is_formatted:
                             formatted_turns.append(transcript)
                 
@@ -118,11 +119,33 @@ class AssemblyAIProvider(STTProvider):
             result.word_count = len(result.complete_transcript.split()) if result.complete_transcript else 0
     
     def _extract_transcript(self, response_json: dict) -> str:
-        """Extract transcript from AssemblyAI v3 response format."""
+        """
+        Extract transcript from AssemblyAI v3 response format.
+        Checks both the 'transcript' field and 'words' array for content.
+        """
         msg_type = response_json.get('type')
         
         # Only extract transcript from Turn messages
-        if msg_type == "Turn":
-            return response_json.get("transcript", "")
+        if msg_type != "Turn":
+            return ""
+        
+        # First, try the transcript field
+        transcript = response_json.get("transcript", "").strip()
+        if transcript:
+            return transcript
+        
+        # If transcript is empty, check the words array
+        words = response_json.get("words", [])
+        if words:
+            # Extract text from words array and join them
+            word_texts = []
+            for word in words:
+                if isinstance(word, dict) and "text" in word:
+                    word_text = word["text"].strip()
+                    if word_text:
+                        word_texts.append(word_text)
+            
+            if word_texts:
+                return " ".join(word_texts)
         
         return ""
