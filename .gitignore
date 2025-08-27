@@ -1,4 +1,6 @@
 .env
 google-credentials.json
 test.wav
+en_test/
+test.tsv
 __pycache__/

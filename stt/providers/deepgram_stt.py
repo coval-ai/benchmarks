@@ -17,7 +17,7 @@ class DeepgramProvider(STTProvider):
         """Build WebSocket URL with model parameter if specified."""
         base_url = (f"wss://api.deepgram.com/v1/listen?"
                    f"channels={channels}&sample_rate={sample_rate}&"
-                   f"encoding=linear16&interim_results=true&vad_events=true&endpointing=true&smart_format=true")
+                   f"encoding=linear16&interim_results=true&vad_events=true&no_delay=true")
         
         if self.model != "default":
             base_url += f"&model={self.model}"
@@ -27,7 +27,7 @@ class DeepgramProvider(STTProvider):
     async def measure_ttft(self, audio_data: bytes, channels: int, 
                           sample_width: int, sample_rate: int,
                           realtime_resolution: float = 0.1, audio_duration: float = None) -> TranscriptionResult:
-        """Deepgram-specific implementation with TTFT using first response method."""
+        """Deepgram-specific implementation with TTFT using first transcript method."""
         from wer_calculator import compare_transcription
         
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
@@ -61,7 +61,7 @@ class DeepgramProvider(STTProvider):
         return result
     
     async def _receive_responses(self, ws, result: TranscriptionResult):
-        """Receive and process Deepgram responses using first response method for TTFT."""
+        """Receive and process Deepgram responses using first transcript method for TTFT."""
         final_flag_segments = []
         last_final_transcript_time = None
         
@@ -73,11 +73,6 @@ class DeepgramProvider(STTProvider):
                 response = json.loads(message)
                 current_time = time.time()
                 
-                # TTFT: Record first response (any message) timing - Deepgram uses first response method
-                if result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = current_time - result.audio_start_time
-                    result.first_token_content = f"Message type: {response.get('type', 'unknown')}"
-                
                 # Skip non-transcript responses for transcript processing
                 if response.get("type") in ["SpeechStarted", "SpeechEnded", "Metadata"]:
                     continue
@@ -85,6 +80,12 @@ class DeepgramProvider(STTProvider):
                 # Extract transcript for partial tracking
                 transcript = self._extract_transcript(response)
                 if transcript:
+                    # TTFT: Record time to first transcript (when we get actual transcription content)
+                    if result.ttft_seconds is None and result.audio_start_time is not None:
+                        result.ttft_seconds = current_time - result.audio_start_time
+                        result.first_token_content = transcript[:30] + "..." if len(transcript) > 30 else transcript
+                        print(f"[{self.name}] First transcript received: '{result.first_token_content}' at {result.ttft_seconds:.3f}s")
+                    
                     # Track partial transcripts
                     result.partial_transcripts.append(transcript)
                     
@@ -119,12 +120,35 @@ class DeepgramProvider(STTProvider):
             result.word_count = len(result.complete_transcript.split()) if result.complete_transcript else 0
     
     def _extract_transcript(self, response_json: dict) -> str:
-        """Extract transcript from Deepgram response format."""
         try:
             channel = response_json.get("channel", {})
             alternatives = channel.get("alternatives", [])
             if alternatives:
-                return alternatives[0].get("transcript", "")
+                alternative = alternatives[0]
+                
+                # First, check the words array for any words
+                words = alternative.get("words", [])
+                if words:
+                    # Extract text from words array and join them
+                    word_texts = []
+                    for word in words:
+                        if isinstance(word, dict):
+                            # Try punctuated_word first (if smart_format is enabled), then fallback to word
+                            word_text = word.get("punctuated_word", "").strip()
+                            if not word_text:
+                                word_text = word.get("word", "").strip()
+                            
+                            if word_text:
+                                word_texts.append(word_text)
+                    
+                    if word_texts:
+                        return " ".join(word_texts)
+                
+                # Fallback to transcript field if words array is empty
+                transcript = alternative.get("transcript", "").strip()
+                if transcript:
+                    return transcript
+            
             return ""
-        except (KeyError, IndexError):
+        except (KeyError, IndexError, TypeError):
             return ""
