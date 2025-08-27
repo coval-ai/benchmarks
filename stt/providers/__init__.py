@@ -14,11 +14,11 @@ except ImportError:
     GoogleProvider = None
 
 __all__ = [
-    'STTProvider',
-    'TranscriptionResult',
-    'DeepgramProvider',
-    'AssemblyAIProvider', 
-    'SpeechmaticsProvider',
-    'GoogleProvider',
-    'GOOGLE_AVAILABLE'
+    "STTProvider",
+    "TranscriptionResult",
+    "DeepgramProvider",
+    "AssemblyAIProvider",
+    "SpeechmaticsProvider",
+    "GoogleProvider",
+    "GOOGLE_AVAILABLE",
 ]

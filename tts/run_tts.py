@@ -15,10 +15,11 @@ import json
 
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from secretmanager import get_secret, get_api_key
-# Load secrets at startup
+
 print("Loading API keys from AWS Secrets Manager...")
 secrets = get_secret("prod/benchmarking")
 
@@ -37,9 +38,11 @@ from providers.rime_tts import Rime_Benchmark
 
 from wer_calculator import compare_transcription
 
+
 async def TTFA_Benchmark(tts_provider, input_str):
     ttfa = await tts_provider.calculateTTFA(input_str)
     return ttfa
+
 
 TTS_PROVIDERS = {
     "OpenAI": OpenAI_Benchmark,
@@ -47,39 +50,25 @@ TTS_PROVIDERS = {
     "ElevenLabs": ElevenLabs_Benchmark,
     "Hume": Hume_Benchmark,
     "PlayHT": Playht_Benchmark,
-    "Rime": Rime_Benchmark
+    "Rime": Rime_Benchmark,
 }
 
 CONFIGURATIONS = {
     "OpenAI": {
         "voice": "alloy",  # Options: "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer"
-        "models": [
-            "gpt-4o-mini-tts",
-            "tts-1",
-            "tts-1-hd"
-        ]
+        "models": ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"],
     },
     "ElevenLabs": {
         "voice": "IKne3meq5aSn9XLyUdCD",  # Use voice ID or name from your ElevenLabs account
-        "models": [
-            "eleven_flash_v2_5",
-            "eleven_multilingual_v2",
-            "eleven_turbo_v2_5"
-        ]
+        "models": ["eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5"],
     },
     "Cartesia": {
         "voice": "bf0a246a-8642-498a-9950-80c35e9276b5",  # Voice ID from Cartesia
-        "models": [
-            "sonic-2",
-            "sonic-turbo",
-            "sonic"
-        ]
+        "models": ["sonic-2", "sonic-turbo", "sonic"],
     },
     "Hume": {
         "voice": "male_01",  # Check Hume documentation for available voices
-        "models": [
-            "octave-tts"
-        ]
+        "models": ["octave-tts"],
     },
     # "PlayHT": {
     #     "voice": "s3://voice-cloning-zero-shot/b27bc13e-996f-4841-b584-4d35801aea98/original/manifest.json",  # Default voice or another voice ID
@@ -91,161 +80,164 @@ CONFIGURATIONS = {
     # },
     "Rime": {
         "voice": "cove",  # For "mist" model: "cove", for "mistv2" model: "breeze"
-        "models": [
-            "arcana",
-            "mistv2"
-        ]
-    }
+        "models": ["arcana", "mistv2"],
+    },
 }
+
 
 def load_test_cases(path):
     try:
-        df = pd.read_csv(path, encoding='cp1252')
+        df = pd.read_csv(path, encoding="cp1252")
         test_cases = []
-        
+
         for _, row in df.iterrows():
-            if pd.notna(row['Testcase ID']) and pd.notna(row['Transcript']):
-                test_cases.append({
-                    'testcase_id': row['Testcase ID'],
-                    'transcript': row['Transcript'].strip(),
-                    'recording_conditions': row.get('Recording conditions', ''),
-                    'mic': row.get('Mic', '')
-                })
-        
+            if pd.notna(row["Testcase ID"]) and pd.notna(row["Transcript"]):
+                test_cases.append(
+                    {
+                        "testcase_id": row["Testcase ID"],
+                        "transcript": row["Transcript"].strip(),
+                        "recording_conditions": row.get("Recording conditions", ""),
+                        "mic": row.get("Mic", ""),
+                    }
+                )
+
         return test_cases
     except Exception as e:
         logging.error(f"Error loading test cases: {e}")
         return []
-    
+
+
 async def run_test(testcase, provider_name, model, voice, timestamp):
-    
+
     print(f"Testing {testcase['testcase_id']} with {provider_name} - {model}.")
-    
-    # Use the shared timestamp for all providers of this test case
-    
+
     ttfa_result = {
-        'provider': provider_name,
-        'model': model,
-        'voice': voice,
-        'benchmark': 'TTS',
-        'metric_type': 'TTFA',
-        'metric_value': None,
-        'metric_units': 'ms',
-        'audio_filename': None,
-        'timestamp': timestamp,
-        'status': 'failed'
+        "provider": provider_name,
+        "model": model,
+        "voice": voice,
+        "benchmark": "TTS",
+        "metric_type": "TTFA",
+        "metric_value": None,
+        "metric_units": "ms",
+        "audio_filename": None,
+        "timestamp": timestamp,
+        "status": "failed",
     }
-    
+
     wer_result = {
-        'provider': provider_name,
-        'model': model,
-        'voice': voice,
-        'benchmark': 'TTS',
-        'metric_type': 'WER',
-        'metric_value': None,
-        'metric_units': '%',
-        'audio_filename': None,
-        'timestamp': timestamp,
-        'status': 'failed'
+        "provider": provider_name,
+        "model": model,
+        "voice": voice,
+        "benchmark": "TTS",
+        "metric_type": "WER",
+        "metric_value": None,
+        "metric_units": "%",
+        "audio_filename": None,
+        "timestamp": timestamp,
+        "status": "failed",
     }
-    
+
     try:
-        # Step 1: Generate audio and calculate TTFA
         try:
             provider = TTS_PROVIDERS[provider_name]
-            config = {'model': model, 'voice': voice}
+            config = {"model": model, "voice": voice}
             client = provider(config)
-            
-            ttfa, audio_filename = await client.calculateTTFA(testcase['transcript'])
-            
+
+            ttfa, audio_filename = await client.calculateTTFA(testcase["transcript"])
+
         except Exception as e:
             logging.error(f"Error generating audio with {provider_name}: {e}")
             ttfa = None
             audio_filename = None
-        
+
         if ttfa is None or audio_filename is None:
-            ttfa_result['status'] = 'tts_failed'
-            wer_result['status'] = 'tts_failed'
+            ttfa_result["status"] = "tts_failed"
+            wer_result["status"] = "tts_failed"
             return [ttfa_result, wer_result]
-        
-        # Update TTFA result
-        ttfa_result['metric_value'] = round(ttfa, 2)
-        ttfa_result['audio_filename'] = audio_filename
-        ttfa_result['status'] = 'success'
-        
-        # Step 2: Transcribe audio
+
+        ttfa_result["metric_value"] = round(ttfa, 2)
+        ttfa_result["audio_filename"] = audio_filename
+        ttfa_result["status"] = "success"
+
         try:
             if not audio_filename or not os.path.exists(audio_filename):
                 logging.error(f"Audio file not found: {audio_filename}")
-                wer_result['status'] = 'audio_file_not_found'
+                wer_result["status"] = "audio_file_not_found"
                 return [ttfa_result, wer_result]
-                
-            api_key = get_api_key('OPENAI_API_KEY', secrets)
+
+            api_key = get_api_key("OPENAI_API_KEY", secrets)
             if not api_key:
                 raise ValueError("OPENAI_API_KEY environment variable is required")
-            
+
             client = OpenAI(api_key=api_key)
             transcript_start = time.time()
-            
-            # Transcribe audio file
+
             with open(audio_filename, "rb") as audio_file:
                 openai_transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=audio_file,
                     language="en",
-                    response_format="text"
+                    response_format="text",
                 )
             openai_transcript_time = (time.time() - transcript_start) * 1000
             openai_hypothesis = openai_transcript.strip()
 
         except Exception as e:
             logging.error(f"Error transcribing audio: {e}")
-            wer_result['status'] = 'stt_failed'
+            wer_result["status"] = "stt_failed"
             return [ttfa_result, wer_result]
-        
+
         if openai_hypothesis is None:
-            wer_result['status'] = 'stt_failed'
+            wer_result["status"] = "stt_failed"
             return [ttfa_result, wer_result]
-        
-        # Step 3: Calculate WER
+
         try:
-            wer_analysis = compare_transcription(testcase['transcript'], openai_hypothesis)
-            custom_wer = wer_analysis['wer']
-            
+            wer_analysis = compare_transcription(
+                testcase["transcript"], openai_hypothesis
+            )
+            custom_wer = wer_analysis["wer"]
+
             if custom_wer is not None:
-                wer_result['metric_value'] = round(custom_wer * 100, 2)
-                wer_result['audio_filename'] = audio_filename
-                wer_result['status'] = 'success'
-                
-                # Log detailed error analysis for debugging when there are differences
-                if custom_wer > 0 and len(wer_analysis['incorrect_words']) > 0:
-                    logging.info(f"Custom WER errors for {testcase['testcase_id']}: {wer_analysis['incorrect_words']}")
-                    logging.info(f"Original normalized: '{wer_analysis['normalized_original_text']}'")
-                    logging.info(f"Transcription normalized: '{wer_analysis['normalized_transcription']}'")
+                wer_result["metric_value"] = round(custom_wer * 100, 2)
+                wer_result["audio_filename"] = audio_filename
+                wer_result["status"] = "success"
+
+                if custom_wer > 0 and len(wer_analysis["incorrect_words"]) > 0:
+                    logging.info(
+                        f"Custom WER errors for {testcase['testcase_id']}: {wer_analysis['incorrect_words']}"
+                    )
+                    logging.info(
+                        f"Original normalized: '{wer_analysis['normalized_original_text']}'"
+                    )
+                    logging.info(
+                        f"Transcription normalized: '{wer_analysis['normalized_transcription']}'"
+                    )
             else:
-                wer_result['status'] = 'wer_failed'
+                wer_result["status"] = "wer_failed"
         except Exception as e:
             logging.error(f"Error calculating custom WER: {e}")
-            wer_result['status'] = 'custom_calculation_failed'
-        
-        print(f"TTFA: {ttfa_result['metric_value']} ms, WER: {wer_result['metric_value']}%")
-        
-        # Optionally clean up audio file (comment out if you want to keep them)
-        # if os.path.exists(audio_filename):
-        #     os.remove(audio_filename)
-        
+            wer_result["status"] = "custom_calculation_failed"
+
+        print(
+            f"TTFA: {ttfa_result['metric_value']} ms, WER: {wer_result['metric_value']}%"
+        )
+
     except Exception as e:
-        logging.error(f"Error in test {testcase['testcase_id']} with {provider_name}: {e}")
-        ttfa_result['status'] = f'error: {str(e)}'
-        wer_result['status'] = f'error: {str(e)}'
-    
+        logging.error(
+            f"Error in test {testcase['testcase_id']} with {provider_name}: {e}"
+        )
+        ttfa_result["status"] = f"error: {str(e)}"
+        wer_result["status"] = f"error: {str(e)}"
+
     return [ttfa_result, wer_result]
+
 
 async def tts_benchmarks(test_cases):
     results = []
-    
-    # Calculate total tests: test_cases * providers * models
-    total_tests = len(test_cases) * sum(len(provider_config['models']) for provider_config in CONFIGURATIONS.values())
+
+    total_tests = len(test_cases) * sum(
+        len(provider_config["models"]) for provider_config in CONFIGURATIONS.values()
+    )
     current_test = 0
 
     print(f"Total tests to run: {total_tests}")
@@ -254,82 +246,113 @@ async def tts_benchmarks(test_cases):
     for testcase in test_cases:
         print(f"\nProcessing test case: {testcase['testcase_id']}")
         print(f"Text: {testcase['transcript'][:50]}...")
-        
-        # Generate timestamp once per test case
+
         test_case_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         for provider_name, provider_config in CONFIGURATIONS.items():
-            for model in provider_config['models']:
+            for model in provider_config["models"]:
                 current_test += 1
                 print(f"[{current_test}/{total_tests}] ", end="")
-                
-                test_results = await run_test(testcase, provider_name, model, provider_config['voice'], test_case_timestamp)
+
+                test_results = await run_test(
+                    testcase,
+                    provider_name,
+                    model,
+                    provider_config["voice"],
+                    test_case_timestamp,
+                )
                 results.extend(test_results)  # Add both TTFA and WER results
-                
-                # Small delay to avoid rate limiting
+
                 await asyncio.sleep(0.5)
-    
-    # Write results to CSV
+
     output_file = "all_benchmarks.csv"
     try:
         fieldnames = [
-            'provider', 'model', 'voice',
-            'benchmark', 'metric_type', 'metric_value', 'metric_units',
-            'audio_filename', 'timestamp', 'status'
+            "provider",
+            "model",
+            "voice",
+            "benchmark",
+            "metric_type",
+            "metric_value",
+            "metric_units",
+            "audio_filename",
+            "timestamp",
+            "status",
         ]
-        
-        with open(output_file, 'a', newline='', encoding='utf-8') as csvfile:
+
+        with open(output_file, "a", newline="", encoding="utf-8") as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows([r for r in results if r is not None])
 
         print(f"\nResults saved to: {output_file}")
-        
+
     except Exception as e:
         logging.error(f"Error writing results to CSV: {e}")
-    
-    # Save to database
+
     try:
         df = pd.DataFrame(results)
         df.to_csv(output_file, index=False)
         engine = create_engine(get_api_key("DATABASE_URL", secrets))
-        df.to_sql('all_benchmarks', engine, if_exists='append', index=False)
+        df.to_sql("all_benchmarks", engine, if_exists="append", index=False)
         print("Data uploaded to database.")
     except Exception as e:
         logging.error(f"Error writing results to database: {e}")
-    
-    # Print summary
-    successful_ttfa_tests = [r for r in results if r['status'] == 'success' and r['metric_type'] == 'TTFA']
-    successful_wer_tests = [r for r in results if r['status'] == 'success' and r['metric_type'] == 'WER']
-    
+
+    successful_ttfa_tests = [
+        r for r in results if r["status"] == "success" and r["metric_type"] == "TTFA"
+    ]
+    successful_wer_tests = [
+        r for r in results if r["status"] == "success" and r["metric_type"] == "WER"
+    ]
+
     print(f"\nTotal result rows: {len(results)}")
     print(f"Successful TTFA tests: {len(successful_ttfa_tests)}")
     print(f"Successful WER tests: {len(successful_wer_tests)}")
-    print(f"Failed tests: {len(results) - len(successful_ttfa_tests) - len(successful_wer_tests)}")
+    print(
+        f"Failed tests: {len(results) - len(successful_ttfa_tests) - len(successful_wer_tests)}"
+    )
 
     if successful_ttfa_tests:
-        avg_ttfa = sum(r['metric_value'] for r in successful_ttfa_tests) / len(successful_ttfa_tests)
+        avg_ttfa = sum(r["metric_value"] for r in successful_ttfa_tests) / len(
+            successful_ttfa_tests
+        )
         print(f"\nAverage TTFA: {avg_ttfa:,.2f} ms")
-        
+
         print(f"\nTTFA by Provider and Model:")
         for provider_name, provider_config in CONFIGURATIONS.items():
-            for model in provider_config['models']:
-                provider_model_results = [r for r in successful_ttfa_tests if r['provider'] == provider_name and r['model'] == model]
+            for model in provider_config["models"]:
+                provider_model_results = [
+                    r
+                    for r in successful_ttfa_tests
+                    if r["provider"] == provider_name and r["model"] == model
+                ]
                 if provider_model_results:
-                    avg_ttfa = sum(r['metric_value'] for r in provider_model_results) / len(provider_model_results)
+                    avg_ttfa = sum(
+                        r["metric_value"] for r in provider_model_results
+                    ) / len(provider_model_results)
                     print(f"  {provider_name} - {model}: {avg_ttfa:,.2f} ms")
-    
+
     if successful_wer_tests:
-        avg_wer = sum(r['metric_value'] for r in successful_wer_tests) / len(successful_wer_tests)
+        avg_wer = sum(r["metric_value"] for r in successful_wer_tests) / len(
+            successful_wer_tests
+        )
         print(f"\nAverage WER: {avg_wer:,.2f}%")
-        
+
         print(f"\nWER by Provider and Model:")
         for provider_name, provider_config in CONFIGURATIONS.items():
-            for model in provider_config['models']:
-                provider_model_results = [r for r in successful_wer_tests if r['provider'] == provider_name and r['model'] == model]
+            for model in provider_config["models"]:
+                provider_model_results = [
+                    r
+                    for r in successful_wer_tests
+                    if r["provider"] == provider_name and r["model"] == model
+                ]
                 if provider_model_results:
-                    avg_wer = sum(r['metric_value'] for r in provider_model_results) / len(provider_model_results)
+                    avg_wer = sum(
+                        r["metric_value"] for r in provider_model_results
+                    ) / len(provider_model_results)
                     print(f"  {provider_name} - {model}: {avg_wer:,.2f}%")
+
 
 database_path = "Test cases.csv"  # Update this path as needed
 test_cases = load_test_cases(database_path)
@@ -338,11 +361,10 @@ if not test_cases:
     print("No test cases found. Please check your Excel file.")
 else:
     print(f"Loaded {len(test_cases)} test cases")
-    
-    # Select a random test case instead of the first one
+
     random_test_case = random.choice(test_cases)
     test_cases = [random_test_case]
-    
+
     print(f"Running random test case: {random_test_case['testcase_id']}")
     print(f"Text: {random_test_case['transcript']}")
 

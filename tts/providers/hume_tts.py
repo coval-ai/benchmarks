@@ -4,10 +4,16 @@ import asyncio
 import base64
 
 from secretmanager import get_secret, get_api_key, load_all_secrets
+
 secrets = get_secret("prod/benchmarking")
 
 from hume import HumeClient, AsyncHumeClient
-from hume.tts import PostedUtterance, FormatWav, PostedUtteranceVoiceWithName, PostedUtteranceVoiceWithId
+from hume.tts import (
+    PostedUtterance,
+    FormatWav,
+    PostedUtteranceVoiceWithName,
+    PostedUtteranceVoiceWithId,
+)
 
 try:
     from hume.types import UserInput
@@ -17,16 +23,19 @@ except ImportError:
 try:
     from hume.models.social.subscribe import SubscribeEvent
 except ImportError:
+
     class SubscribeEvent:
         def __init__(self, **kwargs):
             pass
 
+
 from .base import TTS_Benchmark
+
 
 class Hume_Benchmark(TTS_Benchmark):
     def __init__(self, config):
         super().__init__(config)
-        self.api_key = get_api_key('HUME_API_KEY', secrets)
+        self.api_key = get_api_key("HUME_API_KEY", secrets)
         if not self.api_key:
             raise ValueError("HUME_API_KEY not found in .env file")
 
@@ -39,44 +48,47 @@ class Hume_Benchmark(TTS_Benchmark):
     async def calculateTTFA(self, text):
         audio_chunks = []
         ttfa = None
-        
+
         if self.model == "octave-tts":
             client = HumeClient(api_key=self.api_key)
-            
+
             # CRITICAL FIX: Start timing immediately before API call to match WebSocket providers
             start_time = time.time()
-            
+
             response = client.tts.synthesize_file_streaming(
                 utterances=[
                     PostedUtterance(
                         text=text,
-                        voice=PostedUtteranceVoiceWithId(id="176a55b1-4468-4736-8878-db82729667c1", provider="HUME_AI")
+                        voice=PostedUtteranceVoiceWithId(
+                            id="176a55b1-4468-4736-8878-db82729667c1",
+                            provider="HUME_AI",
+                        ),
                     )
                 ],
                 format=FormatWav(),
                 num_generations=1,
-                instant_mode=True 
+                instant_mode=True,
             )
-            
+
             for chunk_count, chunk in enumerate(response):
                 if self.is_audio_chunk(chunk) and ttfa is None:
                     ttfa = (time.time() - start_time) * 1000
                     print(f"Hume (octave-tts) TTFA: {ttfa:.2f} ms")
-                
+
                 if self.is_audio_chunk(chunk):
                     audio_chunks.append(chunk)
-                    #print(f"Received chunk {chunk_count} at {time.time() - start_time:.5f}s, size={len(chunk)} bytes")
-            
+                    # print(f"Received chunk {chunk_count} at {time.time() - start_time:.5f}s, size={len(chunk)} bytes")
+
             filename = None
             if audio_chunks:
                 filename = f"hume_{self.model}_{int(time.time())}.wav"
                 with open(filename, "wb") as f:
                     for chunk in audio_chunks:
                         f.write(chunk)
-                        
+
         elif self.model == "emphatic-voice-interface":
             client = AsyncHumeClient(api_key=self.api_key)
-            
+
             audio_chunks = []
             conversation_complete = asyncio.Event()
             ttfa = None
@@ -100,26 +112,28 @@ class Hume_Benchmark(TTS_Benchmark):
             async def on_error(error):
                 print(f"Error: {error}")
                 conversation_complete.set()
-            
+
             try:
                 async with client.empathic_voice.chat.connect_with_callbacks(
                     on_message=on_message, on_error=on_error
                 ) as socket:
                     # STANDARDIZED: Start timing immediately before sending request
                     start_time = time.time()
-                    
-                    user_input_message = UserInput(text=f"Speak this text exactly as provided: {text}")
+
+                    user_input_message = UserInput(
+                        text=f"Speak this text exactly as provided: {text}"
+                    )
                     await socket.send_user_input(user_input_message)
                     await conversation_complete.wait()
 
             except Exception as e:
                 print(f"An error occurred: {e}")
-            
+
             filename = None
             if audio_chunks:
                 filename = f"hume_{self.model}_{int(time.time())}.wav"
-                audio_data = b''.join(audio_chunks)
-                
+                audio_data = b"".join(audio_chunks)
+
                 with open(filename, "wb") as f:
                     f.write(audio_data)
 
