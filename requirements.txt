@@ -1,0 +1,38 @@
+# Core dependencies
+pandas
+numpy
+sqlalchemy
+python-dotenv
+
+# Audio processing
+librosa
+soundfile
+jiwer
+
+# API clients
+openai
+deepgram-sdk
+assemblyai
+rev-ai
+websockets
+cartesia
+hume
+
+# ML/AI libraries
+datasets
+huggingface-hub
+transformers
+
+# Google Cloud (optional)
+google-cloud-speech
+
+# Database
+psycopg2-binary
+
+# HTTP clients
+requests
+aiohttp
+
+# AWS integration
+boto3
+botocore
