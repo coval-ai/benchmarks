@@ -71,7 +71,6 @@ class OpenAI_Benchmark(TTS_Benchmark):
                 "output_audio_format": "pcm16",
             }
 
-            # Setup session (exclude from timing)
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.post(
@@ -98,7 +97,6 @@ class OpenAI_Benchmark(TTS_Benchmark):
                         },
                     }
                     
-                    # Start timing immediately before sending request
                     start_time_ws = time.time()
                     await ws.send(json.dumps(create_event))
 

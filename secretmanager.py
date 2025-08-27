@@ -1,24 +1,8 @@
-"""
-Simple secrets management utility functions for AWS Secrets Manager.
-No classes, just functions.
-"""
-
 import boto3
 import json
 import os
 
-
 def get_secret(secret_name=None, region_name=None):
-    """
-    Retrieve secrets from AWS Secrets Manager.
-    
-    Args:
-        secret_name: Name of the secret (defaults to SECRET_NAME env var)
-        region_name: AWS region (defaults to AWS_DEFAULT_REGION env var or us-east-2)
-    
-    Returns:
-        dict: Dictionary of all secrets from the JSON secret, or empty dict if failed
-    """
     if secret_name is None:
         secret_name = os.getenv('SECRET_NAME')
     
@@ -42,18 +26,6 @@ def get_secret(secret_name=None, region_name=None):
 
 
 def get_api_key(key_name, secrets=None, secret_name=None, region_name=None):
-    """
-    Get a specific API key from secrets or environment variables.
-    
-    Args:
-        key_name: Name of the API key (e.g., 'OPENAI_API_KEY')
-        secrets: Optional pre-loaded secrets dictionary
-        secret_name: Optional secret name (if not using pre-loaded secrets)
-        region_name: Optional AWS region
-    
-    Returns:
-        str: The API key value or None if not found
-    """
     if secrets is None:
         secrets = get_secret(secret_name, region_name)
     
@@ -67,17 +39,6 @@ def get_api_key(key_name, secrets=None, secret_name=None, region_name=None):
 
 
 def load_all_secrets(secret_name=None, region_name=None):
-    """
-    Load secrets and set them as environment variables.
-    Useful for loading all secrets at once.
-    
-    Args:
-        secret_name: Name of the secret (defaults to SECRET_NAME env var)
-        region_name: AWS region (defaults to AWS_DEFAULT_REGION env var or us-east-1)
-    
-    Returns:
-        dict: Dictionary of loaded secrets
-    """
     secrets = get_secret(secret_name, region_name)
     
     # Set environment variables for all secrets
@@ -92,7 +53,6 @@ def load_all_secrets(secret_name=None, region_name=None):
 
 
 def get_google_credentials(secrets):
-    """Get Google credentials from AWS Secrets Manager"""
     try:
         # Get the JSON key from AWS Secrets Manager
         google_creds_json = get_api_key('GOOGLE_CREDENTIALS', secrets)

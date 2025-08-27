@@ -9,29 +9,23 @@ from typing import Dict, Optional, Any, List
 class TranscriptionResult:
     provider: str
     
-    # Core timing measurements
     ttft_seconds: Optional[float] = None  # Time to First Token
     total_time: Optional[float] = None    # Total processing time
     audio_to_final_seconds: Optional[float] = None  # Audio start to final transcript
     rtf_value: Optional[float] = None     # Real-Time Factor (audio_duration / audio_to_final)
     
-    # Content tracking
     first_token_content: Optional[str] = None        # What triggered TTFT
     complete_transcript: Optional[str] = None        # Final transcript
     partial_transcripts: List[str] = field(default_factory=list)  # All partials
     
-    # Transcript metrics
     transcript_length: Optional[int] = None  # Character count
     word_count: Optional[int] = None         # Word count
     wer_percentage: Optional[float] = None   # Word Error Rate as percentage
     
-    # Error handling
     error: Optional[str] = None
     
-    # Internal timing (for calculations)
     audio_start_time: Optional[float] = None
     
-    # Deepgram-specific VAD data (bonus metrics)
     vad_first_detected: Optional[float] = None       # First VAD event timing
     vad_events_count: Optional[int] = None           # Number of VAD events
     vad_first_event_content: Optional[str] = None    # Content of first VAD event
@@ -40,7 +34,6 @@ class STTProvider(ABC):
     def __init__(self, api_key: str, model: str = "default"):
         self.api_key = api_key
         self.model = model
-        # Create provider name including model
         base_name = self.__class__.__name__.replace('Provider', '').lower()
         if model == "default":
             self.name = base_name
@@ -51,41 +44,28 @@ class STTProvider(ABC):
     async def measure_ttft(self, audio_data: bytes, channels: int, 
                           sample_width: int, sample_rate: int,
                           realtime_resolution: float = 0.1, audio_duration: float = None) -> TranscriptionResult:
-        """
-        Measure TTFT for this provider.
-        Each provider implements their own connection and response handling logic.
-        """
         pass
     
     async def send_audio_chunks(self, ws, audio_data: bytes, channels: int, 
                               sample_width: int, sample_rate: int, close_message: dict,
                               result: TranscriptionResult, realtime_resolution: float = 0.1):
-        """
-        Send audio chunks with consistent real-time timing simulation.
-        This ensures identical timing across all providers for fair benchmarking.
-        """
         byte_rate = sample_width * sample_rate * channels
         data_copy = audio_data
         first_chunk = True
         
         try:
             while len(data_copy):
-                # Calculate chunk size for realtime_resolution seconds of audio
                 chunk_size = int(byte_rate * realtime_resolution)
                 chunk, data_copy = data_copy[:chunk_size], data_copy[chunk_size:]
                 
-                # Start timing when we send the first audio chunk
                 if first_chunk:
                     result.audio_start_time = time.time()
                     first_chunk = False
                 
-                # Send chunk
                 await ws.send(chunk)
                 
-                # Wait to simulate real-time
                 await asyncio.sleep(realtime_resolution)
             
-            # Send provider-specific close message
             await ws.send(json.dumps(close_message))
             
         except Exception as e:

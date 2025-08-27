@@ -18,7 +18,6 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from secretmanager import get_secret, get_api_key
-# Load secrets at startup
 print("Loading API keys from AWS Secrets Manager...")
 secrets = get_secret("prod/benchmarking")
 
@@ -121,7 +120,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
     
     print(f"Testing {testcase['testcase_id']} with {provider_name} - {model}.")
     
-    # Use the shared timestamp for all providers of this test case
     
     ttfa_result = {
         'provider': provider_name,
@@ -150,7 +148,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
     }
     
     try:
-        # Step 1: Generate audio and calculate TTFA
         try:
             provider = TTS_PROVIDERS[provider_name]
             config = {'model': model, 'voice': voice}
@@ -168,12 +165,10 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
             wer_result['status'] = 'tts_failed'
             return [ttfa_result, wer_result]
         
-        # Update TTFA result
         ttfa_result['metric_value'] = round(ttfa, 2)
         ttfa_result['audio_filename'] = audio_filename
         ttfa_result['status'] = 'success'
         
-        # Step 2: Transcribe audio
         try:
             if not audio_filename or not os.path.exists(audio_filename):
                 logging.error(f"Audio file not found: {audio_filename}")
@@ -187,7 +182,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
             client = OpenAI(api_key=api_key)
             transcript_start = time.time()
             
-            # Transcribe audio file
             with open(audio_filename, "rb") as audio_file:
                 openai_transcript = client.audio.transcriptions.create(
                     model="whisper-1",
@@ -207,7 +201,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
             wer_result['status'] = 'stt_failed'
             return [ttfa_result, wer_result]
         
-        # Step 3: Calculate WER
         try:
             wer_analysis = compare_transcription(testcase['transcript'], openai_hypothesis)
             custom_wer = wer_analysis['wer']
@@ -217,7 +210,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
                 wer_result['audio_filename'] = audio_filename
                 wer_result['status'] = 'success'
                 
-                # Log detailed error analysis for debugging when there are differences
                 if custom_wer > 0 and len(wer_analysis['incorrect_words']) > 0:
                     logging.info(f"Custom WER errors for {testcase['testcase_id']}: {wer_analysis['incorrect_words']}")
                     logging.info(f"Original normalized: '{wer_analysis['normalized_original_text']}'")
@@ -230,9 +222,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
         
         print(f"TTFA: {ttfa_result['metric_value']} ms, WER: {wer_result['metric_value']}%")
         
-        # Optionally clean up audio file (comment out if you want to keep them)
-        # if os.path.exists(audio_filename):
-        #     os.remove(audio_filename)
         
     except Exception as e:
         logging.error(f"Error in test {testcase['testcase_id']} with {provider_name}: {e}")
@@ -244,7 +233,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
 async def tts_benchmarks(test_cases):
     results = []
     
-    # Calculate total tests: test_cases * providers * models
     total_tests = len(test_cases) * sum(len(provider_config['models']) for provider_config in CONFIGURATIONS.values())
     current_test = 0
 
@@ -255,7 +243,6 @@ async def tts_benchmarks(test_cases):
         print(f"\nProcessing test case: {testcase['testcase_id']}")
         print(f"Text: {testcase['transcript'][:50]}...")
         
-        # Generate timestamp once per test case
         test_case_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
         for provider_name, provider_config in CONFIGURATIONS.items():
@@ -266,10 +253,8 @@ async def tts_benchmarks(test_cases):
                 test_results = await run_test(testcase, provider_name, model, provider_config['voice'], test_case_timestamp)
                 results.extend(test_results)  # Add both TTFA and WER results
                 
-                # Small delay to avoid rate limiting
                 await asyncio.sleep(0.5)
     
-    # Write results to CSV
     output_file = "all_benchmarks.csv"
     try:
         fieldnames = [
@@ -288,7 +273,6 @@ async def tts_benchmarks(test_cases):
     except Exception as e:
         logging.error(f"Error writing results to CSV: {e}")
     
-    # Save to database
     try:
         df = pd.DataFrame(results)
         df.to_csv(output_file, index=False)
@@ -298,7 +282,6 @@ async def tts_benchmarks(test_cases):
     except Exception as e:
         logging.error(f"Error writing results to database: {e}")
     
-    # Print summary
     successful_ttfa_tests = [r for r in results if r['status'] == 'success' and r['metric_type'] == 'TTFA']
     successful_wer_tests = [r for r in results if r['status'] == 'success' and r['metric_type'] == 'WER']
     
@@ -339,7 +322,6 @@ if not test_cases:
 else:
     print(f"Loaded {len(test_cases)} test cases")
     
-    # Select a random test case instead of the first one
     random_test_case = random.choice(test_cases)
     test_cases = [random_test_case]
     

@@ -2,21 +2,10 @@ import string
 import re
 
 def dehyphenate(text):
-    """
-    Replace hyphens between letters with spaces while preserving hyphens at word boundaries.
-    
-    Args:
-        text (str): Input text containing hyphenated words
-        
-    Returns:
-        str: Text with hyphens between letters replaced by spaces
-    """
     words = text.split()
     result = []
     
     for word in words:
-        # Replace hyphens with spaces, but only when they're between letters
-        # This preserves hyphens at the start/end of words and in non-word contexts
         dehyphenated_word = ""
         i = 0
         while i < len(word):
@@ -34,16 +23,6 @@ def dehyphenate(text):
     return ' '.join(result)
 
 def sentence_to_numbers(sentence):
-    """
-    Convert written numbers to numerical form (e.g., "twenty four" -> "24").
-    Handles various number formats including dates, compound numbers, and hyphenated numbers.
-    
-    Args:
-        sentence (str): Input text containing written numbers
-        
-    Returns:
-        str: Text with written numbers converted to numerical form
-    """
     # Dictionary mapping words to numbers
     word_to_num = {
         'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
@@ -172,25 +151,13 @@ def sentence_to_numbers(sentence):
         
         i += 1
     
-    # Process ordinals after handling cardinal numbers
     result = ' '.join(result_words)
     result = convert_ordinals(result)
-    
-    # Clean up time expressions
     result = clean_time_expressions(result)
     
     return result
 
 def convert_ordinals(sentence):
-    """
-    Convert ordinal numbers to numerical form with appropriate suffix (e.g., "first" -> "1st").
-    
-    Args:
-        sentence (str): Input text containing ordinal numbers
-        
-    Returns:
-        str: Text with ordinal numbers converted to numerical form with suffixes
-    """
     # Dictionary mapping ordinal words to their numerical form
     ordinal_map = {
         'first': '1st',
@@ -284,15 +251,6 @@ def convert_ordinals(sentence):
     return ' '.join(result_words)
 
 def clean_time_expressions(sentence):
-    """
-    Normalize time expressions in the text (e.g., "3 : 30 PM" -> "3:30PM").
-    
-    Args:
-        sentence (str): Input text containing time expressions
-        
-    Returns:
-        str: Text with normalized time expressions
-    """
     import re
     
     # Pattern for time units (am/pm)
@@ -314,15 +272,6 @@ def clean_time_expressions(sentence):
     return sentence
 
 def remove_punctuation(text):
-    """
-    Remove punctuation from text while preserving decimal points in numbers.
-    
-    Args:
-        text (str): Input text containing punctuation
-        
-    Returns:
-        str: Text with punctuation removed
-    """
     # Step 1: Replace decimal points in numbers with spaces
     text = re.sub(r'(\d+)\.(\d+)', r'\1 \2', text)
     
@@ -338,15 +287,6 @@ def remove_punctuation(text):
     return ' '.join(cleaned_text.split())
 
 def squish_numbers(sentence):
-    """
-    Remove spaces between digits in numbers (e.g., "1 2 3" -> "123").
-    
-    Args:
-        sentence (str): Input text containing numbers with spaces
-        
-    Returns:
-        str: Text with spaces between digits removed
-    """
     characters = list(sentence)
     if len(characters) < 3:
         return sentence
@@ -374,15 +314,6 @@ def squish_numbers(sentence):
     return ''.join(filtered_characters)
 
 def format_money(sentence):
-    """
-    Convert currency symbols and amounts to word form (e.g., "$123.45" -> "123 dollars and 45 cents").
-    
-    Args:
-        sentence (str): Input text containing currency expressions
-        
-    Returns:
-        str: Text with currency expressions converted to word form
-    """
     # Dictionary mapping currency symbols to their word forms
     currency_words = {
         "$": "dollars",
@@ -476,34 +407,10 @@ def format_money(sentence):
     return result               
 
 def normalize_text(text):
-    """
-    Apply all text normalization steps in sequence.
-    
-    Args:
-        text (str): Input text to normalize
-        
-    Returns:
-        str: Normalized text
-    """
     normalized_text = squish_numbers(remove_punctuation(format_money(convert_ordinals(sentence_to_numbers(dehyphenate(text.lower()))))))
     return normalized_text
 
 def calculate_word_error_rate(reference, hypothesis):
-    """
-    Calculate the Word Error Rate (WER) between reference and hypothesis texts.
-    WER is the ratio of the number of word errors to the total number of words in the reference.
-    
-    Args:
-        reference (str): Reference text
-        hypothesis (str): Hypothesis text (transcription)
-        
-    Returns:
-        tuple: (wer, incorrect_words, normalized_reference, normalized_hypothesis)
-            - wer: Word Error Rate (float)
-            - incorrect_words: List of dictionaries containing error details
-            - normalized_reference: Normalized reference text
-            - normalized_hypothesis: Normalized hypothesis text
-    """
     normalized_reference = normalize_text(reference)
     normalized_hypothesis = normalize_text(hypothesis)
 
@@ -545,17 +452,6 @@ def calculate_word_error_rate(reference, hypothesis):
     return wer, incorrect_words, normalized_reference, normalized_hypothesis
 
 def find_incorrect_words(d, ref_words, hyp_words):
-    """
-    Find the specific words that caused errors in the transcription.
-    
-    Args:
-        d: Dynamic programming matrix
-        ref_words: List of words in reference text
-        hyp_words: List of words in hypothesis text
-        
-    Returns:
-        list: List of dictionaries containing error details (substitutions, insertions, deletions)
-    """
     incorrect = []
     i, j = len(ref_words), len(hyp_words)
     
@@ -598,23 +494,6 @@ def find_incorrect_words(d, ref_words, hyp_words):
     return incorrect
 
 def compare_transcription(original_text, transcription):
-    """
-    Compare an original text with its transcription and calculate the Word Error Rate (WER).
-    This is the main function for external use.
-    
-    Args:
-        original_text (str): The original reference text
-        transcription (str): The transcribed text to evaluate
-        
-    Returns:
-        dict: Dictionary containing:
-            - wer: Word Error Rate (float)
-            - incorrect_words: List of dictionaries containing error details
-            - original_text: Original reference text
-            - transcription: Transcribed text
-            - normalized_original_text: Normalized original text
-            - normalized_transcription: Normalized transcribed text
-    """
     # Calculate WER and errors for the transcription
     wer, incorrect, normalized_reference, normalized_hypothesis = calculate_word_error_rate(original_text, transcription)
     
