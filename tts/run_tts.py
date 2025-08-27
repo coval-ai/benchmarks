@@ -56,7 +56,8 @@ CONFIGURATIONS = {
         "models": [
             "gpt-4o-mini-tts",
             "tts-1",
-            "tts-1-hd"
+            "tts-1-hd",
+            "gpt-4o-realtime-preview-2025-08-25"
         ]
     },
     "ElevenLabs": {
