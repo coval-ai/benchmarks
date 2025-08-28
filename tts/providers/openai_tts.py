@@ -59,8 +59,83 @@ class OpenAI_Benchmark(TTS_Benchmark):
                         audio_chunks.append(chunk)
                         # print(f"{chunk_count} {time.time() - start_time:.5f} {len(chunk)}")
                         # chunk_count += 1
+        
+        elif self.model in ["gpt-4o-realtime-preview-latest", "gpt-4o-realtime-preview-2025-08-25"]:
+            headers = {"Authorization": f"Bearer {self.client.api_key}", "Content-Type": "application/json"}
+            session_payload = {
+                "model": self.model,
+                "modalities": ["audio", "text"],
+                "instructions": f"Speak this text exactly as provided: {text}",
+                "voice": self.voice,
+                "input_audio_format": "pcm16",
+                "output_audio_format": "pcm16",
+            }
+
+            # Setup session (exclude from timing)
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.openai.com/v1/realtime/sessions",
+                    headers=headers,
+                    json=session_payload
+                ) as session_response:
+                    if session_response.status != 200:
+                        raise ValueError(f"Failed to create realtime session: {await session_response.text()}")
+            
+            ws_url = f"wss://api.openai.com/v1/realtime?model={self.model}"
+            ws_headers = {"Authorization": f"Bearer {self.client.api_key}", "OpenAI-Beta": "realtime=v1"}
+
+            async def connect_and_process():
+                nonlocal ttfa, audio_chunks
+                async with websockets.connect(ws_url, extra_headers=ws_headers) as ws:
+                    create_event = {
+                        "type": "response.create",
+                        "response": {
+                            "modalities": ["audio", "text"],
+                            "instructions": f"Speak this text exactly as provided: {text}",
+                            "voice": self.voice,
+                            "output_audio_format": "pcm16"
+                        },
+                    }
+                    
+                    # Start timing immediately before sending request
+                    start_time_ws = time.time()
+                    await ws.send(json.dumps(create_event))
+
+                    while True:
+                        try:
+                            message = await ws.recv()
+                            event = json.loads(message)
+                            event_type = event.get("type", "")
+
+                            if event_type == "response.audio.delta" and "delta" in event:
+                                if ttfa is None:
+                                    ttfa = (time.time() - start_time_ws) * 1000
+                                    print(f"OpenAI (realtime) TTFA: {ttfa:.2f} ms")
+
+                                try:
+                                    audio_data = base64.b64decode(event["delta"])
+                                    audio_chunks.append(audio_data)
+                                except Exception as e:
+                                    print(f"Error decoding audio delta: {e}")
+
+                            if event_type == "response.done":
+                                print("Response complete")
+                                break
+
+                        except websockets.exceptions.ConnectionClosed:
+                            print("WebSocket connection closed")
+                            break
+            
+            try:
+                await connect_and_process()
+            except Exception as e:
+                print(f"Error running async task: {e}")
+                import traceback
+                traceback.print_exc()
+        
         else:
-            raise ValueError(f"Unsupported OpenAI model provided: {self.model}. Supported models: gpt-4o-mini-tts, tts-1, tts-1-hd")
+            raise ValueError(f"Unsupported OpenAI model provided: {self.model}. Supported models: gpt-4o-mini-tts, tts-1, tts-1-hd, gpt-4o-realtime-preview-latest")
         
         filename = None
         if audio_chunks:
