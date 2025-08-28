@@ -1,38 +1,29 @@
 import asyncio
-import argparse
 import csv
 import datetime
 import logging
-import time
-import pandas as pd
 import os
 import random
-from sqlalchemy import create_engine
-from dotenv import load_dotenv
-
-import boto3
-import json
-
 import sys
-import os
+import time
+
+import pandas as pd
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from secretmanager import get_secret, get_api_key
+from secretmanager import get_api_key, get_secret
 
 print("Loading API keys from AWS Secrets Manager...")
 secrets = get_secret("prod/benchmarking")
 
 load_dotenv()
 from openai import OpenAI
-from deepgram import DeepgramClient, ClientOptionsFromEnv, PrerecordedOptions
-import assemblyai as aai
-from rev_ai import apiclient
-
-from providers.openai_tts import OpenAI_Benchmark
 from providers.cartesia_tts import Cartesia_Benchmark
 from providers.elevenlabs_tts import ElevenLabs_Benchmark
 from providers.hume_tts import Hume_Benchmark
+from providers.openai_tts import OpenAI_Benchmark
 from providers.playht_tts import Playht_Benchmark
 from providers.rime_tts import Rime_Benchmark
 
@@ -56,7 +47,13 @@ TTS_PROVIDERS = {
 CONFIGURATIONS = {
     "OpenAI": {
         "voice": "alloy",  # Options: "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer"
-        "models": ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"],
+        "models": [
+            "gpt-4o-mini-tts",
+            "tts-1",
+            "tts-1-hd",
+            "gpt-4o-realtime-preview-latest",
+            "gpt-4o-realtime-preview-2025-08-25",
+        ],
     },
     "ElevenLabs": {
         "voice": "IKne3meq5aSn9XLyUdCD",  # Use voice ID or name from your ElevenLabs account
@@ -108,7 +105,6 @@ def load_test_cases(path):
 
 
 async def run_test(testcase, provider_name, model, voice, timestamp):
-
     print(f"Testing {testcase['testcase_id']} with {provider_name} - {model}.")
 
     ttfa_result = {
@@ -319,7 +315,7 @@ async def tts_benchmarks(test_cases):
         )
         print(f"\nAverage TTFA: {avg_ttfa:,.2f} ms")
 
-        print(f"\nTTFA by Provider and Model:")
+        print("\nTTFA by Provider and Model:")
         for provider_name, provider_config in CONFIGURATIONS.items():
             for model in provider_config["models"]:
                 provider_model_results = [
@@ -339,7 +335,7 @@ async def tts_benchmarks(test_cases):
         )
         print(f"\nAverage WER: {avg_wer:,.2f}%")
 
-        print(f"\nWER by Provider and Model:")
+        print("\nWER by Provider and Model:")
         for provider_name, provider_config in CONFIGURATIONS.items():
             for model in provider_config["models"]:
                 provider_model_results = [
