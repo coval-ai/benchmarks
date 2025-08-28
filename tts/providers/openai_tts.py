@@ -1,13 +1,12 @@
-import os
-from openai import AsyncOpenAI
-import time
 import base64
-import websockets
 import json
-import asyncio
+import time
 import wave
 
-from secretmanager import get_secret, get_api_key, load_all_secrets
+import websockets
+from openai import AsyncOpenAI
+
+from secretmanager import get_api_key, get_secret
 
 secrets = get_secret("prod/benchmarking")
 
@@ -59,7 +58,10 @@ class OpenAI_Benchmark(TTS_Benchmark):
                         # print(f"{chunk_count} {time.time() - start_time:.5f} {len(chunk)}")
                         # chunk_count += 1
 
-        elif self.model == "gpt-4o-realtime-preview-latest":
+        elif self.model in [
+            "gpt-4o-realtime-preview-latest",
+            "gpt-4o-realtime-preview-2025-08-25",
+        ]:
             headers = {
                 "Authorization": f"Bearer {self.client.api_key}",
                 "Content-Type": "application/json",
@@ -73,6 +75,7 @@ class OpenAI_Benchmark(TTS_Benchmark):
                 "output_audio_format": "pcm16",
             }
 
+            # Setup session (exclude from timing)
             import aiohttp
 
             async with aiohttp.ClientSession() as session:
@@ -105,6 +108,7 @@ class OpenAI_Benchmark(TTS_Benchmark):
                         },
                     }
 
+                    # Start timing immediately before sending request
                     start_time_ws = time.time()
                     await ws.send(json.dumps(create_event))
 
