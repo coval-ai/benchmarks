@@ -1,12 +1,8 @@
-"""
-Simple secrets management utility functions for AWS Secrets Manager.
-No classes, just functions.
-"""
-
 import boto3
 import json
 import os
 
+# Simple secrets management utility functions for AWS Secrets Manager.
 
 def get_secret(secret_name=None, region_name=None):
     """
@@ -14,7 +10,7 @@ def get_secret(secret_name=None, region_name=None):
     
     Args:
         secret_name: Name of the secret (defaults to SECRET_NAME env var)
-        region_name: AWS region (defaults to AWS_DEFAULT_REGION env var or us-east-2)
+        region_name: AWS region (defaults to AWS_DEFAULT_REGION env var)
     
     Returns:
         dict: Dictionary of all secrets from the JSON secret, or empty dict if failed
@@ -23,7 +19,7 @@ def get_secret(secret_name=None, region_name=None):
         secret_name = os.getenv('SECRET_NAME')
     
     if region_name is None:
-        region_name = os.getenv('AWS_DEFAULT_REGION', 'us-east-2')
+        region_name = os.getenv('AWS_DEFAULT_REGION')
     
     if not secret_name:
         print("Warning: No secret_name provided and SECRET_NAME environment variable not set.")
@@ -46,7 +42,7 @@ def get_api_key(key_name, secrets=None, secret_name=None, region_name=None):
     Get a specific API key from secrets or environment variables.
     
     Args:
-        key_name: Name of the API key (e.g., 'OPENAI_API_KEY')
+        key_name: Name of the API key (e.g. 'OPENAI_API_KEY')
         secrets: Optional pre-loaded secrets dictionary
         secret_name: Optional secret name (if not using pre-loaded secrets)
         region_name: Optional AWS region
@@ -106,6 +102,7 @@ def get_google_credentials(secrets):
                     f.write(google_creds_json)
                 else:
                     json.dump(google_creds_json, f)
+                print(f.name) # URGENT: Check for leak risk, are we deleting the file afterwards
                 return f.name
     except Exception as e:
         print(f"Could not load Google credentials: {e}")

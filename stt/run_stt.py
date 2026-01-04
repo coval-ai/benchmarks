@@ -27,6 +27,7 @@ from secretmanager import get_secret, get_api_key, get_google_credentials
 # Import providers
 from providers import (
     DeepgramProvider, 
+    ElevenLabsProvider,
     AssemblyAIProvider, 
     SpeechmaticsProvider,
     GoogleProvider,
@@ -77,11 +78,24 @@ def create_providers():
             providers.extend([
                 DeepgramProvider(api_key=deepgram_key, model="nova-2"),
                 DeepgramProvider(api_key=deepgram_key, model="nova-3"),
+                DeepgramProvider(api_key=deepgram_key, model="flux-general-en"),
             ])
         else:
             print("DEEPGRAM_API_KEY not found - skipping Deepgram providers")
     except Exception as e:
         print(f"Error creating Deepgram providers: {e}")
+
+    # try:
+    #     # ElevenLabs models
+    #     elevenlabs_key = get_api_key('ELEVENLABS_API_KEY', secrets)
+    #     if elevenlabs_key:
+    #         providers.append(
+    #             ElevenLabsProvider(api_key=elevenlabs_key, model="scribe_v2_realtime")
+    #         )
+    #     else:
+    #         print("ASSEMBLYAI_API_KEY not found - skipping AssemblyAI providers")
+    # except Exception as e:
+    #     print(f"Error creating Deepgram providers: {e}")
     
     try:
         # AssemblyAI models (v3 streaming API)
@@ -109,18 +123,18 @@ def create_providers():
         print(f"Error creating Speechmatics providers: {e}")
     
     # Add Google providers only if the library is available
-    if GOOGLE_AVAILABLE:
-        try:
-            providers.extend([
-                GoogleProvider(model="short"),
-                GoogleProvider(model="long"), 
-                GoogleProvider(model="telephony"),
-                GoogleProvider(model="chirp_2"),
-            ])
-        except Exception as e:
-            print(f"Error creating Google providers: {e}")
-    else:
-        print("Google Cloud Speech not available - skipping Google providers")
+    # if GOOGLE_AVAILABLE:
+    #     try:
+    #         providers.extend([
+    #             GoogleProvider(model="short"),
+    #             GoogleProvider(model="long"), 
+    #             GoogleProvider(model="telephony"),
+    #             GoogleProvider(model="chirp_2"),
+    #         ])
+    #     except Exception as e:
+    #         print(f"Error creating Google providers: {e}")
+    # else:
+    #     print("Google Cloud Speech not available - skipping Google providers")
     
     return providers
 
@@ -152,7 +166,7 @@ def process_transcription_result(result: TranscriptionResult, ground_truth: str,
     # Print transcript to console with WER, Audio-to-Final timing, and RTF
     if result.complete_transcript:
         wer_text = f" (WER: {result.wer_percentage:.1f}%)" if result.wer_percentage is not None else ""
-        audio_to_final_text = f" (Audio→Final: {result.audio_to_final_seconds:.2f}s)" if result.audio_to_final_seconds is not None else ""
+        audio_to_final_text = f" (Audio -> Final: {result.audio_to_final_seconds:.2f}s)" if result.audio_to_final_seconds is not None else ""
         rtf_text = f" (RTF: {result.rtf_value:.2f}x)" if result.rtf_value is not None else ""
         
         print(f"\n{result.provider.upper()} TRANSCRIPT{wer_text}{audio_to_final_text}{rtf_text}:")
@@ -327,7 +341,7 @@ def convert_to_wav_bytes(audio_array, original_sample_rate: int, target_sample_r
     Convert audio array to WAV bytes format expected by STT providers.
     Always resamples to target_sample_rate (default 16kHz) for consistency.
     """
-    print(f"Audio conversion: {original_sample_rate}Hz → {target_sample_rate}Hz")
+    print(f"Audio conversion: {original_sample_rate}Hz â†’ {target_sample_rate}Hz")
     
     # Always resample to ensure consistent sample rate across all providers
     if original_sample_rate != target_sample_rate:
@@ -451,7 +465,15 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
             rtf_row[6] = None  # NULL units
             # transcript column remains empty for RTF rows
             rows.append(rtf_row)
-    
+        
+        # NEW: Audio-to-Final metric (raw value from audio start)
+        if result.audio_to_final_seconds is not None:
+            audio_final_row = base_row.copy()
+            audio_final_row[4] = "AudioToFinal"
+            audio_final_row[5] = result.audio_to_final_seconds
+            audio_final_row[6] = "s"
+            rows.append(audio_final_row)
+        
     # Write to CSV (append mode to combine both tests in same file)
     try:
         with open(filename, 'a' if file_exists else 'w', newline='', encoding='utf-8') as csvfile:
@@ -512,12 +534,11 @@ def load_wav_file(file_path: str) -> Tuple[bytes, int, int, int, str, float]:
     return load_audio_file(file_path)
 
 def display_results_table(results: List[TranscriptionResult]):
-    """Display comprehensive results table with TTFT timing metric and WER."""
-    print("\n" + "="*140)
+    print("\n" + "="*150)
     print("STT MODEL BENCHMARK RESULTS")
-    print("="*140)
-    print(f"{'Provider/Model':<20} {'TTFT (s)':<8} {'WER (%)':<8} {'Total (s)':<9} {'VAD (s)':<8} {'First Token':<30} {'Error':<15}")
-    print("-"*140)
+    print("="*150)
+    print(f"{'Provider/Model':<25} {'TTFT (s)':<10} {'WER (%)':<10} {'First Token':<30} {'Error':<15}")
+    print("-"*150)
     
     successful_ttft = []
     successful_wer = []
@@ -525,24 +546,17 @@ def display_results_table(results: List[TranscriptionResult]):
     
     for result in results:
         if isinstance(result, Exception):
-            print(f"Exception: {result}")
             continue
         
         provider_name = result.provider
         
-        # Format timing values
         ttft = f"{result.ttft_seconds:.3f}" if result.ttft_seconds else "N/A"
         wer = f"{result.wer_percentage:.1f}" if result.wer_percentage is not None else "N/A"
-        total = f"{result.total_time:.3f}" if result.total_time else "N/A"
-        vad = f"{result.vad_first_detected:.3f}" if result.vad_first_detected else "N/A"
-        
-        # Format content strings
         first_token = (result.first_token_content[:27] + "...") if result.first_token_content and len(result.first_token_content) > 30 else (result.first_token_content or "")
         error = result.error[:12] + "..." if result.error and len(result.error) > 15 else (result.error or "")
         
-        print(f"{provider_name:<20} {ttft:<8} {wer:<8} {total:<9} {vad:<8} {first_token:<30} {error:<15}")
+        print(f"{provider_name:<25} {ttft:<10} {wer:<10} {first_token:<30} {error:<15}")
         
-        # Collect successful results for analysis
         if not result.error:
             if result.ttft_seconds:
                 successful_ttft.append((provider_name, result.ttft_seconds))
@@ -782,11 +796,11 @@ async def main():
             
     except Exception as e:
         logging.error(f"Error writing results to database: {e}")
-        # Print first few rows of data for debugging
-        if 'df' in locals():
-            print("Sample data causing issues:")
-            print(df[['provider', 'metric_type', 'metric_value', 'transcript']].head(10))
-        print(f"CSV file kept for debugging: all_benchmarks.csv")
+    #     # Print first few rows of data for debugging
+    #     if 'df' in locals():
+    #         print("Sample data causing issues:")
+    #         print(df[['provider', 'metric_type', 'metric_value', 'transcript']].head(10))
+    #     print(f"CSV file kept for debugging: all_benchmarks.csv")
     
     # =====================================
     # SUMMARY

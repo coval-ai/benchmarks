@@ -40,27 +40,26 @@ class OpenAI_Benchmark(TTS_Benchmark):
         ttfa = None
         chunk_count = 1
         if self.model in ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"]:
-            # Use OpenAI's streaming API for true streaming
+
             start_time = time.time()
             
             async with self.client.audio.speech.with_streaming_response.create(
                 model=self.model,
                 voice=self.voice,
                 input=text,
-                response_format="wav"
+                response_format="pcm"
             ) as response:
                 # Stream chunks as they arrive from the server
                 async for chunk in response.iter_bytes():
-                    if ttfa is None:
-                        ttfa = (time.time() - start_time) * 1000
-                        print(f"OpenAI ({self.model}) TTFA: {ttfa:.2f} ms")
-                    
                     if self.is_audio_chunk(chunk):
+                        if ttfa is None:
+                            ttfa = (time.time() - start_time) * 1000
+                            print(f"OpenAI ({self.model}) TTFA: {ttfa:.2f} ms")
                         audio_chunks.append(chunk)
                         # print(f"{chunk_count} {time.time() - start_time:.5f} {len(chunk)}")
                         # chunk_count += 1
         
-        elif self.model in ["gpt-4o-realtime-preview-latest", "gpt-4o-realtime-preview-2025-08-25"]:
+        elif self.model in ["gpt-realtime-2025-08-28"]:
             headers = {"Authorization": f"Bearer {self.client.api_key}", "Content-Type": "application/json"}
             session_payload = {
                 "model": self.model,
@@ -86,7 +85,7 @@ class OpenAI_Benchmark(TTS_Benchmark):
             ws_headers = {"Authorization": f"Bearer {self.client.api_key}", "OpenAI-Beta": "realtime=v1"}
 
             async def connect_and_process():
-                nonlocal ttfa, audio_chunks
+                nonlocal ttfa, audio_chunks, chunk_count  # Add chunk_count to nonlocal
                 async with websockets.connect(ws_url, extra_headers=ws_headers) as ws:
                     create_event = {
                         "type": "response.create",
@@ -115,7 +114,11 @@ class OpenAI_Benchmark(TTS_Benchmark):
 
                                 try:
                                     audio_data = base64.b64decode(event["delta"])
-                                    audio_chunks.append(audio_data)
+                                    if self.is_audio_chunk(audio_data):
+                                        audio_chunks.append(audio_data)
+                                        # Add chunk analysis for realtime models
+                                        # print(f"{chunk_count} {time.time() - start_time_ws:.5f} {len(audio_data)}")
+                                        chunk_count += 1
                                 except Exception as e:
                                     print(f"Error decoding audio delta: {e}")
 
@@ -141,16 +144,11 @@ class OpenAI_Benchmark(TTS_Benchmark):
         if audio_chunks:
             filename = f"openai_{self.model}_{int(time.time())}.wav"
             
-            if self.model in ["gpt-4o-mini-tts", "tts-1", "tts-1-hd"]:
-                with open(filename, "wb") as f:
-                    for chunk in audio_chunks:
-                        f.write(chunk)
-            else:
-                audio_data = b''.join(audio_chunks)
-                with wave.open(filename, 'wb') as wav_file:
-                    wav_file.setnchannels(1)
-                    wav_file.setsampwidth(2)
-                    wav_file.setframerate(24000)
-                    wav_file.writeframes(audio_data)
+            audio_data = b''.join(audio_chunks)
+            with wave.open(filename, 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(24000)
+                wav_file.writeframes(audio_data)
     
         return ttfa, filename if audio_chunks else None
