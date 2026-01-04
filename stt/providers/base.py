@@ -14,7 +14,7 @@ class TranscriptionResult:
     total_time: Optional[float] = None    # Total processing time
     audio_to_final_seconds: Optional[float] = None  # Audio start to final transcript
     rtf_value: Optional[float] = None     # Real-Time Factor (audio_duration / audio_to_final)
-    
+
     # Content tracking
     first_token_content: Optional[str] = None        # What triggered TTFT
     complete_transcript: Optional[str] = None        # Final transcript
@@ -58,8 +58,8 @@ class STTProvider(ABC):
         pass
     
     async def send_audio_chunks(self, ws, audio_data: bytes, channels: int, 
-                              sample_width: int, sample_rate: int, close_message: dict,
-                              result: TranscriptionResult, realtime_resolution: float = 0.1):
+                          sample_width: int, sample_rate: int, close_message: dict,
+                          result: TranscriptionResult, realtime_resolution: float = 0.1):
         """
         Send audio chunks with consistent real-time timing simulation.
         This ensures identical timing across all providers for fair benchmarking.

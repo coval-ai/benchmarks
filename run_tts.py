@@ -1,5 +1,4 @@
 import asyncio
-import argparse
 import csv
 import datetime
 import logging
@@ -10,56 +9,47 @@ import random
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-import boto3
-import json
-
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from secretmanager import get_secret, get_api_key
-# Load secrets at startup
-print("Loading API keys from AWS Secrets Manager...")
-secrets = get_secret("prod/benchmarking")
-
-load_dotenv()
-from openai import OpenAI
-from deepgram import DeepgramClient, ClientOptionsFromEnv, PrerecordedOptions
-import assemblyai as aai
-from rev_ai import apiclient
-
-from providers.openai_tts import OpenAI_Benchmark
-from providers.cartesia_tts import Cartesia_Benchmark
-from providers.elevenlabs_tts import ElevenLabs_Benchmark
-from providers.hume_tts import Hume_Benchmark
-from providers.playht_tts import Playht_Benchmark
-from providers.rime_tts import Rime_Benchmark
-
 from wer_calculator import compare_transcription
 
-async def TTFA_Benchmark(tts_provider, input_str):
-    ttfa = await tts_provider.calculateTTFA(input_str)
-    return ttfa
+# Load secrets via AWS
+print("Loading API keys from AWS Secrets Manager")
+secrets = get_secret("prod/benchmarking", "us-east-2")
+
+# Load secrets via .env
+if not secrets:
+    print("Loading API keys from .env")
+    load_dotenv()
+
+from openai import OpenAI # Whisper for transcription
+
+from tts.providers.openai_tts import OpenAI_Benchmark
+from tts.providers.cartesia_tts import Cartesia_Benchmark
+from tts.providers.elevenlabs_tts import ElevenLabs_Benchmark
+from tts.providers.hume_tts import Hume_Benchmark
+from tts.providers.rime_tts import Rime_Benchmark
+from tts.providers.deepgram_tts import Deepgram_Benchmark
 
 TTS_PROVIDERS = {
     "OpenAI": OpenAI_Benchmark,
     "Cartesia": Cartesia_Benchmark,
     "ElevenLabs": ElevenLabs_Benchmark,
+    "Deepgram": Deepgram_Benchmark,
     "Hume": Hume_Benchmark,
-    "PlayHT": Playht_Benchmark,
     "Rime": Rime_Benchmark
 }
 
 CONFIGURATIONS = {
-    "OpenAI": {
-        "voice": "alloy",  # Options: "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer"
-        "models": [
-            "gpt-4o-mini-tts",
-            "tts-1",
-            "tts-1-hd",
-            "gpt-4o-realtime-preview-2025-08-25"
-        ]
-    },
+    # "OpenAI": {
+    #     "voice": "alloy",  # Options: "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer"
+    #     "models": [
+    #         "gpt-4o-mini-tts",
+    #         "tts-1",
+    #         "tts-1-hd",
+    #         "gpt-realtime-2025-08-28"
+    #     ]
+    # },
+
     "ElevenLabs": {
         "voice": "IKne3meq5aSn9XLyUdCD",  # Use voice ID or name from your ElevenLabs account
         "models": [
@@ -68,36 +58,44 @@ CONFIGURATIONS = {
             "eleven_turbo_v2_5"
         ]
     },
-    "Cartesia": {
-        "voice": "bf0a246a-8642-498a-9950-80c35e9276b5",  # Voice ID from Cartesia
-        "models": [
-            "sonic-2",
-            "sonic-turbo",
-            "sonic"
-        ]
-    },
-    "Hume": {
-        "voice": "male_01",  # Check Hume documentation for available voices
-        "models": [
-            "octave-tts"
-        ]
-    },
-    # "PlayHT": {
-    #     "voice": "s3://voice-cloning-zero-shot/b27bc13e-996f-4841-b584-4d35801aea98/original/manifest.json",  # Default voice or another voice ID
+
+    # "Cartesia": {
+    #     "voice": "f786b574-daa5-4673-aa0c-cbe3e8534c02",  # Voice ID from Cartesia
     #     "models": [
-    #         "Play3.0-mini",
-    #         "PlayDialog",
-    #         "PlayDialogMultilingual"
+    #         "sonic-3",
+    #         "sonic-2",
+    #         "sonic-turbo",
+    #         "sonic"
     #     ]
     # },
-    "Rime": {
-        "voice": "cove",  # For "mist" model: "cove", for "mistv2" model: "breeze"
-        "models": [
-            "arcana",
-            "mistv2"
-        ]
-    }
+
+    # "Deepgram": {
+    #     "voice": "aura-2-thalia-en",  # Options: aura-asteria-en, aura-luna-en, aura-stella-en etc.
+    #     "models": [
+    #         "aura-2-thalia-en"
+    #     ]
+    # },
+
+    # "Hume": {
+    #     "voice": "male_01",  # Check Hume documentation for available voices
+    #     "models": [
+    #         "octave-tts",
+    #         "octave-2"
+    #     ]
+    # },
+
+    # "Rime": {
+    #     "voice": "luna",  
+    #     "models": [
+    #         "arcana",
+    #         "mistv2"
+    #     ]
+    # }
 }
+
+async def TTFA_Benchmark(tts_provider, input_str):
+    ttfa = await tts_provider.calculateTTFA(input_str)
+    return ttfa
 
 def load_test_cases(path):
     try:
@@ -109,8 +107,6 @@ def load_test_cases(path):
                 test_cases.append({
                     'testcase_id': row['Testcase ID'],
                     'transcript': row['Transcript'].strip(),
-                    'recording_conditions': row.get('Recording conditions', ''),
-                    'mic': row.get('Mic', '')
                 })
         
         return test_cases
@@ -121,8 +117,6 @@ def load_test_cases(path):
 async def run_test(testcase, provider_name, model, voice, timestamp):
     
     print(f"Testing {testcase['testcase_id']} with {provider_name} - {model}.")
-    
-    # Use the shared timestamp for all providers of this test case
     
     ttfa_result = {
         'provider': provider_name,
@@ -155,7 +149,7 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
         try:
             provider = TTS_PROVIDERS[provider_name]
             config = {'model': model, 'voice': voice}
-            client = provider(config)
+            client = provider(config) 
             
             ttfa, audio_filename = await client.calculateTTFA(testcase['transcript'])
             
@@ -180,13 +174,16 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
                 logging.error(f"Audio file not found: {audio_filename}")
                 wer_result['status'] = 'audio_file_not_found'
                 return [ttfa_result, wer_result]
-                
-            api_key = get_api_key('OPENAI_API_KEY', secrets)
+
+            if secrets:    
+                api_key = get_api_key('OPENAI_API_KEY', secrets)
+            else:
+                api_key = os.getenv('OPENAI_API_KEY')
+
             if not api_key:
                 raise ValueError("OPENAI_API_KEY environment variable is required")
             
             client = OpenAI(api_key=api_key)
-            transcript_start = time.time()
             
             # Transcribe audio file
             with open(audio_filename, "rb") as audio_file:
@@ -196,7 +193,6 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
                     language="en",
                     response_format="text"
                 )
-            openai_transcript_time = (time.time() - transcript_start) * 1000
             openai_hypothesis = openai_transcript.strip()
 
         except Exception as e:
@@ -229,11 +225,15 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
             logging.error(f"Error calculating custom WER: {e}")
             wer_result['status'] = 'custom_calculation_failed'
         
+        # Comment out to view the transcription 
+        # print(f"Test case (normalized): {wer_analysis['normalized_original_text']}")
+        # print(f"Transcribed (normalized): {wer_analysis['normalized_transcription']}")
+
         print(f"TTFA: {ttfa_result['metric_value']} ms, WER: {wer_result['metric_value']}%")
         
         # Optionally clean up audio file (comment out if you want to keep them)
-        # if os.path.exists(audio_filename):
-        #     os.remove(audio_filename)
+        if os.path.exists(audio_filename):
+            os.remove(audio_filename)
         
     except Exception as e:
         logging.error(f"Error in test {testcase['testcase_id']} with {provider_name}: {e}")
@@ -249,12 +249,7 @@ async def tts_benchmarks(test_cases):
     total_tests = len(test_cases) * sum(len(provider_config['models']) for provider_config in CONFIGURATIONS.values())
     current_test = 0
 
-    print(f"Total tests to run: {total_tests}")
-    print("-" * 50)
-
     for testcase in test_cases:
-        print(f"\nProcessing test case: {testcase['testcase_id']}")
-        print(f"Text: {testcase['transcript'][:50]}...")
         
         # Generate timestamp once per test case
         test_case_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -271,7 +266,7 @@ async def tts_benchmarks(test_cases):
                 await asyncio.sleep(0.5)
     
     # Write results to CSV
-    output_file = "all_benchmarks.csv"
+    output_file = "results.csv"
     try:
         fieldnames = [
             'provider', 'model', 'voice',
@@ -290,14 +285,14 @@ async def tts_benchmarks(test_cases):
         logging.error(f"Error writing results to CSV: {e}")
     
     # Save to database
-    try:
-        df = pd.DataFrame(results)
-        df.to_csv(output_file, index=False)
-        engine = create_engine(get_api_key("DATABASE_URL", secrets))
-        df.to_sql('all_benchmarks', engine, if_exists='append', index=False)
-        print("Data uploaded to database.")
-    except Exception as e:
-        logging.error(f"Error writing results to database: {e}")
+    # try:
+    #     df = pd.DataFrame(results)
+    #     df.to_csv(output_file, index=False)
+    #     engine = create_engine(get_api_key("DATABASE_URL", secrets))
+    #     df.to_sql('all_benchmarks', engine, if_exists='append', index=False)
+    #     print("Data uploaded to database.")
+    # except Exception as e:
+    #     logging.error(f"Error writing results to database: {e}")
     
     # Print summary
     successful_ttfa_tests = [r for r in results if r['status'] == 'success' and r['metric_type'] == 'TTFA']
@@ -332,20 +327,20 @@ async def tts_benchmarks(test_cases):
                     avg_wer = sum(r['metric_value'] for r in provider_model_results) / len(provider_model_results)
                     print(f"  {provider_name} - {model}: {avg_wer:,.2f}%")
 
-database_path = "Test cases.csv"  # Update this path as needed
+database_path = "tts/Test cases.csv"  # Update this path as needed
 test_cases = load_test_cases(database_path)
 
 if not test_cases:
-    print("No test cases found. Please check your Excel file.")
+    print("No test cases found. Please check your file.")
 else:
     print(f"Loaded {len(test_cases)} test cases")
     
-    # Select a random test case instead of the first one
     random_test_case = random.choice(test_cases)
     test_cases = [random_test_case]
     
-    print(f"Running random test case: {random_test_case['testcase_id']}")
+    print(f"Running test case: {random_test_case['testcase_id']}")
     print(f"Text: {random_test_case['transcript']}")
+    print("-" * 50)
 
 asyncio.run(tts_benchmarks(test_cases))
-print("\nBenchmark completed!")
+print("\nBenchmark completed")

@@ -5,6 +5,7 @@ from .base import STTProvider, TranscriptionResult
 from .deepgram_stt import DeepgramProvider
 from .assemblyai_stt import AssemblyAIProvider
 from .speechmatics_stt import SpeechmaticsProvider
+from .elevenlabs_stt import ElevenLabsProvider
 
 # Import Google provider conditionally
 try:

@@ -30,6 +30,7 @@ COPY stt/ ./stt/
 
 # Copy master script
 COPY run_benchmarks.py ./
+COPY run_tts.py ./
 
 # Copy environment file (if present)
 COPY .env* ./

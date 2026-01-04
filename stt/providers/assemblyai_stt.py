@@ -57,7 +57,6 @@ class AssemblyAIProvider(STTProvider):
         return result
     
     async def _receive_responses(self, ws, result: TranscriptionResult):
-        """Receive and process AssemblyAI responses with TTFT using first transcript content method."""
         complete_turns = []
         formatted_turns = []
         last_final_turn_time = None
@@ -70,45 +69,41 @@ class AssemblyAIProvider(STTProvider):
                 response = json.loads(message)
                 current_time = time.time()
                 
-                # Handle different message types
                 msg_type = response.get('type')
                 
                 if msg_type == "Begin":
-                    session_id = response.get('id')
                     continue
                 
-                # Extract transcript for TTFT measurement (checks both transcript field and words array)
                 transcript = self._extract_transcript(response)
                 if transcript:
-                    # TTFT: Record first actual transcript content timing - AssemblyAI uses first content method
+                    # TTFT measurement
                     if result.ttft_seconds is None and result.audio_start_time is not None:
                         result.ttft_seconds = current_time - result.audio_start_time
                         result.first_token_content = transcript[:30] + "..." if len(transcript) > 30 else transcript
-                        print(f"[{self.name}] First transcript received: '{result.first_token_content}' at {result.ttft_seconds:.3f}s")
+                        print(f"[{self.name}] First transcript at {result.ttft_seconds:.3f}s")
                     
-                    # Track partial transcripts
                     result.partial_transcripts.append(transcript)
                 
-                # Handle AssemblyAI v3 streaming structure
+                # Handle Turn with end_of_turn
                 if msg_type == "Turn":
-                    # Check if this is an end of turn (final result)
                     if response.get('end_of_turn', False):
-                        complete_turns.append(transcript)
-                        last_final_turn_time = current_time  # Track when last final turn was received
-                        
-                        # Check if this looks like a formatted result (has punctuation, proper numbers)
-                        is_formatted = any(char in transcript for char in ['£', '.', '-']) or (transcript and transcript[0].isupper())
-                        if is_formatted:
-                            formatted_turns.append(transcript)
+                        # Only record FIRST end_of_turn with non-empty transcript
+                        if last_final_turn_time is None and transcript:
+                            complete_turns.append(transcript)
+                            last_final_turn_time = current_time
+                            print(f"[{self.name}] FIRST end_of_turn at {current_time - result.audio_start_time:.3f}s from audio start")
+                            
+                            is_formatted = any(char in transcript for char in ['£', '.', '-']) or (transcript and transcript[0].isupper())
+                            if is_formatted:
+                                formatted_turns.append(transcript)
+                        elif last_final_turn_time is not None:
+                            # Log subsequent end_of_turn events but don't update timing
+                            print(f"[{self.name}] Additional end_of_turn at {current_time - result.audio_start_time:.3f}s (ignoring for timing)")
                 
         except Exception as e:
             print(f"Receive error for {self.name}: {e}")
         
-        # Calculate audio-to-final timing
-        if last_final_turn_time and result.audio_start_time:
-            result.audio_to_final_seconds = last_final_turn_time - result.audio_start_time
-        
-        # Build complete transcript - prefer formatted turns
+        # Build complete transcript
         if formatted_turns:
             result.complete_transcript = " ".join(formatted_turns).strip()
         else:
@@ -116,7 +111,7 @@ class AssemblyAIProvider(STTProvider):
         
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split()) if result.complete_transcript else 0
+            result.word_count = len(result.complete_transcript.split())
     
     def _extract_transcript(self, response_json: dict) -> str:
         """
