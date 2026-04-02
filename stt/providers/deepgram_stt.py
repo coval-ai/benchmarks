@@ -115,10 +115,11 @@ class DeepgramProvider(STTProvider):
         
         # Build complete transcript
         if final_flag_segments:
-            if self.model != "flux-general-en":
-                result.complete_transcript = " ".join(final_flag_segments).strip()
+            if self.model == "flux-general-en":
+                # For Flux, final_flag_segments is a single string (the last transcript)
+                result.complete_transcript = final_flag_segments.strip() if isinstance(final_flag_segments, str) else " ".join(final_flag_segments).strip()
             else:
-                result.complete_transcript = transcript
+                result.complete_transcript = " ".join(final_flag_segments).strip()
         else:
             if result.partial_transcripts:
                 result.complete_transcript = max(result.partial_transcripts, key=len).strip()

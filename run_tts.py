@@ -273,10 +273,12 @@ async def tts_benchmarks(test_cases):
             'benchmark', 'metric_type', 'metric_value', 'metric_units',
             'audio_filename', 'timestamp', 'status'
         ]
-        
+
+        file_exists = os.path.exists(output_file)
         with open(output_file, 'a', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
+            if not file_exists:
+                writer.writeheader()
             writer.writerows([r for r in results if r is not None])
 
         print(f"\nResults saved to: {output_file}")
@@ -327,20 +329,26 @@ async def tts_benchmarks(test_cases):
                     avg_wer = sum(r['metric_value'] for r in provider_model_results) / len(provider_model_results)
                     print(f"  {provider_name} - {model}: {avg_wer:,.2f}%")
 
-database_path = "tts/Test cases.csv"  # Update this path as needed
-test_cases = load_test_cases(database_path)
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--test-cases', default='tts/Test cases.csv', help='Path to test cases CSV')
+parser.add_argument('--smoke-test', action='store_true', help='Run a single random test case')
+args = parser.parse_args()
+
+test_cases = load_test_cases(args.test_cases)
 
 if not test_cases:
     print("No test cases found. Please check your file.")
 else:
     print(f"Loaded {len(test_cases)} test cases")
-    
-    random_test_case = random.choice(test_cases)
-    test_cases = [random_test_case]
-    
-    print(f"Running test case: {random_test_case['testcase_id']}")
-    print(f"Text: {random_test_case['transcript']}")
-    print("-" * 50)
 
-asyncio.run(tts_benchmarks(test_cases))
-print("\nBenchmark completed")
+    if args.smoke_test:
+        random_test_case = random.choice(test_cases)
+        test_cases = [random_test_case]
+        print(f"Smoke test — running test case: {random_test_case['testcase_id']}")
+        print(f"Text: {random_test_case['transcript']}")
+
+    print("-" * 50)
+    asyncio.run(tts_benchmarks(test_cases))
+    print("\nBenchmark completed")

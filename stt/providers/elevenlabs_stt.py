@@ -143,6 +143,8 @@ class ElevenLabsProvider(STTProvider):
                     transcript = self._extract_transcript(response)
                     if transcript:
                         full_transcript_parts.append(transcript)
+                        if result.audio_start_time is not None:
+                            result.audio_to_final_seconds = current_time - result.audio_start_time
                         print(f"[{self.name}] Committed segment: {transcript}")
 
                 # 3. Handle Committed Transcriptions with Timestamps
@@ -150,6 +152,8 @@ class ElevenLabsProvider(STTProvider):
                     transcript = self._extract_transcript(response)
                     if transcript:
                         full_transcript_parts.append(transcript)
+                        if result.audio_start_time is not None:
+                            result.audio_to_final_seconds = current_time - result.audio_start_time
                         print(f"[{self.name}] Committed (with timestamps): {transcript}")
 
                 # 4. Handle various error types

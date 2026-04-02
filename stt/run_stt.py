@@ -63,9 +63,10 @@ WER_TRANSFORM_PIPELINE = transforms.Compose([
 # Ground truth for WER calculation (will be updated dynamically)
 GROUND_TRUTH = "For orders over £500, shipping is free when you use promo code SHIP123 or call our order desk at 02079460371."
 
-# Set Google credentials
+# Set Google credentials if available
 google_creds_path = get_google_credentials(secrets)
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = google_creds_path
+if google_creds_path:
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = google_creds_path
 
 def create_providers():
     """Create and return list of configured providers."""
@@ -402,7 +403,7 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
     
     # Prepare data rows in long format
     rows = []
-    readable_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    readable_timestamp = timestamp
     
     # Determine if this is local test.wav (for NTTFT vs TTFT)
     is_local_test = audio_filename == "test.wav"
@@ -640,7 +641,7 @@ def display_analysis(successful_ttft: List[tuple], successful_wer: List[tuple], 
 # Main benchmark execution
 async def main():
     # Generate timestamp for this run
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Create providers
     providers = create_providers()
@@ -662,8 +663,8 @@ async def main():
     print("="*60)
     
     try:
-        print("Loading Common Voice sample from local files...")
-        audio_data_cv, channels_cv, sample_width_cv, sample_rate_cv, filename_cv, duration_cv, ground_truth_cv = load_local_sample()
+        print("Loading audio sample...")
+        audio_data_cv, channels_cv, sample_width_cv, sample_rate_cv, filename_cv, duration_cv, ground_truth_cv = load_audio_sample()
         
         print(f"Common Voice Sample Loaded:")
         print(f"   File: {filename_cv}")

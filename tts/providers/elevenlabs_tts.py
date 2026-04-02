@@ -25,28 +25,28 @@ class ElevenLabs_Benchmark(TTS_Benchmark):
         """Standardized audio detection"""
         if isinstance(message, bytes) and len(message) > 0:
             return True
-        
+
         if isinstance(message, str):
             try:
                 data = json.loads(message)
                 return data.get("audio") and data["audio"] is not None
-            except:
+            except (json.JSONDecodeError, TypeError):
                 return False
-        
+
         return False
 
     def extract_audio_data(self, message):
         """Extract audio data from message"""
         if isinstance(message, bytes):
             return message
-        
+
         try:
             data = json.loads(message)
             if data.get("audio"):
                 return base64.b64decode(data["audio"])
-        except:
+        except (json.JSONDecodeError, TypeError, Exception):
             pass
-        
+
         return b''
 
     def is_final_message(self, message):
@@ -77,18 +77,15 @@ class ElevenLabs_Benchmark(TTS_Benchmark):
         audio_stream = BytesIO()
 
         for chunk in response:
-            if self.is_audio_chunk(chunk) and ttfa is None:
-                ttfa = (time.time() - start_time) * 1000
-                audio_stream.write(chunk)
             if chunk:
+                if self.is_audio_chunk(chunk) and ttfa is None:
+                    ttfa = (time.time() - start_time) * 1000
                 audio_stream.write(chunk)
-        
-        audio_stream.seek(0)
 
         filename = None
-        if audio_stream:
+        audio_data = audio_stream.getvalue()
+        if audio_data:
             filename = f"elevenlabs_{self.model}_{int(time.time())}.wav"
-            audio_data = b''.join(audio_stream)
             with wave.open(filename, 'wb') as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)

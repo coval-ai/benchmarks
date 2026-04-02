@@ -1,22 +1,18 @@
 import subprocess
 import sys
-import os
+
 
 def main():
     print("Starting benchmark suite...")
-    
+
     # Run TTS benchmark first
     print("\nRunning TTS Benchmark...")
-    
-    subprocess.run([sys.executable, 'run_tts.py'])
-   
-    
+    subprocess.run([sys.executable, 'run_tts.py'], check=True)
+
     # Run STT benchmark second
     print("\nRunning STT Benchmark...")
-    os.chdir('stt')
-    subprocess.run([sys.executable, 'run_stt.py'])
-    os.chdir('..')
-    
+    subprocess.run([sys.executable, 'run_stt.py'], cwd='stt', check=True)
+
     print("\nBenchmark suite completed!")
 
 if __name__ == "__main__":

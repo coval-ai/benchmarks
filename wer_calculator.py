@@ -634,6 +634,6 @@ def compare_transcription(original_text, transcription):
 
 normalizer = EnglishTextNormalizer()
 
-results = compare_transcription("There's a slight delay with your $347.89 order, but we expect it to ship by Friday afternoon.", "There is a slight delay with your 347 dollars and 89 cents order but we expect it to ship by Friday afternoon!")
-
-print(results)
+if __name__ == "__main__":
+    results = compare_transcription("There's a slight delay with your $347.89 order, but we expect it to ship by Friday afternoon.", "There is a slight delay with your 347 dollars and 89 cents order but we expect it to ship by Friday afternoon!")
+    print(results)

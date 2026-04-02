@@ -39,41 +39,42 @@ class Cartesia_Benchmark(TTS_Benchmark):
 
     async def calculateTTFA(self, text):
         cartesia = AsyncCartesia(api_key=self.api_key)
-        output_format = {"sample_rate": 24000, "container": "raw", "encoding": "pcm_s16le"} 
-        
-        # Setup WebSocket connection
+        output_format = {"sample_rate": 24000, "container": "raw", "encoding": "pcm_s16le"}
+
         ws = await cartesia.tts.websocket()
-        await ws.connect()
-        
-        start_time = time.time()
-        
-        gen = await ws.send(
-            model_id=self.model,
-            language="en",
-            voice={"id": self.voice},
-            output_format=output_format,
-            transcript=text,
-        )
-        
-        audio_chunks = []
-        ttfa = None
-        
-        async for chunk in gen:
-            if self.is_audio_chunk(chunk) and ttfa is None:
-                ttfa = (time.time() - start_time) * 1000
-            
-            if self.is_audio_chunk(chunk):
-                audio_chunks.append(self.extract_audio_data(chunk))
+        try:
+            await ws.connect()
+
+            start_time = time.time()
+
+            gen = await ws.send(
+                model_id=self.model,
+                language="en",
+                voice={"id": self.voice},
+                output_format=output_format,
+                transcript=text,
+            )
+
+            audio_chunks = []
+            ttfa = None
+
+            async for chunk in gen:
+                if self.is_audio_chunk(chunk):
+                    if ttfa is None:
+                        ttfa = (time.time() - start_time) * 1000
+                    audio_chunks.append(self.extract_audio_data(chunk))
+        finally:
+            await ws.close()
 
         filename = None
         if audio_chunks:
             filename = f"cartesia_{self.model}_{int(time.time())}.wav"
             audio_data = b''.join(audio_chunks)
-            
+
             with wave.open(filename, 'wb') as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(24000)
                 wav_file.writeframes(audio_data)
-        
+
         return ttfa, filename

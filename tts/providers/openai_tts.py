@@ -108,16 +108,13 @@ class OpenAI_Benchmark(TTS_Benchmark):
                             event_type = event.get("type", "")
 
                             if event_type == "response.audio.delta" and "delta" in event:
-                                if ttfa is None:
-                                    ttfa = (time.time() - start_time_ws) * 1000
-                                    print(f"OpenAI (realtime) TTFA: {ttfa:.2f} ms")
-
                                 try:
                                     audio_data = base64.b64decode(event["delta"])
                                     if self.is_audio_chunk(audio_data):
+                                        if ttfa is None:
+                                            ttfa = (time.time() - start_time_ws) * 1000
+                                            print(f"OpenAI (realtime) TTFA: {ttfa:.2f} ms")
                                         audio_chunks.append(audio_data)
-                                        # Add chunk analysis for realtime models
-                                        # print(f"{chunk_count} {time.time() - start_time_ws:.5f} {len(audio_data)}")
                                         chunk_count += 1
                                 except Exception as e:
                                     print(f"Error decoding audio delta: {e}")

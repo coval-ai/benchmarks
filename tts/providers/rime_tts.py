@@ -1,4 +1,3 @@
-import requests
 import os
 import time
 import asyncio
@@ -15,150 +14,70 @@ class Rime_Benchmark(TTS_Benchmark):
         self.api_key = get_api_key('RIME_API_KEY', secrets)
         if not self.api_key:
             raise ValueError("RIME_API_KEY not found in .env file")
-    
+
     def is_audio_chunk(self, chunk):
         if isinstance(chunk, bytes) and len(chunk) > 0:
             return True
         return False
-    
+
     async def calculateTTFA(self, text):
         audio_chunks = []
         ttfa = None
-        
-        if self.model in ["arcana", "mistv2"]:
-            # Use HTTP streaming for all models
-            url = "https://users.rime.ai/v1/rime-tts"
-            
-            # Set sampling rate based on model
-            sampling_rate = 24000
-            
-            if self.model == "arcana":
 
-                payload = {
-                    "speaker": self.voice,
-                    "text": text,
-                    "modelId": self.model,
-                    "repetition_penalty": 1.5,
-                    "temperature": 0.5,
-                    "top_p": 1,
-                    "samplingRate": sampling_rate,
-                    "max_tokens": 1200
-                }
-            else:
-                payload = {
-                    "speaker": "abbie",
-                    "text": text,
-                    "modelId": self.model,
-                    "repetition_penalty": 1.5,
-                    "temperature": 0.5,
-                    "top_p": 1,
-                    "samplingRate": sampling_rate,
-                    "max_tokens": 1200
-                }
-            
-            headers = {
-                "Accept": "audio/pcm",
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # Use aiohttp for async HTTP streaming
-            async with aiohttp.ClientSession() as session:
-                try:
-                    start_time = time.time()
-                    
-                    async with session.post(url, json=payload, headers=headers) as response:
-                        if response.status != 200:
-                            print(f"Rime HTTP error: {response.status}")
-                            error_text = await response.text()
-                            print(f"Error details: {error_text}")
-                            return None, None
-                        
-                        chunk_count = 0
-                        async for chunk in response.content.iter_any():
-                            if self.is_audio_chunk(chunk):
-                                if ttfa is None:
-                                    ttfa = (time.time() - start_time) * 1000
-                                    print(f"Rime ({self.model}) TTFA: {ttfa:.2f} ms")
-                                
-                                audio_chunks.append(chunk)
-                                # print(f"Received chunk {chunk_count} at {time.time() - start_time:.5f}s, size={len(chunk)} bytes")
-                                # chunk_count += 1
-                                
-                except Exception as e:
-                    print(f"Rime HTTP streaming error: {e}")
-                    return None, None
-        
-        # else:
-        #     # Keep existing WebSocket implementation for mist/mistv2 models
-        #     try:
-        #         voice_url = "https://users.rime.ai/data/voices/voice_details.json"
-        #         voice_response = requests.get(voice_url)
-        #         voice_response.raise_for_status()
-        #         speakers = voice_response.json()
-        #     except Exception as e:
-        #         print(f"Rime voice details error: {e}")
-        #         return None, None
-                
-        #     valid_models = ["mistv2", "mist"]
+        valid_models = ["arcana", "mistv2"]
+        if self.model not in valid_models:
+            raise ValueError(f"Unsupported Rime model: {self.model}. Valid models: {valid_models}")
 
-        #     if self.model in valid_models:
-        #         for speaker in speakers:
-        #             if speaker["name"] == self.voice and speaker["model_id"] == self.model:
-        #                 break
-        #         else:
-        #             self.voice = "cove" if self.model == "mist" else "breeze"
-        #     else:
-        #         self.model = "mist"
-        #         self.voice = "cove"
+        url = "https://users.rime.ai/v1/rime-tts"
+        sampling_rate = 24000
 
-        #     import websockets
-        #     uri = f"wss://users-ws.rime.ai/ws?speaker={self.voice}&modelId={self.model}&audioFormat=pcm&samplingRate=22050&reduceLatency=true"
-        #     auth_headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {
+            "speaker": self.voice or "abbie",
+            "text": text,
+            "modelId": self.model,
+            "repetition_penalty": 1.5,
+            "temperature": 0.5,
+            "top_p": 1,
+            "samplingRate": sampling_rate,
+            "max_tokens": 1200
+        }
 
-        #     try:
-        #         async with websockets.connect(uri, extra_headers=auth_headers) as websocket:
-        #             # STANDARDIZED: Start timing immediately before sending request
-        #             start_time = time.time()
-                    
-        #             await websocket.send(text)
-        #             await websocket.send("<EOS>")
-                    
-        #             chunk_count = 0
-        #             while True:
-        #                 try:
-        #                     audio = await asyncio.wait_for(websocket.recv(), timeout=5.0)
-        #                     if self.is_audio_chunk(audio):
-        #                         if ttfa is None:
-        #                             ttfa = (time.time() - start_time) * 1000
-        #                             print(f"Rime ({self.model}) TTFA: {ttfa:.2f} ms")
-        #                         audio_chunks.append(audio)
-        #                         print(f"Received chunk {chunk_count} at {time.time() - start_time:.2f}s, size={len(audio)} bytes")
-        #                         chunk_count += 1
-        #                 except asyncio.TimeoutError:
-        #                     break
-        #                 except websockets.exceptions.ConnectionClosed:
-        #                     break
+        headers = {
+            "Accept": "audio/pcm",
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
 
-        #     except Exception as e:
-        #         print(f"Rime WebSocket error: {e}")
-        #         return None, None
-            
+        async with aiohttp.ClientSession() as session:
+            try:
+                start_time = time.time()
+
+                async with session.post(url, json=payload, headers=headers) as response:
+                    if response.status != 200:
+                        print(f"Rime HTTP error: {response.status}")
+                        error_text = await response.text()
+                        print(f"Error details: {error_text}")
+                        return None, None
+
+                    async for chunk in response.content.iter_any():
+                        if self.is_audio_chunk(chunk):
+                            if ttfa is None:
+                                ttfa = (time.time() - start_time) * 1000
+                                print(f"Rime ({self.model}) TTFA: {ttfa:.2f} ms")
+
+                            audio_chunks.append(chunk)
+
+            except Exception as e:
+                print(f"Rime HTTP streaming error: {e}")
+                return None, None
+
         # Save audio file
         filename = None
         if audio_chunks:
             filename = f"rime_{self.model}_{int(time.time())}.wav"
-            
-            # if self.model == "arcana":
-            #     # HTTP streaming returns WAV format directly
-            #     with open(filename, "wb") as f:
-            #         for chunk in audio_chunks:
-            #             f.write(chunk)
-            # else:
-            # WebSocket returns PCM data, need to wrap in WAV
             import wave
             audio_data = b''.join(audio_chunks)
-            
+
             with wave.open(filename, 'wb') as wav_file:
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
