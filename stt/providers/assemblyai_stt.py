@@ -16,7 +16,7 @@ class AssemblyAIProvider(STTProvider):
     def _build_websocket_url(self, sample_rate: int) -> str:
         """Build WebSocket URL for AssemblyAI v3 streaming API."""
         if sample_rate != 16000:
-            print(f"Warning: AssemblyAI requires 16kHz audio. Got {sample_rate}Hz - this may cause errors.")
+            raise ValueError(f"AssemblyAI requires 16kHz PCM input, got {sample_rate}Hz")
         
         return "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true"
     

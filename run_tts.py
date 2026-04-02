@@ -115,7 +115,7 @@ def load_test_cases(path):
         return []
     
 async def run_test(testcase, provider_name, model, voice, timestamp):
-    
+    audio_filename = None
     print(f"Testing {testcase['testcase_id']} with {provider_name} - {model}.")
     
     ttfa_result = {
@@ -231,15 +231,14 @@ async def run_test(testcase, provider_name, model, voice, timestamp):
 
         print(f"TTFA: {ttfa_result['metric_value']} ms, WER: {wer_result['metric_value']}%")
         
-        # Optionally clean up audio file (comment out if you want to keep them)
-        if os.path.exists(audio_filename):
-            os.remove(audio_filename)
-        
     except Exception as e:
         logging.error(f"Error in test {testcase['testcase_id']} with {provider_name}: {e}")
         ttfa_result['status'] = f'error: {str(e)}'
         wer_result['status'] = f'error: {str(e)}'
-    
+    finally:
+        if audio_filename and os.path.exists(audio_filename):
+            os.remove(audio_filename)
+
     return [ttfa_result, wer_result]
 
 async def tts_benchmarks(test_cases):

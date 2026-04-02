@@ -86,17 +86,16 @@ def create_providers():
     except Exception as e:
         print(f"Error creating Deepgram providers: {e}")
 
-    # try:
-    #     # ElevenLabs models
-    #     elevenlabs_key = get_api_key('ELEVENLABS_API_KEY', secrets)
-    #     if elevenlabs_key:
-    #         providers.append(
-    #             ElevenLabsProvider(api_key=elevenlabs_key, model="scribe_v2_realtime")
-    #         )
-    #     else:
-    #         print("ASSEMBLYAI_API_KEY not found - skipping AssemblyAI providers")
-    # except Exception as e:
-    #     print(f"Error creating Deepgram providers: {e}")
+    try:
+        elevenlabs_key = get_api_key('ELEVENLABS_API_KEY', secrets)
+        if elevenlabs_key:
+            providers.append(
+                ElevenLabsProvider(api_key=elevenlabs_key, model="scribe_v2_realtime")
+            )
+        else:
+            print("ELEVENLABS_API_KEY not found - skipping ElevenLabs providers")
+    except Exception as e:
+        print(f"Error creating ElevenLabs providers: {e}")
     
     try:
         # AssemblyAI models (v3 streaming API)
@@ -162,7 +161,7 @@ def process_transcription_result(result: TranscriptionResult, ground_truth: str,
     
     # Calculate RTF if audio-to-final timing is available
     if result.audio_to_final_seconds is not None and audio_duration is not None and audio_duration > 0:
-        result.rtf_value = audio_duration / result.audio_to_final_seconds
+        result.rtf_value = result.audio_to_final_seconds / audio_duration
     
     # Print transcript to console with WER, Audio-to-Final timing, and RTF
     if result.complete_transcript:
@@ -398,15 +397,16 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
         'audio_filename',
         'timestamp',
         'status',
-        'transcript'  # New column for first transcript (only for TTFT rows)
+        'transcript',  # First transcript (only for TTFT rows)
+        'test_type',
     ]
-    
+
     # Prepare data rows in long format
     rows = []
     readable_timestamp = timestamp
-    
+
     # Determine if this is local test.wav (for NTTFT vs TTFT)
-    is_local_test = audio_filename == "test.wav"
+    is_local_test = test_type == "Local test.wav TTFT"
     
     for result in results:
         if isinstance(result, Exception):
@@ -437,7 +437,8 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
             audio_filename,
             readable_timestamp,
             status,
-            ""      # transcript (only filled for TTFT rows)
+            "",     # transcript (only filled for TTFT rows)
+            test_type,
         ]
         
         # Add TTFT metric (NTTFT for local test.wav, TTFT for Common Voice)

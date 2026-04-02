@@ -135,7 +135,7 @@ class OpenAI_Benchmark(TTS_Benchmark):
                 traceback.print_exc()
         
         else:
-            raise ValueError(f"Unsupported OpenAI model provided: {self.model}. Supported models: gpt-4o-mini-tts, tts-1, tts-1-hd, gpt-4o-realtime-preview-latest")
+            raise ValueError(f"Unsupported OpenAI model provided: {self.model}. Supported models: gpt-4o-mini-tts, tts-1, tts-1-hd, gpt-realtime-2025-08-28")
         
         filename = None
         if audio_chunks:

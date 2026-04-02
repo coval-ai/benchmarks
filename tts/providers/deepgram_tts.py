@@ -42,66 +42,52 @@ class Deepgram_Benchmark(TTS_Benchmark):
 
     async def calculateTTFA(self, text):
         deepgram = DeepgramClient(api_key=self.api_key)
-        
+        stream_complete = asyncio.Event()
+
         with deepgram.speak.v1.connect(
             model=self.model,
             encoding="linear16",
             sample_rate=24000
         ) as dg_connection:
-        
+
             audio_chunks = []
             ttfa = None
             start_time = None
-            
+
             # Event handlers
             def on_open(open_result, **kwargs):
-                #print(f"[EVENT] OPEN: {open_result}")
                 print(f"Connection open")
-            
+
             def on_message(message, **kwargs):
-                # Handles both binary audio data and message objects
                 nonlocal ttfa, audio_chunks, start_time
-                
-                # Handle binary audio data
+
                 if isinstance(message, bytes) and len(message) > 0:
-                    
-                    # Stop time at first audio chunk
                     if ttfa is None and start_time is not None:
                         ttfa = (time.time() - start_time) * 1000
-                        #print(f"Deepgram TTFA: {ttfa:.2f} ms")
-                    
                     audio_chunks.append(message)
                 else:
-                    msg_type = getattr(message, "type", "Unknown")
-                    #print(f"[EVENT] {msg_type}: {message}")
-                    
-                    # Check if this is the flushed event
                     if hasattr(message, "type") and message.type == "Flushed":
-                        #print(f"Audio generation complete")
                         dg_connection.send_control(SpeakV1ControlMessage(type="Close"))
-            
+
             def on_error(error, **kwargs):
                 print(f"[EVENT] ERROR: {error}")
-            
+                stream_complete.set()
+
             def on_close(close_result, **kwargs):
                 print(f"Connection closed")
+                stream_complete.set()
 
             dg_connection.on(EventType.OPEN, on_open)
             dg_connection.on(EventType.MESSAGE, on_message)
             dg_connection.on(EventType.ERROR, on_error)
             dg_connection.on(EventType.CLOSE, on_close)
 
-            # Send text 
             start_time = time.time()
-            dg_connection.send_text(SpeakV1TextMessage(type = "Speak", text=text))
-            
-            # Flush
+            dg_connection.send_text(SpeakV1TextMessage(type="Speak", text=text))
             dg_connection.send_control(SpeakV1ControlMessage(type="Flush"))
-    
             dg_connection.start_listening()
 
-            # Brief moment for cleanup
-            await asyncio.sleep(0.1)
+            await stream_complete.wait()
                     
         # Save audio file
         filename = None
