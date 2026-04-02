@@ -17,6 +17,7 @@ rev-ai
 websockets
 cartesia
 hume
+elevenlabs
 
 # ML/AI libraries
 datasets
