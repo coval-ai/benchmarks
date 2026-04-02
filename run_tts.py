@@ -88,7 +88,7 @@ CONFIGURATIONS = {
     #     "voice": "luna",  
     #     "models": [
     #         "arcana",
-    #         "mistv2"
+    #         "mistv3"
     #     ]
     # }
 }

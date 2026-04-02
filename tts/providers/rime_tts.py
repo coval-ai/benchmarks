@@ -24,7 +24,7 @@ class Rime_Benchmark(TTS_Benchmark):
         audio_chunks = []
         ttfa = None
 
-        valid_models = ["arcana", "mistv2"]
+        valid_models = ["arcana", "mistv3"]
         if self.model not in valid_models:
             raise ValueError(f"Unsupported Rime model: {self.model}. Valid models: {valid_models}")
 
