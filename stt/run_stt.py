@@ -9,7 +9,6 @@ from jiwer import transforms
 import io
 import librosa
 import soundfile as sf
-from datasets import load_dataset
 import re
 import csv
 from datetime import datetime
@@ -42,13 +41,6 @@ from wer_calculator import compare_transcription
 print("Loading API keys from AWS Secrets Manager...")
 secrets = get_secret("prod/benchmarking")
 
-hf_token = get_api_key('HUGGING_FACE_TOKEN', secrets)
-if hf_token:
-    from huggingface_hub import login
-    login(token=hf_token)
-else:
-    print("HUGGING_FACE_TOKEN not found.")
-
 # Create WER normalization transforms - combine into a single callable
 WER_TRANSFORM_PIPELINE = transforms.Compose([
     transforms.RemovePunctuation(),
@@ -60,7 +52,7 @@ WER_TRANSFORM_PIPELINE = transforms.Compose([
     transforms.ReduceToListOfListOfWords()
 ])
 
-# Ground truth for WER calculation (will be updated dynamically)
+# Ground truth for WER calculation (fallback only)
 GROUND_TRUTH = "For orders over £500, shipping is free when you use promo code SHIP123 or call our order desk at 02079460371."
 
 # Set Google credentials if available
@@ -176,65 +168,70 @@ def process_transcription_result(result: TranscriptionResult, ground_truth: str,
     
     return result
 
-# LOCAL DATA LOADING FUNCTIONS (NEW)
+
+# LOCAL DATA LOADING FUNCTIONS
 def load_local_sample(min_duration: float = 2.0, max_duration: float = 15.0, max_retries: int = 10) -> Tuple[bytes, int, int, int, str, float, str]:
     """
-    Load a random sample from local en_test folder and test.tsv file.
+    Load a random sample from local audios folder and ss-corpus-en.tsv file.
     Returns: (audio_data, channels, sample_width, sample_rate, filename, duration_seconds, ground_truth)
     """
-    print("Loading from local en_test folder and test.tsv...")
+    print("Loading from local audios folder and ss-corpus-en.tsv...")
     
-    # Check if local files exist
-    tsv_path = "test.tsv"
-    audio_dir = "en_test"
+    tsv_path = "ss-corpus-en.tsv"
+    audio_dir = "audios"
     
     if not os.path.exists(tsv_path):
-        raise FileNotFoundError(f"test.tsv not found at {tsv_path}")
+        raise FileNotFoundError(f"ss-corpus-en.tsv not found at {tsv_path}")
     if not os.path.exists(audio_dir):
-        raise FileNotFoundError(f"en_test directory not found at {audio_dir}")
+        raise FileNotFoundError(f"audios directory not found at {audio_dir}")
     
     # Load TSV file
     try:
         df = pd.read_csv(tsv_path, sep='\t')
-        print(f"Loaded {len(df)} entries from test.tsv")
+        print(f"Loaded {len(df)} entries from ss-corpus-en.tsv")
     except Exception as e:
-        raise Exception(f"Failed to load test.tsv: {e}")
+        raise Exception(f"Failed to load ss-corpus-en.tsv: {e}")
     
-    # Required columns
-    required_columns = ['path', 'sentence']
-    missing_columns = [col for col in required_columns if col not in df.columns]
-    if missing_columns:
-        raise ValueError(f"Missing required columns in test.tsv: {missing_columns}")
+    # Filter to validated, transcribed clips only
+    df = df[
+        df['split'].isin(['test', 'train', 'dev']) &
+        df['transcription'].notna() &
+        (df['votes'] >= 1)
+    ]
+    df = df[~df['transcription'].str.match(r'^\[[^\]]+\]$', na=False)]
+    df = df[df['transcription'].str.strip().str.len() > 0]
+    print(f"After filtering: {len(df)} usable clips")
     
-    # Try to find a suitable sample
+    # Pre-filter by duration using duration_ms column (faster than loading each file)
+    df = df[
+        (df['duration_ms'] / 1000 >= min_duration) &
+        (df['duration_ms'] / 1000 <= max_duration)
+    ]
+    print(f"After duration filter ({min_duration}-{max_duration}s): {len(df)} clips")
+    
+    if len(df) == 0:
+        raise Exception(f"No clips found matching duration range {min_duration}-{max_duration}s")
+    
+    # Try to find a sample whose audio file actually exists on disk
     for attempt in range(max_retries):
         try:
-            # Select a random row
             sample_row = df.sample(n=1).iloc[0]
             
-            # Get audio file path and sentence
-            audio_filename = sample_row['path']
+            audio_filename = sample_row['audio_file']
             audio_path = os.path.join(audio_dir, audio_filename)
-            sentence = sample_row['sentence']
+            transcription = sample_row['transcription']
             
-            # Check if audio file exists
             if not os.path.exists(audio_path):
                 print(f"Attempt {attempt+1}: Audio file not found: {audio_path}")
                 continue
             
-            # Load and check audio duration
             try:
                 audio_data, channels, sample_width, sample_rate, _, duration = load_audio_file(audio_path)
                 
-                # Check if duration is in our range
-                if min_duration <= duration <= max_duration:
-                    # Clean transcript for ground truth
-                    ground_truth = clean_transcript(sentence)
-                    
-                    print(f"Selected local sample: {audio_filename} ({duration:.2f}s)")
-                    return audio_data, channels, sample_width, sample_rate, audio_filename, duration, ground_truth
-                else:
-                    print(f"Sample {attempt+1}: {audio_filename} - {duration:.2f}s (outside {min_duration}-{max_duration}s range)")
+                ground_truth = clean_transcript(transcription)
+                
+                print(f"Selected local sample: {audio_filename} ({duration:.2f}s)")
+                return audio_data, channels, sample_width, sample_rate, audio_filename, duration, ground_truth
             
             except Exception as e:
                 print(f"Attempt {attempt+1}: Failed to load {audio_filename}: {e}")
@@ -246,64 +243,12 @@ def load_local_sample(min_duration: float = 2.0, max_duration: float = 15.0, max
     
     raise Exception(f"Failed to find suitable local sample after {max_retries} attempts")
 
-# COMMON VOICE FUNCTIONS (EXISTING)
-def load_common_voice_sample(min_duration: float = 2.0, max_duration: float = 15.0, max_retries: int = 10) -> Tuple[bytes, int, int, int, str, float, str]:
-    """
-    Load a random sample from Common Voice English test set.
-    Returns: (audio_data, channels, sample_width, sample_rate, filename, duration_seconds, ground_truth)
-    """
-    print(f"Loading Common Voice dataset (English test split)...")
-    
-    # Load dataset in streaming mode (no download)
-    try:
-        dataset = load_dataset("mozilla-foundation/common_voice_16_1", "en", split="test", streaming=True)
-        print("Dataset connection established")
-    except Exception as e:
-        print(f"Failed to load dataset: {e}")
-        raise
-    
-    # Try to find a suitable sample
-    for attempt in range(max_retries):
-        try:
-            # Get a random sample
-            sample = next(iter(dataset.shuffle(seed=None).take(1)))
-            
-            # Get audio data and info
-            audio_array = sample['audio']['array']
-            sample_rate = sample['audio']['sampling_rate']
-            transcript = sample['sentence']
-            
-            # Calculate duration
-            duration = len(audio_array) / sample_rate
-            
-            # Check if duration is in our range
-            if min_duration <= duration <= max_duration:
-                # Convert to WAV format with consistent 16kHz sample rate
-                audio_data = convert_to_wav_bytes(audio_array, sample_rate, target_sample_rate=16000)
-                
-                # Clean transcript for ground truth
-                ground_truth = clean_transcript(transcript)
-                
-                # Generate filename
-                filename = f"common_voice_sample_{attempt+1}.wav"
-                
-                # Return in same format as original load_wav_file - force 16kHz sample rate
-                return audio_data, 1, 2, 16000, filename, duration, ground_truth
-            else:
-                print(f"Sample {attempt+1}: {duration:.2f}s (outside {min_duration}-{max_duration}s range)")
-                
-        except Exception as e:
-            print(f"Attempt {attempt+1} failed: {e}")
-            continue
-    
-    raise Exception(f"Failed to find suitable sample after {max_retries} attempts")
 
 def load_audio_sample(min_duration: float = 2.0, max_duration: float = 15.0, max_retries: int = 10) -> Tuple[bytes, int, int, int, str, float, str]:
     """
     Load audio sample with fallback strategy:
-    1. Try local en_test folder first
-    2. Fall back to Common Voice API
-    3. Fall back to hardcoded test.wav
+    1. Try local audios folder first
+    2. Fall back to hardcoded test.wav
     
     Returns: (audio_data, channels, sample_width, sample_rate, filename, duration_seconds, ground_truth)
     """
@@ -311,24 +256,17 @@ def load_audio_sample(min_duration: float = 2.0, max_duration: float = 15.0, max
     
     # First try: Local files
     try:
-        print("Attempting to load from local en_test folder...")
+        print("Attempting to load from local audios folder...")
         return load_local_sample(min_duration, max_duration, max_retries)
     except Exception as e:
         print(f"Local loading failed: {e}")
-    
-    # Second try: Common Voice API
-    try:
-        print("Attempting to load from Common Voice API...")
-        return load_common_voice_sample(min_duration, max_duration, max_retries)
-    except Exception as e:
-        print(f"Common Voice API failed: {e}")
     
     # Final fallback: test.wav with hardcoded ground truth
     try:
         print("Falling back to local test.wav file...")
         if os.path.exists("test.wav"):
             audio_data, channels, sample_width, sample_rate, filename, duration = load_audio_file("test.wav")
-            ground_truth = GROUND_TRUTH  # Use hardcoded value
+            ground_truth = GROUND_TRUTH
             print(f"Loaded fallback test.wav ({duration:.2f}s)")
             return audio_data, channels, sample_width, sample_rate, filename, duration, ground_truth
         else:
@@ -336,46 +274,27 @@ def load_audio_sample(min_duration: float = 2.0, max_duration: float = 15.0, max
     except Exception as e:
         raise Exception(f"All audio loading methods failed. Final error: {e}")
 
-def convert_to_wav_bytes(audio_array, original_sample_rate: int, target_sample_rate: int = 16000) -> bytes:
-    """
-    Convert audio array to WAV bytes format expected by STT providers.
-    Always resamples to target_sample_rate (default 16kHz) for consistency.
-    """
-    print(f"Audio conversion: {original_sample_rate}Hz â†’ {target_sample_rate}Hz")
-    
-    # Always resample to ensure consistent sample rate across all providers
-    if original_sample_rate != target_sample_rate:
-        print(f"Resampling from {original_sample_rate}Hz to {target_sample_rate}Hz...")
-        audio_array = librosa.resample(audio_array, orig_sr=original_sample_rate, target_sr=target_sample_rate)
-    else:
-        print(f"No resampling needed (already {target_sample_rate}Hz)")
-    
-    # Convert to bytes using soundfile
-    with io.BytesIO() as wav_buffer:
-        sf.write(wav_buffer, audio_array, target_sample_rate, format='WAV', subtype='PCM_16')
-        wav_buffer.seek(0)
-        
-        # Skip WAV header (44 bytes) to get raw PCM data
-        wav_bytes = wav_buffer.read()
-        pcm_data = wav_bytes[44:]  # Skip WAV header
-        
-        print(f"Converted to {len(pcm_data)} bytes of PCM data")
-        return pcm_data
 
 def clean_transcript(transcript: str) -> str:
     """
     Clean and normalize transcript text for WER calculation.
+    Removes disfluency tags, noise markers, and unclear markers used in
+    the Common Voice Spontaneous Speech dataset.
     """
+    # Remove XML-style tags: <disfluency>, <noise>, <unclear>, etc.
+    transcript = re.sub(r'<[^>]+>', '', transcript)
+    
+    # Remove square bracket markers: [um], [noise], [unclear], etc.
+    transcript = re.sub(r'\[[^\]]+\]', '', transcript)
+    
     # Convert to lowercase
     transcript = transcript.lower()
     
     # Remove extra whitespace
     transcript = ' '.join(transcript.split())
     
-    # REMOVED: All regex operations to eliminate errors
-    # Basic string cleaning only
-    
     return transcript.strip()
+
 
 # Utility Functions
 def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audio_filename: str = "test.wav", test_type: str = "unknown"):
@@ -441,7 +360,7 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
             test_type,
         ]
         
-        # Add TTFT metric (NTTFT for local test.wav, TTFT for Common Voice)
+        # Add TTFT metric (NTTFT for local test.wav, TTFT for Spontaneous Speech)
         if result.ttft_seconds is not None:
             ttft_row = base_row.copy()
             ttft_row[4] = "NTTFT" if is_local_test else "TTFT"
@@ -456,7 +375,6 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
             wer_row[4] = "WER"
             wer_row[5] = result.wer_percentage
             wer_row[6] = "%"  # percentage units
-            # transcript column remains empty for WER rows
             rows.append(wer_row)
         
         # Add RTF metric (no transcript)
@@ -465,10 +383,9 @@ def save_results_to_csv(results: List[TranscriptionResult], timestamp: str, audi
             rtf_row[4] = "RTF"
             rtf_row[5] = result.rtf_value
             rtf_row[6] = None  # NULL units
-            # transcript column remains empty for RTF rows
             rows.append(rtf_row)
         
-        # NEW: Audio-to-Final metric (raw value from audio start)
+        # Audio-to-Final metric (raw value from audio start)
         if result.audio_to_final_seconds is not None:
             audio_final_row = base_row.copy()
             audio_final_row[4] = "AudioToFinal"
@@ -496,7 +413,6 @@ def load_audio_file(file_path: str, target_sample_rate: int = 16000) -> Tuple[by
     Automatically converts to target sample rate and format expected by STT providers.
     Returns: (audio_data, channels, sample_width, sample_rate, filename, duration_seconds)
     """
-    import os
     filename = os.path.basename(file_path)
     
     try:
@@ -520,10 +436,8 @@ def load_audio_file(file_path: str, target_sample_rate: int = 16000) -> Tuple[by
             
             # Skip WAV header (44 bytes) to get raw PCM data
             wav_bytes = wav_buffer.read()
-            pcm_data = wav_bytes[44:]  # Skip WAV header
+            pcm_data = wav_bytes[44:]
             
-            # Return format consistent with original function
-            # (audio_data, channels, sample_width, sample_rate, filename, duration_seconds)
             return pcm_data, 1, 2, target_sample_rate, filename, duration_seconds
             
     except Exception as e:
@@ -587,7 +501,7 @@ def display_analysis(successful_ttft: List[tuple], successful_wer: List[tuple], 
     
     # WER Analysis
     if successful_wer:
-        successful_wer.sort(key=lambda x: x[1])  # Sort by WER (lower is better)
+        successful_wer.sort(key=lambda x: x[1])
         best_wer = successful_wer[0]
         print(f"\nBest WER (Accuracy): {best_wer[0]} ({best_wer[1]:.1f}%)")
         
@@ -657,25 +571,25 @@ async def main():
         print(f"  - {provider.name}")
     
     # =====================================
-    # TEST 1: Common Voice (TTFT + WER)
+    # TEST 1: Spontaneous Speech (TTFT + WER)
     # =====================================
     print("\n" + "="*60)
-    print("TEST 1: COMMON VOICE - ACCURACY & PERFORMANCE BENCHMARK")
+    print("TEST 1: SPONTANEOUS SPEECH - ACCURACY & PERFORMANCE BENCHMARK")
     print("="*60)
     
     try:
         print("Loading audio sample...")
         audio_data_cv, channels_cv, sample_width_cv, sample_rate_cv, filename_cv, duration_cv, ground_truth_cv = load_audio_sample()
         
-        print(f"Common Voice Sample Loaded:")
+        print(f"Spontaneous Speech Sample Loaded:")
         print(f"   File: {filename_cv}")
         print(f"   Duration: {duration_cv:.2f}s")
         print(f"   Ground Truth: \"{ground_truth_cv}\"")
         print(f"   Ground Truth Length: {len(ground_truth_cv.split())} words, {len(ground_truth_cv)} characters")
-        print(f"   Source: Local en_test folder")
+        print(f"   Source: Local audios folder")
         
-        # Run all providers on Common Voice sample
-        print(f"\nRunning Common Voice benchmark...")
+        # Run all providers on Spontaneous Speech sample
+        print(f"\nRunning Spontaneous Speech benchmark...")
         tasks_cv = [
             provider.measure_ttft(audio_data_cv, channels_cv, sample_width_cv, sample_rate_cv, 0.1, duration_cv)
             for provider in providers
@@ -683,7 +597,7 @@ async def main():
         
         results_cv = await asyncio.gather(*tasks_cv, return_exceptions=True)
         
-        # Process Common Voice results (with WER calculation)
+        # Process Spontaneous Speech results (with WER calculation)
         processed_results_cv = []
         for result in results_cv:
             if isinstance(result, Exception):
@@ -691,15 +605,15 @@ async def main():
             else:
                 processed_results_cv.append(process_transcription_result(result, ground_truth_cv, duration_cv))
         
-        # Display Common Voice results
-        print("\nCOMMON VOICE RESULTS (TTFT + WER):")
+        # Display Spontaneous Speech results
+        print("\nSPONTANEOUS SPEECH RESULTS (TTFT + WER):")
         successful_ttft_cv, successful_wer_cv, failed_results_cv = display_results_table(processed_results_cv)
         
-        # Save Common Voice results to CSV
-        save_results_to_csv(processed_results_cv, timestamp, filename_cv, "Common Voice TTFT+WER")
+        # Save Spontaneous Speech results to CSV
+        save_results_to_csv(processed_results_cv, timestamp, filename_cv, "Spontaneous Speech TTFT+WER")
         
     except Exception as e:
-        print(f"Common Voice test failed: {e}")
+        print(f"Spontaneous Speech test failed: {e}")
         processed_results_cv = []
         successful_ttft_cv, successful_wer_cv, failed_results_cv = [], [], []
     
@@ -741,11 +655,6 @@ async def main():
                 if isinstance(result, Exception):
                     processed_results_local.append(result)
                 else:
-                    # Change TTFT to NTTFT for local test.wav results
-                    if hasattr(result, 'ttft_seconds') and result.ttft_seconds is not None:
-                        # Create a copy to avoid modifying the original result object
-                        result_copy = result
-                        # We'll handle the NTTFT vs TTFT distinction in save_results_to_csv
                     processed_results_local.append(result)
             
             # Display local results (TTFT only)
@@ -772,9 +681,9 @@ async def main():
     print("COMBINED ANALYSIS")
     print("="*60)
     
-    # Analyze Common Voice results
+    # Analyze Spontaneous Speech results
     if successful_ttft_cv or successful_wer_cv:
-        print("\nCOMMON VOICE ANALYSIS:")
+        print("\nSPONTANEOUS SPEECH ANALYSIS:")
         display_analysis(successful_ttft_cv, successful_wer_cv, failed_results_cv)
     
     # Analyze local results  
@@ -783,22 +692,21 @@ async def main():
         display_analysis(successful_ttft_local, [], failed_results_local)
     
     # Upload to database (single CSV file now contains both result sets)
-    try:
-        csv_file = "all_benchmarks.csv"
-        if os.path.exists(csv_file):
-            df = pd.read_csv(csv_file)
+    # try:
+    #     csv_file = "all_benchmarks.csv"
+    #     if os.path.exists(csv_file):
+    #         df = pd.read_csv(csv_file)
             
-            engine = create_engine(get_api_key("DATABASE_URL", secrets))
-            df.to_sql('all_benchmarks', engine, if_exists='append', index=False)
-            print("All benchmark data uploaded to database")
+    #         engine = create_engine(get_api_key("DATABASE_URL", secrets))
+    #         df.to_sql('all_benchmarks', engine, if_exists='append', index=False)
+    #         print("All benchmark data uploaded to database")
             
-            # Delete CSV file after successful upload to prevent duplicates
-            os.remove(csv_file)
-            print(f"Deleted {csv_file} to prevent duplicate uploads")
+    #         # Delete CSV file after successful upload to prevent duplicates
+    #         os.remove(csv_file)
+    #         print(f"Deleted {csv_file} to prevent duplicate uploads")
             
-    except Exception as e:
-        logging.error(f"Error writing results to database: {e}")
-    #     # Print first few rows of data for debugging
+    # except Exception as e:
+    #     logging.error(f"Error writing results to database: {e}")
     #     if 'df' in locals():
     #         print("Sample data causing issues:")
     #         print(df[['provider', 'metric_type', 'metric_value', 'transcript']].head(10))
@@ -813,12 +721,12 @@ async def main():
     
     print(f"Total providers tested: {len(providers)}")
     
-    # Common Voice summary
+    # Spontaneous Speech summary
     cv_success = len([r for r in processed_results_cv if not isinstance(r, Exception) and not r.error]) if processed_results_cv else 0
-    print(f"\nCommon Voice Test (Accuracy + Performance):")
+    print(f"\nSpontaneous Speech Test (Accuracy + Performance):")
     print(f"   Successful TTFT measurements: {len(successful_ttft_cv)}")
     print(f"   Successful WER measurements: {len(successful_wer_cv)}")
-    print(f"   Sample source: Common Voice EN test set")
+    print(f"   Sample source: Common Voice Spontaneous Speech 3.0 EN")
     
     # Local test summary
     local_success = len([r for r in processed_results_local if not isinstance(r, Exception) and not r.error]) if processed_results_local else 0
@@ -829,7 +737,7 @@ async def main():
     # Winners
     if successful_ttft_cv:
         ttft_winner_cv = min(successful_ttft_cv, key=lambda x: x[1])
-        print(f"\nCommon Voice TTFT winner: {ttft_winner_cv[0]} ({ttft_winner_cv[1]:.3f}s)")
+        print(f"\nSpontaneous Speech TTFT winner: {ttft_winner_cv[0]} ({ttft_winner_cv[1]:.3f}s)")
     
     if successful_wer_cv:
         wer_winner = min(successful_wer_cv, key=lambda x: x[1])
