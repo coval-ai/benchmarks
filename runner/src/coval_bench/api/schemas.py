@@ -47,8 +47,8 @@ class ResultOut(BaseModel):
     voice: str | None
     benchmark: Literal["STT", "TTS"]
     metric_type: str
-    metric_value: float
-    metric_units: str
+    metric_value: float | None
+    metric_units: str | None
     audio_filename: str | None
     created_at: datetime
     status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
