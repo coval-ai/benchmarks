@@ -37,7 +37,7 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ResultOut
+from coval_bench.api.schemas import ResultOut, ResultsResponse
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -66,7 +66,7 @@ _SELECT = (
 )
 
 
-@router.get("/results")
+@router.get("/results", response_model=ResultsResponse)
 @limiter.limit("60/minute")
 async def list_results(
     request: Request,  # required by slowapi
@@ -116,7 +116,7 @@ async def list_results(
         description="Maximum rows to return (1–100000, default 10000).",
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-) -> dict[str, Any]:
+) -> ResultsResponse:
     """Return a newest-first page of successful benchmark results.
 
     All optional filters are ANDed together.
@@ -207,4 +207,4 @@ async def list_results(
         result_rows = await rows.fetchall()
 
     results = [ResultOut.model_validate(r) for r in result_rows]
-    return {"results": [r.model_dump(mode="json") for r in results]}
+    return ResultsResponse(results=results)

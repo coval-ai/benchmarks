@@ -16,8 +16,6 @@ No DB hit is made by this endpoint.
 
 from __future__ import annotations
 
-from typing import Any
-
 import structlog
 from fastapi import APIRouter
 from starlette.requests import Request
@@ -79,13 +77,13 @@ def _describe() -> ProvidersResponse:
     )
 
 
-@router.get("/providers")
+@router.get("/providers", response_model=ProvidersResponse)
 @limiter.limit("60/minute")
-async def get_providers(request: Request) -> dict[str, Any]:
+async def get_providers(request: Request) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
     Sourced from the full runner matrix (all entries, not just enabled ones).
     Each model includes a ``disabled`` flag that the frontend can use to
     hide or grey out models that are known but not actively benchmarked.
     """
-    return _describe().model_dump()
+    return _describe()

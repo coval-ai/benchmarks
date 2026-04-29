@@ -87,3 +87,24 @@ class ProvidersResponse(BaseModel):
 
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
+
+
+class ResultsResponse(BaseModel):
+    """Response schema for GET /v1/results."""
+
+    results: list[ResultOut]
+
+
+class RunsResponse(BaseModel):
+    """Response schema for GET /v1/runs."""
+
+    runs: list[RunOut]
+    next_before: int | None = None
+
+
+class LeaderboardResponse(BaseModel):
+    """Response schema for GET /v1/leaderboard."""
+
+    metric: Literal["WER", "TTFA", "TTFT"]
+    window: Literal["24h", "7d", "30d"]
+    entries: list[LeaderboardEntry]

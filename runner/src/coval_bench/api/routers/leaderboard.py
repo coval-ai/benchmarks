@@ -27,7 +27,7 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import LeaderboardEntry
+from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -81,7 +81,7 @@ _MV_SQL = """
 """
 
 
-@router.get("/leaderboard")
+@router.get("/leaderboard", response_model=LeaderboardResponse)
 @limiter.limit("60/minute")
 async def get_leaderboard(
     request: Request,  # required by slowapi
@@ -89,7 +89,7 @@ async def get_leaderboard(
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-) -> dict[str, Any]:
+) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
     Args:
@@ -124,8 +124,4 @@ async def get_leaderboard(
         entry_rows = await rows.fetchall()
 
     entries = [LeaderboardEntry.model_validate(r) for r in entry_rows]
-    return {
-        "metric": metric,
-        "window": window,
-        "entries": [e.model_dump() for e in entries],
-    }
+    return LeaderboardResponse(metric=metric, window=window, entries=entries)

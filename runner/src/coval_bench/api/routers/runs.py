@@ -19,7 +19,7 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import RunOut
+from coval_bench.api.schemas import RunOut, RunsResponse
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -35,14 +35,14 @@ LIMIT %(limit)s
 """
 
 
-@router.get("/runs")
+@router.get("/runs", response_model=RunsResponse)
 @limiter.limit("60/minute")
 async def list_runs(
     request: Request,  # required by slowapi for rate-limiting
     limit: int = Query(default=50, ge=1, le=200),
     before: int | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-) -> dict[str, Any]:
+) -> RunsResponse:
     """Return a newest-first page of benchmark runs.
 
     Args:
@@ -63,4 +63,4 @@ async def list_runs(
     next_before: int | None = None
     if len(runs) == limit:
         next_before = min(r.id for r in runs)
-    return {"runs": [r.model_dump(mode="json") for r in runs], "next_before": next_before}
+    return RunsResponse(runs=runs, next_before=next_before)
