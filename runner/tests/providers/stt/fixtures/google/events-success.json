@@ -1,0 +1,18 @@
+[
+  {
+    "results": [
+      {
+        "alternatives": [{"transcript": "hello world", "confidence": 0.95}],
+        "is_final": false
+      }
+    ]
+  },
+  {
+    "results": [
+      {
+        "alternatives": [{"transcript": "hello world how are you", "confidence": 0.96}],
+        "is_final": true
+      }
+    ]
+  }
+]

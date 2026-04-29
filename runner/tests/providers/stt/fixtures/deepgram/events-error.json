@@ -1,0 +1,4 @@
+[
+  {"type": "Connected", "session_id": "test-session-err"},
+  {"type": "Error", "description": "Invalid API key", "variant": "INVALID_AUTH"}
+]
