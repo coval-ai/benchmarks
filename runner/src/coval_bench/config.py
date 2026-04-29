@@ -14,7 +14,7 @@ import functools
 from pathlib import Path
 from typing import Literal
 
-from pydantic import PostgresDsn, SecretStr
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,7 +29,12 @@ class Settings(BaseSettings):
     )
 
     # --- Database ---
-    database_url: PostgresDsn
+    # `str`, not `PostgresDsn`: in prod we use the Cloud SQL Auth Proxy Unix
+    # socket form `postgresql://user:pw@/db?host=/cloudsql/<conn-name>`, which
+    # Pydantic's `PostgresDsn` rejects (empty host). psycopg / SQLAlchemy
+    # validate the URL at connect time, so the Pydantic-side check would only
+    # block the legitimate prod form without catching anything new.
+    database_url: str
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
