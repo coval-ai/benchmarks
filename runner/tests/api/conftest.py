@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -179,8 +180,19 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
         await aconn.close()
 
 
-async def _insert_result(postgresql: Any, run_id: int, **kwargs: Any) -> int:
-    """Helper: insert a result row and return its id."""
+async def _insert_result(
+    postgresql: Any,
+    run_id: int,
+    *,
+    created_at: datetime | None = None,
+    **kwargs: Any,
+) -> int:
+    """Helper: insert a result row and return its id.
+
+    Pass ``created_at`` as a :class:`datetime` to override the DB default
+    (``now()``).  This is useful for seeding rows at specific points in time
+    for window-filter tests.  All other columns can be overridden via kwargs.
+    """
     dsn = _make_db_url(postgresql)
     aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
     try:
@@ -197,19 +209,36 @@ async def _insert_result(postgresql: Any, run_id: int, **kwargs: Any) -> int:
             "status": "success",
         }
         defaults.update(kwargs)
-        row = await aconn.execute(
-            """
-            INSERT INTO benchmarks_v2.results
-                (run_id, provider, model, voice, benchmark, metric_type,
-                 metric_value, metric_units, audio_filename, status)
-            VALUES
-                (%(run_id)s, %(provider)s, %(model)s, %(voice)s, %(benchmark)s,
-                 %(metric_type)s, %(metric_value)s, %(metric_units)s,
-                 %(audio_filename)s, %(status)s)
-            RETURNING id
-            """,
-            defaults,
-        )
+
+        if created_at is not None:
+            defaults["created_at"] = created_at
+            row = await aconn.execute(
+                """
+                INSERT INTO benchmarks_v2.results
+                    (run_id, provider, model, voice, benchmark, metric_type,
+                     metric_value, metric_units, audio_filename, status, created_at)
+                VALUES
+                    (%(run_id)s, %(provider)s, %(model)s, %(voice)s, %(benchmark)s,
+                     %(metric_type)s, %(metric_value)s, %(metric_units)s,
+                     %(audio_filename)s, %(status)s, %(created_at)s)
+                RETURNING id
+                """,
+                defaults,
+            )
+        else:
+            row = await aconn.execute(
+                """
+                INSERT INTO benchmarks_v2.results
+                    (run_id, provider, model, voice, benchmark, metric_type,
+                     metric_value, metric_units, audio_filename, status)
+                VALUES
+                    (%(run_id)s, %(provider)s, %(model)s, %(voice)s, %(benchmark)s,
+                     %(metric_type)s, %(metric_value)s, %(metric_units)s,
+                     %(audio_filename)s, %(status)s)
+                RETURNING id
+                """,
+                defaults,
+            )
         result = await row.fetchone()
         assert result is not None
         return int(result[0])

@@ -32,7 +32,13 @@ class RunOut(BaseModel):
 
 
 class ResultOut(BaseModel):
-    """API response schema for a single benchmark result row."""
+    """API response schema for a single benchmark result row.
+
+    ``status`` is sourced from the *parent run*, not from the result row's own
+    ``status`` column (which is always ``'success'`` because we filter on it).
+    The parent-run status is denormalized here at the API boundary via SQL JOIN
+    so the frontend does not need a second round-trip.
+    """
 
     id: int
     run_id: int
@@ -45,6 +51,7 @@ class ResultOut(BaseModel):
     metric_units: str
     audio_filename: str | None
     created_at: datetime
+    status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
 
     model_config = ConfigDict(from_attributes=True)
 
