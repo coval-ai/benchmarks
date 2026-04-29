@@ -1,0 +1,18 @@
+{
+  "_license": "Apache-2.0",
+  "id": "stt-v1",
+  "version": "1.0.0",
+  "license": "CC-BY-4.0",
+  "source": "Test fixture (wrong hash — used to verify DatasetIntegrityError)",
+  "items": [
+    {
+      "path": "audio/0001.wav",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "transcript": "hello world",
+      "duration_sec": 1.0,
+      "speaker_id": "S001",
+      "chapter_id": "C001",
+      "utterance_id": "U001"
+    }
+  ]
+}

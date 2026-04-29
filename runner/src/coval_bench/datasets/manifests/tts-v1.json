@@ -1,0 +1,129 @@
+{
+  "_license": "Apache-2.0",
+  "id": "tts-v1",
+  "version": "1.0.0",
+  "license": "Coval-internal — do not redistribute",
+  "source": "Coval TTS test cases (legacy CSV, cp1252)",
+  "items": [
+    {
+      "testcase_id": "A1",
+      "transcript": "Your order #ORD-24589 shipped via UPS tracking 1Z999AA1234567890 and will arrive between 2:30 PM - 4:45 PM tomorrow."
+    },
+    {
+      "testcase_id": "A2",
+      "transcript": "There's a slight delay with your $347.89 order, but we expect it to ship by Friday afternoon."
+    },
+    {
+      "testcase_id": "A3",
+      "transcript": "Order status update: your items are now in \"Quality Check\" and should ship within 24-48 hours."
+    },
+    {
+      "testcase_id": "A4",
+      "transcript": "Hi Ms. Garcia, your appointment with Dr. Peterson is scheduled for Tuesday, March 5th at 10:30 AM."
+    },
+    {
+      "testcase_id": "A5",
+      "transcript": "I can reschedule you to either 11:15 AM on Wednesday or - let me check - 2:45 PM on Thursday."
+    },
+    {
+      "testcase_id": "A6",
+      "transcript": "Please arrive 10 minutes early and bring your insurance card and a photo ID."
+    },
+    {
+      "testcase_id": "A7",
+      "transcript": "Let's fix your Wi-Fi: unplug your router for exactly 30 seconds, then wait for the green light."
+    },
+    {
+      "testcase_id": "A8",
+      "transcript": "Your device is downloading update version 12.4.1 - about 250 MB remaining, roughly 8 minutes left."
+    },
+    {
+      "testcase_id": "A9",
+      "transcript": "I'm seeing error code E-1047 here, which usually means - actually, let me guide you through the solution."
+    },
+    {
+      "testcase_id": "A10",
+      "transcript": "For security, please confirm the last 4 digits of the card ending in 8429 used for your recent purchase."
+    },
+    {
+      "testcase_id": "A11",
+      "transcript": "I need to verify your account: what's the ZIP code we have on file? Please take your time."
+    },
+    {
+      "testcase_id": "A12",
+      "transcript": "We detected 2 unusual login attempts from Chicago, Illinois yesterday around 11:30 PM."
+    },
+    {
+      "testcase_id": "A13",
+      "transcript": "Hi David, your premium subscription renews in 5 days at $29.99 - would you like to continue or explore other options?"
+    },
+    {
+      "testcase_id": "A14",
+      "transcript": "Based on your purchase history, you might like our flash sale: 30% off electronics through Sunday."
+    },
+    {
+      "testcase_id": "A15",
+      "transcript": "I noticed you haven't logged in since January 15th - is there anything we can help you with?"
+    },
+    {
+      "testcase_id": "A16",
+      "transcript": "Your invoice shows a balance of $187.50, including the monthly fee plus tax."
+    },
+    {
+      "testcase_id": "A17",
+      "transcript": "The $24.99 charge is for the premium support package you activated on January 22nd."
+    },
+    {
+      "testcase_id": "A18",
+      "transcript": "Your auto-payment of $67.50 failed due to an expired card - would you like to update your payment method?"
+    },
+    {
+      "testcase_id": "A19",
+      "transcript": "Thanks for your interest in our software - companies your size typically see 20-25% efficiency gains."
+    },
+    {
+      "testcase_id": "A20",
+      "transcript": "For a 50-person team, I'd recommend our Business plan at $149 per month rather than Basic."
+    },
+    {
+      "testcase_id": "A21",
+      "transcript": "Great timing! We're offering 20% off annual plans - that saves you $359.88 for the first year."
+    },
+    {
+      "testcase_id": "A22",
+      "transcript": "On a scale of 1 to 10, how would you rate your current pain level?"
+    },
+    {
+      "testcase_id": "A23",
+      "transcript": "Have you taken any medications today? Please include prescription drugs and over-the-counter items."
+    },
+    {
+      "testcase_id": "A24",
+      "transcript": "Your symptoms sound manageable, but I'd recommend seeing Dr. Martinez within 48 hours to be safe."
+    },
+    {
+      "testcase_id": "A25",
+      "transcript": "Your PTO request for December 20th through 24th has been approved - that's 3 business days."
+    },
+    {
+      "testcase_id": "A26",
+      "transcript": "Password reset complete: your temporary password is NewPass2024! Please change it within 24 hours."
+    },
+    {
+      "testcase_id": "A27",
+      "transcript": "IT ticket about your printer issue has been assigned to technician Lisa Chen."
+    },
+    {
+      "testcase_id": "A28",
+      "transcript": "Your wire transfer of $1,247.50 to account ending in 5691 was processed at 2:15 PM."
+    },
+    {
+      "testcase_id": "A29",
+      "transcript": "Hi Mr. O'Connor, I'm calling about your consultation - are you available for 20 minutes between 9 AM and noon?"
+    },
+    {
+      "testcase_id": "A30",
+      "transcript": "System alert: your server usage hit 87% at 3:42 AM, but it's back to normal levels now."
+    }
+  ]
+}

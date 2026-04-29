@@ -1,0 +1,27 @@
+{
+  "_license": "Apache-2.0",
+  "id": "stt-v1",
+  "version": "1.0.0",
+  "license": "CC-BY-4.0",
+  "source": "Test fixture (generated 440 Hz sine, 16kHz mono PCM_16)",
+  "items": [
+    {
+      "path": "audio/0001.wav",
+      "sha256": "61648b306c4b096538b83eafa50fea3a22ae49918d48430859d29725243fb1d4",
+      "transcript": "hello world",
+      "duration_sec": 1.0,
+      "speaker_id": "S001",
+      "chapter_id": "C001",
+      "utterance_id": "U001"
+    },
+    {
+      "path": "audio/0001.wav",
+      "sha256": "61648b306c4b096538b83eafa50fea3a22ae49918d48430859d29725243fb1d4",
+      "transcript": "how are you today",
+      "duration_sec": 1.0,
+      "speaker_id": "S001",
+      "chapter_id": "C001",
+      "utterance_id": "U002"
+    }
+  ]
+}
