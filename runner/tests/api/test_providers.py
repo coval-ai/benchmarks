@@ -27,13 +27,43 @@ async def test_providers_shape(client: AsyncClient) -> None:
 
 
 async def test_each_provider_has_models(client: AsyncClient) -> None:
-    """Every provider entry has at least one model."""
+    """Every provider entry has at least one model (ModelInfo dict, not string)."""
     response = await client.get("/v1/providers")
     data = response.json()
     for entry in data["stt"]:
         assert len(entry["models"]) >= 1
+        # models are now dicts, not strings
+        assert isinstance(entry["models"][0]["model"], str)
     for entry in data["tts"]:
         assert len(entry["models"]) >= 1
+        assert isinstance(entry["models"][0]["model"], str)
+
+
+async def test_disabled_flag_exposed(client: AsyncClient) -> None:
+    """Known-disabled models appear with disabled=True; live models appear with disabled=False."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    # google STT models (chirp_2, long, telephony, short) are all disabled in the matrix
+    google_entry = next(e for e in data["stt"] if e["provider"] == "google")
+    chirp_2 = next(m for m in google_entry["models"] if m["model"] == "chirp_2")
+    assert chirp_2["disabled"] is True
+
+    # deepgram nova-3 is an active model — must be disabled=False
+    deepgram_entry = next(e for e in data["stt"] if e["provider"] == "deepgram")
+    nova_3 = next(m for m in deepgram_entry["models"] if m["model"] == "nova-3")
+    assert nova_3["disabled"] is False
+
+
+async def test_response_shape_breaking_change(client: AsyncClient) -> None:
+    """models is a list[ModelInfo] (dict with 'model' + 'disabled'), not a list[str]."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+    first_model = data["stt"][0]["models"][0]
+    assert isinstance(first_model, dict), "models must be dicts, not strings"
+    assert set(first_model.keys()) == {"model", "disabled"}, (
+        f"ModelInfo must have exactly 'model' and 'disabled' keys, got {set(first_model.keys())}"
+    )
 
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:

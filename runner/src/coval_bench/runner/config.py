@@ -22,6 +22,7 @@ class ProviderEntry(BaseModel):
     model: str
     voice: str | None = None  # TTS only
     enabled: bool
+    disabled: bool = False  # admin-level "hide / don't run" flag; orthogonal to enabled
 
 
 # ---------------------------------------------------------------------------
@@ -37,11 +38,12 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
-    # OFF per legacy comments:
-    ProviderEntry(provider="google", model="short", enabled=False),
-    ProviderEntry(provider="google", model="long", enabled=False),
-    ProviderEntry(provider="google", model="telephony", enabled=False),
-    ProviderEntry(provider="google", model="chirp_2", enabled=False),
+    # OFF per legacy comments; disabled=True mirrors legacy EXCLUDED_MODELS in
+    # benchmarking-web-app/lib/db.ts
+    ProviderEntry(provider="google", model="short", enabled=False, disabled=True),
+    ProviderEntry(provider="google", model="long", enabled=False, disabled=True),
+    ProviderEntry(provider="google", model="telephony", enabled=False, disabled=True),
+    ProviderEntry(provider="google", model="chirp_2", enabled=False, disabled=True),
 ]
 
 # ---------------------------------------------------------------------------
@@ -83,8 +85,22 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="aura-2-thalia-en",
         enabled=False,
     ),
-    ProviderEntry(provider="hume", model="octave-tts", voice="male_01", enabled=False),
-    ProviderEntry(provider="hume", model="octave-2", voice="male_01", enabled=False),
+    # disabled=True mirrors legacy EXCLUDED_MODELS in benchmarking-web-app/lib/db.ts
+    ProviderEntry(
+        provider="hume", model="octave-tts", voice="male_01", enabled=False, disabled=True
+    ),
+    ProviderEntry(provider="hume", model="octave-2", voice="male_01", enabled=False, disabled=True),
     ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=False),
     ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False),
+    # Placeholder entries for models in legacy EXCLUDED_MODELS that were never in this matrix.
+    # voice=None because we never run them — purpose is to expose them in /v1/providers so the
+    # frontend can label them as disabled. Both came from TTS legacy data (web-app-data-audit.md).
+    ProviderEntry(
+        provider="openai",
+        model="gpt-realtime-2025-08-28",
+        voice=None,
+        enabled=False,
+        disabled=True,
+    ),
+    ProviderEntry(provider="cartesia", model="sonic", voice=None, enabled=False, disabled=True),
 ]

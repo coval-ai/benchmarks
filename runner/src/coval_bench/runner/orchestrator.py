@@ -495,8 +495,8 @@ async def run_benchmarks(
             if (ov.provider, ov.model) not in existing_tts_keys and ov.voice is not None:
                 tts_matrix.append(ov)
 
-    enabled_stt = [e for e in stt_matrix if e.enabled]
-    enabled_tts = [e for e in tts_matrix if e.enabled]
+    enabled_stt = [e for e in stt_matrix if e.enabled and not e.disabled]
+    enabled_tts = [e for e in tts_matrix if e.enabled and not e.disabled]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row

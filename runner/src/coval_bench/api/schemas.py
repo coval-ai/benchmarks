@@ -60,11 +60,18 @@ class LeaderboardEntry(BaseModel):
     n: int
 
 
+class ModelInfo(BaseModel):
+    """A single model entry under a provider, with admin-disabled flag."""
+
+    model: str
+    disabled: bool = False
+
+
 class ProviderInfo(BaseModel):
     """Information about a single provider's models."""
 
     provider: str
-    models: list[str]
+    models: list[ModelInfo]
     modes: list[str] | None = None  # only TTS uses this
 
 

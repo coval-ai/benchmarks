@@ -741,3 +741,51 @@ async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) 
 
     disabled_cls.assert_not_called()
     provider_cls.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# 11. test_disabled_flag_skipped
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_disabled_flag_skipped(audio_file: Path, settings: Settings) -> None:
+    """Entries with disabled=True are never instantiated or called, even when enabled=True."""
+    good = _good_transcription()
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=good)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    disabled_cls = MagicMock()
+
+    stt_providers = {"deepgram": provider_cls, "elevenlabs": disabled_cls}
+    matrix = [
+        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
+        # enabled=True but disabled=True — the disabled flag must win
+        ProviderEntry(
+            provider="elevenlabs", model="scribe_v2_realtime", enabled=True, disabled=True
+        ),
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    # The disabled provider class must never have been instantiated or called
+    disabled_cls.assert_not_called()
+    # The active provider was still called
+    provider_cls.assert_called()
