@@ -1,0 +1,71 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+
+# syntax=docker/dockerfile:1
+
+# ---------------------------------------------------------------------------
+# Build stage
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim-bookworm AS build
+
+WORKDIR /app
+
+# Minimal system deps — the API image does NOT need ffmpeg or audio libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Copy dependency manifests first for layer caching
+# README.md is referenced by pyproject.toml's [project].readme and is required
+# at metadata-validation time when uv builds the editable wheel for this package.
+COPY pyproject.toml uv.lock README.md ./
+
+# Install production dependencies (no dev, no extras that pull in heavy audio libs)
+RUN uv sync --frozen --no-dev
+
+# Copy source tree
+COPY src/ ./src/
+
+# ---------------------------------------------------------------------------
+# Final stage — slim, non-root (uid 65532)
+#
+# See runner Dockerfile for the rationale: distroless python3-debian12 ships
+# Python 3.11, incompatible with the 3.12 wheels installed in the build stage.
+# python:3.12-slim-bookworm keeps the image small while matching the runtime.
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim-bookworm AS final
+
+LABEL org.opencontainers.image.source="https://github.com/coval-ai/benchmarks" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.title="coval-bench-api"
+
+# Native lib for soundfile — pulled transitively via audio.py imports in config
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libsndfile1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 65532 nonroot \
+    && useradd --uid 65532 --gid 65532 --no-create-home --shell /sbin/nologin nonroot
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
+    PATH="/app/.venv/bin:$PATH"
+
+COPY --from=build --chown=65532:65532 /app /app
+
+USER 65532:65532
+
+EXPOSE 8080
+
+CMD ["uvicorn", "coval_bench.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
