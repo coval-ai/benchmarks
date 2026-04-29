@@ -1,0 +1,89 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Trivy container vulnerability scan.
+# Scans the :latest tags for runner and api images in Artifact Registry.
+# Uploads findings as SARIF to the GitHub Security tab.
+#
+# Runs:
+#   - weekly on Monday at 07:00 UTC (staggered 1 h after CodeQL)
+#   - on workflow_dispatch (Loren can trigger ad-hoc)
+#
+# NOTE: :latest only exists after tag.yml has run on a v* tag at least once.
+# Until then the "Check :latest exists" step exits 0 with a warning and the
+# trivy step is skipped, keeping the workflow green.
+
+name: Trivy
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'   # Monday 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write         # WIF for pulling from Artifact Registry
+  security-events: write  # Upload SARIF to Security tab
+
+jobs:
+  scan:
+    name: Scan ${{ matrix.image }}:latest
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - image: runner
+          - image: api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Authenticate to GCP via WIF so Trivy can pull the private AR image.
+      # runner-scanner is a dedicated read-only SA — bound to schedule +
+      # workflow_dispatch on coval-ai/benchmarks. Trivy must NOT use
+      # runner-deploy (which has artifactregistry.writer).
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/691745901966/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider
+          service_account: runner-scanner@coval-benchmarks-prod.iam.gserviceaccount.com
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      # Guard: skip gracefully if :latest has not been pushed yet (i.e. no v*
+      # tag has been released). Trivy returns exit 1 on a missing image ref,
+      # which would fail the workflow unnecessarily.
+      - name: Check :latest exists in Artifact Registry
+        id: image-check
+        run: |
+          IMAGE="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}:latest"
+          if gcloud artifacts docker images describe "${IMAGE}" --quiet 2>/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Trivy skipped::${IMAGE} not found — run tag.yml first to push :latest."
+          fi
+
+      - name: Scan ${{ matrix.image }}:latest with Trivy
+        if: steps.image-check.outputs.exists == 'true'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}:latest
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          severity: HIGH,CRITICAL
+          exit-code: '0'        # Report findings; don't fail the workflow
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF to GitHub Security tab
+        if: steps.image-check.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}

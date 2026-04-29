@@ -1,0 +1,106 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# PR gate: lint + type-check + tests + secret scan + docker build (no push)
+# Triggers on every pull_request targeting main.
+
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+# Cancel prior runs for the same PR branch on re-push.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint / Test / Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: runner
+        run: uv sync --frozen --dev
+
+      # -----------------------------------------------------------------------
+      # Lint & format
+      # -----------------------------------------------------------------------
+      - name: ruff check
+        working-directory: runner
+        run: uv run ruff check .
+
+      - name: ruff format check
+        working-directory: runner
+        run: uv run ruff format --check .
+
+      # -----------------------------------------------------------------------
+      # Type checking
+      # -----------------------------------------------------------------------
+      - name: mypy strict
+        working-directory: runner
+        run: uv run mypy --strict src
+
+      # -----------------------------------------------------------------------
+      # Tests
+      # -----------------------------------------------------------------------
+      - name: pytest
+        working-directory: runner
+        run: uv run pytest -q
+
+      # -----------------------------------------------------------------------
+      # Secret scan — free for OSS; set empty string to suppress license prompt
+      # on private-repo runs (repo flips public at cutover).
+      # -----------------------------------------------------------------------
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ""
+
+      # -----------------------------------------------------------------------
+      # Docker build — confirm both Dockerfiles build; no push.
+      # GHA cache via buildx gha backend.
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker build — runner image
+        uses: docker/build-push-action@v5
+        with:
+          context: runner
+          file: runner/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Docker build — api image
+        uses: docker/build-push-action@v5
+        with:
+          context: runner
+          file: runner/Dockerfile.api
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
