@@ -41,7 +41,7 @@ import os
 from importlib.resources import files
 from pathlib import Path
 
-from google.cloud import storage  # type: ignore[attr-defined]
+from google.cloud import storage
 from pydantic import BaseModel, Field
 
 from coval_bench.config import Settings
