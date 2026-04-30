@@ -23,6 +23,7 @@ export const modelColors: Record<string, string> = {
   // Rime
   arcana: "#33FF99",
   mistv2: "#1E8449",
+  mistv3: "#0E5C32",
 
   // Deepgram models
   "aura-2-thalia-en": "#FC2D62",

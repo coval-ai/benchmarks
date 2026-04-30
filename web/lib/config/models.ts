@@ -11,6 +11,7 @@ export const modelDisplayNames: Record<string, string> = {
   sonic: "Sonic",
   "sonic-turbo": "Sonic Turbo",
   mistv2: "Mist v2",
+  mistv3: "Mist v3",
   arcana: "Arcana",
   "octave-tts": "Octave",
   "octave-2": "Octave 2",
