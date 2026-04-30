@@ -881,3 +881,76 @@ async def test_incremental_flush_persists_completed_tasks(
     # The releaser only fired record_results once provider A had been persisted
     # — proving we don't wait for B before flushing A.
     assert provider_b_release.is_set()
+
+
+# ---------------------------------------------------------------------------
+# 13. test_sigterm_finalizes_run_as_partial
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    not hasattr(asyncio.get_event_loop_policy().new_event_loop(), "add_signal_handler"),
+    reason="loop.add_signal_handler is POSIX-only",
+)
+@pytest.mark.asyncio
+async def test_sigterm_finalizes_run_as_partial(
+    audio_file: Path, settings: Settings
+) -> None:
+    """SIGTERM mid-run → writer.finish_run called with PARTIAL.
+
+    Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
+    Without the handler, the run row stays at status='running' (invisible to
+    the API filter that includes only 'succeeded'/'partial'). This regression
+    test guards the recovery path: the orchestrator must intercept SIGTERM,
+    cancel the in-flight gather, and update the run row to PARTIAL.
+    """
+    import os
+    import signal
+
+    good = _good_transcription()
+
+    started = asyncio.Event()
+
+    async def _slow_measure(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        started.set()
+        await asyncio.sleep(60)  # would normally hang; SIGTERM short-circuits
+        return good
+
+    provider = MagicMock()
+    provider.measure_ttft = _slow_measure
+    provider_cls = MagicMock(return_value=provider)
+
+    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async def _send_sigterm_after_start() -> None:
+        await started.wait()
+        # Tiny sleep so the gather is suspended at the await before SIGTERM.
+        await asyncio.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    sigterm_task = asyncio.create_task(_send_sigterm_after_start())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    await sigterm_task
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    writer.finish_run.assert_awaited_once()
+    finish_kwargs = writer.finish_run.await_args.kwargs
+    assert finish_kwargs["status"] == RunStatus.PARTIAL
+    assert "sigterm" in (finish_kwargs.get("error") or "").lower()

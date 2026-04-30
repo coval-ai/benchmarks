@@ -35,6 +35,7 @@ import asyncio
 import contextlib
 import hashlib
 import importlib
+import signal
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -572,6 +573,26 @@ async def run_benchmarks(
         all_results: list[Any] = []
         sem = asyncio.Semaphore(_CONCURRENCY_CAP)
 
+        # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
+        # We catch it, cancel the in-flight gather, and finalize the run row as
+        # PARTIAL so timed-out executions surface in /v1/results instead of
+        # remaining stuck at status='running' (invisible to the API filter).
+        loop = asyncio.get_running_loop()
+        main_task = asyncio.current_task()
+        sigterm_received = False
+
+        def _on_sigterm() -> None:
+            nonlocal sigterm_received
+            if sigterm_received:
+                return
+            sigterm_received = True
+            _log.warning("SIGTERM received — finalizing run as partial", run_id=run_id)
+            if main_task is not None:
+                main_task.cancel()
+
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
+
         try:
             # ------------------------------------------------------------------
             # 3. STT path
@@ -671,6 +692,52 @@ async def run_benchmarks(
             )
             return summary
 
+        except asyncio.CancelledError:
+            # SIGTERM-driven cancellation: write PARTIAL so the run is visible
+            # to /v1/results. Any other CancelledError (e.g., parent shutdown)
+            # is re-raised so it propagates normally.
+            if not sigterm_received:
+                raise
+            if main_task is not None:
+                main_task.uncancel()
+            typed_results = [r for r in all_results if isinstance(r, Result)]
+            success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
+            fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
+            total_results = len(typed_results)
+            try:
+                await asyncio.shield(
+                    writer.finish_run(
+                        run_id,
+                        status=RunStatus.PARTIAL,
+                        error="sigterm-received (cloud-run-task-timeout)",
+                    )
+                )
+            except Exception as write_exc:
+                _log.error(
+                    "failed to update run row after SIGTERM",
+                    run_id=run_id,
+                    exc_info=write_exc,
+                )
+            finished_at = datetime.now(tz=UTC)
+            _log.warning(
+                "benchmark run finished early due to SIGTERM",
+                run_id=run_id,
+                status=str(RunStatus.PARTIAL),
+                total_results=total_results,
+                success_count=success_count,
+                fail_count=fail_count,
+                duration_s=(finished_at - started_at).total_seconds(),
+            )
+            return RunSummary(
+                run_id=run_id,
+                started_at=started_at,
+                finished_at=finished_at,
+                status=str(RunStatus.PARTIAL),
+                total_results=total_results,
+                success_count=success_count,
+                fail_count=fail_count,
+            )
+
         except Exception as exc:
             # Unrecoverable error — log RUN_FAILED (triggers Cloud Logging metric),
             # update run row, then re-raise so Cloud Run Job exits non-zero.
@@ -693,3 +760,7 @@ async def run_benchmarks(
                     exc_info=write_exc,
                 )
             raise
+
+        finally:
+            with contextlib.suppress(NotImplementedError, ValueError):
+                loop.remove_signal_handler(signal.SIGTERM)
