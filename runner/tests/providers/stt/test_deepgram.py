@@ -113,6 +113,10 @@ def test_build_websocket_url_flux() -> None:
     url = p._build_websocket_url(16000, 1)
     assert "preview.deepgram.com" in url
     assert "flux-general-en" in url
+    # Without these the v2/listen preview endpoint buffers transcripts until
+    # CloseStream, leaving ttft_seconds null on every run.
+    assert "interim_results=true" in url
+    assert "no_delay=true" in url
 
 
 # ---------------------------------------------------------------------------

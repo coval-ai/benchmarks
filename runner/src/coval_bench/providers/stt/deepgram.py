@@ -52,10 +52,12 @@ class DeepgramProvider(STTProvider):
 
     def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
         if self._model == "flux-general-en":
-            # flux uses a preview endpoint with a fixed param shape
+            # Without interim_results+no_delay the v2/listen preview endpoint
+            # buffers transcripts until CloseStream, leaving ttft unmeasurable.
             return (
                 "wss://api.preview.deepgram.com/v2/listen"
                 "?model=flux-general-en&sample_rate=16000&encoding=linear16"
+                "&interim_results=true&no_delay=true"
             )
         url = (
             f"wss://api.deepgram.com/v1/listen"
