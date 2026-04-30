@@ -5,7 +5,11 @@
 
 ``run_benchmarks`` is the function the Cloud Run Job invokes once per scheduled
 trigger. It wires dataset loading → parallel provider dispatch with per-call
-timeout + retry → metric computation → DB persistence → run summary.
+timeout + retry → metric computation → per-task DB persistence → run summary.
+
+Persistence is per-task (each ``_run_stt_item`` / ``_run_tts_item`` flushes
+its own results before returning) rather than a single batch at end-of-run,
+so a job-timeout mid-run still durably stores everything that completed.
 
 Design notes
 ------------
@@ -150,8 +154,14 @@ async def _run_stt_item(
     run_id: int,
     sem: asyncio.Semaphore,
     settings: Settings,
+    writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
 ) -> list[Any]:
-    """Run a single STT provider × dataset item, returning a list of Result rows."""
+    """Run a single STT provider × dataset item, returning a list of Result rows.
+
+    If *writer* is non-None, results are persisted before returning. This is the
+    incremental-flush path used by ``run_benchmarks``: a task that completes is
+    durably stored even if a sibling task or the whole job is later cancelled.
+    """
     stt_providers = _get_stt_providers()
     _, _, _, models_mod = _get_db_symbols()
     Benchmark = models_mod.Benchmark
@@ -304,6 +314,17 @@ async def _run_stt_item(
                     exc_info=exc,
                 )
 
+    if writer is not None and results:
+        try:
+            await writer.record_results(results)
+        except Exception as exc:
+            _log.warning(
+                "STT result persist failed",
+                provider=entry.provider,
+                model=entry.model,
+                exc_info=exc,
+            )
+
     return results
 
 
@@ -319,8 +340,13 @@ async def _run_tts_item(
     run_id: int,
     sem: asyncio.Semaphore,
     settings: Settings,
+    writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
 ) -> list[Any]:
-    """Run a single TTS provider × dataset item, returning a list of Result rows."""
+    """Run a single TTS provider × dataset item, returning a list of Result rows.
+
+    If *writer* is non-None, results are persisted before returning. See
+    :func:`_run_stt_item` for the rationale (incremental flush).
+    """
     tts_providers = _get_tts_providers()
     _, _, _, models_mod = _get_db_symbols()
     Benchmark = models_mod.Benchmark
@@ -434,6 +460,17 @@ async def _run_tts_item(
                         path=str(audio_path),
                         exc_info=exc,
                     )
+
+    if writer is not None and results:
+        try:
+            await writer.record_results(results)
+        except Exception as exc:
+            _log.warning(
+                "TTS result persist failed",
+                provider=entry.provider,
+                model=entry.model,
+                exc_info=exc,
+            )
 
     return results
 
@@ -550,6 +587,7 @@ async def run_benchmarks(
                         run_id=run_id,
                         sem=sem,
                         settings=settings,
+                        writer=writer,
                     )
                     for item in items
                     for entry in enabled_stt
@@ -576,6 +614,7 @@ async def run_benchmarks(
                         run_id=run_id,
                         sem=sem,
                         settings=settings,
+                        writer=writer,
                     )
                     for item in tts_items
                     for entry in enabled_tts
@@ -589,15 +628,14 @@ async def run_benchmarks(
                         all_results.extend(batch_result)
 
             # ------------------------------------------------------------------
-            # 5. Persist results
+            # 5. Compute final run status
             # ------------------------------------------------------------------
+            # Results were persisted incrementally inside _run_stt_item /
+            # _run_tts_item — see those functions' ``writer`` argument. This
+            # ensures a job-timeout mid-run still durably stores everything
+            # that completed, instead of losing the whole run's results in a
+            # rolled-back batch INSERT.
             typed_results = [r for r in all_results if isinstance(r, Result)]
-            if typed_results:
-                await writer.record_results(typed_results)
-
-            # ------------------------------------------------------------------
-            # 6. Compute final run status
-            # ------------------------------------------------------------------
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)

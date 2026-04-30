@@ -265,7 +265,10 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     assert summary.success_count == summary.total_results
     assert summary.fail_count == 0
     writer.start_run.assert_awaited_once()
-    writer.record_results.assert_awaited_once()
+    # Per-task incremental flush — one call per (registered) provider × item.
+    # The default STT matrix has additional deepgram models (nova-3, flux), so
+    # both deepgram and elevenlabs each fire multiple times via the same mock.
+    assert writer.record_results.await_count >= 2
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
 
 
@@ -789,3 +792,92 @@ async def test_disabled_flag_skipped(audio_file: Path, settings: Settings) -> No
     disabled_cls.assert_not_called()
     # The active provider was still called
     provider_cls.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# 12. test_incremental_flush_persists_completed_tasks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_incremental_flush_persists_completed_tasks(
+    audio_file: Path, settings: Settings
+) -> None:
+    """Each provider×item task flushes its own results — completed tasks are
+    persisted before later tasks run, so a mid-run cancellation cannot lose
+    them. Asserts ordering: ``record_results`` is awaited *during* gather, not
+    once at the end after all tasks finish.
+    """
+    good = _good_transcription()
+
+    # Provider A finishes immediately; provider B sleeps then finishes.
+    provider_a = MagicMock()
+    provider_a.measure_ttft = AsyncMock(return_value=good)
+    provider_cls_a = MagicMock(return_value=provider_a)
+
+    provider_b_started = asyncio.Event()
+    provider_b_release = asyncio.Event()
+
+    async def slow_measure(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        provider_b_started.set()
+        await provider_b_release.wait()
+        return good
+
+    provider_b = MagicMock()
+    provider_b.measure_ttft = slow_measure
+    provider_cls_b = MagicMock(return_value=provider_b)
+
+    stt_providers = {"deepgram": provider_cls_a, "elevenlabs": provider_cls_b}
+    matrix = [
+        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
+        ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    record_calls_when_b_started: list[int] = []
+
+    original_record = writer.record_results
+
+    async def _record_and_observe(results: Any) -> None:
+        # Snapshot how many calls had completed when each call lands.
+        record_calls_when_b_started.append(original_record.await_count)
+        await original_record(results)
+
+    writer.record_results = AsyncMock(side_effect=_record_and_observe)
+
+    async def _release_after_a_persisted() -> None:
+        # Wait until provider A's record_results has been awaited at least once,
+        # then release provider B. If persistence were batched at end-of-run,
+        # this would deadlock (provider B waits for release, gather waits for B,
+        # record_results never fires).
+        await provider_b_started.wait()
+        while writer.record_results.await_count < 1:
+            await asyncio.sleep(0.01)
+        provider_b_release.set()
+
+    releaser = asyncio.create_task(_release_after_a_persisted())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    await releaser
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    # At least two tasks → at least two flushes (default matrix has extra
+    # deepgram/elevenlabs entries that the override map merges through).
+    assert writer.record_results.await_count >= 2
+    # The releaser only fired record_results once provider A had been persisted
+    # — proving we don't wait for B before flushing A.
+    assert provider_b_release.is_set()
