@@ -75,6 +75,26 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
     assert mistv3["disabled"] is False
 
 
+async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
+    """Models the runner doesn't actually run today must report disabled=True.
+
+    Otherwise the FE filter ``!m.disabled`` would let them through and the
+    sidebar/legend would render placeholder rows for models we aren't
+    benchmarking. Mirrors the cleanup landed alongside Phase 4.7.
+    """
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
+    for inactive in ("tts-1", "gpt-4o-mini-tts"):
+        entry = next(m for m in openai_entry["models"] if m["model"] == inactive)
+        assert entry["disabled"] is True, f"{inactive} must be disabled=True"
+
+    rime_entry = next(e for e in data["tts"] if e["provider"] == "rime")
+    mistv2 = next(m for m in rime_entry["models"] if m["model"] == "mistv2")
+    assert mistv2["disabled"] is True
+
+
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     """The /v1/providers endpoint never acquires a DB connection.
 
