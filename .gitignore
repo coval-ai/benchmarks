@@ -28,6 +28,9 @@ coverage.xml
 *.swp
 *.swo
 
+# Local Claude Code workspace (never shipped)
+.claude/
+
 # Local env files (must never reach the repo)
 .env
 .env.*
