@@ -12,7 +12,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
-import { formatTime } from "@/lib/utils/formatters";
+import { formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import CustomGapTooltip from "@/components/charts/tooltips/GapTooltip";
 import ExpandableDescription from "@/components/shared/ExpandableDescription";
@@ -33,6 +33,8 @@ const PerformanceDeltaSection: React.FC = () => {
   } = useDashboard();
 
   const themeColors = useThemeColors();
+  const tzAbbr = getLocalTimeZoneAbbr();
+  const xAxisLabel = tzAbbr ? `Time (${tzAbbr})` : "Time";
 
   return (
     <div className="mb-16">
@@ -69,7 +71,7 @@ const PerformanceDeltaSection: React.FC = () => {
               tick={{ fill: themeColors.axisText, fontSize: 12 }}
               tickFormatter={(value) => formatTime(value)}
               label={{
-                value: "Time",
+                value: xAxisLabel,
                 position: "insideBottom",
                 offset: -5,
                 style: {

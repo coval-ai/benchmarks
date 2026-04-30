@@ -3,17 +3,46 @@
  */
 
 /**
- * Format a timestamp to a readable time string
- * @param timestamp - Unix timestamp in milliseconds
- * @returns Formatted time string in HH:MM format (24-hour)
+ * Format a timestamp as HH:MM in the viewer's local timezone (24-hour).
+ *
+ * `Intl.DateTimeFormat` defaults to the runtime timezone when none is given,
+ * so chart axes always reflect what time the viewer was looking at the page —
+ * not UTC, not the server's TZ.
  */
 export function formatTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString("en-US", {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
   });
+}
+
+/**
+ * Same as {@link formatTime} but includes seconds — used in tooltips where
+ * the user is hovering a specific data point and wants higher precision.
+ */
+export function formatTimeWithSeconds(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+}
+
+/**
+ * Short timezone abbreviation for the viewer's locale (e.g. "PDT", "UTC", "GMT+1").
+ * Returned as a plain string so callers can interpolate into axis labels.
+ */
+export function getLocalTimeZoneAbbr(): string {
+  try {
+    const parts = new Intl.DateTimeFormat(undefined, {
+      timeZoneName: "short"
+    }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    return "";
+  }
 }
 
 /**

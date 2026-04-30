@@ -1,5 +1,6 @@
 import React from "react";
 import { BenchmarkData } from "@/types/benchmark.types";
+import { formatTimeWithSeconds } from "@/lib/utils/formatters";
 import { to15MinuteBucket } from "@/lib/utils/time";
 
 interface GapTooltipProps {
@@ -48,7 +49,7 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
         <p
           style={{ margin: "0", fontWeight: "bold", fontSize: "12px" }}
         >
-          {new Date(Number(label)).toLocaleTimeString()}
+          {formatTimeWithSeconds(Number(label))}
         </p>
       </div>
       <div style={{ fontSize: "11px" }}>

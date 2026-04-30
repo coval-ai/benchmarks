@@ -1,5 +1,5 @@
 import React from "react";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
 
 interface TimelineTooltipProps {
   active?: boolean;
@@ -37,7 +37,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       <p
         style={{ margin: "0 0 8px 0", fontWeight: "bold", fontSize: "12px" }}
       >
-        {new Date(Number(label)).toLocaleTimeString()}
+        {formatTimeWithSeconds(Number(label))}
       </p>
       <div style={{ fontSize: "11px" }}>
         {validData.map((item, index) => {
