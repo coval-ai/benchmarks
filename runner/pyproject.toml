@@ -79,7 +79,7 @@ target-version = "py312"
 extend-select = ["E", "F", "I", "B", "UP", "SIM", "S", "ANN"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "ANN401"]
+"tests/**" = ["S101", "ANN401", "S311"]
 "src/coval_bench/providers/stt/*.py" = ["ANN401"]
 # FastAPI uses Depends/Query in function argument defaults by design
 "src/coval_bench/api/routers/*.py" = ["B008"]
