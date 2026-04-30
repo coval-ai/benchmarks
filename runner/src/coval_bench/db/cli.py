@@ -29,8 +29,9 @@ def db_migrate() -> None:
 
     from coval_bench.config import get_settings
 
-    # alembic.ini lives at the same level as pyproject.toml (runner root).
-    ini_path = Path(__file__).parents[4] / "alembic.ini"
+    # alembic.ini lives at the same level as pyproject.toml (runner root):
+    # src/coval_bench/db/cli.py → parents[3] resolves to runner/.
+    ini_path = Path(__file__).parents[3] / "alembic.ini"
     cfg = Config(str(ini_path))
     cfg.set_main_option("sqlalchemy.url", str(get_settings().database_url))
     command.upgrade(cfg, "head")

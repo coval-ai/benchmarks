@@ -79,7 +79,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE MATERIALIZED VIEW results_24h AS
-        SELECT provider, model, metric_type,
+        SELECT provider, model, benchmark, metric_type,
                avg(metric_value)                                        AS avg_value,
                percentile_cont(0.5)  WITHIN GROUP (ORDER BY metric_value) AS p50,
                percentile_cont(0.95) WITHIN GROUP (ORDER BY metric_value) AS p95,
@@ -87,8 +87,11 @@ def upgrade() -> None:
         FROM results
         WHERE status = 'success'
           AND created_at >= now() - INTERVAL '24 hours'
-        GROUP BY provider, model, metric_type
+        GROUP BY provider, model, benchmark, metric_type
         """
+    )
+    op.execute(
+        "CREATE INDEX results_24h_lookup_idx ON results_24h (benchmark, metric_type, avg_value)"
     )
 
 
