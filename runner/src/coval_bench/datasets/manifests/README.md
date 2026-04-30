@@ -74,8 +74,8 @@ end-to-end synthesis latency. There is no reference-audio quality metric —
 voices vary by provider, so apples-to-apples audio quality comparison is out
 of scope for v1.
 
-Converted from an internal CSV (cp1252 encoding) of curated TTS prompts.
-Contains 30 test cases.
+Generated from a curated set of 30 short customer-service prompts
+(Apache-2.0).
 
 To regenerate from a local CSV (`--in tts-source.csv`, columns
 `Testcase ID`, `Transcript`):

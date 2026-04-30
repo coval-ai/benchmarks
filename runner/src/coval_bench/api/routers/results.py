@@ -18,8 +18,8 @@ Note on window routing:
 * ``window=24h``: queries the live ``benchmarks_v2.results`` table directly with a
   24-hour filter. The ``results_24h`` materialized view is NOT used here because it
   aggregates by (provider, model, benchmark, metric_type) and lacks row-level columns
-  (id, voice, metric_value, etc.) required by ``ResultOut``. Decision: orchestrator
-  2026-04-29. The existing index ``results_provider_model_idx`` supports this path.
+  (id, voice, metric_value, etc.) required by ``ResultOut``. The existing index
+  ``results_provider_model_idx`` supports this path.
 * ``window=7d|30d``: live table join with interval filter.
 * ``since``/``until``: live table join with explicit timestamp bounds.
 """

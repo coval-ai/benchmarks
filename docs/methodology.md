@@ -94,8 +94,8 @@ metrics in particular are session-dependent).
 - ADR-011 — Provider scope and the `disabled` flag policy.
 - ADR-020 — Dataset selection rule (round-robin by speaker, 2.0–15.0 s window).
 
-The full ADR set is published under `docs/adr/` as decisions are promoted
-from internal status to public commitment.
+ADR rationale is referenced inline in the relevant source files and READMEs
+where the decision context is load-bearing.
 
 ## Caveats
 
