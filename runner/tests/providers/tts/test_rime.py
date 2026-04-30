@@ -78,6 +78,28 @@ async def test_rime_invalid_model(fake_settings: Settings) -> None:
     assert result.ttfa_ms is None
 
 
+@pytest.mark.asyncio
+async def test_invalid_model_returns_error(fake_settings: Settings) -> None:
+    """mistv3 is now a valid model; mistv4 is rejected without a network call."""
+    # mistv3 is valid as of 2026-04-30 — must NOT be rejected by VALID_MODELS.
+    valid = RimeTTSProvider(fake_settings, model="mistv3", voice="luna")
+    fake_resp = FakeAiohttpResponse([make_pcm_bytes(240)], status=200)
+    fake_sess = FakeAiohttpSession(fake_resp)
+    with patch("coval_bench.providers.tts.rime.aiohttp.ClientSession", return_value=fake_sess):
+        ok = await valid.synthesize("ok")
+    assert ok.error is None
+    if ok.audio_path:
+        ok.audio_path.unlink()
+
+    # An unknown model is still rejected pre-flight without hitting the network.
+    bad = RimeTTSProvider(fake_settings, model="mistv4", voice="luna")
+    bad_result = await bad.synthesize("test")
+    assert bad_result.error is not None
+    assert "Unsupported" in bad_result.error
+    assert "mistv3" in bad_result.error
+    assert bad_result.audio_path is None
+
+
 # ---------------------------------------------------------------------------
 # Error path — HTTP errors
 # ---------------------------------------------------------------------------
@@ -149,6 +171,55 @@ def test_rime_name_and_model(fake_settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 # Missing API key
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Re-activated 2026-04-30: arcana (resolves to Arcana v3 server-side) + mistv3.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_arcana_http(fake_settings: Settings) -> None:
+    """arcana streams PCM via HTTP → ttfa set, valid WAV with .wav magic bytes."""
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240)]
+    provider = RimeTTSProvider(fake_settings, model="arcana", voice="luna")
+
+    fake_resp = FakeAiohttpResponse(chunks, status=200)
+    fake_sess = FakeAiohttpSession(fake_resp)
+    with patch("coval_bench.providers.tts.rime.aiohttp.ClientSession", return_value=fake_sess):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.provider == "rime"
+    assert result.model == "arcana"
+    assert result.voice == "luna"
+    assert result.audio_path is not None
+    assert result.audio_path.exists()
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_mistv3_http(fake_settings: Settings) -> None:
+    """mistv3 streams PCM via HTTP → ttfa set, valid WAV with .wav magic bytes."""
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240)]
+    provider = RimeTTSProvider(fake_settings, model="mistv3", voice="luna")
+
+    fake_resp = FakeAiohttpResponse(chunks, status=200)
+    fake_sess = FakeAiohttpSession(fake_resp)
+    with patch("coval_bench.providers.tts.rime.aiohttp.ClientSession", return_value=fake_sess):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.provider == "rime"
+    assert result.model == "mistv3"
+    assert result.voice == "luna"
+    assert result.audio_path is not None
+    assert result.audio_path.exists()
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    result.audio_path.unlink()
 
 
 def test_rime_missing_api_key() -> None:

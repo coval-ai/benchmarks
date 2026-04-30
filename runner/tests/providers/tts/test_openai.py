@@ -254,3 +254,30 @@ def test_openai_name_property(fake_settings: Settings) -> None:
     p = OpenAITTSProvider(fake_settings, model="tts-1-hd", voice="echo")
     assert p.name == "openai-tts-1-hd"
     assert p.model == "tts-1-hd"
+
+
+# ---------------------------------------------------------------------------
+# Re-activated 2026-04-30: tts-1-hd is the only OpenAI HTTP model in production.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_tts_1_hd_streams_pcm(fake_settings: Settings) -> None:
+    """tts-1-hd streams PCM chunks → ttfa set, valid WAV with .wav magic bytes."""
+    pcm = make_pcm_bytes(480)
+    provider = _make_http_provider(fake_settings, model="tts-1-hd")
+
+    mock_client = _make_streaming_response_mock([pcm, pcm])
+    with patch.object(provider, "_client", mock_client):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.provider == "openai"
+    assert result.model == "tts-1-hd"
+    assert result.voice == "alloy"
+    assert result.audio_path is not None
+    assert result.audio_path.exists()
+    # WAV magic bytes — RIFF header
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    result.audio_path.unlink()

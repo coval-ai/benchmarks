@@ -125,6 +125,37 @@ def test_deepgram_name_and_model(fake_settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Re-activated 2026-04-30: aura-2-thalia-en (Deepgram production voice).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_aura_2_thalia_en_http(fake_settings: Settings) -> None:
+    """aura-2-thalia-en HTTP streaming → ttfa set, valid WAV with .wav magic bytes."""
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240), make_pcm_bytes(240)]
+    provider = DeepgramTTSProvider(
+        fake_settings,
+        model="aura-2-thalia-en",
+        voice="aura-2-thalia-en",
+    )
+
+    fake_resp = FakeAiohttpResponse(chunks, status=200)
+    fake_sess = FakeAiohttpSession(fake_resp)
+    with patch("coval_bench.providers.tts.deepgram.aiohttp.ClientSession", return_value=fake_sess):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.provider == "deepgram"
+    assert result.model == "aura-2-thalia-en"
+    assert result.voice == "aura-2-thalia-en"
+    assert result.audio_path is not None
+    assert result.audio_path.exists()
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    result.audio_path.unlink()
+
+
 def test_deepgram_missing_api_key() -> None:
     settings_no_key = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]

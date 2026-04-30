@@ -65,6 +65,15 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
         f"ModelInfo must have exactly 'model' and 'disabled' keys, got {set(first_model.keys())}"
     )
 
+    # Re-activated 2026-04-30 — these must surface in the catalogue with disabled=False.
+    openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
+    tts_1_hd = next(m for m in openai_entry["models"] if m["model"] == "tts-1-hd")
+    assert tts_1_hd["disabled"] is False
+
+    rime_entry = next(e for e in data["tts"] if e["provider"] == "rime")
+    mistv3 = next(m for m in rime_entry["models"] if m["model"] == "mistv3")
+    assert mistv3["disabled"] is False
+
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     """The /v1/providers endpoint never acquires a DB connection.

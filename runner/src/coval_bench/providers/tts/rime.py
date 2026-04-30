@@ -22,7 +22,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 SAMPLE_RATE = 24000
 RIME_TTS_URL = "https://users.rime.ai/v1/rime-tts"
 
-VALID_MODELS = {"arcana", "mistv2"}
+VALID_MODELS = {"arcana", "mistv2", "mistv3"}
 
 
 class RimeTTSProvider(TTSProvider):

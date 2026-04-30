@@ -97,6 +97,36 @@ def test_cartesia_name_and_model(fake_settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Re-activated 2026-04-30: sonic-3 (flagship Cartesia model).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_synthesize_sonic_3_streams_chunks(fake_settings: Settings) -> None:
+    """sonic-3 streams audio chunks → ttfa set, valid WAV with .wav magic bytes."""
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240), make_pcm_bytes(240)]
+    provider = CartesiaTTSProvider(
+        fake_settings,
+        model="sonic-3",
+        voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
+    )
+
+    fake_client = make_fake_cartesia_client(chunks)
+    with patch("coval_bench.providers.tts.cartesia.AsyncCartesia", return_value=fake_client):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.provider == "cartesia"
+    assert result.model == "sonic-3"
+    assert result.voice == "f786b574-daa5-4673-aa0c-cbe3e8534c02"
+    assert result.audio_path is not None
+    assert result.audio_path.exists()
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    result.audio_path.unlink()
+
+
 def test_cartesia_missing_api_key() -> None:
     settings_no_key = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]

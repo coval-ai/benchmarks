@@ -50,6 +50,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
 # ---------------------------------------------------------------------------
 
 DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
+    # ElevenLabs — already in production.
     ProviderEntry(
         provider="elevenlabs",
         model="eleven_flash_v2_5",
@@ -68,28 +69,35 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="IKne3meq5aSn9XLyUdCD",
         enabled=True,
     ),
-    # OFF:
+    # OpenAI — re-activated 2026-04-30: tts-1-hd only (highest-quality HTTP model).
+    # tts-1 and gpt-4o-mini-tts kept defined but enabled=False — re-evaluate later.
+    ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=True),
     ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=False),
     ProviderEntry(provider="openai", model="gpt-4o-mini-tts", voice="alloy", enabled=False),
+    # Cartesia — re-activated 2026-04-30: sonic-3 (flagship).
     ProviderEntry(
         provider="cartesia",
         model="sonic-3",
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
-        enabled=False,
+        enabled=True,
     ),
+    # Deepgram — re-activated 2026-04-30: aura-2-thalia-en.
     ProviderEntry(
         provider="deepgram",
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
-        enabled=False,
+        enabled=True,
     ),
-    # disabled=True hides these from the public catalogue.
+    # Rime — re-activated 2026-04-30: arcana (resolves to Arcana v3 server-side
+    # per Rime docs — same model ID promoted in place) + mistv3.
+    ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=True),
+    ProviderEntry(provider="rime", model="mistv3", voice="luna", enabled=True),
+    ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False),
+    # Hidden from the public catalogue (`disabled=True`). Never executed.
     ProviderEntry(
         provider="hume", model="octave-tts", voice="male_01", enabled=False, disabled=True
     ),
     ProviderEntry(provider="hume", model="octave-2", voice="male_01", enabled=False, disabled=True),
-    ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=False),
-    ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False),
     # Placeholder entries with voice=None — never executed by the runner; surfaced only
     # in /v1/providers so the frontend can label them as disabled.
     ProviderEntry(
