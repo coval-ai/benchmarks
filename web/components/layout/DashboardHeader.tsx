@@ -28,6 +28,7 @@ const DashboardHeader: React.FC = () => {
               alt="Coval"
               width={120}
               height={32}
+              priority
               style={{ width: "auto", height: "auto" }}
               className="h-8 w-auto hidden md:block dark:invert-0 invert"
             />
@@ -36,6 +37,7 @@ const DashboardHeader: React.FC = () => {
               alt="Coval"
               width={90}
               height={24}
+              priority
               style={{ width: "auto", height: "auto" }}
               className="h-6 w-auto md:hidden dark:invert-0 invert"
             />
