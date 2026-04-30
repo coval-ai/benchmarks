@@ -17,6 +17,7 @@ import click
 
 from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
+from coval_bench.migrations.import_legacy import import_legacy_cli
 
 
 @click.group()
@@ -61,6 +62,14 @@ def db() -> None:
 
 db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
+
+
+@cli.group()
+def migrate() -> None:
+    """One-shot data migrations."""
+
+
+migrate.add_command(import_legacy_cli, name="import-legacy")
 
 
 if __name__ == "__main__":
