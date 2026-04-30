@@ -22,28 +22,25 @@ export function formatTime(timestamp: number): string {
  * @returns Formatted model name for display
  */
 export function normalizeModelName(modelName: string): string {
-  // Define specific mappings for known models
+  // Mapping mirrors the backend's enabled provider matrix (runner/config.py).
   const modelMappings: Record<string, string> = {
-    "tts-1": "TTS 1",
+    // TTS
     "tts-1-hd": "TTS 1 HD",
-    "gpt-4o-mini-tts": "GPT-4o Mini",
-    "gpt-realtime-2025-08-28": "GPT-4o Realtime",
     eleven_multilingual_v2: "Multilingual v2",
     eleven_flash_v2_5: "Flash v2.5",
     eleven_turbo_v2_5: "Turbo v2.5",
-    "sonic-2": "Sonic 2",
     "sonic-3": "Sonic 3",
-    sonic: "Sonic",
-    "sonic-turbo": "Sonic Turbo",
-    mistv2: "Mist v2",
-    mistv3: "Mist v3",
+    "aura-2-thalia-en": "Aura 2",
     arcana: "Arcana",
-    "octave-tts": "Octave",
+    mistv3: "Mist v3",
+    // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
-    universal: "Universal",
     "flux-general-en": "Flux",
-    "aura-2-thalia-en": "Aura 2"
+    scribe_v2_realtime: "Scribe v2",
+    "universal-streaming": "Universal Streaming",
+    default: "Default",
+    enhanced: "Enhanced"
   };
 
   // Return mapped name if it exists
@@ -72,8 +69,8 @@ export function normalizeSTTProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     assemblyai: "AssemblyAI",
     deepgram: "Deepgram",
-    speechmatics: "Speechmatics",
-    google: "Google"
+    elevenlabs: "ElevenLabs",
+    speechmatics: "Speechmatics"
   };
 
   const lower = providerName.toLowerCase();

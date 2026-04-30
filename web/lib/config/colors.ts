@@ -1,47 +1,36 @@
 export const modelColors: Record<string, string> = {
-  // OpenAI models - Red family
-  "gpt-4o-mini-tts": "#F56A5C",
-  "tts-1": "#E74C3C",
+  // OpenAI TTS
   "tts-1-hd": "#943126",
-  "gpt-realtime-2025-08-28": "#6E1B14",
 
-  // ElevenLabs models - Orange family
+  // ElevenLabs TTS
   eleven_multilingual_v2: "#FFD633",
   eleven_flash_v2_5: "#F39C12",
   eleven_turbo_v2_5: "#B7950B",
 
-  // Cartesia models - Blue family
-  sonic: "#85C1E9",
-  "sonic-2": "#3498DB",
+  // ElevenLabs STT
+  scribe_v2_realtime: "#E67E22",
+
+  // Cartesia TTS
   "sonic-3": "#3498DB",
-  "sonic-turbo": "#21618C",
 
-  // Hume models - purple family
-  "octave-tts": "#9B59B6",
-  "octave-2": "#7F21A6",
-
-  // Rime
+  // Rime TTS
   arcana: "#33FF99",
-  mistv2: "#1E8449",
   mistv3: "#0E5C32",
 
-  // Deepgram models
+  // Deepgram TTS
   "aura-2-thalia-en": "#FC2D62",
+
+  // Deepgram STT
   "nova-2": "#F39C12",
   "nova-3": "#FFD633",
   "flux-general-en": "#FFFF66",
 
-  // AssemblyAI models
+  // AssemblyAI STT
   "universal-streaming": "#E74C3C",
 
-  // Speechmatics
+  // Speechmatics STT
   enhanced: "#3498DB",
-  default: "#21618C",
-  // Additional provider models
-  short: "#2ECC71",
-  long: "#7D3C98",
-  telephony: "#E598D1",
-  chirp_2: "#1E8449"
+  default: "#21618C"
 };
 
 export const providerColors: Record<string, string> = {
@@ -50,11 +39,6 @@ export const providerColors: Record<string, string> = {
   Cartesia: "#3498DB",
   Deepgram: "#16A085",
   AssemblyAI: "#8E44AD",
-  Hume: "#9B59B6",
-  PlayHT: "#2ECC71",
-  Rime: "#27AE60",
-  "Rev AI": "#1ABC9C",
-  Azure: "#95A5A6",
-  Google: "#34495E",
-  AWS: "#E91E63"
+  Speechmatics: "#21618C",
+  Rime: "#27AE60"
 };
