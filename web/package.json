@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "vercel-build": "pnpm codegen && pnpm build",
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
