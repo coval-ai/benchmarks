@@ -20,6 +20,12 @@ from typing import Literal
 import jiwer
 from pydantic import BaseModel
 
+# Bump on any behavioural change to the normalization pipeline below
+# (currency, ordinals, dates, time expressions, dehyphenation rules).
+# Surfaced on ``WERResult`` so downstream consumers can pin against a
+# specific normalization revision; documented in ``docs/methodology.md``.
+NORM_VERSION: Literal["1"] = "1"
+
 # ---------------------------------------------------------------------------
 # Public data models
 # ---------------------------------------------------------------------------
@@ -37,6 +43,7 @@ class WERResult(BaseModel):
     incorrect_words: list[WordError]
     normalized_reference: str
     normalized_hypothesis: str
+    norm_version: Literal["1"] = NORM_VERSION
 
 
 # ---------------------------------------------------------------------------
