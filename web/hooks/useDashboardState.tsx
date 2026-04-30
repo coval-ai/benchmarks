@@ -474,7 +474,7 @@ export function useDashboardState(page: "tts" | "stt") {
     : {
         short: "Word Error Rate (%) \u2022 Click bar to compare models",
         detailed:
-          "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate using the open-source Mozilla's Common Voice test dataset in English, which includes diverse speakers, accents, and real-world audio conditions.",
+          "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions.",
       };
 
   const heatmapDisplayData = page === "tts"

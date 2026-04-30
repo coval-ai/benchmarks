@@ -27,6 +27,6 @@ export const metricDescriptions = {
   performanceGap: {
     short: "Time to First Token",
     detailed:
-      "Using Mozilla's Common Voice test dataset, we measure how quickly the system returns the first transcribed token after the audio begins across multiple test cases. The fastest model is set as the baseline and we measure the delta relative to the fastest performer. Hover to view the first token."
+      "We measure how quickly the system returns the first transcribed token after the audio begins across multiple test cases. The fastest model is set as the baseline and we measure the delta relative to the fastest performer. Hover to view the first token."
   }
 };
