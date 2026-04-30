@@ -340,11 +340,13 @@ export function useChartData({
         (item) =>
           selectedSTTModels.includes(item.model) &&
           item.metric_type === primaryMetric &&
-          INCLUDED_STATUSES.has(item.status)
+          INCLUDED_STATUSES.has(item.status) &&
+          item.metric_value !== null &&
+          item.metric_value !== undefined
       )
       .map((item) => ({
         timestamp: to15MinuteBucket(new Date(item.timestamp).getTime()),
-        value: (item.metric_value ?? 0) * 1000,
+        value: (item.metric_value as number) * 1000,
         model: item.model,
         benchmark: item.benchmark
       }))
