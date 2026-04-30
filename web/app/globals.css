@@ -1,0 +1,174 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Light mode (default) */
+:root {
+  /* Surfaces */
+  --color-surface-primary: #FFFFFF;
+  --color-surface-secondary: rgba(243, 244, 246, 0.5);
+  --color-surface-elevated: #F9FAFB;
+  --color-surface-tooltip: #FFFFFF;
+  --color-surface-backdrop: rgba(0, 0, 0, 0.5);
+  --color-surface-overlay: rgba(255, 255, 255, 0.9);
+
+  /* Text */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-tertiary: #9CA3AF;
+  --color-text-on-tooltip: #111827;
+  --color-text-on-tooltip-secondary: #6B7280;
+
+  /* Borders */
+  --color-border-primary: #E5E7EB;
+  --color-border-secondary: #E5E7EB;
+
+  /* Charts */
+  --color-chart-grid: #E5E7EB;
+  --color-chart-axis-text: #6B7280;
+  --color-chart-label: #111827;
+  --color-chart-median: #111827;
+  --color-chart-box-fill: rgba(0, 0, 0, 0.08);
+  --color-chart-bar-stroke: #D1D5DB;
+
+  /* Interactive */
+  --color-hover-bg: rgba(0, 0, 0, 0.05);
+  --color-selected-bg: rgba(0, 0, 0, 0.08);
+  --color-selected-border: rgba(0, 0, 0, 0.15);
+
+  /* Toggle */
+  --color-surface-toggle-active: #000000;
+  --color-text-on-toggle-active: #FFFFFF;
+  --color-surface-toggle-inactive: rgba(243, 244, 246, 1);
+  --color-text-on-toggle-inactive: #6B7280;
+
+  /* Spinner */
+  --color-spinner-track: rgba(0, 0, 0, 0.2);
+  --color-spinner-head: #111827;
+
+  /* Screen glow */
+  --color-screen-glow: rgba(0, 0, 0, 0.15);
+
+  /* Fonts */
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+/* Dark mode */
+.dark {
+  --color-surface-primary: #000000;
+  --color-surface-secondary: rgba(17, 24, 39, 0.2);
+  --color-surface-elevated: #111827;
+  --color-surface-tooltip: #1F2937;
+  --color-surface-backdrop: rgba(0, 0, 0, 0.5);
+  --color-surface-overlay: rgba(0, 0, 0, 0.9);
+
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #9CA3AF;
+  --color-text-tertiary: #6B7280;
+  --color-text-on-tooltip: #F9FAFB;
+  --color-text-on-tooltip-secondary: #9CA3AF;
+
+  --color-border-primary: rgba(255, 255, 255, 0.1);
+  --color-border-secondary: #1F2937;
+
+  --color-chart-grid: #374151;
+  --color-chart-axis-text: #9CA3AF;
+  --color-chart-label: #F9FAFB;
+  --color-chart-median: #FFFFFF;
+  --color-chart-box-fill: rgba(255, 255, 255, 0.15);
+  --color-chart-bar-stroke: #374151;
+
+  --color-hover-bg: rgba(255, 255, 255, 0.05);
+  --color-selected-bg: rgba(255, 255, 255, 0.12);
+  --color-selected-border: rgba(255, 255, 255, 0.15);
+
+  --color-surface-toggle-active: #FFFFFF;
+  --color-text-on-toggle-active: #000000;
+  --color-surface-toggle-inactive: rgba(17, 24, 39, 1);
+  --color-text-on-toggle-inactive: #9CA3AF;
+
+  --color-spinner-track: rgba(255, 255, 255, 0.2);
+  --color-spinner-head: #FFFFFF;
+
+  --color-screen-glow: rgba(255, 255, 255, 0.6);
+
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-montserrat);
+  --font-mono: var(--font-montserrat);
+
+  /* Surface colors */
+  --color-surface-primary: var(--color-surface-primary);
+  --color-surface-secondary: var(--color-surface-secondary);
+  --color-surface-elevated: var(--color-surface-elevated);
+  --color-surface-tooltip: var(--color-surface-tooltip);
+  --color-surface-overlay: var(--color-surface-overlay);
+
+  /* Text colors */
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-tertiary: var(--color-text-tertiary);
+
+  /* Border colors */
+  --color-border-primary: var(--color-border-primary);
+  --color-border-secondary: var(--color-border-secondary);
+
+  /* Interactive */
+  --color-hover-bg: var(--color-hover-bg);
+  --color-selected-bg: var(--color-selected-bg);
+  --color-selected-border: var(--color-selected-border);
+
+  /* Toggle */
+  --color-surface-toggle-active: var(--color-surface-toggle-active);
+  --color-text-on-toggle-active: var(--color-text-on-toggle-active);
+  --color-surface-toggle-inactive: var(--color-surface-toggle-inactive);
+  --color-text-on-toggle-inactive: var(--color-text-on-toggle-inactive);
+
+  /* Spinner */
+  --color-spinner-track: var(--color-spinner-track);
+  --color-spinner-head: var(--color-spinner-head);
+}
+
+@keyframes screenGlow {
+  0%, 100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: inset 0 0 60px 10px var(--color-screen-glow);
+  }
+}
+
+body.screen-glow::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 9999;
+  animation: screenGlow 300ms ease-out;
+}
+
+body {
+  background: var(--color-surface-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-montserrat), "Montserrat", Arial, Helvetica,
+    sans-serif;
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
