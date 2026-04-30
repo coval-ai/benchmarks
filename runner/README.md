@@ -26,12 +26,35 @@ See `src/coval_bench/datasets/manifests/README.md` for full dataset details and
 
 ## Local development
 
+### Tests (offline, no creds, no DB)
+
 ```bash
 uv sync
-uv run python -m coval_bench --help
 uv run pytest -q
 ```
 
-Provider API keys are loaded from environment variables (or a `.env` file) — see `src/coval_bench/config.py` for the full list. All keys are optional locally; tests use VCR cassettes and never hit the network.
+VCR cassettes + fakes — never hit the network.
+
+### Full stack (Postgres + API + runner image, real provider APIs)
+
+From the repo root:
+
+```bash
+cp .env.example .env             # add provider keys you want to exercise
+docker compose up -d db          # Postgres on :5432
+docker compose run --rm migrate  # alembic upgrade head
+docker compose up -d api         # FastAPI on http://localhost:8000
+
+# Trigger a single-item benchmark run (writes to the local Postgres):
+docker compose run --rm runner coval-bench run --smoke --kind tts
+
+# Probe one TTS provider without DB writes:
+docker compose run --rm runner coval-bench tts-smoke \
+  --provider cartesia --model sonic-3 --voice <voice-id> --text "hello"
+```
+
+The web FE (`web/`) is a Next.js app — run `pnpm dev` against `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+
+All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 
 Apache-2.0.

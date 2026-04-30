@@ -118,11 +118,7 @@ const TimelineChart: React.FC = () => {
                 dataKey={`${model}_value`}
                 stroke={getModelColor(model)}
                 strokeWidth={selectedModels.length === 1 ? 3 : 2}
-                dot={{
-                  r: selectedModels.length === 1 ? 5 : 4,
-                  strokeWidth: 0,
-                  fill: getModelColor(model)
-                }}
+                dot={false}
                 activeDot={{
                   r: selectedModels.length === 1 ? 7 : 6,
                   fill: getModelColor(model)

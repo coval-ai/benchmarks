@@ -32,8 +32,9 @@ COPY pyproject.toml uv.lock README.md ./
 # Install production dependencies (no dev, no extras that pull in heavy audio libs)
 RUN uv sync --frozen --no-dev
 
-# Copy source tree
+# Copy source tree + alembic config (db/cli.py reads /app/alembic.ini)
 COPY src/ ./src/
+COPY alembic.ini ./
 
 # ---------------------------------------------------------------------------
 # Final stage — slim, non-root (uid 65532)
