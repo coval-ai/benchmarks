@@ -23,6 +23,7 @@ jobs:
   ci:
     name: Lint / Test / Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -64,9 +65,11 @@ jobs:
       # -----------------------------------------------------------------------
       # Tests
       # -----------------------------------------------------------------------
+      # pytest-socket blocks all network calls except the embedded Postgres
+      # spun up by pytest-postgresql on the loopback interface.
       - name: pytest
         working-directory: runner
-        run: uv run pytest -q
+        run: uv run pytest -q --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1
 
       # -----------------------------------------------------------------------
       # Secret scan — free for OSS; set empty string to suppress license prompt
