@@ -150,6 +150,7 @@ class DeepgramProvider(STTProvider):
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
         final_segments: list[str] = []
         flux_latest: str = ""
+        last_final_time: float | None = None
 
         try:
             async for raw in ws:
@@ -188,16 +189,24 @@ class DeepgramProvider(STTProvider):
 
                 if self._model == "flux-general-en":
                     flux_latest = transcript
+                    # flux emits rolling updates; every transcript update is the
+                    # latest "final" view of what was said — track the last one.
+                    last_final_time = now
                 elif self._model in ("nova-2", "nova-3"):
                     if msg.get("speech_final"):
                         final_segments.append(transcript)
+                        last_final_time = now
                 else:
                     # default model — treat is_final as final
                     if msg.get("is_final"):
                         final_segments.append(transcript)
+                        last_final_time = now
 
         except Exception as exc:
             logger.exception("deepgram receive error", error=str(exc))
+
+        if last_final_time is not None and result.audio_start_time is not None:
+            result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
         # Build complete transcript
         if self._model == "flux-general-en":
@@ -216,9 +225,12 @@ class DeepgramProvider(STTProvider):
     # ------------------------------------------------------------------
 
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
-        if self._model == "flux-general-en":
-            return str(msg.get("transcript", "")).strip()
-
+        # Both the standard endpoint (v1/listen) and the flux preview endpoint
+        # (v2/listen) return Deepgram's standard Results message shape:
+        #   {"type": "Results", "channel": {"alternatives": [{"transcript": "..."}]}}
+        # An earlier implementation read a top-level "transcript" key for flux,
+        # but that key does not exist in a Results message — causing silent NULL
+        # TTFT for flux-general-en on every run.
         try:
             channel: dict[str, Any] = msg.get("channel", {})
             alternatives: list[dict[str, Any]] = channel.get("alternatives", [])
