@@ -45,6 +45,7 @@ export function useDashboardState(page: "tts" | "stt") {
     benchmark: benchmarkParam,
     window: "24h",
     include_failed: false,
+    limit: 100000,
   });
   const providersQuery = useProvidersQuery();
 

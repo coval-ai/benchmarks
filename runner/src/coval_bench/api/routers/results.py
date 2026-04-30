@@ -110,10 +110,10 @@ async def list_results(
         ),
     ),
     limit: int = Query(
-        default=10000,
+        default=100000,
         ge=1,
         le=100000,
-        description="Maximum rows to return (1–100000, default 10000).",
+        description="Maximum rows to return (1–100000, default 100000).",
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> ResultsResponse:

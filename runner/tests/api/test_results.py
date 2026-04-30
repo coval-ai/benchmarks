@@ -297,8 +297,8 @@ async def test_metric_type_only(client: AsyncClient, postgresql: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_limit_default_10000(client: AsyncClient, postgresql: Any) -> None:
-    """Default limit is 10000 — seeding 150 rows returns all 150."""
+async def test_limit_default_100000(client: AsyncClient, postgresql: Any) -> None:
+    """Default limit is 100000 — seeding 150 rows returns all 150."""
     run_id = await _insert_run(postgresql)
     for i in range(150):
         await _insert_result(postgresql, run_id, model=f"model-{i:03d}")
