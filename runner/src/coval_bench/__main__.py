@@ -12,6 +12,8 @@ run status is FAILED.
 """
 
 import asyncio
+import json
+import sys
 
 import click
 
@@ -70,6 +72,71 @@ def migrate() -> None:
 
 
 migrate.add_command(import_legacy_cli, name="import-legacy")
+
+
+@cli.command(name="tts-smoke")
+@click.option("--provider", required=True, help="TTS provider name (e.g. openai, cartesia).")
+@click.option("--model", required=True, help="Model ID for the provider (e.g. tts-1-hd).")
+@click.option("--voice", required=True, help="Voice ID for the provider.")
+@click.option(
+    "--text",
+    default="Hello world.",
+    show_default=True,
+    help="Text to synthesize.",
+)
+def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
+    """Probe a single (provider, model, voice) against the real TTS upstream.
+
+    Emits a structured single-line JSON to stdout. Exits 0 on success, 1 on
+    provider error, 2 if *provider* is not registered. Does NOT write to the
+    database — pure provider call.
+    """
+    from typing import Any
+
+    from coval_bench.config import get_settings
+    from coval_bench.providers.tts import TTS_PROVIDERS
+
+    registry: dict[str, Any] = dict(TTS_PROVIDERS)
+    provider_cls = registry.get(provider)
+    if provider_cls is None:
+        click.echo(
+            f"Unknown TTS provider: {provider!r}. Known: {sorted(registry.keys())}",
+            err=True,
+        )
+        sys.exit(2)
+
+    settings = get_settings()
+    instance = provider_cls(settings=settings, model=model, voice=voice)
+    result = asyncio.run(instance.synthesize(text))
+
+    audio_path_str: str | None = str(result.audio_path) if result.audio_path else None
+    audio_bytes: int | None = None
+    if result.audio_path is not None and result.audio_path.exists():
+        audio_bytes = result.audio_path.stat().st_size
+
+    ok = (
+        result.error is None
+        and result.audio_path is not None
+        and audio_bytes is not None
+        and audio_bytes > 0
+    )
+
+    click.echo(
+        json.dumps(
+            {
+                "event": "tts_smoke",
+                "provider": provider,
+                "model": model,
+                "voice": voice,
+                "ttfa_ms": result.ttfa_ms,
+                "audio_path": audio_path_str,
+                "audio_bytes": audio_bytes,
+                "error": result.error,
+                "ok": ok,
+            }
+        )
+    )
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":
