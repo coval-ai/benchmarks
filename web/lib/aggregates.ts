@@ -1,11 +1,10 @@
 /**
- * Client-side aggregation logic that mirrors the legacy SQL `getModelStats` from
- * `benchmarking-web-app/lib/db.ts`.
+ * Client-side aggregation. Computes per-(provider, model, metric_type) stats
+ * from raw `Result` rows.
  *
  * Filter: status IN ('SUCCEEDED', 'PARTIAL') AND metric_value IS NOT NULL.
- * Note: Phase 4.5 uses uppercase status enum (RUNNING|SUCCEEDED|PARTIAL|FAILED).
- * Legacy SQL used lowercase 'success'. The new contract is uppercase; we include
- * PARTIAL as well (partially-succeeded runs may still have valid individual results).
+ * Status enum is uppercase (RUNNING|SUCCEEDED|PARTIAL|FAILED); PARTIAL runs
+ * may still contain valid individual results.
  *
  * Stddev: sample stddev (n-1 denominator), COALESCE to 0 for n=1 (undefined from d3).
  * Percentiles: linear interpolation via d3 quantile(), identical to Postgres percentile_cont.
@@ -33,7 +32,6 @@ export interface ModelStats {
 const INCLUDED_STATUSES = new Set<Result["status"]>(["SUCCEEDED", "PARTIAL"]);
 
 /**
- * Mirrors `getModelStats` from legacy `lib/db.ts`.
  * Filter `status IN ('SUCCEEDED','PARTIAL')` + `metric_value IS NOT NULL`.
  * Stddev=sample (n-1), n=1→0. Percentiles=linear interp.
  *
@@ -129,13 +127,13 @@ export function statsByKey(stats: ModelStats[]): Map<string, ModelStats> {
 /**
  * Returns a lookup function for per-(model, metricType, provider) stats.
  * Supports both exact lookup (with provider) and fallback linear scan (without provider)
- * to preserve legacy hook behaviour that searched by (model, metric_type) only.
+ * for callers that search by (model, metric_type) without a provider qualifier.
  */
 export function makeStatLookup(stats: ModelStats[]) {
   const map = statsByKey(stats);
   return (model: string, metricType: string, provider?: string): ModelStats | undefined => {
     if (provider) return map.get(`${metricType}|${provider}|${model}`);
-    // Legacy fallback: search by (model, metric_type) without provider.
+    // Fallback: search by (model, metric_type) without provider.
     for (const s of stats) {
       if (s.model === model && s.metric_type === metricType) return s;
     }

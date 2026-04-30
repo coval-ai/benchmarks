@@ -9,13 +9,13 @@ Create Date: 2026-04-29
 
 Notes
 -----
-DB roles (``runner``, ``api``) and GRANTs are managed by Terraform (Phase 1).
+DB roles (``runner``, ``api``) and GRANTs are managed by Terraform.
 Alembic does NOT create or alter roles.
 
 The ``results_24h`` materialized view is populated immediately but will be
-empty until results are inserted.  Refresh is handled by a Cloud Scheduler
-cron job (Phase 4) via ``REFRESH MATERIALIZED VIEW CONCURRENTLY results_24h``.
-That cron is out of scope for this migration.
+empty until results are inserted.  Refresh is handled out-of-band by a
+Cloud Scheduler cron via ``REFRESH MATERIALIZED VIEW CONCURRENTLY
+results_24h``. That cron is out of scope for this migration.
 """
 
 from __future__ import annotations

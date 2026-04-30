@@ -4,10 +4,9 @@
 """Provider on/off matrix — per ADR-011.
 
 Encode the full provider × model matrix here, NOT in the orchestrator.
-Defaults mirror the legacy ``run_stt.py`` / ``run_tts.py`` enabled/commented state.
 
-TODO: Phase 3 — support env-var override via ``PROVIDER_OVERRIDES_JSON`` to flip
-flags at deploy time without a code change.
+TODO: support env-var override via ``PROVIDER_OVERRIDES_JSON`` to flip flags
+at deploy time without a code change.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ class ProviderEntry(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# STT matrix — mirrors legacy run_stt.py CONFIGURATIONS dict
+# STT matrix
 # Uncommented blocks → enabled=True; commented-out blocks → enabled=False
 # ---------------------------------------------------------------------------
 
@@ -38,8 +37,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
-    # OFF per legacy comments; disabled=True mirrors legacy EXCLUDED_MODELS in
-    # benchmarking-web-app/lib/db.ts
+    # OFF; disabled=True hides these from the public catalogue.
     ProviderEntry(provider="google", model="short", enabled=False, disabled=True),
     ProviderEntry(provider="google", model="long", enabled=False, disabled=True),
     ProviderEntry(provider="google", model="telephony", enabled=False, disabled=True),
@@ -47,7 +45,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
 ]
 
 # ---------------------------------------------------------------------------
-# TTS matrix — mirrors legacy run_tts.py CONFIGURATIONS dict
+# TTS matrix
 # Uncommented blocks → enabled=True; commented-out blocks → enabled=False
 # ---------------------------------------------------------------------------
 
@@ -70,7 +68,7 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="IKne3meq5aSn9XLyUdCD",
         enabled=True,
     ),
-    # OFF per legacy comments:
+    # OFF:
     ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=False),
     ProviderEntry(provider="openai", model="gpt-4o-mini-tts", voice="alloy", enabled=False),
     ProviderEntry(
@@ -85,16 +83,15 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="aura-2-thalia-en",
         enabled=False,
     ),
-    # disabled=True mirrors legacy EXCLUDED_MODELS in benchmarking-web-app/lib/db.ts
+    # disabled=True hides these from the public catalogue.
     ProviderEntry(
         provider="hume", model="octave-tts", voice="male_01", enabled=False, disabled=True
     ),
     ProviderEntry(provider="hume", model="octave-2", voice="male_01", enabled=False, disabled=True),
     ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=False),
     ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False),
-    # Placeholder entries for models in legacy EXCLUDED_MODELS that were never in this matrix.
-    # voice=None because we never run them — purpose is to expose them in /v1/providers so the
-    # frontend can label them as disabled. Both came from TTS legacy data (web-app-data-audit.md).
+    # Placeholder entries with voice=None — never executed by the runner; surfaced only
+    # in /v1/providers so the frontend can label them as disabled.
     ProviderEntry(
         provider="openai",
         model="gpt-realtime-2025-08-28",

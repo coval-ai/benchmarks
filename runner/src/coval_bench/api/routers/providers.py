@@ -8,8 +8,8 @@ The catalogue is sourced from the runner's provider matrices
 orchestrator uses to decide what to actually run, so the website can never
 drift from the runner's reality. All matrix entries are exposed (including
 ``enabled=False`` and ``disabled=True``) so the frontend can decide whether to
-show or grey out disabled models. The ``disabled`` flag on each model mirrors
-the legacy ``EXCLUDED_MODELS`` list in the Neon web app.
+show or grey out disabled models. The ``disabled`` flag indicates a model the
+runner intentionally skips (configured in ``runner/config.py``).
 
 No DB hit is made by this endpoint.
 """

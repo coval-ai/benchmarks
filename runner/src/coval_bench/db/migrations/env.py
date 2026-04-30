@@ -13,9 +13,9 @@ connection (Cloud SQL Auth Proxy).
 
 Notes
 -----
-- DB roles and GRANTs are managed by Terraform (Phase 1), not Alembic.
+- DB roles and GRANTs are managed by Terraform, not Alembic.
 - The ``results_24h`` materialized view is refreshed by a Cloud Scheduler
-  cron (Phase 4); Alembic only creates the initial definition.
+  cron; Alembic only creates the initial definition.
 - ``alembic_version`` is stored in the public schema (default) so that
   Alembic can create it before ``benchmarks_v2`` is created.
 - We connect via psycopg3 sync connection + SQLAlchemy ``create_engine``

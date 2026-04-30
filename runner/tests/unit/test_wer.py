@@ -45,7 +45,7 @@ _GOLDEN: list[tuple[int, str, str, float, str]] = [
     # 8 — hyphenated number: "twenty-four hours" — the pipeline dehyphenates FIRST,
     #     so "twenty-four" → "twenty four" → sentence_to_numbers year-patterns it as
     #     "twenty" + "four" → "2004" (matching legacy behaviour). Hyp "24 hours" stays "24".
-    #     WER = 1 sub / 2 words = 0.5 (legacy behaviour documented; Phase 4 may fix ordering).
+    #     WER = 1 sub / 2 words = 0.5 (current pipeline behaviour; ordering may be revisited).
     (8, "twenty-four hours", "24 hours", 0.5, "hyphenated number: legacy dehyphenate-first"),
     # 9 — ordinal + year: "December the fifteenth twenty twenty four" vs "december 15th 2024"
     #     ref normalizes: "december the 15th 20204" (year pattern bug: "twenty" + "twenty" + "four")
@@ -151,8 +151,8 @@ def test_normalize_twenty_four() -> None:
     # The spec says normalize_text("twenty-four") should return "24".
     # The legacy pipeline, however, dehyphenates first, turning "twenty-four" into
     # "twenty four", which the year-pattern logic converts to "2004" (not "24").
-    # We preserve legacy behaviour verbatim; the discrepancy is documented here so
-    # Phase 4 can fix the pipeline ordering if desired.
+    # We preserve the current behaviour verbatim; the discrepancy is documented
+    # here so the pipeline ordering can be revisited if desired.
     assert normalize_text("twenty-four") == "2004"
 
 

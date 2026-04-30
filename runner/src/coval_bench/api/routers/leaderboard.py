@@ -9,7 +9,7 @@ Metric/benchmark compatibility:
 - TTFA + TTS
 
 ``window=24h`` queries the materialized view ``benchmarks_v2.results_24h``
-(refreshed by a Cloud Scheduler cron in Phase 3 — read-only here).
+(refreshed by a Cloud Scheduler cron — read-only here).
 
 ``window=7d`` / ``window=30d`` run a live aggregation query against the
 ``results`` table directly.

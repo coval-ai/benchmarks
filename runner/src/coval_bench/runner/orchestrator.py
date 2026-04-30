@@ -455,8 +455,7 @@ async def run_benchmarks(
     Args:
         settings: Injected application settings (no global state).
         benchmark_kind: Which benchmark(s) to run.
-        smoke: If True, process only the first dataset item (local dev parity
-            with legacy ``--smoke-test``).
+        smoke: If True, process only the first dataset item (local dev mode).
         matrix_overrides: Optional list of ``ProviderEntry`` objects that override
             the default matrices by ``(provider, model)`` key.
 

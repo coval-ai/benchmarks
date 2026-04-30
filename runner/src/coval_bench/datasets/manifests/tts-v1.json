@@ -3,7 +3,7 @@
   "id": "tts-v1",
   "version": "1.0.0",
   "license": "Coval-internal — do not redistribute",
-  "source": "Coval TTS test cases (legacy CSV, cp1252)",
+  "source": "Coval TTS test cases",
   "items": [
     {
       "testcase_id": "A1",

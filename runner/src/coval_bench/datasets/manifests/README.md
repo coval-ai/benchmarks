@@ -35,10 +35,8 @@ providers train on LibriSpeech — so the value lives in (a) latency metrics,
 which are unaffected, and (b) per-provider regression-over-time, which works
 symmetrically.
 
-**Phase 2 (current):** Stub with 2 placeholder items.  The real hashes are
-not yet populated because the audio files have not been uploaded to GCS.
-
-**Phase 4:** Run `scripts/build_dataset.py` to regenerate:
+To rebuild the manifest from scratch (downloads LibriSpeech, transcodes,
+uploads, recomputes hashes), run `scripts/build_dataset.py`:
 
 ```bash
 uv run python scripts/build_dataset.py build \
@@ -77,16 +75,17 @@ end-to-end synthesis latency. There is no reference-audio quality metric —
 voices vary by provider, so apples-to-apples audio quality comparison is out
 of scope for v1.
 
-Converted from `legacy-benchmarks/tts/Test cases.csv` (cp1252 encoding) by
-the `dataset-loader` subagent during Phase 2.  Contains 30 test cases.
+Converted from an internal CSV (cp1252 encoding) of curated TTS prompts.
+Contains 30 test cases.
 
-To regenerate from the CSV (read-only source):
+To regenerate from a local CSV (`--in tts-source.csv`, columns
+`Testcase ID`, `Transcript`):
 
 ```bash
 python3 -c "
-import csv, json
+import csv, json, sys
 rows = []
-with open('legacy-benchmarks/tts/Test cases.csv', encoding='cp1252') as f:
+with open(sys.argv[1], encoding='cp1252') as f:
     for row in csv.DictReader(f):
         rows.append({'testcase_id': row['Testcase ID'], 'transcript': row['Transcript']})
 manifest = {
@@ -94,11 +93,11 @@ manifest = {
     'id': 'tts-v1',
     'version': '1.0.0',
     'license': 'Coval-internal \u2014 do not redistribute',
-    'source': 'Coval TTS test cases (legacy CSV, cp1252)',
+    'source': 'Coval TTS test cases',
     'items': rows,
 }
 print(json.dumps(manifest, indent=2, ensure_ascii=False))
-" > benchmarks/runner/src/coval_bench/datasets/manifests/tts-v1.json
+" tts-source.csv > runner/src/coval_bench/datasets/manifests/tts-v1.json
 ```
 
 License: `Coval-internal — do not redistribute`.

@@ -3,11 +3,10 @@
 
 """slowapi rate-limit configuration.
 
-The limiter uses in-memory storage by default. This is acceptable for Phase 2:
-each Cloud Run instance maintains its own counter, so total throughput could
-exceed 60 req/min/IP under multi-instance scaling. If abuse appears, Phase 3
-may switch to a Redis-backed limiter (slowapi supports that via ``limits``
-storage backends).
+The limiter uses in-memory storage by default. Each Cloud Run instance
+maintains its own counter, so total throughput could exceed 60 req/min/IP
+under multi-instance scaling. If abuse appears, switch to a Redis-backed
+limiter (slowapi supports that via ``limits`` storage backends).
 
 Usage::
 

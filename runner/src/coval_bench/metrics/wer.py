@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Word Error Rate computation.
 
-Uses the legacy text normalization pipeline (currency, ordinals, dates, time
-expressions) ported verbatim from ``legacy-benchmarks/wer_calculator.py``.
-The DP edit-distance is delegated to ``jiwer`` for correctness and speed.
-The normalization pipeline is kept as the default (not ``whisper_normalizer``)
-per Phase-2 spec; Phase 4 may A/B test the two pipelines after measuring drift.
+Uses a text normalization pipeline (currency, ordinals, dates, time expressions)
+ported verbatim from the prior internal implementation. The DP edit-distance is
+delegated to ``jiwer`` for correctness and speed. The normalization pipeline is
+kept as the default (not ``whisper_normalizer``); the two pipelines may be
+A/B-tested in a future revision after measuring drift.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class WERResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Private normalization helpers — ported verbatim from legacy wer_calculator.py
+# Private normalization helpers — ported verbatim from the prior implementation.
 # ---------------------------------------------------------------------------
 
 
