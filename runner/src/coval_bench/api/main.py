@@ -7,7 +7,7 @@ Production startup::
 
     uvicorn coval_bench.api.main:app --host 0.0.0.0 --port 8080
 
-Or via the CLI (wired by the orchestrator agent in ``__main__.py``)::
+Or via the CLI (see ``__main__.py`` for the entry point)::
 
     coval-bench serve
 

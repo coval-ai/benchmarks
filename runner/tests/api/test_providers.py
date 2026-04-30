@@ -80,7 +80,7 @@ async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
 
     Otherwise the FE filter ``!m.disabled`` would let them through and the
     sidebar/legend would render placeholder rows for models we aren't
-    benchmarking. Mirrors the cleanup landed alongside Phase 4.7.
+    benchmarking.
     """
     response = await client.get("/v1/providers")
     data = response.json()
