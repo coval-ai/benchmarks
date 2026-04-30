@@ -127,6 +127,39 @@ async def test_synthesize_sonic_3_streams_chunks(fake_settings: Settings) -> Non
     result.audio_path.unlink()
 
 
+@pytest.mark.asyncio
+async def test_cartesia_send_includes_language_en(fake_settings: Settings) -> None:
+    """Regression: ctx.send() must include language='en'.
+
+    Without this, sonic-3 falls back to multilingual auto-detect and
+    intermittently hallucinates non-English output (CJK / Arabic / emoji
+    transcripts), producing WER=100% rows in the benchmark. Cartesia v2
+    contexts do NOT propagate `language` from conn.context() to ctx.send();
+    it must be passed on every send call.
+    """
+    chunks = [make_pcm_bytes(240)]
+    provider = CartesiaTTSProvider(
+        fake_settings, model="sonic-3", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"
+    )
+    fake_client = make_fake_cartesia_client(chunks)
+
+    with patch("coval_bench.providers.tts.cartesia.AsyncCartesia", return_value=fake_client):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    fake_conn = fake_client._fake_conn
+    assert fake_conn.last_context is not None, "conn.context(...) was never called"
+    send_kwargs = fake_conn.last_context.send_kwargs
+    assert send_kwargs is not None, "ctx.send(...) was never called"
+    assert send_kwargs.get("language") == "en", (
+        f"ctx.send must pass language='en' to prevent multilingual hallucination, "
+        f"got {send_kwargs!r}"
+    )
+
+    if result.audio_path is not None:
+        result.audio_path.unlink()
+
+
 def test_cartesia_missing_api_key() -> None:
     settings_no_key = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]

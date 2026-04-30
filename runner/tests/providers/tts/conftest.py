@@ -119,9 +119,10 @@ class FakeCartesiaContext:
 
     def __init__(self, chunks: list[bytes]) -> None:
         self._chunks = chunks
+        self.send_kwargs: dict[str, Any] | None = None
 
-    async def send(self, **_kwargs: Any) -> None:
-        pass
+    async def send(self, **kwargs: Any) -> None:
+        self.send_kwargs = kwargs
 
     async def no_more_inputs(self) -> None:
         pass
@@ -146,9 +147,14 @@ class FakeCartesiaConnection:
 
     def __init__(self, chunks: list[bytes]) -> None:
         self._chunks = chunks
+        self.last_context: FakeCartesiaContext | None = None
+        self.last_context_kwargs: dict[str, Any] | None = None
 
-    def context(self, **_kwargs: Any) -> FakeCartesiaContext:
-        return FakeCartesiaContext(self._chunks)
+    def context(self, **kwargs: Any) -> FakeCartesiaContext:
+        ctx = FakeCartesiaContext(self._chunks)
+        self.last_context = ctx
+        self.last_context_kwargs = kwargs
+        return ctx
 
     async def __aenter__(self) -> FakeCartesiaConnection:
         return self
@@ -169,6 +175,9 @@ def make_fake_cartesia_client(chunks: list[bytes]) -> MagicMock:
 
     fake_client = MagicMock()
     fake_client.tts = fake_tts
+    # Expose the underlying FakeCartesiaConnection so tests can introspect
+    # what was passed to ctx.send / conn.context (e.g., language hint).
+    fake_client._fake_conn = fake_conn
     return fake_client
 
 
