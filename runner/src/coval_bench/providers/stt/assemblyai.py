@@ -113,7 +113,7 @@ class AssemblyAIProvider(STTProvider):
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
         complete_turns: list[str] = []
-        first_end_of_turn_seen = False
+        last_final_time: float | None = None
 
         try:
             async for raw in ws:
@@ -136,17 +136,15 @@ class AssemblyAIProvider(STTProvider):
                         )
                     result.partial_transcripts.append(transcript)
 
-                if (
-                    msg_type == "Turn"
-                    and msg.get("end_of_turn")
-                    and not first_end_of_turn_seen
-                    and transcript
-                ):
+                if msg_type == "Turn" and msg.get("end_of_turn") and transcript:
                     complete_turns.append(transcript)
-                    first_end_of_turn_seen = True
+                    last_final_time = now
 
         except Exception as exc:
             logger.exception("assemblyai receive error", error=str(exc))
+
+        if last_final_time is not None and result.audio_start_time is not None:
+            result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
         if complete_turns:
             result.complete_transcript = " ".join(complete_turns).strip() or None
