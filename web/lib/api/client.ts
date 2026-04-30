@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Typed fetch wrapper for the Coval Benchmarks API.
  * All shapes are derived from the OpenAPI codegen — see lib/api/generated/schema.ts.

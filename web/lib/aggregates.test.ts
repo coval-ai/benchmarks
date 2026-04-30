@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Unit tests for lib/aggregates.ts.
  * Uses the codegen'd ResultOut type from the FastAPI OpenAPI schema.

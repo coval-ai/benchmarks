@@ -63,12 +63,11 @@ License: `CC-BY-4.0` (LibriSpeech `test-clean` is explicitly redistributable).
 ### `tts-v1.json`
 
 **What we benchmark.** TTS providers are scored on a fixed set of **30 short
-English transcripts** drawn from real Coval customer-service domains: order
+English transcripts** drawn from synthetic customer-service domains: order
 tracking, appointment scheduling, account verification, technical support.
 Transcripts are text-only (no reference audio) — so we measure latency, not
-intelligibility. License: **Coval-internal — not redistributable**, so this
-manifest is shipped inside the wheel but the corpus itself never goes to
-public GCS.
+intelligibility. License: **Apache-2.0** (same as the rest of the repo); the
+manifest is shipped inside the wheel.
 
 **What we measure on it.** TTFA (time to first audio byte, primary), RTF,
 end-to-end synthesis latency. There is no reference-audio quality metric —
@@ -92,7 +91,7 @@ manifest = {
     '_license': 'Apache-2.0',
     'id': 'tts-v1',
     'version': '1.0.0',
-    'license': 'Coval-internal \u2014 do not redistribute',
+    'license': 'Apache-2.0',
     'source': 'Coval TTS test cases',
     'items': rows,
 }
@@ -100,7 +99,7 @@ print(json.dumps(manifest, indent=2, ensure_ascii=False))
 " tts-source.csv > runner/src/coval_bench/datasets/manifests/tts-v1.json
 ```
 
-License: `Coval-internal — do not redistribute`.
+License: `Apache-2.0`.
 
 ## Schema
 

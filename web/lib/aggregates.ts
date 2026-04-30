@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Client-side aggregation. Computes per-(provider, model, metric_type) stats
  * from raw `Result` rows.

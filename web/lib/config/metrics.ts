@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 export const metricDescriptions = {
   ttfa: {
     short: "Time to First Audio",

@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Build a URL query string from a params object.
  * Omits keys whose value is undefined or null.

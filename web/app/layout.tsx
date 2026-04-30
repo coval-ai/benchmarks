@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Metadata } from "next";
 import { Montserrat } from "next/font/google";
 import { ThemeProvider } from "@/components/providers/ThemeProvider";

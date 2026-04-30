@@ -17,12 +17,11 @@ WER is artificially low (most providers train on LibriSpeech) — the value is
 in latency and per-provider regression-over-time.
 
 **TTS** — providers are scored on 30 short English customer-service transcripts
-(order tracking, appointments, account verification, tech support — Coval-internal,
-not redistributable). Metrics: TTFA, RTF, end-to-end synthesis latency. No
-reference-audio quality metric (voices differ by provider).
+(order tracking, appointments, account verification, tech support; Apache-2.0).
+Metrics: TTFA, RTF, end-to-end synthesis latency. No reference-audio quality
+metric (voices differ by provider).
 
-See `src/coval_bench/datasets/manifests/README.md` for full dataset details and
-`tmp/DECISIONS.md` ADR-020 for the rationale.
+See `src/coval_bench/datasets/manifests/README.md` for full dataset details.
 
 ## Local development
 

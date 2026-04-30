@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 export const modelDisplayNames: Record<string, string> = {
   // TTS
   "tts-1-hd": "TTS 1 HD",

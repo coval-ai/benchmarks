@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 import React from "react";
 import { BenchmarkData } from "@/types/benchmark.types";
 import { formatTimeWithSeconds } from "@/lib/utils/formatters";
