@@ -376,16 +376,16 @@ def test_load_manifest_reads_packaged_tts_manifest() -> None:
 
     manifest = _load_manifest("tts-v1")
     assert manifest.id == "tts-v1"
-    assert len(manifest.items) == 30  # all 30 legacy CSV rows
+    assert len(manifest.items) == 30  # 30 curated TTS prompts
 
 
 def test_load_manifest_reads_packaged_stt_manifest() -> None:
-    """_load_manifest round-trips the packaged stt-v1.json stub manifest."""
+    """_load_manifest round-trips the packaged stt-v1.json manifest."""
     from coval_bench.datasets.loader import _load_manifest
 
     manifest = _load_manifest("stt-v1")
     assert manifest.id == "stt-v1"
-    assert len(manifest.items) == 2  # Phase 2 stub has 2 placeholder items
+    assert len(manifest.items) == 50  # 50-utterance LibriSpeech sample (ADR-020)
 
 
 def test_load_dataset_dispatcher_stt(test_settings: Settings, tmp_path: Path) -> None:
