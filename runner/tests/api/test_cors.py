@@ -59,3 +59,60 @@ async def test_cors_methods_include_get_options(client: AsyncClient) -> None:
     )
     methods_header = response.headers.get("access-control-allow-methods", "")
     assert "GET" in methods_header
+
+
+async def test_cors_vercel_canonical_allowed(client: AsyncClient) -> None:
+    """The canonical Vercel project URL is in the static allowlist."""
+    response = await client.options(
+        "/v1/runs",
+        headers={
+            "Origin": "https://benchmarks-covalai.vercel.app",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code in (200, 204)
+    assert (
+        response.headers.get("access-control-allow-origin")
+        == "https://benchmarks-covalai.vercel.app"
+    )
+
+
+async def test_cors_vercel_branch_preview_allowed(client: AsyncClient) -> None:
+    """Vercel branch preview URLs match the regex allowlist."""
+    origin = "https://benchmarks-git-feat-foo-covalai.vercel.app"
+    response = await client.options(
+        "/v1/runs",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code in (200, 204)
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
+async def test_cors_vercel_hash_preview_allowed(client: AsyncClient) -> None:
+    """Vercel per-deployment hash URLs match the regex allowlist."""
+    origin = "https://benchmarks-abc123def-covalai.vercel.app"
+    response = await client.options(
+        "/v1/runs",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code in (200, 204)
+    assert response.headers.get("access-control-allow-origin") == origin
+
+
+async def test_cors_vercel_other_project_disallowed(client: AsyncClient) -> None:
+    """A Vercel URL for a different project does not match the regex."""
+    response = await client.options(
+        "/v1/runs",
+        headers={
+            "Origin": "https://other-project-covalai.vercel.app",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    acao = response.headers.get("access-control-allow-origin", "")
+    assert acao != "https://other-project-covalai.vercel.app"

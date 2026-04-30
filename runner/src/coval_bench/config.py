@@ -64,10 +64,17 @@ class Settings(BaseSettings):
     # --- API ---
     cors_origins: list[str] = [
         "https://benchmarks.coval.ai",
+        "https://benchmarks-covalai.vercel.app",
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
     ]
+    # Matches Vercel preview deploys for the covalai/benchmarks project:
+    # branch URLs (`benchmarks-git-<branch>-covalai.vercel.app`) and
+    # per-deployment hash URLs (`benchmarks-<hash>-covalai.vercel.app`).
+    # The canonical project URL is in cors_origins above; this regex is for
+    # ephemeral preview deploys only.
+    cors_origin_regex: str | None = r"^https://benchmarks-[a-z0-9-]+-covalai\.vercel\.app$"
     rate_limit_per_minute: int = 60
 
 
