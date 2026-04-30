@@ -101,7 +101,7 @@ export function useChartData({
   const getTimelineData = useCallback((): TimelineDataPoint[] => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "NTTFT";
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
     if (selectedModels.length === 0) {
       return [];
@@ -166,7 +166,7 @@ export function useChartData({
   const getViolinData = useCallback((): ViolinPlotData => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "NTTFT";
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
     if (selectedModels.length === 0) {
       return {
