@@ -52,12 +52,13 @@ class DeepgramProvider(STTProvider):
 
     def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
         if self._model == "flux-general-en":
-            # Without interim_results+no_delay the v2/listen preview endpoint
-            # buffers transcripts until CloseStream, leaving ttft unmeasurable.
+            # The v2/listen preview endpoint uses a conversational TurnInfo-based
+            # protocol — it does NOT accept interim_results / no_delay (those are
+            # v1/listen params) and rejects the WS upgrade with HTTP 400 if they
+            # are present. TurnInfo events stream as rolling updates by default.
             return (
                 "wss://api.preview.deepgram.com/v2/listen"
                 "?model=flux-general-en&sample_rate=16000&encoding=linear16"
-                "&interim_results=true&no_delay=true"
             )
         url = (
             f"wss://api.deepgram.com/v1/listen"
@@ -173,7 +174,36 @@ class DeepgramProvider(STTProvider):
                     result.vad_events_count = (result.vad_events_count or 0) + 1
                     continue
 
-                if msg_type in ("SpeechEnded", "Metadata", "Connected", "TurnInfo"):
+                if msg_type in ("SpeechEnded", "Metadata", "Connected"):
+                    continue
+
+                # flux v2/listen emits TurnInfo (not Results). Each TurnInfo
+                # carries a rolling top-level "transcript" + "words" array,
+                # NOT the channel.alternatives shape. Handle it inline so we
+                # can mark the latest TurnInfo as the best transcript so far.
+                if msg_type == "TurnInfo":
+                    transcript = str(msg.get("transcript", "")).strip()
+                    if not transcript:
+                        words: list[dict[str, Any]] = msg.get("words", [])
+                        parts = []
+                        for w in words:
+                            text = (
+                                str(w.get("punctuated_word", "")).strip()
+                                or str(w.get("word", "")).strip()
+                            )
+                            if text:
+                                parts.append(text)
+                        transcript = " ".join(parts)
+                    if not transcript:
+                        continue
+                    if result.ttft_seconds is None and result.audio_start_time is not None:
+                        result.ttft_seconds = now - result.audio_start_time
+                        result.first_token_content = (
+                            transcript[:30] + "..." if len(transcript) > 30 else transcript
+                        )
+                    result.partial_transcripts.append(transcript)
+                    flux_latest = transcript
+                    last_final_time = now
                     continue
 
                 transcript = self._extract_transcript(msg)
@@ -189,12 +219,7 @@ class DeepgramProvider(STTProvider):
 
                 result.partial_transcripts.append(transcript)
 
-                if self._model == "flux-general-en":
-                    flux_latest = transcript
-                    # flux emits rolling updates; every transcript update is the
-                    # latest "final" view of what was said — track the last one.
-                    last_final_time = now
-                elif self._model in ("nova-2", "nova-3"):
+                if self._model in ("nova-2", "nova-3"):
                     if msg.get("speech_final"):
                         final_segments.append(transcript)
                         last_final_time = now
@@ -227,12 +252,10 @@ class DeepgramProvider(STTProvider):
     # ------------------------------------------------------------------
 
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
-        # Both the standard endpoint (v1/listen) and the flux preview endpoint
-        # (v2/listen) return Deepgram's standard Results message shape:
+        # Used for nova-2/nova-3/default (v1/listen Results messages):
         #   {"type": "Results", "channel": {"alternatives": [{"transcript": "..."}]}}
-        # An earlier implementation read a top-level "transcript" key for flux,
-        # but that key does not exist in a Results message — causing silent NULL
-        # TTFT for flux-general-en on every run.
+        # flux-general-en uses v2/listen TurnInfo messages, which carry a
+        # top-level "transcript" + "words" — handled inline in _receive.
         try:
             channel: dict[str, Any] = msg.get("channel", {})
             alternatives: list[dict[str, Any]] = channel.get("alternatives", [])

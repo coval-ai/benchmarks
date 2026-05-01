@@ -111,12 +111,13 @@ def test_build_websocket_url_nova3() -> None:
 def test_build_websocket_url_flux() -> None:
     p = make_provider("flux-general-en")
     url = p._build_websocket_url(16000, 1)
+    assert "/v2/listen" in url
     assert "preview.deepgram.com" in url
     assert "flux-general-en" in url
-    # Without these the v2/listen preview endpoint buffers transcripts until
-    # CloseStream, leaving ttft_seconds null on every run.
-    assert "interim_results=true" in url
-    assert "no_delay=true" in url
+    # v2/listen rejects interim_results / no_delay as unknown query params and
+    # closes the WS upgrade with HTTP 400 — both must be absent.
+    assert "interim_results" not in url
+    assert "no_delay" not in url
 
 
 # ---------------------------------------------------------------------------

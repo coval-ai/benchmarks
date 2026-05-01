@@ -2,46 +2,35 @@
   {"type": "Connected", "session_id": "test-flux-session-001"},
   {"type": "Metadata", "model_info": {"name": "flux-general-en"}},
   {
-    "type": "Results",
-    "channel_index": [0, 1],
-    "duration": 1.5,
-    "start": 0.0,
-    "is_final": false,
-    "speech_final": false,
-    "channel": {
-      "alternatives": [
-        {
-          "transcript": "hello world",
-          "confidence": 0.95,
-          "words": [
-            {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.4, "confidence": 0.97},
-            {"word": "world", "punctuated_word": "world", "start": 0.5, "end": 0.8, "confidence": 0.93}
-          ]
-        }
-      ]
-    }
+    "type": "TurnInfo",
+    "request_id": "test-flux-request-001",
+    "event": "StartOfTurn",
+    "turn_index": 0,
+    "audio_window_start": 0.0,
+    "audio_window_end": 0.4,
+    "transcript": "hello",
+    "words": [
+      {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.4, "confidence": 0.97}
+    ],
+    "end_of_turn_confidence": 0.05,
+    "sequence_id": 1
   },
   {
-    "type": "Results",
-    "channel_index": [0, 1],
-    "duration": 3.0,
-    "start": 0.0,
-    "is_final": true,
-    "speech_final": true,
-    "channel": {
-      "alternatives": [
-        {
-          "transcript": "hello world how are you",
-          "confidence": 0.96,
-          "words": [
-            {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.4, "confidence": 0.97},
-            {"word": "world", "punctuated_word": "world", "start": 0.5, "end": 0.8, "confidence": 0.93},
-            {"word": "how", "punctuated_word": "how", "start": 1.0, "end": 1.2, "confidence": 0.95},
-            {"word": "are", "punctuated_word": "are", "start": 1.3, "end": 1.5, "confidence": 0.95},
-            {"word": "you", "punctuated_word": "you", "start": 1.6, "end": 1.8, "confidence": 0.95}
-          ]
-        }
-      ]
-    }
+    "type": "TurnInfo",
+    "request_id": "test-flux-request-001",
+    "event": "Update",
+    "turn_index": 0,
+    "audio_window_start": 0.0,
+    "audio_window_end": 1.8,
+    "transcript": "hello world how are you",
+    "words": [
+      {"word": "hello", "punctuated_word": "Hello", "start": 0.1, "end": 0.4, "confidence": 0.97},
+      {"word": "world", "punctuated_word": "world", "start": 0.5, "end": 0.8, "confidence": 0.93},
+      {"word": "how", "punctuated_word": "how", "start": 1.0, "end": 1.2, "confidence": 0.95},
+      {"word": "are", "punctuated_word": "are", "start": 1.3, "end": 1.5, "confidence": 0.95},
+      {"word": "you", "punctuated_word": "you", "start": 1.6, "end": 1.8, "confidence": 0.95}
+    ],
+    "end_of_turn_confidence": 0.92,
+    "sequence_id": 2
   }
 ]
