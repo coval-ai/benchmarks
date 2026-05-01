@@ -27,6 +27,7 @@ export const modelColors: Record<string, string> = {
   "nova-2": "#F39C12",
   "nova-3": "#FFD633",
   "flux-general-en": "#FFFF66",
+  "flux-general-multi": "#FFB347",
 
   // AssemblyAI STT
   "universal-streaming": "#E74C3C",

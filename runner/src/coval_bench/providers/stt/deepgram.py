@@ -24,7 +24,7 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("default", "nova-2", "nova-3", "flux-general-en")
+_VALID_MODELS = ("default", "nova-2", "nova-3", "flux-general-en", "flux-general-multi")
 
 
 class DeepgramProvider(STTProvider):
@@ -51,14 +51,15 @@ class DeepgramProvider(STTProvider):
     # ------------------------------------------------------------------
 
     def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
-        if self._model == "flux-general-en":
-            # The v2/listen preview endpoint uses a conversational TurnInfo-based
-            # protocol — it does NOT accept interim_results / no_delay (those are
-            # v1/listen params) and rejects the WS upgrade with HTTP 400 if they
-            # are present. TurnInfo events stream as rolling updates by default.
+        if self._model.startswith("flux-"):
+            # v2/listen uses a conversational TurnInfo-based protocol — it does
+            # NOT accept interim_results / no_delay (those are v1/listen params)
+            # and rejects the WS upgrade with HTTP 400 if either is present.
+            # `flux-general-multi` shares the same endpoint as `flux-general-en`;
+            # we don't pass a language hint so the multilingual model auto-detects.
             return (
                 "wss://api.preview.deepgram.com/v2/listen"
-                "?model=flux-general-en&sample_rate=16000&encoding=linear16"
+                f"?model={self._model}&sample_rate=16000&encoding=linear16"
             )
         url = (
             f"wss://api.deepgram.com/v1/listen"

@@ -120,6 +120,17 @@ def test_build_websocket_url_flux() -> None:
     assert "no_delay" not in url
 
 
+def test_build_websocket_url_flux_multi() -> None:
+    p = make_provider("flux-general-multi")
+    url = p._build_websocket_url(16000, 1)
+    assert "/v2/listen" in url
+    assert "model=flux-general-multi" in url
+    # No language hint — multilingual model auto-detects.
+    assert "language=" not in url
+    assert "interim_results" not in url
+    assert "no_delay" not in url
+
+
 # ---------------------------------------------------------------------------
 # Invalid model
 # ---------------------------------------------------------------------------

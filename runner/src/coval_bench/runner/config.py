@@ -33,6 +33,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
     ProviderEntry(provider="deepgram", model="nova-3", enabled=True),
     ProviderEntry(provider="deepgram", model="flux-general-en", enabled=True),
+    ProviderEntry(provider="deepgram", model="flux-general-multi", enabled=True),
     ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
