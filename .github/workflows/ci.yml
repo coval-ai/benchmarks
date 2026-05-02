@@ -92,7 +92,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker build — runner image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: runner
           file: runner/Dockerfile
@@ -102,7 +102,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Docker build — api image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v7
         with:
           context: runner
           file: runner/Dockerfile.api
