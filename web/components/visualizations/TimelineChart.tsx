@@ -3,7 +3,7 @@
 
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
 import {
   LineChart,
   Line,
@@ -28,12 +28,13 @@ const TimelineChart: React.FC = () => {
     selectedModels,
     getWindowedTimelineData,
     getCurrentTimeWindow,
-    chartRef,
+    getTimelineTicks,
     isDragging,
     handleMouseDown,
     formatChartLabel,
     getProviderForModel,
   } = useDashboard();
+  const chartRef = useRef<HTMLDivElement>(null);
 
   const themeColors = useThemeColors();
   const windowedTimelineData = getWindowedTimelineData();
@@ -74,6 +75,7 @@ const TimelineChart: React.FC = () => {
               type="number"
               scale="time"
               domain={currentTimeWindow}
+              ticks={getTimelineTicks()}
               allowDataOverflow={false}
               axisLine={false}
               tickLine={false}

@@ -22,7 +22,11 @@ export const useTimelineWindow = ({
   visibleWindowMs
 }: UseTimelineWindowProps) => {
   const [timelineWindowEnd, setTimelineWindowEnd] = useState<number>(initialEnd);
-  const chartRef = useRef<HTMLDivElement>(null);
+  // Capture the chart element at mousedown time so drag math uses the chart
+  // the user actually clicked. Prior implementation shared a single chartRef
+  // between TimelineChart and PerformanceDeltaSection — last-mounted wins —
+  // which made drag distance scale wrong when the wrong rect was used.
+  const dragElementRef = useRef<HTMLElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
   const [dragStartTime, setDragStartTime] = useState(0);
@@ -36,7 +40,8 @@ export const useTimelineWindow = ({
     return [Math.min(...allTimelineData), Math.max(...allTimelineData)];
   }, [getTimelineData, visibleWindowMs]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
+    dragElementRef.current = e.currentTarget;
     setIsDragging(true);
     setDragStartX(e.clientX);
     setDragStartTime(timelineWindowEnd);
@@ -45,11 +50,13 @@ export const useTimelineWindow = ({
 
   const handleMouseMove = useCallback(
     (e: MouseEvent) => {
-      if (!isDragging || !chartRef.current) return;
+      const el = dragElementRef.current;
+      if (!isDragging || !el) return;
 
-      const rect = chartRef.current.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
       const deltaX = e.clientX - dragStartX;
       const chartWidth = rect.width;
+      if (chartWidth === 0) return;
       const timeRange = visibleWindowMs;
 
       const timeDelta = (deltaX / chartWidth) * timeRange;
@@ -68,6 +75,7 @@ export const useTimelineWindow = ({
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
+    dragElementRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -88,7 +96,6 @@ export const useTimelineWindow = ({
     isDragging,
     dragStartX,
     dragStartTime,
-    chartRef,
     handleMouseDown,
     handleMouseMove,
     handleMouseUp

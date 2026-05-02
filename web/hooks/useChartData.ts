@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type {
   BenchmarkData,
   ModelStats,
@@ -101,7 +101,9 @@ export function useChartData({
     );
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
-  const getTimelineData = useCallback((): TimelineDataPoint[] => {
+  // Memoized result so repeated callers (getFullTimeRange, getWindowedTimelineData,
+  // useTimelineWindow) share a single computation per (rawData, tab, selection).
+  const timelineData = useMemo<TimelineDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
@@ -110,7 +112,7 @@ export function useChartData({
       return [];
     }
 
-    const timelineData = rawData
+    const points = rawData
       .filter(
         (item) =>
           selectedModels.includes(item.model) &&
@@ -131,7 +133,7 @@ export function useChartData({
     const timestampGroups: { [key: number]: TimelineDataPoint } = {};
     const modelValueAccumulator: { [key: number]: { [key: string]: { total: number; count: number } } } = {};
 
-    timelineData.forEach((item) => {
+    points.forEach((item) => {
       if (!timestampGroups[item.timestamp]) {
         timestampGroups[item.timestamp] = {
           timestamp: item.timestamp,
@@ -164,6 +166,11 @@ export function useChartData({
 
     return Object.values(timestampGroups);
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+
+  const getTimelineData = useCallback(
+    (): TimelineDataPoint[] => timelineData,
+    [timelineData]
+  );
 
   // Violin plots need raw values for KDE — cannot use pre-aggregated stats
   const getViolinData = useCallback((): ViolinPlotData => {
@@ -602,6 +609,25 @@ export function useChartData({
     return [windowStart, timelineWindowEnd];
   }, [timelineWindowEnd]);
 
+  // Pinned tick positions for the X axis. Letting Recharts auto-pick ticks
+  // gives uneven spacing that shifts as the window pans. Six ticks (every
+  // 4 hours, snapped to whole-hour boundaries inside the window) stays
+  // readable without crowding.
+  const getTimelineTicks = useCallback((): number[] => {
+    const [windowStart, windowEnd] = [
+      timelineWindowEnd - TWENTY_FOUR_HOURS_MS,
+      timelineWindowEnd,
+    ];
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    const firstTick =
+      Math.ceil(windowStart / FOUR_HOURS_MS) * FOUR_HOURS_MS;
+    const ticks: number[] = [];
+    for (let t = firstTick; t <= windowEnd; t += FOUR_HOURS_MS) {
+      ticks.push(t);
+    }
+    return ticks;
+  }, [timelineWindowEnd]);
+
   const getWindowedTimelineData = useCallback((): TimelineDataPoint[] => {
     const [windowStart, windowEnd] = getCurrentTimeWindow();
     const fullData = getTimelineData();
@@ -679,6 +705,7 @@ export function useChartData({
     getGapData,
     getFullTimeRange,
     getCurrentTimeWindow,
+    getTimelineTicks,
     getWindowedTimelineData,
     getWindowedGapData,
     getSTTRankingData
