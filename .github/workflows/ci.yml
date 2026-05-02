@@ -72,14 +72,17 @@ jobs:
         run: uv run pytest -q --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1
 
       # -----------------------------------------------------------------------
-      # Secret scan — free for OSS; set empty string to suppress license prompt
-      # on private-repo runs (repo flips public at cutover).
+      # Secret scan — gitleaks/gitleaks-action@v2 now requires a paid license
+      # for org-owned repos (public or private). Use the OSS CLI binary
+      # directly instead, which is free and equivalent for our use case.
       # -----------------------------------------------------------------------
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ""
+        run: |
+          set -euo pipefail
+          GITLEAKS_VERSION=8.21.4
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --verbose
 
       # -----------------------------------------------------------------------
       # Docker build — confirm both Dockerfiles build; no push.
