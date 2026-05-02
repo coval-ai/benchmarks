@@ -3,7 +3,7 @@
 
 "use client";
 
-import React from "react";
+import React, { useRef } from "react";
 import {
   LineChart,
   Line,
@@ -25,15 +25,16 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 const PerformanceDeltaSection: React.FC = () => {
   const {
     selectedModels,
-    chartRef,
     isDragging,
     handleMouseDown,
     getWindowedGapData,
     getCurrentTimeWindow,
+    getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
     rawData,
   } = useDashboard();
+  const chartRef = useRef<HTMLDivElement>(null);
 
   const themeColors = useThemeColors();
   const tzAbbr = getLocalTimeZoneAbbr();
@@ -68,6 +69,7 @@ const PerformanceDeltaSection: React.FC = () => {
               type="number"
               scale="time"
               domain={getCurrentTimeWindow()}
+              ticks={getTimelineTicks()}
               allowDataOverflow={false}
               axisLine={false}
               tickLine={false}

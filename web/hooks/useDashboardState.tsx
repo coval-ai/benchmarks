@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import type { BenchmarkData, ModelsByProvider } from "@/types/benchmark.types";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
@@ -104,11 +104,15 @@ export function useDashboardState(page: "tts" | "stt") {
   const [timelineWindowEndTemp, setTimelineWindowEndTemp] =
     useState<number>(latestTimestamp);
 
-  // Re-anchor whenever the data's latest timestamp changes (i.e. on first
-  // load after the fetch resolves, and on subsequent refetches).
+  // Anchor once on first successful fetch, then leave the user's window alone.
+  // Re-anchoring on every refetch yanks the chart out from under the user mid-drag.
+  const hasAnchoredRef = useRef(false);
   useEffect(() => {
+    if (hasAnchoredRef.current) return;
+    if (rawData.length === 0) return;
     setTimelineWindowEndTemp(latestTimestamp);
-  }, [latestTimestamp]);
+    hasAnchoredRef.current = true;
+  }, [rawData.length, latestTimestamp]);
 
   // useChartData hook - pass page as activeTab internally
   const chartData = useChartData({
@@ -124,10 +128,7 @@ export function useDashboardState(page: "tts" | "stt") {
   const {
     timelineWindowEnd,
     isDragging,
-    chartRef,
     handleMouseDown,
-    handleMouseMove,
-    handleMouseUp,
   } = useTimelineWindow({
     initialEnd: timelineWindowEndTemp,
     getTimelineData: chartData.getTimelineData,
@@ -213,25 +214,6 @@ export function useDashboardState(page: "tts" | "stt") {
     window.addEventListener("resize", scaleHeatmapForMobile);
     return () => window.removeEventListener("resize", scaleHeatmapForMobile);
   }, [page]);
-
-  // Mouse drag event listeners
-  useEffect(() => {
-    if (isDragging) {
-      document.addEventListener(
-        "mousemove",
-        handleMouseMove as (e: Event) => void
-      );
-      document.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      document.removeEventListener(
-        "mousemove",
-        handleMouseMove as (e: Event) => void
-      );
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isDragging, handleMouseMove, handleMouseUp]);
 
   // Auto-select all models when data loads (disabled models already filtered out by useMemo above).
   useEffect(() => {
@@ -563,7 +545,6 @@ export function useDashboardState(page: "tts" | "stt") {
     toggleSidebar,
 
     // Timeline
-    chartRef,
     isDragging,
     handleMouseDown,
 
@@ -572,6 +553,7 @@ export function useDashboardState(page: "tts" | "stt") {
     getProviderForModel: chartData.getProviderForModel,
     getWindowedTimelineData: chartData.getWindowedTimelineData,
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
+    getTimelineTicks: chartData.getTimelineTicks,
     getWindowedGapData: chartData.getWindowedGapData,
     getViolinData: chartData.getViolinData,
     getSTTRankingData: chartData.getSTTRankingData,

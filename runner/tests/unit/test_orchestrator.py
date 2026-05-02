@@ -893,9 +893,7 @@ async def test_incremental_flush_persists_completed_tasks(
     reason="loop.add_signal_handler is POSIX-only",
 )
 @pytest.mark.asyncio
-async def test_sigterm_finalizes_run_as_partial(
-    audio_file: Path, settings: Settings
-) -> None:
+async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Settings) -> None:
     """SIGTERM mid-run → writer.finish_run called with PARTIAL.
 
     Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.

@@ -13,7 +13,7 @@ export function ApiProviders({ children }: { children: ReactNode }) {
         defaultOptions: {
           queries: {
             staleTime: 60_000,
-            refetchOnWindowFocus: true,
+            refetchOnWindowFocus: false,
             refetchInterval: 5 * 60_000,
             retry: 2,
           },

@@ -75,9 +75,7 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
     # disabled=True hides them from /v1/providers so the FE doesn't render
     # placeholder rows for models we aren't actually benchmarking.
     ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=True),
-    ProviderEntry(
-        provider="openai", model="tts-1", voice="alloy", enabled=False, disabled=True
-    ),
+    ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=False, disabled=True),
     ProviderEntry(
         provider="openai",
         model="gpt-4o-mini-tts",
@@ -103,9 +101,7 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
     # per Rime docs — same model ID promoted in place) + mistv3.
     ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="mistv3", voice="luna", enabled=True),
-    ProviderEntry(
-        provider="rime", model="mistv2", voice="luna", enabled=False, disabled=True
-    ),
+    ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False, disabled=True),
     # Hidden from the public catalogue (`disabled=True`). Never executed.
     ProviderEntry(
         provider="hume", model="octave-tts", voice="male_01", enabled=False, disabled=True
