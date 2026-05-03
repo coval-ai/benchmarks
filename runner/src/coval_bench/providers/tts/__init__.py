@@ -18,6 +18,7 @@ from coval_bench.providers.base import TTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
+from coval_bench.providers.tts.gradium import GradiumTTSProvider
 from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
 
@@ -33,6 +34,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
     "cartesia": CartesiaTTSProvider,
     "elevenlabs": ElevenLabsTTSProvider,
+    "gradium": GradiumTTSProvider,
     "deepgram": DeepgramTTSProvider,
     "rime": RimeTTSProvider,
 }
@@ -40,4 +42,4 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
 if HumeTTSProvider is not None:
     TTS_PROVIDERS["hume"] = HumeTTSProvider
 
-__all__ = ["TTS_PROVIDERS", "HUME_AVAILABLE"]
+__all__ = ["TTS_PROVIDERS", "HUME_AVAILABLE", "GradiumTTSProvider"]

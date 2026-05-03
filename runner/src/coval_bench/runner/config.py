@@ -38,6 +38,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
+    ProviderEntry(provider="gradium", model="default", enabled=True),
     # OFF; disabled=True hides these from the public catalogue.
     ProviderEntry(provider="google", model="short", enabled=False, disabled=True),
     ProviderEntry(provider="google", model="long", enabled=False, disabled=True),
@@ -95,6 +96,13 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         provider="deepgram",
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
+        enabled=True,
+    ),
+    # Gradium — added 2026-05-03: WebSocket streaming, Emma voice (American English).
+    ProviderEntry(
+        provider="gradium",
+        model="default",
+        voice="YTpq7expH9539ERJ",
         enabled=True,
     ),
     # Rime — re-activated 2026-04-30: arcana (resolves to Arcana v3 server-side
