@@ -19,7 +19,7 @@ import psycopg.rows
 from coval_bench.config import get_settings
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX
 
-LEGACY_RUNNER_SHA: Final[str] = "legacy-neon-import"
+LEGACY_RUNNER_SHA: Final[str] = "historical-import"
 LEGACY_DATASET_ID: Final[str] = "legacy:cv+local"
 LEGACY_DATASET_SHA256: Final[str] = "legacy:unverified"
 WINDOW_DAYS: Final[int] = 7
@@ -162,7 +162,7 @@ def _summarize(
     except Exception:
         target_url = "<not configured>"
 
-    lines.append(f"source: legacy Neon ({_redact_url(legacy_url)})")
+    lines.append(f"source: legacy import ({_redact_url(legacy_url)})")
     lines.append(f"target: {_redact_url(target_url)}")
 
     if rows:

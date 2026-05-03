@@ -255,7 +255,7 @@ def test_tts_dataset_text_only(test_settings: Settings, tmp_path: Path) -> None:
     tts_manifest = Manifest(
         id="tts-v1",
         version="1.0.0",
-        license="Coval-internal",
+        license="proprietary",
         source="test",
         items=[
             TTSManifestItem(testcase_id="TC001", transcript="hello world"),
@@ -415,7 +415,7 @@ def test_load_dataset_dispatcher_tts(test_settings: Settings, tmp_path: Path) ->
     tts_manifest = Manifest(
         id="tts-v1",
         version="1.0.0",
-        license="Coval-internal",
+        license="proprietary",
         source="test",
         items=[TTSManifestItem(testcase_id="TC001", transcript="hello")],
     )
@@ -438,7 +438,7 @@ def test_load_dataset_dispatcher_empty(test_settings: Settings, tmp_path: Path) 
     empty_manifest = Manifest(
         id="tts-v1",
         version="1.0.0",
-        license="Coval-internal",
+        license="proprietary",
         source="test",
         items=[],
     )

@@ -72,6 +72,16 @@ jobs:
         run: uv run pytest -q --disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1
 
       # -----------------------------------------------------------------------
+      # License scan — fail if any dep carries a copyleft license (GPL/AGPL/SSPL/BUSL).
+      # LGPL (psycopg, soxr, mirakuru, pytest-postgresql) is intentionally allowed.
+      # -----------------------------------------------------------------------
+      - name: pip-licenses
+        working-directory: runner
+        run: |
+          uv run pip-licenses \
+            --fail-on "GPL-2.0-only;GPL-2.0-or-later;GPL-3.0-only;GPL-3.0-or-later;AGPL-3.0-only;AGPL-3.0-or-later;SSPL-1.0;BUSL-1.1"
+
+      # -----------------------------------------------------------------------
       # Secret scan — gitleaks/gitleaks-action@v2 now requires a paid license
       # for org-owned repos (public or private). Use the OSS CLI binary
       # directly instead, which is free and equivalent for our use case.

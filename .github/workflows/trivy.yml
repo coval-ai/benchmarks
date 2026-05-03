@@ -7,7 +7,7 @@
 #
 # Runs:
 #   - weekly on Monday at 07:00 UTC (staggered 1 h after CodeQL)
-#   - on workflow_dispatch (Loren can trigger ad-hoc)
+#   - on workflow_dispatch (manual trigger)
 #
 # NOTE: :latest only exists after tag.yml has run on a v* tag at least once.
 # Until then the "Check :latest exists" step exits 0 with a warning and the
