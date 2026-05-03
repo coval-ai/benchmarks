@@ -103,7 +103,23 @@ export function normalizeSTTProviderName(providerName: string): string {
     assemblyai: "AssemblyAI",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
+    gradium: "Gradium",
     speechmatics: "Speechmatics"
+  };
+
+  const lower = providerName.toLowerCase();
+  return mappings[lower] ?? providerName;
+}
+
+export function normalizeTTSProviderName(providerName: string): string {
+  const mappings: Record<string, string> = {
+    cartesia: "Cartesia",
+    deepgram: "Deepgram",
+    elevenlabs: "ElevenLabs",
+    gradium: "Gradium",
+    hume: "Hume",
+    openai: "OpenAI",
+    rime: "Rime"
   };
 
   const lower = providerName.toLowerCase();

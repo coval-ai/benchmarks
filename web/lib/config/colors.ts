@@ -44,5 +44,6 @@ export const providerColors: Record<string, string> = {
   Deepgram: "#16A085",
   AssemblyAI: "#8E44AD",
   Speechmatics: "#21618C",
-  Rime: "#27AE60"
+  Rime: "#27AE60",
+  Gradium: "#1ABC9C"
 };

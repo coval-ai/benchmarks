@@ -10,7 +10,7 @@ import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { useTimelineWindow } from "@/hooks/useTimelineWindow";
-import { normalizeModelName, normalizeSTTProviderName } from "@/lib/utils/formatters";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
 import { computeModelStats, type Result } from "@/lib/aggregates";
@@ -122,6 +122,7 @@ export function useDashboardState(page: "tts" | "stt") {
     selectedTTSModels: page === "tts" ? selectedModels : [],
     selectedSTTModels: page === "stt" ? selectedModels : [],
     timelineWindowEnd: timelineWindowEndTemp,
+    modelsByProvider: page === "tts" ? ttsModelsByProvider : sttModelsByProvider,
   });
 
   // useTimelineWindow hook
@@ -444,7 +445,7 @@ export function useDashboardState(page: "tts" | "stt") {
     : "Speech-to-Text Models";
   const normalizeProviderName = page === "stt"
     ? normalizeSTTProviderName
-    : (name: string) => name;
+    : normalizeTTSProviderName;
 
   const violinDescription = {
     short: `Distribution of ${latencyLabel} values across all runs`,

@@ -6,6 +6,7 @@
 import { useCallback, useMemo } from "react";
 import type {
   BenchmarkData,
+  ModelsByProvider,
   ModelStats,
   TimelineDataPoint,
   ScatterDataPoint,
@@ -20,7 +21,7 @@ import {
   calculateStats,
   calculateKernelDensity
 } from "@/lib/utils/statistics";
-import { normalizeModelName, normalizeSTTProviderName } from "@/lib/utils/formatters";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { to15MinuteBucket } from "@/lib/utils/time";
 
@@ -37,6 +38,7 @@ interface UseChartDataParams {
   selectedTTSModels: string[];
   selectedSTTModels: string[];
   timelineWindowEnd: number;
+  modelsByProvider: ModelsByProvider;
 }
 
 export function useChartData({
@@ -45,7 +47,8 @@ export function useChartData({
   modelStats,
   selectedTTSModels,
   selectedSTTModels,
-  timelineWindowEnd
+  timelineWindowEnd,
+  modelsByProvider
 }: UseChartDataParams) {
   // Helper: find a stat row for a given model and metric
   const getStat = useCallback(
@@ -68,17 +71,22 @@ export function useChartData({
   // Helper function to get provider for a model
   const getProviderForModel = useCallback(
     (model: string): string => {
-      // Try modelStats first (cheaper), then fall back to rawData
+      // Try modelStats first (cheaper), then fall back to rawData, then providers config
       const stat = modelStats.find((s) => s.model === model);
-      const rawProvider = stat?.provider ?? rawData.find((d) => d.model === model)?.provider ?? "Unknown";
+      const rawFromData = stat?.provider ?? rawData.find((d) => d.model === model)?.provider;
+
+      // Fall back to providers config when no run data exists yet
+      const rawProvider = rawFromData ?? Object.entries(modelsByProvider).find(
+        ([, models]) => models.includes(model)
+      )?.[0] ?? "Unknown";
 
       if (activeTab === "stt") {
         return normalizeSTTProviderName(rawProvider);
       }
 
-      return rawProvider;
+      return normalizeTTSProviderName(rawProvider);
     },
-    [modelStats, rawData, activeTab]
+    [modelStats, rawData, activeTab, modelsByProvider]
   );
 
   // ─── Functions that still need raw data (distributions, individual points) ───

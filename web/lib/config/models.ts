@@ -26,5 +26,16 @@ export const sttProviderNames: Record<string, string> = {
   assemblyai: "AssemblyAI",
   deepgram: "Deepgram",
   elevenlabs: "ElevenLabs",
+  gradium: "Gradium",
   speechmatics: "Speechmatics"
+};
+
+export const ttsProviderNames: Record<string, string> = {
+  cartesia: "Cartesia",
+  deepgram: "Deepgram",
+  elevenlabs: "ElevenLabs",
+  gradium: "Gradium",
+  hume: "Hume",
+  openai: "OpenAI",
+  rime: "Rime"
 };
