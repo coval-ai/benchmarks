@@ -35,6 +35,7 @@ _VALID_MODELS = ("default",)
 _WS_URL = "wss://api.gradium.ai/api/speech/tts"
 _SAMPLE_RATE = 24000
 
+
 class GradiumTTSProvider(TTSProvider):
     """Gradium TTS provider using WebSocket streaming."""
 
