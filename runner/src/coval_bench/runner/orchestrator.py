@@ -545,7 +545,7 @@ async def run_benchmarks(
             import importlib.resources as _importlib_resources
 
             manifest_ref = _importlib_resources.files("coval_bench.datasets.manifests").joinpath(
-                "stt-v1.json"
+                f"{settings.dataset_id}.json"
             )
             manifest_bytes = manifest_ref.read_bytes()
             dataset_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
@@ -577,7 +577,7 @@ async def run_benchmarks(
             # 3. STT path
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
-                stt_dataset = load_dataset("stt-v1", settings=settings)
+                stt_dataset = load_dataset(settings.dataset_id, settings=settings)
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
 
                 stt_tasks = [

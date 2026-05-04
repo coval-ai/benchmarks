@@ -39,3 +39,6 @@ coverage.xml
 # OS noise
 .DS_Store
 Thumbs.db
+
+# MInDS-14 human-review sidecar (generated locally; not shipped in git)
+runner/src/coval_bench/datasets/manifests/minds14_raw.json

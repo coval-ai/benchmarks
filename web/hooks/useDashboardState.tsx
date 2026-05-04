@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { BenchmarkData, ModelsByProvider } from "@/types/benchmark.types";
+import type {
+  BarDataPoint,
+  BenchmarkData,
+  ModelsByProvider,
+} from "@/types/benchmark.types";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
@@ -10,6 +14,7 @@ import { useTimelineWindow } from "@/hooks/useTimelineWindow";
 import { normalizeModelName, normalizeSTTProviderName } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
+import type { ModelInfo } from "@/lib/api/client";
 import { computeModelStats, type Result } from "@/lib/aggregates";
 
 function adaptResult(row: Result): BenchmarkData {
@@ -31,7 +36,7 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [expandedProviders, setExpandedProviders] = useState<{[key: string]: boolean;}>({});
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [chartRefreshKey] = useState(0);
@@ -66,10 +71,14 @@ export function useDashboardState(page: "tts" | "stt") {
     const providers = providersQuery.data;
     if (providers) {
       for (const p of providers.tts) {
-        tts[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
+        tts[p.provider] = p.models
+          .filter((m: ModelInfo) => !m.disabled)
+          .map((m: ModelInfo) => m.model);
       }
       for (const p of providers.stt) {
-        stt[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
+        stt[p.provider] = p.models
+          .filter((m: ModelInfo) => !m.disabled)
+          .map((m: ModelInfo) => m.model);
       }
     }
     return { ttsModelsByProvider: tts, sttModelsByProvider: stt };
@@ -138,7 +147,7 @@ export function useDashboardState(page: "tts" | "stt") {
   // Event handlers
   const toggleProvider = useCallback(
     (provider: string) => {
-      setExpandedProviders((prev) => ({
+      setExpandedProviders((prev: Record<string, boolean>) => ({
         ...prev,
         [provider]: !prev[provider],
       }));
@@ -148,9 +157,9 @@ export function useDashboardState(page: "tts" | "stt") {
 
   const toggleModelSelection = useCallback(
     (model: string) => {
-      setSelectedModels((prev) =>
+      setSelectedModels((prev: string[]) =>
         prev.includes(model)
-          ? prev.filter((m) => m !== model)
+          ? prev.filter((m: string) => m !== model)
           : [...prev, model]
       );
     },
@@ -158,7 +167,7 @@ export function useDashboardState(page: "tts" | "stt") {
   );
 
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
+    setSidebarCollapsed((prev: boolean) => !prev);
     // Wait for CSS transition to complete (300ms), then trigger resize
     setTimeout(() => {
       window.dispatchEvent(new Event("resize"));
@@ -252,10 +261,10 @@ export function useDashboardState(page: "tts" | "stt") {
   const secondaryMetric = "WER";
 
   const primaryData = currentData.filter(
-    (item) => item.metric_type === primaryMetric
+    (item: BenchmarkData) => item.metric_type === primaryMetric
   );
   const secondaryData = currentData.filter(
-    (item) => item.metric_type === secondaryMetric
+    (item: BenchmarkData) => item.metric_type === secondaryMetric
   );
 
   let avgPrimary = 0;
@@ -280,13 +289,13 @@ export function useDashboardState(page: "tts" | "stt") {
     }
 
     const sttSecondaryData = currentData.filter(
-      (item) => item.metric_type === secondaryMetric
+      (item: BenchmarkData) => item.metric_type === secondaryMetric
     );
     if (selectedModels.length === 1) {
       if (sttSecondaryData.length > 0) {
         avgSecondary =
           sttSecondaryData.reduce(
-            (sum, item) => sum + (item.metric_value ?? 0),
+            (sum: number, item: BenchmarkData) => sum + (item.metric_value ?? 0),
             0
           ) / sttSecondaryData.length;
       }
@@ -295,16 +304,17 @@ export function useDashboardState(page: "tts" | "stt") {
         [key: string]: { avgSecondary: number; provider: string };
       } = {};
 
-      selectedModels.forEach((model) => {
+      selectedModels.forEach((model: string) => {
         const modelSecondaryData = sttSecondaryData.filter(
-          (item) => item.model === model
+          (item: BenchmarkData) => item.model === model
         );
 
         let modelAvgSecondary = Infinity;
         if (modelSecondaryData.length > 0) {
           modelAvgSecondary =
             modelSecondaryData.reduce(
-              (sum, item) => sum + (item.metric_value ?? 0),
+              (sum: number, item: BenchmarkData) =>
+                sum + (item.metric_value ?? 0),
               0
             ) / modelSecondaryData.length;
         }
@@ -334,8 +344,10 @@ export function useDashboardState(page: "tts" | "stt") {
     // TTS logic
     if (selectedModels.length === 1) {
       if (primaryData.length > 0) {
-        const primaryValues = primaryData.map((item) => item.metric_value ?? 0);
-        const sortedPrimary = primaryValues.sort((a, b) => a - b);
+        const primaryValues = primaryData.map(
+          (item: BenchmarkData) => item.metric_value ?? 0
+        );
+        const sortedPrimary = primaryValues.sort((a: number, b: number) => a - b);
         const medianIndex = Math.floor(sortedPrimary.length / 2);
         avgPrimary =
           sortedPrimary.length % 2 === 0
@@ -346,7 +358,8 @@ export function useDashboardState(page: "tts" | "stt") {
       if (secondaryData.length > 0) {
         avgSecondary =
           secondaryData.reduce(
-            (sum, item) => sum + (item.metric_value ?? 0),
+            (sum: number, item: BenchmarkData) =>
+              sum + (item.metric_value ?? 0),
             0
           ) / secondaryData.length;
       }
@@ -359,12 +372,12 @@ export function useDashboardState(page: "tts" | "stt") {
         };
       } = {};
 
-      selectedModels.forEach((model) => {
+      selectedModels.forEach((model: string) => {
         const modelPrimaryData = primaryData.filter(
-          (item) => item.model === model
+          (item: BenchmarkData) => item.model === model
         );
         const modelSecondaryData = secondaryData.filter(
-          (item) => item.model === model
+          (item: BenchmarkData) => item.model === model
         );
 
         let modelMedianPrimary = Infinity;
@@ -372,9 +385,9 @@ export function useDashboardState(page: "tts" | "stt") {
 
         if (modelPrimaryData.length > 0) {
           const primaryValues = modelPrimaryData.map(
-            (item) => item.metric_value ?? 0
+            (item: BenchmarkData) => item.metric_value ?? 0
           );
-          const sortedPrimary = primaryValues.sort((a, b) => a - b);
+          const sortedPrimary = primaryValues.sort((a: number, b: number) => a - b);
           const medianIndex = Math.floor(sortedPrimary.length / 2);
           modelMedianPrimary =
             sortedPrimary.length % 2 === 0
@@ -385,7 +398,8 @@ export function useDashboardState(page: "tts" | "stt") {
         if (modelSecondaryData.length > 0) {
           modelAvgSecondary =
             modelSecondaryData.reduce(
-              (sum, item) => sum + (item.metric_value ?? 0),
+              (sum: number, item: BenchmarkData) =>
+                sum + (item.metric_value ?? 0),
               0
             ) / modelSecondaryData.length;
         }
@@ -436,7 +450,7 @@ export function useDashboardState(page: "tts" | "stt") {
   const werBarData = chartData.getWERBarData();
 
   const werBarDataWithColors = useMemo(() => {
-    return werBarData.map((item) => ({
+    return werBarData.map((item: BarDataPoint) => ({
       ...item,
       fill: clickedWERBars.has(item.model)
         ? "#FF851B"

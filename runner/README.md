@@ -16,6 +16,10 @@ WER, TTFT, audio→final latency, RTF. Total audio per run ≈ 5–6 min. Absolu
 WER is artificially low (most providers train on LibriSpeech) — the value is
 in latency and per-provider regression-over-time.
 
+**STT v2** — optional frozen **60-clip** MInDS-14–style US banking customer-service
+audio (`DATASET_ID=stt-v2`); see `docs/methodology.md` and
+`src/coval_bench/datasets/manifests/README.md`.
+
 **TTS** — providers are scored on 30 short English customer-service transcripts
 (order tracking, appointments, account verification, tech support — Coval-internal,
 not redistributable). Metrics: TTFA, RTF, end-to-end synthesis latency. No
@@ -32,6 +36,36 @@ uv run python -m coval_bench --help
 uv run pytest -q
 ```
 
-Provider API keys are loaded from environment variables (or a `.env` file) — see `src/coval_bench/config.py` for the full list. All keys are optional locally; tests use VCR cassettes and never hit the network.
+Tests use VCR cassettes + fakes and never hit the network. Provider API keys are
+loaded from environment variables (or a `.env` file) — see
+`src/coval_bench/config.py` for the full list. All keys are optional locally.
+
+### Full stack (Postgres + API + runner image, real provider APIs)
+
+From the repo root:
+
+```bash
+# Create a `.env` in the repo root with POSTGRES_* and any provider keys you need
+# (variable names in `src/coval_bench/config.py`).
+docker compose up -d db          # Postgres on :5432
+# `migrate` and `runner` use Compose profiles — include them or Compose may not see the service:
+docker compose --profile init run --rm migrate   # alembic upgrade head
+docker compose up -d api         # FastAPI on http://localhost:8000
+
+# Trigger a single-item benchmark run (writes to the local Postgres):
+docker compose --profile tools run --rm runner coval-bench run --smoke --kind tts
+
+# Probe one TTS provider without DB writes:
+docker compose --profile tools run --rm runner coval-bench tts-smoke \
+  --provider cartesia --model sonic-3 --voice <voice-id> --text "hello"
+
+# Probe one STT provider without DB writes (no Postgres required):
+docker compose --profile tools run --rm runner coval-bench stt-preview \
+  --provider deepgram --model nova-2
+```
+
+The web FE (`web/`) is a Next.js app — run `pnpm dev` against `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+
+All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional for offline tests.
 
 Apache-2.0.

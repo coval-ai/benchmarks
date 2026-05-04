@@ -44,6 +44,7 @@ dependencies = [
 [project.optional-dependencies]
 google-stt = ["google-cloud-speech>=2.27"]
 hume-tts = ["hume>=0.7"]
+minds14-build = ["datasets>=2.18"]
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"
@@ -130,6 +131,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "aiohttp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "datasets.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]

@@ -28,6 +28,11 @@ class STTManifestItem(BaseModel):
     speaker_id: str | None = None  # LibriSpeech provenance
     chapter_id: str | None = None
     utterance_id: str | None = None
+    # MInDS-14 / custom STT provenance
+    gender: str | None = None
+    intent_class: int | None = None
+    intent_name: str | None = None
+    language: str | None = None  # "english" ( will add another language later)
 
 
 class TTSManifestItem(BaseModel):

@@ -60,6 +60,22 @@ This script:
 
 License: `CC-BY-4.0` (LibriSpeech `test-clean` is explicitly redistributable).
 
+### `stt-v2.json`
+
+**What we benchmark.** A frozen **60-clip** STT corpus derived from Hugging Face
+[`PolyAI/minds14`](https://huggingface.co/datasets/PolyAI/minds14) banking
+customer-service audio (`en-US`, `train`), **`CC-BY-4.0`**. The manifest is
+reviewed and pinned: **30 male / 30 female** speakers (one speaker per clip),
+realistic **call-center / phone-bandwidth** sound (resampled to 16 kHz mono for
+the runner), **intent-grouped** requests (pay bill, freeze account, app error,
+travel notification, etc.), and **diverse voices / US English accents** —
+complementing `stt-v1` LibriSpeech read speech. See `docs/methodology.md`
+(**STT v2**) for the design rationale.
+
+**Publishing / rebuild.** Use
+`python -m coval_bench.datasets.scripts.publish_reviewed_stt_v2` (see module
+docstring under `runner/src/coval_bench/datasets/scripts/`).
+
 ### `tts-v1.json`
 
 **What we benchmark.** TTS providers are scored on a fixed set of **30 short

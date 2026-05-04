@@ -1,0 +1,71 @@
+# Local development stack — Postgres + API + runner image.
+#
+# Usage:
+#   cp .env.example .env        # fill in provider keys (optional for offline tests)
+#   docker compose up -d db     # bring up Postgres only
+#   docker compose --profile init run --rm migrate
+#   docker compose up api       # FastAPI on http://localhost:8000
+#   docker compose --profile tools run --rm runner coval-bench run --smoke --kind tts
+#
+# The `runner` and `migrate` services have profiles so `docker compose up` only
+# starts long-running services (db, api). One-shot commands are invoked via
+# `docker compose run --rm <service> ...`.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-benchmarks}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-benchmarks}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build:
+      context: ./runner
+      dockerfile: Dockerfile
+    profiles: ["init"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-benchmarks}
+    command: ["coval-bench", "db", "migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./runner
+      dockerfile: Dockerfile.api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-benchmarks}
+    ports:
+      - "8000:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  runner:
+    build:
+      context: ./runner
+      dockerfile: Dockerfile
+    profiles: ["tools"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-benchmarks}
+      RUNNER_SHA: local
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

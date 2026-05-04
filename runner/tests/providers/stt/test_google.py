@@ -75,7 +75,16 @@ async def test_google_success(audio_pcm_bytes: bytes) -> None:
     responses = _load_fixture_responses()
 
     mock_client = MagicMock()
-    mock_client.streaming_recognize.return_value = iter(responses)
+
+    def _streaming_recognize_side_effect(*, requests: Any, **kwargs: Any) -> Any:
+        # Real gRPC consumes the request iterator (config + audio chunks). That
+        # drive sets ``audio_start_time`` on the first chunk; without draining
+        # ``requests``, TTFT stays None while transcripts can still finalize.
+        for _ in requests:
+            pass
+        return iter(responses)
+
+    mock_client.streaming_recognize.side_effect = _streaming_recognize_side_effect
 
     with patch(
         "coval_bench.providers.stt.google.SpeechClient",

@@ -14,7 +14,7 @@ import functools
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,6 +56,19 @@ class Settings(BaseSettings):
 
     # Path to a Google service-account JSON file mounted as a Secret-as-volume.
     google_application_credentials: Path | None = None
+
+    @field_validator("google_application_credentials", mode="before")
+    @classmethod
+    def _blank_credentials_env_is_none(cls, value: object) -> object:
+        """Treat empty ``GOOGLE_APPLICATION_CREDENTIALS=`` like unset (anonymous GCS reads).
+
+        Bare ``storage.Client()`` would otherwise chase ADC and fail locally.
+        """
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     # GCP project ID hosting the Google STT v2 recognizer. Required only when
     # the Google STT provider is enabled (optional `google-stt` extra).
