@@ -16,6 +16,10 @@ WER, TTFT, audio→final latency, RTF. Total audio per run ≈ 5–6 min. Absolu
 WER is artificially low (most providers train on LibriSpeech) — the value is
 in latency and per-provider regression-over-time.
 
+**STT v2** — optional frozen **60-clip** MInDS-14–style US banking customer-service
+audio (`DATASET_ID=stt-v2`); see `docs/methodology.md` and
+`src/coval_bench/datasets/manifests/README.md`.
+
 **TTS** — providers are scored on 30 short English customer-service transcripts
 (order tracking, appointments, account verification, tech support; Apache-2.0).
 Metrics: TTFA, RTF, end-to-end synthesis latency. No reference-audio quality
