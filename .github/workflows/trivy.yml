@@ -38,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Authenticate to GCP via WIF so Trivy can pull the private AR image.
       # runner-scanner is a dedicated read-only SA — bound to schedule +
