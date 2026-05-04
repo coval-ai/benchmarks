@@ -280,6 +280,14 @@ def load_stt_dataset(
             meta["chapter_id"] = raw_item.chapter_id
         if raw_item.utterance_id is not None:
             meta["utterance_id"] = raw_item.utterance_id
+        if raw_item.gender is not None:
+            meta["gender"] = raw_item.gender
+        if raw_item.intent_class is not None:
+            meta["intent_class"] = str(raw_item.intent_class)
+        if raw_item.intent_name is not None:
+            meta["intent_name"] = raw_item.intent_name
+        if raw_item.language is not None:
+            meta["language"] = raw_item.language
         items.append(
             DatasetItem(
                 path=local_path,

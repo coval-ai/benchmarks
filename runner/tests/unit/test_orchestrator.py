@@ -152,7 +152,7 @@ async def _orchestrator_env(  # noqa: ANN202
     tts_dataset.items = tts_items
 
     def _load_dataset(dataset_id: str, *, settings: Any) -> Any:
-        return stt_dataset if dataset_id == "stt-v1" else tts_dataset
+        return tts_dataset if dataset_id == "tts-v1" else stt_dataset
 
     fake_pool = MagicMock()
 
