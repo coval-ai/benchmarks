@@ -1,20 +1,10 @@
 {
   "_license": "Apache-2.0",
   "id": "stt-v2",
-  "version": "1.0.0",
-  "license": "PolyAI MInDS-14; verify redistribution terms before publishing",
-  "source": "PolyAI MInDS-14 en-US reviewed subset",
+  "version": "2.0.0",
+  "license": "CC-BY-4.0",
+  "source": "PolyAI MInDS-14 (Hugging Face PolyAI/minds14 en-US train); attribution per dataset card",
   "items": [
-    {
-      "path": "en-US~JOINT_ACCOUNT/602b9f97963e11ccd901cc32.wav",
-      "sha256": "475bfa4682e4ec8ae4731af25c93b3bb969079d013b4d784887049b1f92abc5b",
-      "transcript": "hi, i'd like to set up a joint account with my partner. i'm not seeing the option to do it on the app, so i called in to get some help. can i just do it over the phone with you and give you the information? or should i do it in the app and i'm missing something? okay, i'd prefer to just do it over the phone if possible, thanks",
-      "duration_sec": 24.234625,
-      "intent_class": 11,
-      "intent_name": "joint_account",
-      "gender": "male",
-      "language": "english"
-    },
     {
       "path": "en-US~JOINT_ACCOUNT/602ba81ebb1e6d0fbce920e6.wav",
       "sha256": "9ba2d1d312d67249ad27167b87421ff6929add3729129edaee49ae3521948ba3",
@@ -22,8 +12,25 @@
       "duration_sec": 10.922625,
       "intent_class": 11,
       "intent_name": "joint_account",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
+    },
+    {
+      "path": "en-US~JOINT_ACCOUNT/602baf85963e11ccd901ce47.wav",
+      "sha256": "f2ce33cde664d20a38a84b329d939a13b9b26789230c1c58ee4106693a09b5d8",
+      "transcript": "i was wanting to set up a joint account with my spouse and i was wondering do we each get a separate card, debit card and a separate way of knowing who is accessing the account? thank you.",
+      "duration_sec": 14.933375,
+      "intent_class": 11,
+      "intent_name": "joint_account",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~BALANCE/602bad6bbb1e6d0fbce921f7.wav",
+      "sha256": "6dbb021e3aaeb3ac8b2b4613f5a3b13901bc60b893fa62430801ae6ce329dca2",
+      "transcript": "yes, i'm wondering if i could find out what my account balance is right now, my checking and my savings. thank you.",
+      "duration_sec": 11.690625,
+      "intent_class": 4,
+      "intent_name": "balance",
+      "gender": "female"
     },
     {
       "path": "en-US~PAY_BILL/602ba90c05f96973d6794495.wav",
@@ -32,8 +39,7 @@
       "duration_sec": 12.714625,
       "intent_class": 13,
       "intent_name": "pay_bill",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~PAY_BILL/602ba4d505f96973d6794433.wav",
@@ -42,18 +48,16 @@
       "duration_sec": 9.813375,
       "intent_class": 13,
       "intent_name": "pay_bill",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
-      "path": "en-US~FREEZE/602ba7a1963e11ccd901ccfa.wav",
-      "sha256": "db650891e283860a8c9deef4e0b95b24a256374740b4a6f881dfea6ae033c6a4",
-      "transcript": "hi, i've lost my bank card and please stop all transactions. i don't want anybody using my card for anything. i don't know where it is. can you do this for me immediately? thank you.",
-      "duration_sec": 16.384,
-      "intent_class": 9,
-      "intent_name": "freeze_account",
-      "gender": "female",
-      "language": "english"
+      "path": "en-US~PAY_BILL/602ba74a05f96973d679446d.wav",
+      "sha256": "b5abcfed108f87da838c2f0c1478bf4b8c6d3fa237340c7d4a853dc87617694f",
+      "transcript": "hello, yes, i'm calling in regards to my credit card bill. i'd like to pay it a little bit early if i could. that would be great. thank you.",
+      "duration_sec": 10.837375,
+      "intent_class": 13,
+      "intent_name": "pay_bill",
+      "gender": "male"
     },
     {
       "path": "en-US~FREEZE/602ba1ed05f96973d6794409.wav",
@@ -62,28 +66,43 @@
       "duration_sec": 13.312,
       "intent_class": 9,
       "intent_name": "freeze_account",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~FREEZE/602b9e95bb1e6d0fbce91fbb.wav",
-      "sha256": "34166575936fbb837e15670e2864be95779d329e855fc32b469c2a01145e9acb",
-      "transcript": "hi, i lost my card. i'd like to freeze my card, stop all transactions. i don't know where i put it. i'm not sure if it was stolen or not. so i'd like it to be frozen. so that nothing can happen. thank you very much.",
-      "duration_sec": 17.152,
+      "path": "en-US~FREEZE/602ba64005f96973d679444e.wav",
+      "sha256": "76baa70fc0ff38d424a9ba0e3bd534e628bc207e83e7bca7796b6f649e8ca007",
+      "transcript": "hi, i suspect that there's been some fraud with my credit card, so i would like to put a phrase in my card so that there can be no more use of it.",
+      "duration_sec": 12.117375,
       "intent_class": 9,
       "intent_name": "freeze_account",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~FREEZE/602baa075f67b421554f645f.wav",
-      "sha256": "9b9cc76c53f2bb968fd59d7fd8d26344d154deb744b0b9dfbb523f5531870f11",
-      "transcript": "hello, yes, i'm calling because my card got stolen. yes, yes, it's an urgent situation. i would like to stop all transactions from my card. yes, freeze it completely. okay, thank you. bye.",
-      "duration_sec": 17.92575,
+      "path": "en-US~FREEZE/602bafaa5f67b421554f64dd.wav",
+      "sha256": "7bd73a8763aa070a245bfbdd58bc222520cc1eb44e3454b2e7637934cb8f3910",
+      "transcript": "hi, i was wondering if there was a way that you could freeze my card for me. i need to stop all transactions to my account right now.",
+      "duration_sec": 14.506625,
       "intent_class": 9,
       "intent_name": "freeze_account",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
+    },
+    {
+      "path": "en-US~FREEZE/602b997e963e11ccd901cbb5.wav",
+      "sha256": "1d6ce1e8285e46e70825cb5b19879bfa2e42865ec56fd40543be181e46e1635b",
+      "transcript": "hello, i just recently lost my card at the airport. will you be able to stop r",
+      "duration_sec": 9.386625,
+      "intent_class": 9,
+      "intent_name": "freeze_account",
+      "gender": "male"
+    },
+    {
+      "path": "en-US~FREEZE/602b9c73bb1e6d0fbce91f88.wav",
+      "sha256": "d672cb78b73e33b50c049b590735a8cadb11ebeb0a9266031327b22e72ceca8b",
+      "transcript": "hi, i need to place a freeze on my card. i have reason to believe that it has been stolen or has misplaced it.",
+      "duration_sec": 10.325375,
+      "intent_class": 9,
+      "intent_name": "freeze_account",
+      "gender": "female"
     },
     {
       "path": "en-US~APP_ERROR/602ba2d95f67b421554f63db.wav",
@@ -92,28 +111,16 @@
       "duration_sec": 15.139375,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~APP_ERROR/602ba528963e11ccd901cca8.wav",
-      "sha256": "2e93f70802925ef1cd1cc63bfd2920305db3ee75f256a479b735e1919ccc87e6",
-      "transcript": "hi, so i'm using your app on my phone and the app isn't working properly so i was wondering if you guys could help me.",
-      "duration_sec": 16.384,
-      "intent_class": 2,
-      "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~APP_ERROR/602ba668bb1e6d0fbce9209d.wav",
       "sha256": "6f4d978b160c3b9a95e929a7cae968171d774b2e6b57ae15911d8f2d7e210168",
-      "transcript": "i'm usually i usually use the app for my big services and today it's not working. can you help me access my account?",
+      "transcript": "i'm usually i usually use the app for my big servicesa and today it's not working. can you help me access my account?",
       "duration_sec": 12.117375,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~APP_ERROR/602baddbbb1e6d0fbce92215.wav",
@@ -122,18 +129,7 @@
       "duration_sec": 9.984,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~APP_ERROR/602b9febbb1e6d0fbce91fc8.wav",
-      "sha256": "c6ad09c2caf7fa5754add2cbb794e829184811c0a6c85bc0cde725eb678587ae",
-      "transcript": "hi, i was just using the banking app that you guys have on my phone and it's not loading up. it's saying that it can't access my account and then it won't go through. can you help me with this?",
-      "duration_sec": 16.64,
-      "intent_class": 2,
-      "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~APP_ERROR/602b9a5fbb1e6d0fbce91f52.wav",
@@ -142,28 +138,7 @@
       "duration_sec": 11.52,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~APP_ERROR/602ba131963e11ccd901cc45.wav",
-      "sha256": "e1b2bf4d491816f3bbcc26504c4ad1a383a13089e1c3892f80dbbf1338035833",
-      "transcript": "yeah, hi there. i just wanted to ask a quick question. i'm trying to access the app for your bank and it's not loading properly. i can't see anything. there's just a spinning cursor and it says, please try again in a few minutes. i come out of the app and i try again. still nothing happens. is there any help i can get?",
-      "duration_sec": 22.357375,
-      "intent_class": 2,
-      "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~APP_ERROR/602bab0f963e11ccd901cd80.wav",
-      "sha256": "7f972ef40cec06978e9e37ad6057b095d029ac488eedcb8fe202b81a3847fe2a",
-      "transcript": "hi, i'm trying to use the app and it is literally not working. it's not showing my transactions from sunday. i'm trying to pay a bill and also check the status of a check that needs to be cleared and the app keeps closing, it keeps crashing and it's not showing anything on my end.",
-      "duration_sec": 21.589375,
-      "intent_class": 2,
-      "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~APP_ERROR/602ba3bcbb1e6d0fbce92023.wav",
@@ -172,8 +147,7 @@
       "duration_sec": 11.861375,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~APP_ERROR/602b9a1f963e11ccd901cbca.wav",
@@ -182,28 +156,25 @@
       "duration_sec": 9.642625,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~APP_ERROR/602ba6dc963e11ccd901cce0.wav",
-      "sha256": "a90b8ada2c5fe09e57a479cb9b5f7eded8fac2284eb44a12817f37d98abe6daa",
-      "transcript": "yes, good morning. i was trying to use the android app to access my account information and it says that i have no accounts to service online. i was wondering if you could tell me when this information would be available again for me. thanks a lot.",
-      "duration_sec": 24.490625,
+      "path": "en-US~APP_ERROR/602ba50505f96973d6794437.wav",
+      "sha256": "67a4b6045f0da74148fd3df25b4efa58c5685198d5e8cf96765f79cc065b0a4b",
+      "transcript": "hi, i'm trying to use your app online. it says it's being serviced, and now i can't get to my account, and i can't see my balance. can you help me with this please?",
+      "duration_sec": 13.397375,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~APP_ERROR/602b972a963e11ccd901cb84.wav",
-      "sha256": "d11690c7fc7b3e296dbbbdbe520a03449b3a65e358d07fdde7c6cdf8d17d1a08",
-      "transcript": "hello, i'm trying to use your app for your bank service and for some reason the app doesn't seem to load whenever i'm trying to check my bank statement.",
-      "duration_sec": 8.704,
+      "path": "en-US~APP_ERROR/602b97d1bb1e6d0fbce91f1f.wav",
+      "sha256": "889cbeb8d50faa356d63a5d3c19fbb8b8adadb2da355c1a94d62daaf3b7adbb5",
+      "transcript": "hello, i'm calling for technical difficulties. i cannot access my bank account. and i was wondering what the problem is. thank you.",
+      "duration_sec": 9.386625,
       "intent_class": 2,
       "intent_name": "app_error",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~ADDRESS/602ba7df5f67b421554f6436.wav",
@@ -212,18 +183,7 @@
       "duration_sec": 10.325375,
       "intent_class": 1,
       "intent_name": "address",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~ADDRESS/602baaa805f96973d67944af.wav",
-      "sha256": "93f98025bd7b5cc4a694fe57ad239f065e05d761d51c151e724af25ed4b73d92",
-      "transcript": "hi, i want to change my address to something else. i have moved and i'm no longer at that particular address. so again, i'm calling about getting a new address or updating my address rather",
-      "duration_sec": 15.616,
-      "intent_class": 1,
-      "intent_name": "address",
-      "gender": "female",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~ATM_LIMIT/602ba91b05f96973d6794497.wav",
@@ -232,38 +192,7 @@
       "duration_sec": 9.472,
       "intent_class": 3,
       "intent_name": "atm_limit",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~ATM_LIMIT/602bad24963e11ccd901cdd0.wav",
-      "sha256": "75a38395784553b4e8ba48135353d4419d639f14d591d582327d7d95e12d0759",
-      "transcript": "hello, i'm trying to take some money from my account and i was wondering if you could tell me how much money i have in my account so that i can know how much it is. do you also know is there a limit each day that i can take? maybe i can't take all of it, but is it like 400 or 500 a day? thank you.",
-      "duration_sec": 24.234625,
-      "intent_class": 3,
-      "intent_name": "atm_limit",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~ATM_LIMIT/602ba64fbb1e6d0fbce92096.wav",
-      "sha256": "ce7ec05f8e0f83311cd82ffb46613cc447047f8b1f1c6def123a71bc38fb1ea0",
-      "transcript": "hi, i was wondering if there's any way to increase my withdrawal limit. what's the maximum amount of money that i can withdraw from the atm?",
-      "duration_sec": 15.36,
-      "intent_class": 3,
-      "intent_name": "atm_limit",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~ATM_LIMIT/602ba7815f67b421554f6430.wav",
-      "sha256": "594d53b78d4816ad285a4418096b4152147ef94b88e01f68642b94b70aa262e0",
-      "transcript": "good morning. yes, i was wondering if you could tell me what my maximum atm withdrawal limit would be on this account. good morning. yes, i was wondering if you could tell me what the actual withdrawal limit from an atm would be.",
-      "duration_sec": 34.133375,
-      "intent_class": 3,
-      "intent_name": "atm_limit",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~ATM_LIMIT/602ba3f35f67b421554f63eb.wav",
@@ -272,8 +201,16 @@
       "duration_sec": 9.984,
       "intent_class": 3,
       "intent_name": "atm_limit",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
+    },
+    {
+      "path": "en-US~ATM_LIMIT/602ba02f963e11ccd901cc38.wav",
+      "sha256": "190e71b3bec8e795b02d97f017586dfc2453e0a086144c6e66a3f393a256f954",
+      "transcript": "hi, i need to withdraw money from an atm. i was just wondering what the maximum amount of money i can withdraw at one time is. thank you.",
+      "duration_sec": 12.8,
+      "intent_class": 3,
+      "intent_name": "atm_limit",
+      "gender": "female"
     },
     {
       "path": "en-US~ATM_LIMIT/602ba672bb1e6d0fbce920a1.wav",
@@ -282,18 +219,43 @@
       "duration_sec": 14.08,
       "intent_class": 3,
       "intent_name": "atm_limit",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
-      "path": "en-US~ABROAD/602b9fa105f96973d67943f0.wav",
-      "sha256": "472376a65edf368c5d7e48550c14508876ef92007507b4e7322c7cd99c1e759c",
-      "transcript": "hi, yes, i'm going to be traveling to the united kingdom for a couple of weeks next month. i need to know if i can use my card from my bank account while i'm in europe.",
-      "duration_sec": 17.834625,
-      "intent_class": 0,
-      "intent_name": "abroad",
-      "gender": "female",
-      "language": "english"
+      "path": "en-US~ATM_LIMIT/602baa125f67b421554f6461.wav",
+      "sha256": "ad3d04ecbd7cd336847573766ca91e4fcfaf8fb55653d86b71687e1027a0aa88",
+      "transcript": "i would like to withdraw money from an atm and i'm wondering what the maximum amount of money i can withdraw at one time is.",
+      "duration_sec": 11.434625,
+      "intent_class": 3,
+      "intent_name": "atm_limit",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~ATM_LIMIT/602ba6ac05f96973d6794456.wav",
+      "sha256": "0b71285c095f1eaeddc73f57158c57263acd120bc4eaefa897ead9857dd4dc45",
+      "transcript": "hi, i'm at the atm now and i'm just curious about my limit. i want to make sure that i know my atm withdrawal limit so that i don't incur any fees.",
+      "duration_sec": 12.970625,
+      "intent_class": 3,
+      "intent_name": "atm_limit",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~ATM_LIMIT/602babf35f67b421554f6474.wav",
+      "sha256": "f61cc786c3f31b383cdd9ea06684c13932dc7713843f4754053edcd8067a8f1d",
+      "transcript": "what's the most amount of money i can withdraw in one time and during an entire day from an atm machine?",
+      "duration_sec": 9.984,
+      "intent_class": 3,
+      "intent_name": "atm_limit",
+      "gender": "male"
+    },
+    {
+      "path": "en-US~ATM_LIMIT/602b97d45f67b421554f6368.wav",
+      "sha256": "730a7b691fbc72f73d0fce85f773a5a9edb34a20ddded4546baac201f6ce40a1",
+      "transcript": "hi, i'd like to withdraw some money using my card from an atm. do i have a limit on how much money i can withdraw? and if so, can i get that changed?",
+      "duration_sec": 12.817375,
+      "intent_class": 3,
+      "intent_name": "atm_limit",
+      "gender": "female"
     },
     {
       "path": "en-US~ABROAD/602ba878963e11ccd901cd1d.wav",
@@ -302,8 +264,7 @@
       "duration_sec": 11.52,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~ABROAD/602ba7ee963e11ccd901cd08.wav",
@@ -312,18 +273,7 @@
       "duration_sec": 12.458625,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~ABROAD/602ba4a3bb1e6d0fbce92048.wav",
-      "sha256": "46abaf15be6a67370396a4b896c7c607e664989484fcb523c1a7c92d66a11a4e",
-      "transcript": "hi, yeah, i'm going to go on vacation actually for a few weeks and i wanted to ask whether my card works abroad. could i just get some information about that?",
-      "duration_sec": 19.285375,
-      "intent_class": 0,
-      "intent_name": "abroad",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~ABROAD/602ba62705f96973d6794449.wav",
@@ -332,8 +282,7 @@
       "duration_sec": 12.288,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~ABROAD/602ba930bb1e6d0fbce92115.wav",
@@ -342,8 +291,7 @@
       "duration_sec": 12.032,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~ABROAD/602ba967963e11ccd901cd36.wav",
@@ -352,18 +300,43 @@
       "duration_sec": 9.130625,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~ABROAD/602ba5aa05f96973d6794442.wav",
-      "sha256": "74d462f4190152e1904dd45fb4fde9603807e92731031bd25ccfec128c88a0c4",
-      "transcript": "good morning. i am going to be taking a trip to germany shortly and wanted to know whether my bank card will work while i am overseas.",
-      "duration_sec": 18.773375,
+      "path": "en-US~ABROAD/602b9a09963e11ccd901cbc3.wav",
+      "sha256": "fb9e6905238f193aef0a04b8fd138461ce7b037fbb9ff3c37db2030fa5e5a5bc",
+      "transcript": "hello, i'm about to travel abroad and i was just wondering if my card will work where i'm traveling to.",
+      "duration_sec": 9.301375,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
+    },
+    {
+      "path": "en-US~ABROAD/602b97f4963e11ccd901cb92.wav",
+      "sha256": "e327773c3005ae6c3d30651fec42eb98287e58d51230ea5ced7a6d08bd2681ae",
+      "transcript": "hi, i'm going to be going abroad and i'd like to know if i can use my card in england while i'm there or if i have to do anything special to activate it.",
+      "duration_sec": 10.496,
+      "intent_class": 0,
+      "intent_name": "abroad",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~ABROAD/602ba22c963e11ccd901cc57.wav",
+      "sha256": "84caa73a31bce79292fa37e60a56097629ae49f8c26e9d910e43615d99afdbb0",
+      "transcript": "hi, i'm going to be traveling abroad. i'm going to japan. and i just wondered if i'm going to be able to use my bank card when i'm there. if you could let me know that would be great. thank you.",
+      "duration_sec": 11.861375,
+      "intent_class": 0,
+      "intent_name": "abroad",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~ABROAD/602ba090bb1e6d0fbce91fda.wav",
+      "sha256": "f31b4dd29ff9babcc1a72aece32ada8af01ff05b20d0269bdd89637cb4a1e24c",
+      "transcript": "hello, i will be traveling in europe next month and i wanted to know if my card would work abroad or if there's anything i need to do in order to set that up.",
+      "duration_sec": 15.104,
+      "intent_class": 0,
+      "intent_name": "abroad",
+      "gender": "female"
     },
     {
       "path": "en-US~ABROAD/602b97075f67b421554f635e.wav",
@@ -372,38 +345,43 @@
       "duration_sec": 13.397375,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
-      "path": "en-US~ABROAD/602ba316bb1e6d0fbce9200d.wav",
-      "sha256": "90425cbb956bb1ef01cf354bfd131fb1feeb77799bb6b92906e079ee60485477",
-      "transcript": "yeah, so i'm going to europe in like a month. i was wondering if my card would work over there as well as here. i'm just doing it ahead of time to make sure that you know it actually works.",
-      "duration_sec": 15.957375,
+      "path": "en-US~ABROAD/602b9696963e11ccd901cb79.wav",
+      "sha256": "7636137525376bace2b43e1cfec9462b17cee0c2f81d080a0c0c858c65abf233",
+      "transcript": "i need my card abroad. can i pay for things when i'm in japan? hi, yes, i'm going on vacation for a few weeks and wanted to ask if i have to do anything.",
+      "duration_sec": 10.666625,
       "intent_class": 0,
       "intent_name": "abroad",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
-      "path": "en-US~LATEST_TRANSACTIONS/602b9d7e963e11ccd901cc15.wav",
-      "sha256": "a71083d652b539cd1a8cc7a8c9ce1bbed1a1ebbe284fd79c7fce24c4da2c275d",
-      "transcript": "hi, i like to know about my recent transactions. i think there's a payment that's been made that i don't know about.",
-      "duration_sec": 8.448,
-      "intent_class": 12,
-      "intent_name": "latest_transactions",
-      "gender": "female",
-      "language": "english"
+      "path": "en-US~DIRECT_DEBIT/602ba757bb1e6d0fbce920c9.wav",
+      "sha256": "5f266ed7d844d504ac67fca3be6fa4c829f0e09b4b85117e3eb27d3408016fba",
+      "transcript": "hi, i'm calling today about my direct debit. can you show me where i can look at my direct debit? thank you.",
+      "duration_sec": 11.178625,
+      "intent_class": 8,
+      "intent_name": "direct_debit",
+      "gender": "female"
     },
     {
-      "path": "en-US~LATEST_TRANSACTIONS/602ba44cbb1e6d0fbce92037.wav",
-      "sha256": "a801930e3e5d68711edeff76250ee23db0e6d947a44b142eb291f3042462aa87",
-      "transcript": "hi, i'm calling because i want to see my latest transactions on my account. can you please show me them? okay. there's a thing that i don't really recognize. i don't know what this is. yes, yes, yes, i do recognize that.",
-      "duration_sec": 20.340625,
+      "path": "en-US~LATEST_TRANSACTIONS/602b9a90963e11ccd901cbd0.wav",
+      "sha256": "8f3324061d9bfda6202c36f5764a2965f9da0fa58ce6cc7f166e7d097cda4245",
+      "transcript": "hello, i was looking at my recent transactions and i saw that there was a payment that i didn't make. will you be able to stop this payment? thank you.",
+      "duration_sec": 10.581375,
       "intent_class": 12,
       "intent_name": "latest_transactions",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
+    },
+    {
+      "path": "en-US~LATEST_TRANSACTIONS/602baf425f67b421554f64d3.wav",
+      "sha256": "111d70616120c8aa0af1f12c621b36146e1427aaf5df595fa5cc60ccfa66019a",
+      "transcript": "there's something in my account that i'm not sure about. can you show me my last transactions? because i'm not familiar with that payment. thank you.",
+      "duration_sec": 10.325375,
+      "intent_class": 12,
+      "intent_name": "latest_transactions",
+      "gender": "female"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602b99f6963e11ccd901cbc2.wav",
@@ -412,8 +390,7 @@
       "duration_sec": 9.301375,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602b9d96963e11ccd901cc18.wav",
@@ -422,18 +399,7 @@
       "duration_sec": 9.728,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~HIGH_VALUE_PAYMENT/602ba3b45f67b421554f63e7.wav",
-      "sha256": "fc078045d2279418a4a7e47cb388d477f60f58b813d6a30baeb6cd175589ad06",
-      "transcript": "hi, i'm trying to make a pretty large payment and i'm getting a message that i would get a text message. it says it's sms, i don't really know what that is or what i'm supposed to do with it.",
-      "duration_sec": 16.896,
-      "intent_class": 10,
-      "intent_name": "high_value_payment",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602b9ccb05f96973d67943e0.wav",
@@ -442,8 +408,7 @@
       "duration_sec": 14.08,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602babdc05f96973d67944c2.wav",
@@ -452,8 +417,7 @@
       "duration_sec": 11.349375,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602ba7e3bb1e6d0fbce920db.wav",
@@ -462,18 +426,16 @@
       "duration_sec": 12.117375,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~HIGH_VALUE_PAYMENT/602ba9dd963e11ccd901cd4e.wav",
-      "sha256": "ceca9e2288fbc3e94a4e26e59fb41fe6a006fc01179eb7d34e9f0369d73ecf18",
-      "transcript": "yeah, hi. i'm trying to make a fairly large payment using my debit card, and it keeps sending me the sms messages with confirmation codes. what exactly am i supposed to do with these? i've never used these confirmation codes before.",
-      "duration_sec": 25.685375,
+      "path": "en-US~HIGH_VALUE_PAYMENT/602b9d30bb1e6d0fbce91fa1.wav",
+      "sha256": "f2233486d648411298f3de76fed67c2b9d1aee6f4849266f6abe60bfdf6d0d41",
+      "transcript": "i'm trying to make a large payment online and i see that it says that it will send me a text message for confirmation. i was wondering why this is.",
+      "duration_sec": 9.557375,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~HIGH_VALUE_PAYMENT/602b9e9d963e11ccd901cc28.wav",
@@ -482,28 +444,25 @@
       "duration_sec": 13.003125,
       "intent_class": 10,
       "intent_name": "high_value_payment",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
-      "path": "en-US~CASH_DEPOSIT/602ba174963e11ccd901cc4b.wav",
-      "sha256": "8ce5937d1cdc000cf9308b081c0f71b47b930be7774032126facaae5fdde7e95",
-      "transcript": "hi, i wanted to deposit some money into my account. i was just wondering how i can transfer that into there.",
-      "duration_sec": 8.106625,
+      "path": "en-US~CASH_DEPOSIT/602baf09963e11ccd901ce21.wav",
+      "sha256": "f56a9b55a093939262c226a72185a2a82586c45dc3489e1ded67c3e81a707a83",
+      "transcript": "oh yes, good afternoon. i need some help. i'm trying to deposit some money into my account. and how can i do that? where can i make a deposit? or how can i transfer money to my account?",
+      "duration_sec": 12.629375,
       "intent_class": 7,
       "intent_name": "cash_deposit",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~CASH_DEPOSIT/602ba6e7963e11ccd901cce2.wav",
-      "sha256": "f5057bfb3634ac4e63c3bcc2ab0f48f37a3ddfa7be3d9cc87b9397497f2ece85",
-      "transcript": "hello, yes, i have a few questions on depositing money into the account. i was wondering if i could deposit some money and i'm not quite sure where, where can i deposit the money and how do i transfer money into the account if you could helph with that it would be great.",
-      "duration_sec": 18.346625,
+      "path": "en-US~CASH_DEPOSIT/602baea3bb1e6d0fbce92279.wav",
+      "sha256": "6870946748b21a9d60940b5463c4e2cd8c09fb9aa4408afa2e88db1d2319642f",
+      "transcript": "hi, i was hoping you could help me. i'm wondering what options i have for depositing money into my account. thanks.",
+      "duration_sec": 10.837375,
       "intent_class": 7,
       "intent_name": "cash_deposit",
-      "gender": "male",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~CARD_ISSUES/602ba502963e11ccd901cca4.wav",
@@ -512,18 +471,7 @@
       "duration_sec": 13.653375,
       "intent_class": 6,
       "intent_name": "card_issues",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~CARD_ISSUES/602ba87bbb1e6d0fbce920f7.wav",
-      "sha256": "186a4b8c5f0f5309ee54f75a032fb79b2ebfdc97fa1e2c28e5a8dc2efeff1e9f",
-      "transcript": "good morning. i'm trying to use my atm debit card and it is coming up refused. i was wondering if you could tell me why. i think i have enough money in the account to cover the charges. thank you very much.",
-      "duration_sec": 25.941375,
-      "intent_class": 6,
-      "intent_name": "card_issues",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~CARD_ISSUES/602b98ad963e11ccd901cba3.wav",
@@ -532,8 +480,7 @@
       "duration_sec": 9.557375,
       "intent_class": 6,
       "intent_name": "card_issues",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
     },
     {
       "path": "en-US~CARD_ISSUES/602b9854963e11ccd901cb9e.wav",
@@ -542,38 +489,7 @@
       "duration_sec": 14.953625,
       "intent_class": 6,
       "intent_name": "card_issues",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~CARD_ISSUES/602ba7efbb1e6d0fbce920dd.wav",
-      "sha256": "ec5a6d08182271b0813b6233930ab500eed561cd75eb894e7f73807a34ed0db5",
-      "transcript": "hi, i require some assistance. i'm a little bit confused because my card is just not working.ng. it completely stopped, i'm not able to purchase anything. i'm not sure why. i want som help as to why my card is not functioning and because i do need it to be working. so i just like some help with restoring my card. thank you.",
-      "duration_sec": 24.405375,
-      "intent_class": 6,
-      "intent_name": "card_issues",
-      "gender": "female",
-      "language": "english"
-    },
-    {
-      "path": "en-US~CARD_ISSUES/602ba333963e11ccd901cc6c.wav",
-      "sha256": "7b629c42222ece0866f31c27597f43b242d733c5dd9faa4a6388c6bd76a54b88",
-      "transcript": "hey, i'm calling to see why my debit card was declining. i tried to pay for groceries and it kept declining. i tried like four times. i don't know if i haven't used a different debit card but is there a problem with my balance at the app isn't showing or is it like is do i need a new card? what's the reason my payment declined? yeah, i'd appreciate some help. thanks.",
-      "duration_sec": 28.074625,
-      "intent_class": 6,
-      "intent_name": "card_issues",
-      "gender": "male",
-      "language": "english"
-    },
-    {
-      "path": "en-US~CARD_ISSUES/602baeb75f67b421554f64be.wav",
-      "sha256": "9a6e75abb3ada200071a27675ee454b7038b44b58c897967d7f13b5aaddaf381",
-      "transcript": "hi, good afternoon. can you help me with my card? i'm having trouble here at the grocery store and i'm trying to use my card, but it won't work. it will not make a payment here. can you tell me what's wrong or what's... can you help me resolve this please?",
-      "duration_sec": 16.981375,
-      "intent_class": 6,
-      "intent_name": "card_issues",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
       "path": "en-US~CARD_ISSUES/602ba7db963e11ccd901cd06.wav",
@@ -582,18 +498,34 @@
       "duration_sec": 12.8,
       "intent_class": 6,
       "intent_name": "card_issues",
-      "gender": "female",
-      "language": "english"
+      "gender": "female"
     },
     {
-      "path": "en-US~BUSINESS_LOAN/602bab57bb1e6d0fbce92194.wav",
-      "sha256": "403511faec87ccfbebd77ffe5e6032af6f847fc3ee607b9647866816bb4a1889",
-      "transcript": "hello, i am calling to talk about a new business loan that i want to take out. i'm trying to start a business with my husband and i wanted to know how can we start that process as far as applying for this business loan.",
-      "duration_sec": 16.725375,
-      "intent_class": 5,
-      "intent_name": "business_loan",
-      "gender": "female",
-      "language": "english"
+      "path": "en-US~CARD_ISSUES/602bae04bb1e6d0fbce9222d.wav",
+      "sha256": "07a4c1c6dfc37ebc287b3f6f895cf029f6248e320b3f9011db2501f832768211",
+      "transcript": "i was trying to use my card today and the card is not working. is there a problem that i have with it? could you tell me what's going on? why are my payments didn't go through?",
+      "duration_sec": 14.250625,
+      "intent_class": 6,
+      "intent_name": "card_issues",
+      "gender": "female"
+    },
+    {
+      "path": "en-US~CARD_ISSUES/602ba237963e11ccd901cc5a.wav",
+      "sha256": "26495ace17e15d4eb34e0f5b369e16600eb18a29b7d7c73a1352ccfb75160aac",
+      "transcript": "hi there,hi there i've just tried using my card and it doesn't let me pay with anything. is there something wrong? can you please help me figure out what's wrong with my card? thanks.",
+      "duration_sec": 12.373375,
+      "intent_class": 6,
+      "intent_name": "card_issues",
+      "gender": "male"
+    },
+    {
+      "path": "en-US~CARD_ISSUES/602ba0b0963e11ccd901cc3f.wav",
+      "sha256": "41c6209819e9e9c70e3b4385a01ece26bca8c2a439b4cd4231a0693732ddb4b3",
+      "transcript": "hi, i just got my new card in the mail and for some reason i'm not able to use it at the store. can you help me understand why my payments being to clean and why the cards not working?",
+      "duration_sec": 13.824,
+      "intent_class": 6,
+      "intent_name": "card_issues",
+      "gender": "female"
     },
     {
       "path": "en-US~BUSINESS_LOAN/602ba6b65f67b421554f6419.wav",
@@ -602,8 +534,16 @@
       "duration_sec": 11.264,
       "intent_class": 5,
       "intent_name": "business_loan",
-      "gender": "male",
-      "language": "english"
+      "gender": "male"
+    },
+    {
+      "path": "en-US~BUSINESS_LOAN/602bac4d963e11ccd901cda8.wav",
+      "sha256": "db7864a21e7cc90571ead411e15517e0f9e7afd589229226e31d3e2d65dcd67c",
+      "transcript": "hi, i'm an account holder, have been for 10 years, and i'd like to speak to somebody about taking out a business loan.",
+      "duration_sec": 14.250625,
+      "intent_class": 5,
+      "intent_name": "business_loan",
+      "gender": "male"
     }
   ]
 }

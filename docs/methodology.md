@@ -31,40 +31,61 @@ captions).
 for latency baselines and regression tracking, but not representative of
 **narrowband / telephony-shaped** audio, **accent and speaker variability**, or
 **messy real-world wording**. `stt-v2` fills that gap: **60** frozen clips from
-MInDS-14-style banking customer service (**30 male / 30 female** speakers in
+MInDS-14-style banking customer service (**36 female / 24 male** speakers in
 the packaged manifest), **one distinct speaker per clip**, grouped by
-**intent** (12 categories in the packaged manifest, e.g. pay bill, freeze
-card, app error). Clips are **resampled to
+**intent** (14 categories in the packaged manifest, e.g. pay bill, freeze
+account, ATM limit, abroad). Clips are **resampled to
 16 kHz mono** for the runner, but upstream captures retain **telephone-style
 bandwidth and codec/DSP character** — lower acoustic fidelity than LibriSpeech
 — on purpose, so WER and timings reflect **call-center STT** more than studio
 read speech. English is **US-market customer service** with natural
-speaker-to-speaker variation (including **regional accents** common in that
-setting).
+variation (including regional accents typical of that setting).
+
+**Subset construction (frozen in `stt-v2.json`).** The reviewed pool was
+narrowed using the same **practical goals** as **`stt-v1`**: keep utterances inside
+a **latency-friendly duration band**, require **enough clips to be usable as a bench**
+— we targeted **≥ 50**, then froze **60** rows — and preserved **breadth across the 14 customer-service intents** rather than collapsing into one conversational theme.
+
+For those **60** rows, **`duration_sec`** after export clusters around **≈ 9–15 s**, consistent with narrowing the eligible reviewed pool to about **9.0–15.15 s** before pinning.
+
+**Pre-commit validation.** Before committing the frozen manifest **`stt-v2.json`**, we
+performed a limited set of standard balance and composition checks. The objective was
+to confirm that the subset remained appropriate for **latency-fair** speech-to-text
+evaluation and did not show gross structural imbalance. The review addressed: (i)
+whether **duration** differed substantially between clips with **male** versus **female**
+metadata labels within the chosen band; (ii) whether the **duration filter** materially
+shifted inclusion relative to the wider **eligible pool** under the same rules; and
+(iii) whether **labeled-gender** counts departed markedly from a **50/50** reference
+split. Results were assessed at **α = 0.05**. **None** of these checks indicated that
+the **inclusion criteria** for the frozen **60-clip** subset should be revised.
+
+**Scope of public documentation.** The **authoritative** specification for reproduction
+is **`stt-v2.json`**, including each item’s **`path`**, **`transcript`**, and **`sha256`**.
+This document does **not** publish the full matrix of test statistics, *p*-values, or
+alternative windows; disclosing that level of detail increases the risk of **overfitting**
+to published diagnostics. **Operators** retain selection records (windows, intent
+filters, exclusions, and related notes) for **internal audit** and **regression**
+analysis. Those materials are **not** part of the public benchmark contract.
 
 **Runtime object layout.** The runner loads audio from
 `gs://<dataset_bucket>/stt-v2/<item.path>` (see
 `runner/src/coval_bench/datasets/loader.py`). There is no separate `/audio/`
 prefix unless paths inside the manifest include it.
 
-**Rebuilding / verifying.** From `runner/`, with the optional HF extra
-installed, run (see `manifests/README.md` for the full flags):
-
-```bash
-uv run python -m coval_bench.datasets.scripts.build_dataset build \
-  --dataset stt-v2 --bucket <bucket> [--dry-run]
-```
-
-Dry-run checks SHA256
-against the packaged manifest without GCS writes; omit `--dry-run` to upload.
-Optional **`HF_MINDS14_REVISION`** pins the Hub snapshot for byte-stable
-rebuilds.
+**Rebuilding / verifying.** `stt-v2` is **not** built through
+`build_dataset` (that CLI covers `stt-v1` / `tts-v1` only). Operators refresh
+pins from reviewed JSON + WAVs via **`publish_reviewed_stt_v2`** — see
+`runner/src/coval_bench/datasets/scripts/publish_reviewed_stt_v2.py` and
+`runner/src/coval_bench/datasets/manifests/README.md`. Optional HF export of
+reviewed clips uses **`export_minds14_reviewed_wavs`** (`minds14-build` /
+`datasets` deps). **`HF_MINDS14_REVISION`** can pin the Hub snapshot when
+re-deriving bytes from **`minds14_audio`** / HF (see that module).
 
 **Metrics on v2.** The same STT metrics apply as for `stt-v1` (WER after the
 normalization pipeline in `runner/src/coval_bench/metrics/wer.py`, TTFT,
-audio→final latency, RTF). Utterance durations are wider than LibriSpeech v1
-(see `duration_sec` in the manifest); interpret absolute WER and latency in
-that context.
+audio→final latency, RTF). **`duration_sec`** in the manifest stays within the
+**telephony‑oriented band** chosen above — compare leaderboard cells **within**
+`stt-v2`, not literal seconds against `stt-v1`.
 
 **ADR scope.** ADR-020 governs **LibriSpeech `stt-v1` construction** (round-robin
 by speaker in the 2.0–15.0 s window). **`stt-v2` item order and inclusion are

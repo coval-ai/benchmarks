@@ -65,12 +65,13 @@ License: `CC-BY-4.0` (LibriSpeech `test-clean` is explicitly redistributable).
 **What we benchmark.** A frozen **60-clip** STT corpus derived from Hugging Face
 [`PolyAI/minds14`](https://huggingface.co/datasets/PolyAI/minds14) banking
 customer-service audio (`en-US`, `train`), **`CC-BY-4.0`**. The manifest is
-reviewed and pinned: **30 male / 30 female** speakers (one speaker per clip),
-realistic **call-center / phone-bandwidth** sound (resampled to 16 kHz mono for
-the runner), **intent-grouped** requests (pay bill, freeze account, app error,
-travel notification, etc.), and **diverse voices / US English accents** —
-complementing `stt-v1` LibriSpeech read speech. See `docs/methodology.md`
-(**STT v2**) for the design rationale.
+human-reviewed and SHA-pinned; each row carries **`gender`** (metadata only — see
+**`docs/methodology.md`** for the **duration band**, **intent coverage goals**, and
+**pre-commit validation**, not a published test table), **one speaker per clip**,
+**14** **`intent_name`** categories (all represented), **realistic
+call-center / phone-bandwidth** sound (runner: **16 kHz mono**), and diverse
+**US-market English** voices — complementing `stt-v1` LibriSpeech read speech. See
+**`docs/methodology.md` (STT v2)** for the full rationale.
 
 **Publishing / rebuild.** Use
 `python -m coval_bench.datasets.scripts.publish_reviewed_stt_v2` (see module
