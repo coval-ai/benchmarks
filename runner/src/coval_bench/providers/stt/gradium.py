@@ -6,7 +6,8 @@
 Supports models: default
 Wire protocol: WebSocket, wss://api.gradium.ai/api/speech/asr
 Auth: x-api-key: <key>
-Setup: {"type":"setup","model_name":"default","input_format":"pcm_16000","json_config":"{\"language\": \"en\"}"}
+Setup: {"type":"setup","model_name":"default","input_format":"pcm_16000",
+        "json_config":"{\"language\": \"en\"}"}
 Audio: {"type":"audio","audio":"<base64-encoded PCM>"}
 Flush: {"type":"flush","flush_id":1}  -- forces buffered results to emit
 Close: {"type":"end_of_stream"}
