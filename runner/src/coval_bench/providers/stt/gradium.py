@@ -6,7 +6,8 @@
 Supports models: default
 Wire protocol: WebSocket, wss://api.gradium.ai/api/speech/asr
 Auth: x-api-key: <key>
-Setup: {"type":"setup","model_name":"default","input_format":"pcm"}
+Setup: {"type":"setup","model_name":"default","input_format":"pcm_16000",
+        "json_config":"{\"language\": \"en\"}"}
 Audio: {"type":"audio","audio":"<base64-encoded PCM>"}
 Flush: {"type":"flush","flush_id":1}  -- forces buffered results to emit
 Close: {"type":"end_of_stream"}
@@ -64,6 +65,9 @@ class GradiumSTTProvider(STTProvider):
         realtime_resolution: float = 0.1,
         audio_duration: float | None = None,
     ) -> TranscriptionResult:
+        if sample_rate != 16000:
+            raise ValueError(f"Gradium requires 16 kHz PCM input; got {sample_rate} Hz")
+
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
         total_start = time.monotonic()
 
@@ -72,7 +76,14 @@ class GradiumSTTProvider(STTProvider):
 
             async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
                 await ws.send(
-                    json.dumps({"type": "setup", "model_name": self._model, "input_format": "pcm"})
+                    json.dumps(
+                        {
+                            "type": "setup",
+                            "model_name": self._model,
+                            "input_format": "pcm_16000",
+                            "json_config": json.dumps({"language": "en"}),
+                        }
+                    )
                 )
 
                 send_task = asyncio.create_task(
