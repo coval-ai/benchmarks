@@ -4,7 +4,7 @@
 import React from "react";
 import { BenchmarkData } from "@/types/benchmark.types";
 import { formatTimeWithSeconds } from "@/lib/utils/formatters";
-import { to15MinuteBucket } from "@/lib/utils/time";
+import { to30MinuteBucket } from "@/lib/utils/time";
 
 interface GapTooltipProps {
   active?: boolean;
@@ -68,7 +68,7 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
               (d) =>
                 d.model === modelName &&
                 d.metric_type === "TTFT" &&
-                to15MinuteBucket(new Date(d.timestamp).getTime()) === labelTimestamp
+                to30MinuteBucket(new Date(d.timestamp).getTime()) === labelTimestamp
             )
             .sort(
               (a, b) =>
