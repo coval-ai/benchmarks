@@ -128,9 +128,6 @@ class GradiumSTTProvider(STTProvider):
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
         final_parts: list[str] = []
-        # "end_text" carries no text — it finalises the segment whose text arrived
-        # in the preceding "text" message.  Track it here.
-        pending_text: str = ""
 
         try:
             async for raw in ws:
@@ -158,19 +155,12 @@ class GradiumSTTProvider(STTProvider):
                             transcript[:30] + "..." if len(transcript) > 30 else transcript
                         )
                     result.partial_transcripts.append(transcript)
-                    pending_text = transcript
+                    final_parts.append(transcript)
+                    if result.audio_start_time is not None:
+                        result.audio_to_final_seconds = now - result.audio_start_time
                     continue
 
-                if msg_type == "end_text":
-                    # Commit the text that arrived with the preceding "text" message.
-                    if pending_text:
-                        final_parts.append(pending_text)
-                        if result.audio_start_time is not None:
-                            result.audio_to_final_seconds = now - result.audio_start_time
-                        pending_text = ""
-                    continue
-
-                if msg_type in ("flushed", "ready"):
+                if msg_type in ("flushed", "ready", "end_text"):
                     continue
 
                 if msg_type == "end_of_stream":
