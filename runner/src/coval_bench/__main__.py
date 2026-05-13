@@ -139,5 +139,58 @@ def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
     sys.exit(0 if ok else 1)
 
 
+@cli.command(name="stt-preview")
+@click.option(
+    "--dataset-id",
+    envvar="DATASET_ID",
+    default="stt-v2",
+    show_default=True,
+    help="Packaged manifest id / GCS prefix (stt-v1, stt-v2, …).",
+)
+@click.option(
+    "--bucket",
+    envvar="DATASET_BUCKET",
+    default="coval-benchmarks-datasets",
+    show_default=True,
+    help="GCS bucket containing /<dataset-id>/… WAV objects.",
+)
+@click.option("--provider", default="deepgram", show_default=True, help="STT provider key.")
+@click.option("--model", default="nova-2", show_default=True, help="Provider model id.")
+@click.option(
+    "--limit",
+    default=1,
+    show_default=True,
+    type=int,
+    help="Max utterances to transcribe (from start of manifest order).",
+)
+def stt_preview(dataset_id: str, bucket: str, provider: str, model: str, limit: int) -> None:
+    """Load corpus audio from GCS + call one STT upstream — **no database**.
+
+    Uses anonymous reads when ``GOOGLE_APPLICATION_CREDENTIALS`` is unset (public bucket).
+
+    Requires a valid ``<PROVIDER>_API_KEY`` in the environment or ``.env``. ``DATABASE_URL``
+    is optional; a harmless placeholder is used if unset.
+
+    Emits one JSON object to stdout. Exit code ``0`` = every item succeeded.
+    """
+    from coval_bench.stt_preview import run_stt_preview
+
+    exit_code, payload = asyncio.run(
+        run_stt_preview(
+            dataset_id=dataset_id,
+            dataset_bucket=bucket,
+            provider=provider,
+            model=model,
+            limit=max(1, limit),
+        )
+    )
+    click.echo(json.dumps(payload, indent=2))
+    if exit_code != 0:
+        hint: str | None = payload.get("error") if isinstance(payload, dict) else None
+        raise click.ClickException(
+            hint or f"stt-preview failed (exit {exit_code}); see JSON above for details."
+        )
+
+
 if __name__ == "__main__":
     cli()
