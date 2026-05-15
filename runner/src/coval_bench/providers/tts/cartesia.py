@@ -69,15 +69,19 @@ class CartesiaTTSProvider(TTSProvider):
                 )
 
                 start = time.monotonic()
-                # `language` MUST be passed on every send() — Cartesia v2 contexts
-                # don't propagate it from the conn.context(...) call. Without this
-                # explicit hint, sonic-3 falls back to multilingual auto-detect
-                # and intermittently hallucinates non-English output (CJK/Arabic/
-                # emoji transcripts), producing WER=100% rows in the benchmark.
+                # Both `output_format` and `language` MUST be passed on every
+                # send() — ctx.send() does NOT inherit them from conn.context().
+                # Omitting output_format causes the SDK to substitute its own
+                # default (pcm_f32le / 44100 Hz), which mismatches the WAV header
+                # written by _write_wav (pcm_s16le / 24000 Hz) and produces
+                # corrupt audio → Whisper hallucination → WER > 100%.
+                # Omitting language causes sonic-3 to auto-detect and intermittently
+                # synthesize non-English audio → WER = 100%.
                 await ctx.send(
                     model_id=self._model,
                     transcript=text,
                     voice=voice_spec,
+                    output_format=OUTPUT_FORMAT,
                     language="en",
                     continue_=False,
                 )
