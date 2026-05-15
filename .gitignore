@@ -43,3 +43,15 @@ coverage.xml
 .DS_Store
 Thumbs.db
 .vercel
+node_modules
+
+# Local knowledge base (never commit)
+insights.md
+
+# Local-only markdown (never commit — use a .local.md suffix)
+**/*.local.md
+
+# Package manager / toolchain caches (local)
+.pnpm-store/
+.uv-cache/
+runner/.uv-cache/

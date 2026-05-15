@@ -1,18 +1,28 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deepgram TTS provider — HTTP POST streaming to Deepgram Speak API."""
+"""Deepgram TTS provider — WebSocket streaming to Deepgram Speak API.
+
+Wire protocol (single-utterance benchmark path):
+  connect → recv Metadata → send Speak(text) → send Flush
+  → recv binary PCM frames until Flushed → close
+
+Rate limit: 20 Flush messages per 60 seconds per API key.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
 import time
 import wave
 from pathlib import Path
+from urllib.parse import urlencode
 
-import aiohttp
 import structlog
+import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
@@ -20,11 +30,11 @@ from coval_bench.providers.base import TTSProvider, TTSResult
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
-DEEPGRAM_TTS_URL = "https://api.deepgram.com/v1/speak"
+_DEEPGRAM_TTS_WS_BASE = "wss://api.deepgram.com/v1/speak"
 
 
 class DeepgramTTSProvider(TTSProvider):
-    """Deepgram TTS provider using HTTP streaming (Speak API)."""
+    """Deepgram TTS provider using WebSocket streaming (Speak API)."""
 
     enabled: bool = True
 
@@ -45,53 +55,50 @@ class DeepgramTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
-    @staticmethod
-    def _is_audio_chunk(chunk: object) -> bool:
-        if isinstance(chunk, bytes) and len(chunk) > 0:
-            return True
-        return bool(hasattr(chunk, "audio") and getattr(chunk, "audio", None)) or bool(
-            hasattr(chunk, "data") and getattr(chunk, "data", None)
-        )
-
     async def synthesize(self, text: str) -> TTSResult:
-        """Synthesize speech via Deepgram HTTP and return a TTSResult."""
+        """Synthesize speech via Deepgram WebSocket and return a TTSResult."""
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
 
-        headers = {
-            "Authorization": f"Token {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        params = {
-            "model": self._model,
-            "encoding": "linear16",
-            "sample_rate": str(SAMPLE_RATE),
-        }
-        payload = {"text": text}
+        qs = urlencode({"encoding": "linear16", "sample_rate": SAMPLE_RATE, "model": self._model})
+        url = f"{_DEEPGRAM_TTS_WS_BASE}?{qs}"
+        headers = {"Authorization": f"Token {self._api_key}"}
 
         try:
-            async with aiohttp.ClientSession() as session:
-                start = time.monotonic()
-                async with session.post(
-                    DEEPGRAM_TTS_URL,
-                    headers=headers,
-                    params=params,
-                    json=payload,
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise ValueError(f"Deepgram HTTP error {response.status}: {error_text}")
+            async with ws_client.connect(url, additional_headers=headers) as ws:
+                # Drain the server-initiated Metadata frame before starting the clock.
+                # Connection is fully established; t0 starts before Flush (synthesis trigger).
+                raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
+                if isinstance(raw, str):
+                    msg = json.loads(raw)
+                    if msg.get("type") == "Warning":
+                        logger.warning("deepgram_ws_warning", description=msg.get("description"))
 
-                    async for chunk in response.content.iter_any():
-                        if self._is_audio_chunk(chunk):
-                            if ttfa_ms is None:
-                                ttfa_ms = (time.monotonic() - start) * 1000
-                                logger.debug(
-                                    "deepgram_ttfa",
-                                    model=self._model,
-                                    ttfa_ms=ttfa_ms,
-                                )
-                            audio_chunks.append(chunk)
+                await ws.send(json.dumps({"type": "Speak", "text": text}))
+
+                # t0 — synthesis trigger (equivalent to the HTTP POST in the old path).
+                # Matches Cartesia's convention: t0 after connect, before text dispatch.
+                start = time.monotonic()
+                await ws.send(json.dumps({"type": "Flush"}))
+
+                async for raw in ws:
+                    if isinstance(raw, bytes):
+                        if ttfa_ms is None:
+                            ttfa_ms = (time.monotonic() - start) * 1000
+                            logger.debug(
+                                "deepgram_ttfa",
+                                model=self._model,
+                                ttfa_ms=ttfa_ms,
+                            )
+                        audio_chunks.append(raw)
+                        continue
+
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type", "")
+                    if msg_type == "Flushed":
+                        break
+                    if msg_type == "Warning":
+                        logger.warning("deepgram_ws_warning", description=msg.get("description"))
 
         except Exception as exc:
             logger.debug("deepgram_error", exc_info=True)
