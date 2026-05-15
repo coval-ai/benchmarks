@@ -160,6 +160,42 @@ async def test_cartesia_send_includes_language_en(fake_settings: Settings) -> No
         result.audio_path.unlink()
 
 
+@pytest.mark.asyncio
+async def test_cartesia_send_includes_output_format(fake_settings: Settings) -> None:
+    """Regression: ctx.send() must include output_format matching OUTPUT_FORMAT.
+
+    The Cartesia SDK AsyncWebSocketContext.send() does NOT inherit output_format
+    from conn.context() — ctx._output_format is only used by push(), not send().
+    When output_format is omitted from send(), the SDK substitutes its own default
+    (pcm_f32le / 44100 Hz). _write_wav then stamps the WAV header as pcm_s16le /
+    24000 Hz, producing a corrupt file. Whisper hallucinating on corrupt audio
+    causes WER > 100% in the benchmark.
+    """
+    from coval_bench.providers.tts.cartesia import OUTPUT_FORMAT
+
+    chunks = [make_pcm_bytes(240)]
+    provider = CartesiaTTSProvider(
+        fake_settings, model="sonic-3", voice="f786b574-daa5-4673-aa0c-cbe3e8534c02"
+    )
+    fake_client = make_fake_cartesia_client(chunks)
+
+    with patch("coval_bench.providers.tts.cartesia.AsyncCartesia", return_value=fake_client):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    fake_conn = fake_client._fake_conn
+    assert fake_conn.last_context is not None, "conn.context(...) was never called"
+    send_kwargs = fake_conn.last_context.send_kwargs
+    assert send_kwargs is not None, "ctx.send(...) was never called"
+    assert send_kwargs.get("output_format") == OUTPUT_FORMAT, (
+        f"ctx.send must pass output_format=OUTPUT_FORMAT (pcm_s16le/24000) to prevent "
+        f"SDK default (pcm_f32le/44100) corrupting the WAV file, got {send_kwargs!r}"
+    )
+
+    if result.audio_path is not None:
+        result.audio_path.unlink()
+
+
 def test_cartesia_missing_api_key() -> None:
     settings_no_key = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]
