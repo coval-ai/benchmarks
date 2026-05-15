@@ -14,7 +14,7 @@ import functools
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,7 +34,12 @@ class Settings(BaseSettings):
     # Pydantic's `PostgresDsn` rejects (empty host). psycopg / SQLAlchemy
     # validate the URL at connect time, so the Pydantic-side check would only
     # block the legitimate prod form without catching anything new.
-    database_url: str
+    #
+    # Default placeholder lets provider-only CLIs (e.g. ``coval-bench tts-smoke``) run
+    # without DATABASE_URL. Set DATABASE_URL for ``run``, migrate, API, and Docker Compose.
+    database_url: str = Field(
+        default="postgresql://unused:unused@127.0.0.1:5432/unused",
+    )
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
