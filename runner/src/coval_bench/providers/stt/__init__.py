@@ -19,6 +19,7 @@ from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
+from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
 
 # Google is optional — gated on the ``google-stt`` extra
@@ -35,6 +36,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "assemblyai": AssemblyAIProvider,
     "elevenlabs": ElevenLabsSTTProvider,
     "gradium": GradiumSTTProvider,
+    "smallest": SmallestSTTProvider,
     "speechmatics": SpeechmaticsProvider,
 }
 
@@ -48,6 +50,7 @@ __all__ = [
     "AssemblyAIProvider",
     "ElevenLabsSTTProvider",
     "GradiumSTTProvider",
+    "SmallestSTTProvider",
     "SpeechmaticsProvider",
     "GoogleSTTProvider",
 ]
