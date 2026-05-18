@@ -59,6 +59,10 @@ class SmallestSTTProvider(STTProvider):
         realtime_resolution: float = 0.1,
         audio_duration: float | None = None,
     ) -> TranscriptionResult:
+        if channels != 1:
+            raise ValueError(
+                f"Smallest AI Pulse only supports mono audio (channels=1), got channels={channels}"
+            )
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
         total_start = time.monotonic()
 
