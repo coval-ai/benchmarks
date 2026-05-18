@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Authenticate to GCP via WIF — no JSON key involved.
       # runner-deploy SA is bound to coval-ai/benchmarks refs/tags/v* by the
