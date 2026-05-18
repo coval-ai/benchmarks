@@ -48,12 +48,7 @@ class SmallestSTTProvider(STTProvider):
         return self._model
 
     def _build_websocket_url(self, sample_rate: int) -> str:
-        return (
-            f"{_WS_BASE_URL}"
-            f"?language=en"
-            f"&encoding=linear16"
-            f"&sample_rate={sample_rate}"
-        )
+        return f"{_WS_BASE_URL}?language=en&encoding=linear16&sample_rate={sample_rate}"
 
     async def measure_ttft(
         self,
