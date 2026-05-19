@@ -2,13 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Hume TTS provider — WebSocket streaming to Hume Octave TTS API.
-
-Wire protocol (single-utterance benchmark path):
-  connect (api_key in URL, version in URL) -> t0 -> send text msg -> send flush
-  -> recv binary PCM frames -> send close -> WS closes naturally
-
-Auth: api_key query param in WSS URL (Hume WS does not accept headers).
-Audio: raw PCM linear16 at 48 kHz mono (strip_headers=true, format_type=pcm).
+Hume WS does not accept headers
 """
 
 from __future__ import annotations
@@ -98,7 +92,6 @@ class HumeTTSProvider(TTSProvider):
             async with asyncio.timeout(_WS_SESSION_TIMEOUT_S):
                 async with ws_client.connect(url) as ws:
                     # t0: connection established; Hume WS sends no setup message.
-                    # Consistent with Cartesia/Deepgram/Gradium WS group convention.
                     start = time.monotonic()
 
                     await ws.send(
@@ -112,7 +105,6 @@ class HumeTTSProvider(TTSProvider):
                         )
                     )
                     await ws.send(json.dumps({"flush": True}))
-                    # Signal end of input; server sends remaining audio then closes.
                     await ws.send(json.dumps({"close": True}))
 
                     async for raw in ws:
