@@ -331,7 +331,10 @@ export function useChartData({
           y: yData.metric_value ?? 0,
           model: xData.model,
           benchmark: xData.benchmark,
-          provider: xData.provider
+          provider:
+            activeTab === "stt"
+              ? normalizeSTTProviderName(xData.provider)
+              : normalizeTTSProviderName(xData.provider)
         });
       }
     });
@@ -343,7 +346,7 @@ export function useChartData({
     const outlierCount = xValues.filter((val) => val > p99X).length;
 
     return { points: scatterPoints, p99X, outlierCount };
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels, getProviderForModel]);
 
   // Gap data needs per-timestamp comparisons — cannot use pre-aggregated stats
   const getGapData = useCallback((): TimelineDataPoint[] => {

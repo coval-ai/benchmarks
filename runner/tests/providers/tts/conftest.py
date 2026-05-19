@@ -94,11 +94,31 @@ class FakeWebSocket:
             return msg
         raise StopAsyncIteration
 
+    def __aiter__(self) -> _AsyncFakeWebSocketIter:
+        return _AsyncFakeWebSocketIter(self)
+
     async def __aenter__(self) -> FakeWebSocket:
         return self
 
     async def __aexit__(self, *_: object) -> None:
         pass
+
+
+class _AsyncFakeWebSocketIter:
+    """Async iterator over remaining FakeWebSocket messages (shares recv() index)."""
+
+    def __init__(self, ws: FakeWebSocket) -> None:
+        self._ws = ws
+
+    def __aiter__(self) -> _AsyncFakeWebSocketIter:
+        return self
+
+    async def __anext__(self) -> str | bytes:
+        if self._ws._idx >= len(self._ws._messages):
+            raise StopAsyncIteration
+        msg = self._ws._messages[self._ws._idx]
+        self._ws._idx += 1
+        return msg
 
 
 # ---------------------------------------------------------------------------

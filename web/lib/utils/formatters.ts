@@ -65,6 +65,7 @@ export function normalizeModelName(modelName: string): string {
     "aura-2-thalia-en": "Aura 2",
     arcana: "Arcana",
     mistv3: "Mist v3",
+    coda: "Coda",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -93,6 +94,17 @@ export function normalizeModelName(modelName: string): string {
     });
 }
 
+/** Display fallback for provider slugs not in the explicit maps below. */
+function capitalizeProviderSlug(providerName: string): string {
+  const trimmed = providerName.trim();
+  if (!trimmed) return trimmed;
+  return trimmed
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
 /**
  * Normalize STT provider name for display
  * @param providerName - Raw provider name from API
@@ -104,11 +116,12 @@ export function normalizeSTTProviderName(providerName: string): string {
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
-    speechmatics: "Speechmatics"
+    speechmatics: "Speechmatics",
+    rime: "Rime",
   };
 
   const lower = providerName.toLowerCase();
-  return mappings[lower] ?? providerName;
+  return mappings[lower] ?? capitalizeProviderSlug(providerName);
 }
 
 export function normalizeTTSProviderName(providerName: string): string {
@@ -119,9 +132,9 @@ export function normalizeTTSProviderName(providerName: string): string {
     gradium: "Gradium",
     hume: "Hume",
     openai: "OpenAI",
-    rime: "Rime"
+    rime: "Rime",
   };
 
   const lower = providerName.toLowerCase();
-  return mappings[lower] ?? providerName;
+  return mappings[lower] ?? capitalizeProviderSlug(providerName);
 }

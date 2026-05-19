@@ -105,8 +105,9 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="YTpq7expH9539ERJ",
         enabled=True,
     ),
-    # Rime — re-activated 2026-04-30: arcana (resolves to Arcana v3 server-side
-    # per Rime docs — same model ID promoted in place) + mistv3.
+    # Rime — all three on /ws3 WebSocket (rewired 2026-05-19).
+    # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
+    ProviderEntry(provider="rime", model="coda", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="mistv3", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False, disabled=True),

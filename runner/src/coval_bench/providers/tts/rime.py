@@ -1,18 +1,21 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Rime TTS provider — HTTP POST streaming to Rime TTS API."""
+"""Rime TTS provider — WebSocket streaming to Rime /ws3 JSON endpoint."""
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import tempfile
 import time
 import wave
 from pathlib import Path
+from urllib.parse import urlencode
 
-import aiohttp
 import structlog
+import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
@@ -20,15 +23,15 @@ from coval_bench.providers.base import TTSProvider, TTSResult
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
-RIME_TTS_URL = "https://users.rime.ai/v1/rime-tts"
+_WS_BASE = "wss://users-ws.rime.ai/ws3"
 
-VALID_MODELS = {"arcana", "mistv2", "mistv3"}
+VALID_MODELS = {"arcana", "coda", "mistv3"}
 
 
 class RimeTTSProvider(TTSProvider):
-    """Rime TTS provider using HTTP streaming."""
+    """Rime TTS provider using WebSocket /ws3 JSON streaming."""
 
-    enabled: bool = False  # Commented out in legacy run_tts.py
+    enabled: bool = False  # enabled via DEFAULT_TTS_MATRIX entries
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
@@ -47,12 +50,8 @@ class RimeTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
-    @staticmethod
-    def _is_audio_chunk(chunk: object) -> bool:
-        return isinstance(chunk, bytes) and len(chunk) > 0
-
     async def synthesize(self, text: str) -> TTSResult:
-        """Synthesize speech via Rime HTTP and return a TTSResult."""
+        """Synthesize speech via Rime /ws3 WebSocket and return a TTSResult."""
         if self._model not in VALID_MODELS:
             return TTSResult(
                 provider="rime",
@@ -68,37 +67,37 @@ class RimeTTSProvider(TTSProvider):
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
 
-        payload = {
-            "speaker": self._voice or "luna",
-            "text": text,
-            "modelId": self._model,
-            "repetition_penalty": 1.5,
-            "temperature": 0.5,
-            "top_p": 1,
-            "samplingRate": SAMPLE_RATE,
-            "max_tokens": 1200,
-        }
-
-        headers = {
-            "Accept": "audio/pcm",
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+        qs = urlencode(
+            {
+                "modelId": self._model,
+                "speaker": self._voice or "luna",
+                "audioFormat": "pcm",
+                "samplingRate": SAMPLE_RATE,
+                # segment=never: synthesis fires only on explicit eos, not on sentence
+                # boundary detection. Deterministic trigger; matches Deepgram Flush /
+                # Gradium end_of_stream / Hume flush patterns.
+                "segment": "never",
+            }
+        )
+        url = f"{_WS_BASE}?{qs}"
+        headers = {"Authorization": f"Bearer {self._api_key}"}
 
         try:
-            async with aiohttp.ClientSession() as session:
+            async with ws_client.connect(url, additional_headers=headers) as ws:
+                # t0 — WS connected; /ws3 sends no server-initiated setup frame.
+                # Consistent with Hume/Cartesia/Gradium: t0 after connect, before text send.
                 start = time.monotonic()
-                async with session.post(
-                    RIME_TTS_URL,
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        raise ValueError(f"Rime HTTP error {response.status}: {error_text}")
 
-                    async for chunk in response.content.iter_any():
-                        if self._is_audio_chunk(chunk):
+                await ws.send(json.dumps({"text": text}))
+                await ws.send(json.dumps({"operation": "eos"}))
+
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    msg_type = msg.get("type", "")
+
+                    if msg_type == "chunk":
+                        audio_bytes = base64.b64decode(msg["data"])
+                        if audio_bytes:
                             if ttfa_ms is None:
                                 ttfa_ms = (time.monotonic() - start) * 1000
                                 logger.debug(
@@ -106,10 +105,17 @@ class RimeTTSProvider(TTSProvider):
                                     model=self._model,
                                     ttfa_ms=ttfa_ms,
                                 )
-                            audio_chunks.append(chunk)
+                            audio_chunks.append(audio_bytes)
+
+                    elif msg_type == "done":
+                        break
+
+                    elif msg_type == "error":
+                        raise RuntimeError(msg.get("message", "rime /ws3 error"))
+                    # "timestamps" events are silently dropped — not needed for benchmark.
 
         except Exception as exc:
-            logger.debug("rime_error", exc_info=True)
+            logger.warning("rime_error", exc_info=True)
             return TTSResult(
                 provider="rime",
                 model=self._model,
@@ -131,7 +137,7 @@ class RimeTTSProvider(TTSProvider):
 
 
 def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    """Concatenate PCM chunks and write a WAV file to a temp location."""
+    """Concatenate raw PCM chunks and write a WAV file to a temp location."""
     fd, tmp_name = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     audio_data = b"".join(chunks)
