@@ -17,6 +17,8 @@ const normalizeModelName = (modelName: string): string => {
     "aura-2-thalia-en": "Aura 2",
     arcana: "Arcana",
     mistv3: "Mist v3",
+    "octave-tts": "Octave TTS",
+    "octave-2": "Octave 2",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",

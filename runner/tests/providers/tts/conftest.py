@@ -11,6 +11,7 @@ monkeypatched fake SDKs.
 from __future__ import annotations
 
 import wave as _wave
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -79,7 +80,7 @@ def sample_text() -> str:
 class FakeWebSocket:
     """Minimal async context-manager fake for websockets.connect()."""
 
-    def __init__(self, messages: list[str | bytes]) -> None:
+    def __init__(self, messages: Sequence[str | bytes]) -> None:
         self._messages = list(messages)
         self._idx = 0
         self.sent: list[str | bytes] = []
@@ -99,6 +100,15 @@ class FakeWebSocket:
 
     async def __aexit__(self, *_: object) -> None:
         pass
+
+    def __aiter__(self) -> FakeWebSocket:
+        return self
+
+    async def __anext__(self) -> str | bytes:
+        try:
+            return await self.recv()
+        except StopAsyncIteration:
+            raise StopAsyncIteration from None
 
 
 # ---------------------------------------------------------------------------

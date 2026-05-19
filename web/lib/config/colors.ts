@@ -20,6 +20,10 @@ export const modelColors: Record<string, string> = {
   arcana: "#33FF99",
   mistv3: "#0E5C32",
 
+  // Hume TTS
+  "octave-tts": "#7C3AED",
+  "octave-2": "#C026D3",
+
   // Deepgram TTS
   "aura-2-thalia-en": "#FC2D62",
 
@@ -45,5 +49,6 @@ export const providerColors: Record<string, string> = {
   AssemblyAI: "#8E44AD",
   Speechmatics: "#21618C",
   Rime: "#27AE60",
-  Gradium: "#1ABC9C"
+  Gradium: "#1ABC9C",
+  Hume: "#A855F7"
 };
