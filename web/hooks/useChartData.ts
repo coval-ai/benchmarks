@@ -21,7 +21,7 @@ import {
   calculateStats,
   calculateKernelDensity
 } from "@/lib/utils/statistics";
-import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { to15MinuteBucket } from "@/lib/utils/time";
 
@@ -50,11 +50,16 @@ export function useChartData({
   timelineWindowEnd,
   modelsByProvider
 }: UseChartDataParams) {
-  // Helper: find a stat row for a given model and metric
+  // Helper: find a stat row for a given model key and metric.
+  // Accepts composite "provider:model" keys or bare model slugs.
   const getStat = useCallback(
-    (model: string, metricType: string): ModelStats | undefined => {
+    (modelKey: string, metricType: string): ModelStats | undefined => {
+      const { provider, model } = parseModelKey(modelKey);
       return modelStats.find(
-        (s) => s.model === model && s.metric_type === metricType
+        (s) =>
+          s.model === model &&
+          (provider === "" || s.provider === provider) &&
+          s.metric_type === metricType
       );
     },
     [modelStats]
@@ -68,23 +73,28 @@ export function useChartData({
     []
   );
 
-  // Helper function to get provider for a model
+  // Helper function to get provider for a model.
+  // Accepts composite "provider:model" keys — extracts the provider directly.
   const getProviderForModel = useCallback(
-    (model: string): string => {
-      // Try modelStats first (cheaper), then fall back to rawData, then providers config
+    (modelKey: string): string => {
+      const { provider, model } = parseModelKey(modelKey);
+      if (provider) {
+        return activeTab === "stt"
+          ? normalizeSTTProviderName(provider)
+          : normalizeTTSProviderName(provider);
+      }
+      // Fallback for bare slugs: search modelStats, then rawData, then providers config
       const stat = modelStats.find((s) => s.model === model);
       const rawFromData = stat?.provider ?? rawData.find((d) => d.model === model)?.provider;
-
-      // Fall back to providers config when no run data exists yet
-      const rawProvider = rawFromData ?? Object.entries(modelsByProvider).find(
-        ([, models]) => models.includes(model)
-      )?.[0] ?? "Unknown";
-
-      if (activeTab === "stt") {
-        return normalizeSTTProviderName(rawProvider);
-      }
-
-      return normalizeTTSProviderName(rawProvider);
+      const rawProvider =
+        rawFromData ??
+        Object.entries(modelsByProvider).find(([, models]) =>
+          models.includes(modelKey)
+        )?.[0] ??
+        "Unknown";
+      return activeTab === "stt"
+        ? normalizeSTTProviderName(rawProvider)
+        : normalizeTTSProviderName(rawProvider);
     },
     [modelStats, rawData, activeTab, modelsByProvider]
   );
@@ -100,9 +110,10 @@ export function useChartData({
       return [];
     }
 
+    const selectedModelKeys = new Set(selectedModels);
     return rawData.filter(
       (item) =>
-        selectedModels.includes(item.model) &&
+        selectedModelKeys.has(toModelKey(item.provider, item.model)) &&
         metricTypes.includes(item.metric_type) &&
         item.metric_value !== null &&
         item.metric_value !== undefined
@@ -120,10 +131,11 @@ export function useChartData({
       return [];
     }
 
+    const selectedModelKeys = new Set(selectedModels);
     const points = rawData
       .filter(
         (item) =>
-          selectedModels.includes(item.model) &&
+          selectedModelKeys.has(toModelKey(item.provider, item.model)) &&
           item.metric_type === primaryMetric &&
           INCLUDED_STATUSES.has(item.status)
       )
@@ -133,7 +145,7 @@ export function useChartData({
           activeTab === "tts"
             ? item.metric_value ?? 0
             : (item.metric_value ?? 0) * 1000,
-        model: item.model,
+        modelKey: toModelKey(item.provider, item.model),
         benchmark: item.benchmark
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
@@ -151,10 +163,10 @@ export function useChartData({
       }
       const bucketAcc = modelValueAccumulator[item.timestamp];
       if (bucketAcc) {
-        if (!bucketAcc[item.model]) {
-          bucketAcc[item.model] = { total: 0, count: 0 };
+        if (!bucketAcc[item.modelKey]) {
+          bucketAcc[item.modelKey] = { total: 0, count: 0 };
         }
-        const modelAcc = bucketAcc[item.model];
+        const modelAcc = bucketAcc[item.modelKey];
         if (modelAcc) {
           modelAcc.total += item.value;
           modelAcc.count += 1;
@@ -195,19 +207,20 @@ export function useChartData({
       };
     }
 
+    const selectedModelKeys = new Set(selectedModels);
     const modelGroups: { [key: string]: BenchmarkData[] } = {};
 
     rawData.forEach((item) => {
-      if (!selectedModels.includes(item.model)) return;
+      const itemKey = toModelKey(item.provider, item.model);
+      if (!selectedModelKeys.has(itemKey)) return;
       if (item.metric_type !== primaryMetric) return;
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
 
-      if (!modelGroups[item.model]) {
-        modelGroups[item.model] = [];
+      if (!modelGroups[itemKey]) {
+        modelGroups[itemKey] = [];
       }
-      // noUncheckedIndexedAccess: guard after the initialization above
-      const modelGroup = modelGroups[item.model];
+      const modelGroup = modelGroups[itemKey];
       if (modelGroup) {
         modelGroup.push(item);
       }
@@ -298,18 +311,18 @@ export function useChartData({
       [key: string]: { [key: string]: BenchmarkData[] };
     } = {};
 
+    const selectedModelKeys = new Set(selectedModels);
     rawData.forEach((item) => {
-      if (!selectedModels.includes(item.model)) return;
+      if (!selectedModelKeys.has(toModelKey(item.provider, item.model))) return;
       if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
 
-      const key = `${item.benchmark}_${item.model}_${item.timestamp}`;
+      const key = `${item.benchmark}_${item.provider}_${item.model}_${item.timestamp}`;
       if (!benchmarkGroups[key]) {
         benchmarkGroups[key] = {};
       }
       if (!benchmarkGroups[key][item.metric_type]) {
         benchmarkGroups[key][item.metric_type] = [];
       }
-      // noUncheckedIndexedAccess: guard after initialization
       const metricGroup = benchmarkGroups[key][item.metric_type];
       if (metricGroup) {
         metricGroup.push(item);
@@ -329,7 +342,7 @@ export function useChartData({
               ? xData.metric_value ?? 0
               : (xData.metric_value ?? 0) * 1000,
           y: yData.metric_value ?? 0,
-          model: xData.model,
+          model: toModelKey(xData.provider, xData.model),
           benchmark: xData.benchmark,
           provider:
             activeTab === "stt"
@@ -356,10 +369,11 @@ export function useChartData({
 
     const primaryMetric = "TTFT";
 
+    const selectedSTTModelKeys = new Set(selectedSTTModels);
     const ttftData = rawData
       .filter(
         (item) =>
-          selectedSTTModels.includes(item.model) &&
+          selectedSTTModelKeys.has(toModelKey(item.provider, item.model)) &&
           item.metric_type === primaryMetric &&
           INCLUDED_STATUSES.has(item.status) &&
           item.metric_value !== null &&
@@ -368,7 +382,7 @@ export function useChartData({
       .map((item) => ({
         timestamp: to15MinuteBucket(new Date(item.timestamp).getTime()),
         value: (item.metric_value as number) * 1000,
-        model: item.model,
+        model: toModelKey(item.provider, item.model),
         benchmark: item.benchmark
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
@@ -453,8 +467,10 @@ export function useChartData({
       [key: number]: { [key: string]: { total: number; count: number } };
     } = {};
 
+    const selectedModelKeys = new Set(selectedModels);
     rawData.forEach((item) => {
-      if (!selectedModels.includes(item.model)) return;
+      const itemKey = toModelKey(item.provider, item.model);
+      if (!selectedModelKeys.has(itemKey)) return;
       if (item.metric_type !== latencyMetric) return;
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
@@ -467,10 +483,10 @@ export function useChartData({
         activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
       const bucket = timestampGroups[timestamp];
       if (bucket) {
-        if (!bucket[item.model]) {
-          bucket[item.model] = { total: 0, count: 0 };
+        if (!bucket[itemKey]) {
+          bucket[itemKey] = { total: 0, count: 0 };
         }
-        const modelAcc = bucket[item.model];
+        const modelAcc = bucket[itemKey];
         if (modelAcc) {
           modelAcc.total += latencyValue;
           modelAcc.count += 1;
@@ -495,7 +511,6 @@ export function useChartData({
     selectedModels.forEach((model) => {
       const werStat = getStat(model, "WER");
       const latencyStat = getStat(model, latencyMetric);
-      const rtfStat = getStat(model, "RTF");
 
       // Need both latency and WER data
       if (!werStat || !latencyStat) return;
@@ -537,8 +552,7 @@ export function useChartData({
         latencyP75: p75,
         latencyIQR: p75 - p25,
         avgWER: werStat.avg_value,
-        werStdDev: werStat.stddev_value,
-        avgRTF: rtfStat?.avg_value ?? 0
+        werStdDev: werStat.stddev_value
       });
     });
 
@@ -562,7 +576,6 @@ export function useChartData({
     selectedTTSModels.forEach((model) => {
       const latencyStat = getStat(model, "TTFA");
       const werStat = getStat(model, "WER");
-      const rtfStat = getStat(model, "RTF");
 
       if (!latencyStat || !werStat) return;
 
@@ -573,8 +586,7 @@ export function useChartData({
         latencyP75: latencyStat.p75,
         latencyIQR: latencyStat.p75 - latencyStat.p25,
         avgWER: werStat.avg_value,
-        werStdDev: werStat.stddev_value,
-        avgRTF: rtfStat?.avg_value ?? 0
+        werStdDev: werStat.stddev_value
       });
     });
 
@@ -665,6 +677,38 @@ export function useChartData({
     );
   }, [getCurrentTimeWindow, getGapData]);
 
+  /** Models that have at least one plotted point in the current timeline window. */
+  const getModelsWithTimelineData = useCallback((): string[] => {
+    const selectedModels =
+      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+    const windowed = getWindowedTimelineData();
+    return selectedModels.filter((model) =>
+      windowed.some(
+        (point) =>
+          point[`${model}_value`] !== undefined &&
+          point[`${model}_value`] !== null
+      )
+    );
+  }, [
+    activeTab,
+    selectedTTSModels,
+    selectedSTTModels,
+    getWindowedTimelineData,
+  ]);
+
+  /** Models that have at least one gap point in the current performance-delta window. */
+  const getModelsWithGapData = useCallback((): string[] => {
+    const selectedModels =
+      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+    const windowed = getWindowedGapData();
+    return selectedModels.filter((model) =>
+      windowed.some(
+        (point) =>
+          point[`${model}_gap`] !== undefined && point[`${model}_gap`] !== null
+      )
+    );
+  }, [activeTab, selectedTTSModels, selectedSTTModels, getWindowedGapData]);
+
   const getSTTRankingData = useCallback(() => {
     if (activeTab !== "stt" || selectedSTTModels.length === 0) {
       return [];
@@ -719,6 +763,8 @@ export function useChartData({
     getTimelineTicks,
     getWindowedTimelineData,
     getWindowedGapData,
+    getModelsWithTimelineData,
+    getModelsWithGapData,
     getSTTRankingData
   };
 }

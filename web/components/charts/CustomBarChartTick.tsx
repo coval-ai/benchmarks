@@ -2,47 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import {
+  normalizeModelName,
+  normalizeSTTProviderName,
+  normalizeTTSProviderName,
+} from "@/lib/utils/formatters";
+import { useActiveTab } from "@/hooks/useActiveTab";
 import { useThemeColors } from "@/hooks/useThemeColors";
-
-// Helper function to normalize model names
-const normalizeModelName = (modelName: string): string => {
-  // Mapping mirrors the backend's enabled provider matrix (runner/config.py).
-  const modelMappings: Record<string, string> = {
-    // TTS
-    "gpt-4o-mini-tts": "GPT-4o mini TTS",
-    eleven_multilingual_v2: "Multilingual v2",
-    eleven_flash_v2_5: "Flash v2.5",
-    eleven_turbo_v2_5: "Turbo v2.5",
-    "sonic-3": "Sonic 3",
-    "aura-2-thalia-en": "Aura 2",
-    arcana: "Arcana",
-    mistv3: "Mist v3",
-    "octave-tts": "Octave TTS",
-    "octave-2": "Octave 2",
-    coda: "Coda",
-    // STT
-    "nova-2": "Nova 2",
-    "nova-3": "Nova 3",
-    "flux-general-en": "Flux",
-    "flux-general-multi": "Flux Multilingual",
-    scribe_v2_realtime: "Scribe v2",
-    "universal-streaming": "Universal Streaming",
-    default: "Default",
-    enhanced: "Enhanced"
-  };
-
-  // Return mapped name if it exists
-  if (modelMappings[modelName]) {
-    return modelMappings[modelName];
-  }
-
-  // Fallback: automatic normalization for unmapped models
-  return modelName
-    .replace(/-/g, " ") // Replace hyphens with spaces
-    .split(" ") // Split into words
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize
-    .join(" "); // Join back together
-};
 
 const CustomBarChartTick: React.FC<{
   x?: number;
@@ -53,12 +19,17 @@ const CustomBarChartTick: React.FC<{
   sidebarCollapsed?: boolean;
 }> = ({ x = 0, y = 0, payload, getProviderForModel, isMobile = false, sidebarCollapsed = true }) => {
   const themeColors = useThemeColors();
+  const activeTab = useActiveTab();
 
   if (!payload) return null;
 
   const model = payload.value;
   const normalizedModel = normalizeModelName(model);
-  const provider = getProviderForModel(model);
+  const providerRaw = getProviderForModel(model);
+  const provider =
+    activeTab === "stt"
+      ? normalizeSTTProviderName(providerRaw)
+      : normalizeTTSProviderName(providerRaw);
 
   // Adjust font sizes based on sidebar state
   const modelFontSize = sidebarCollapsed ? "12px" : "10px";

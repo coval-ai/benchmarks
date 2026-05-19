@@ -43,7 +43,6 @@ export interface ModelHeatmapData {
   latencyIQR: number;
   avgWER: number;
   werStdDev: number;
-  avgRTF: number; // Will be 0 for TTS models
 }
 
 export interface ScatterDataResult {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 import { TooltipProps } from "@/types/chart.types";
 
 interface ScatterTooltipProps extends TooltipProps {
@@ -24,8 +25,8 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
       >
         <p
           style={{ margin: 0, fontWeight: "bold" }}
-        >{`Model: ${point.model}`}</p>
-        <p style={{ margin: 0 }}>{`Provider: ${point.provider}`}</p>
+        >{`Model: ${normalizeModelName(point.model)}`}</p>
+        <p style={{ margin: 0 }}>{`Provider: ${activeTab === "stt" ? normalizeSTTProviderName(point.provider) : normalizeTTSProviderName(point.provider)}`}</p>
         <p style={{ margin: 0 }}>{`${
           activeTab === "tts" ? "TTFA" : "TTFT"
         }: ${point.x.toFixed(0)}ms`}</p>

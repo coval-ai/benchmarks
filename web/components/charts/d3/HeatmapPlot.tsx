@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import * as d3 from "d3";
 import { HeatmapProps, SortConfig } from "@/types/chart.types";
 import { ModelHeatmapData } from "@/types/benchmark.types";
+import { normalizeModelName } from "@/lib/utils/formatters";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
@@ -382,7 +383,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
           .attr("dominant-baseline", "middle")
           .attr("fill", themeColors.label)
           .attr("font-size", "10px")
-          .text(model.model);
+          .text(normalizeModelName(model.model));
       } else {
         // Desktop: Single line as before
         const labelText = formatChartLabel(model.model, provider);
