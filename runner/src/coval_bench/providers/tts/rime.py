@@ -74,8 +74,6 @@ class RimeTTSProvider(TTSProvider):
                 "audioFormat": "pcm",
                 "samplingRate": SAMPLE_RATE,
                 # segment=never: synthesis fires only on explicit eos, not on sentence
-                # boundary detection. Deterministic trigger; matches Deepgram Flush /
-                # Gradium end_of_stream / Hume flush patterns.
                 "segment": "never",
             }
         )
@@ -84,8 +82,6 @@ class RimeTTSProvider(TTSProvider):
 
         try:
             async with ws_client.connect(url, additional_headers=headers) as ws:
-                # t0 — WS connected; /ws3 sends no server-initiated setup frame.
-                # Consistent with Hume/Cartesia/Gradium: t0 after connect, before text send.
                 start = time.monotonic()
 
                 await ws.send(json.dumps({"text": text}))
