@@ -315,7 +315,7 @@ requires-dist = [
     { name = "soundfile", specifier = ">=0.12" },
     { name = "structlog", specifier = ">=24" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
-    { name = "websockets", specifier = ">=12,<14" },
+    { name = "websockets", specifier = ">=13,<14" },
     { name = "whisper-normalizer", specifier = ">=0.0.10" },
 ]
 provides-extras = ["google-stt", "hume-tts"]
