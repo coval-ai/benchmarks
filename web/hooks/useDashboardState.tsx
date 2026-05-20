@@ -476,7 +476,7 @@ export function useDashboardState(page: "tts" | "stt") {
         label,
         displayValue: normalizeModelName(fastestLatencyModel),
         subtitle: fastestLatencyProvider
-          ? { detail: fastestLatencyProvider }
+          ? { detail: normalizeProviderName(fastestLatencyProvider) }
           : undefined,
       };
     }
@@ -487,7 +487,9 @@ export function useDashboardState(page: "tts" | "stt") {
         selectedModels.length > 1 && fastestLatencyModel
           ? {
               name: normalizeModelName(fastestLatencyModel),
-              detail: fastestLatencyProvider,
+              detail: fastestLatencyProvider
+                ? normalizeProviderName(fastestLatencyProvider)
+                : undefined,
             }
           : undefined,
     };
@@ -500,7 +502,9 @@ export function useDashboardState(page: "tts" | "stt") {
       selectedModels.length > 1 && lowestWERModel
         ? {
             name: normalizeModelName(lowestWERModel),
-            detail: normalizeSTTProviderName(lowestWERProvider),
+            detail: lowestWERProvider
+              ? normalizeProviderName(lowestWERProvider)
+              : undefined,
           }
         : undefined,
   };

@@ -13,6 +13,7 @@ export const modelDisplayNames: Record<string, string> = {
   mistv3: "Mist v3",
   "octave-tts": "Octave TTS",
   "octave-2": "Octave 2",
+  coda: "Coda",
   // STT
   "nova-2": "Nova 2",
   "nova-3": "Nova 3",

@@ -28,7 +28,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "slowapi>=0.1.9",
     # WebSocket clients (STT providers)
-    "websockets>=12,<14",
+    "websockets>=13,<14",
     # TTS provider SDKs
     "openai>=1.40",
     "cartesia>=2",

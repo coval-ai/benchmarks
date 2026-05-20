@@ -38,14 +38,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Authenticate to GCP via WIF so Trivy can pull the private AR image.
       # runner-scanner is a dedicated read-only SA — bound to schedule +
       # workflow_dispatch on coval-ai/benchmarks. Trivy must NOT use
       # runner-deploy (which has artifactregistry.writer).
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SCANNER_SA }}
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security tab
         if: steps.image-check.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-${{ matrix.image }}.sarif
           category: trivy-${{ matrix.image }}

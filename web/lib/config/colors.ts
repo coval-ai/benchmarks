@@ -19,6 +19,7 @@ export const modelColors: Record<string, string> = {
   // Rime TTS
   arcana: "#33FF99",
   mistv3: "#0E5C32",
+  coda: "#1DE9B6",
 
   // Hume TTS
   "octave-tts": "#7C3AED",
