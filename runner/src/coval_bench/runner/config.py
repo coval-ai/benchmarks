@@ -111,11 +111,18 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="rime", model="arcana", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="mistv3", voice="luna", enabled=True),
     ProviderEntry(provider="rime", model="mistv2", voice="luna", enabled=False, disabled=True),
-    # Hidden from the public catalogue (`disabled=True`). Never executed.
     ProviderEntry(
-        provider="hume", model="octave-tts", voice="male_01", enabled=False, disabled=True
+        provider="hume",
+        model="octave-tts",
+        voice="176a55b1-4468-4736-8878-db82729667c1",
+        enabled=True,
     ),
-    ProviderEntry(provider="hume", model="octave-2", voice="male_01", enabled=False, disabled=True),
+    ProviderEntry(
+        provider="hume",
+        model="octave-2",
+        voice="176a55b1-4468-4736-8878-db82729667c1",
+        enabled=True,
+    ),
     # Placeholder entries with voice=None — never executed by the runner; surfaced only
     # in /v1/providers so the frontend can label them as disabled.
     ProviderEntry(
