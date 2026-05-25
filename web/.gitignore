@@ -29,3 +29,6 @@ Thumbs.db
 
 # Vercel
 .vercel
+
+# Local-only manual dev/smoke scripts
+scripts/smoke-*.sh
