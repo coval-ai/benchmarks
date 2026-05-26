@@ -365,9 +365,7 @@ async def test_deepgram_default_audio_to_final(
 
 @pytest.mark.asyncio
 async def test_deepgram_flux_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    """flux-general-en: TTFT and audio_to_final_seconds are populated using the
-    standard channel.alternatives response shape (same wire format as nova-* but
-    on the preview endpoint)."""
+    """flux-general-en: TTFT and audio_to_final_seconds are populated from TurnInfo messages."""
     events = load_fixture_events("deepgram", "events-flux-success")
     provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
 
