@@ -28,7 +28,8 @@ GCS, and regenerates ``stt-v1.json``.
    — **all three are LEXICOGRAPHIC STRING SORTS**.  Do NOT int-cast.
    This is the reproducibility contract.
 
-7. Take the first 50.
+7. Select 50 utterances by **round-robin over speakers** in lex order (see
+   ``_select_50`` in this module — ADR-020; not “first 50 rows” after the sort).
 
 8. Transcode each to 16 kHz mono PCM_16 WAV; compute SHA256.
 

@@ -6,7 +6,9 @@ four. This document describes each one and where it lives.
 
 ## 1. Dataset
 
-**STT benchmark.** A 50-utterance subset of
+### STT v1 (`stt-v1`)
+
+A 50-utterance subset of
 [LibriSpeech `test-clean`](https://www.openslr.org/12/) (OpenSLR-12,
 `CC-BY-4.0`). Selection rule: utterances filtered to the 2.0–15.0 s duration
 range, then round-robin by speaker in lexicographic order — all 40 speakers
@@ -14,23 +16,103 @@ range, then round-robin by speaker in lexicographic order — all 40 speakers
 The selection is deterministic and reproducible from the raw `test-clean`
 download.
 
+### STT v2 (`stt-v2`)
+
+A frozen STT corpus sourced from Hugging Face
+[`PolyAI/minds14`](https://huggingface.co/datasets/PolyAI/minds14) (`en-US`,
+`train`), **`CC-BY-4.0`**. The packaged manifest `stt-v2.json` is **authored and
+frozen**: each row keys off the Hub `path`, carries a human-reviewed reference
+transcript (and editorial metadata such as intent labels where present), and
+pins **`sha256`** for the mirrored WAV bytes. The JSON on disk remains the
+source of truth for transcripts and paths (reviewed text, not raw Hub
+captions).
+
+**Why this corpus (vs `stt-v1`).** `stt-v1` is clean read audiobook speech — ideal
+for latency baselines and regression tracking, but not representative of
+**narrowband / telephony-shaped** audio, **accent and speaker variability**, or
+**messy real-world wording**. `stt-v2` fills that gap: **60** frozen clips from
+MInDS-14-style banking customer service (**36 female / 24 male** speakers in
+the packaged manifest), **one distinct speaker per clip**, grouped by
+**intent** (14 categories in the packaged manifest, e.g. pay bill, freeze
+account, ATM limit, abroad). Clips are **resampled to
+16 kHz mono** for the runner, but upstream captures retain **telephone-style
+bandwidth and codec/DSP character** — lower acoustic fidelity than LibriSpeech
+— on purpose, so WER and timings reflect **call-center STT** more than studio
+read speech. English is **US-market customer service** with natural
+variation (including regional accents typical of that setting).
+
+**Subset construction (frozen in `stt-v2.json`).** The reviewed pool was
+narrowed using the same **practical goals** as **`stt-v1`**: keep utterances inside
+a **latency-friendly duration band**, require **enough clips to be usable as a bench**
+— we targeted **≥ 50**, then froze **60** rows — and preserved **breadth across the 14 customer-service intents** rather than collapsing into one conversational theme.
+
+For those **60** rows, **`duration_sec`** after export clusters around **≈ 9–15 s**, consistent with narrowing the eligible reviewed pool to about **9.0–15.15 s** before pinning.
+
+**Pre-commit validation.** Before committing the frozen manifest **`stt-v2.json`**, we
+performed a limited set of standard balance and composition checks. The objective was
+to confirm that the subset remained appropriate for **latency-fair** speech-to-text
+evaluation and did not show gross structural imbalance. The review addressed: (i)
+whether **duration** differed substantially between clips with **male** versus **female**
+metadata labels within the chosen band; (ii) whether the **duration filter** materially
+shifted inclusion relative to the wider **eligible pool** under the same rules; and
+(iii) whether **labeled-gender** counts departed markedly from a **50/50** reference
+split. Results were assessed at **α = 0.05**. **None** of these checks indicated that
+the **inclusion criteria** for the frozen **60-clip** subset should be revised.
+
+**Scope of public documentation.** The **authoritative** specification for reproduction
+is **`stt-v2.json`**, including each item’s **`path`**, **`transcript`**, and **`sha256`**.
+This document does **not** publish the full matrix of test statistics, *p*-values, or
+alternative windows; disclosing that level of detail increases the risk of **overfitting**
+to published diagnostics. **Operators** retain selection records (windows, intent
+filters, exclusions, and related notes) for **internal audit** and **regression**
+analysis. Those materials are **not** part of the public benchmark contract.
+
+**Runtime object layout.** The runner loads audio from
+`gs://<dataset_bucket>/stt-v2/<item.path>` (see
+`runner/src/coval_bench/datasets/loader.py`). There is no separate `/audio/`
+prefix unless paths inside the manifest include it.
+
+**Rebuilding / verifying.** `stt-v2` is **not** built through
+`build_dataset` (that CLI covers `stt-v1` / `tts-v1` only). Operators refresh
+pins from reviewed JSON + WAVs via **`publish_reviewed_stt_v2`** — see
+`runner/src/coval_bench/datasets/scripts/publish_reviewed_stt_v2.py` and
+`runner/src/coval_bench/datasets/manifests/README.md`. Optional HF export of
+reviewed clips uses **`export_minds14_reviewed_wavs`** (`minds14-build` /
+`datasets` deps). **`HF_MINDS14_REVISION`** can pin the Hub snapshot when
+re-deriving bytes from **`minds14_audio`** / HF (see that module).
+
+**Metrics on v2.** The same STT metrics apply as for `stt-v1` (WER after the
+normalization pipeline in `runner/src/coval_bench/metrics/wer.py`, TTFT,
+audio→final latency, RTF). **`duration_sec`** in the manifest stays within the
+**telephony‑oriented band** chosen above — compare leaderboard cells **within**
+`stt-v2`, not literal seconds against `stt-v1`.
+
+**ADR scope.** ADR-020 governs **LibriSpeech `stt-v1` construction** (round-robin
+by speaker in the 2.0–15.0 s window). **`stt-v2` item order and inclusion are
+defined only by the committed manifest**, not by that ADR.
+
 **TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
 rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
 
-**SHA pinning.** Every audio file referenced by `stt-v1.json` carries a
-`sha256` field. The runner verifies the SHA after fetching from GCS and raises
-`DatasetIntegrityError` on mismatch (see `runner/src/coval_bench/datasets/loader.py`).
-TTS items are text-only and have no SHA.
+**SHA pinning.** Every audio item in an STT manifest (`stt-v1.json`,
+`stt-v2.json`, …) carries a `sha256` field. The runner verifies the SHA after
+fetching from GCS and raises `DatasetIntegrityError` on mismatch (see
+`runner/src/coval_bench/datasets/loader.py`). TTS items are text-only and have
+no SHA.
 
 **Versioning.** Dataset manifests live at
-`runner/src/coval_bench/datasets/manifests/{stt-v1,tts-v1}.json` and carry a
+`runner/src/coval_bench/datasets/manifests/{stt-v1,stt-v2,tts-v1}.json` and carry a
 `version` field. Bumping the dataset re-pins by minting a new manifest
 (`stt-v2.json` etc.); the old manifest stays for historical reproducibility.
 
-**Rebuilding from scratch.** `runner/scripts/build_dataset.py` downloads the
-LibriSpeech archive, applies the selection rule, transcodes to the canonical
-audio format, uploads to GCS, and writes the manifest with fresh SHAs. See
-`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure.
+**Rebuilding from scratch.** From `runner/`, run the packaged builder
+`python -m coval_bench.datasets.scripts.build_dataset` (see
+`runner/src/coval_bench/datasets/scripts/build_dataset.py`): for **`stt-v1`**
+it downloads LibriSpeech, applies the ADR-020 selection rule, transcodes,
+uploads to GCS, and writes the manifest with fresh SHAs. For **`stt-v2`** use
+`publish_reviewed_stt_v2` (see **Rebuilding / publishing** under **`stt-v2`**
+above). See `runner/src/coval_bench/datasets/manifests/README.md` for an
+operator checklist when present.
 
 **Selection rationale.** See [ADR-020](#adr-references) below.
 
@@ -54,17 +136,15 @@ models that are catalogued but not currently producing data. See
 ## 3. Normalization pipeline
 
 WER is computed after a deterministic normalization pipeline applied to both
-the reference transcript and the provider hypothesis. The pipeline lives in
-`runner/src/coval_bench/metrics/wer.py` and covers currency expansion,
-ordinals, dates, time expressions, dehyphenation, and unicode folding.
+the reference transcript and the provider hypothesis. 
 
-**Version constant.** `wer.NORM_VERSION` (currently `"1"`) is bumped on any
+**Version constant.** `wer.NORM_VERSION` is bumped on any
 behavioural change to the pipeline. The constant is included on every
 `WERResult` as `norm_version`, so a result row can be unambiguously
 attributed to the pipeline version that produced it.
 
-A future revision may A/B-test against `whisper_normalizer`. Any such change
-will increment `NORM_VERSION` and ship a separate ADR.
+To reduce benchmark gaming, detailed normalization rules are maintained in
+internal evaluation docs and are not listed here.
 
 ## 4. Library versions
 
@@ -81,10 +161,15 @@ To reproduce a single `(provider, model, voice, metric)` cell:
    (`/v1/runs/<id>` exposes `runner_sha`).
 2. `uv sync` inside `runner/`.
 3. Set the relevant provider API key in `.env`.
-4. `coval-bench run --kind stt --providers <provider> --models <model>`
-   (or analogous for TTS). The runner downloads the same dataset audio from
-   GCS, verifies the SHA, runs against the same model identifier, and applies
-   the same normalization pipeline.
+4. From `runner/`, run `coval-bench run --kind stt` (add `--smoke` for one
+   utterance × the full enabled matrix). The CLI does **not** accept
+   `--providers` / `--models`; rows come from `DEFAULT_STT_MATRIX` /
+   `DEFAULT_TTS_MATRIX` in `runner/src/coval_bench/runner/config.py`. Point
+   `DATASET_ID` / `DATASET_BUCKET` at the same corpus as the run you are
+   reproducing (e.g. `stt-v1` or `stt-v2`). For a single `(provider, model)`
+   probe **without Postgres**, use `coval-bench stt-preview`. The runner
+   fetches STT audio from GCS when applicable, verifies SHA256, and applies the
+   same WER normalization pipeline.
 
 Numbers should match the leaderboard within provider-side variance (latency
 metrics in particular are session-dependent).
@@ -103,6 +188,10 @@ where the decision context is load-bearing.
   providers because the corpus is widely included in training data.
   Latency and per-provider drift over time are the more informative
   signals.
+- **`stt-v2`** (MInDS-14–derived) is conversational, **phone-style**,
+  customer-intent English with different speakers per clip; WER and latency are
+  not directly comparable to `stt-v1` leaderboard cells — compare providers
+  **within** the same dataset id and manifest version.
 - This is a research benchmark. Results reflect a specific dataset and
   methodology and may not generalize to production workloads. See the
   Apache-2.0 `LICENSE` for the warranty disclaimer.
