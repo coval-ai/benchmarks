@@ -71,6 +71,7 @@ def test_build_websocket_url() -> None:
     url = p._build_websocket_url()
     assert "elevenlabs.io" in url
     assert "scribe_v2_realtime" in url
+    assert "audio_format=pcm_16000" in url
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +103,7 @@ def test_invalid_model_raises() -> None:
 async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
     error_events = [
         {"message_type": "session_started", "session_id": "x", "config": {}},
-        {"message_type": "scribe_auth_error", "message": "Invalid API key"},
+        {"message_type": "auth_error", "message": "Invalid API key"},
     ]
     provider = ElevenLabsSTTProvider(api_key=fake_api_key)
 
@@ -119,7 +120,7 @@ async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: by
         )
 
     assert result.error is not None
-    assert "scribe_auth_error" in result.error
+    assert "auth_error" in result.error
     assert result.complete_transcript is None
 
 
