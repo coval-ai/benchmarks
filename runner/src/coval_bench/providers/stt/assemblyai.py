@@ -25,7 +25,9 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 logger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("universal-streaming",)
-_WS_URL = "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true"
+# speech_model is required by the API; format_turns is omitted (default=false) because
+# the formatting pass adds significant latency that would inflate TTFT measurements.
+_WS_URL = "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english"
 
 
 class AssemblyAIProvider(STTProvider):
@@ -124,11 +126,13 @@ class AssemblyAIProvider(STTProvider):
                 now = time.monotonic()
                 msg_type: str = msg.get("type", "")
 
-                if msg_type == "Begin":
+                if msg_type in ("Begin", "Termination"):
                     continue
 
                 transcript = self._extract_transcript(msg)
                 if transcript:
+                    # TTFT fires on the first Turn regardless of end_of_turn. We want
+                    # time-to-first-word, not time-to-first-completed-sentence.
                     if result.ttft_seconds is None and result.audio_start_time is not None:
                         result.ttft_seconds = now - result.audio_start_time
                         result.first_token_content = (

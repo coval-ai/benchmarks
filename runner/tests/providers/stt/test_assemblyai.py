@@ -63,6 +63,19 @@ async def test_assemblyai_success(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 # ---------------------------------------------------------------------------
+# URL sanity
+# ---------------------------------------------------------------------------
+
+
+def test_websocket_url_contains_required_params() -> None:
+    from coval_bench.providers.stt.assemblyai import _WS_URL
+
+    assert "speech_model=" in _WS_URL
+    assert "format_turns" not in _WS_URL
+    assert "streaming.assemblyai.com/v3/ws" in _WS_URL
+
+
+# ---------------------------------------------------------------------------
 # Provider name
 # ---------------------------------------------------------------------------
 
