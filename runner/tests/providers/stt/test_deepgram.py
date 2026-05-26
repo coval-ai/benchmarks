@@ -111,9 +111,10 @@ def test_build_websocket_url_nova3() -> None:
 def test_build_websocket_url_flux() -> None:
     p = make_provider("flux-general-en")
     url = p._build_websocket_url(16000, 1)
-    assert "/v2/listen" in url
-    assert "preview.deepgram.com" in url
+    assert url.startswith("wss://api.deepgram.com/v2/listen")
+    assert "preview" not in url
     assert "flux-general-en" in url
+    assert "channels=1" in url
     # v2/listen rejects interim_results / no_delay as unknown query params and
     # closes the WS upgrade with HTTP 400 — both must be absent.
     assert "interim_results" not in url
@@ -123,8 +124,10 @@ def test_build_websocket_url_flux() -> None:
 def test_build_websocket_url_flux_multi() -> None:
     p = make_provider("flux-general-multi")
     url = p._build_websocket_url(16000, 1)
-    assert "/v2/listen" in url
+    assert url.startswith("wss://api.deepgram.com/v2/listen")
+    assert "preview" not in url
     assert "model=flux-general-multi" in url
+    assert "channels=1" in url
     # No language hint — multilingual model auto-detects.
     assert "language=" not in url
     assert "interim_results" not in url
