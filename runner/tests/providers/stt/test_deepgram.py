@@ -386,8 +386,7 @@ async def test_deepgram_flux_success(fake_api_key: SecretStr, audio_pcm_bytes: b
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
     assert "hello" in result.first_token_content.lower()
-    assert result.complete_transcript is not None
-    assert "hello" in result.complete_transcript.lower()
+    assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
     assert result.audio_to_final_seconds >= 0
 
