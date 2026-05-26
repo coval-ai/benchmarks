@@ -111,9 +111,10 @@ def test_build_websocket_url_nova3() -> None:
 def test_build_websocket_url_flux() -> None:
     p = make_provider("flux-general-en")
     url = p._build_websocket_url(16000, 1)
-    assert "/v2/listen" in url
-    assert "preview.deepgram.com" in url
+    assert url.startswith("wss://api.deepgram.com/v2/listen")
+    assert "preview" not in url
     assert "flux-general-en" in url
+    assert "channels=1" in url
     # v2/listen rejects interim_results / no_delay as unknown query params and
     # closes the WS upgrade with HTTP 400 — both must be absent.
     assert "interim_results" not in url
@@ -123,8 +124,10 @@ def test_build_websocket_url_flux() -> None:
 def test_build_websocket_url_flux_multi() -> None:
     p = make_provider("flux-general-multi")
     url = p._build_websocket_url(16000, 1)
-    assert "/v2/listen" in url
+    assert url.startswith("wss://api.deepgram.com/v2/listen")
+    assert "preview" not in url
     assert "model=flux-general-multi" in url
+    assert "channels=1" in url
     # No language hint — multilingual model auto-detects.
     assert "language=" not in url
     assert "interim_results" not in url
@@ -365,9 +368,7 @@ async def test_deepgram_default_audio_to_final(
 
 @pytest.mark.asyncio
 async def test_deepgram_flux_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
-    """flux-general-en: TTFT and audio_to_final_seconds are populated using the
-    standard channel.alternatives response shape (same wire format as nova-* but
-    on the preview endpoint)."""
+    """flux-general-en: TTFT and audio_to_final_seconds are populated from TurnInfo messages."""
     events = load_fixture_events("deepgram", "events-flux-success")
     provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
 
@@ -388,8 +389,7 @@ async def test_deepgram_flux_success(fake_api_key: SecretStr, audio_pcm_bytes: b
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
     assert "hello" in result.first_token_content.lower()
-    assert result.complete_transcript is not None
-    assert "hello" in result.complete_transcript.lower()
+    assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
     assert result.audio_to_final_seconds >= 0
 
@@ -414,3 +414,34 @@ async def test_deepgram_flux_audio_to_final_none_when_no_transcript(
         )
 
     assert result.audio_to_final_seconds is None
+
+
+# ---------------------------------------------------------------------------
+# Happy path — flux-general-multi
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deepgram_flux_multi_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """flux-general-multi: TTFT and complete_transcript are populated from TurnInfo messages."""
+    events = load_fixture_events("deepgram", "events-flux-success")
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-multi")
+
+    with patch(
+        "coval_bench.providers.stt.deepgram.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.ttft_seconds is not None
+    assert result.ttft_seconds >= 0
+    assert result.complete_transcript == "hello world how are you"
+    assert result.audio_to_final_seconds is not None
+    assert result.audio_to_final_seconds >= 0

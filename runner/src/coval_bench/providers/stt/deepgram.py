@@ -3,8 +3,10 @@
 
 """Deepgram real-time STT provider.
 
-Supports models: default (nova-2), nova-2, nova-3, flux-general-en.
-Wire protocol: WebSocket, wss://api.deepgram.com/v1/listen
+Supports models: default (nova-2), nova-2, nova-3, flux-general-en, flux-general-multi.
+Wire protocols:
+  nova-2 / nova-3 / default: wss://api.deepgram.com/v1/listen (Results events)
+  flux-general-*:            wss://api.deepgram.com/v2/listen  (TurnInfo events)
 Auth: Authorization: Token <key>
 Close: {"type": "CloseStream"}
 """
@@ -58,8 +60,11 @@ class DeepgramProvider(STTProvider):
             # `flux-general-multi` shares the same endpoint as `flux-general-en`;
             # we don't pass a language hint so the multilingual model auto-detects.
             return (
-                "wss://api.preview.deepgram.com/v2/listen"
-                f"?model={self._model}&sample_rate=16000&encoding=linear16"
+                "wss://api.deepgram.com/v2/listen"
+                f"?model={self._model}"
+                f"&sample_rate={sample_rate}"
+                f"&channels={channels}"
+                f"&encoding=linear16"
             )
         url = (
             f"wss://api.deepgram.com/v1/listen"
@@ -69,6 +74,7 @@ class DeepgramProvider(STTProvider):
             f"&interim_results=true"
             f"&vad_events=true"
             f"&no_delay=true"
+            f"&punctuate=true"
         )
         if self._model != "default":
             url += f"&model={self._model}"
@@ -175,7 +181,7 @@ class DeepgramProvider(STTProvider):
                     result.vad_events_count = (result.vad_events_count or 0) + 1
                     continue
 
-                if msg_type in ("SpeechEnded", "Metadata", "Connected"):
+                if msg_type in ("UtteranceEnd", "Metadata", "Connected"):
                     continue
 
                 # flux v2/listen emits TurnInfo (not Results). Each TurnInfo
@@ -237,7 +243,7 @@ class DeepgramProvider(STTProvider):
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
         # Build complete transcript
-        if self._model == "flux-general-en":
+        if self._model in ("flux-general-en", "flux-general-multi"):
             result.complete_transcript = flux_latest.strip() or None
         elif final_segments:
             result.complete_transcript = " ".join(final_segments).strip()
