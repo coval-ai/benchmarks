@@ -15,6 +15,7 @@ lib/api/generated/
 
 # TypeScript
 *.tsbuildinfo
+next-env.d.ts
 
 # Debug
 npm-debug.log*
