@@ -68,11 +68,13 @@ async def test_assemblyai_success(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 
 def test_websocket_url_contains_required_params() -> None:
-    from coval_bench.providers.stt.assemblyai import _WS_URL
+    from coval_bench.providers.stt.assemblyai import _SPEECH_MODEL_MAP, _WS_BASE
 
-    assert "speech_model=" in _WS_URL
-    assert "format_turns" not in _WS_URL
-    assert "streaming.assemblyai.com/v3/ws" in _WS_URL
+    assert "streaming.assemblyai.com/v3/ws" in _WS_BASE
+    # Every mapped speech_model value must be a non-empty API string
+    for user_name, api_name in _SPEECH_MODEL_MAP.items():
+        assert api_name, f"model {user_name!r} maps to an empty speech_model"
+        assert "format_turns" not in api_name
 
 
 # ---------------------------------------------------------------------------

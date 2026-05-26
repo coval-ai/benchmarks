@@ -24,18 +24,23 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("universal-streaming",)
-# speech_model is required by the API; format_turns is omitted (default=false) because
-# the formatting pass adds significant latency that would inflate TTFT measurements.
-_WS_URL = "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english"
+# Maps user-facing model names to the speech_model value required by the API.
+# format_turns is omitted (default=false) — the formatting pass adds latency that
+# would inflate TTFT measurements.
+_SPEECH_MODEL_MAP: dict[str, str] = {
+    "universal-streaming": "universal-streaming-english",
+}
+_WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 
 
 class AssemblyAIProvider(STTProvider):
     """AssemblyAI v3 streaming STT provider."""
 
     def __init__(self, api_key: SecretStr, model: str = "universal-streaming") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid AssemblyAI model {model!r}. Valid: {_VALID_MODELS}")
+        if model not in _SPEECH_MODEL_MAP:
+            raise ValueError(
+                f"Invalid AssemblyAI model {model!r}. Valid: {tuple(_SPEECH_MODEL_MAP)}"
+            )
         self._api_key = api_key
         self._model = model
 
@@ -63,8 +68,10 @@ class AssemblyAIProvider(STTProvider):
         total_start = time.monotonic()
 
         try:
+            speech_model = _SPEECH_MODEL_MAP[self._model]
+            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
             headers = {"Authorization": self._api_key.get_secret_value()}
-            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
+            async with ws_client.connect(url, additional_headers=headers) as ws:
                 send_task = asyncio.create_task(
                     self._send_audio(
                         ws,
