@@ -237,7 +237,7 @@ class DeepgramProvider(STTProvider):
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
         # Build complete transcript
-        if self._model == "flux-general-en":
+        if self._model in ("flux-general-en", "flux-general-multi"):
             result.complete_transcript = flux_latest.strip() or None
         elif final_segments:
             result.complete_transcript = " ".join(final_segments).strip()
