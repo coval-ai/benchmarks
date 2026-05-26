@@ -95,6 +95,23 @@ def test_invalid_model_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Invalid sample rate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_wrong_sample_rate(audio_pcm_bytes: bytes) -> None:
+    provider = ElevenLabsSTTProvider(api_key=SecretStr("k"))
+    with pytest.raises(ValueError, match="16 kHz"):
+        await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=8000,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Failure path — error event
 # ---------------------------------------------------------------------------
 
