@@ -159,7 +159,13 @@ class GoogleSTTProvider(STTProvider):
                     if hasattr(response, "results") and response.results:
                         for result_item in response.results:
                             if getattr(result_item, "is_final", False):
-                                final_transcripts.append(transcript)
+                                item_transcript = (
+                                    str(result_item.alternatives[0].transcript)
+                                    if result_item.alternatives
+                                    else ""
+                                )
+                                if item_transcript:
+                                    final_transcripts.append(item_transcript)
                                 last_final_time = now
                                 break
             except Exception as exc:
