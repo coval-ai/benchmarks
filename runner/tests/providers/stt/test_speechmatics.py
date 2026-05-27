@@ -109,6 +109,19 @@ def test_extract_transcript_uses_transcript_field() -> None:
     assert p._extract_transcript(msg) == "Hello, world."
 
 
+def test_extract_transcript_whitespace_only_falls_back_to_results() -> None:
+    """Whitespace-only transcript field falls through to results."""
+    p = make_provider()
+    msg = {
+        "message": "AddTranscript",
+        "transcript": "   ",
+        "results": [
+            {"alternatives": [{"content": "hello", "confidence": 0.95}]},
+        ],
+    }
+    assert p._extract_transcript(msg) == "hello"
+
+
 def test_extract_transcript_fallback_without_transcript_field() -> None:
     """Falls back to joining results when transcript field is absent."""
     p = make_provider()

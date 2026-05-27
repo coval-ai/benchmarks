@@ -203,9 +203,9 @@ class SpeechmaticsProvider(STTProvider):
         # Prefer the pre-formatted transcript field — it handles punctuation
         # spacing correctly via attaches_to semantics (e.g. "Hello, world."
         # not "Hello , world .").
-        transcript: str = msg.get("transcript", "")
+        transcript: str = msg.get("transcript", "").strip()
         if transcript:
-            return transcript.strip()
+            return transcript
         # Fallback for responses that omit the transcript field
         results: list[dict[str, Any]] = msg.get("results", [])
         parts: list[str] = []
