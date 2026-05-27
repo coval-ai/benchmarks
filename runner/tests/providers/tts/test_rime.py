@@ -165,7 +165,9 @@ async def test_rime_mistv3_uses_22050(fake_settings: Settings) -> None:
         result = await provider.synthesize("test")
 
     assert result.error is None
-    assert parse_qs(urlparse(captured["url"]).query)["samplingRate"] == ["22050"]
+    assert parse_qs(urlparse(captured["url"]).query)["samplingRate"] == [
+        str(_MODEL_SAMPLE_RATES["mistv3"])
+    ]
     if result.audio_path:
         result.audio_path.unlink()
 
