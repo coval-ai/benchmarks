@@ -71,6 +71,7 @@ def test_build_websocket_url() -> None:
     url = p._build_websocket_url()
     assert "elevenlabs.io" in url
     assert "scribe_v2_realtime" in url
+    assert "audio_format=pcm_16000" in url
 
 
 # ---------------------------------------------------------------------------
@@ -94,15 +95,35 @@ def test_invalid_model_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Invalid sample rate
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_wrong_sample_rate(audio_pcm_bytes: bytes) -> None:
+    provider = ElevenLabsSTTProvider(api_key=SecretStr("k"))
+    with pytest.raises(ValueError, match="16 kHz"):
+        await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=8000,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Failure path — error event
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+@pytest.mark.parametrize("message_type", ["auth_error", "scribe_auth_error"])
+async def test_elevenlabs_api_error(
+    message_type: str, fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
     error_events = [
         {"message_type": "session_started", "session_id": "x", "config": {}},
-        {"message_type": "scribe_auth_error", "message": "Invalid API key"},
+        {"message_type": message_type, "message": "Invalid API key"},
     ]
     provider = ElevenLabsSTTProvider(api_key=fake_api_key)
 
@@ -119,7 +140,7 @@ async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: by
         )
 
     assert result.error is not None
-    assert "scribe_auth_error" in result.error
+    assert message_type in result.error
     assert result.complete_transcript is None
 
 
