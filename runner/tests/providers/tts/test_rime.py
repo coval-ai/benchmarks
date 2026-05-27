@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from coval_bench.config import Settings
-from coval_bench.providers.tts.rime import SAMPLE_RATE, RimeTTSProvider
+from coval_bench.providers.tts.rime import _MODEL_SAMPLE_RATES, RimeTTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
@@ -119,7 +119,7 @@ async def test_rime_url_shape(fake_settings: Settings) -> None:
     assert parsed.path == "/ws3"
     assert qs["modelId"] == ["coda"]
     assert qs["audioFormat"] == ["pcm"]
-    assert qs["samplingRate"] == [str(SAMPLE_RATE)]
+    assert qs["samplingRate"] == [str(_MODEL_SAMPLE_RATES["coda"])]
     assert qs["segment"] == ["never"]
     assert qs["speaker"] == ["luna"]
 
@@ -144,6 +144,30 @@ async def test_rime_url_model_id(fake_settings: Settings, model: str) -> None:
         await provider.synthesize("test")
 
     assert parse_qs(urlparse(captured["url"]).query)["modelId"] == [model]
+
+
+@pytest.mark.asyncio
+async def test_rime_mistv3_uses_22050(fake_settings: Settings) -> None:
+    """mistv3 requests its native 22050 Hz sample rate, not the coda/arcana 24000."""
+    ws = FakeWebSocket(_ws3_events([make_pcm_bytes(240)]))
+    captured: dict[str, str] = {}
+
+    def _capture(url: str, **_kwargs: object) -> Any:
+        captured["url"] = url
+        return _fake_connect(ws)
+
+    provider = RimeTTSProvider(fake_settings, model="mistv3", voice="luna")
+
+    with patch(
+        "coval_bench.providers.tts.rime.ws_client.connect",
+        side_effect=_capture,
+    ):
+        result = await provider.synthesize("test")
+
+    assert result.error is None
+    assert parse_qs(urlparse(captured["url"]).query)["samplingRate"] == ["22050"]
+    if result.audio_path:
+        result.audio_path.unlink()
 
 
 # ---------------------------------------------------------------------------
