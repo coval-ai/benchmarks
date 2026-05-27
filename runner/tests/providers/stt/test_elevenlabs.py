@@ -117,10 +117,13 @@ async def test_elevenlabs_wrong_sample_rate(audio_pcm_bytes: bytes) -> None:
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+@pytest.mark.parametrize("message_type", ["auth_error", "scribe_auth_error"])
+async def test_elevenlabs_api_error(
+    message_type: str, fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
     error_events = [
         {"message_type": "session_started", "session_id": "x", "config": {}},
-        {"message_type": "auth_error", "message": "Invalid API key"},
+        {"message_type": message_type, "message": "Invalid API key"},
     ]
     provider = ElevenLabsSTTProvider(api_key=fake_api_key)
 
@@ -137,7 +140,7 @@ async def test_elevenlabs_api_error(fake_api_key: SecretStr, audio_pcm_bytes: by
         )
 
     assert result.error is not None
-    assert "auth_error" in result.error
+    assert message_type in result.error
     assert result.complete_transcript is None
 
 

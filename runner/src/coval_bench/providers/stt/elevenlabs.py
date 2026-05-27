@@ -42,6 +42,19 @@ _ERROR_MSG_TYPES = frozenset(
         "chunk_size_exceeded",
         "insufficient_audio_activity",
         "transcriber_error",
+        "scribe_error",
+        "scribe_auth_error",
+        "scribe_quota_exceeded_error",
+        "scribe_throttled_error",
+        "scribe_unaccepted_terms_error",
+        "scribe_rate_limited_error",
+        "scribe_queue_overflow_error",
+        "scribe_resource_exhausted_error",
+        "scribe_session_time_limit_exceeded_error",
+        "scribe_input_error",
+        "scribe_chunk_size_exceeded_error",
+        "scribe_insufficient_audio_activity_error",
+        "scribe_transcriber_error",
     }
 )
 
