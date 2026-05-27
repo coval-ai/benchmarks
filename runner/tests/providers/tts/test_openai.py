@@ -182,26 +182,10 @@ async def test_openai_realtime_happy_path(fake_settings: Settings) -> None:
 
     provider = _make_realtime_provider(fake_settings)
 
-    # Mock the aiohttp session POST (session creation)
-    mock_sess_resp = MagicMock()
-    mock_sess_resp.status = 200
-    mock_sess_resp.__aenter__ = AsyncMock(return_value=mock_sess_resp)
-    mock_sess_resp.__aexit__ = AsyncMock(return_value=False)
-
-    mock_http_sess = MagicMock()
-    mock_http_sess.post = MagicMock(return_value=mock_sess_resp)
-    mock_http_sess.__aenter__ = AsyncMock(return_value=mock_http_sess)
-    mock_http_sess.__aexit__ = AsyncMock(return_value=False)
-
-    aiohttp_patch = patch(
-        "coval_bench.providers.tts.openai.aiohttp.ClientSession",
-        return_value=mock_http_sess,
-    )
-    ws_patch = patch(
+    with patch(
         "coval_bench.providers.tts.openai.websockets.connect",
         return_value=fake_ws,
-    )
-    with aiohttp_patch, ws_patch:
+    ):
         result = await provider.synthesize("Hello realtime")
 
     assert result.error is None, f"Error: {result.error}"
@@ -212,37 +196,6 @@ async def test_openai_realtime_happy_path(fake_settings: Settings) -> None:
     assert result.audio_path.stat().st_size > 0
 
     result.audio_path.unlink()
-
-
-# ---------------------------------------------------------------------------
-# Realtime — session creation error
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_openai_realtime_session_error(fake_settings: Settings) -> None:
-    """Session creation failure → error result, no audio."""
-    provider = _make_realtime_provider(fake_settings)
-
-    mock_sess_resp = MagicMock()
-    mock_sess_resp.status = 401
-    mock_sess_resp.text = AsyncMock(return_value="Unauthorized")
-    mock_sess_resp.__aenter__ = AsyncMock(return_value=mock_sess_resp)
-    mock_sess_resp.__aexit__ = AsyncMock(return_value=False)
-
-    mock_http_sess = MagicMock()
-    mock_http_sess.post = MagicMock(return_value=mock_sess_resp)
-    mock_http_sess.__aenter__ = AsyncMock(return_value=mock_http_sess)
-    mock_http_sess.__aexit__ = AsyncMock(return_value=False)
-
-    with patch(
-        "coval_bench.providers.tts.openai.aiohttp.ClientSession",
-        return_value=mock_http_sess,
-    ):
-        result = await provider.synthesize("test")
-
-    assert result.error is not None
-    assert result.audio_path is None
 
 
 # ---------------------------------------------------------------------------

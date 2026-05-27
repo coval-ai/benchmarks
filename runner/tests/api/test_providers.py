@@ -65,10 +65,10 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
         f"ModelInfo must have exactly 'model' and 'disabled' keys, got {set(first_model.keys())}"
     )
 
-    # Re-activated 2026-04-30 — these must surface in the catalogue with disabled=False.
     openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
-    tts_1_hd = next(m for m in openai_entry["models"] if m["model"] == "tts-1-hd")
-    assert tts_1_hd["disabled"] is False
+    for active in ("tts-1-hd", "tts-1", "gpt-4o-mini-tts"):
+        entry = next(m for m in openai_entry["models"] if m["model"] == active)
+        assert entry["disabled"] is False, f"{active} must be disabled=False"
 
     rime_entry = next(e for e in data["tts"] if e["provider"] == "rime")
     mistv3 = next(m for m in rime_entry["models"] if m["model"] == "mistv3")
@@ -76,19 +76,9 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
 
 
 async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
-    """Models the runner doesn't actually run today must report disabled=True.
-
-    Otherwise the FE filter ``!m.disabled`` would let them through and the
-    sidebar/legend would render placeholder rows for models we aren't
-    benchmarking.
-    """
+    """Disabled models must report disabled=True so the FE filter hides them."""
     response = await client.get("/v1/providers")
     data = response.json()
-
-    openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
-    for inactive in ("tts-1", "gpt-4o-mini-tts"):
-        entry = next(m for m in openai_entry["models"] if m["model"] == inactive)
-        assert entry["disabled"] is True, f"{inactive} must be disabled=True"
 
     rime_entry = next(e for e in data["tts"] if e["provider"] == "rime")
     mistv2 = next(m for m in rime_entry["models"] if m["model"] == "mistv2")

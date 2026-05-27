@@ -14,7 +14,6 @@ import wave
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 import structlog
 import websockets
 import websockets.exceptions
@@ -25,7 +24,18 @@ from coval_bench.providers.base import TTSProvider, TTSResult
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-VALID_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer"]
+VALID_VOICES = [
+    "alloy",
+    "ash",
+    "ballad",
+    "coral",
+    "echo",
+    "sage",
+    "shimmer",
+    "verse",
+    "marin",
+    "cedar",
+]
 
 HTTP_MODELS = {"gpt-4o-mini-tts", "tts-1", "tts-1-hd"}
 REALTIME_MODELS = {"gpt-realtime-2025-08-28"}
@@ -125,42 +135,6 @@ class OpenAITTSProvider(TTSProvider):
     async def _synthesize_realtime(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
-
-        req_headers: dict[str, str] = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
-        session_payload: dict[str, Any] = {
-            "model": self._model,
-            "modalities": ["audio", "text"],
-            "instructions": f"Speak this text exactly as provided: {text}",
-            "voice": self._voice,
-            "input_audio_format": "pcm16",
-            "output_audio_format": "pcm16",
-        }
-
-        try:
-            async with (
-                aiohttp.ClientSession() as http_session,
-                http_session.post(
-                    "https://api.openai.com/v1/realtime/sessions",
-                    headers=req_headers,
-                    json=session_payload,
-                ) as session_response,
-            ):
-                if session_response.status != 200:
-                    body = await session_response.text()
-                    raise ValueError(f"Failed to create realtime session: {body}")
-        except Exception as exc:
-            logger.debug("openai_realtime_session_error", exc_info=True)
-            return TTSResult(
-                provider="openai",
-                model=self._model,
-                voice=self._voice,
-                ttfa_ms=None,
-                audio_path=None,
-                error=str(exc),
-            )
 
         ws_url = f"wss://api.openai.com/v1/realtime?model={self._model}"
         ws_extra_headers = {
