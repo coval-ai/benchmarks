@@ -200,6 +200,13 @@ class SpeechmaticsProvider(STTProvider):
         msg_type: str = msg.get("message", "")
         if msg_type not in ("AddTranscript", "AddPartialTranscript"):
             return ""
+        # Prefer the pre-formatted transcript field — it handles punctuation
+        # spacing correctly via attaches_to semantics (e.g. "Hello, world."
+        # not "Hello , world .").
+        transcript: str = msg.get("transcript", "")
+        if transcript:
+            return transcript.strip()
+        # Fallback for responses that omit the transcript field
         results: list[dict[str, Any]] = msg.get("results", [])
         parts: list[str] = []
         for r in results:
