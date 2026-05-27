@@ -37,7 +37,7 @@ VALID_VOICES = [
     "cedar",
 ]
 
-HTTP_MODELS = {"gpt-4o-mini-tts", "gpt-4o-mini-tts-2025-12-15", "tts-1", "tts-1-hd"}
+HTTP_MODELS = {"gpt-4o-mini-tts", "tts-1", "tts-1-hd"}
 REALTIME_MODELS = {"gpt-realtime-2025-08-28"}
 SAMPLE_RATE = 24000
 
