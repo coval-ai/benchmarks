@@ -74,11 +74,10 @@ class DeepgramTTSProvider(TTSProvider):
                     if msg.get("type") == "Warning":
                         logger.warning("deepgram_ws_warning", description=msg.get("description"))
 
-                await ws.send(json.dumps({"type": "Speak", "text": text}))
-
                 # t0 — synthesis trigger (equivalent to the HTTP POST in the old path).
                 # Matches Cartesia's convention: t0 after connect, before text dispatch.
                 start = time.monotonic()
+                await ws.send(json.dumps({"type": "Speak", "text": text}))
                 await ws.send(json.dumps({"type": "Flush"}))
 
                 async for raw in ws:
