@@ -56,6 +56,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         deepgram_api_key="test-deepgram-key",  # type: ignore[arg-type]
         hume_api_key="test-hume-key",  # type: ignore[arg-type]
         rime_api_key="test-rime-key",  # type: ignore[arg-type]
+        gradium_tts_api_key="test-gradium-tts-key",  # type: ignore[arg-type]
     )
 
 

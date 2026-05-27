@@ -33,7 +33,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("default",)
 _WS_URL = "wss://api.gradium.ai/api/speech/tts"
-_SAMPLE_RATE = 24000
+_SAMPLE_RATE = 48000
 
 
 class GradiumTTSProvider(TTSProvider):
