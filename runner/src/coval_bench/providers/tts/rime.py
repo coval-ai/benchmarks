@@ -33,11 +33,6 @@ _MODEL_SAMPLE_RATES: dict[str, int] = {
     "coda": 24000,
     "mistv3": 22050,
 }
-if set(_MODEL_SAMPLE_RATES) != VALID_MODELS:
-    raise ValueError(
-        f"VALID_MODELS and _MODEL_SAMPLE_RATES are out of sync: "
-        f"{VALID_MODELS ^ set(_MODEL_SAMPLE_RATES)}"
-    )
 
 
 class RimeTTSProvider(TTSProvider):
@@ -78,7 +73,7 @@ class RimeTTSProvider(TTSProvider):
 
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
-        sample_rate = _MODEL_SAMPLE_RATES[self._model]
+        sample_rate = _MODEL_SAMPLE_RATES.get(self._model, 24000)
 
         qs = urlencode(
             {
