@@ -13,6 +13,9 @@ export const modelColors: Record<string, string> = {
   // ElevenLabs STT
   scribe_v2_realtime: "#E67E22",
 
+  // xAI STT
+  "grok-stt": "#111827",
+
   // Cartesia TTS
   "sonic-3": "#3498DB",
 
@@ -51,5 +54,6 @@ export const providerColors: Record<string, string> = {
   Speechmatics: "#21618C",
   Rime: "#27AE60",
   Gradium: "#1ABC9C",
-  Hume: "#A855F7"
+  Hume: "#A855F7",
+  xAI: "#111827"
 };

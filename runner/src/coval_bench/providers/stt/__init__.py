@@ -20,6 +20,7 @@ from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
+from coval_bench.providers.stt.xai import XaiSTTProvider
 
 # Google is optional — gated on the ``google-stt`` extra
 try:
@@ -36,6 +37,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "elevenlabs": ElevenLabsSTTProvider,
     "gradium": GradiumSTTProvider,
     "speechmatics": SpeechmaticsProvider,
+    "xai": XaiSTTProvider,
 }
 
 if GoogleSTTProvider is not None:
@@ -49,5 +51,6 @@ __all__ = [
     "ElevenLabsSTTProvider",
     "GradiumSTTProvider",
     "SpeechmaticsProvider",
+    "XaiSTTProvider",
     "GoogleSTTProvider",
 ]

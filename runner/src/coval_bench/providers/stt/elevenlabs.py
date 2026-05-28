@@ -89,7 +89,6 @@ class ElevenLabsSTTProvider(STTProvider):
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
     ) -> TranscriptionResult:
         if sample_rate != 16000:
             raise ValueError(f"ElevenLabs requires 16 kHz PCM input; got {sample_rate} Hz")

@@ -74,6 +74,7 @@ export function normalizeModelName(modelName: string): string {
     "flux-general-en": "Flux",
     "flux-general-multi": "Flux Multilingual",
     scribe_v2_realtime: "Scribe v2",
+    "grok-stt": "Grok STT",
     "universal-streaming": "Universal Streaming",
     default: "Default",
     enhanced: "Enhanced"
@@ -120,6 +121,7 @@ export function normalizeSTTProviderName(providerName: string): string {
     gradium: "Gradium",
     speechmatics: "Speechmatics",
     rime: "Rime",
+    xai: "xAI",
   };
 
   const lower = providerName.toLowerCase();

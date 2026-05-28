@@ -55,7 +55,6 @@ async def test_deepgram_nova3_success(fake_api_key: SecretStr, audio_pcm_bytes: 
             sample_width=2,
             sample_rate=16000,
             realtime_resolution=0.5,
-            audio_duration=3.0,
         )
 
     assert result.error is None
