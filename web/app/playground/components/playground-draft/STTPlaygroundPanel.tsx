@@ -20,13 +20,11 @@ import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
 import { SttTrianglePulseCanvas } from "./SttTrianglePulseCanvas";
 import { useSTTBenchmark } from "@/app/playground/hooks/useSTTBenchmark";
-import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
-type SttMetricKey = "ttft" | "audioToFinal";
+type SttMetricKey = "ttfa" | "audioToFinal";
 
 const STT_METRICS_ALL: Record<SttMetricKey, boolean> = {
-  ttft: true,
+  ttfa: true,
   audioToFinal: true
 };
 
@@ -40,7 +38,7 @@ const BENCH_ROW_PY = "py-2.5 sm:py-3";
 
 type LeaderRow = {
   model: SttModelConfig;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
   transcript: string;
   error?: string;
@@ -48,7 +46,7 @@ type LeaderRow = {
 };
 
 function sortMetricValue(row: LeaderRow, key: SttMetricKey): number {
-  if (key === "ttft") return row.ttftMs ?? Number.POSITIVE_INFINITY;
+  if (key === "ttfa") return row.ttfaMs ?? Number.POSITIVE_INFINITY;
   return row.audioToFinalMs;
 }
 
@@ -102,7 +100,7 @@ function useCarouselScrollHints(
 }
 
 function sttRankingMetric(): SttMetricKey {
-  return "ttft";
+  return "ttfa";
 }
 
 export function STTPlaygroundPanel({
@@ -274,7 +272,7 @@ export function STTPlaygroundPanel({
       const error = errors.get(model.id);
       return {
         model,
-        ttftMs: result?.ttftMs ?? null,
+        ttfaMs: result?.ttfaMs ?? null,
         audioToFinalMs: result?.audioToFinalMs ?? 0,
         transcript: result?.transcript ?? "",
         error,
@@ -356,11 +354,6 @@ export function STTPlaygroundPanel({
     if (!canStartOrRetakeRecording) return;
     enterHoldArmRef.current = false;
     const selectedIds = activeModels.map((m) => m.id);
-    capturePostHogEvent(POSTHOG_EVENTS.playgroundSttRecordPressed, {
-      mode: "stt",
-      selected_model_ids: selectedIds,
-      selected_model_count: selectedIds.length
-    });
     void start(selectedIds);
   }, [phase, activeModels, canStartOrRetakeRecording, start, stop, reset]);
 
@@ -425,21 +418,21 @@ export function STTPlaygroundPanel({
             : "Recording complete";
 
   const visibleMetricKeys = useMemo(
-    (): SttMetricKey[] => (["ttft", "audioToFinal"] as const).filter((k) => STT_METRICS_ALL[k]),
+    (): SttMetricKey[] => (["ttfa", "audioToFinal"] as const).filter((k) => STT_METRICS_ALL[k]),
     []
   );
 
   const metricHeaderLabel = (key: SttMetricKey) => {
-    if (key === "ttft") return "TTFT";
+    if (key === "ttfa") return "First word";
     return "Final";
   };
 
   const renderMetricCell = (key: SttMetricKey, row: LeaderRow) => {
-    if (key === "ttft") {
+    if (key === "ttfa") {
       return (
-        <div key="ttft" className={`${BENCH_METRIC_COL} text-right`}>
+        <div key="ttfa" className={`${BENCH_METRIC_COL} text-right`}>
           <p className="text-xs font-medium tabular-nums leading-snug text-text-primary">
-            {row.ttftMs !== null && row.ttftMs > 0 ? `${row.ttftMs}ms` : "—"}
+            {row.ttfaMs !== null && row.ttfaMs > 0 ? `${row.ttfaMs}ms` : "—"}
           </p>
         </div>
       );
@@ -602,7 +595,7 @@ export function STTPlaygroundPanel({
             metrics
           </p>
           <div className="flex flex-wrap gap-2" aria-label="Metrics included in results">
-            {(["TTFT", "Final"] as const).map((label) => (
+            {(["First word", "Final"] as const).map((label) => (
               <span
                 key={label}
                 className="rounded-full border border-border-primary px-3 py-1.5 text-xs font-medium text-text-primary dark:border-white/20 dark:text-white"
@@ -612,7 +605,7 @@ export function STTPlaygroundPanel({
             ))}
           </div>
           <p className="font-sans text-[10px] text-text-tertiary">
-            Hold Enter to record, release to stop (when focus isn&apos;t in a control) · Ranking uses TTFT
+            Hold Enter to record, release to stop (when focus isn&apos;t in a control) · Ranking by first recognized word after upload (not live TTFT)
           </p>
         </div>
         <button

@@ -23,7 +23,7 @@ const _ERROR_TYPES = new Set([
 
 export type ElevenLabsResult = {
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 
@@ -38,7 +38,7 @@ export function callElevenLabs(
     let sessionReady = false;
     let audioSent = false;
     let t0 = 0;
-    let ttftMs: number | null = null;
+    let ttfaMs: number | null = null;
     let lastCommitTime = 0;
     const committed: string[] = [];
     let lastPartial = "";
@@ -67,8 +67,11 @@ export function callElevenLabs(
 
     const clearHandshakeTimer = () => clearTimeout(handshakeTimer);
 
-    const sendAudioAndCommit = () => {
+    ws.on("open", () => {
       t0 = performance.now();
+    });
+
+    const sendAudioAndCommit = () => {
       let isFirstChunk = true;
       for (let i = 0; i < buf.length; i += CHUNK_BYTES) {
         const slice = buf.subarray(i, Math.min(i + CHUNK_BYTES, buf.length));
@@ -125,7 +128,7 @@ export function callElevenLabs(
       if (mt === "partial_transcript") {
         const p = typeof msg.text === "string" ? msg.text.trim() : "";
         if (p) {
-          if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+          if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
           lastPartial = p;
         }
         return;
@@ -151,7 +154,7 @@ export function callElevenLabs(
         const audioToFinalMs = lastCommitTime > 0
           ? Math.round(lastCommitTime - t0)
           : (audioSent && t0 > 0 ? Math.round(performance.now() - t0) : 0);
-        resolve({ transcript, ttftMs, audioToFinalMs });
+        resolve({ transcript, ttfaMs, audioToFinalMs });
       });
     });
 

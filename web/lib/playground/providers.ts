@@ -103,7 +103,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "deepgram",
     label: "Nova-2",
     model: "nova-2",
-    // Matches `DeepgramProvider._build_websocket_url` (mono, 16k, linear16) in runner.
     url: "wss://api.deepgram.com/v1/listen?sample_rate=16000&encoding=linear16&channels=1&interim_results=true&vad_events=true&no_delay=true&model=nova-2",
     sampleRate: 16_000,
     enabled: true
@@ -140,7 +139,7 @@ export const sttModels: SttModelConfig[] = [
     provider: "assemblyai",
     label: "AssemblyAI",
     model: "universal-streaming",
-    url: "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true",
+    url: "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english",
     sampleRate: 16_000,
     enabled: true
   },

@@ -18,11 +18,6 @@ import {
 } from "@/lib/playground/provider-styles";
 import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
-import { capturePostHogEvent } from "@/lib/posthog/client";
-import {
-  POSTHOG_EVENTS,
-  type PlaygroundTtsRunTrigger
-} from "@/lib/posthog/events";
 
 /** HARDCODED: demo prompt chips only — not provider data. */
 const EXAMPLES = [
@@ -188,8 +183,8 @@ export function TTSPlaygroundPanel({
     []
   );
 
-  const openBenchmarkRef = useRef<(_trigger: PlaygroundTtsRunTrigger) => Promise<void>>(async () => {});
-  openBenchmarkRef.current = async (_trigger: PlaygroundTtsRunTrigger) => {
+  const openBenchmarkRef = useRef<() => Promise<void>>(async () => {});
+  openBenchmarkRef.current = async () => {
     if (!canBenchmark || hasInFlight) return;
     const selectedIds = activeModels.map((model) => model.id);
     const summary = await runBenchmark(text, selectedIds);
@@ -207,7 +202,7 @@ export function TTSPlaygroundPanel({
       if (!cmdEnterFromPrompt && isTypingInteractionTarget(e.target)) return;
       if (!canBenchmark || hasInFlight) return;
       e.preventDefault();
-      void openBenchmarkRef.current("keyboard");
+      void openBenchmarkRef.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -255,20 +250,8 @@ export function TTSPlaygroundPanel({
 
   const handleBenchmarkButtonClick = useCallback(() => {
     if (!canBenchmark || hasInFlight) return;
-
-    const selectedIds = activeModels.map((model) => model.id);
-    const trimmedText = text.trim();
-
-    capturePostHogEvent(POSTHOG_EVENTS.playgroundTtsBenchmarkPressed, {
-      mode: "tts",
-      text_length: trimmedText.length,
-      selected_model_ids: selectedIds,
-      selected_model_count: selectedIds.length,
-      used_example_prompt: EXAMPLES.some((example) => example.text === trimmedText)
-    });
-
-    void openBenchmarkRef.current("button");
-  }, [activeModels, canBenchmark, hasInFlight, text]);
+    void openBenchmarkRef.current();
+  }, [canBenchmark, hasInFlight]);
 
   return (
     <section

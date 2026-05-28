@@ -1,13 +1,13 @@
 import WebSocket from "@/lib/stt/ws";
 
 const WS_URL =
-  "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&format_turns=true";
+  "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english";
 const CHUNK_BYTES = 8_192;
 const SESSION_TIMEOUT_MS = 55_000;
 
 export type AssemblyAIResult = {
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 
@@ -18,7 +18,7 @@ export function callAssemblyAI(pcm: ArrayBuffer, apiKey: string): Promise<Assemb
     const turns: string[] = [];
     let settled = false;
     let t0 = 0;
-    let ttftMs: number | null = null;
+    let ttfaMs: number | null = null;
     let gotTermination = false;
 
     const timer = setTimeout(() => {
@@ -51,13 +51,13 @@ export function callAssemblyAI(pcm: ArrayBuffer, apiKey: string): Promise<Assemb
       if (msg["type"] === "Turn") {
         const text = extractText(msg);
         if (text) {
-          if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+          if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
           if (msg["end_of_turn"] === true) turns.push(text);
         }
       } else if (msg["type"] === "Termination") {
         gotTermination = true;
         const audioToFinalMs = t0 > 0 ? Math.round(performance.now() - t0) : 0;
-        settle(() => resolve({ transcript: turns.join(" ").trim(), ttftMs, audioToFinalMs }));
+        settle(() => resolve({ transcript: turns.join(" ").trim(), ttfaMs, audioToFinalMs }));
       }
     });
 

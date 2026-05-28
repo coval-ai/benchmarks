@@ -1,7 +1,7 @@
 export type STTSuccess = {
   modelId: string;
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 

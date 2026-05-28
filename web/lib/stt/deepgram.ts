@@ -6,7 +6,7 @@ const DEEPGRAM_PCM_CHUNK_BYTES = 3_200;
 
 export type DeepgramResult = {
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 
@@ -18,9 +18,6 @@ export async function callDeepgram(
   if (model === "flux-general-en") {
     return callDeepgramFlux(pcm, apiKey);
   }
-  // nova-2 / nova-3 — v1 WebSocket protocol, mirrors runner's
-  // DeepgramProvider._build_websocket_url so playground TTFT/audio-to-final
-  // numbers are comparable with the benchmark dashboard.
   return callDeepgramNova(pcm, model, apiKey);
 }
 
@@ -49,7 +46,7 @@ function callDeepgramNova(
     let settled = false;
     let sentAudio = false;
     let t0 = 0;
-    let ttftMs: number | null = null;
+    let ttfaMs: number | null = null;
     const finalSegments: string[] = [];
     let lastInterim = "";
     let lastFinalTime = 0;
@@ -113,7 +110,7 @@ function callDeepgramNova(
       const transcript = extractDeepgramTranscript(msg);
       if (!transcript) return;
 
-      if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+      if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
 
       if (msg.speech_final) {
         finalSegments.push(transcript);
@@ -135,7 +132,7 @@ function callDeepgramNova(
         const audioToFinalMs = lastFinalTime > 0
           ? Math.round(lastFinalTime - t0)
           : (t0 > 0 ? Math.round(performance.now() - t0) : 0);
-        resolve({ transcript, ttftMs, audioToFinalMs });
+        resolve({ transcript, ttfaMs, audioToFinalMs });
       });
     });
 
@@ -164,7 +161,7 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
     let connectedSeen = false;
     let sentAudio = false;
     let t0 = 0;
-    let ttftMs: number | null = null;
+    let ttfaMs: number | null = null;
     const endTurnTexts: string[] = [];
     let lastTranscript = "";
 
@@ -180,6 +177,10 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
     }, 55_000);
 
     const clearTimer = () => clearTimeout(timer);
+
+    ws.on("open", () => {
+      t0 = performance.now();
+    });
 
     ws.on("message", (raw) => {
       const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
@@ -209,7 +210,6 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
           if (sentAudio) return;
           sentAudio = true;
           connectedSeen = true;
-          t0 = performance.now();
           for (let i = 0; i < buf.length; i += DEEPGRAM_PCM_CHUNK_BYTES) {
             const slice = buf.subarray(i, Math.min(i + DEEPGRAM_PCM_CHUNK_BYTES, buf.length));
             if (slice.length > 0) ws.send(slice);
@@ -220,7 +220,7 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
         case "TurnInfo": {
           const transcript = extractDeepgramTranscript(msg);
           if (transcript) {
-            if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+            if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
             lastTranscript = transcript;
           }
           if (msg.event === "EndOfTurn" && transcript) {
@@ -231,7 +231,7 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
         case "Results": {
           const transcript = extractDeepgramTranscript(msg);
           if (transcript) {
-            if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+            if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
             lastTranscript = transcript;
           }
           return;
@@ -259,7 +259,7 @@ function callDeepgramFlux(pcm: ArrayBuffer, apiKey: string): Promise<DeepgramRes
         const transcript =
           endTurnTexts.length > 0 ? endTurnTexts.join(" ").trim() : lastTranscript.trim();
         const audioToFinalMs = t0 > 0 ? Math.round(performance.now() - t0) : 0;
-        resolve({ transcript, ttftMs, audioToFinalMs });
+        resolve({ transcript, ttfaMs, audioToFinalMs });
       });
     });
 

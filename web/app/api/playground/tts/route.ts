@@ -32,6 +32,11 @@ export async function POST(req: Request) {
 }
 
 async function handle(req: Request, ip: string) {
+  const rawLen = req.headers.get("content-length");
+  const contentLength = rawLen != null ? Number(rawLen) : NaN;
+  if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > 4_096) {
+    return Response.json({ error: "Request too large.", code: "PAYLOAD_TOO_LARGE" }, { status: 413 });
+  }
   let body: unknown;
   try {
     body = await req.json();
@@ -88,6 +93,12 @@ async function handle(req: Request, ip: string) {
       throw new Error("Provider returned no audio data.");
     }
 
+    const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
+    const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+    if (totalBytes > MAX_AUDIO_BYTES) {
+      throw new Error("Provider returned oversized audio payload.");
+    }
+
     const wav = buildWav(chunks);
     const headers: Record<string, string> = {
       "Content-Type": "audio/wav",
@@ -102,9 +113,8 @@ async function handle(req: Request, ip: string) {
     return new Response(responseBody, { headers });
   } catch (err) {
     const detail = err instanceof Error ? err.message : "Synthesis failed.";
-    const message =
-      process.env.NODE_ENV === "development" ? detail : "Audio synthesis failed.";
-    return Response.json({ error: message, code: "UPSTREAM_ERROR" }, { status: 502 });
+    console.error("[playground/tts] provider error", { detail });
+    return Response.json({ error: "Audio synthesis failed.", code: "UPSTREAM_ERROR" }, { status: 502 });
   }
 }
 

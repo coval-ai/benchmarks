@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { postPlaygroundTts, PlaygroundTtsError } from "@/lib/api/client";
 import type { PlaygroundApiError } from "@/lib/playground/schemas";
 
@@ -171,6 +171,19 @@ export function useTTSGeneration() {
   }, []);
 
   const hasInFlight = Object.values(rows).some((row) => row.status === "loading");
+
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  useEffect(() => {
+    return () => {
+      runTokenRef.current += 1;
+      for (const controller of Object.values(controllersRef.current)) controller.abort();
+      controllersRef.current = {};
+      for (const row of Object.values(rowsRef.current)) {
+        if (row.audioUrl) URL.revokeObjectURL(row.audioUrl);
+      }
+    };
+  }, []);
 
   return { rows, runBenchmark, cancelAll, resetRows, hasInFlight };
 }

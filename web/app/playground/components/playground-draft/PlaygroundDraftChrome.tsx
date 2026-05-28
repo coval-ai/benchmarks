@@ -1,14 +1,12 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { PlaygroundMode } from "../../hooks/usePlaygroundMode";
-import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
-import type { PlaygroundModeChangeTrigger } from "@/lib/posthog/events";
 
 type PlaygroundDraftChromeProps = {
   mode: PlaygroundMode;
-  onModeChange: (mode: PlaygroundMode, trigger?: PlaygroundModeChangeTrigger) => void;
+  onModeChange: (mode: PlaygroundMode) => void;
   /** True while a benchmark / results modal is open — mode tabs and shortcuts are disabled. */
   modeTabsLocked?: boolean;
   children: ReactNode;
@@ -21,17 +19,20 @@ export function PlaygroundDraftChrome({
   modeTabsLocked = false,
   children
 }: PlaygroundDraftChromeProps) {
+  const tablistRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
+    const el = tablistRef.current;
+    if (!el) return;
     const onKey = (e: KeyboardEvent) => {
       if (modeTabsLocked) return;
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      if (isTypingInteractionTarget(e.target)) return;
       e.preventDefault();
-      if (e.key === "ArrowLeft") onModeChange("tts", "keyboard");
-      else onModeChange("stt", "keyboard");
+      if (e.key === "ArrowLeft") onModeChange("tts");
+      else onModeChange("stt");
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    el.addEventListener("keydown", onKey);
+    return () => el.removeEventListener("keydown", onKey);
   }, [modeTabsLocked, onModeChange]);
 
   return (
@@ -42,6 +43,7 @@ export function PlaygroundDraftChrome({
             <h1 className="font-sans text-2xl font-bold text-text-primary md:text-4xl">Playground</h1>
           </div>
           <div
+            ref={tablistRef}
             className={`flex justify-center transition-opacity duration-200 ${modeTabsLocked ? "pointer-events-none opacity-40" : ""}`}
             role="tablist"
             aria-label="Playground mode"
@@ -71,7 +73,7 @@ export function PlaygroundDraftChrome({
                     : "text-text-secondary hover:text-text-primary"
                 }`}
                 onClick={() => {
-                  onModeChange("tts", "click");
+                  onModeChange("tts");
                 }}
               >
                 TTS
@@ -90,7 +92,7 @@ export function PlaygroundDraftChrome({
                     : "text-text-secondary hover:text-text-primary"
                 }`}
                 onClick={() => {
-                  onModeChange("stt", "click");
+                  onModeChange("stt");
                 }}
               >
                 STT

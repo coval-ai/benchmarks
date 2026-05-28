@@ -1,9 +1,11 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Color utility functions for benchmark visualizations
  */
 
 import { modelColors, providerColors } from '@/lib/config/colors';
-import { tryDecodeBenchmarkSeriesId } from '@/lib/utils/benchmarkSeriesId';
 
 /**
  * Fallback colors for models/providers not in the predefined color maps
@@ -63,29 +65,16 @@ function hashCode(str: string): number {
 }
 
 /**
- * Resolve a stable chart color for a series.
- *
- * Accepts either a composite id (`provider\\u001fmodel`) or a bare model slug
- * (legacy). Composite ids first try `provider-model` keys, then the model slug,
- * then a deterministic fallback hash of the full series id so two vendors both
- * using `default` never share a color by accident.
+ * Get color for a model, using predefined colors or generating a consistent fallback
+ * @param model - Model name
+ * @returns Hex color code
  */
-export function getModelColor(seriesIdOrModel: string): string {
-  const decoded = tryDecodeBenchmarkSeriesId(seriesIdOrModel);
-  const slug = decoded?.model ?? seriesIdOrModel;
-
-  if (decoded) {
-    const compositeKey = `${decoded.provider.toLowerCase()}-${slug}`;
-    if (modelColors[compositeKey]) {
-      return modelColors[compositeKey];
-    }
+export function getModelColor(model: string): string {
+  if (modelColors[model]) {
+    return modelColors[model];
   }
 
-  if (modelColors[slug]) {
-    return modelColors[slug];
-  }
-
-  const hash = hashCode(seriesIdOrModel);
+  const hash = hashCode(model);
   return fallbackModelColors[Math.abs(hash) % fallbackModelColors.length] ?? "#E74C3C";
 }
 

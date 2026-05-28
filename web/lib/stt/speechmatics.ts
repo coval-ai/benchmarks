@@ -7,7 +7,7 @@ const SESSION_TIMEOUT_MS = 55_000;
 
 export type SpeechmaticsResult = {
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 
@@ -25,7 +25,7 @@ export function callSpeechmatics(
     const finals: string[] = [];
     let seqNo = 0;
     let t0 = 0;
-    let ttftMs: number | null = null;
+    let ttfaMs: number | null = null;
     let settled = false;
     let recognitionStarted = false;
     let gotEndOfTranscript = false;
@@ -49,6 +49,7 @@ export function callSpeechmatics(
     }, SESSION_TIMEOUT_MS);
 
     ws.on("open", () => {
+      t0 = performance.now();
       ws.send(
         JSON.stringify({
           message: "StartRecognition",
@@ -79,7 +80,6 @@ export function callSpeechmatics(
       if (type === "RecognitionStarted") {
         recognitionStarted = true;
         clearTimeout(startTimer);
-        t0 = performance.now();
         for (let i = 0; i < buf.length; i += CHUNK_BYTES) {
           ws.send(buf.subarray(i, i + CHUNK_BYTES));
           seqNo++;
@@ -91,7 +91,7 @@ export function callSpeechmatics(
       if (type === "AddTranscript") {
         const text = extractText(msg);
         if (text) {
-          if (ttftMs === null && t0 > 0) ttftMs = Math.round(performance.now() - t0);
+          if (ttfaMs === null && t0 > 0) ttfaMs = Math.round(performance.now() - t0);
           finals.push(text);
         }
         return;
@@ -101,7 +101,7 @@ export function callSpeechmatics(
         gotEndOfTranscript = true;
         const audioToFinalMs = t0 > 0 ? Math.round(performance.now() - t0) : 0;
         ws.close();
-        settle(() => resolve({ transcript: finals.join(" ").trim(), ttftMs, audioToFinalMs }));
+        settle(() => resolve({ transcript: finals.join(" ").trim(), ttfaMs, audioToFinalMs }));
         return;
       }
 

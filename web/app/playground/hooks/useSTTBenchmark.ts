@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { startAudioCapture, type AudioCaptureHandle } from "@/lib/playground/audio-capture";
 import { getEnabledSttModels } from "@/lib/playground/providers";
 import { isSTTError, type STTResponse } from "@/lib/stt/types";
@@ -9,7 +9,7 @@ export type BenchmarkPhase = "idle" | "recording" | "submitting" | "complete" | 
 
 export type ModelResult = {
   transcript: string;
-  ttftMs: number | null;
+  ttfaMs: number | null;
   audioToFinalMs: number;
 };
 
@@ -29,7 +29,7 @@ export type STTBenchmarkCompletionSummary = {
   modelIds: string[];
   successes: Array<{
     modelId: string;
-    ttftMs: number | null;
+    ttfaMs: number | null;
     audioToFinalMs: number;
   }>;
   failures: Array<{
@@ -42,7 +42,7 @@ type STTBenchmarkOutcome =
   | {
       status: "success";
       modelId: string;
-      ttftMs: number | null;
+      ttfaMs: number | null;
       audioToFinalMs: number;
     }
   | {
@@ -52,7 +52,7 @@ type STTBenchmarkOutcome =
     };
 
 const SAMPLE_RATE = 16_000;
-const MAX_DURATION_MS = 60_000;
+const MAX_DURATION_MS = 50_000;
 
 export function useSTTBenchmark(options?: {
   onComplete?: (summary: STTBenchmarkCompletionSummary) => void;
@@ -70,6 +70,15 @@ export function useSTTBenchmark(options?: {
   const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startingRef = useRef(false);
   const stopRequestedRef = useRef(false);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (autoStopRef.current) clearTimeout(autoStopRef.current);
+      controllerRef.current?.abort();
+      captureRef.current?.stop();
+    };
+  }, []);
 
   const submitPcm = useCallback(async (chunks: ArrayBuffer[]) => {
     setPhase("submitting");
@@ -103,77 +112,96 @@ export function useSTTBenchmark(options?: {
       return;
     }
 
-    const outcomes = await Promise.all(
-      modelIds.map(async (modelId) => {
-        const form = new FormData();
-        form.set("modelId", modelId);
-        form.set("audio", pcmBlob, "audio.pcm");
-        form.set("audioDurationMs", String(durMs));
+    const form = new FormData();
+    form.set("audio", pcmBlob, "audio.pcm");
+    form.set("modelIds", JSON.stringify(modelIds));
+    form.set("audioDurationMs", String(durMs));
 
-        // Abort slightly after the server's maxDuration so the client doesn't hang
-        const controller = new AbortController();
-        const abortTimer = setTimeout(() => controller.abort(), 65_000);
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const abortTimer = setTimeout(() => controller.abort(), 65_000);
 
-        try {
-          const res = await fetch("/api/stt/benchmark", {
-            method: "POST",
-            body: form,
-            signal: controller.signal
-          });
-          clearTimeout(abortTimer);
+    let batch: { results: STTResponse[] } | null = null;
+    let topLevelError: string | null = null;
+    try {
+      const res = await fetch("/api/playground/stt", {
+        method: "POST",
+        body: form,
+        signal: controller.signal,
+      });
+      clearTimeout(abortTimer);
 
-          if (!res.ok) {
-            // Route always returns JSON errors; Vercel infrastructure errors (504) return HTML
-            const errData = await res.json().catch(() => null) as STTResponse | null;
-            const message =
-              errData && isSTTError(errData) ? errData.error : `Request failed (HTTP ${res.status})`;
-            setErrors((prev) => new Map(prev).set(modelId, message));
-            return {
-              status: "error" as const,
-              modelId,
-              errorMessage: message
-            };
-          }
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => null)) as { error?: string } | null;
+        topLevelError = errData?.error ?? `Request failed (HTTP ${res.status})`;
+      } else {
+        batch = (await res.json()) as { results: STTResponse[] };
+      }
+    } catch (err) {
+      clearTimeout(abortTimer);
+      topLevelError =
+        err instanceof Error && err.name === "AbortError" ? "Request timed out" : "Network error";
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null;
+    }
 
-          const data = (await res.json()) as STTResponse;
-          if (isSTTError(data)) {
-            setErrors((prev) => new Map(prev).set(modelId, data.error));
-            return {
-              status: "error" as const,
-              modelId,
-              errorMessage: data.error
-            };
-          } else {
-            const transcript = data.transcript.trim() || "No transcript returned.";
-            setResults((prev) =>
-              new Map(prev).set(modelId, {
-                transcript,
-                ttftMs: data.ttftMs,
-                audioToFinalMs: data.audioToFinalMs,
-              }),
-            );
-            return {
-              status: "success" as const,
-              modelId,
-              ttftMs: data.ttftMs,
-              audioToFinalMs: data.audioToFinalMs,
-            };
-          }
-        } catch (err) {
-          clearTimeout(abortTimer);
-          const message =
-            err instanceof Error && err.name === "AbortError"
-              ? "Request timed out"
-              : "Network error";
-          setErrors((prev) => new Map(prev).set(modelId, message));
+    let outcomes: STTBenchmarkOutcome[];
+    if (topLevelError) {
+      outcomes = modelIds.map((modelId) => ({
+        status: "error" as const,
+        modelId,
+        errorMessage: topLevelError,
+      }));
+      setErrors((prev) => {
+        const next = new Map(prev);
+        for (const id of modelIds) next.set(id, topLevelError);
+        return next;
+      });
+    } else {
+      const results = batch?.results ?? [];
+      outcomes = results.map((data) => {
+        if (isSTTError(data)) {
+          setErrors((prev) => new Map(prev).set(data.modelId, data.error));
           return {
             status: "error" as const,
-            modelId,
-            errorMessage: message
+            modelId: data.modelId,
+            errorMessage: data.error,
           };
         }
-      }),
-    );
+        const transcript = data.transcript.trim() || "No transcript returned.";
+        setResults((prev) =>
+          new Map(prev).set(data.modelId, {
+            transcript,
+            ttfaMs: data.ttfaMs,
+            audioToFinalMs: data.audioToFinalMs,
+          }),
+        );
+        return {
+          status: "success" as const,
+          modelId: data.modelId,
+          ttfaMs: data.ttfaMs,
+          audioToFinalMs: data.audioToFinalMs,
+        };
+      });
+
+      const received = new Set(results.map((r) => r.modelId));
+      const missing = modelIds.filter((id) => !received.has(id));
+      if (missing.length > 0) {
+        const message = "Provider response missing.";
+        setErrors((prev) => {
+          const next = new Map(prev);
+          for (const id of missing) next.set(id, message);
+          return next;
+        });
+        outcomes.push(
+          ...missing.map((id) => ({
+            status: "error" as const,
+            modelId: id,
+            errorMessage: message,
+          })),
+        );
+      }
+    }
 
     const successes = outcomes.filter(
       (outcome): outcome is Extract<STTBenchmarkOutcome, { status: "success" }> =>

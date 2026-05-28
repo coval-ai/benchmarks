@@ -1,21 +1,20 @@
 import { getEnabledSttModels, getEnabledTtsModels } from "@/lib/playground/providers";
 
-// SECURITY LIMITATION (TODO Turnstile + signed session token):
-//   `Origin`, `x-forwarded-for`, and `x-real-ip` are all caller-controlled.
-//   A direct HTTP client (curl, scripts) can forge any of them, bypassing the
-//   allowlist below and the per-IP caps. These guards are defense-in-depth
-//   against honest browser clients only. See playground-pr-plan.md C1 follow-up.
-
-const ALLOWED_ORIGINS = [
-  /^https?:\/\/localhost(:\d+)?$/,
-  /^https?:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https:\/\/.*\.coval\.ai$/,
-  /^https:\/\/.*-covalai\.vercel\.app$/,
-];
+// SECURITY LIMITATION: `Origin`, `x-forwarded-for`, and `x-real-ip` are all
+// caller-controlled — any HTTP client can forge them. These checks are
+// defense-in-depth for honest browser clients only. The in-process Maps below
+// are not shared across Vercel instances (each gets fresh state on cold start).
+// Upgrade path: signed session token + Upstash Redis before exposing to
+// untrusted traffic at scale.
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:3000",
+  "https://benchmarks.coval.ai",
+  // Add specific Vercel preview URLs here when testing playground on a preview deploy.
+]);
 
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
-  return ALLOWED_ORIGINS.some((re) => re.test(origin));
+  return ALLOWED_ORIGINS.has(origin);
 }
 
 export function getClientIp(req: Request): string {

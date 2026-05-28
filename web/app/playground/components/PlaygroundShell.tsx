@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 type PlaygroundShellProps = {
   /**
-   * Site chrome (e.g. `PlaygroundHeader`). Pass **only** through this prop so it
+   * Site chrome (e.g. `DashboardHeader`). Pass **only** through this prop so it
    * lives in a `<header>` landmark. Do not put the same chrome inside `children`,
    * or you will duplicate markup and lose a clear banner/main split for AT.
    */
