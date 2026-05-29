@@ -2,9 +2,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 import { getTtsModelById } from "@/lib/playground/providers";
+import { getSessionFromRequest } from "@/lib/playground/session";
 import {
   isAllowedOrigin,
-  getClientIp,
   tryAcquireSession,
   releaseSession,
   tryConsumeDailyQuota,
@@ -19,19 +19,22 @@ export async function POST(req: Request) {
   if (!isAllowedOrigin(req.headers.get("origin"))) {
     return Response.json({ error: "Forbidden.", code: "FORBIDDEN" }, { status: 403 });
   }
-  const ip = getClientIp(req);
-  if (!tryAcquireSession(ip)) {
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    return Response.json({ error: "Unauthorized.", code: "UNAUTHORIZED" }, { status: 401 });
+  }
+  if (!tryAcquireSession(session.sid)) {
     return Response.json({ error: "Too many concurrent sessions.", code: "RATE_LIMITED" }, { status: 429 });
   }
 
   try {
-    return await handle(req, ip);
+    return await handle(req, session.sid);
   } finally {
-    releaseSession(ip);
+    releaseSession(session.sid);
   }
 }
 
-async function handle(req: Request, ip: string) {
+async function handle(req: Request, sid: string) {
   const rawLen = req.headers.get("content-length");
   const contentLength = rawLen != null ? Number(rawLen) : NaN;
   if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > 4_096) {
@@ -77,7 +80,7 @@ async function handle(req: Request, ip: string) {
   }
 
   // Daily cap is the last gate so malformed or rejected requests don't burn quota.
-  if (!tryConsumeDailyQuota(ip)) {
+  if (!tryConsumeDailyQuota(sid)) {
     return Response.json({ error: "Daily quota exceeded.", code: "RATE_LIMITED" }, { status: 429 });
   }
 
