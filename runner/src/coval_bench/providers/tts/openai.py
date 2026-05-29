@@ -7,11 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
-import os
-import tempfile
 import time
-import wave
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -21,6 +17,7 @@ from openai import AsyncOpenAI
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -91,7 +88,8 @@ class OpenAITTSProvider(TTSProvider):
 
     async def _synthesize_http(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
 
         try:
             start = time.monotonic()
@@ -103,38 +101,36 @@ class OpenAITTSProvider(TTSProvider):
             ) as response:
                 async for chunk in response.iter_bytes():
                     if isinstance(chunk, bytes) and len(chunk) > 0:
-                        if ttfa_ms is None:
-                            ttfa_ms = (time.monotonic() - start) * 1000
-                            logger.debug(
-                                "openai_http_ttfa",
-                                model=self._model,
-                                ttfa_ms=ttfa_ms,
-                            )
+                        if first_chunk_at is None:
+                            first_chunk_at = time.monotonic()
                         audio_chunks.append(chunk)
         except Exception as exc:
             logger.debug("openai_http_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="openai",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, SAMPLE_RATE) if audio_chunks else None
-        return TTSResult(
+        return finalize_tts_result(
             provider="openai",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
 
     async def _synthesize_realtime(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
 
         ws_url = f"wss://api.openai.com/v1/realtime?model={self._model}"
         ws_extra_headers = {
@@ -165,13 +161,8 @@ class OpenAITTSProvider(TTSProvider):
                         if event_type == "response.audio.delta" and "delta" in event:
                             audio_data = base64.b64decode(event["delta"])
                             if len(audio_data) > 0:
-                                if ttfa_ms is None:
-                                    ttfa_ms = (time.monotonic() - start) * 1000
-                                    logger.debug(
-                                        "openai_realtime_ttfa",
-                                        model=self._model,
-                                        ttfa_ms=ttfa_ms,
-                                    )
+                                if first_chunk_at is None:
+                                    first_chunk_at = time.monotonic()
                                 audio_chunks.append(audio_data)
 
                         if event_type == "response.done":
@@ -181,34 +172,23 @@ class OpenAITTSProvider(TTSProvider):
                         break
         except Exception as exc:
             logger.debug("openai_realtime_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="openai",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, SAMPLE_RATE) if audio_chunks else None
-        return TTSResult(
+        return finalize_tts_result(
             provider="openai",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    """Concatenate PCM chunks and write a WAV file to a temp location."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    audio_data = b"".join(chunks)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

@@ -14,11 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import tempfile
 import time
-import wave
-from pathlib import Path
 from urllib.parse import urlencode
 
 import structlog
@@ -26,6 +22,7 @@ import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -58,7 +55,8 @@ class DeepgramTTSProvider(TTSProvider):
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Deepgram WebSocket and return a TTSResult."""
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
 
         qs = urlencode({"encoding": "linear16", "sample_rate": SAMPLE_RATE, "model": self._model})
         url = f"{_DEEPGRAM_TTS_WS_BASE}?{qs}"
@@ -82,13 +80,8 @@ class DeepgramTTSProvider(TTSProvider):
 
                 async for raw in ws:
                     if isinstance(raw, bytes):
-                        if ttfa_ms is None:
-                            ttfa_ms = (time.monotonic() - start) * 1000
-                            logger.debug(
-                                "deepgram_ttfa",
-                                model=self._model,
-                                ttfa_ms=ttfa_ms,
-                            )
+                        if first_chunk_at is None:
+                            first_chunk_at = time.monotonic()
                         audio_chunks.append(raw)
                         continue
 
@@ -101,34 +94,23 @@ class DeepgramTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.debug("deepgram_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="deepgram",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, SAMPLE_RATE) if audio_chunks else None
-        return TTSResult(
+        return finalize_tts_result(
             provider="deepgram",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    """Concatenate PCM chunks and write a WAV file to a temp location."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    audio_data = b"".join(chunks)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

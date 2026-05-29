@@ -167,8 +167,8 @@ async def test_cartesia_send_includes_output_format(fake_settings: Settings) -> 
     The Cartesia SDK AsyncWebSocketContext.send() does NOT inherit output_format
     from conn.context() — ctx._output_format is only used by push(), not send().
     When output_format is omitted from send(), the SDK substitutes its own default
-    (pcm_f32le / 44100 Hz). _write_wav then stamps the WAV header as pcm_s16le /
-    24000 Hz, producing a corrupt file. Whisper hallucinating on corrupt audio
+    (pcm_f32le / 44100 Hz). The finalize step then stamps the WAV header as
+    pcm_s16le / 24000 Hz, producing a corrupt file. Whisper hallucinating on corrupt audio
     causes WER > 100% in the benchmark.
     """
     from coval_bench.providers.tts.cartesia import OUTPUT_FORMAT
