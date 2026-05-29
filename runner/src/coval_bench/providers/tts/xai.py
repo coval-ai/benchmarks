@@ -66,7 +66,6 @@ class XaiTTSProvider(TTSProvider):
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
-        error: str | None = None
 
         try:
             headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -102,7 +101,14 @@ class XaiTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.debug("xai_tts_error", exc_info=True)
-            error = str(exc)
+            return TTSResult(
+                provider="xai",
+                model=self._model,
+                voice=self._voice,
+                ttfa_ms=ttfa_ms,
+                audio_path=None,
+                error=str(exc),
+            )
 
         audio_path = _write_wav(audio_chunks, _SAMPLE_RATE) if audio_chunks else None
         return TTSResult(
@@ -111,7 +117,7 @@ class XaiTTSProvider(TTSProvider):
             voice=self._voice,
             ttfa_ms=ttfa_ms,
             audio_path=audio_path,
-            error=error,
+            error=None,
         )
 
 

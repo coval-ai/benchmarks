@@ -122,6 +122,74 @@ async def test_xai_tts_error_event(fake_settings: Settings) -> None:
     assert result.ttfa_ms is None
 
 
+@pytest.mark.asyncio
+async def test_xai_tts_error_after_partial_audio(fake_settings: Settings) -> None:
+    chunk = make_pcm_bytes(240)
+    events = [
+        json.dumps({"type": "audio.delta", "delta": base64.b64encode(chunk).decode()}),
+        json.dumps({"type": "error", "message": "stream interrupted"}),
+    ]
+    ws = FakeWebSocket(events)
+    provider = XaiTTSProvider(fake_settings, model="grok-tts", voice="eve")
+
+    with patch(
+        "coval_bench.providers.tts.xai.ws_client.connect",
+        return_value=ws,
+    ):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is not None
+    assert "stream interrupted" in result.error
+    assert result.audio_path is None
+    assert result.ttfa_ms is not None
+
+
+@pytest.mark.asyncio
+async def test_xai_tts_ttfa_set_on_first_chunk_only(fake_settings: Settings) -> None:
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240), make_pcm_bytes(240)]
+    ws = FakeWebSocket(_audio_events(chunks))
+    provider = XaiTTSProvider(fake_settings, model="grok-tts", voice="eve")
+
+    times = iter([0.0, 0.1, 1.0, 2.0])
+
+    with (
+        patch(
+            "coval_bench.providers.tts.xai.time.monotonic",
+            side_effect=lambda: next(times, 10.0),
+        ),
+        patch(
+            "coval_bench.providers.tts.xai.ws_client.connect",
+            return_value=ws,
+        ),
+    ):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is None
+    assert result.ttfa_ms == pytest.approx(100.0)
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_xai_tts_skips_empty_audio_delta(fake_settings: Settings) -> None:
+    events = [
+        json.dumps({"type": "audio.delta", "delta": ""}),
+        json.dumps({"type": "audio.done", "trace_id": "test"}),
+    ]
+    ws = FakeWebSocket(events)
+    provider = XaiTTSProvider(fake_settings, model="grok-tts", voice="eve")
+
+    with patch(
+        "coval_bench.providers.tts.xai.ws_client.connect",
+        return_value=ws,
+    ):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is None
+    assert result.audio_path is None
+    assert result.ttfa_ms is None
+
+
 def test_xai_tts_invalid_model_raises(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Invalid xAI TTS model"):
         XaiTTSProvider(fake_settings, model="not-a-model", voice="eve")
@@ -139,6 +207,7 @@ def test_xai_tts_missing_api_key_raises() -> None:
         dataset_id="stt-v1",
         runner_sha="test",
         log_level="DEBUG",
+        xai_api_key=None,
     )
     with pytest.raises(ValueError, match="xai_api_key is required"):
         XaiTTSProvider(settings, model="grok-tts", voice="eve")
