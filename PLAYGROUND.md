@@ -83,9 +83,15 @@ Planned follow-up: server-side real-time pacing of audio to each provider WS
 All five must be `done` before this surface is OSS-ready. Today, the route
 handlers are defense-in-depth for honest browsers, not the abuse boundary.
 
-- **Signed sessions** — `planned, follow-up PR`. Forged `Origin` / forwarded-IP
-  headers bypass current checks; issue a short-lived signed token at page load
-  and require it on every `POST /api/playground/*`.
+- **Signed sessions** — `done`. HMAC-SHA256 token in an HttpOnly cookie
+  (`__playground_session`) minted on `/playground` server-component render,
+  required on every `POST /api/playground/*`. The cookie is set with two
+  Path scopes (`/playground` and `/api/playground`) so the page can read it
+  on reload without leaking it to dashboard routes. Rate limiter keys on
+  the session `sid`, not on IP. See `web/lib/playground/session.ts`.
+  Rotation: set `PLAYGROUND_SESSION_SECRET_PREVIOUS` to the current secret,
+  set `PLAYGROUND_SESSION_SECRET` to a fresh one, deploy. Existing cookies
+  verify against either for ~24h; drop `PREVIOUS` after.
 - **Durable quota** — `not yet wired`. `concurrent` / `daily` Maps in
   `security.ts` are per-instance and reset on cold start; move to Upstash Redis
   keyed on the signed session.
