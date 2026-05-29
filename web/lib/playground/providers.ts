@@ -4,6 +4,10 @@
  *
  * Keep this list intentionally small and public: every enabled row must have a
  * server-side adapter in `web/app/api/**` and a matching server-only env var.
+ *
+ * This is a curated subset of runner-supported models, not a mirror. The parity
+ * check in `providers.test.ts` asserts every model here exists in the runner's
+ * `_VALID_MODELS`; the runner may support more models than the playground exposes.
  */
 
 export type TtsProviderId =
