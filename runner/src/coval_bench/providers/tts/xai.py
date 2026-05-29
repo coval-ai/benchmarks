@@ -47,7 +47,7 @@ class XaiTTSProvider(TTSProvider):
 
     @property
     def name(self) -> str:
-        return "xai"
+        return f"xai-{self._model}"
 
     @property
     def model(self) -> str:

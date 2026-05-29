@@ -215,5 +215,5 @@ def test_xai_tts_missing_api_key_raises() -> None:
 
 def test_xai_tts_provider_name(fake_settings: Settings) -> None:
     provider = XaiTTSProvider(fake_settings, model="grok-tts", voice="eve")
-    assert provider.name == "xai"
+    assert provider.name == "xai-grok-tts"
     assert provider.model == "grok-tts"
