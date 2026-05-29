@@ -25,6 +25,9 @@ export const modelColors: Record<string, string> = {
   "octave-tts": "#7C3AED",
   "octave-2": "#C026D3",
 
+  // xAI TTS
+  "grok-tts": "#1F2937",
+
   // Deepgram TTS
   "aura-2-thalia-en": "#FC2D62",
 
@@ -51,5 +54,6 @@ export const providerColors: Record<string, string> = {
   Speechmatics: "#21618C",
   Rime: "#27AE60",
   Gradium: "#1ABC9C",
-  Hume: "#A855F7"
+  Hume: "#A855F7",
+  xAI: "#111827"
 };

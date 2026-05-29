@@ -68,6 +68,7 @@ export function normalizeModelName(modelName: string): string {
     "octave-tts": "Octave TTS",
     "octave-2": "Octave 2",
     coda: "Coda",
+    "grok-tts": "Grok TTS",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -135,6 +136,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     hume: "Hume",
     openai: "OpenAI",
     rime: "Rime",
+    xai: "xAI",
   };
 
   const lower = providerName.toLowerCase();
