@@ -55,3 +55,6 @@ insights.md
 .pnpm-store/
 .uv-cache/
 runner/.uv-cache/
+
+# Playground internal docs (per Loren's PR #26 R4-1 review)
+PLAYGROUND.md
