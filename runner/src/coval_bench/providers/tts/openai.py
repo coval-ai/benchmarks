@@ -37,6 +37,8 @@ class OpenAITTSProvider(TTSProvider):
 
     enabled: bool = True
 
+    _VALID_MODELS = frozenset(HTTP_MODELS | REALTIME_MODELS)
+
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
         self._voice = voice

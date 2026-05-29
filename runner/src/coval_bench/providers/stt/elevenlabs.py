@@ -25,8 +25,6 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("scribe_v1", "scribe_v2_realtime")
-
 _ERROR_MSG_TYPES = frozenset(
     {
         "scribe_error",
@@ -49,9 +47,13 @@ _ERROR_MSG_TYPES = frozenset(
 class ElevenLabsSTTProvider(STTProvider):
     """ElevenLabs real-time STT provider."""
 
+    _VALID_MODELS = frozenset({"scribe_v1", "scribe_v2_realtime"})
+
     def __init__(self, api_key: SecretStr, model: str = "scribe_v2_realtime") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid ElevenLabs model {model!r}. Valid: {_VALID_MODELS}")
+        if not self._model_supported(model):
+            raise ValueError(
+                f"Invalid ElevenLabs model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         self._api_key = api_key
         self._model = model
 

@@ -5,7 +5,7 @@
  * Sample prompt chips are static product copy; benchmark metrics are request-derived.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Pause, Play, X } from "lucide-react";
 import type { TtsModelConfig } from "@/lib/playground/providers";
@@ -143,21 +143,39 @@ export function TTSPlaygroundPanel({
     setSelectedMap((prev) => ({ ...prev, [id]: !prev[id] }));
   }, [hasInFlight, modelsById]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const doneBtnRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     if (!benchmarkOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setBenchmarkOpen(false);
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        setBenchmarkOpen(false);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const restoreTo = document.activeElement as HTMLElement | null;
+    doneBtnRef.current?.focus();
+    return () => restoreTo?.focus?.();
   }, [benchmarkOpen]);
+
+  const onDialogKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setBenchmarkOpen(false);
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const root = dialogRef.current;
+    if (!root) return;
+    const focusables = root.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
 
   useEffect(() => {
     if (!benchmarkOpen) stop();
@@ -362,11 +380,13 @@ export function TTSPlaygroundPanel({
               }}
             >
               <div
+                ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="tts-benchmark-title"
                 className="playground-modal-base relative flex max-h-[min(88vh,640px)] w-full max-w-md flex-col overflow-hidden rounded-2xl shadow-2xl sm:max-w-xl"
                 onMouseDown={(e) => e.stopPropagation()}
+                onKeyDown={onDialogKeyDown}
               >
                 <div className="flex shrink-0 items-start justify-between gap-3 border-b playground-modal-row-divider px-4 pb-0 pt-4 sm:px-5 sm:pt-5">
                   <div className="min-w-0 pr-2 pb-3 sm:pb-4">
@@ -457,6 +477,7 @@ export function TTSPlaygroundPanel({
                 </div>
                 <div className="shrink-0 border-t playground-modal-row-divider px-4 py-3 sm:px-5 sm:py-4">
                   <button
+                    ref={doneBtnRef}
                     type="button"
                     title="Close (Enter)"
                     className="w-full rounded-lg py-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary sm:text-sm dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"

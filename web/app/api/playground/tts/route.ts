@@ -2,9 +2,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 import { getTtsModelById } from "@/lib/playground/providers";
+import { getSessionFromRequest } from "@/lib/playground/session";
 import {
   isAllowedOrigin,
-  getClientIp,
   tryAcquireSession,
   releaseSession,
   tryConsumeDailyQuota,
@@ -14,24 +14,28 @@ import WebSocket from "@/lib/stt/ws";
 const SAMPLE_RATE = 24_000;
 const MAX_TEXT_LENGTH = 500;
 const PROVIDER_TIMEOUT_MS = 55_000;
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req.headers.get("origin"))) {
     return Response.json({ error: "Forbidden.", code: "FORBIDDEN" }, { status: 403 });
   }
-  const ip = getClientIp(req);
-  if (!tryAcquireSession(ip)) {
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    return Response.json({ error: "Unauthorized.", code: "UNAUTHORIZED" }, { status: 401 });
+  }
+  if (!tryAcquireSession(session.sid)) {
     return Response.json({ error: "Too many concurrent sessions.", code: "RATE_LIMITED" }, { status: 429 });
   }
 
   try {
-    return await handle(req, ip);
+    return await handle(req, session.sid);
   } finally {
-    releaseSession(ip);
+    releaseSession(session.sid);
   }
 }
 
-async function handle(req: Request, ip: string) {
+async function handle(req: Request, sid: string) {
   const rawLen = req.headers.get("content-length");
   const contentLength = rawLen != null ? Number(rawLen) : NaN;
   if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > 4_096) {
@@ -77,7 +81,7 @@ async function handle(req: Request, ip: string) {
   }
 
   // Daily cap is the last gate so malformed or rejected requests don't burn quota.
-  if (!tryConsumeDailyQuota(ip)) {
+  if (!tryConsumeDailyQuota(sid, "tts")) {
     return Response.json({ error: "Daily quota exceeded.", code: "RATE_LIMITED" }, { status: 429 });
   }
 
@@ -91,12 +95,6 @@ async function handle(req: Request, ip: string) {
 
     if (chunks.length === 0) {
       throw new Error("Provider returned no audio data.");
-    }
-
-    const totalBytes = chunks.reduce((sum, c) => sum + c.length, 0);
-    const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
-    if (totalBytes > MAX_AUDIO_BYTES) {
-      throw new Error("Provider returned oversized audio payload.");
     }
 
     const wav = buildWav(chunks);
@@ -175,6 +173,7 @@ function synthesizeCartesia(model: string, voiceId: string, text: string) {
     let ttfaMs: number | null = null;
     let gotDone = false;
     const chunks: Buffer[] = [];
+    let total = 0;
 
     const settle = (fn: () => void) => {
       if (settled) return;
@@ -214,7 +213,15 @@ function synthesizeCartesia(model: string, voiceId: string, text: string) {
       }
       if (evt.type === "chunk" && evt.data) {
         if (ttfaMs === null) ttfaMs = performance.now() - t0;
-        chunks.push(Buffer.from(evt.data, "base64"));
+        const buf = Buffer.from(evt.data, "base64");
+        total += buf.length;
+        if (total > MAX_AUDIO_BYTES) {
+          clearTimer();
+          ws.close();
+          settle(() => reject(new Error("Provider audio exceeded cap")));
+          return;
+        }
+        chunks.push(buf);
       } else if (evt.type === "done") {
         gotDone = true;
         clearTimer();
@@ -270,6 +277,7 @@ function synthesizeDeepgram(model: string, text: string) {
     let ttfaMs: number | null = null;
     let gotFlushed = false;
     const chunks: Buffer[] = [];
+    let total = 0;
 
     const settle = (fn: () => void) => {
       if (settled) return;
@@ -293,6 +301,13 @@ function synthesizeDeepgram(model: string, text: string) {
     ws.on("message", (raw: Buffer | string) => {
       if (Buffer.isBuffer(raw) && raw.length > 0 && raw[0] !== 0x7b) {
         if (ttfaMs === null && t0 > 0) ttfaMs = performance.now() - t0;
+        total += raw.length;
+        if (total > MAX_AUDIO_BYTES) {
+          clearTimer();
+          ws.close();
+          settle(() => reject(new Error("Provider audio exceeded cap")));
+          return;
+        }
         chunks.push(raw);
         return;
       }
@@ -354,6 +369,7 @@ function synthesizeRime(model: string, voice: string, text: string) {
     let ttfaMs: number | null = null;
     let gotDone = false;
     const chunks: Buffer[] = [];
+    let total = 0;
 
     const settle = (fn: () => void) => {
       if (settled) return;
@@ -384,7 +400,15 @@ function synthesizeRime(model: string, voice: string, text: string) {
       }
       if (msg.type === "chunk" && msg.data) {
         if (ttfaMs === null) ttfaMs = performance.now() - t0;
-        chunks.push(Buffer.from(msg.data, "base64"));
+        const buf = Buffer.from(msg.data, "base64");
+        total += buf.length;
+        if (total > MAX_AUDIO_BYTES) {
+          clearTimer();
+          ws.close();
+          settle(() => reject(new Error("Provider audio exceeded cap")));
+          return;
+        }
+        chunks.push(buf);
       } else if (msg.type === "done") {
         gotDone = true;
         clearTimer();
@@ -431,12 +455,18 @@ async function readBinaryStream(
   const reader = body.getReader();
   const chunks: Buffer[] = [];
   let ttfaMs: number | null = null;
+  let total = 0;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (value && value.length > 0) {
       if (ttfaMs === null) ttfaMs = performance.now() - t0;
+      total += value.length;
+      if (total > MAX_AUDIO_BYTES) {
+        await reader.cancel();
+        throw new Error("Provider audio exceeded cap");
+      }
       chunks.push(Buffer.from(value));
     }
   }

@@ -6,10 +6,10 @@ import { callElevenLabs } from "@/lib/stt/elevenlabs";
 import { callAssemblyAI } from "@/lib/stt/assemblyai";
 import { callSpeechmatics } from "@/lib/stt/speechmatics";
 import { getEnabledSttModels } from "@/lib/playground/providers";
+import { getSessionFromRequest } from "@/lib/playground/session";
 import type { STTResponse } from "@/lib/stt/types";
 import {
   isAllowedOrigin,
-  getClientIp,
   tryAcquireSession,
   releaseSession,
   tryConsumeDailyQuota,
@@ -29,8 +29,14 @@ export async function POST(req: Request): Promise<Response> {
       { status: 403 },
     );
   }
-  const ip = getClientIp(req);
-  if (!tryAcquireSession(ip)) {
+  const session = getSessionFromRequest(req);
+  if (!session) {
+    return Response.json(
+      { error: "Unauthorized.", code: "UNAUTHORIZED" } satisfies BatchError,
+      { status: 401 },
+    );
+  }
+  if (!tryAcquireSession(session.sid)) {
     return Response.json(
       { error: "Too many concurrent sessions.", code: "RATE_LIMITED" } satisfies BatchError,
       { status: 429 },
@@ -38,13 +44,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    return await handle(req, ip);
+    return await handle(req, session.sid);
   } finally {
-    releaseSession(ip);
+    releaseSession(session.sid);
   }
 }
 
-async function handle(req: Request, ip: string): Promise<Response> {
+async function handle(req: Request, sid: string): Promise<Response> {
   const rawLen = req.headers.get("content-length");
   const contentLength = rawLen != null ? Number(rawLen) : NaN;
   if (!Number.isFinite(contentLength) || contentLength < 0 || contentLength > MAX_PCM_BYTES + 4_096) {
@@ -105,6 +111,8 @@ async function handle(req: Request, ip: string): Promise<Response> {
     }
   }
 
+  const uniqueModelIds = Array.from(new Set(modelIds));
+
   const audioPart = form.get("audio");
   if (!(audioPart instanceof Blob)) {
     return Response.json(
@@ -119,8 +127,8 @@ async function handle(req: Request, ip: string): Promise<Response> {
     );
   }
 
-  // One click = one quota item, regardless of how many models were selected.
-  if (!tryConsumeDailyQuota(ip)) {
+  // Charge one quota item per provider invocation. A 7-model click consumes 7.
+  if (!tryConsumeDailyQuota(sid, "stt", uniqueModelIds.length)) {
     return Response.json(
       { error: "Daily quota exceeded.", code: "RATE_LIMITED" } satisfies BatchError,
       { status: 429 },
@@ -128,7 +136,7 @@ async function handle(req: Request, ip: string): Promise<Response> {
   }
 
   const pcm = await audioPart.arrayBuffer();
-  const results = await Promise.all(modelIds.map((id) => transcribeOne(id, pcm)));
+  const results = await Promise.all(uniqueModelIds.map((id) => transcribeOne(id, pcm)));
 
   return Response.json({ results } satisfies BatchSuccess);
 }

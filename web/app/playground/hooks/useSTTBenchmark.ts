@@ -71,9 +71,12 @@ export function useSTTBenchmark(options?: {
   const startingRef = useRef(false);
   const stopRequestedRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const startTokenRef = useRef(0);
 
   useEffect(() => {
+    const startToken = startTokenRef;
     return () => {
+      startToken.current++;
       if (autoStopRef.current) clearTimeout(autoStopRef.current);
       controllerRef.current?.abort();
       captureRef.current?.stop();
@@ -240,6 +243,7 @@ export function useSTTBenchmark(options?: {
 
   const start = useCallback(async (modelIds: string[]) => {
     if (captureRef.current || startingRef.current) return;
+    const token = ++startTokenRef.current;
     stopRequestedRef.current = false;
     startingRef.current = true;
     chunksRef.current = [];
@@ -250,25 +254,34 @@ export function useSTTBenchmark(options?: {
     setSessionError(null);
     setAudioDurationMs(null);
 
+    let handle: AudioCaptureHandle;
     try {
-      captureRef.current = await startAudioCapture((chunk) => {
+      handle = await startAudioCapture((chunk) => {
         chunksRef.current.push(chunk);
       });
     } catch (err) {
+      if (startTokenRef.current !== token) return;
       startingRef.current = false;
       stopRequestedRef.current = false;
       setSessionError(err instanceof Error ? err.message : "Microphone access denied.");
       setPhase("error");
       return;
     }
+
+    if (startTokenRef.current !== token) {
+      handle.stop();
+      return;
+    }
+    captureRef.current = handle;
     startingRef.current = false;
 
-    // Hard cap — stop automatically at 60 s
+    // Hard cap — stop automatically at MAX_DURATION_MS
     autoStopRef.current = setTimeout(stop, MAX_DURATION_MS);
     if (stopRequestedRef.current) stop();
   }, [stop]);
 
   const reset = useCallback(() => {
+    startTokenRef.current++;
     if (autoStopRef.current) {
       clearTimeout(autoStopRef.current);
       autoStopRef.current = null;
