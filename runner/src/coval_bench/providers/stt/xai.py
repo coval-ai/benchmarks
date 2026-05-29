@@ -67,14 +67,16 @@ class XaiSTTProvider(STTProvider):
         sample_rate: int,
         realtime_resolution: float = 0.1,
     ) -> TranscriptionResult:
+        result = TranscriptionResult(provider=self.name)
         if sample_width != 2:
-            raise ValueError(
+            result.error = (
                 f"xAI realtime transcription expects 16-bit PCM input; got {sample_width}"
             )
+            return result
         if realtime_resolution <= 0:
-            raise ValueError("realtime_resolution must be > 0")
+            result.error = "realtime_resolution must be > 0"
+            return result
 
-        result = TranscriptionResult(provider=self.name)
         total_start = time.monotonic()
 
         try:

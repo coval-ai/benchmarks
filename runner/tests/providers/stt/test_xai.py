@@ -151,27 +151,33 @@ def test_xai_invalid_model_raises() -> None:
 async def test_xai_rejects_non_pcm16(fake_api_key: SecretStr) -> None:
     provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
 
-    with pytest.raises(ValueError, match="16-bit PCM"):
-        await provider.measure_ttft(
-            audio_data=b"\x00" * 16,
-            channels=1,
-            sample_width=1,
-            sample_rate=16000,
-        )
+    result = await provider.measure_ttft(
+        audio_data=b"\x00" * 16,
+        channels=1,
+        sample_width=1,
+        sample_rate=16000,
+    )
+
+    assert result.error is not None
+    assert "16-bit PCM" in result.error
+    assert result.ttft_seconds is None
 
 
 @pytest.mark.asyncio
 async def test_xai_rejects_non_positive_realtime_resolution(fake_api_key: SecretStr) -> None:
     provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
 
-    with pytest.raises(ValueError, match="realtime_resolution must be > 0"):
-        await provider.measure_ttft(
-            audio_data=b"\x00" * 16,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0,
-        )
+    result = await provider.measure_ttft(
+        audio_data=b"\x00" * 16,
+        channels=1,
+        sample_width=2,
+        sample_rate=16000,
+        realtime_resolution=0,
+    )
+
+    assert result.error is not None
+    assert "realtime_resolution must be > 0" in result.error
+    assert result.ttft_seconds is None
 
 
 @pytest.mark.asyncio
