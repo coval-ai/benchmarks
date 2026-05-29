@@ -45,7 +45,7 @@ class XaiSTTProvider(STTProvider):
     def model(self) -> str:
         return self._model
 
-    def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
+    def _build_websocket_url(self, sample_rate: int) -> str:
         params: dict[str, str | int] = {
             "sample_rate": sample_rate,
             "encoding": "pcm",
@@ -53,16 +53,13 @@ class XaiSTTProvider(STTProvider):
             "language": "en",
             "filler_words": "false",
             "diarize": "false",
-            "multichannel": "true" if channels > 1 else "false",
         }
-        if channels > 1:
-            params["channels"] = channels
         return f"{_BASE_WS_URL}?{urlencode(params)}"
 
     async def measure_ttft(
         self,
         audio_data: bytes,
-        channels: int,
+        channels: int,  # noqa: ARG002
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
@@ -82,7 +79,7 @@ class XaiSTTProvider(STTProvider):
         try:
             headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
             async with ws_client.connect(
-                self._build_websocket_url(sample_rate, channels),
+                self._build_websocket_url(sample_rate),
                 additional_headers=headers,
             ) as ws:
                 await self._wait_for_ready(ws)
@@ -90,7 +87,6 @@ class XaiSTTProvider(STTProvider):
                     self._send_audio(
                         ws,
                         audio_data,
-                        channels,
                         sample_rate,
                         result,
                         realtime_resolution,
@@ -130,12 +126,11 @@ class XaiSTTProvider(STTProvider):
         self,
         ws: Any,
         audio_data: bytes,
-        channels: int,
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
     ) -> None:
-        frame_bytes = 2 * channels
+        frame_bytes = 2
         chunk_size = max(frame_bytes, int(sample_rate * frame_bytes * realtime_resolution))
         first_chunk = True
 
