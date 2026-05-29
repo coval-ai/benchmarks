@@ -111,6 +111,8 @@ async function handle(req: Request, sid: string): Promise<Response> {
     }
   }
 
+  const uniqueModelIds = Array.from(new Set(modelIds));
+
   const audioPart = form.get("audio");
   if (!(audioPart instanceof Blob)) {
     return Response.json(
@@ -125,8 +127,8 @@ async function handle(req: Request, sid: string): Promise<Response> {
     );
   }
 
-  // One click = one quota item, regardless of how many models were selected.
-  if (!tryConsumeDailyQuota(sid)) {
+  // Charge one quota item per provider invocation. A 7-model click consumes 7.
+  if (!tryConsumeDailyQuota(sid, "stt", uniqueModelIds.length)) {
     return Response.json(
       { error: "Daily quota exceeded.", code: "RATE_LIMITED" } satisfies BatchError,
       { status: 429 },
@@ -134,7 +136,7 @@ async function handle(req: Request, sid: string): Promise<Response> {
   }
 
   const pcm = await audioPart.arrayBuffer();
-  const results = await Promise.all(modelIds.map((id) => transcribeOne(id, pcm)));
+  const results = await Promise.all(uniqueModelIds.map((id) => transcribeOne(id, pcm)));
 
   return Response.json({ results } satisfies BatchSuccess);
 }

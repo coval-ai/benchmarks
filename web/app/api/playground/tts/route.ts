@@ -80,7 +80,7 @@ async function handle(req: Request, sid: string) {
   }
 
   // Daily cap is the last gate so malformed or rejected requests don't burn quota.
-  if (!tryConsumeDailyQuota(sid)) {
+  if (!tryConsumeDailyQuota(sid, "tts")) {
     return Response.json({ error: "Daily quota exceeded.", code: "RATE_LIMITED" }, { status: 429 });
   }
 

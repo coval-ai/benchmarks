@@ -37,7 +37,9 @@ export const MAX_CONCURRENT_PER_SESSION = Math.max(
   getEnabledTtsModels().length,
   getEnabledSttModels().length,
 );
-export const DAILY_REQUEST_CAP = MAX_CONCURRENT_PER_SESSION * 5;
+
+export const STT_DAILY_CAP = MAX_CONCURRENT_PER_SESSION * 5;
+export const TTS_DAILY_CAP = MAX_CONCURRENT_PER_SESSION * 5;
 
 const concurrent = new Map<string, number>();
 
@@ -56,24 +58,30 @@ export function releaseSession(sid: string): void {
 
 const DAILY_TTL_MS = 24 * 60 * 60 * 1000;
 const PRUNE_THRESHOLD = 10_000;
-const daily = new Map<string, { count: number; resetAt: number }>();
+const dailyStt = new Map<string, { count: number; resetAt: number }>();
+const dailyTts = new Map<string, { count: number; resetAt: number }>();
 
-export function tryConsumeDailyQuota(sid: string): boolean {
-  if (daily.size > PRUNE_THRESHOLD) pruneExpired();
+export type QuotaKind = "stt" | "tts";
+
+export function tryConsumeDailyQuota(sid: string, kind: QuotaKind, count: number = 1): boolean {
+  if (count <= 0) return true;
+  const map = kind === "stt" ? dailyStt : dailyTts;
+  const cap = kind === "stt" ? STT_DAILY_CAP : TTS_DAILY_CAP;
+  if (map.size > PRUNE_THRESHOLD) pruneExpired(map);
   const now = Date.now();
-  const entry = daily.get(sid);
+  let entry = map.get(sid);
   if (!entry || now > entry.resetAt) {
-    daily.set(sid, { count: 1, resetAt: now + DAILY_TTL_MS });
-    return true;
+    entry = { count: 0, resetAt: now + DAILY_TTL_MS };
+    map.set(sid, entry);
   }
-  if (entry.count >= DAILY_REQUEST_CAP) return false;
-  entry.count++;
+  if (entry.count + count > cap) return false;
+  entry.count += count;
   return true;
 }
 
-function pruneExpired(): void {
+function pruneExpired(map: Map<string, { count: number; resetAt: number }>): void {
   const now = Date.now();
-  for (const [sid, entry] of daily) {
-    if (now > entry.resetAt) daily.delete(sid);
+  for (const [sid, entry] of map) {
+    if (now > entry.resetAt) map.delete(sid);
   }
 }
