@@ -32,7 +32,7 @@ from coval_bench.providers.base import TTSProvider, TTSResult
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _WS_URL = "wss://api.gradium.ai/api/speech/tts"
-_SAMPLE_RATE = 24000
+_SAMPLE_RATE = 48000
 
 
 class GradiumTTSProvider(TTSProvider):

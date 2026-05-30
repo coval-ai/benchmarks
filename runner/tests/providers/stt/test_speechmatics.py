@@ -89,6 +89,53 @@ async def test_speechmatics_enhanced(fake_api_key: SecretStr, audio_pcm_bytes: b
 
 
 # ---------------------------------------------------------------------------
+# Transcript field — punctuation spacing
+# ---------------------------------------------------------------------------
+
+
+def test_extract_transcript_uses_transcript_field() -> None:
+    """transcript field is used instead of joining results with spaces."""
+    p = make_provider()
+    msg = {
+        "message": "AddTranscript",
+        "transcript": "Hello, world.",
+        "results": [
+            {"alternatives": [{"content": "Hello", "confidence": 0.99}]},
+            {"alternatives": [{"content": ",", "confidence": 0.99}]},
+            {"alternatives": [{"content": "world", "confidence": 0.99}]},
+            {"alternatives": [{"content": ".", "confidence": 0.99}]},
+        ],
+    }
+    assert p._extract_transcript(msg) == "Hello, world."
+
+
+def test_extract_transcript_whitespace_only_falls_back_to_results() -> None:
+    """Whitespace-only transcript field falls through to results."""
+    p = make_provider()
+    msg = {
+        "message": "AddTranscript",
+        "transcript": "   ",
+        "results": [
+            {"alternatives": [{"content": "hello", "confidence": 0.95}]},
+        ],
+    }
+    assert p._extract_transcript(msg) == "hello"
+
+
+def test_extract_transcript_fallback_without_transcript_field() -> None:
+    """Falls back to joining results when transcript field is absent."""
+    p = make_provider()
+    msg = {
+        "message": "AddTranscript",
+        "results": [
+            {"alternatives": [{"content": "hello", "confidence": 0.95}]},
+            {"alternatives": [{"content": "world", "confidence": 0.93}]},
+        ],
+    }
+    assert p._extract_transcript(msg) == "hello world"
+
+
+# ---------------------------------------------------------------------------
 # StartRecognition config
 # ---------------------------------------------------------------------------
 

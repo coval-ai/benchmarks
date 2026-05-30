@@ -22,8 +22,13 @@ from coval_bench.providers.base import TTSProvider, TTSResult
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-SAMPLE_RATE = 24000
 _WS_BASE = "wss://users-ws.rime.ai/ws3"
+
+_MODEL_SAMPLE_RATES: dict[str, int] = {
+    "arcana": 24000,
+    "coda": 24000,
+    "mistv3": 22050,
+}
 
 
 class RimeTTSProvider(TTSProvider):
@@ -73,7 +78,7 @@ class RimeTTSProvider(TTSProvider):
                 "modelId": self._model,
                 "speaker": self._voice or "luna",
                 "audioFormat": "pcm",
-                "samplingRate": SAMPLE_RATE,
+                "samplingRate": _MODEL_SAMPLE_RATES.get(self._model, 24000),
                 # segment=never: synthesis fires only on explicit eos, not on sentence
                 "segment": "never",
             }
@@ -122,7 +127,11 @@ class RimeTTSProvider(TTSProvider):
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, SAMPLE_RATE) if audio_chunks else None
+        audio_path = (
+            _write_wav(audio_chunks, _MODEL_SAMPLE_RATES.get(self._model, 24000))
+            if audio_chunks
+            else None
+        )
         return TTSResult(
             provider="rime",
             model=self._model,

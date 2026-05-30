@@ -32,7 +32,7 @@ async def test_elevenlabs_happy_path(fake_settings: Settings, tmp_path: Path) ->
     )
 
     mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.convert.return_value = iter(pcm_chunks)
+    mock_sdk.text_to_speech.stream.return_value = iter(pcm_chunks)
 
     with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
         result = await provider.synthesize("Hello from ElevenLabs")
@@ -56,7 +56,7 @@ async def test_elevenlabs_all_models(fake_settings: Settings) -> None:
     for model in ElevenLabsTTSProvider._VALID_MODELS:
         provider = ElevenLabsTTSProvider(fake_settings, model=model, voice="test-voice")
         mock_sdk = MagicMock()
-        mock_sdk.text_to_speech.convert.return_value = iter([pcm])
+        mock_sdk.text_to_speech.stream.return_value = iter([pcm])
         with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
             result = await provider.synthesize("test")
         assert result.error is None, f"Model {model}: {result.error}"
@@ -91,7 +91,7 @@ async def test_elevenlabs_empty_response(fake_settings: Settings) -> None:
     provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="test-voice")
 
     mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.convert.return_value = iter([])  # nothing
+    mock_sdk.text_to_speech.stream.return_value = iter([])  # nothing
 
     with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
         result = await provider.synthesize("silence")
@@ -163,7 +163,7 @@ async def test_elevenlabs_json_audio_chunks(fake_settings: Settings) -> None:
     provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="test-voice")
 
     mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.convert.return_value = iter([json_chunk])
+    mock_sdk.text_to_speech.stream.return_value = iter([json_chunk])
 
     with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
         result = await provider.synthesize("json audio test")

@@ -27,6 +27,19 @@ logger = structlog.get_logger(__name__)
 
 _ERROR_MSG_TYPES = frozenset(
     {
+        "error",
+        "auth_error",
+        "quota_exceeded",
+        "commit_throttled",
+        "rate_limited",
+        "unaccepted_terms",
+        "queue_overflow",
+        "resource_exhausted",
+        "session_time_limit_exceeded",
+        "input_error",
+        "chunk_size_exceeded",
+        "insufficient_audio_activity",
+        "transcriber_error",
         "scribe_error",
         "scribe_auth_error",
         "scribe_quota_exceeded_error",
@@ -66,7 +79,10 @@ class ElevenLabsSTTProvider(STTProvider):
         return self._model
 
     def _build_websocket_url(self) -> str:
-        return f"wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id={self._model}"
+        return (
+            f"wss://api.elevenlabs.io/v1/speech-to-text/realtime"
+            f"?model_id={self._model}&audio_format=pcm_16000"
+        )
 
     async def measure_ttft(
         self,
@@ -77,6 +93,8 @@ class ElevenLabsSTTProvider(STTProvider):
         realtime_resolution: float = 0.1,
         audio_duration: float | None = None,
     ) -> TranscriptionResult:
+        if sample_rate != 16000:
+            raise ValueError(f"ElevenLabs requires 16 kHz PCM input; got {sample_rate} Hz")
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
         total_start = time.monotonic()
 
@@ -175,6 +193,10 @@ class ElevenLabsSTTProvider(STTProvider):
                         result.partial_transcripts.append(transcript)
 
                 elif msg_type in ("committed_transcript", "committed_transcript_with_timestamps"):
+                    # Both types carry "text" in the same position.
+                    # committed_transcript_with_timestamps arrives when include_timestamps=true,
+                    # but handling it defensively prevents silent data loss if the server ever
+                    # sends it unexpectedly (account setting, API default change, etc.).
                     transcript = msg.get("text", "").strip()
                     if transcript:
                         committed_parts.append(transcript)

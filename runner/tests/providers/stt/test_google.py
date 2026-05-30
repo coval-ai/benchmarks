@@ -75,7 +75,13 @@ async def test_google_success(audio_pcm_bytes: bytes) -> None:
     responses = _load_fixture_responses()
 
     mock_client = MagicMock()
-    mock_client.streaming_recognize.return_value = iter(responses)
+
+    def _fake_recognize(requests: Any) -> Any:
+        # Consume the request iterator so audio_start_time gets set
+        list(requests)
+        return iter(responses)
+
+    mock_client.streaming_recognize.side_effect = _fake_recognize
 
     with patch(
         "coval_bench.providers.stt.google.SpeechClient",
@@ -87,14 +93,15 @@ async def test_google_success(audio_pcm_bytes: bytes) -> None:
 
     provider._client = mock_client
 
-    result = await provider.measure_ttft(
-        audio_data=audio_pcm_bytes,
-        channels=1,
-        sample_width=2,
-        sample_rate=16000,
-        realtime_resolution=0.5,
-        audio_duration=3.0,
-    )
+    with patch("coval_bench.providers.stt.google.time.sleep"):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+            audio_duration=3.0,
+        )
 
     assert result.error is None
     assert result.ttft_seconds is not None

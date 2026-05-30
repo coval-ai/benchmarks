@@ -160,11 +160,19 @@ class GoogleSTTProvider(STTProvider):
                         result.partial_transcripts.append(transcript)
 
                     if hasattr(response, "results") and response.results:
+                        saw_final = False
                         for result_item in response.results:
                             if getattr(result_item, "is_final", False):
-                                final_transcripts.append(transcript)
-                                last_final_time = now
-                                break
+                                item_transcript = (
+                                    str(result_item.alternatives[0].transcript)
+                                    if result_item.alternatives
+                                    else ""
+                                )
+                                if item_transcript:
+                                    final_transcripts.append(item_transcript)
+                                saw_final = True
+                        if saw_final:
+                            last_final_time = now
             except Exception as exc:
                 logger.exception("google streaming_recognize failed", error=str(exc))
                 raise

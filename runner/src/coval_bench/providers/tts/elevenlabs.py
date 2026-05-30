@@ -98,7 +98,7 @@ class ElevenLabsTTSProvider(TTSProvider):
             client = ElevenLabs(api_key=self._api_key)
             start = time.monotonic()
 
-            response = client.text_to_speech.convert(
+            response = client.text_to_speech.stream(
                 voice_id=self._voice,
                 output_format="pcm_24000",
                 text=text,
