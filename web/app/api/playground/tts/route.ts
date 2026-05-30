@@ -24,14 +24,14 @@ export async function POST(req: Request) {
   if (!session) {
     return Response.json({ error: "Unauthorized.", code: "UNAUTHORIZED" }, { status: 401 });
   }
-  if (!tryAcquireSession(session.sid)) {
+  if (!(await tryAcquireSession(session.sid))) {
     return Response.json({ error: "Too many concurrent sessions.", code: "RATE_LIMITED" }, { status: 429 });
   }
 
   try {
     return await handle(req, session.sid);
   } finally {
-    releaseSession(session.sid);
+    await releaseSession(session.sid);
   }
 }
 
@@ -81,7 +81,7 @@ async function handle(req: Request, sid: string) {
   }
 
   // Daily cap is the last gate so malformed or rejected requests don't burn quota.
-  if (!tryConsumeDailyQuota(sid, "tts")) {
+  if (!(await tryConsumeDailyQuota(sid, "tts"))) {
     return Response.json({ error: "Daily quota exceeded.", code: "RATE_LIMITED" }, { status: 429 });
   }
 

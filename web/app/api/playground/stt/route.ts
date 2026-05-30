@@ -36,7 +36,7 @@ export async function POST(req: Request): Promise<Response> {
       { status: 401 },
     );
   }
-  if (!tryAcquireSession(session.sid)) {
+  if (!(await tryAcquireSession(session.sid))) {
     return Response.json(
       { error: "Too many concurrent sessions.", code: "RATE_LIMITED" } satisfies BatchError,
       { status: 429 },
@@ -46,7 +46,7 @@ export async function POST(req: Request): Promise<Response> {
   try {
     return await handle(req, session.sid);
   } finally {
-    releaseSession(session.sid);
+    await releaseSession(session.sid);
   }
 }
 
@@ -128,7 +128,7 @@ async function handle(req: Request, sid: string): Promise<Response> {
   }
 
   // Charge one quota item per provider invocation. A 7-model click consumes 7.
-  if (!tryConsumeDailyQuota(sid, "stt", uniqueModelIds.length)) {
+  if (!(await tryConsumeDailyQuota(sid, "stt", uniqueModelIds.length))) {
     return Response.json(
       { error: "Daily quota exceeded.", code: "RATE_LIMITED" } satisfies BatchError,
       { status: 429 },
