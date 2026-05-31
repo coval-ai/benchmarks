@@ -72,9 +72,11 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         enabled=True,
     ),
     # OpenAI HTTP models.
-    ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=True),
-    ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=True),
     ProviderEntry(provider="openai", model="gpt-4o-mini-tts", voice="alloy", enabled=True),
+    # Legacy OpenAI HTTP models — retired 2026-05-31; kept disabled (hidden from the
+    # public catalogue) per the matrix convention for superseded models.
+    ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=False, disabled=True),
+    ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=False, disabled=True),
     # Cartesia — re-activated 2026-04-30: sonic-3 (flagship).
     ProviderEntry(
         provider="cartesia",
