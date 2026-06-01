@@ -14,6 +14,7 @@ const DashboardHeader: React.FC = () => {
   const pathname = usePathname();
   const isTTS = pathname === "/tts";
   const isSTT = pathname === "/stt";
+  const isPlayground = pathname === "/playground";
 
   return (
     <div className="fixed top-0 left-0 right-0 z-50 h-16 bg-surface-overlay backdrop-blur-xl border-b border-border-primary">
@@ -76,6 +77,22 @@ const DashboardHeader: React.FC = () => {
               <div
                 className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-500 ease-out ${
                   isSTT ? "w-full opacity-100" : "w-0 opacity-0"
+                }`}
+                style={{ transformOrigin: "left center" }}
+              />
+            </Link>
+
+            {/* Playground Link */}
+            <Link
+              href="/playground"
+              aria-current={isPlayground ? "page" : undefined}
+              aria-label="Switch to Playground"
+              className="relative px-2 md:px-3 py-2 text-text-primary font-light tracking-wide transition-all duration-300 ease-out hover:text-text-secondary text-xs md:text-sm"
+            >
+              Playground
+              <div
+                className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-500 ease-out ${
+                  isPlayground ? "w-full opacity-100" : "w-0 opacity-0"
                 }`}
                 style={{ transformOrigin: "left center" }}
               />

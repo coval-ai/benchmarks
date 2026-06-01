@@ -40,6 +40,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
     ProviderEntry(provider="gradium", model="default", enabled=True),
     ProviderEntry(provider="xai", model="grok-stt", enabled=True),
+    ProviderEntry(provider="smallest", model="pulse", enabled=True),
     # OFF; disabled=True hides these from the public catalogue.
     ProviderEntry(provider="google", model="short", enabled=False, disabled=True),
     ProviderEntry(provider="google", model="long", enabled=False, disabled=True),
@@ -73,9 +74,11 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         enabled=True,
     ),
     # OpenAI HTTP models.
-    ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=True),
-    ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=True),
     ProviderEntry(provider="openai", model="gpt-4o-mini-tts", voice="alloy", enabled=True),
+    # Legacy OpenAI HTTP models — retired 2026-05-31; kept disabled (hidden from the
+    # public catalogue) per the matrix convention for superseded models.
+    ProviderEntry(provider="openai", model="tts-1-hd", voice="alloy", enabled=False, disabled=True),
+    ProviderEntry(provider="openai", model="tts-1", voice="alloy", enabled=False, disabled=True),
     # Cartesia — re-activated 2026-04-30: sonic-3 (flagship).
     ProviderEntry(
         provider="cartesia",

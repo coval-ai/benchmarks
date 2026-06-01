@@ -24,18 +24,13 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
 
-# Models enabled for benchmarking
-SUPPORTED_MODELS = {
-    "eleven_flash_v2_5",
-    "eleven_multilingual_v2",
-    "eleven_turbo_v2_5",
-}
-
 
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider using the official SDK streaming endpoint."""
 
     enabled: bool = True
+
+    _VALID_MODELS = frozenset({"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
@@ -84,6 +79,18 @@ class ElevenLabsTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via ElevenLabs SDK and return a TTSResult."""
+        if not self._model_supported(self._model):
+            return TTSResult(
+                provider="elevenlabs",
+                model=self._model,
+                voice=self._voice,
+                ttfa_ms=None,
+                audio_path=None,
+                error=(
+                    f"Unsupported ElevenLabs model: {self._model}. "
+                    f"Valid models: {sorted(self._VALID_MODELS)}"
+                ),
+            )
         ttfa_ms: float | None = None
         audio_stream = BytesIO()
 

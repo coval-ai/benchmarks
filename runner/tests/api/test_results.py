@@ -21,7 +21,12 @@ async def test_filters_compose(client: AsyncClient, postgresql: Any) -> None:
     await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3", metric_type="WER")
     # Non-matching rows
     await _insert_result(
-        postgresql, run_id, provider="openai", model="tts-1", metric_type="TTFA", benchmark="TTS"
+        postgresql,
+        run_id,
+        provider="openai",
+        model="gpt-4o-mini-tts",
+        metric_type="TTFA",
+        benchmark="TTS",
     )
     await _insert_result(postgresql, run_id, provider="deepgram", model="nova-2", metric_type="WER")
 

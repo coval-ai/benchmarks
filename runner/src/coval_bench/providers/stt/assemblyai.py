@@ -36,10 +36,12 @@ _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 class AssemblyAIProvider(STTProvider):
     """AssemblyAI v3 streaming STT provider."""
 
+    _VALID_MODELS = frozenset(_SPEECH_MODEL_MAP)
+
     def __init__(self, api_key: SecretStr, model: str = "universal-streaming") -> None:
-        if model not in _SPEECH_MODEL_MAP:
+        if not self._model_supported(model):
             raise ValueError(
-                f"Invalid AssemblyAI model {model!r}. Valid: {tuple(_SPEECH_MODEL_MAP)}"
+                f"Invalid AssemblyAI model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
             )
         self._api_key = api_key
         self._model = model

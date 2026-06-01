@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     # These type stubs may not be present; used only for static analysis.
     pass
 
-_VALID_MODELS = ("default", "short", "long", "telephony", "chirp_2")
 _RECOGNIZER_PATTERN = "projects/{project}/locations/us-central1/recognizers/_"
 _API_ENDPOINT = "us-central1-speech.googleapis.com"
 
@@ -53,6 +52,8 @@ class GoogleSTTProvider(STTProvider):
     Requires:      GOOGLE_APPLICATION_CREDENTIALS pointing to a service-account JSON.
     """
 
+    _VALID_MODELS = frozenset({"default", "short", "long", "telephony", "chirp_2"})
+
     def __init__(
         self,
         api_key: SecretStr,
@@ -63,8 +64,10 @@ class GoogleSTTProvider(STTProvider):
             raise ImportError(
                 "google-cloud-speech is not installed. Install it with: uv sync --extra google-stt"
             )
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Google STT model {model!r}. Valid: {_VALID_MODELS}")
+        if not self._model_supported(model):
+            raise ValueError(
+                f"Invalid Google STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         if project_id is None:
             raise ValueError(
                 "GoogleSTTProvider requires project_id (set Settings.google_project_id)"

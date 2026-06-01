@@ -3,7 +3,7 @@
 
 export const modelDisplayNames: Record<string, string> = {
   // TTS
-  "tts-1-hd": "TTS 1 HD",
+  "gpt-4o-mini-tts": "GPT-4o mini TTS",
   eleven_multilingual_v2: "Multilingual v2",
   eleven_flash_v2_5: "Flash v2.5",
   eleven_turbo_v2_5: "Turbo v2.5",
@@ -21,6 +21,7 @@ export const modelDisplayNames: Record<string, string> = {
   "flux-general-multi": "Flux Multilingual",
   scribe_v2_realtime: "Scribe v2",
   "grok-stt": "Grok STT",
+  scribe_v2_realtime: "Scribe v2 Realtime",
   "universal-streaming": "Universal Streaming",
   default: "Default",
   enhanced: "Enhanced"

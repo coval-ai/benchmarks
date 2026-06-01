@@ -40,7 +40,7 @@ Each `(provider, model, voice)` tuple the runner exercises is declared in
 `runner/src/coval_bench/runner/config.py` (`DEFAULT_STT_MATRIX` and
 `DEFAULT_TTS_MATRIX`). Model identifiers are exact provider strings — not
 aliases — wherever the provider exposes a versioned identifier (e.g.
-`nova-3`, `flux-general-en`, `tts-1-hd`, `aura-2-thalia-en`, `mistv3`).
+`nova-3`, `flux-general-en`, `gpt-4o-mini-tts`, `aura-2-thalia-en`, `mistv3`).
 
 **Server-side aliases.** Where a provider resolves a name server-side (e.g.
 Rime `arcana` → Arcana v3), the resolution is documented inline in

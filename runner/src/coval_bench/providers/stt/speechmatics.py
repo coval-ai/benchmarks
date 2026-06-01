@@ -25,16 +25,19 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("default", "enhanced", "broadcast")
 _WS_URL = "wss://eu2.rt.speechmatics.com/v2"
 
 
 class SpeechmaticsProvider(STTProvider):
     """Speechmatics real-time STT provider."""
 
+    _VALID_MODELS = frozenset({"default", "enhanced", "broadcast"})
+
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Speechmatics model {model!r}. Valid: {_VALID_MODELS}")
+        if not self._model_supported(model):
+            raise ValueError(
+                f"Invalid Speechmatics model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         self._api_key = api_key
         self._model = model
 

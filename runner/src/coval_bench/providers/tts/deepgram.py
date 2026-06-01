@@ -55,8 +55,22 @@ class DeepgramTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
+    def _model_supported(self, model: str) -> bool:
+        return model.startswith("aura-")
+
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Deepgram WebSocket and return a TTSResult."""
+        if not self._model_supported(self._model):
+            return TTSResult(
+                provider="deepgram",
+                model=self._model,
+                voice=self._voice,
+                ttfa_ms=None,
+                audio_path=None,
+                error=(
+                    f"Unsupported Deepgram TTS model: {self._model}. Expected an 'aura-' model."
+                ),
+            )
         audio_chunks: list[bytes] = []
         ttfa_ms: float | None = None
 

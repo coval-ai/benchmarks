@@ -12,6 +12,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 # ---------------------------------------------------------------------------
 # Shared result types
@@ -71,6 +72,16 @@ class TTSResult:
 
 class Provider(ABC):
     """Base class for all benchmark providers (STT and TTS)."""
+
+    _VALID_MODELS: ClassVar[frozenset[str]] = frozenset()
+
+    def _model_supported(self, model: str) -> bool:
+        """Return True when *model* is allowed for this provider.
+
+        An empty ``_VALID_MODELS`` accepts any model. Providers that validate by
+        pattern rather than an exact set override this method.
+        """
+        return not self._VALID_MODELS or model in self._VALID_MODELS
 
     @property
     @abstractmethod
