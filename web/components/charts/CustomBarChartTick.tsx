@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
-import {
-  normalizeModelName,
-  normalizeSTTProviderName,
-  normalizeTTSProviderName,
-} from "@/lib/utils/formatters";
-import { useActiveTab } from "@/hooks/useActiveTab";
+import { normalizeModelName } from "@/lib/utils/formatters";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
 const CustomBarChartTick: React.FC<{
@@ -19,17 +14,12 @@ const CustomBarChartTick: React.FC<{
   sidebarCollapsed?: boolean;
 }> = ({ x = 0, y = 0, payload, getProviderForModel, isMobile = false, sidebarCollapsed = true }) => {
   const themeColors = useThemeColors();
-  const activeTab = useActiveTab();
 
   if (!payload) return null;
 
   const model = payload.value;
   const normalizedModel = normalizeModelName(model);
-  const providerRaw = getProviderForModel(model);
-  const provider =
-    activeTab === "stt"
-      ? normalizeSTTProviderName(providerRaw)
-      : normalizeTTSProviderName(providerRaw);
+  const provider = getProviderForModel(model);
 
   // Adjust font sizes based on sidebar state
   const modelFontSize = sidebarCollapsed ? "12px" : "10px";
