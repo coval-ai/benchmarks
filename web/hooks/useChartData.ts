@@ -556,7 +556,11 @@ export function useChartData({
       });
     });
 
-    return heatmapData.sort((a, b) => a.model.localeCompare(b.model));
+    return heatmapData.sort(
+      (a, b) =>
+        normalizeModelName(a.model).localeCompare(normalizeModelName(b.model)) ||
+        a.model.localeCompare(b.model)
+    );
   }, [
     rawData,
     activeTab,
@@ -590,7 +594,11 @@ export function useChartData({
       });
     });
 
-    return heatmapData.sort((a, b) => a.model.localeCompare(b.model));
+    return heatmapData.sort(
+      (a, b) =>
+        normalizeModelName(a.model).localeCompare(normalizeModelName(b.model)) ||
+        a.model.localeCompare(b.model)
+    );
   }, [activeTab, selectedTTSModels, getStat]);
 
   const getWERBarData = useCallback((): BarDataPoint[] => {
