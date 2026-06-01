@@ -37,7 +37,7 @@ VALID_VOICES = [
     "cedar",
 ]
 
-HTTP_MODELS = {"gpt-4o-mini-tts", "tts-1", "tts-1-hd"}
+HTTP_MODELS = {"gpt-4o-mini-tts"}
 REALTIME_MODELS = {"gpt-realtime-2025-08-28"}
 SAMPLE_RATE = 24000
 
@@ -46,6 +46,8 @@ class OpenAITTSProvider(TTSProvider):
     """OpenAI TTS provider supporting HTTP and Realtime WS paths."""
 
     enabled: bool = True
+
+    _VALID_MODELS = frozenset(HTTP_MODELS | REALTIME_MODELS)
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model

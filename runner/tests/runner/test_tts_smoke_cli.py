@@ -53,7 +53,7 @@ def _ok_provider() -> MagicMock:
     instance.synthesize = AsyncMock(
         return_value=TTSResult(
             provider="openai",
-            model="tts-1-hd",
+            model="gpt-4o-mini-tts",
             voice="alloy",
             ttfa_ms=412.3,
             audio_path=audio_path,
@@ -70,7 +70,7 @@ def _err_provider() -> MagicMock:
     instance.synthesize = AsyncMock(
         return_value=TTSResult(
             provider="openai",
-            model="tts-1-hd",
+            model="gpt-4o-mini-tts",
             voice="alloy",
             ttfa_ms=None,
             audio_path=None,
@@ -94,7 +94,7 @@ def test_tts_smoke_success(monkeypatch: pytest.MonkeyPatch) -> None:
             "--provider",
             "openai",
             "--model",
-            "tts-1-hd",
+            "gpt-4o-mini-tts",
             "--voice",
             "alloy",
             "--text",
@@ -106,7 +106,7 @@ def test_tts_smoke_success(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = json.loads(line)
     assert payload["event"] == "tts_smoke"
     assert payload["provider"] == "openai"
-    assert payload["model"] == "tts-1-hd"
+    assert payload["model"] == "gpt-4o-mini-tts"
     assert payload["voice"] == "alloy"
     assert payload["ttfa_ms"] == 412.3
     assert payload["error"] is None
@@ -128,7 +128,7 @@ def test_tts_smoke_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
             "--provider",
             "openai",
             "--model",
-            "tts-1-hd",
+            "gpt-4o-mini-tts",
             "--voice",
             "alloy",
         ],
@@ -153,7 +153,7 @@ def test_tts_smoke_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
             "--provider",
             "definitely-not-real",
             "--model",
-            "tts-1-hd",
+            "gpt-4o-mini-tts",
             "--voice",
             "alloy",
         ],

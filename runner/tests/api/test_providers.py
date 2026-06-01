@@ -66,7 +66,7 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
     )
 
     openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
-    for active in ("tts-1-hd", "tts-1", "gpt-4o-mini-tts"):
+    for active in ("gpt-4o-mini-tts",):
         entry = next(m for m in openai_entry["models"] if m["model"] == active)
         assert entry["disabled"] is False, f"{active} must be disabled=False"
 
@@ -83,6 +83,12 @@ async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
     rime_entry = next(e for e in data["tts"] if e["provider"] == "rime")
     mistv2 = next(m for m in rime_entry["models"] if m["model"] == "mistv2")
     assert mistv2["disabled"] is True
+
+    # OpenAI legacy HTTP models (tts-1, tts-1-hd) are retired but kept disabled.
+    openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
+    for legacy in ("tts-1", "tts-1-hd"):
+        model = next(m for m in openai_entry["models"] if m["model"] == legacy)
+        assert model["disabled"] is True, f"{legacy} must be disabled=True"
 
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:

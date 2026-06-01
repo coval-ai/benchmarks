@@ -1,6 +1,3 @@
-// Copyright 2026 The Coval Benchmarks Authors
-// SPDX-License-Identifier: Apache-2.0
-
 /**
  * Typed fetch wrapper for the Coval Benchmarks API.
  * All shapes are derived from the OpenAPI codegen — see lib/api/generated/schema.ts.
@@ -8,6 +5,7 @@
 
 import type { components, paths } from "./generated/schema";
 import { buildQueryString } from "./url";
+import { normalizePlaygroundError, type PlaygroundApiError } from "@/lib/playground/schemas";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -19,6 +17,13 @@ export class ApiError extends Error {
   ) {
     super(`API ${status}: ${statusText}`);
     this.name = "ApiError";
+  }
+}
+
+export class PlaygroundTtsError extends Error {
+  constructor(public readonly payload: PlaygroundApiError) {
+    super(payload.error);
+    this.name = "PlaygroundTtsError";
   }
 }
 
@@ -61,6 +66,53 @@ type LeaderboardQueryParams = NonNullable<
 
 export interface FetchOptions {
   signal?: AbortSignal;
+}
+
+export type PlaygroundTtsResponse = {
+  audioBlob: Blob;
+  ttfaMs: number | null;
+  totalMs: number;
+};
+
+export async function postPlaygroundTts(
+  body: { modelId: string; text: string },
+  opts?: FetchOptions
+): Promise<PlaygroundTtsResponse> {
+  const t0 = performance.now();
+  const res = await fetch(`/api/playground/tts`, {
+    method: "POST",
+    signal: opts?.signal,
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "audio/wav,application/json",
+    },
+    body: JSON.stringify({ model_id: body.modelId, text: body.text }),
+  });
+
+  if (!res.ok) {
+    let parsed: unknown = null;
+    try {
+      parsed = await res.json();
+    } catch {
+      // ignore parse failure
+    }
+    throw new PlaygroundTtsError(normalizePlaygroundError(res.status, parsed));
+  }
+
+  const contentType = (res.headers.get("Content-Type") ?? "").toLowerCase();
+  if (!contentType.startsWith("audio/")) {
+    throw new PlaygroundTtsError(
+      normalizePlaygroundError(502, {
+        code: "UPSTREAM_ERROR",
+        error: `Expected audio response, got ${contentType || "unknown"}.`,
+      }),
+    );
+  }
+  const blob = await res.blob();
+  const totalMs = performance.now() - t0;
+  const ttfaHeader = res.headers.get("X-TTFA-Ms");
+  const ttfaMs = ttfaHeader ? Number(ttfaHeader) : null;
+  return { audioBlob: blob, ttfaMs: Number.isFinite(ttfaMs) ? ttfaMs : null, totalMs };
 }
 
 export async function getResults(

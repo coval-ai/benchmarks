@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     gradium_api_key: SecretStr | None = None
     gradium_tts_api_key: SecretStr | None = None
     xai_api_key: SecretStr | None = None
+    smallest_api_key: SecretStr | None = None
 
     # Path to a Google service-account JSON file mounted as a Secret-as-volume.
     google_application_credentials: Path | None = None

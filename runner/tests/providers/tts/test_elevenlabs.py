@@ -52,10 +52,8 @@ async def test_elevenlabs_happy_path(fake_settings: Settings, tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_elevenlabs_all_models(fake_settings: Settings) -> None:
     """Supported models all work with monkeypatched SDK."""
-    from coval_bench.providers.tts.elevenlabs import SUPPORTED_MODELS
-
     pcm = make_pcm_bytes()
-    for model in SUPPORTED_MODELS:
+    for model in ElevenLabsTTSProvider._VALID_MODELS:
         provider = ElevenLabsTTSProvider(fake_settings, model=model, voice="test-voice")
         mock_sdk = MagicMock()
         mock_sdk.text_to_speech.stream.return_value = iter([pcm])

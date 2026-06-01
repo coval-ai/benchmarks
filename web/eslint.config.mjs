@@ -11,6 +11,7 @@ export default [
   {
     ignores: [
       ".next/**",
+      ".vercel/**",
       "node_modules/**",
       "generated/**",
       "*.config.js",
