@@ -85,6 +85,30 @@ def _truncate(msg: str) -> str:
     return msg[:_MAX_ERROR_LEN]
 
 
+def _metric_outcome(
+    metric_value: float | None,
+    item_error: str | None,
+    metric_label: str,
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+) -> tuple[Any, str | None]:
+    """Decide ``(status, error)`` for a single result row.
+
+    A provider that returns without raising can still have failed: it may set
+    ``result.error`` or simply produce no measurement. The orchestrator used to
+    stamp every returned row ``SUCCESS``; this restores honest labelling.
+
+    Rules (in order):
+    * an item-level provider error fails the row and carries the message;
+    * otherwise a missing (``None``) metric fails just this row;
+    * a present metric succeeds.
+    """
+    if item_error:
+        return result_status.FAILED, _truncate(item_error)
+    if metric_value is None:
+        return result_status.FAILED, f"no {metric_label} produced"
+    return result_status.SUCCESS, None
+
+
 async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
     """Transcribe *audio_path* with OpenAI ``whisper-1`` and return the text.
 
@@ -194,6 +218,8 @@ async def _run_stt_item(
         duration_sec: float = item.duration_sec
         audio_bytes = audio_path.read_bytes()
 
+        transcription_result = None
+        item_error: str | None = None
         try:
             async with asyncio.timeout(_STT_TIMEOUT_S):
                 transcription_result = await with_retry(
@@ -207,7 +233,7 @@ async def _run_stt_item(
                     ),
                 )
         except Exception as exc:
-            err = _truncate(str(exc))
+            item_error = _truncate(str(exc))
             _log.warning(
                 "STT provider call failed",
                 provider=entry.provider,
@@ -215,24 +241,20 @@ async def _run_stt_item(
                 audio=str(audio_path),
                 exc_info=exc,
             )
-            results.append(
-                Result(
-                    run_id=run_id,
-                    provider=entry.provider,
-                    model=entry.model,
-                    benchmark=Benchmark.STT,
-                    metric_type="TTFT",
-                    metric_value=None,
-                    metric_units=None,
-                    audio_filename=audio_path.name,
-                    transcript=None,
-                    status=ResultStatus.FAILED,
-                    error=err,
-                )
-            )
-            return results
+
+        item_error = item_error or (
+            transcription_result.error if transcription_result is not None else None
+        )
+        ttft_seconds = transcription_result.ttft_seconds if transcription_result else None
+        audio_to_final = (
+            transcription_result.audio_to_final_seconds if transcription_result else None
+        )
+        complete_transcript = (
+            transcription_result.complete_transcript if transcription_result else None
+        )
 
         # 1. TTFT
+        ttft_status, ttft_error = _metric_outcome(ttft_seconds, item_error, "TTFT", ResultStatus)
         results.append(
             Result(
                 run_id=run_id,
@@ -240,16 +262,19 @@ async def _run_stt_item(
                 model=entry.model,
                 benchmark=Benchmark.STT,
                 metric_type="TTFT",
-                metric_value=transcription_result.ttft_seconds,
+                metric_value=ttft_seconds,
                 metric_units="seconds",
                 audio_filename=audio_path.name,
-                transcript=transcription_result.complete_transcript,
-                status=ResultStatus.SUCCESS,
-                error=None,
+                transcript=complete_transcript,
+                status=ttft_status,
+                error=ttft_error,
             )
         )
 
         # 2. AudioToFinal
+        atf_status, atf_error = _metric_outcome(
+            audio_to_final, item_error, "AudioToFinal", ResultStatus
+        )
         results.append(
             Result(
                 run_id=run_id,
@@ -257,21 +282,24 @@ async def _run_stt_item(
                 model=entry.model,
                 benchmark=Benchmark.STT,
                 metric_type="AudioToFinal",
-                metric_value=transcription_result.audio_to_final_seconds,
+                metric_value=audio_to_final,
                 metric_units="seconds",
                 audio_filename=audio_path.name,
-                transcript=transcription_result.complete_transcript,
-                status=ResultStatus.SUCCESS,
-                error=None,
+                transcript=complete_transcript,
+                status=atf_status,
+                error=atf_error,
             )
         )
 
-        # 3. RTF — suppress on invalid inputs (e.g. zero duration) rather than failing the row
+        # 3. RTF — derived from AudioToFinal, so its outcome tracks whether a final was
+        # produced. A present final with an uncomputable RTF (e.g. zero duration) stays a
+        # null-valued success rather than a failure, matching the original intent.
         rtf_value: float | None = None
-        if transcription_result.audio_to_final_seconds is not None and duration_sec > 0:
+        if audio_to_final is not None and duration_sec > 0:
             with contextlib.suppress(Exception):
-                rtf_value = compute_rtf(transcription_result.audio_to_final_seconds, duration_sec)
+                rtf_value = compute_rtf(audio_to_final, duration_sec)
 
+        rtf_status, rtf_error = _metric_outcome(audio_to_final, item_error, "RTF", ResultStatus)
         results.append(
             Result(
                 run_id=run_id,
@@ -282,16 +310,17 @@ async def _run_stt_item(
                 metric_value=rtf_value,
                 metric_units="ratio",
                 audio_filename=audio_path.name,
-                transcript=transcription_result.complete_transcript,
-                status=ResultStatus.SUCCESS,
-                error=None,
+                transcript=complete_transcript,
+                status=rtf_status,
+                error=rtf_error,
             )
         )
 
-        # 4. WER (when ground-truth available)
-        if transcript_ref and transcription_result.complete_transcript is not None:
+        # 4. WER (when ground-truth available; skip when the stream errored so we don't
+        # score a transcript salvaged from a failed run)
+        if transcript_ref and complete_transcript is not None and item_error is None:
             try:
-                wer_result = compute_wer(transcript_ref, transcription_result.complete_transcript)
+                wer_result = compute_wer(transcript_ref, complete_transcript)
                 results.append(
                     Result(
                         run_id=run_id,
@@ -302,7 +331,7 @@ async def _run_stt_item(
                         metric_value=wer_result.wer_percentage,
                         metric_units="percent",
                         audio_filename=audio_path.name,
-                        transcript=transcription_result.complete_transcript,
+                        transcript=complete_transcript,
                         status=ResultStatus.SUCCESS,
                         error=None,
                     )
@@ -371,6 +400,8 @@ async def _run_tts_item(
         transcript: str = item.transcript
         provider = provider_cls(settings=settings, model=entry.model, voice=entry.voice)
 
+        tts_result = None
+        item_error: str | None = None
         try:
             async with asyncio.timeout(_TTS_TIMEOUT_S):
                 tts_result = await with_retry(
@@ -378,33 +409,22 @@ async def _run_tts_item(
                 )
             audio_path = tts_result.audio_path
         except Exception as exc:
-            err = _truncate(str(exc))
+            item_error = _truncate(str(exc))
             _log.warning(
                 "TTS provider call failed",
                 provider=entry.provider,
                 model=entry.model,
                 exc_info=exc,
             )
-            results.append(
-                Result(
-                    run_id=run_id,
-                    provider=entry.provider,
-                    model=entry.model,
-                    voice=entry.voice,
-                    benchmark=Benchmark.TTS,
-                    metric_type="TTFA",
-                    metric_value=None,
-                    metric_units=None,
-                    audio_filename=None,
-                    transcript=None,
-                    status=ResultStatus.FAILED,
-                    error=err,
-                )
-            )
-            return results
+
+        # Single failure model: a raised exception OR a provider-reported error fails the
+        # TTFA row (see _metric_outcome) and suppresses WER scoring below.
+        item_error = item_error or (tts_result.error if tts_result is not None else None)
+        ttfa_ms = tts_result.ttfa_ms if tts_result else None
 
         try:
             # 1. TTFA
+            ttfa_status, ttfa_error = _metric_outcome(ttfa_ms, item_error, "TTFA", ResultStatus)
             results.append(
                 Result(
                     run_id=run_id,
@@ -413,17 +433,17 @@ async def _run_tts_item(
                     voice=entry.voice,
                     benchmark=Benchmark.TTS,
                     metric_type="TTFA",
-                    metric_value=tts_result.ttfa_ms,
+                    metric_value=ttfa_ms,
                     metric_units="milliseconds",
                     audio_filename=audio_path.name if audio_path else None,
                     transcript=transcript,
-                    status=ResultStatus.SUCCESS,
-                    error=None,
+                    status=ttfa_status,
+                    error=ttfa_error,
                 )
             )
 
-            # 2. WER via Whisper transcription of synthesized audio
-            if audio_path is not None and audio_path.exists():
+            # 2. WER via Whisper transcription of synthesized audio (skip when synth errored)
+            if item_error is None and audio_path is not None and audio_path.exists():
                 try:
                     whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
                     wer_result = compute_wer(transcript, whisper_transcript)
