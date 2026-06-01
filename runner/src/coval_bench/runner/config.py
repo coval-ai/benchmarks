@@ -117,6 +117,7 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="176a55b1-4468-4736-8878-db82729667c1",
         enabled=True,
     ),
+    ProviderEntry(provider="xai", model="grok-tts", voice="eve", enabled=True),
     # Placeholder entries with voice=None — never executed by the runner; surfaced only
     # in /v1/providers so the frontend can label them as disabled.
     ProviderEntry(
