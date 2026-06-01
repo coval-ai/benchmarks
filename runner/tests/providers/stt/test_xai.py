@@ -126,6 +126,7 @@ async def test_xai_websocket_connect_setup(fake_api_key: SecretStr, audio_pcm_by
     assert query.get("sample_rate") == ["16000"]
     assert query.get("encoding") == ["pcm"]
     assert query.get("interim_results") == ["true"]
+    assert query.get("endpointing") == ["200"]
     assert query.get("language") == ["en"]
     auth = captured["additional_headers"].get("Authorization")
     assert auth == f"Bearer {fake_api_key.get_secret_value()}"

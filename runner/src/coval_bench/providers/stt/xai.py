@@ -50,6 +50,7 @@ class XaiSTTProvider(STTProvider):
             "sample_rate": sample_rate,
             "encoding": "pcm",
             "interim_results": "true",
+            "endpointing": 200,
             "language": "en",
             "filler_words": "false",
             "diarize": "false",
