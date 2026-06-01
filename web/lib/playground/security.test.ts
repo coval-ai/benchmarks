@@ -1,7 +1,9 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const ORIGINAL_ENV = { ...process.env };
 
 function clearRedisEnv() {
   for (const key of Object.keys(process.env)) {
@@ -10,6 +12,7 @@ function clearRedisEnv() {
       key === "UPSTASH_REDIS_REST_TOKEN" ||
       key === "KV_REST_API_URL" ||
       key === "KV_REST_API_TOKEN" ||
+      key === "PLAYGROUND_REDIS_ENV_PREFIX" ||
       key.endsWith("KV_REST_API_URL") ||
       key.endsWith("KV_REST_API_TOKEN")
     ) {
@@ -26,6 +29,13 @@ async function loadSecurityFallback() {
 
 beforeEach(() => {
   vi.resetModules();
+});
+
+afterEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in ORIGINAL_ENV)) delete process.env[key];
+  }
+  Object.assign(process.env, ORIGINAL_ENV);
 });
 
 describe("security (in-process fallback)", () => {

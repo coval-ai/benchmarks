@@ -25,15 +25,19 @@ const CONCURRENCY_TTL_S = 120;
 const DAILY_TTL_S = 24 * 60 * 60;
 
 function resolveRedisCreds(): { url: string; token: string } | null {
-  let url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "";
-  let token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
-  if (!url || !token) {
-    for (const [k, v] of Object.entries(process.env)) {
-      if (!v) continue;
-      if (!url && k.endsWith("KV_REST_API_URL")) url = v;
-      if (!token && k.endsWith("KV_REST_API_TOKEN")) token = v;
-    }
-  }
+  const prefix = process.env.PLAYGROUND_REDIS_ENV_PREFIX?.replace(/_+$/, "");
+  const prefixed = (suffix: string) =>
+    prefix ? process.env[`${prefix}_${suffix}`] : undefined;
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL ||
+    process.env.KV_REST_API_URL ||
+    prefixed("KV_REST_API_URL") ||
+    "";
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ||
+    process.env.KV_REST_API_TOKEN ||
+    prefixed("KV_REST_API_TOKEN") ||
+    "";
   return url && token ? { url, token } : null;
 }
 
@@ -42,11 +46,11 @@ const redis = creds ? new Redis(creds) : null;
 
 const ACQUIRE_LUA = `
 local n = redis.call('INCR', KEYS[1])
-redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 if n > tonumber(ARGV[1]) then
   redis.call('DECR', KEYS[1])
   return 0
 end
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 return 1`;
 
 const RELEASE_LUA = `
@@ -112,22 +116,29 @@ export async function tryConsumeDailyQuota(
 }
 
 const DAILY_TTL_MS = DAILY_TTL_S * 1000;
+const CONCURRENCY_TTL_MS = CONCURRENCY_TTL_S * 1000;
 const PRUNE_THRESHOLD = 10_000;
-const concurrent = new Map<string, number>();
+const concurrent = new Map<string, { count: number; resetAt: number }>();
 const dailyStt = new Map<string, { count: number; resetAt: number }>();
 const dailyTts = new Map<string, { count: number; resetAt: number }>();
 
 function tryAcquireSessionMemory(sid: string): boolean {
-  const cur = concurrent.get(sid) ?? 0;
-  if (cur >= MAX_CONCURRENT_PER_SESSION) return false;
-  concurrent.set(sid, cur + 1);
+  if (concurrent.size > PRUNE_THRESHOLD) pruneExpired(concurrent);
+  const now = Date.now();
+  let entry = concurrent.get(sid);
+  if (!entry || now > entry.resetAt) entry = { count: 0, resetAt: now + CONCURRENCY_TTL_MS };
+  if (entry.count >= MAX_CONCURRENT_PER_SESSION) return false;
+  entry.count += 1;
+  entry.resetAt = now + CONCURRENCY_TTL_MS;
+  concurrent.set(sid, entry);
   return true;
 }
 
 function releaseSessionMemory(sid: string): void {
-  const cur = concurrent.get(sid) ?? 0;
-  if (cur <= 1) concurrent.delete(sid);
-  else concurrent.set(sid, cur - 1);
+  const entry = concurrent.get(sid);
+  if (!entry) return;
+  if (entry.count <= 1) concurrent.delete(sid);
+  else entry.count -= 1;
 }
 
 function tryConsumeDailyQuotaMemory(
