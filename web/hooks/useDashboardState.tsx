@@ -13,6 +13,7 @@ import { useTimelineWindow } from "@/hooks/useTimelineWindow";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
+import type { ModelInfo } from "@/lib/api/client";
 import { computeModelStats, type Result } from "@/lib/aggregates";
 
 function adaptResult(row: Result): BenchmarkData {
@@ -70,10 +71,14 @@ export function useDashboardState(page: "tts" | "stt") {
     const providers = providersQuery.data;
     if (providers) {
       for (const p of providers.tts) {
-        tts[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
+        tts[p.provider] = p.models
+          .filter((m: ModelInfo) => !m.disabled)
+          .map((m: ModelInfo) => m.model);
       }
       for (const p of providers.stt) {
-        stt[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
+        stt[p.provider] = p.models
+          .filter((m: ModelInfo) => !m.disabled)
+          .map((m: ModelInfo) => m.model);
       }
     }
     return { ttsModelsByProvider: tts, sttModelsByProvider: stt };

@@ -19,7 +19,6 @@ export const modelDisplayNames: Record<string, string> = {
   "nova-3": "Nova 3",
   "flux-general-en": "Flux",
   "flux-general-multi": "Flux Multilingual",
-  scribe_v2_realtime: "Scribe v2",
   "grok-stt": "Grok STT",
   scribe_v2_realtime: "Scribe v2 Realtime",
   "universal-streaming": "Universal Streaming",
