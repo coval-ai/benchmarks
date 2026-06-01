@@ -59,7 +59,8 @@ class XaiTTSProvider(TTSProvider):
             "voice": self._voice,
             "codec": "pcm",
             "sample_rate": _SAMPLE_RATE,
-            "text_normalization": "true",
+            "text_normalization": "false",
+            "optimize_streaming_latency": 2,
         }
         return f"{_BASE_WS_URL}?{urlencode(params)}"
 

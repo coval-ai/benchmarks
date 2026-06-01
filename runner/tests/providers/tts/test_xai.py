@@ -83,7 +83,8 @@ async def test_xai_tts_url_and_auth(fake_settings: Settings) -> None:
     assert query.get("voice") == ["eve"]
     assert query.get("codec") == ["pcm"]
     assert query.get("sample_rate") == ["24000"]
-    assert query.get("text_normalization") == ["true"]
+    assert query.get("text_normalization") == ["false"]
+    assert query.get("optimize_streaming_latency") == ["2"]
     headers = captured["headers"]
     assert isinstance(headers, dict)
     assert headers.get("Authorization") == "Bearer test-xai-key"
