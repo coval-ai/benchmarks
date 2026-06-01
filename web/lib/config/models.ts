@@ -14,6 +14,7 @@ export const modelDisplayNames: Record<string, string> = {
   "octave-tts": "Octave TTS",
   "octave-2": "Octave 2",
   coda: "Coda",
+  "grok-tts": "Grok TTS",
   // STT
   "nova-2": "Nova 2",
   "nova-3": "Nova 3",
@@ -40,5 +41,6 @@ export const ttsProviderNames: Record<string, string> = {
   gradium: "Gradium",
   hume: "Hume",
   openai: "OpenAI",
-  rime: "Rime"
+  rime: "Rime",
+  xai: "xAI"
 };
