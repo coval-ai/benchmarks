@@ -3,7 +3,7 @@
 
 export const modelColors: Record<string, string> = {
   // OpenAI TTS
-  "tts-1-hd": "#943126",
+  "gpt-4o-mini-tts": "#943126",
 
   // ElevenLabs TTS
   eleven_multilingual_v2: "#FFD633",

@@ -76,7 +76,7 @@ migrate.add_command(import_legacy_cli, name="import-legacy")
 
 @cli.command(name="tts-smoke")
 @click.option("--provider", required=True, help="TTS provider name (e.g. openai, cartesia).")
-@click.option("--model", required=True, help="Model ID for the provider (e.g. tts-1-hd).")
+@click.option("--model", required=True, help="Model ID for the provider (e.g. gpt-4o-mini-tts).")
 @click.option("--voice", required=True, help="Voice ID for the provider.")
 @click.option(
     "--text",
