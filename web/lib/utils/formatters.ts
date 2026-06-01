@@ -73,7 +73,7 @@ export function normalizeModelName(modelName: string): string {
     "nova-3": "Nova 3",
     "flux-general-en": "Flux",
     "flux-general-multi": "Flux Multilingual",
-    scribe_v2_realtime: "Scribe v2",
+    scribe_v2_realtime: "Scribe v2 Realtime",
     "universal-streaming": "Universal Streaming",
     default: "Default",
     enhanced: "Enhanced"

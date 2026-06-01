@@ -26,15 +26,19 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("default", "nova-2", "nova-3", "flux-general-en", "flux-general-multi")
-
 
 class DeepgramProvider(STTProvider):
     """Deepgram streaming STT provider."""
 
+    _VALID_MODELS = frozenset(
+        {"default", "nova-2", "nova-3", "flux-general-en", "flux-general-multi"}
+    )
+
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Deepgram model {model!r}. Valid: {_VALID_MODELS}")
+        if not self._model_supported(model):
+            raise ValueError(
+                f"Invalid Deepgram model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         self._api_key = api_key
         self._model = model
 
