@@ -11,7 +11,7 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { useTimelineWindow } from "@/hooks/useTimelineWindow";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey } from "@/lib/utils/formatters";
-import { buildModelsByProviderFromResults } from "@/lib/utils/modelsFromResults";
+import { buildModelsByProviderFromResults, pruneSelection } from "@/lib/utils/modelsFromResults";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
 import { computeModelStats, type Result } from "@/lib/aggregates";
@@ -234,6 +234,17 @@ export function useDashboardState(page: "tts" | "stt") {
       setExpandedProviders(expanded);
     }
   }, [modelsByProvider, selectedModels.length]);
+
+  // Keep the selection a subset of the visible models. Once provider metadata
+  // loads, a model that results alone had surfaced may be filtered out of
+  // modelsByProvider; drop it so it stops being plotted while absent from the
+  // sidebar. Removal-only, so it never fights a manual selection.
+  useEffect(() => {
+    setSelectedModels((prev) => {
+      const next = pruneSelection(prev, modelsByProvider);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [modelsByProvider]);
 
   // Calculate metrics
   const currentData = chartData.getCurrentData();

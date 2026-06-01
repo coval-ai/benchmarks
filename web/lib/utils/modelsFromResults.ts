@@ -68,3 +68,18 @@ export function buildModelsByProviderFromResults(
 
   return modelsByProvider;
 }
+
+/**
+ * Drop any selected composite key that is no longer present in
+ * `modelsByProvider`. Removal-only: it never adds or reorders, so it cannot
+ * override a manual selection or re-introduce a model — it only reconciles the
+ * selection after provider metadata filters a model out (e.g. a disabled model
+ * that results alone had surfaced before the catalogue loaded).
+ */
+export function pruneSelection(
+  selected: readonly string[],
+  modelsByProvider: ModelsByProvider
+): string[] {
+  const valid = new Set(Object.values(modelsByProvider).flat());
+  return selected.filter((key) => valid.has(key));
+}

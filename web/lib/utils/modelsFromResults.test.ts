@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Result } from "../aggregates";
-import { buildModelsByProviderFromResults } from "./modelsFromResults";
+import { buildModelsByProviderFromResults, pruneSelection } from "./modelsFromResults";
 
 function row(
   provider: string,
@@ -125,5 +125,29 @@ describe("buildModelsByProviderFromResults", () => {
     expect(out.openai).toEqual(["openai:tts-1-hd"]);
     expect(out.elevenlabs).toEqual(["elevenlabs:eleven_flash_v2_5"]);
     expect(out.hume).toEqual(["hume:octave-tts", "hume:octave-2"]);
+  });
+});
+
+describe("pruneSelection", () => {
+  it("removes selected keys no longer present in modelsByProvider", () => {
+    const result = pruneSelection(
+      ["speechmatics:default", "google:short", "deepgram:nova-2"],
+      {
+        speechmatics: ["speechmatics:default"],
+        deepgram: ["deepgram:nova-2"]
+      }
+    );
+    expect(result).toEqual(["speechmatics:default", "deepgram:nova-2"]);
+  });
+
+  it("keeps the selection intact when every key is still valid", () => {
+    const selected = ["deepgram:nova-2", "deepgram:nova-3"];
+    expect(
+      pruneSelection(selected, { deepgram: ["deepgram:nova-2", "deepgram:nova-3"] })
+    ).toEqual(selected);
+  });
+
+  it("returns empty when modelsByProvider is empty", () => {
+    expect(pruneSelection(["deepgram:nova-2"], {})).toEqual([]);
   });
 });
