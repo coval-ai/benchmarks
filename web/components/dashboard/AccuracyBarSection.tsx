@@ -78,7 +78,7 @@ const AccuracyBarSection: React.FC = () => {
                 },
               }}
             />
-            <Tooltip content={<CustomBarTooltip />} cursor={false} />
+            <Tooltip content={<CustomBarTooltip getProviderForModel={getProviderForModel} />} cursor={false} />
             <Bar
               dataKey="averageWER"
               stroke={themeColors.barStroke}

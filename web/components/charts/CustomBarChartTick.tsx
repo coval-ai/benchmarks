@@ -26,22 +26,34 @@ const CustomBarChartTick: React.FC<{
   const providerFontSize = sidebarCollapsed ? "10px" : "9px";
   const mobileFontSize = sidebarCollapsed ? "11px" : "10px";
 
-  // Mobile: Show only model name, diagonal
+  // Mobile: model name + provider, diagonal
   if (isMobile) {
     return (
       <g transform={`translate(${x},${y})`}>
-        <text
-          x={0}
-          y={0}
-          dy={16}
-          textAnchor="end"
-          fill={themeColors.label}
-          fontSize={mobileFontSize}
-          fontWeight="bold"
-          transform="rotate(-45)"
-        >
-          {normalizedModel}
-        </text>
+        <g transform="rotate(-45)">
+          <text
+            x={0}
+            y={0}
+            dy={14}
+            textAnchor="end"
+            fill={themeColors.label}
+            fontSize={mobileFontSize}
+            fontWeight="bold"
+          >
+            {normalizedModel}
+          </text>
+          <text
+            x={0}
+            y={0}
+            dy={26}
+            textAnchor="end"
+            fill={themeColors.label}
+            fontSize={providerFontSize}
+            opacity={0.8}
+          >
+            {provider}
+          </text>
+        </g>
       </g>
     );
   }
