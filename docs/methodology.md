@@ -66,7 +66,34 @@ attributed to the pipeline version that produced it.
 A future revision may A/B-test against `whisper_normalizer`. Any such change
 will increment `NORM_VERSION` and ship a separate ADR.
 
-## 4. Library versions
+## 4. Latency metrics (TTFA)
+
+The TTS latency metric is **TTFA (Time-To-First-Audio)**, reported in
+milliseconds. It is *perceived* first-audible latency, the goal being to measure 
+what an enqueue-and-play client actually waits before it hears sound:
+
+    TTFA = (first audio chunk arrival − synthesis start)
+           + leading silence inside the stream before the first audible sample
+
+The arrival term is wall-clock (`time.monotonic`) from the synthesis trigger to
+the first non-empty audio chunk. The leading-silence term is computed from the
+assembled PCM by `runner/src/coval_bench/metrics/ttfa.py`
+(`first_audible_offset_ms`, an RMS-threshold onset detector). Both terms are
+combined in one place — `providers/tts/_common.py:finalize_tts_result` — which
+every provider routes through. The offset is best-effort: if it cannot be
+computed, TTFA degrades to arrival-only and the audio is still kept.
+
+**Methodology change (2026-05).** TTFA previously measured *network arrival
+only* (time to first chunk) and ignored any leading silence a provider
+front-loads into the stream. As of this change it is the perceived value above.
+This shifts every provider's reported TTFA upward by its leading-silence offset
+(near-zero for providers that emit audible audio immediately; several hundred ms
+for those that front-load silence), so numbers recorded before the change are
+**not comparable** with later ones. There is no schema or metric-name change —
+the existing `TTFA` metric simply carries the perceived definition from this
+point forward, distinguished by the `runner_sha` on the run.
+
+## 5. Library versions
 
 The DP edit-distance computation is delegated to `jiwer`. Pinned in
 `runner/uv.lock` (currently `jiwer == 4.0.0`). `numpy` is also locked. Every

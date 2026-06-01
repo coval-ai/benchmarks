@@ -7,18 +7,15 @@ from __future__ import annotations
 
 import base64
 import json
-import os
-import tempfile
 import time
-import wave
 from io import BytesIO
-from pathlib import Path
 
 import structlog
 from elevenlabs import ElevenLabs
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -91,7 +88,8 @@ class ElevenLabsTTSProvider(TTSProvider):
                     f"Valid models: {sorted(self._VALID_MODELS)}"
                 ),
             )
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
         audio_stream = BytesIO()
 
         try:
@@ -107,13 +105,8 @@ class ElevenLabsTTSProvider(TTSProvider):
 
             for chunk in response:
                 if chunk:
-                    if self._is_audio_chunk(chunk) and ttfa_ms is None:
-                        ttfa_ms = (time.monotonic() - start) * 1000
-                        logger.debug(
-                            "elevenlabs_ttfa",
-                            model=self._model,
-                            ttfa_ms=ttfa_ms,
-                        )
+                    if self._is_audio_chunk(chunk) and first_chunk_at is None:
+                        first_chunk_at = time.monotonic()
                     if isinstance(chunk, bytes):
                         audio_stream.write(chunk)
                     else:
@@ -121,39 +114,27 @@ class ElevenLabsTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.debug("elevenlabs_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="elevenlabs",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
         audio_data = audio_stream.getvalue()
-        audio_path: Path | None = None
-        if audio_data:
-            audio_path = _write_wav_from_data(audio_data, SAMPLE_RATE)
-        else:
+        if not audio_data:
             logger.warning("elevenlabs_no_audio", model=self._model)
 
-        return TTSResult(
+        return finalize_tts_result(
             provider="elevenlabs",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=audio_data,
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav_from_data(audio_data: bytes, sample_rate: int) -> Path:
-    """Write raw PCM data as a WAV file and return the path."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

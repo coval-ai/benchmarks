@@ -5,11 +5,7 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 import time
-import wave
-from pathlib import Path
 from typing import Any
 
 import structlog
@@ -18,6 +14,7 @@ from cartesia.types import VoiceSpecifierParam
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -68,7 +65,8 @@ class CartesiaTTSProvider(TTSProvider):
                 ),
             )
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
         voice_spec: VoiceSpecifierParam = {"id": self._voice, "mode": "id"}
 
         try:
@@ -87,7 +85,7 @@ class CartesiaTTSProvider(TTSProvider):
                 # send() — ctx.send() does NOT inherit them from conn.context().
                 # Omitting output_format causes the SDK to substitute its own
                 # default (pcm_f32le / 44100 Hz), which mismatches the WAV header
-                # written by _write_wav (pcm_s16le / 24000 Hz) and produces
+                # written at finalize (pcm_s16le / 24000 Hz) and produces
                 # corrupt audio → Whisper hallucination → WER > 100%.
                 # Omitting language causes sonic-3 to auto-detect and intermittently
                 # synthesize non-English audio → WER = 100%.
@@ -105,47 +103,31 @@ class CartesiaTTSProvider(TTSProvider):
                     if event_type == "chunk":
                         audio: bytes | None = getattr(event, "audio", None)
                         if audio and len(audio) > 0:
-                            if ttfa_ms is None:
-                                ttfa_ms = (time.monotonic() - start) * 1000
-                                logger.debug(
-                                    "cartesia_ttfa",
-                                    model=self._model,
-                                    ttfa_ms=ttfa_ms,
-                                )
+                            if first_chunk_at is None:
+                                first_chunk_at = time.monotonic()
                             audio_chunks.append(audio)
                     elif event_type == "done":
                         break
 
         except Exception as exc:
             logger.debug("cartesia_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="cartesia",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, SAMPLE_RATE) if audio_chunks else None
-        return TTSResult(
+        return finalize_tts_result(
             provider="cartesia",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    """Concatenate PCM chunks and write a WAV file to a temp location."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    audio_data = b"".join(chunks)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

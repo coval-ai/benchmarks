@@ -333,8 +333,8 @@ async def test_rime_empty_chunk_not_counted(fake_settings: Settings) -> None:
         result = await provider.synthesize("test")
 
     assert result.error is None
-    # If the `if audio_bytes:` guard is removed, audio_chunks = [b""] is truthy
-    # so _write_wav is called and ttfa_ms is set — both assertions below would fail.
+    # If the `if audio_bytes:` guard is removed, first_chunk_at gets stamped on the
+    # empty chunk, so ttfa_ms is computed (non-None) — the assertion below would fail.
     assert result.ttfa_ms is None
     assert result.audio_path is None
 

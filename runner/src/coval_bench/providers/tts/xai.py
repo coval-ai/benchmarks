@@ -7,11 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
-import os
-import tempfile
 import time
-import wave
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -20,6 +16,7 @@ import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -66,7 +63,8 @@ class XaiTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
 
         try:
             headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -90,8 +88,8 @@ class XaiTTSProvider(TTSProvider):
                         if audio_b64:
                             chunk = base64.b64decode(audio_b64)
                             if chunk:
-                                if ttfa_ms is None:
-                                    ttfa_ms = (time.monotonic() - start) * 1000
+                                if first_chunk_at is None:
+                                    first_chunk_at = time.monotonic()
                                 audio_chunks.append(chunk)
 
                     elif event_type == "audio.done":
@@ -102,33 +100,23 @@ class XaiTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.debug("xai_tts_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="xai",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=_SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = _write_wav(audio_chunks, _SAMPLE_RATE) if audio_chunks else None
-        return TTSResult(
+        return finalize_tts_result(
             provider="xai",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=_SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    audio_data = b"".join(chunks)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

@@ -7,11 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
-import os
-import tempfile
 import time
-import wave
-from pathlib import Path
 from urllib.parse import urlencode
 
 import structlog
@@ -19,6 +15,7 @@ import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -71,7 +68,9 @@ class RimeTTSProvider(TTSProvider):
             )
 
         audio_chunks: list[bytes] = []
-        ttfa_ms: float | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
+        sample_rate = _MODEL_SAMPLE_RATES.get(self._model, 24000)
 
         qs = urlencode(
             {
@@ -100,13 +99,8 @@ class RimeTTSProvider(TTSProvider):
                     if msg_type == "chunk":
                         audio_bytes = base64.b64decode(msg["data"])
                         if audio_bytes:
-                            if ttfa_ms is None:
-                                ttfa_ms = (time.monotonic() - start) * 1000
-                                logger.debug(
-                                    "rime_ttfa",
-                                    model=self._model,
-                                    ttfa_ms=ttfa_ms,
-                                )
+                            if first_chunk_at is None:
+                                first_chunk_at = time.monotonic()
                             audio_chunks.append(audio_bytes)
 
                     elif msg_type == "done":
@@ -118,38 +112,23 @@ class RimeTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.warning("rime_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="rime",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=sample_rate,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
             )
 
-        audio_path = (
-            _write_wav(audio_chunks, _MODEL_SAMPLE_RATES.get(self._model, 24000))
-            if audio_chunks
-            else None
-        )
-        return TTSResult(
+        return finalize_tts_result(
             provider="rime",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=b"".join(audio_chunks),
+            sample_rate=sample_rate,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
         )
-
-
-def _write_wav(chunks: list[bytes], sample_rate: int) -> Path:
-    """Concatenate raw PCM chunks and write a WAV file to a temp location."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    audio_data = b"".join(chunks)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)
