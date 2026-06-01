@@ -1,0 +1,197 @@
+/* Playground — shared utilities; surfaces use globals theme tokens only */
+
+.playground-mono {
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.playground-viz-ring {
+  position: relative;
+  width: min(280px, 70vw);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  margin-inline: auto;
+  /* Canvas paints the disk; this shell only clips to the circle and draws the outer ring border. */
+  background: transparent;
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+  /* Light: soft chip on white page. Dark: match page black — avoid grey translucent secondary. */
+  --playground-stt-disk: var(--color-surface-secondary);
+}
+
+.dark .playground-viz-ring {
+  --playground-stt-disk: var(--color-surface-primary);
+}
+
+.playground-viz-dust {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, color-mix(in srgb, var(--color-text-primary) 18%, transparent), transparent),
+    radial-gradient(1px 1px at 80% 20%, color-mix(in srgb, var(--color-text-primary) 14%, transparent), transparent),
+    radial-gradient(1px 1px at 40% 70%, color-mix(in srgb, var(--color-text-primary) 12%, transparent), transparent),
+    radial-gradient(1px 1px at 65% 55%, color-mix(in srgb, var(--color-text-primary) 16%, transparent), transparent),
+    radial-gradient(1px 1px at 10% 80%, color-mix(in srgb, var(--color-text-primary) 10%, transparent), transparent),
+    radial-gradient(1px 1px at 90% 75%, color-mix(in srgb, var(--color-text-primary) 14%, transparent), transparent);
+  animation: playground-drift 18s linear infinite;
+  opacity: 0.75;
+}
+
+@keyframes playground-drift {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  100% {
+    transform: rotate(360deg) scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playground-viz-dust {
+    animation: none;
+  }
+}
+
+/* STT comparison card — pulsing dot while recording */
+.playground-stt-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.playground-stt-dot.playground-stt-dot--recording {
+  animation: playground-stt-dotpulse 1.2s ease-in-out infinite;
+}
+
+@keyframes playground-stt-dotpulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playground-stt-dot.playground-stt-dot--recording {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* TTS & STT panel swap */
+@keyframes playground-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.playground-panel-switch {
+  animation: playground-panel-in 0.22s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playground-panel-switch {
+    animation: none;
+  }
+}
+
+/* STT transcript strip — edge peek + optional track stretch (see component) */
+.playground-stt-carousel-viewport {
+  touch-action: pan-x;
+  overscroll-behavior-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.playground-stt-carousel-fade {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3rem;
+  z-index: 2;
+}
+
+.playground-stt-carousel-fade--left {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-surface-secondary) 92%, transparent),
+    transparent
+  );
+}
+
+.playground-stt-carousel-fade--right {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--color-surface-secondary) 92%, transparent),
+    transparent
+  );
+}
+
+/* Leaderboard / benchmark overlays — light: white panel; dark: monochrome chrome */
+.playground-modal-base {
+  background: var(--color-surface-tooltip);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.dark .playground-modal-base {
+  background: #0a0a0a;
+  color: #fafafa;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Sticky table header inside modal scroll regions */
+.playground-modal-table-head {
+  background: var(--color-surface-tooltip);
+  /* Covers row content scrolling underneath (opaque + soft edge). */
+  box-shadow: 0 10px 12px -8px color-mix(in srgb, var(--color-text-primary) 18%, transparent);
+}
+
+.dark .playground-modal-table-head {
+  background: #0a0a0a;
+  box-shadow: 0 12px 16px -10px rgba(0, 0, 0, 0.85);
+}
+
+.playground-modal-border-subtle {
+  border-color: var(--color-border-primary);
+}
+
+.dark .playground-modal-border-subtle {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.playground-modal-label {
+  color: var(--color-text-secondary);
+}
+
+.dark .playground-modal-label {
+  color: #71717a;
+}
+
+.playground-modal-row-divider {
+  border-color: var(--color-border-primary);
+}
+
+.dark .playground-modal-row-divider {
+  border-color: rgba(255, 255, 255, 0.06);
+}

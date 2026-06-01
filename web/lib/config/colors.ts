@@ -3,7 +3,7 @@
 
 export const modelColors: Record<string, string> = {
   // OpenAI TTS
-  "tts-1-hd": "#943126",
+  "gpt-4o-mini-tts": "#943126",
 
   // ElevenLabs TTS
   eleven_multilingual_v2: "#FFD633",
@@ -37,9 +37,11 @@ export const modelColors: Record<string, string> = {
   // AssemblyAI STT
   "universal-streaming": "#E74C3C",
 
-  // Speechmatics STT
+  // Speechmatics STT — composite keys so `default` does not collide with other vendors
   enhanced: "#3498DB",
-  default: "#21618C"
+  default: "#21618C",
+  "speechmatics-default": "#21618C",
+  "speechmatics-enhanced": "#3498DB"
 };
 
 export const providerColors: Record<string, string> = {

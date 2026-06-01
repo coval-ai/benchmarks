@@ -23,7 +23,9 @@ from .conftest import FakeWebSocket, make_pcm_bytes
 # ---------------------------------------------------------------------------
 
 
-def _make_http_provider(fake_settings: Settings, model: str = "tts-1") -> OpenAITTSProvider:
+def _make_http_provider(
+    fake_settings: Settings, model: str = "gpt-4o-mini-tts"
+) -> OpenAITTSProvider:
     return OpenAITTSProvider(fake_settings, model=model, voice="alloy")
 
 
@@ -77,7 +79,7 @@ async def test_openai_http_happy_path(fake_settings: Settings, tmp_path: Path) -
     assert result.audio_path.exists()
     assert result.audio_path.stat().st_size > 0
     assert result.provider == "openai"
-    assert result.model == "tts-1"
+    assert result.model == "gpt-4o-mini-tts"
     assert result.voice == "alloy"
 
     # Orchestrator owns deletion — provider must NOT auto-delete
@@ -105,14 +107,14 @@ async def test_openai_http_all_http_models(fake_settings: Settings) -> None:
 
 def test_openai_unknown_voice_falls_back_to_alloy(fake_settings: Settings) -> None:
     """Unknown voice is replaced by 'alloy' at construction time."""
-    provider = OpenAITTSProvider(fake_settings, model="tts-1", voice="invalid_voice")
+    provider = OpenAITTSProvider(fake_settings, model="gpt-4o-mini-tts", voice="invalid_voice")
     assert provider._voice == "alloy"
 
 
 def test_openai_valid_voices_accepted(fake_settings: Settings) -> None:
     """All documented voices are accepted without fallback."""
     for voice in VALID_VOICES:
-        p = OpenAITTSProvider(fake_settings, model="tts-1", voice=voice)
+        p = OpenAITTSProvider(fake_settings, model="gpt-4o-mini-tts", voice=voice)
         assert p._voice == voice
 
 
@@ -204,21 +206,21 @@ async def test_openai_realtime_happy_path(fake_settings: Settings) -> None:
 
 
 def test_openai_name_property(fake_settings: Settings) -> None:
-    p = OpenAITTSProvider(fake_settings, model="tts-1-hd", voice="echo")
-    assert p.name == "openai-tts-1-hd"
-    assert p.model == "tts-1-hd"
+    p = OpenAITTSProvider(fake_settings, model="gpt-4o-mini-tts", voice="echo")
+    assert p.name == "openai-gpt-4o-mini-tts"
+    assert p.model == "gpt-4o-mini-tts"
 
 
 # ---------------------------------------------------------------------------
-# Re-activated 2026-04-30: tts-1-hd is the only OpenAI HTTP model in production.
+# gpt-4o-mini-tts is the only OpenAI HTTP model in production.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_synthesize_tts_1_hd_streams_pcm(fake_settings: Settings) -> None:
-    """tts-1-hd streams PCM chunks → ttfa set, valid WAV with .wav magic bytes."""
+async def test_synthesize_gpt_4o_mini_tts_streams_pcm(fake_settings: Settings) -> None:
+    """gpt-4o-mini-tts streams PCM chunks → ttfa set, valid WAV with .wav magic bytes."""
     pcm = make_pcm_bytes(480)
-    provider = _make_http_provider(fake_settings, model="tts-1-hd")
+    provider = _make_http_provider(fake_settings, model="gpt-4o-mini-tts")
 
     mock_client = _make_streaming_response_mock([pcm, pcm])
     with patch.object(provider, "_client", mock_client):
@@ -227,7 +229,7 @@ async def test_synthesize_tts_1_hd_streams_pcm(fake_settings: Settings) -> None:
     assert result.error is None
     assert result.ttfa_ms is not None
     assert result.provider == "openai"
-    assert result.model == "tts-1-hd"
+    assert result.model == "gpt-4o-mini-tts"
     assert result.voice == "alloy"
     assert result.audio_path is not None
     assert result.audio_path.exists()

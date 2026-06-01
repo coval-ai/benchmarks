@@ -28,7 +28,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("default",)
 _WS_URL = "wss://api.gradium.ai/api/speech/tts"
 _SAMPLE_RATE = 48000
 
@@ -36,9 +35,13 @@ _SAMPLE_RATE = 48000
 class GradiumTTSProvider(TTSProvider):
     """Gradium TTS provider using WebSocket streaming."""
 
+    _VALID_MODELS = frozenset({"default"})
+
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Gradium TTS model {model!r}. Valid: {_VALID_MODELS}")
+        if not self._model_supported(model):
+            raise ValueError(
+                f"Invalid Gradium TTS model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         self._model = model
         self._voice = voice
 

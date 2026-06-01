@@ -346,7 +346,7 @@ export function useChartData({
     const outlierCount = xValues.filter((val) => val > p99X).length;
 
     return { points: scatterPoints, p99X, outlierCount };
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels, getProviderForModel]);
+  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
   // Gap data needs per-timestamp comparisons — cannot use pre-aggregated stats
   const getGapData = useCallback((): TimelineDataPoint[] => {

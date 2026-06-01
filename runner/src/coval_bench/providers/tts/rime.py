@@ -21,10 +21,6 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _WS_BASE = "wss://users-ws.rime.ai/ws3"
 
-VALID_MODELS = {"arcana", "coda", "mistv3"}
-
-# Native output sample rates per model; requesting each model's native rate
-# avoids server-side upsampling and produces the most faithful benchmark audio.
 _MODEL_SAMPLE_RATES: dict[str, int] = {
     "arcana": 24000,
     "coda": 24000,
@@ -36,6 +32,8 @@ class RimeTTSProvider(TTSProvider):
     """Rime TTS provider using WebSocket /ws3 JSON streaming."""
 
     enabled: bool = False  # enabled via DEFAULT_TTS_MATRIX entries
+
+    _VALID_MODELS = frozenset({"arcana", "coda", "mistv3"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
@@ -56,7 +54,7 @@ class RimeTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Rime /ws3 WebSocket and return a TTSResult."""
-        if self._model not in VALID_MODELS:
+        if not self._model_supported(self._model):
             return TTSResult(
                 provider="rime",
                 model=self._model,
@@ -64,7 +62,8 @@ class RimeTTSProvider(TTSProvider):
                 ttfa_ms=None,
                 audio_path=None,
                 error=(
-                    f"Unsupported Rime model: {self._model}. Valid models: {sorted(VALID_MODELS)}"
+                    f"Unsupported Rime model: {self._model}. "
+                    f"Valid models: {sorted(self._VALID_MODELS)}"
                 ),
             )
 
@@ -78,7 +77,7 @@ class RimeTTSProvider(TTSProvider):
                 "modelId": self._model,
                 "speaker": self._voice or "luna",
                 "audioFormat": "pcm",
-                "samplingRate": sample_rate,
+                "samplingRate": _MODEL_SAMPLE_RATES.get(self._model, 24000),
                 # segment=never: synthesis fires only on explicit eos, not on sentence
                 "segment": "never",
             }

@@ -25,7 +25,6 @@ SAMPLE_RATE = 48000
 _WS_BASE = "wss://api.hume.ai/v0/tts/stream/input"
 _WS_SESSION_TIMEOUT_S = 30.0
 
-SUPPORTED_MODELS = {"octave-tts", "octave-2"}
 # Maps model name to Hume version query param
 _MODEL_TO_VERSION: dict[str, str] = {"octave-tts": "1", "octave-2": "2"}
 
@@ -36,6 +35,8 @@ class HumeTTSProvider(TTSProvider):
     """Hume TTS provider using WebSocket streaming (Octave Speak API)."""
 
     enabled: bool = False
+
+    _VALID_MODELS = frozenset(_MODEL_TO_VERSION)
 
     def __init__(self, settings: Settings, model: str, voice: str | None) -> None:
         self._model = model
@@ -57,7 +58,7 @@ class HumeTTSProvider(TTSProvider):
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Hume WebSocket and return a TTSResult."""
         voice_id = self._voice if self._voice else _DEFAULT_VOICE_ID
-        if self._model not in SUPPORTED_MODELS:
+        if not self._model_supported(self._model):
             return TTSResult(
                 provider="hume",
                 model=self._model,
@@ -65,7 +66,8 @@ class HumeTTSProvider(TTSProvider):
                 ttfa_ms=None,
                 audio_path=None,
                 error=(
-                    f"Unsupported Hume model: {self._model}. Supported: {sorted(SUPPORTED_MODELS)}"
+                    f"Unsupported Hume model: {self._model}. "
+                    f"Supported: {sorted(self._VALID_MODELS)}"
                 ),
             )
 
