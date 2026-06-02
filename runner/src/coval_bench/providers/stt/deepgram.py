@@ -163,6 +163,7 @@ class DeepgramProvider(STTProvider):
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
         final_segments: list[str] = []
+        pending_partial: str = ""
         flux_latest: str = ""
         last_final_time: float | None = None
 
@@ -230,15 +231,22 @@ class DeepgramProvider(STTProvider):
 
                 result.partial_transcripts.append(transcript)
 
-                if self._model in ("nova-2", "nova-3"):
-                    if msg.get("speech_final"):
-                        final_segments.append(transcript)
-                        last_final_time = now
+                # Deepgram v1 chunks an utterance into non-overlapping pieces,
+                # each finalized by is_final=true. speech_final=true is only an
+                # endpointing flag riding on the last is_final before a pause —
+                # keying on it drops every is_final-only piece in between. Per
+                # Deepgram's docs the full transcript is the concatenation of
+                # ALL is_final segments, so accumulate on is_final.
+                if msg.get("is_final"):
+                    final_segments.append(transcript)
+                    pending_partial = ""
+                    last_final_time = now
                 else:
-                    # default model — treat is_final as final
-                    if msg.get("is_final"):
-                        final_segments.append(transcript)
-                        last_final_time = now
+                    # Interim for the current (not-yet-finalized) segment. Keep
+                    # the longest so a tail the stream closes before finalizing
+                    # still makes it into the transcript.
+                    if len(transcript) > len(pending_partial):
+                        pending_partial = transcript
 
         except Exception as exc:
             logger.exception("deepgram receive error", error=str(exc))
@@ -249,10 +257,11 @@ class DeepgramProvider(STTProvider):
         # Build complete transcript
         if self._model in ("flux-general-en", "flux-general-multi"):
             result.complete_transcript = flux_latest.strip() or None
-        elif final_segments:
-            result.complete_transcript = " ".join(final_segments).strip()
-        elif result.partial_transcripts:
-            result.complete_transcript = max(result.partial_transcripts, key=len).strip() or None
+        elif final_segments or pending_partial:
+            parts = list(final_segments)
+            if pending_partial:
+                parts.append(pending_partial)
+            result.complete_transcript = " ".join(parts).strip() or None
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
