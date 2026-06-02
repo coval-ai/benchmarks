@@ -45,7 +45,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       <div style={{ fontSize: "11px" }}>
         {validData.map((item, index) => {
           // Extract model name from dataKey (remove '_value' suffix)
-          const modelName = item.dataKey.replace("_value", "");
+          const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
 
           return (

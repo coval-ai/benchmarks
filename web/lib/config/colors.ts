@@ -40,11 +40,12 @@ export const modelColors: Record<string, string> = {
   // AssemblyAI STT
   "universal-streaming": "#E74C3C",
 
-  // Speechmatics STT — composite keys so `default` does not collide with other vendors
+  // Speechmatics STT
   enhanced: "#3498DB",
   default: "#21618C",
-  "speechmatics-default": "#21618C",
-  "speechmatics-enhanced": "#3498DB"
+  // Composite keys for models whose slug is shared across providers
+  "speechmatics:default": "#21618C",
+  "gradium:default": "#1ABC9C"
 };
 
 export const providerColors: Record<string, string> = {

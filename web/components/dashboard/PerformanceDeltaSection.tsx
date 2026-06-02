@@ -24,7 +24,7 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 
 const PerformanceDeltaSection: React.FC = () => {
   const {
-    selectedModels,
+    getModelsWithGapData,
     isDragging,
     handleMouseDown,
     getWindowedGapData,
@@ -32,9 +32,9 @@ const PerformanceDeltaSection: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
-    rawData,
   } = useDashboard();
   const chartRef = useRef<HTMLDivElement>(null);
+  const modelsWithData = getModelsWithGapData();
 
   const themeColors = useThemeColors();
   const tzAbbr = getLocalTimeZoneAbbr();
@@ -94,7 +94,7 @@ const PerformanceDeltaSection: React.FC = () => {
               tickFormatter={(value) =>
                 value === 0
                   ? "FASTEST"
-                  : `+${(value / 1000).toFixed(3)}s`
+                  : `+${value.toFixed(0)}ms`
               }
               label={{
                 value: "Performance Gap (ms)",
@@ -111,11 +111,10 @@ const PerformanceDeltaSection: React.FC = () => {
               content={
                 <CustomGapTooltip
                   getProviderForModel={getProviderForModel}
-                  rawData={rawData}
                 />
               }
             />
-            {selectedModels.length > 1 && (
+            {modelsWithData.length > 1 && (
               <Legend
                 wrapperStyle={{
                   color: themeColors.axisText,
@@ -137,16 +136,16 @@ const PerformanceDeltaSection: React.FC = () => {
               }}
             />
 
-            {selectedModels.map((model) => (
+            {modelsWithData.map((model) => (
               <Line
                 key={model}
                 type="monotone"
                 dataKey={`${model}_gap`}
                 stroke={getModelColor(model)}
-                strokeWidth={selectedModels.length === 1 ? 3 : 2}
+                strokeWidth={modelsWithData.length === 1 ? 3 : 2}
                 dot={false}
                 activeDot={{
-                  r: selectedModels.length === 1 ? 7 : 6,
+                  r: modelsWithData.length === 1 ? 7 : 6,
                   fill: getModelColor(model),
                 }}
                 connectNulls={false}

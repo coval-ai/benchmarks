@@ -32,7 +32,6 @@ dependencies = [
     # TTS provider SDKs
     "openai>=1.40",
     "cartesia>=2",
-    "elevenlabs>=1.5",
     "aiohttp>=3.9",
     # Dataset
     "google-cloud-storage>=2.18",
@@ -119,10 +118,6 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "cartesia.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "elevenlabs.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from pydantic import BaseModel
 
+from coval_bench.providers._http_session import close_all as _close_http_clients
+from coval_bench.providers.base import Provider
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
 from coval_bench.runner.retry import with_retry
 
@@ -337,11 +339,29 @@ async def _run_stt_item(
                     )
                 )
             except Exception as exc:
+                # compute_wer is deterministic over a transcript we already obtained, so a
+                # crash here is a genuine failure — surface it as a FAILED row rather than
+                # silently dropping it and leaving the run marked SUCCEEDED.
                 _log.warning(
                     "WER computation failed",
                     provider=entry.provider,
                     model=entry.model,
                     exc_info=exc,
+                )
+                results.append(
+                    Result(
+                        run_id=run_id,
+                        provider=entry.provider,
+                        model=entry.model,
+                        benchmark=Benchmark.STT,
+                        metric_type="WER",
+                        metric_value=None,
+                        metric_units=None,
+                        audio_filename=audio_path.name,
+                        transcript=complete_transcript,
+                        status=ResultStatus.FAILED,
+                        error=_truncate(str(exc)),
+                    )
                 )
 
     if writer is not None and results:
@@ -425,6 +445,27 @@ async def _run_tts_item(
         try:
             # 1. TTFA
             ttfa_status, ttfa_error = _metric_outcome(ttfa_ms, item_error, "TTFA", ResultStatus)
+            ttfa_value = ttfa_ms
+
+            # Transport-contamination gate: a clean measurement taken over HTTP/1.1 or a cold
+            # socket is not comparable to the WebSocket cohort. Override only a would-be
+            # SUCCESS — a real provider error or empty result keeps its own message.
+            if ttfa_status is ResultStatus.SUCCESS and tts_result is not None:
+                if tts_result.http_version is not None and tts_result.http_version != "HTTP/2":
+                    ttfa_status = ResultStatus.FAILED
+                    ttfa_error = _truncate(
+                        f"TTFA measured over {tts_result.http_version}; not comparable "
+                        "(no HTTP/2 multiplexing, TTFA reabsorbs TCP+TLS)"
+                    )
+                    ttfa_value = None
+                elif tts_result.connection_reused is False:
+                    ttfa_status = ResultStatus.FAILED
+                    ttfa_error = _truncate(
+                        "TTFA measured over a cold connection; not comparable "
+                        "(TTFA reabsorbs TCP+TLS)"
+                    )
+                    ttfa_value = None
+
             results.append(
                 Result(
                     run_id=run_id,
@@ -433,43 +474,77 @@ async def _run_tts_item(
                     voice=entry.voice,
                     benchmark=Benchmark.TTS,
                     metric_type="TTFA",
-                    metric_value=ttfa_ms,
+                    metric_value=ttfa_value,
                     metric_units="milliseconds",
                     audio_filename=audio_path.name if audio_path else None,
                     transcript=transcript,
                     status=ttfa_status,
                     error=ttfa_error,
+                    http_version=tts_result.http_version if tts_result else None,
+                    submit_to_headers_ms=tts_result.submit_to_headers_ms if tts_result else None,
                 )
             )
 
             # 2. WER via Whisper transcription of synthesized audio (skip when synth errored)
             if item_error is None and audio_path is not None and audio_path.exists():
+                # Whisper transcription is our measurement instrument, not the provider under
+                # test — a transcription failure is logged and skipped (no WER row), so a
+                # transient Whisper outage doesn't drag the provider's run to PARTIAL.
+                whisper_transcript: str | None = None
                 try:
                     whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
-                    wer_result = compute_wer(transcript, whisper_transcript)
-                    results.append(
-                        Result(
-                            run_id=run_id,
-                            provider=entry.provider,
-                            model=entry.model,
-                            voice=entry.voice,
-                            benchmark=Benchmark.TTS,
-                            metric_type="WER",
-                            metric_value=wer_result.wer_percentage,
-                            metric_units="percent",
-                            audio_filename=audio_path.name,
-                            transcript=whisper_transcript,
-                            status=ResultStatus.SUCCESS,
-                            error=None,
-                        )
-                    )
                 except Exception as exc:
                     _log.warning(
-                        "TTS WER computation failed",
+                        "TTS WER transcription failed",
                         provider=entry.provider,
                         model=entry.model,
                         exc_info=exc,
                     )
+
+                # compute_wer is deterministic; if it raises on a real transcript, that's a
+                # genuine failure worth surfacing as a FAILED row rather than silently dropping.
+                if whisper_transcript is not None:
+                    try:
+                        wer_result = compute_wer(transcript, whisper_transcript)
+                        results.append(
+                            Result(
+                                run_id=run_id,
+                                provider=entry.provider,
+                                model=entry.model,
+                                voice=entry.voice,
+                                benchmark=Benchmark.TTS,
+                                metric_type="WER",
+                                metric_value=wer_result.wer_percentage,
+                                metric_units="percent",
+                                audio_filename=audio_path.name,
+                                transcript=whisper_transcript,
+                                status=ResultStatus.SUCCESS,
+                                error=None,
+                            )
+                        )
+                    except Exception as exc:
+                        _log.warning(
+                            "TTS WER computation failed",
+                            provider=entry.provider,
+                            model=entry.model,
+                            exc_info=exc,
+                        )
+                        results.append(
+                            Result(
+                                run_id=run_id,
+                                provider=entry.provider,
+                                model=entry.model,
+                                voice=entry.voice,
+                                benchmark=Benchmark.TTS,
+                                metric_type="WER",
+                                metric_value=None,
+                                metric_units=None,
+                                audio_filename=audio_path.name,
+                                transcript=whisper_transcript,
+                                status=ResultStatus.FAILED,
+                                error=_truncate(str(exc)),
+                            )
+                        )
         finally:
             # Orchestrator owns audio cleanup — always delete in finally block
             if audio_path is not None and audio_path.exists():
@@ -614,6 +689,40 @@ async def run_benchmarks(
             loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
 
         try:
+            # ------------------------------------------------------------------
+            # 2b. Provider warmup
+            # Each provider class may override Provider.warmup() to absorb
+            # pre-t0 deployment cold-start cost (HTTP TCP+TLS, gRPC channel
+            # open, NVCF dispatch).  Default is a no-op; only providers that
+            # need it pay the call.  Errors are non-fatal.
+            # ------------------------------------------------------------------
+            stt_providers = _get_stt_providers()
+            tts_providers = _get_tts_providers()
+            provider_classes: set[type[Provider]] = set()
+            if benchmark_kind in ("stt", "both"):
+                for entry in enabled_stt:
+                    cls = stt_providers.get(entry.provider)
+                    if cls is not None:
+                        provider_classes.add(cls)
+            if benchmark_kind in ("tts", "both"):
+                for entry in enabled_tts:
+                    cls = tts_providers.get(entry.provider)
+                    if cls is not None:
+                        provider_classes.add(cls)
+            if provider_classes:
+                ordered_classes = list(provider_classes)
+                warmup_results = await asyncio.gather(
+                    *(cls.warmup(settings=settings) for cls in ordered_classes),
+                    return_exceptions=True,
+                )
+                for cls, res in zip(ordered_classes, warmup_results, strict=False):
+                    if isinstance(res, BaseException):
+                        _log.warning(
+                            "provider_warmup_failed",
+                            provider=cls.__name__,
+                            exc_info=res,
+                        )
+
             # ------------------------------------------------------------------
             # 3. STT path
             # ------------------------------------------------------------------
@@ -784,3 +893,5 @@ async def run_benchmarks(
         finally:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.remove_signal_handler(signal.SIGTERM)
+            with contextlib.suppress(Exception):
+                await _close_http_clients()

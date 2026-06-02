@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import { normalizeModelName } from "@/lib/utils/formatters";
 import { CustomBarTooltipProps } from "@/types/chart.types";
 
 const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   active,
   payload,
-  label
+  label,
+  getProviderForModel
 }) => {
   if (active && payload && payload.length > 0) {
     const value = payload[0]?.value;
+    const modelKey = label ?? "";
+    const provider = getProviderForModel?.(modelKey);
+    const modelLabel = provider
+      ? `${provider} ${normalizeModelName(modelKey)}`
+      : normalizeModelName(modelKey);
     return (
       <div
         style={{
@@ -22,7 +29,7 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
       >
         <p
           style={{ margin: 0, fontWeight: "bold", color: "var(--color-text-on-tooltip)" }}
-        >{`Model: ${label}`}</p>
+        >{`Model: ${modelLabel}`}</p>
         <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`Average WER: ${Number(
           value
         ).toFixed(1)}%`}</p>

@@ -25,7 +25,7 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
   const {
-    selectedModels,
+    getModelsWithTimelineData,
     getWindowedTimelineData,
     getCurrentTimeWindow,
     getTimelineTicks,
@@ -37,6 +37,7 @@ const TimelineChart: React.FC = () => {
   const chartRef = useRef<HTMLDivElement>(null);
 
   const themeColors = useThemeColors();
+  const modelsWithData = getModelsWithTimelineData();
   const windowedTimelineData = getWindowedTimelineData();
   const currentTimeWindow = getCurrentTimeWindow();
   const tzAbbr = getLocalTimeZoneAbbr();
@@ -110,22 +111,22 @@ const TimelineChart: React.FC = () => {
               }}
             />
             <Tooltip content={<CustomTimelineTooltip getProviderForModel={getProviderForModel} />} />
-            {selectedModels.length > 1 && (
+            {modelsWithData.length > 1 && (
               <Legend
                 wrapperStyle={{ color: themeColors.axisText, paddingTop: "20px" }}
                 iconType="line"
               />
             )}
-            {selectedModels.map((model) => (
+            {modelsWithData.map((model) => (
               <Line
                 key={model}
                 type="monotone"
                 dataKey={`${model}_value`}
                 stroke={getModelColor(model)}
-                strokeWidth={selectedModels.length === 1 ? 3 : 2}
+                strokeWidth={modelsWithData.length === 1 ? 3 : 2}
                 dot={false}
                 activeDot={{
-                  r: selectedModels.length === 1 ? 7 : 6,
+                  r: modelsWithData.length === 1 ? 7 : 6,
                   fill: getModelColor(model)
                 }}
                 connectNulls={false}
