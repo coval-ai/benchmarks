@@ -41,7 +41,7 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
       </p>
       <div style={{ fontSize: "11px" }}>
         {validData.map((item, index) => {
-          const modelName = item.dataKey.replace("_gap", "");
+          const modelName = item.dataKey.replace(/_gap$/, "");
           const provider = getProviderForModel(modelName);
           const gapMs = item.value;
 
