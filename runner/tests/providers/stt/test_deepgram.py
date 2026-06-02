@@ -445,3 +445,97 @@ async def test_deepgram_flux_multi_success(fake_api_key: SecretStr, audio_pcm_by
     assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
     assert result.audio_to_final_seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Transcript assembly — keep ALL is_final segments, not just speech_final
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deepgram_keeps_isfinal_only_segments(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """nova-3: an is_final segment without speech_final must not be dropped.
+
+    Deepgram chunks long utterances into multiple is_final pieces, with
+    speech_final only on the last one before a pause. Keying assembly on
+    speech_final dropped the in-between pieces; we accumulate on is_final.
+    """
+    events: list[Any] = [
+        {"type": "Connected", "session_id": "test-isfinal"},
+        {
+            "type": "Results",
+            "is_final": True,
+            "speech_final": False,  # finalized piece, but not an endpoint
+            "channel": {"alternatives": [{"transcript": "the quick brown fox"}]},
+        },
+        {
+            "type": "Results",
+            "is_final": True,
+            "speech_final": True,  # endpoint — only this survived before the fix
+            "channel": {"alternatives": [{"transcript": "jumps over the lazy dog"}]},
+        },
+    ]
+    provider = DeepgramProvider(api_key=fake_api_key, model="nova-3")
+
+    with patch(
+        "coval_bench.providers.stt.deepgram.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.complete_transcript == "the quick brown fox jumps over the lazy dog"
+
+
+@pytest.mark.asyncio
+async def test_deepgram_includes_unfinalized_tail(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """nova-3: a tail the stream closes before finalizing is still included.
+
+    After the last is_final, interim results keep arriving but never finalize.
+    The longest such interim is appended so the trailing words aren't lost.
+    """
+    events: list[Any] = [
+        {"type": "Connected", "session_id": "test-tail"},
+        {
+            "type": "Results",
+            "is_final": True,
+            "speech_final": True,
+            "channel": {"alternatives": [{"transcript": "first sentence"}]},
+        },
+        {
+            "type": "Results",
+            "is_final": False,
+            "speech_final": False,
+            "channel": {"alternatives": [{"transcript": "second"}]},
+        },
+        {
+            "type": "Results",
+            "is_final": False,
+            "speech_final": False,
+            "channel": {"alternatives": [{"transcript": "second sentence tail"}]},
+        },
+    ]
+    provider = DeepgramProvider(api_key=fake_api_key, model="nova-3")
+
+    with patch(
+        "coval_bench.providers.stt.deepgram.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.complete_transcript == "first sentence second sentence tail"
