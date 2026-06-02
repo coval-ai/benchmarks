@@ -22,11 +22,6 @@ export const metricDescriptions = {
     detailed:
       "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounces complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
   },
-  rtf: {
-    short: "Real-time factor",
-    detailed:
-      "RTF measures how fast a speech-to-text model processes audio relative to real-time. RTF = processing time / audio duration. Values < 1.0 mean faster than real-time, > 1.0 mean slower than real-time. Higher values are better for batch processing, while values close to 1.0 are ideal for real-time applications."
-  },
   performanceGap: {
     short: "Time to First Token",
     detailed:

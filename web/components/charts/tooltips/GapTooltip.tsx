@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
-import { BenchmarkData } from "@/types/benchmark.types";
-import { formatTimeWithSeconds } from "@/lib/utils/formatters";
-import { to15MinuteBucket } from "@/lib/utils/time";
+import { normalizeModelName, formatTimeWithSeconds } from "@/lib/utils/formatters";
 
 interface GapTooltipProps {
   active?: boolean;
@@ -16,20 +14,16 @@ interface GapTooltipProps {
   }>;
   label?: string | number;
   getProviderForModel: (model: string) => string;
-  rawData: BenchmarkData[];
 }
 
-const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, getProviderForModel, rawData }) => {
+const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, getProviderForModel }) => {
   if (!active || !payload || payload.length === 0) return null;
 
-  // Filter out null/undefined values and sort by gap (smallest gap = best performance)
   const validData = payload
     .filter((item) => item.value != null)
     .sort((a, b) => a.value - b.value);
 
   if (validData.length === 0) return null;
-
-  const labelTimestamp = Number(label);
 
   return (
     <div
@@ -39,41 +33,17 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
         borderRadius: "8px",
         color: "var(--color-text-on-tooltip)",
         padding: "12px",
-        minWidth: "400px",
-        maxWidth: "600px"
+        minWidth: "250px"
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
-        <p
-          style={{ margin: "0", fontWeight: "bold", fontSize: "12px", marginRight: "12px" }}
-        >
-          First Token
-        </p>
-        <p
-          style={{ margin: "0", fontWeight: "bold", fontSize: "12px" }}
-        >
-          {formatTimeWithSeconds(Number(label))}
-        </p>
-      </div>
+      <p style={{ margin: "0 0 8px 0", fontWeight: "bold", fontSize: "12px" }}>
+        {formatTimeWithSeconds(Number(label))}
+      </p>
       <div style={{ fontSize: "11px" }}>
         {validData.map((item, index) => {
-          // Extract model name from dataKey (remove '_gap' suffix)
-          const modelName = item.dataKey.replace("_gap", "");
+          const modelName = item.dataKey.replace(/_gap$/, "");
           const provider = getProviderForModel(modelName);
           const gapMs = item.value;
-
-          // Get transcript from rawData for this model/timestamp
-          const transcript = rawData
-            .filter(
-              (d) =>
-                d.model === modelName &&
-                d.metric_type === "TTFT" &&
-                to15MinuteBucket(new Date(d.timestamp).getTime()) === labelTimestamp
-            )
-            .sort(
-              (a, b) =>
-                new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-            )[0]?.transcript ?? "";
 
           return (
             <div
@@ -85,7 +55,7 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
                 justifyContent: "space-between"
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", flex: "0 0 auto" }}>
+              <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
                 <div
                   style={{
                     width: "8px",
@@ -96,14 +66,14 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
                     flexShrink: 0
                   }}
                 />
-                <div>
+                <div style={{ flex: 1 }}>
                   <div
                     style={{
                       color: index === 0 ? "#10B981" : "var(--color-text-on-tooltip)",
                       fontWeight: index === 0 ? "bold" : "normal"
                     }}
                   >
-                    #{index + 1} {modelName}
+                    #{index + 1} {normalizeModelName(modelName)}
                   </div>
                   <div
                     style={{
@@ -116,30 +86,16 @@ const CustomGapTooltip: React.FC<GapTooltipProps> = ({ active, payload, label, g
                   </div>
                 </div>
               </div>
-
-              <div style={{ display: "flex", alignItems: "center", flex: "1 1 auto", justifyContent: "space-between", marginLeft: "12px" }}>
-                <span
-                  style={{
-                    color: "var(--color-text-on-tooltip-secondary)",
-                    fontWeight: index === 0 ? "bold" : "normal",
-                    flexShrink: 0
-                  }}
-                >
-                  {index === 0 ? "FASTEST" : `+${(gapMs / 1000).toFixed(3)}s`}
-                </span>
-
-                <span
-                  style={{
-                    color: "var(--color-text-on-tooltip-secondary)",
-                    fontWeight: index === 0 ? "bold" : "normal",
-                    marginLeft: "12px",
-                    textAlign: "right",
-                    flex: "1 1 auto"
-                  }}
-                >
-                  {transcript}
-                </span>
-              </div>
+              <span
+                style={{
+                  color: "var(--color-text-on-tooltip-secondary)",
+                  marginLeft: "12px",
+                  fontWeight: index === 0 ? "bold" : "normal",
+                  flexShrink: 0
+                }}
+              >
+                {index === 0 ? "FASTEST" : `+${gapMs.toFixed(0)}ms`}
+              </span>
             </div>
           );
         })}

@@ -6,6 +6,7 @@
  */
 
 import { modelColors, providerColors } from '@/lib/config/colors';
+import { parseModelKey } from '@/lib/utils/formatters';
 
 /**
  * Fallback colors for models/providers not in the predefined color maps
@@ -65,16 +66,16 @@ function hashCode(str: string): number {
 }
 
 /**
- * Get color for a model, using predefined colors or generating a consistent fallback
- * @param model - Model name
- * @returns Hex color code
+ * Get color for a model. Accepts both bare slugs ("default") and composite
+ * "provider:model" keys ("speechmatics:default"). Composite keys are tried
+ * first so that same-slug models across different providers can have distinct
+ * colors; the hash fallback uses the full key for uniqueness.
  */
-export function getModelColor(model: string): string {
-  if (modelColors[model]) {
-    return modelColors[model];
-  }
-
-  const hash = hashCode(model);
+export function getModelColor(modelKey: string): string {
+  if (modelColors[modelKey]) return modelColors[modelKey];
+  const { model } = parseModelKey(modelKey);
+  if (modelColors[model]) return modelColors[model];
+  const hash = hashCode(modelKey);
   return fallbackModelColors[Math.abs(hash) % fallbackModelColors.length] ?? "#E74C3C";
 }
 

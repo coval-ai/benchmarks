@@ -44,4 +44,5 @@ export interface CustomBarTooltipProps {
     value: number;
   }>;
   label?: string;
+  getProviderForModel?: (model: string) => string;
 }

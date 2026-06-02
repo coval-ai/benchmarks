@@ -49,12 +49,33 @@ export function getLocalTimeZoneAbbr(): string {
 }
 
 /**
- * Normalize model name for display
- * @param modelName - Raw model name from API
+ * Build a composite model key from provider and model slug.
+ * Used throughout the frontend to uniquely identify a (provider, model) pair,
+ * since multiple providers can share the same model slug (e.g. "default").
+ */
+export function toModelKey(provider: string, model: string): string {
+  return `${provider}:${model}`;
+}
+
+/**
+ * Parse a composite model key back into its provider and model slug parts.
+ * Returns the key unchanged as `model` when no colon separator is found.
+ */
+export function parseModelKey(key: string): { provider: string; model: string } {
+  const idx = key.indexOf(":");
+  if (idx === -1) return { provider: "", model: key };
+  return { provider: key.slice(0, idx), model: key.slice(idx + 1) };
+}
+
+/**
+ * Normalize model name for display.
+ * Accepts both bare slugs ("default") and composite keys ("speechmatics:default").
+ * @param modelKey - Model slug or composite "provider:model" key
  * @returns Formatted model name for display
  */
-export function normalizeModelName(modelName: string): string {
-  // Mapping mirrors the backend's enabled provider matrix (runner/config.py).
+export function normalizeModelName(modelKey: string): string {
+  const { model } = parseModelKey(modelKey);
+  // Display labels only — sidebar/chart membership comes from result rows, not this map.
   const modelMappings: Record<string, string> = {
     // TTS
     "gpt-4o-mini-tts": "GPT-4o mini TTS",
@@ -80,13 +101,12 @@ export function normalizeModelName(modelName: string): string {
     enhanced: "Enhanced"
   };
 
-  // Return mapped name if it exists
-  if (modelMappings[modelName]) {
-    return modelMappings[modelName];
+  if (modelMappings[model]) {
+    return modelMappings[model];
   }
 
   // Fallback: automatic normalization for unmapped models
-  return modelName
+  return model
     .replace(/-/g, " ") // Replace hyphens with spaces
     .replace(/_/g, " ") // Replace underscores with spaces
     .replace(/\bv(\d+)/g, "v$1") // Keep version format (v2, v3)
@@ -119,8 +139,8 @@ export function normalizeSTTProviderName(providerName: string): string {
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
-    speechmatics: "Speechmatics",
     rime: "Rime",
+    speechmatics: "Speechmatics"
   };
 
   const lower = providerName.toLowerCase();

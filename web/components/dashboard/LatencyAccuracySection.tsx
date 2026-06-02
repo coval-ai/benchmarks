@@ -51,7 +51,7 @@ const LatencyAccuracySection: React.FC = () => {
 
       <div className="h-64">
         <ResponsiveContainer width="100%" height="100%">
-          <ScatterChart data={scatterData}>
+          <ScatterChart>
             <XAxis
               dataKey="x"
               type="number"
@@ -74,6 +74,7 @@ const LatencyAccuracySection: React.FC = () => {
             />
             <YAxis
               dataKey="y"
+              type="number"
               name="WER (%)"
               domain={[0, "dataMax"]}
               axisLine={false}
@@ -95,10 +96,9 @@ const LatencyAccuracySection: React.FC = () => {
             {selectedModels.map((model: string) => (
               <Scatter
                 key={model}
-                dataKey="y"
                 data={scatterData.filter(
                   (item: ScatterDataPoint) =>
-                    item.model === model && item.x <= scatterP99X
+                    item.model === model && item.x <= (scatterP99X || Infinity)
                 )}
                 fill={getModelColor(model)}
                 name={model}

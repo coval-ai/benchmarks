@@ -2,47 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import { normalizeModelName } from "@/lib/utils/formatters";
 import { useThemeColors } from "@/hooks/useThemeColors";
-
-// Helper function to normalize model names
-const normalizeModelName = (modelName: string): string => {
-  // Mapping mirrors the backend's enabled provider matrix (runner/config.py).
-  const modelMappings: Record<string, string> = {
-    // TTS
-    "gpt-4o-mini-tts": "GPT-4o mini TTS",
-    eleven_multilingual_v2: "Multilingual v2",
-    eleven_flash_v2_5: "Flash v2.5",
-    eleven_turbo_v2_5: "Turbo v2.5",
-    "sonic-3": "Sonic 3",
-    "aura-2-thalia-en": "Aura 2",
-    arcana: "Arcana",
-    mistv3: "Mist v3",
-    "octave-tts": "Octave TTS",
-    "octave-2": "Octave 2",
-    coda: "Coda",
-    // STT
-    "nova-2": "Nova 2",
-    "nova-3": "Nova 3",
-    "flux-general-en": "Flux",
-    "flux-general-multi": "Flux Multilingual",
-    scribe_v2_realtime: "Scribe v2",
-    "universal-streaming": "Universal Streaming",
-    default: "Default",
-    enhanced: "Enhanced"
-  };
-
-  // Return mapped name if it exists
-  if (modelMappings[modelName]) {
-    return modelMappings[modelName];
-  }
-
-  // Fallback: automatic normalization for unmapped models
-  return modelName
-    .replace(/-/g, " ") // Replace hyphens with spaces
-    .split(" ") // Split into words
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1)) // Capitalize
-    .join(" "); // Join back together
-};
 
 const CustomBarChartTick: React.FC<{
   x?: number;
@@ -65,22 +26,34 @@ const CustomBarChartTick: React.FC<{
   const providerFontSize = sidebarCollapsed ? "10px" : "9px";
   const mobileFontSize = sidebarCollapsed ? "11px" : "10px";
 
-  // Mobile: Show only model name, diagonal
+  // Mobile: model name + provider, diagonal
   if (isMobile) {
     return (
       <g transform={`translate(${x},${y})`}>
-        <text
-          x={0}
-          y={0}
-          dy={16}
-          textAnchor="end"
-          fill={themeColors.label}
-          fontSize={mobileFontSize}
-          fontWeight="bold"
-          transform="rotate(-45)"
-        >
-          {normalizedModel}
-        </text>
+        <g transform="rotate(-45)">
+          <text
+            x={0}
+            y={0}
+            dy={14}
+            textAnchor="end"
+            fill={themeColors.label}
+            fontSize={mobileFontSize}
+            fontWeight="bold"
+          >
+            {normalizedModel}
+          </text>
+          <text
+            x={0}
+            y={0}
+            dy={26}
+            textAnchor="end"
+            fill={themeColors.label}
+            fontSize={providerFontSize}
+            opacity={0.8}
+          >
+            {provider}
+          </text>
+        </g>
       </g>
     );
   }

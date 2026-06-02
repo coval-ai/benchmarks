@@ -4,13 +4,14 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import type { BenchmarkData, ModelsByProvider } from "@/types/benchmark.types";
+import type { BenchmarkData } from "@/types/benchmark.types";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { useTimelineWindow } from "@/hooks/useTimelineWindow";
-import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey } from "@/lib/utils/formatters";
+import { buildModelsByProviderFromResults, pruneSelection } from "@/lib/utils/modelsFromResults";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
 import { computeModelStats, type Result } from "@/lib/aggregates";
@@ -64,20 +65,21 @@ export function useDashboardState(page: "tts" | "stt") {
     [resultRows]
   );
 
-  const { ttsModelsByProvider, sttModelsByProvider } = useMemo(() => {
-    const tts: ModelsByProvider = {};
-    const stt: ModelsByProvider = {};
-    const providers = providersQuery.data;
-    if (providers) {
-      for (const p of providers.tts) {
-        tts[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
-      }
-      for (const p of providers.stt) {
-        stt[p.provider] = p.models.filter((m) => !m.disabled).map((m) => m.model);
-      }
-    }
-    return { ttsModelsByProvider: tts, sttModelsByProvider: stt };
-  }, [providersQuery.data]);
+  const { ttsModelsByProvider, sttModelsByProvider } = useMemo(
+    () => ({
+      ttsModelsByProvider: buildModelsByProviderFromResults(
+        resultRows,
+        "TTS",
+        providersQuery.data
+      ),
+      sttModelsByProvider: buildModelsByProviderFromResults(
+        resultRows,
+        "STT",
+        providersQuery.data
+      ),
+    }),
+    [providersQuery.data, resultRows]
+  );
 
   const loading = resultsQuery.isLoading || providersQuery.isLoading;
 
@@ -222,7 +224,7 @@ export function useDashboardState(page: "tts" | "stt") {
       Object.keys(modelsByProvider).length > 0 &&
       selectedModels.length === 0
     ) {
-      const allModels = Object.values(modelsByProvider).flat();
+      const allModels: string[] = Object.values(modelsByProvider).flat();
       setSelectedModels(allModels);
 
       const expanded: Record<string, boolean> = {};
@@ -232,6 +234,17 @@ export function useDashboardState(page: "tts" | "stt") {
       setExpandedProviders(expanded);
     }
   }, [modelsByProvider, selectedModels.length]);
+
+  // Keep the selection a subset of the visible models. Once provider metadata
+  // loads, a model that results alone had surfaced may be filtered out of
+  // modelsByProvider; drop it so it stops being plotted while absent from the
+  // sidebar. Removal-only, so it never fights a manual selection.
+  useEffect(() => {
+    setSelectedModels((prev) => {
+      const next = pruneSelection(prev, modelsByProvider);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [modelsByProvider]);
 
   // Calculate metrics
   const currentData = chartData.getCurrentData();
@@ -262,7 +275,7 @@ export function useDashboardState(page: "tts" | "stt") {
       const fastestModel = rankingData[0];
       if (fastestModel) {
         fastestLatencyModel = fastestModel.model;
-        fastestLatencyProvider = fastestModel.provider;
+        fastestLatencyProvider = normalizeSTTProviderName(fastestModel.provider);
       }
     }
 
@@ -283,8 +296,9 @@ export function useDashboardState(page: "tts" | "stt") {
       } = {};
 
       selectedModels.forEach((model) => {
+        const { model: modelSlug, provider: modelProvider } = parseModelKey(model);
         const modelSecondaryData = sttSecondaryData.filter(
-          (item) => item.model === model
+          (item) => item.model === modelSlug && item.provider === modelProvider
         );
 
         let modelAvgSecondary = Infinity;
@@ -347,11 +361,12 @@ export function useDashboardState(page: "tts" | "stt") {
       } = {};
 
       selectedModels.forEach((model) => {
+        const { model: modelSlug, provider: modelProvider } = parseModelKey(model);
         const modelPrimaryData = primaryData.filter(
-          (item) => item.model === model
+          (item) => item.model === modelSlug && item.provider === modelProvider
         );
         const modelSecondaryData = secondaryData.filter(
-          (item) => item.model === model
+          (item) => item.model === modelSlug && item.provider === modelProvider
         );
 
         let modelMedianPrimary = Infinity;
@@ -397,7 +412,7 @@ export function useDashboardState(page: "tts" | "stt") {
         ) {
           fastestPrimary = metrics.medianPrimary;
           fastestLatencyModel = model;
-          fastestLatencyProvider = metrics.provider;
+          fastestLatencyProvider = normalizeTTSProviderName(metrics.provider);
         }
         if (
           metrics.avgSecondary < lowestSecondary &&
@@ -405,7 +420,7 @@ export function useDashboardState(page: "tts" | "stt") {
         ) {
           lowestSecondary = metrics.avgSecondary;
           lowestWERModel = model;
-          lowestWERProvider = metrics.provider;
+          lowestWERProvider = normalizeTTSProviderName(metrics.provider);
         }
       });
 
@@ -560,6 +575,8 @@ export function useDashboardState(page: "tts" | "stt") {
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
     getTimelineTicks: chartData.getTimelineTicks,
     getWindowedGapData: chartData.getWindowedGapData,
+    getModelsWithTimelineData: chartData.getModelsWithTimelineData,
+    getModelsWithGapData: chartData.getModelsWithGapData,
     getViolinData: chartData.getViolinData,
     getSTTRankingData: chartData.getSTTRankingData,
 
