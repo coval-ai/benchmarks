@@ -111,7 +111,7 @@ but the rule is the same.
 | Cohort | What is excluded from t0 |
 |---|---|
 | WS streaming (Deepgram, AssemblyAI, ElevenLabs Scribe, Speechmatics, Gradium STT, Cartesia, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
-| HTTP TTS (ElevenLabs HTTP, OpenAI `tts-1-hd`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
+| HTTP TTS (ElevenLabs HTTP, OpenAI `gpt-4o-mini-tts`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
 
 HTTP-pool warming lives in `runner/src/coval_bench/providers/_http_session.py`.
 Providers opt in by overriding `Provider.warmup()` in `providers/base.py`; the
