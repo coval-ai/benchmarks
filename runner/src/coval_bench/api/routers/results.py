@@ -60,7 +60,11 @@ _WINDOW_INTERVALS: dict[str, str] = {
 _SELECT = (
     "SELECT r.id, r.run_id, r.provider, r.model, r.voice, r.benchmark,"
     " r.metric_type, r.metric_value, r.metric_units, r.audio_filename,"
-    " r.created_at, UPPER(rn.status) AS status"
+    " r.created_at,"
+    " COALESCE(rn.scheduled_at,"
+    " to_timestamp(floor(extract(epoch FROM r.created_at) / 1800) * 1800))"
+    " AS scheduled_at,"
+    " UPPER(rn.status) AS status"
     " FROM benchmarks_v2.results r"
     " JOIN benchmarks_v2.runs rn ON rn.id = r.run_id"
 )

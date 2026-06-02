@@ -27,6 +27,7 @@ function adaptResult(row: Result): BenchmarkData {
     metric_units: row.metric_units,
     audio_filename: row.audio_filename ?? "",
     timestamp: row.created_at,
+    scheduled_at: row.scheduled_at,
     status: row.status,
     transcript: "",
   };

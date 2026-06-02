@@ -568,10 +568,14 @@ async def run_benchmarks(
         except Exception:
             dataset_sha256 = "unknown"
 
+        period = settings.schedule_period_seconds
+        epoch = int(datetime.now(tz=UTC).timestamp())
+        scheduled_at = datetime.fromtimestamp(epoch - epoch % period, tz=UTC)
         run = await writer.start_run(
             runner_sha=settings.runner_sha,
             dataset_id=settings.dataset_id,
             dataset_sha256=dataset_sha256,
+            scheduled_at=scheduled_at,
         )
         run_id = run.id
         assert run_id is not None  # noqa: S101 — DB always returns an id after INSERT

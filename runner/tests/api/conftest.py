@@ -56,6 +56,7 @@ async def _apply_schema(dsn: str) -> None:
                 id             bigserial PRIMARY KEY,
                 started_at     timestamptz NOT NULL DEFAULT now(),
                 finished_at    timestamptz,
+                scheduled_at   timestamptz,
                 runner_sha     text NOT NULL,
                 dataset_id     text NOT NULL,
                 dataset_sha256 text NOT NULL,
