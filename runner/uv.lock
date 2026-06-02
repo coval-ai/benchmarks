@@ -247,7 +247,6 @@ dependencies = [
     { name = "anyio" },
     { name = "cartesia" },
     { name = "click" },
-    { name = "elevenlabs" },
     { name = "fastapi" },
     { name = "google-cloud-storage" },
     { name = "httpx", extra = ["http2"] },
@@ -298,7 +297,6 @@ requires-dist = [
     { name = "anyio", specifier = ">=4.4" },
     { name = "cartesia", specifier = ">=2" },
     { name = "click", specifier = ">=8.1" },
-    { name = "elevenlabs", specifier = ">=1.5" },
     { name = "fastapi", specifier = ">=0.111" },
     { name = "google-cloud-speech", marker = "extra == 'google-stt'", specifier = ">=2.27" },
     { name = "google-cloud-storage", specifier = ">=2.18" },
@@ -428,23 +426,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722, upload-time = "2023-12-24T09:54:32.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277, upload-time = "2023-12-24T09:54:30.421Z" },
-]
-
-[[package]]
-name = "elevenlabs"
-version = "2.45.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "requests" },
-    { name = "typing-extensions" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/a3/1696fd5b32e94703ff64b009de49bc5f4909397b5400900e3c5ca10a6499/elevenlabs-2.45.0.tar.gz", hash = "sha256:237eb96508e973393eb273728c562ae1f029764a544ab282acfd5d6d1cb8a043", size = 554966, upload-time = "2026-04-27T09:57:21.439Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/60/2f/e9136e7b049898fcd8ddf1836d687cac0acc5ed76329740942498fe602e0/elevenlabs-2.45.0-py3-none-any.whl", hash = "sha256:19edf75de4da22b340bd96c833c3589a9871015addc1d487b034b4541c71b0ef", size = 1518097, upload-time = "2026-04-27T09:57:19.102Z" },
 ]
 
 [[package]]

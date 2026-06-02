@@ -16,6 +16,11 @@ import websockets.exceptions
 from openai import AsyncOpenAI
 
 from coval_bench.config import Settings
+from coval_bench.providers._http_session import (
+    connection_reused,
+    get_shared_client,
+    submit_to_headers_ms,
+)
 from coval_bench.providers.base import TTSProvider, TTSResult
 from coval_bench.providers.tts._common import finalize_tts_result
 
@@ -37,6 +42,8 @@ VALID_VOICES = [
 HTTP_MODELS = {"gpt-4o-mini-tts"}
 REALTIME_MODELS = {"gpt-realtime-2025-08-28"}
 SAMPLE_RATE = 24000
+
+_BASE_URL = "https://api.openai.com"
 
 
 class OpenAITTSProvider(TTSProvider):
@@ -63,7 +70,10 @@ class OpenAITTSProvider(TTSProvider):
         if api_key_secret is None:
             raise ValueError("openai_api_key is required in Settings")
         self._api_key = api_key_secret.get_secret_value()
-        self._client = AsyncOpenAI(api_key=self._api_key)
+        self._client = AsyncOpenAI(
+            api_key=self._api_key,
+            http_client=get_shared_client("openai", _BASE_URL),
+        )
 
     @property
     def name(self) -> str:
@@ -72,6 +82,26 @@ class OpenAITTSProvider(TTSProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Pre-warm the shared httpx pool used by the HTTP TTS path.
+
+        Transport failures propagate to the caller, which runs warmup under
+        ``return_exceptions=True`` and logs them. A 401 still warms the
+        socket, so an unauthenticated HEAD is sufficient. The Realtime WS
+        path is unaffected (it opens its own ws connection).
+        """
+        client = get_shared_client("openai", _BASE_URL)
+        t0 = time.monotonic()
+        response = await client.head("/v1/models")
+        logger.info(
+            "openai_prewarm",
+            warmup_ms=round((time.monotonic() - t0) * 1000, 1),
+            http_version=response.http_version,
+        )
+        if response.http_version != "HTTP/2":
+            logger.warning("openai_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech and return a TTSResult."""
@@ -90,6 +120,9 @@ class OpenAITTSProvider(TTSProvider):
 
     async def _synthesize_http(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
+        http_version: str | None = None
+        setup_ms: float | None = None
+        reused: bool | None = None
         start: float | None = None
         first_chunk_at: float | None = None
 
@@ -101,6 +134,9 @@ class OpenAITTSProvider(TTSProvider):
                 input=text,
                 response_format="pcm",
             ) as response:
+                http_version = response.http_version
+                setup_ms = submit_to_headers_ms(response.http_response.request)
+                reused = connection_reused(response.http_response.request)
                 async for chunk in response.iter_bytes():
                     if isinstance(chunk, bytes) and len(chunk) > 0:
                         if first_chunk_at is None:
@@ -117,6 +153,9 @@ class OpenAITTSProvider(TTSProvider):
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
+                http_version=http_version,
+                submit_to_headers_ms=setup_ms,
+                connection_reused=reused,
             )
 
         return finalize_tts_result(
@@ -127,6 +166,9 @@ class OpenAITTSProvider(TTSProvider):
             sample_rate=SAMPLE_RATE,
             audio_synthesis_start=start,
             first_audio_chunk_at=first_chunk_at,
+            http_version=http_version,
+            submit_to_headers_ms=setup_ms,
+            connection_reused=reused,
         )
 
     async def _synthesize_realtime(self, text: str) -> TTSResult:

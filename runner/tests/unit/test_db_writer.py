@@ -138,6 +138,14 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         views = {row[0] for row in cur.fetchall()}
     assert "results_24h" in views
 
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'benchmarks_v2' AND table_name = 'results'"
+        )
+        columns = {row[0] for row in cur.fetchall()}
+    assert {"http_version", "submit_to_headers_ms"} <= columns
+
     _downgrade_migrations(pg_conn)
 
     with pg_conn.cursor() as cur:
@@ -344,6 +352,55 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
     assert abs(float(row["avg_value"]) - 0.3) < 0.001
     # p50 = median = 0.3
     assert abs(float(row["p50"]) - 0.3) < 0.001
+
+
+def test_records_http_diagnostics(pg_conn: psycopg.Connection[Any]) -> None:
+    """http_version and submit_to_headers_ms round-trip through the writer."""
+    _apply_migrations(pg_conn)
+
+    async def _run() -> int:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123", dataset_id="tts-v1", dataset_sha256="deadbeef"
+            )
+            assert run.id is not None
+            await writer.record_results(
+                [
+                    Result(
+                        run_id=run.id,
+                        provider="openai",
+                        model="gpt-4o-mini-tts",
+                        voice="alloy",
+                        benchmark=Benchmark.TTS,
+                        metric_type="TTFA",
+                        metric_value=120.0,
+                        metric_units="milliseconds",
+                        status=ResultStatus.SUCCESS,
+                        http_version="HTTP/2",
+                        submit_to_headers_ms=3.4,
+                    )
+                ]
+            )
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+            return run.id
+        finally:
+            await pool.close()
+
+    run_id = asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT http_version, submit_to_headers_ms "
+            "FROM benchmarks_v2.results WHERE run_id = %s",
+            (run_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == "HTTP/2"
+    assert abs(float(row[1]) - 3.4) < 0.001
 
 
 def test_check_constraints(pg_conn: psycopg.Connection[Any]) -> None:

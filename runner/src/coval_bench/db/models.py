@@ -67,3 +67,5 @@ class Result(BaseModel):
     transcript: str | None = None
     status: ResultStatus
     error: str | None = None
+    http_version: str | None = None
+    submit_to_headers_ms: float | None = None

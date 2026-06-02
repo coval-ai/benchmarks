@@ -96,8 +96,8 @@ class RunWriter:
             INSERT INTO benchmarks_v2.results
                 (run_id, provider, model, voice, benchmark, metric_type,
                  metric_value, metric_units, audio_filename, transcript,
-                 status, error)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 status, error, http_version, submit_to_headers_ms)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         params = [
             (
@@ -113,6 +113,8 @@ class RunWriter:
                 r.transcript,
                 r.status,
                 r.error,
+                r.http_version,
+                r.submit_to_headers_ms,
             )
             for r in results
         ]

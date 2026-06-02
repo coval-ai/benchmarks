@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from pydantic import BaseModel
 
+from coval_bench.providers._http_session import close_all as _close_http_clients
+from coval_bench.providers.base import Provider
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
 from coval_bench.runner.retry import with_retry
 
@@ -405,6 +407,17 @@ async def _run_tts_item(
 
         try:
             # 1. TTFA
+            if tts_result.http_version is not None and tts_result.http_version != "HTTP/2":
+                ttfa_failure = (
+                    f"TTFA measured over {tts_result.http_version}; not comparable "
+                    "(no HTTP/2 multiplexing, TTFA reabsorbs TCP+TLS)"
+                )
+            elif tts_result.connection_reused is False:
+                ttfa_failure = (
+                    "TTFA measured over a cold connection; not comparable (TTFA reabsorbs TCP+TLS)"
+                )
+            else:
+                ttfa_failure = None
             results.append(
                 Result(
                     run_id=run_id,
@@ -413,12 +426,14 @@ async def _run_tts_item(
                     voice=entry.voice,
                     benchmark=Benchmark.TTS,
                     metric_type="TTFA",
-                    metric_value=tts_result.ttfa_ms,
+                    metric_value=None if ttfa_failure else tts_result.ttfa_ms,
                     metric_units="milliseconds",
                     audio_filename=audio_path.name if audio_path else None,
                     transcript=transcript,
-                    status=ResultStatus.SUCCESS,
-                    error=None,
+                    status=ResultStatus.FAILED if ttfa_failure else ResultStatus.SUCCESS,
+                    error=_truncate(ttfa_failure) if ttfa_failure else None,
+                    http_version=tts_result.http_version,
+                    submit_to_headers_ms=tts_result.submit_to_headers_ms,
                 )
             )
 
@@ -595,6 +610,40 @@ async def run_benchmarks(
 
         try:
             # ------------------------------------------------------------------
+            # 2b. Provider warmup
+            # Each provider class may override Provider.warmup() to absorb
+            # pre-t0 deployment cold-start cost (HTTP TCP+TLS, gRPC channel
+            # open, NVCF dispatch).  Default is a no-op; only providers that
+            # need it pay the call.  Errors are non-fatal.
+            # ------------------------------------------------------------------
+            stt_providers = _get_stt_providers()
+            tts_providers = _get_tts_providers()
+            provider_classes: set[type[Provider]] = set()
+            if benchmark_kind in ("stt", "both"):
+                for entry in enabled_stt:
+                    cls = stt_providers.get(entry.provider)
+                    if cls is not None:
+                        provider_classes.add(cls)
+            if benchmark_kind in ("tts", "both"):
+                for entry in enabled_tts:
+                    cls = tts_providers.get(entry.provider)
+                    if cls is not None:
+                        provider_classes.add(cls)
+            if provider_classes:
+                ordered_classes = list(provider_classes)
+                warmup_results = await asyncio.gather(
+                    *(cls.warmup(settings=settings) for cls in ordered_classes),
+                    return_exceptions=True,
+                )
+                for cls, res in zip(ordered_classes, warmup_results, strict=False):
+                    if isinstance(res, BaseException):
+                        _log.warning(
+                            "provider_warmup_failed",
+                            provider=cls.__name__,
+                            exc_info=res,
+                        )
+
+            # ------------------------------------------------------------------
             # 3. STT path
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
@@ -764,3 +813,5 @@ async def run_benchmarks(
         finally:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.remove_signal_handler(signal.SIGTERM)
+            with contextlib.suppress(Exception):
+                await _close_http_clients()
