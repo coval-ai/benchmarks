@@ -689,7 +689,10 @@ export function useChartData({
   const getModelsWithTimelineData = useCallback((): string[] => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const windowed = getWindowedTimelineData();
+    const [windowStart, windowEnd] = getCurrentTimeWindow();
+    const windowed = getTimelineData().filter(
+      (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
+    );
     return selectedModels.filter((model) =>
       windowed.some(
         (point) =>
@@ -701,21 +704,25 @@ export function useChartData({
     activeTab,
     selectedTTSModels,
     selectedSTTModels,
-    getWindowedTimelineData,
+    getCurrentTimeWindow,
+    getTimelineData,
   ]);
 
   /** Models that have at least one gap point in the current performance-delta window. */
   const getModelsWithGapData = useCallback((): string[] => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const windowed = getWindowedGapData();
+    const [windowStart, windowEnd] = getCurrentTimeWindow();
+    const windowed = getGapData().filter(
+      (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
+    );
     return selectedModels.filter((model) =>
       windowed.some(
         (point) =>
           point[`${model}_gap`] !== undefined && point[`${model}_gap`] !== null
       )
     );
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getWindowedGapData]);
+  }, [activeTab, selectedTTSModels, selectedSTTModels, getCurrentTimeWindow, getGapData]);
 
   const getSTTRankingData = useCallback(() => {
     if (activeTab !== "stt" || selectedSTTModels.length === 0) {
