@@ -31,6 +31,9 @@ def finalize_tts_result(
     audio_synthesis_start: float | None,
     first_audio_chunk_at: float | None,
     error: str | None = None,
+    http_version: str | None = None,
+    submit_to_headers_ms: float | None = None,
+    connection_reused: bool | None = None,
 ) -> TTSResult:
     """Build a TTSResult with perceived TTFA from assembled PCM and timing.
 
@@ -74,6 +77,9 @@ def finalize_tts_result(
         ttfa_ms=ttfa_ms,
         audio_path=audio_path,
         error=error,
+        http_version=http_version,
+        submit_to_headers_ms=submit_to_headers_ms,
+        connection_reused=connection_reused,
     )
 
 

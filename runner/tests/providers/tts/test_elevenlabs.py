@@ -6,14 +6,35 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from coval_bench.config import Settings
+from coval_bench.providers import _http_session
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 
 from .conftest import make_pcm_bytes
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _install_mock(handler: object) -> None:
+    """Register a MockTransport-backed AsyncClient as the shared elevenlabs client."""
+    _http_session._CLIENTS["elevenlabs"] = httpx.AsyncClient(
+        base_url="https://api.elevenlabs.io",
+        transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
+    )
+
+
+@pytest.fixture(autouse=True)
+def reset_clients() -> None:
+    _http_session._CLIENTS.clear()
+    yield
+    _http_session._CLIENTS.clear()
+
 
 # ---------------------------------------------------------------------------
 # Happy path
@@ -21,46 +42,61 @@ from .conftest import make_pcm_bytes
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_happy_path(fake_settings: Settings, tmp_path: Path) -> None:
-    """ElevenLabs synthesize → ttfa set, WAV file written."""
-    pcm_chunks = [make_pcm_bytes(240), make_pcm_bytes(240)]
+async def test_elevenlabs_happy_path(
+    fake_settings: Settings,
+    tmp_path: Path,
+) -> None:
+    pcm = make_pcm_bytes(480) * 4  # ~80 ms of silence
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["xi_api_key"] = request.headers.get("xi-api-key")
+        captured["body"] = request.read()
+        return httpx.Response(200, content=pcm)
+
+    _install_mock(handler)
 
     provider = ElevenLabsTTSProvider(
         fake_settings,
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
     )
+    result = await provider.synthesize("Hello from ElevenLabs")
 
-    mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.stream.return_value = iter(pcm_chunks)
-
-    with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
-        result = await provider.synthesize("Hello from ElevenLabs")
-
-    assert result.error is None, f"Unexpected error: {result.error}"
-    assert result.ttfa_ms is not None
-    assert 0 < result.ttfa_ms < 60_000
-    assert result.audio_path is not None
-    assert result.audio_path.exists()
+    assert result.error is None, result.error
+    assert result.ttfa_ms is not None and 0 < result.ttfa_ms < 10_000
+    assert result.audio_path is not None and result.audio_path.exists()
     assert result.audio_path.stat().st_size > 0
     assert result.provider == "elevenlabs"
     assert result.model == "eleven_flash_v2_5"
+    assert result.http_version == "HTTP/1.1"
+    assert result.submit_to_headers_ms is None
+
+    url = str(captured["url"])
+    assert "/v1/text-to-speech/IKne3meq5aSn9XLyUdCD/stream" in url
+    assert "output_format=pcm_24000" in url
+    assert captured["xi_api_key"] == "test-elevenlabs-key"
+    body = captured["body"]
+    assert isinstance(body, bytes)
+    assert b"Hello from ElevenLabs" in body
+    assert b"eleven_flash_v2_5" in body
 
     result.audio_path.unlink()
 
 
 @pytest.mark.asyncio
 async def test_elevenlabs_all_models(fake_settings: Settings) -> None:
-    """Supported models all work with monkeypatched SDK."""
-    pcm = make_pcm_bytes()
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=make_pcm_bytes(240))
+
+    _install_mock(handler)
+
     for model in ElevenLabsTTSProvider._VALID_MODELS:
         provider = ElevenLabsTTSProvider(fake_settings, model=model, voice="test-voice")
-        mock_sdk = MagicMock()
-        mock_sdk.text_to_speech.stream.return_value = iter([pcm])
-        with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
-            result = await provider.synthesize("test")
-        assert result.error is None, f"Model {model}: {result.error}"
-        if result.audio_path:
+        result = await provider.synthesize("test")
+        assert result.error is None, f"{model}: {result.error}"
+        if result.audio_path is not None:
             result.audio_path.unlink()
 
 
@@ -70,31 +106,46 @@ async def test_elevenlabs_all_models(fake_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_sdk_error(fake_settings: Settings) -> None:
-    """SDK exception → result.error populated, audio_path None."""
-    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="test-voice")
+async def test_elevenlabs_http_error(fake_settings: Settings) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, content=b'{"detail": "rate limit"}')
 
-    with patch(
-        "coval_bench.providers.tts.elevenlabs.ElevenLabs",
-        side_effect=RuntimeError("API rate limit"),
-    ):
-        result = await provider.synthesize("error test")
+    _install_mock(handler)
+
+    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="v")
+    result = await provider.synthesize("hi")
 
     assert result.error is not None
-    assert "API rate limit" in result.error
+    assert "429" in result.error
+    assert "rate limit" in result.error
     assert result.audio_path is None
 
 
 @pytest.mark.asyncio
+async def test_elevenlabs_transport_exception(fake_settings: Settings) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("synthetic network failure")
+
+    _install_mock(handler)
+
+    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="v")
+    result = await provider.synthesize("hi")
+
+    assert result.error is not None
+    assert "synthetic network failure" in result.error
+    assert result.audio_path is None
+    assert result.ttfa_ms is None
+
+
+@pytest.mark.asyncio
 async def test_elevenlabs_empty_response(fake_settings: Settings) -> None:
-    """Empty iterator from SDK → audio_path is None, error is None."""
-    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="test-voice")
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"")
 
-    mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.stream.return_value = iter([])  # nothing
+    _install_mock(handler)
 
-    with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
-        result = await provider.synthesize("silence")
+    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="v")
+    result = await provider.synthesize("silence")
 
     assert result.error is None
     assert result.audio_path is None
@@ -102,75 +153,34 @@ async def test_elevenlabs_empty_response(fake_settings: Settings) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Static method coverage — JSON-encoded audio branch
+# warmup
 # ---------------------------------------------------------------------------
 
 
-def test_elevenlabs_is_audio_chunk_bytes() -> None:
-    """Bytes with content are audio chunks."""
-    assert ElevenLabsTTSProvider._is_audio_chunk(b"\x00\x01") is True
-    assert ElevenLabsTTSProvider._is_audio_chunk(b"") is False
+@pytest.mark.asyncio
+async def test_elevenlabs_warmup_issues_head(fake_settings: Settings) -> None:
+    seen: list[str] = []
 
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        return httpx.Response(401, content=b"unauthorized")
 
-def test_elevenlabs_is_audio_chunk_json_with_audio() -> None:
-    """JSON-encoded message with 'audio' key is an audio chunk."""
-    import base64
-    import json
+    _install_mock(handler)
+    await ElevenLabsTTSProvider.warmup(fake_settings)
 
-    payload = json.dumps({"audio": base64.b64encode(b"\x00\x01").decode()})
-    assert ElevenLabsTTSProvider._is_audio_chunk(payload) is True
-
-
-def test_elevenlabs_is_audio_chunk_json_no_audio() -> None:
-    """JSON without 'audio' key is not an audio chunk."""
-    import json
-
-    payload = json.dumps({"isFinal": True})
-    assert ElevenLabsTTSProvider._is_audio_chunk(payload) is False
-
-
-def test_elevenlabs_is_audio_chunk_invalid_json() -> None:
-    """Non-JSON string is not an audio chunk."""
-    assert ElevenLabsTTSProvider._is_audio_chunk("not json") is False
-
-
-def test_elevenlabs_extract_audio_from_json() -> None:
-    """Extracts base64-encoded audio from JSON message."""
-    import base64
-    import json
-
-    raw = b"\x00\x01\x02"
-    payload = json.dumps({"audio": base64.b64encode(raw).decode()})
-    result = ElevenLabsTTSProvider._extract_audio(payload)
-    assert result == raw
-
-
-def test_elevenlabs_extract_audio_fallback() -> None:
-    """Invalid JSON returns empty bytes."""
-    result = ElevenLabsTTSProvider._extract_audio("invalid json {{{")
-    assert result == b""
+    assert seen == ["HEAD /v1/voices"]
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_json_audio_chunks(fake_settings: Settings) -> None:
-    """Synthesize with JSON-encoded audio chunk (ElevenLabs WS format)."""
-    import base64
-    import json
+async def test_elevenlabs_warmup_propagates_transport_error(fake_settings: Settings) -> None:
+    """Transport failures propagate so the orchestrator can log them."""
 
-    raw_pcm = make_pcm_bytes(240)
-    json_chunk = json.dumps({"audio": base64.b64encode(raw_pcm).decode()})
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("dns blew up")
 
-    provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="test-voice")
-
-    mock_sdk = MagicMock()
-    mock_sdk.text_to_speech.stream.return_value = iter([json_chunk])
-
-    with patch("coval_bench.providers.tts.elevenlabs.ElevenLabs", return_value=mock_sdk):
-        result = await provider.synthesize("json audio test")
-
-    # The json branch goes through _extract_audio which returns the decoded bytes
-    # audio stream write receives empty string from non-bytes path, ttfa may be None
-    assert result.error is None
+    _install_mock(handler)
+    with pytest.raises(httpx.ConnectError):
+        await ElevenLabsTTSProvider.warmup(fake_settings)
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +192,11 @@ def test_elevenlabs_name_and_model(fake_settings: Settings) -> None:
     p = ElevenLabsTTSProvider(fake_settings, model="eleven_turbo_v2_5", voice="voice-id")
     assert p.name == "elevenlabs-eleven_turbo_v2_5"
     assert p.model == "eleven_turbo_v2_5"
+
+
+def test_elevenlabs_rejects_unsupported_model(fake_settings: Settings) -> None:
+    with pytest.raises(ValueError, match="Unsupported ElevenLabs model"):
+        ElevenLabsTTSProvider(fake_settings, model="not-a-real-model", voice="v")
 
 
 # ---------------------------------------------------------------------------
