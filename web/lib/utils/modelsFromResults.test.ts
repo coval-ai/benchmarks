@@ -42,6 +42,15 @@ describe("buildModelsByProviderFromResults", () => {
     expect(out.openai).toBeUndefined();
   });
 
+  it("keeps same-slug models from different providers distinct", () => {
+    const out = buildModelsByProviderFromResults(
+      [row("speechmatics", "default"), row("gradium", "default")],
+      "STT"
+    );
+    expect(out.speechmatics).toEqual(["speechmatics:default"]);
+    expect(out.gradium).toEqual(["gradium:default"]);
+  });
+
   it("starts from enabled catalogue models so an empty benchmark page still has choices", () => {
     const catalogue = {
       tts: [],
