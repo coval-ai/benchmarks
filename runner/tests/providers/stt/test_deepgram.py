@@ -114,11 +114,17 @@ def test_build_websocket_url_flux() -> None:
     assert url.startswith("wss://api.deepgram.com/v2/listen")
     assert "preview" not in url
     assert "flux-general-en" in url
-    assert "channels=1" in url
-    # v2/listen rejects interim_results / no_delay as unknown query params and
-    # closes the WS upgrade with HTTP 400 — both must be absent.
+    # v2/listen rejects v1-only query params as unknown and closes the WS upgrade
+    # with HTTP 400 — interim_results, no_delay AND channels must all be absent.
     assert "interim_results" not in url
     assert "no_delay" not in url
+    assert "channels" not in url
+
+
+def test_build_websocket_url_flux_rejects_non_mono() -> None:
+    p = make_provider("flux-general-en")
+    with pytest.raises(ValueError, match="Flux models require mono audio"):
+        p._build_websocket_url(16000, 2)
 
 
 def test_build_websocket_url_flux_multi() -> None:
@@ -127,11 +133,11 @@ def test_build_websocket_url_flux_multi() -> None:
     assert url.startswith("wss://api.deepgram.com/v2/listen")
     assert "preview" not in url
     assert "model=flux-general-multi" in url
-    assert "channels=1" in url
     # No language hint — multilingual model auto-detects.
     assert "language=" not in url
     assert "interim_results" not in url
     assert "no_delay" not in url
+    assert "channels" not in url
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +398,41 @@ async def test_deepgram_flux_success(fake_api_key: SecretStr, audio_pcm_bytes: b
     assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
     assert result.audio_to_final_seconds >= 0
+
+
+@pytest.mark.asyncio
+async def test_deepgram_flux_concatenates_multiple_turns(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """flux: turns are concatenated by turn_index, not collapsed to the last turn.
+
+    The single-turn happy-path fixture can't distinguish concatenation from
+    last-turn-wins. This drives two turns (delivered out of order) so a revert to
+    keeping only the latest turn — or a switch that drops turn ordering — fails.
+    """
+    events = [
+        {"type": "Connected", "session_id": "test-flux-multi"},
+        {"type": "TurnInfo", "event": "StartOfTurn", "turn_index": 1, "transcript": "how"},
+        {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 1, "transcript": "how are you"},
+        {"type": "TurnInfo", "event": "StartOfTurn", "turn_index": 0, "transcript": "hello"},
+        {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 0, "transcript": "hello world"},
+    ]
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch(
+        "coval_bench.providers.stt.deepgram.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    # Ordered by turn_index regardless of arrival order; both turns present.
+    assert result.complete_transcript == "hello world how are you"
 
 
 @pytest.mark.asyncio
