@@ -19,7 +19,9 @@ import {
 import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
 import { SttTrianglePulseCanvas } from "./SttTrianglePulseCanvas";
-import { useSTTBenchmark } from "@/app/playground/hooks/useSTTBenchmark";
+import { useSTTBenchmark, type STTBenchmarkCompletionSummary } from "@/app/playground/hooks/useSTTBenchmark";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 type SttMetricKey = "ttfa" | "audioToFinal";
 
@@ -114,7 +116,27 @@ export function STTPlaygroundPanel({
     () => new Map(models.map((model) => [model.id, model])),
     [models]
   );
-  const { phase, results, errors, sessionError, start, stop, reset } = useSTTBenchmark();
+  const handleBenchmarkComplete = useCallback((summary: STTBenchmarkCompletionSummary) => {
+    const ttfas = summary.successes
+      .map((s) => s.ttfaMs)
+      .filter((v): v is number => v != null);
+    const finals = summary.successes.map((s) => s.audioToFinalMs);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundBenchmarkCompleted, {
+      surface: "playground",
+      mode: "stt",
+      selected_model_ids: summary.modelIds,
+      selected_model_count: summary.modelIds.length,
+      success_count: summary.successes.length,
+      failure_count: summary.failures.length,
+      audio_duration_ms: Math.round(summary.audioDurationMs),
+      best_ttfa_ms: ttfas.length ? Math.min(...ttfas) : null,
+      best_audio_to_final_ms: finals.length ? Math.min(...finals) : null,
+      is_comparison: summary.modelIds.length >= 2
+    });
+  }, []);
+  const { phase, results, errors, sessionError, start, stop, reset } = useSTTBenchmark({
+    onComplete: handleBenchmarkComplete
+  });
   /**
    * User picks which **enabled** models participate in compare. `selectedMap` does not gate the
    * server allowlist — parent should pass configs consistent with `/v1/providers` + runner matrix;
@@ -165,6 +187,7 @@ export function STTPlaygroundPanel({
   const carouselViewportRef = useRef<HTMLDivElement>(null);
   const carouselTrackRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const transcriptBrowsedFiredRef = useRef(false);
 
   const carouselActivityKey =
     activeModels.length > 0 ? activeModels.map((m) => m.id).join(":") : "";
@@ -174,6 +197,14 @@ export function STTPlaygroundPanel({
   const scrollCarouselStep = useCallback((dir: -1 | 1) => {
     const vp = carouselViewportRef.current;
     if (!vp) return;
+    if (!transcriptBrowsedFiredRef.current) {
+      transcriptBrowsedFiredRef.current = true;
+      capturePostHogEvent(POSTHOG_EVENTS.sttTranscriptBrowsed, {
+        surface: "playground",
+        mode: "stt",
+        method: "arrow"
+      });
+    }
     const first = vp.querySelector('[role="listitem"]') as HTMLElement | null;
     const step = first ? first.offsetWidth + 16 : 256;
     vp.scrollBy({ left: dir * step, behavior: "smooth" });
@@ -293,8 +324,20 @@ export function STTPlaygroundPanel({
   const toggleModel = useCallback((id: string) => {
     if (!modelsById.has(id)) return;
     if (phase !== "idle") return;
-    setSelectedMap((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, [modelsById, phase]);
+    const willBeSelected = !selectedMap[id];
+    const nextMap = { ...selectedMap, [id]: willBeSelected };
+    const selectedIds = visibleModels.filter((m) => nextMap[m.id] !== false).map((m) => m.id);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundModelSelectionChanged, {
+      surface: "playground",
+      mode: "stt",
+      action: willBeSelected ? "add" : "remove",
+      model_id: id,
+      selected_model_ids: selectedIds,
+      selected_model_count: selectedIds.length,
+      is_comparison: selectedIds.length >= 2
+    });
+    setSelectedMap(nextMap);
+  }, [modelsById, phase, selectedMap, visibleModels]);
 
   useEffect(() => {
     if (!leaderOpen) return;
@@ -354,6 +397,14 @@ export function STTPlaygroundPanel({
     if (!canStartOrRetakeRecording) return;
     enterHoldArmRef.current = false;
     const selectedIds = activeModels.map((m) => m.id);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundSttRecordPressed, {
+      surface: "playground",
+      mode: "stt",
+      selected_model_ids: selectedIds,
+      selected_model_count: selectedIds.length,
+      trigger: "button",
+      is_comparison: selectedIds.length >= 2
+    });
     void start(selectedIds);
   }, [phase, activeModels, canStartOrRetakeRecording, start, stop, reset]);
 
@@ -379,6 +430,14 @@ export function STTPlaygroundPanel({
       if (p === "complete") setLeaderOpen(false);
       enterHoldArmRef.current = true;
       const selectedIds = activeModelsRef.current.map((model) => model.id);
+      capturePostHogEvent(POSTHOG_EVENTS.playgroundSttRecordPressed, {
+        surface: "playground",
+        mode: "stt",
+        selected_model_ids: selectedIds,
+        selected_model_count: selectedIds.length,
+        trigger: "keyboard",
+        is_comparison: selectedIds.length >= 2
+      });
       void start(selectedIds);
     };
 

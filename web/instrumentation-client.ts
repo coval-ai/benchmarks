@@ -16,6 +16,8 @@ if (posthogToken) {
   posthog.init(posthogToken, {
     api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "https://us.i.posthog.com",
     defaults: "2026-01-30",
+    autocapture: false,
+    disable_session_recording: true,
     loaded: (instance) => {
       if (!shouldEnablePostHogDebug()) return;
 
@@ -30,4 +32,6 @@ if (posthogToken) {
       }
     }
   });
+
+  posthog.register({ product: "public-benchmarks" });
 }

@@ -1,14 +1,34 @@
 export const POSTHOG_EVENTS = {
-  ttsPageVisited: "tts_page_visited",
-  sttPageVisited: "stt_page_visited",
-  ttsTimelineTooltipOpened: "tts_timeline_tooltip_opened",
-  sttTimelineTooltipOpened: "stt_timeline_tooltip_opened",
-  playgroundTtsVisited: "playground_tts_visited",
-  playgroundSttVisited: "playground_stt_visited",
+  dashboardModelSelectionChanged: "dashboard_model_selection_changed",
+  playgroundModelSelectionChanged: "playground_model_selection_changed",
   playgroundTtsBenchmarkPressed: "playground_tts_benchmark_pressed",
-  playgroundSttRecordPressed: "playground_stt_record_pressed"
+  playgroundSttRecordPressed: "playground_stt_record_pressed",
+  playgroundBenchmarkCompleted: "playground_benchmark_completed",
+  outboundToCovalClicked: "outbound_to_coval_clicked",
+  dashboardChartHovered: "dashboard_chart_hovered",
+  dashboardScrollDepth: "dashboard_scroll_depth",
+  playgroundTtsTypingStarted: "playground_tts_typing_started",
+  dashboardHeatmapSorted: "dashboard_heatmap_sorted",
+  dashboardWerBarClicked: "dashboard_wer_bar_clicked",
+  dashboardDescriptionExpanded: "dashboard_description_expanded",
+  dashboardChartPanned: "dashboard_chart_panned",
+  sttTranscriptBrowsed: "stt_transcript_browsed",
+  playgroundExamplePromptUsed: "playground_example_prompt_used",
+  playgroundModeSwitched: "playground_mode_switched",
+  playgroundResultPlayed: "playground_result_played",
+  resultShared: "result_shared"
 } as const;
 
-export type PlaygroundModeChangeTrigger = "click" | "keyboard";
-export type PlaygroundTtsRunTrigger = "button" | "keyboard";
-export type DashboardSelectionTrigger = "sidebar" | "mobile_sheet";
+export type PostHogSurface = "tts_dashboard" | "stt_dashboard" | "playground";
+export type PostHogMode = "tts" | "stt";
+export type SelectionAction = "add" | "remove";
+export type DashboardChartId =
+  | "timeline"
+  | "scatter"
+  | "wer_bar"
+  | "violin"
+  | "heatmap"
+  | "performance_delta";
+export type PlaygroundRunTrigger = "button" | "keyboard";
+export type PlaygroundModeSwitchTrigger = "tab" | "keyboard";
+export type TranscriptBrowseMethod = "arrow" | "scroll";
