@@ -169,20 +169,6 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
-def _warm_audio_metrics() -> None:
-    """Absorb librosa's lazy numba/scipy import before any provider traffic.
-
-    The first ``first_audible_offset_ms`` call pulls in the stack (~18s on one
-    Cloud Run vCPU); mid-phase it freezes the event loop and inflates every
-    in-flight TTFA. Must run before provider warmup so the freeze can't idle
-    out freshly warmed connections, and before the run row exists — the loop
-    can't service SIGTERM during the freeze, so a row would strand at
-    'running'.
-    """
-    mod = importlib.import_module("coval_bench.metrics")
-    mod.first_audible_offset_ms(b"\x00\x00" * 1600, 16000)
-
-
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -643,15 +629,6 @@ async def run_benchmarks(
 
     enabled_stt = [e for e in stt_matrix if e.enabled and not e.disabled]
     enabled_tts = [e for e in tts_matrix if e.enabled and not e.disabled]
-
-    # Before the pool opens: the synchronous ~18s freeze must not sit inside
-    # the SIGTERM-finalization window where a run row could strand at
-    # 'running'.  Errors are non-fatal — a broken stack surfaces per-result.
-    if benchmark_kind in ("tts", "both") and enabled_tts:
-        try:
-            _warm_audio_metrics()
-        except Exception as exc:
-            _log.warning("audio_metrics_warmup_failed", exc_info=exc)
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row
