@@ -4,9 +4,9 @@ import type { ReactNode } from "react";
 
 type PlaygroundShellProps = {
   /**
-   * Site chrome (e.g. `DashboardHeader`). Pass **only** through this prop so it
-   * lives in a `<header>` landmark. Do not put the same chrome inside `children`,
-   * or you will duplicate markup and lose a clear banner/main split for AT.
+   * Site chrome (e.g. `DashboardHeader`), which supplies its own `<header>`
+   * banner landmark. Pass **only** through this prop so it stays a sibling of
+   * `<main>`; do not also place the same chrome inside `children`.
    */
   header?: ReactNode;
   children: ReactNode;
@@ -29,7 +29,7 @@ export function PlaygroundShell({ header, children, className }: PlaygroundShell
 
   return (
     <div className={surfaceClassName}>
-      {header ? <header>{header}</header> : null}
+      {header}
       <main>{children}</main>
     </div>
   );

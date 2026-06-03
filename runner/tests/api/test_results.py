@@ -9,8 +9,10 @@ import datetime as dt
 from datetime import datetime, timedelta
 from typing import Any
 
+import pytest
 from httpx import AsyncClient
 
+from coval_bench.config import Settings
 from tests.api.conftest import _insert_result, _insert_run
 
 
@@ -324,3 +326,58 @@ async def test_limit_zero_rejected(client: AsyncClient) -> None:
     """limit=0 → 422 (below minimum)."""
     response = await client.get("/v1/results", params={"limit": 0})
     assert response.status_code == 422
+
+
+def _patch_period(monkeypatch: pytest.MonkeyPatch, seconds: int) -> None:
+    """Force the results endpoint to read a specific schedule_period_seconds.
+
+    Patches the module-level ``get_settings`` reference rather than the shared
+    ``lru_cache``, so nothing leaks into other tests and monkeypatch reverts it.
+    """
+    monkeypatch.setattr(
+        "coval_bench.api.routers.results.get_settings",
+        lambda: Settings(schedule_period_seconds=seconds),
+    )
+
+
+async def test_scheduled_at_fallback_uses_configured_period(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NULL scheduled_at falls back to created_at floored to the configured period.
+
+    With a 900s period, a created_at at :20 past the hour floors to :15 (900s grid),
+    not :00 (the old hardcoded 1800s grid) — proving the fallback tracks config.
+    """
+    _patch_period(monkeypatch, 900)
+    run_id = await _insert_run(postgresql)  # scheduled_at left NULL
+    created = (_now() - timedelta(hours=1)).replace(minute=20, second=0, microsecond=0)
+    await _insert_result(postgresql, run_id, created_at=created)
+
+    response = await client.get("/v1/results")
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+
+    expected = created.replace(minute=15)
+    assert datetime.fromisoformat(results[0]["scheduled_at"]) == expected
+
+
+async def test_scheduled_at_uses_stamped_value(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stamped scheduled_at is returned verbatim — COALESCE never hits the fallback.
+
+    The stored value (:00) is returned unchanged even though the created_at-based
+    fallback under a 900s period would yield a different bucket (:15).
+    """
+    _patch_period(monkeypatch, 900)
+    stamped = (_now() - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    run_id = await _insert_run(postgresql, scheduled_at=stamped)
+    created = (_now() - timedelta(hours=1)).replace(minute=20, second=0, microsecond=0)
+    await _insert_result(postgresql, run_id, created_at=created)
+
+    response = await client.get("/v1/results")
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert datetime.fromisoformat(results[0]["scheduled_at"]) == stamped

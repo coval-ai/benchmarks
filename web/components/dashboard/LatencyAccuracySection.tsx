@@ -49,7 +49,7 @@ const LatencyAccuracySection: React.FC = () => {
         </div>
       </div>
 
-      <div className="h-64">
+      <div className="h-64 border border-border-secondary rounded-lg bg-white p-4">
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart>
             <XAxis

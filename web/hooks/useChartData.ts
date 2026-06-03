@@ -23,7 +23,6 @@ import {
 } from "@/lib/utils/statistics";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
-import { to15MinuteBucket } from "@/lib/utils/time";
 
 // Parent-run statuses that should contribute to chart aggregates. Mirrors the
 // filter used in `lib/aggregates.ts` — keep in sync. The result-row status is
@@ -140,7 +139,7 @@ export function useChartData({
           INCLUDED_STATUSES.has(item.status)
       )
       .map((item) => ({
-        timestamp: to15MinuteBucket(new Date(item.timestamp).getTime()),
+        timestamp: new Date(item.scheduled_at).getTime(),
         value:
           activeTab === "tts"
             ? item.metric_value ?? 0
@@ -390,7 +389,7 @@ export function useChartData({
           item.metric_value !== undefined
       )
       .map((item) => ({
-        timestamp: to15MinuteBucket(new Date(item.timestamp).getTime()),
+        timestamp: new Date(item.scheduled_at).getTime(),
         value: (item.metric_value as number) * 1000,
         model: toModelKey(item.provider, item.model),
         benchmark: item.benchmark
@@ -490,7 +489,7 @@ export function useChartData({
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
 
-      const timestamp = to15MinuteBucket(new Date(item.timestamp).getTime());
+      const timestamp = new Date(item.scheduled_at).getTime();
       if (!timestampGroups[timestamp]) {
         timestampGroups[timestamp] = {};
       }

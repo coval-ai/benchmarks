@@ -366,8 +366,14 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
         )
 
     assert summary.status == str(RunStatus.FAILED)
-    assert summary.fail_count == 1
+    # Unified failure model: a raised exception fails every metric row for the item
+    # (TTFT, AudioToFinal, RTF), each carrying the real exception string.
+    assert summary.fail_count == 3
     assert summary.success_count == 0
+    rows = _recorded_rows(writer)
+    assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF"}
+    assert all(r.status == ResultStatus.FAILED for r in rows)
+    assert all("always fails" in (r.error or "") for r in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -1228,3 +1234,572 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     finish_kwargs = writer.finish_run.await_args.kwargs
     assert finish_kwargs["status"] == RunStatus.PARTIAL
     assert "sigterm" in (finish_kwargs.get("error") or "").lower()
+
+
+# ---------------------------------------------------------------------------
+# 14-17. degraded results that return (no raise) are marked FAILED
+# ---------------------------------------------------------------------------
+
+
+def _only_stt_matrix(provider: str, model: str) -> list[ProviderEntry]:
+    """Disable the whole default STT matrix and enable just one provider×model.
+
+    Keeps a degraded-provider test isolated to a single Result set (the default
+    matrix runs deepgram across several models, which would otherwise collide).
+    """
+    from coval_bench.runner.config import DEFAULT_STT_MATRIX
+
+    return [
+        *[
+            ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
+            for e in DEFAULT_STT_MATRIX
+        ],
+        ProviderEntry(provider=provider, model=model, enabled=True),
+    ]
+
+
+def _recorded_rows(writer: MagicMock) -> list[Result]:
+    """All Result rows handed to writer.record_results across the run."""
+    return [row for call in writer.record_results.await_args_list for row in call.args[0]]
+
+
+@pytest.mark.asyncio
+async def test_stt_empty_result_marked_failed(audio_file: Path, settings: Settings) -> None:
+    """No-raise return with no metrics → TTFT/AudioToFinal/RTF FAILED, no WER row, run FAILED."""
+    empty = TranscriptionResult(provider="deepgram")  # all metrics None, no error, no transcript
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=empty)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    for mt in ("TTFT", "AudioToFinal", "RTF"):
+        assert by_metric[mt].status == ResultStatus.FAILED
+        assert by_metric[mt].error and "produced" in by_metric[mt].error
+    assert "WER" not in by_metric  # no transcript → no WER row
+    assert summary.success_count == 0
+    assert summary.status == str(RunStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_stt_result_error_propagated(audio_file: Path, settings: Settings) -> None:
+    """result.error set → every row FAILED, provider message preserved, WER skipped."""
+    errored = TranscriptionResult(
+        provider="deepgram",
+        ttft_seconds=0.3,  # a measured TTFT is still untrustworthy when the stream errored
+        complete_transcript="partial words",
+        error="websocket closed unexpectedly",
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=errored)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+
+    rows = _recorded_rows(writer)
+    assert rows
+    assert all(r.status == ResultStatus.FAILED for r in rows)
+    assert all("websocket closed" in (r.error or "") for r in rows)
+    assert all(r.metric_type != "WER" for r in rows)  # errored stream → no WER scoring
+    assert summary.success_count == 0
+
+
+@pytest.mark.asyncio
+async def test_stt_partial_keeps_real_ttft(audio_file: Path, settings: Settings) -> None:
+    """First token but no final → TTFT success, AudioToFinal/RTF FAILED → run PARTIAL."""
+    partial = TranscriptionResult(
+        provider="deepgram",
+        ttft_seconds=0.42,
+        audio_to_final_seconds=None,
+        complete_transcript=None,
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=partial)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFT"].status == ResultStatus.SUCCESS
+    assert by_metric["TTFT"].metric_value == 0.42
+    assert by_metric["AudioToFinal"].status == ResultStatus.FAILED
+    assert by_metric["RTF"].status == ResultStatus.FAILED
+    assert summary.status == str(RunStatus.PARTIAL)
+
+
+@pytest.mark.asyncio
+async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings) -> None:
+    """TTS synth returns (no raise) with no ttfa/audio → TTFA FAILED, no WER row, run FAILED."""
+    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
+
+    hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+    empty_tts = TTSResult(
+        provider="hume",
+        model=hume_entry.model,
+        voice=hume_entry.voice or "v",
+        ttfa_ms=None,
+        audio_path=None,
+        error=None,
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(return_value=empty_tts)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    # Enable exactly one hume entry; disable the rest of the default TTS matrix.
+    matrix = [
+        ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry))
+        for e in DEFAULT_TTS_MATRIX
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_items=[_make_tts_item("hello world")],
+        tts_providers={"hume": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="tts",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFA"].status == ResultStatus.FAILED
+    assert by_metric["TTFA"].error and "TTFA" in by_metric["TTFA"].error
+    assert "WER" not in by_metric
+    assert summary.success_count == 0
+    assert summary.status == str(RunStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_tts_provider_error_wins_over_contamination(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A provider error on an HTTP/1.1 result fails the row with the provider message.
+
+    Transport contamination only downgrades a would-be SUCCESS; a real provider error keeps
+    its own (more specific) message and suppresses WER.
+    """
+    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
+
+    hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+    errored_tts = TTSResult(
+        provider="hume",
+        model=hume_entry.model,
+        voice=hume_entry.voice or "v",
+        ttfa_ms=120.0,
+        audio_path=None,
+        error="synth stream closed early",
+        http_version="HTTP/1.1",  # would otherwise trigger the contamination message
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(return_value=errored_tts)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    matrix = [
+        ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry))
+        for e in DEFAULT_TTS_MATRIX
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_items=[_make_tts_item("hello world")],
+        tts_providers={"hume": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="tts",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    ttfa = by_metric["TTFA"]
+    assert ttfa.status == ResultStatus.FAILED
+    assert "synth stream closed early" in (ttfa.error or "")
+    assert "HTTP/1.1" not in (ttfa.error or "")  # contamination message must not win
+    assert ttfa.http_version == "HTTP/1.1"  # diagnostic still recorded
+    assert "WER" not in by_metric  # errored synth → no WER scoring
+    assert summary.success_count == 0
+
+
+@pytest.mark.asyncio
+async def test_stt_wer_compute_failure_marked_failed(audio_file: Path, settings: Settings) -> None:
+    """compute_wer crashing on a real transcript → FAILED WER row, run PARTIAL (not silent)."""
+    from coval_bench.metrics import compute_rtf
+
+    def _raising_wer(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("wer blew up")
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        with patch(
+            "coval_bench.runner.orchestrator._get_metrics",
+            return_value=(_raising_wer, compute_rtf),
+        ):
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFT"].status == ResultStatus.SUCCESS
+    assert by_metric["WER"].status == ResultStatus.FAILED
+    assert by_metric["WER"].metric_value is None
+    assert "wer blew up" in (by_metric["WER"].error or "")
+    assert summary.status == str(RunStatus.PARTIAL)
+
+
+@pytest.mark.asyncio
+async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
+    """A Whisper transcription failure (our instrument) is logged, emits no WER row, no PARTIAL."""
+    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "synth.wav"
+        audio_path.write_bytes(b"\x00" * 512)
+
+        hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+        good_tts = TTSResult(
+            provider="hume",
+            model=hume_entry.model,
+            voice=hume_entry.voice or "v",
+            ttfa_ms=120.0,
+            audio_path=audio_path,
+            error=None,
+            http_version="HTTP/2",
+        )
+
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=good_tts)
+        provider_cls = MagicMock(return_value=provider_inst)
+
+        matrix = [
+            ProviderEntry(
+                provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry)
+            )
+            for e in DEFAULT_TTS_MATRIX
+        ]
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        async with _orchestrator_env(
+            audio_path=audio_path,
+            tts_items=[_make_tts_item("hello world")],
+            tts_providers={"hume": provider_cls},
+            run=run,
+            writer=writer,
+        ) as _:
+            with patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper down"),
+            ):
+                summary = await run_benchmarks(
+                    settings=settings,
+                    benchmark_kind="tts",
+                    smoke=True,
+                    matrix_overrides=matrix,
+                )
+
+        by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+        assert by_metric["TTFA"].status == ResultStatus.SUCCESS
+        assert "WER" not in by_metric  # instrument failure → no row, no run-status flip
+        assert summary.status == str(RunStatus.SUCCEEDED)
+
+
+@pytest.mark.asyncio
+async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None:
+    """compute_wer crashing after a good Whisper transcript → FAILED WER row, run PARTIAL."""
+    from coval_bench.metrics import compute_rtf
+    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
+
+    def _raising_wer(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("wer blew up")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "synth.wav"
+        audio_path.write_bytes(b"\x00" * 512)
+
+        hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+        good_tts = TTSResult(
+            provider="hume",
+            model=hume_entry.model,
+            voice=hume_entry.voice or "v",
+            ttfa_ms=120.0,
+            audio_path=audio_path,
+            error=None,
+            http_version="HTTP/2",
+        )
+
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=good_tts)
+        provider_cls = MagicMock(return_value=provider_inst)
+
+        matrix = [
+            ProviderEntry(
+                provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry)
+            )
+            for e in DEFAULT_TTS_MATRIX
+        ]
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        async with _orchestrator_env(
+            audio_path=audio_path,
+            tts_items=[_make_tts_item("hello world")],
+            tts_providers={"hume": provider_cls},
+            run=run,
+            writer=writer,
+        ) as _:
+            with (
+                patch(
+                    "coval_bench.runner.orchestrator._get_metrics",
+                    return_value=(_raising_wer, compute_rtf),
+                ),
+                patch(
+                    "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                    return_value="hello world",
+                ),
+            ):
+                summary = await run_benchmarks(
+                    settings=settings,
+                    benchmark_kind="tts",
+                    smoke=True,
+                    matrix_overrides=matrix,
+                )
+
+        by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+        assert by_metric["TTFA"].status == ResultStatus.SUCCESS
+        assert by_metric["WER"].status == ResultStatus.FAILED
+        assert by_metric["WER"].metric_value is None
+        assert "wer blew up" in (by_metric["WER"].error or "")
+        assert summary.status == str(RunStatus.PARTIAL)
+
+
+# ---------------------------------------------------------------------------
+# test_audio_metrics_warmed_before_provider_traffic
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_audio_metrics_warmed_before_provider_traffic(settings: Settings) -> None:
+    """librosa warm-up runs before provider warmup and any synthesis.
+
+    The first first_audible_offset_ms call imports the numba/scipy stack and
+    blocks the loop; landing it after provider warmup would idle out the warmed
+    connections, and landing it mid-phase would inflate in-flight TTFA.
+    """
+    order: list[str] = []
+
+    tts_result = TTSResult(
+        provider="elevenlabs",
+        model="eleven_flash_v2_5",
+        voice="IKne3meq5aSn9XLyUdCD",
+        ttfa_ms=120.0,
+        audio_path=None,
+        error=None,
+    )
+
+    async def _synthesize(*args: Any, **kwargs: Any) -> TTSResult:
+        order.append("synthesize")
+        return tts_result
+
+    async def _warmup(*args: Any, **kwargs: Any) -> None:
+        order.append("provider_warmup")
+
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(side_effect=_synthesize)
+    provider_cls = MagicMock(return_value=provider_inst)
+    provider_cls.warmup = AsyncMock(side_effect=_warmup)
+
+    matrix = [
+        ProviderEntry(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="IKne3meq5aSn9XLyUdCD",
+            enabled=True,
+        )
+    ]
+
+    async with _orchestrator_env(
+        audio_path=Path("/nonexistent"),
+        tts_providers={"elevenlabs": provider_cls},
+    ) as _:
+        with patch(
+            "coval_bench.runner.orchestrator._warm_audio_metrics",
+            side_effect=lambda: order.append("warm"),
+        ) as warm_mock:
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    warm_mock.assert_called_once()
+    assert "synthesize" in order
+    assert order[0] == "warm"
+    assert order.index("warm") < order.index("provider_warmup")
+
+
+@pytest.mark.asyncio
+async def test_audio_metrics_warmup_skipped_for_stt_only(
+    audio_file: Path, settings: Settings
+) -> None:
+    """STT-only runs never touch the TTS audio-metric stack."""
+    good = _good_transcription()
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=good)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+    ) as _:
+        with patch("coval_bench.runner.orchestrator._warm_audio_metrics") as warm_mock:
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    warm_mock.assert_not_called()
+
+
+def test_warm_audio_metrics_real_call() -> None:
+    """The unmocked warm-up body runs against the real metrics stack.
+
+    Guards the dummy input against future first_audible_offset_ms validation
+    changes; a stale input would otherwise only surface at run start in prod.
+    """
+    from coval_bench.runner.orchestrator import _warm_audio_metrics
+
+    _warm_audio_metrics()
+
+
+@pytest.mark.asyncio
+async def test_audio_metrics_warmup_failure_non_fatal(settings: Settings) -> None:
+    """A warm-up failure degrades to a warning; the run still executes."""
+    tts_result = TTSResult(
+        provider="elevenlabs",
+        model="eleven_flash_v2_5",
+        voice="IKne3meq5aSn9XLyUdCD",
+        ttfa_ms=120.0,
+        audio_path=None,
+        error=None,
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(return_value=tts_result)
+    provider_cls = MagicMock(return_value=provider_inst)
+    provider_cls.warmup = AsyncMock(return_value=None)
+
+    matrix = [
+        ProviderEntry(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="IKne3meq5aSn9XLyUdCD",
+            enabled=True,
+        )
+    ]
+
+    async with _orchestrator_env(
+        audio_path=Path("/nonexistent"),
+        tts_providers={"elevenlabs": provider_cls},
+    ) as _:
+        with patch(
+            "coval_bench.runner.orchestrator._warm_audio_metrics",
+            side_effect=ImportError("numba missing"),
+        ) as warm_mock:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    warm_mock.assert_called_once()
+    provider_cls.warmup.assert_awaited_once()
+    provider_inst.synthesize.assert_awaited()
+    assert summary.status != str(RunStatus.FAILED)

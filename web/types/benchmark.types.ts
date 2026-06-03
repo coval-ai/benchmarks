@@ -11,6 +11,7 @@ export interface BenchmarkData {
   metric_units: string | null;
   audio_filename: string;
   timestamp: string;
+  scheduled_at: string;
   status: string;
   transcript: string;
 }

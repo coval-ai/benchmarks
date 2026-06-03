@@ -33,7 +33,7 @@ const ViolinSection: React.FC = () => {
         className={`${
           isMobile
             ? ""
-            : "border border-border-secondary rounded-lg bg-surface-secondary p-4"
+            : "border border-border-secondary rounded-lg bg-white p-4"
         }`}
       >
         <ViolinPlot

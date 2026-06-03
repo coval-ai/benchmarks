@@ -20,6 +20,7 @@ same single-transaction guarantee.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import psycopg
 import psycopg.rows
@@ -54,6 +55,7 @@ class RunWriter:
         runner_sha: str,
         dataset_id: str,
         dataset_sha256: str,
+        scheduled_at: datetime | None = None,
     ) -> Run:
         """Insert a ``running`` row into ``benchmarks_v2.runs``.
 
@@ -61,16 +63,16 @@ class RunWriter:
         """
         sql = """
             INSERT INTO benchmarks_v2.runs
-                (runner_sha, dataset_id, dataset_sha256, status)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id, started_at, finished_at, runner_sha,
+                (runner_sha, dataset_id, dataset_sha256, status, scheduled_at)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id, started_at, finished_at, scheduled_at, runner_sha,
                       dataset_id, dataset_sha256, status, error
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
                     sql,
-                    (runner_sha, dataset_id, dataset_sha256, RunStatus.RUNNING),
+                    (runner_sha, dataset_id, dataset_sha256, RunStatus.RUNNING, scheduled_at),
                 )
                 row = await cur.fetchone()
                 if row is None:  # pragma: no cover — unreachable after INSERT RETURNING
