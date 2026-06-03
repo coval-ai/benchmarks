@@ -6,6 +6,7 @@
 import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 
 
 const ModelSidebar: React.FC = () => {
@@ -14,12 +15,12 @@ const ModelSidebar: React.FC = () => {
     normalizeProviderName,
     modelsByProvider,
     selectedModels,
-    expandedProviders,
     sidebarCollapsed,
     toggleSidebar: onToggleSidebar,
-    toggleProvider: onToggleProvider,
     toggleModelSelection: onToggleModelSelection,
   } = useDashboard();
+  const { expandedProviders, toggleProvider: onToggleProvider } =
+    useSidebarMenu();
 
   return (
     <div

@@ -17,7 +17,7 @@ const HeatmapSection: React.FC = () => {
         className={`heatmap-container ${
           isMobile
             ? ""
-            : "w-[75vw] mx-auto border border-border-secondary rounded-lg bg-white p-8"
+            : "w-[75vw] mx-auto relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
       >
         <div className="flex justify-between items-start mb-4">

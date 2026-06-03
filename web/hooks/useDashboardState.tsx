@@ -36,9 +36,7 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [expandedProviders, setExpandedProviders] = useState<{[key: string]: boolean;}>({});
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
@@ -145,16 +143,6 @@ export function useDashboardState(page: "tts" | "stt") {
   }, [timelineWindowEnd]);
 
   // Event handlers
-  const toggleProvider = useCallback(
-    (provider: string) => {
-      setExpandedProviders((prev) => ({
-        ...prev,
-        [provider]: !prev[provider],
-      }));
-    },
-    []
-  );
-
   const toggleModelSelection = useCallback(
     (model: string) => {
       setSelectedModels((prev) =>
@@ -227,12 +215,6 @@ export function useDashboardState(page: "tts" | "stt") {
     ) {
       const allModels: string[] = Object.values(modelsByProvider).flat();
       setSelectedModels(allModels);
-
-      const expanded: Record<string, boolean> = {};
-      Object.keys(modelsByProvider).forEach((provider) => {
-        expanded[provider] = true;
-      });
-      setExpandedProviders(expanded);
     }
   }, [modelsByProvider, selectedModels.length]);
 
@@ -559,17 +541,13 @@ export function useDashboardState(page: "tts" | "stt") {
     // Model state
     selectedModels,
     modelsByProvider,
-    expandedProviders,
 
     // UI state
     sidebarCollapsed,
-    mobileSheetOpen,
-    setMobileSheetOpen,
     isMobile,
     chartRefreshKey,
 
     // Actions
-    toggleProvider,
     toggleModelSelection,
     toggleSidebar,
 

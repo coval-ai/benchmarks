@@ -5,6 +5,7 @@
 
 import dynamic from "next/dynamic";
 import { DashboardProvider } from "@/contexts/DashboardContext";
+import { SidebarMenuProvider } from "@/contexts/SidebarMenuContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/dashboard/PageHeader";
 import KeyMetrics from "@/components/dashboard/KeyMetrics";
@@ -38,15 +39,17 @@ const HeatmapSection = dynamic(
 export function TTSDashboard() {
   return (
     <DashboardProvider page="tts">
-      <DashboardLayout>
-        <PageHeader />
-        <KeyMetrics />
-        <TimelineChart />
-        <ViolinSection />
-        <LatencyAccuracySection />
-        <AccuracyBarSection />
-        <HeatmapSection />
-      </DashboardLayout>
+      <SidebarMenuProvider>
+        <DashboardLayout>
+          <PageHeader />
+          <KeyMetrics />
+          <TimelineChart />
+          <ViolinSection />
+          <LatencyAccuracySection />
+          <AccuracyBarSection />
+          <HeatmapSection />
+        </DashboardLayout>
+      </SidebarMenuProvider>
     </DashboardProvider>
   );
 }

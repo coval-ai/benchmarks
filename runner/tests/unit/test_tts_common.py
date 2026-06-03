@@ -142,7 +142,7 @@ def test_finalize_offset_failure_falls_back_and_writes_wav() -> None:
 
     with patch(
         "coval_bench.providers.tts._common.first_audible_offset_ms",
-        side_effect=RuntimeError("librosa boom"),
+        side_effect=RuntimeError("offset boom"),
     ):
         result = finalize_tts_result(
             provider="test",

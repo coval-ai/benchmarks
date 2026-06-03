@@ -23,7 +23,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   stat,
 }) => (
   <div className="flex justify-between items-start gap-8 mb-4">
-    <div className="w-3/4">
+    <div className="w-3/4 min-w-0">
       <h2 className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
         {label}
       </h2>
@@ -35,11 +35,11 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       </p>
     </div>
     {stat && (
-      <div className="text-right shrink-0">
+      <div className="text-right min-w-0">
         <div className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
           {stat.label}
         </div>
-        <div className="font-mono text-5xl font-bold">{stat.value}</div>
+        <div className="font-mono text-5xl font-bold break-words">{stat.value}</div>
       </div>
     )}
   </div>

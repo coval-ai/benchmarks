@@ -9,7 +9,6 @@ what an enqueue-and-play client actually experiences.
 
 from __future__ import annotations
 
-import librosa
 import numpy as np
 
 # Loudness threshold and framing calibrated against recorded output from every
@@ -57,8 +56,8 @@ def first_audible_offset_ms(
     # which has real energy and would falsely read as audible at t=0.
     pad = frame_length // 2
     padded = np.pad(samples, pad, mode="edge")
-    frames = librosa.util.frame(padded, frame_length=frame_length, hop_length=hop_length)
-    rms = np.sqrt(np.mean((frames - frames.mean(axis=0, keepdims=True)) ** 2, axis=0))
+    frames = np.lib.stride_tricks.sliding_window_view(padded, frame_length)[::hop_length]
+    rms = np.sqrt(np.mean((frames - frames.mean(axis=1, keepdims=True)) ** 2, axis=1))
 
     audible_frames = np.where(rms > _AUDIBLE_RMS_THRESHOLD)[0]
     if audible_frames.size == 0:

@@ -41,7 +41,7 @@ const ViolinSection: React.FC = () => {
         className={`${
           isMobile
             ? ""
-            : "w-[75vw] mx-auto border border-border-secondary rounded-lg bg-white p-8"
+            : "w-[75vw] mx-auto relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
       >
         <SectionHeader
