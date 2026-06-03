@@ -31,7 +31,7 @@ dependencies = [
     # TTS provider SDKs
     "openai>=1.40",
     "cartesia>=2",
-    "aiohttp>=3.9",
+    "aiohttp>=3.14.0",
     # Dataset
     "google-cloud-storage>=2.18",
     # WER
