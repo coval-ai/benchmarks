@@ -38,6 +38,7 @@ from starlette.requests import Request
 from coval_bench.api.deps import get_pool
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
+from coval_bench.config import get_settings
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -62,7 +63,8 @@ _SELECT = (
     " r.metric_type, r.metric_value, r.metric_units, r.audio_filename,"
     " r.created_at,"
     " COALESCE(rn.scheduled_at,"
-    " to_timestamp(floor(extract(epoch FROM r.created_at) / 1800) * 1800))"
+    " to_timestamp(floor(extract(epoch FROM r.created_at) / %(schedule_period)s)"
+    " * %(schedule_period)s))"
     " AS scheduled_at,"
     " UPPER(rn.status) AS status"
     " FROM benchmarks_v2.results r"
@@ -166,7 +168,10 @@ async def list_results(
 
     # Build WHERE clause dynamically — parameterised only, no f-string SQL injection.
     conditions: list[str] = ["r.status = 'success'"]
-    params: dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {
+        "limit": limit,
+        "schedule_period": get_settings().schedule_period_seconds,
+    }
 
     if provider is not None:
         conditions.append("r.provider = %(provider)s")

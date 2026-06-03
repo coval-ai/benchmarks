@@ -5,8 +5,9 @@
 
 scheduled_at is the cron trigger time, snapshotted once at run start and
 floored to the scheduler period so every result in a run shares one bucket.
-Historical rows are backfilled with floor(started_at / 1800) — the 30-minute
-grid the chart used to compute client-side — so existing points don't shift.
+Historical rows are backfilled with floor(started_at / 1800) to align with the
+new 30-minute server-side grid. The prior chart bucketed client-side to a
+15-minute grid, so existing :15/:45 ticks shift to :00/:30 after this migration.
 """
 
 from __future__ import annotations

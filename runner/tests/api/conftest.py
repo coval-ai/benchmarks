@@ -164,12 +164,16 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
             "dataset_id": "librispeech-test-clean-50",
             "dataset_sha256": "sha256test",
             "status": "succeeded",
+            "scheduled_at": None,
         }
         defaults.update(kwargs)
         row = await aconn.execute(
             """
-            INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
-            VALUES (%(runner_sha)s, %(dataset_id)s, %(dataset_sha256)s, %(status)s)
+            INSERT INTO benchmarks_v2.runs
+                (runner_sha, dataset_id, dataset_sha256, status, scheduled_at)
+            VALUES
+                (%(runner_sha)s, %(dataset_id)s, %(dataset_sha256)s, %(status)s,
+                 %(scheduled_at)s)
             RETURNING id
             """,
             defaults,

@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # to compute each run's scheduled_at. MUST stay in sync with the Cloud
     # Scheduler cron cadence (*/30 -> 1800, */15 -> 900); set via the
     # SCHEDULE_PERIOD_SECONDS env var, owned by the infra repo.
-    schedule_period_seconds: int = 1800
+    schedule_period_seconds: int = Field(default=1800, gt=0)
 
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
     openai_api_key: SecretStr | None = None
