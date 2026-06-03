@@ -125,7 +125,7 @@ const DesktopGroup: React.FC<{ group: NavGroup }> = ({ group }) => {
       >
         {group.label}
       </button>
-      <div className="invisible absolute left-0 top-full pt-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100">
+      <div className="invisible absolute left-0 top-full pt-2 opacity-0 transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
         <div
           role="menu"
           className="min-w-[15rem] rounded-2xl bg-surface-primary p-2 shadow-xl"
@@ -252,6 +252,7 @@ const GlobalNav: React.FC<{
         <div className="relative h-full w-full overflow-hidden">
           {/* Root panel */}
           <div
+            inert={activePanel !== null}
             className={`absolute inset-0 flex flex-col gap-1 overflow-y-auto px-3 py-4 transition-transform duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
               activePanel !== null ? "-translate-x-full" : "translate-x-0"
             }`}
@@ -304,6 +305,7 @@ const GlobalNav: React.FC<{
               <div
                 key={group.label}
                 aria-hidden={activePanel !== i}
+                inert={activePanel !== i}
                 className={`absolute inset-0 flex flex-col gap-1 overflow-y-auto px-3 py-4 transition-transform duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
                   activePanel === i ? "translate-x-0" : "translate-x-full"
                 }`}
