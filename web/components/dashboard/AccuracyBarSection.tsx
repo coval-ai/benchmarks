@@ -37,7 +37,7 @@ const AccuracyBarSection: React.FC = () => {
         <h2 className="text-2xl font-light mb-2">Accuracy by Model</h2>
         <ExpandableDescription description={description} />
       </div>
-      <div className="h-64 border border-border-secondary rounded-lg bg-white p-4">
+      <div className="h-64 relative z-[2] border border-border-secondary rounded-lg bg-white p-4">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
             data={werBarDataWithColors}

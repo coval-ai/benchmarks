@@ -55,7 +55,7 @@ const PerformanceDeltaSection: React.FC = () => {
 
       <div
         ref={chartRef}
-        className="h-96 p-4 border border-border-secondary rounded-lg bg-white"
+        className="h-96 p-4 relative z-[2] border border-border-secondary rounded-lg bg-white"
         onMouseDown={handleMouseDown}
         style={{
           userSelect: "none",
