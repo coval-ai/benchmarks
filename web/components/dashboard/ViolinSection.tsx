@@ -3,16 +3,17 @@
 
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import ViolinPlot from "@/components/charts/d3/ViolinPlot";
-import ExpandableDescription from "@/components/shared/ExpandableDescription";
+import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 
 const ViolinSection: React.FC = () => {
   const {
     violinDescription: description,
+    latencyLabel,
     getViolinData,
     getProviderForModel,
     isMobile,
@@ -20,24 +21,40 @@ const ViolinSection: React.FC = () => {
     chartRefreshKey,
   } = useDashboard();
 
-  return (
-    <div className="mb-16">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h2 className="text-2xl font-light mb-2">Latency Variation</h2>
-          <ExpandableDescription description={description} />
-        </div>
-      </div>
+  const violinData = getViolinData();
+  const medianLatency = useMemo(() => {
+    const values: number[] = [];
+    for (const modelData of violinData.data) {
+      values.push(...modelData.values);
+    }
+    if (values.length === 0) return 0;
+    values.sort((a, b) => a - b);
+    const mid = Math.floor(values.length / 2);
+    return values.length % 2 === 0
+      ? ((values[mid - 1] ?? 0) + (values[mid] ?? 0)) / 2
+      : (values[mid] ?? 0);
+  }, [violinData]);
 
+  return (
+    <div className="mb-4">
       <div
         className={`${
           isMobile
             ? ""
-            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-4"
+            : "w-[75vw] mx-auto relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
       >
+        <SectionHeader
+          label="Latency Variation"
+          description={description}
+          stat={{
+            label: `Median ${latencyLabel}`,
+            value: `${medianLatency.toFixed(0)} ms`,
+          }}
+        />
+
         <ViolinPlot
-          data={getViolinData()}
+          data={violinData}
           getModelColor={getModelColor}
           getProviderForModel={getProviderForModel}
           normalizeModelName={normalizeModelName}

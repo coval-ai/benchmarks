@@ -29,7 +29,7 @@ const DashboardHeader: React.FC = () => {
           60px global nav. Hidden on mobile while the full-screen menu is open. */}
       <nav
         aria-label="Benchmark sections"
-        className={`fixed inset-x-0 top-[60px] z-40 h-12 border-b border-border-primary bg-surface-overlay backdrop-blur-xl ${
+        className={`fixed inset-x-0 top-[60px] z-40 h-12 border-b border-border-primary bg-white ${
           mobileNavOpen ? "max-lg:hidden" : ""
         }`}
       >

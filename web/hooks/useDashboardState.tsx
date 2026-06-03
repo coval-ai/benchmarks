@@ -259,6 +259,7 @@ export function useDashboardState(page: "tts" | "stt") {
       if (fastestModel) {
         fastestLatencyModel = fastestModel.model;
         fastestLatencyProvider = normalizeSTTProviderName(fastestModel.provider);
+        avgPrimary = fastestModel.latencyMs;
       }
     }
 
@@ -431,7 +432,7 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Derived display values
   const latencyLabel = page === "tts" ? "TTFA" : "TTFT";
-  const pageTitle = page === "tts" ? "TTS Model Comparison" : "STT Model Comparison";
+  const pageTitle = page === "tts" ? "Text to Speech Model Comparisons" : "Speech to Text Model Comparisons";
   const pageSubtitle = page === "tts"
     ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
     : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
@@ -468,19 +469,12 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
-    const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyLabel}`;
-    if (page === "stt" && selectedModels.length > 0 && fastestLatencyModel) {
-      return {
-        label,
-        displayValue: normalizeModelName(fastestLatencyModel),
-        subtitle: fastestLatencyProvider
-          ? { detail: normalizeProviderName(fastestLatencyProvider) }
-          : undefined,
-      };
-    }
+    const latencyFullLabel =
+      page === "tts" ? "Time to First Audio" : "Time to First Token";
+    const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyFullLabel}`;
     return {
       label,
-      displayValue: avgPrimary.toFixed(0),
+      displayValue: `${avgPrimary.toFixed(0)} ms`,
       subtitle:
         selectedModels.length > 1 && fastestLatencyModel
           ? {
@@ -494,7 +488,7 @@ export function useDashboardState(page: "tts" | "stt") {
   })();
 
   const secondaryKeyMetric = {
-    label: `${selectedModels.length > 1 ? "Lowest" : "Average"} WER`,
+    label: `${selectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
     displayValue: `${avgSecondary.toFixed(1)}%`,
     subtitle:
       selectedModels.length > 1 && lowestWERModel
@@ -505,6 +499,18 @@ export function useDashboardState(page: "tts" | "stt") {
               : undefined,
           }
         : undefined,
+  };
+
+  const modelsComparedMetric = {
+    label: "Models Compared",
+    displayValue: `${selectedModels.length}`,
+  };
+
+  const providersMetric = {
+    label: "Providers",
+    displayValue: `${
+      new Set(selectedModels.map((model) => parseModelKey(model).provider)).size
+    }`,
   };
 
   return {
@@ -525,6 +531,8 @@ export function useDashboardState(page: "tts" | "stt") {
     // Key metrics
     primaryKeyMetric,
     secondaryKeyMetric,
+    modelsComparedMetric,
+    providersMetric,
 
     // Data loading
     loading,

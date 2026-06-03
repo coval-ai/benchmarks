@@ -784,12 +784,14 @@ export function useChartData({
       position: index + 1,
       model: stat.model,
       provider: stat.provider,
+      // Absolute median latency (ms); raw STT values are in seconds.
+      latencyMs: (getStat(stat.model, "TTFT")?.p50 ?? 0) * 1000,
       p25Delta: stat.p25Delta,
       p50Delta: stat.p50Delta,
       p75Delta: stat.p75Delta,
       isFirst: index === 0
     }));
-  }, [activeTab, selectedSTTModels, getModelHeatmapData, getProviderForModel]);
+  }, [activeTab, selectedSTTModels, getModelHeatmapData, getProviderForModel, getStat]);
 
   const getSTTRankingData = useCallback(
     () => sttRankingDataMemo,
