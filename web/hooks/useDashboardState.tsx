@@ -252,15 +252,16 @@ export function useDashboardState(page: "tts" | "stt") {
     avgPrimary = 0;
     avgSecondary = 0;
   } else if (page === "stt") {
-    const rankingData = chartData.getSTTRankingData();
-
-    if (rankingData.length > 0) {
-      const fastestModel = rankingData[0];
-      if (fastestModel) {
-        fastestLatencyModel = fastestModel.model;
-        fastestLatencyProvider = normalizeSTTProviderName(fastestModel.provider);
-      }
-    }
+    let fastestPrimary = Infinity;
+    selectedModels.forEach((model) => {
+      const stat = chartData.getStat(model, primaryMetric);
+      if (!stat || stat.p50 >= fastestPrimary) return;
+      fastestPrimary = stat.p50;
+      fastestLatencyModel = model;
+      fastestLatencyProvider = parseModelKey(model).provider;
+    });
+    // TTFT is stored in seconds; display in ms like TTFA
+    avgPrimary = fastestPrimary !== Infinity ? fastestPrimary * 1000 : 0;
 
     const sttSecondaryData = currentData.filter(
       (item) => item.metric_type === secondaryMetric
@@ -469,18 +470,9 @@ export function useDashboardState(page: "tts" | "stt") {
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
     const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyLabel}`;
-    if (page === "stt" && selectedModels.length > 0 && fastestLatencyModel) {
-      return {
-        label,
-        displayValue: normalizeModelName(fastestLatencyModel),
-        subtitle: fastestLatencyProvider
-          ? { detail: normalizeProviderName(fastestLatencyProvider) }
-          : undefined,
-      };
-    }
     return {
       label,
-      displayValue: avgPrimary.toFixed(0),
+      displayValue: `${avgPrimary.toFixed(0)} ms`,
       subtitle:
         selectedModels.length > 1 && fastestLatencyModel
           ? {
@@ -553,11 +545,8 @@ export function useDashboardState(page: "tts" | "stt") {
     getWindowedTimelineData: chartData.getWindowedTimelineData,
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
     getTimelineTicks: chartData.getTimelineTicks,
-    getWindowedGapData: chartData.getWindowedGapData,
     getModelsWithTimelineData: chartData.getModelsWithTimelineData,
-    getModelsWithGapData: chartData.getModelsWithGapData,
     getViolinData: chartData.getViolinData,
-    getSTTRankingData: chartData.getSTTRankingData,
 
     // Computed chart data
     scatterData,

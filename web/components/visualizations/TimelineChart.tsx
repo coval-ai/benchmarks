@@ -47,11 +47,7 @@ const TimelineChart: React.FC = () => {
     <div className="mb-16">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h2 className="text-2xl font-light mb-2">
-            {activeTab === "tts"
-              ? "Latency Benchmarks"
-              : "Performance Consistency"}
-          </h2>
+          <h2 className="text-2xl font-light mb-2">Latency Benchmarks</h2>
           <ExpandableDescription
             description={
               metricDescriptions[activeTab === "tts" ? "ttfa" : "ttft"]
