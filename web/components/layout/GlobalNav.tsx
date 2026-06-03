@@ -167,7 +167,7 @@ const GlobalNav: React.FC<{
 
   return (
     <>
-    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-surface-overlay backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-white">
       <div className="flex h-full items-center justify-between px-4 md:px-6">
         {/* Logo */}
         <a
