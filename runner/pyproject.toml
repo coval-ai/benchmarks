@@ -18,7 +18,6 @@ dependencies = [
     "anyio>=4.4",
     # Audio
     "soundfile>=0.12",
-    "librosa>=0.10",
     "numpy>=1.26",
     # DB
     "psycopg[binary,pool]>=3.2",
@@ -91,10 +90,6 @@ extend-select = ["E", "F", "I", "B", "UP", "SIM", "S", "ANN"]
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = "librosa.*"
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "soundfile.*"
