@@ -1,0 +1,10 @@
+[
+  {"type": "session.created", "session": {"id": "sess_err"}},
+  {"type": "session.updated", "session": {"type": "transcription", "audio": {"input": {"turn_detection": null}}}},
+  {
+    "type": "conversation.item.input_audio_transcription.failed",
+    "item_id": "item_err",
+    "content_index": 0,
+    "error": {"message": "quota exceeded"}
+  }
+]
