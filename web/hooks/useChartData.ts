@@ -192,7 +192,7 @@ export function useChartData({
   );
 
   // Violin plots need raw values for KDE — cannot use pre-aggregated stats
-  const getViolinData = useCallback((): ViolinPlotData => {
+  const violinDataMemo = useMemo<ViolinPlotData>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
@@ -295,8 +295,13 @@ export function useChartData({
     };
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
+  const getViolinData = useCallback(
+    (): ViolinPlotData => violinDataMemo,
+    [violinDataMemo]
+  );
+
   // Scatter needs paired per-run values — cannot use pre-aggregated stats
-  const getScatterData = useCallback((): ScatterDataResult => {
+  const scatterDataMemo = useMemo<ScatterDataResult>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
@@ -360,8 +365,13 @@ export function useChartData({
     return { points: scatterPoints, p99X, outlierCount };
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
+  const getScatterData = useCallback(
+    (): ScatterDataResult => scatterDataMemo,
+    [scatterDataMemo]
+  );
+
   // Gap data needs per-timestamp comparisons — cannot use pre-aggregated stats
-  const getGapData = useCallback((): TimelineDataPoint[] => {
+  const gapDataMemo = useMemo<TimelineDataPoint[]>(() => {
     if (activeTab !== "stt" || selectedSTTModels.length === 0) {
       return [];
     }
@@ -448,10 +458,15 @@ export function useChartData({
     return gapData;
   }, [rawData, activeTab, selectedSTTModels]);
 
+  const getGapData = useCallback(
+    (): TimelineDataPoint[] => gapDataMemo,
+    [gapDataMemo]
+  );
+
   // ─── Functions using SQL-aggregated modelStats ───
 
   // STT heatmap still needs raw data for per-timestamp delta calculation
-  const getModelHeatmapData = useCallback((): ModelHeatmapData[] => {
+  const modelHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
@@ -568,8 +583,13 @@ export function useChartData({
     getStat
   ]);
 
+  const getModelHeatmapData = useCallback(
+    (): ModelHeatmapData[] => modelHeatmapDataMemo,
+    [modelHeatmapDataMemo]
+  );
+
   // TTS heatmap uses absolute percentiles — fully from SQL stats
-  const getTTSHeatmapData = useCallback((): ModelHeatmapData[] => {
+  const ttsHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     if (activeTab !== "tts" || selectedTTSModels.length === 0) {
       return [];
     }
@@ -600,7 +620,12 @@ export function useChartData({
     );
   }, [activeTab, selectedTTSModels, getStat]);
 
-  const getWERBarData = useCallback((): BarDataPoint[] => {
+  const getTTSHeatmapData = useCallback(
+    (): ModelHeatmapData[] => ttsHeatmapDataMemo,
+    [ttsHeatmapDataMemo]
+  );
+
+  const werBarDataMemo = useMemo<BarDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
 
@@ -622,6 +647,11 @@ export function useChartData({
       .filter((item): item is BarDataPoint => item !== null)
       .sort((a, b) => a.averageWER - b.averageWER);
   }, [activeTab, selectedTTSModels, selectedSTTModels, getStat]);
+
+  const getWERBarData = useCallback(
+    (): BarDataPoint[] => werBarDataMemo,
+    [werBarDataMemo]
+  );
 
   // ─── Timeline window functions ───
 
@@ -723,7 +753,7 @@ export function useChartData({
     );
   }, [activeTab, selectedTTSModels, selectedSTTModels, getCurrentTimeWindow, getGapData]);
 
-  const getSTTRankingData = useCallback(() => {
+  const sttRankingDataMemo = useMemo(() => {
     if (activeTab !== "stt" || selectedSTTModels.length === 0) {
       return [];
     }
@@ -760,6 +790,11 @@ export function useChartData({
       isFirst: index === 0
     }));
   }, [activeTab, selectedSTTModels, getModelHeatmapData, getProviderForModel]);
+
+  const getSTTRankingData = useCallback(
+    () => sttRankingDataMemo,
+    [sttRankingDataMemo]
+  );
 
   return {
     formatChartLabel,
