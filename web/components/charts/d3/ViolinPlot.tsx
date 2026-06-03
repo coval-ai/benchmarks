@@ -34,7 +34,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
 
   // Handle responsive sizing
   useEffect(() => {
-    const handleResize = () => {
+    const measure = () => {
       if (containerRef.current) {
         const containerWidth = containerRef.current.offsetWidth;
         setDimensions({
@@ -52,16 +52,24 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       }
     };
 
-    handleResize();
+    // Debounce resize redraws so the heavy d3 chart redraws once after the
+    // width settles, not on every frame of the sidebar's 300ms transition.
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+    const handleResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(measure, 150);
+    };
+
+    measure();
     window.addEventListener("resize", handleResize);
 
-    // Also listen for sidebar changes by checking container size periodically
     const resizeObserver = new ResizeObserver(handleResize);
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
     };

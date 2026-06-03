@@ -37,7 +37,6 @@ export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
@@ -537,7 +536,6 @@ export function useDashboardState(page: "tts" | "stt") {
     // UI state
     sidebarCollapsed,
     isMobile,
-    chartRefreshKey,
 
     // Actions
     toggleModelSelection,
