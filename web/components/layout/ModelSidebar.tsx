@@ -23,7 +23,7 @@ const ModelSidebar: React.FC = () => {
 
   return (
     <div
-      className={`hidden lg:flex flex-col fixed left-4 top-20 bottom-4 z-10 bg-surface-secondary backdrop-blur-2xl border border-border-primary rounded-3xl p-3 shadow-2xl transition-all duration-300 ${
+      className={`hidden lg:flex flex-col fixed left-4 top-28 bottom-4 z-10 bg-surface-secondary backdrop-blur-2xl border border-border-primary rounded-3xl p-3 shadow-2xl transition-all duration-300 ${
         sidebarCollapsed ? "w-16" : "w-64"
       }`}
     >

@@ -8,7 +8,6 @@ import { DashboardProvider } from "@/contexts/DashboardContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/dashboard/PageHeader";
 import KeyMetrics from "@/components/dashboard/KeyMetrics";
-import DashboardFooter from "@/components/dashboard/DashboardFooter";
 
 // Lazy-load heavy chart components — D3 and Recharts do not support SSR
 const PerformanceDeltaSection = dynamic(
@@ -59,7 +58,6 @@ export function STTDashboard() {
         <LatencyAccuracySection />
         <AccuracyBarSection />
         <HeatmapSection />
-        <DashboardFooter />
       </DashboardLayout>
     </DashboardProvider>
   );
