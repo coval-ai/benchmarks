@@ -27,6 +27,7 @@ function adaptResult(row: Result): BenchmarkData {
     metric_units: row.metric_units,
     audio_filename: row.audio_filename ?? "",
     timestamp: row.created_at,
+    scheduled_at: (row as { scheduled_at?: string }).scheduled_at ?? row.created_at,
     status: row.status,
     transcript: "",
   };
@@ -89,15 +90,15 @@ export function useDashboardState(page: "tts" | "stt") {
 
   const modelsByProvider = page === "tts" ? ttsModelsByProvider : sttModelsByProvider;
 
-  // Anchor the timeline window to the latest data timestamp, not Date.now().
-  // The data we plot is from a benchmark run that may have finished hours
-  // before the user opens this page; using Date.now() pushes all rendered
-  // points to the far-left edge of a window that ends "now".
+  // Anchor the timeline window to the latest plotted bucket, not Date.now().
+  // Charts plot scheduled_at so every result from one benchmark run shares a
+  // tick; fall back to created_at during API rollout or for legacy rows.
   const latestTimestamp = useMemo<number>(() => {
     if (rawData.length === 0) return Date.now();
     let max = 0;
     for (const item of rawData) {
-      const t = new Date(item.timestamp).getTime();
+      const t = new Date(item.scheduled_at || item.timestamp).getTime();
+      if (Number.isNaN(t)) continue;
       if (t > max) max = t;
     }
     return max > 0 ? max : Date.now();
