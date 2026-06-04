@@ -36,7 +36,7 @@ const DashboardHeader: React.FC = () => {
         {/* Anchored to the full-width nav (not the centered container) so it
             always lines up with the logo's left margin, like the global nav. */}
         <span className="absolute left-4 top-1/2 hidden -translate-y-1/2 font-mono text-xs uppercase tracking-wider text-text-tertiary sm:inline md:left-6">
-          Benchmarks
+          Voice Model Benchmarks
         </span>
         <div className="relative mx-auto flex h-full max-w-[1400px] items-center justify-center gap-1 px-4 md:px-6">
           {SECTIONS.map((section) => {

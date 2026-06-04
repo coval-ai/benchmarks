@@ -10,7 +10,6 @@ import { useDashboard } from "@/contexts/DashboardContext";
 
 const ModelSidebar: React.FC = () => {
   const {
-    sidebarTitle: title,
     normalizeProviderName,
     modelsByProvider,
     selectedModels,
@@ -24,10 +23,6 @@ const ModelSidebar: React.FC = () => {
         {/* Model Selection Content */}
         <div className="space-y-2">
           <div>
-            <div className="text-text-secondary text-xs font-medium mb-3 px-2">
-              {title}
-            </div>
-
             {Object.entries(modelsByProvider).map(([provider, models]) => (
               <div key={provider} className="mt-4 first:mt-0">
                 <div className="text-text-primary pt-1.5 pb-0.5 px-2 text-sm font-bold">
