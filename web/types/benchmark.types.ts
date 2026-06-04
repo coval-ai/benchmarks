@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export interface BenchmarkData {
+  run_id: number;
   provider: string;
   model: string;
   voice: string;

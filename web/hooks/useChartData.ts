@@ -322,7 +322,7 @@ export function useChartData({
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
 
-      const key = `${item.benchmark}_${item.provider}_${item.model}_${item.voice}_${item.audio_filename}_${item.scheduled_at}`;
+      const key = `${item.run_id}\x00${item.provider}\x00${item.model}\x00${item.voice}\x00${item.audio_filename}`;
       if (!benchmarkGroups[key]) {
         benchmarkGroups[key] = {};
       }

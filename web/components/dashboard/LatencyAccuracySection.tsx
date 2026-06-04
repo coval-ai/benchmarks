@@ -59,7 +59,7 @@ const LatencyAccuracySection: React.FC = () => {
     return { yMax: max, yTicks: ticks };
   }, [scatterData]);
 
-  // X ticks at a nice fixed interval, domain rounded up to the last tick
+  // X ticks at a "nice" step computed from the data, domain rounded up to the last tick
   const { xMax, xTicks } = useMemo(() => {
     const maxLatency = scatterData.reduce(
       (acc: number, item: ScatterDataPoint) => Math.max(acc, item.x),

@@ -18,6 +18,7 @@ import { computeModelStats, type Result } from "@/lib/aggregates";
 
 function adaptResult(row: Result): BenchmarkData {
   return {
+    run_id: row.run_id,
     provider: row.provider,
     model: row.model,
     voice: row.voice ?? "",
