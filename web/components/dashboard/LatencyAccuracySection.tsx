@@ -9,6 +9,7 @@ import {
   Scatter,
   XAxis,
   YAxis,
+  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
@@ -21,30 +22,57 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 
 const LatencyAccuracySection: React.FC = () => {
-  const {
-    latencyLabel,
-    selectedModels,
-    scatterData,
-    scatterP99X,
-    scatterOutlierCount,
-  } = useDashboard();
+  const { latencyLabel, selectedModels, scatterData } = useDashboard();
 
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
 
   const description = {
-    short: `Raw ${latencyLabel} and WER performance across all measurements`,
+    short: `Average ${latencyLabel} and WER per model`,
     detailed:
       "Every voice AI system faces a fundamental trade-off between speed and accuracy. Faster models might sacrifice precision to deliver quick responses, while more accurate models may take additional processing time to ensure correct results. Choose the model that offers the best balance for your specific use case.",
   };
 
+  // Overall run-weighted average, matching the mean over all raw measurements
   const avgLatency = useMemo(() => {
-    if (scatterData.length === 0) return 0;
-    const sum = scatterData.reduce(
-      (acc: number, item: ScatterDataPoint) => acc + item.x,
+    const totalRuns = scatterData.reduce(
+      (acc: number, item: ScatterDataPoint) => acc + item.count,
       0
     );
-    return sum / scatterData.length;
+    if (totalRuns === 0) return 0;
+    const sum = scatterData.reduce(
+      (acc: number, item: ScatterDataPoint) => acc + item.x * item.count,
+      0
+    );
+    return sum / totalRuns;
+  }, [scatterData]);
+
+  // Y domain rounded up to the next 2% step, ticks every 2%
+  const { yMax, yTicks } = useMemo(() => {
+    const maxWER = scatterData.reduce(
+      (acc: number, item: ScatterDataPoint) => Math.max(acc, item.y),
+      0
+    );
+    const max = Math.max(2, Math.ceil((maxWER * 1.1) / 2) * 2);
+    const ticks = [];
+    for (let t = 0; t <= max; t += 2) ticks.push(t);
+    return { yMax: max, yTicks: ticks };
+  }, [scatterData]);
+
+  // X ticks at a "nice" step computed from the data, domain rounded up to the last tick
+  const { xMax, xTicks } = useMemo(() => {
+    const maxLatency = scatterData.reduce(
+      (acc: number, item: ScatterDataPoint) => Math.max(acc, item.x),
+      0
+    );
+    const raw = (maxLatency * 1.05) / 5;
+    const pow = Math.pow(10, Math.floor(Math.log10(raw || 1)));
+    const step =
+      [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw) ?? pow;
+    const max = Math.ceil((maxLatency * 1.05) / step) * step;
+    const ticks = [];
+    for (let t = 0; t <= max; t += step) ticks.push(t);
+    return { xMax: max, xTicks: ticks };
   }, [scatterData]);
 
   return (
@@ -62,11 +90,16 @@ const LatencyAccuracySection: React.FC = () => {
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart>
+              <CartesianGrid
+                stroke={themeColors.grid}
+                strokeDasharray="2 2"
+              />
               <XAxis
                 dataKey="x"
                 type="number"
                 name={`${latencyLabel} (ms)`}
-                domain={[0, scatterP99X || "dataMax"]}
+                domain={[0, xMax]}
+                ticks={xTicks}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
@@ -86,7 +119,8 @@ const LatencyAccuracySection: React.FC = () => {
                 dataKey="y"
                 type="number"
                 name="WER (%)"
-                domain={[0, "dataMax"]}
+                domain={[0, yMax]}
+                ticks={yTicks}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
@@ -107,25 +141,23 @@ const LatencyAccuracySection: React.FC = () => {
                 <Scatter
                   key={model}
                   data={scatterData.filter(
-                    (item: ScatterDataPoint) =>
-                      item.model === model && item.x <= (scatterP99X || Infinity)
+                    (item: ScatterDataPoint) => item.model === model
                   )}
                   fill={getModelColor(model)}
                   name={model}
+                  shape={(props: { cx?: number; cy?: number; fill?: string }) => (
+                    <circle
+                      cx={props.cx}
+                      cy={props.cy}
+                      r={6}
+                      fill={props.fill}
+                    />
+                  )}
                 />
               ))}
             </ScatterChart>
           </ResponsiveContainer>
         </div>
-
-        {scatterOutlierCount > 0 && (
-          <div className="text-center mt-2">
-            <p className="text-text-tertiary text-xs">
-              {scatterOutlierCount} measurements above{" "}
-              {(scatterP99X / 1000).toFixed(1)}s not shown
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

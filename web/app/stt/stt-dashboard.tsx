@@ -45,8 +45,8 @@ export function STTDashboard() {
           <KeyMetrics />
           <TimelineChart />
           <ViolinSection />
-          <LatencyAccuracySection />
           <AccuracyBarSection />
+          <LatencyAccuracySection />
           <HeatmapSection />
         </DashboardLayout>
       </SidebarMenuProvider>

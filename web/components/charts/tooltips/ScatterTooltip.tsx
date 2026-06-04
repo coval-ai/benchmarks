@@ -27,10 +27,11 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
           style={{ margin: 0, fontWeight: "bold" }}
         >{`Model: ${normalizeModelName(point.model)}`}</p>
         <p style={{ margin: 0 }}>{`Provider: ${activeTab === "stt" ? normalizeSTTProviderName(point.provider) : normalizeTTSProviderName(point.provider)}`}</p>
-        <p style={{ margin: 0 }}>{`${
+        <p style={{ margin: 0 }}>{`Avg ${
           activeTab === "tts" ? "TTFA" : "TTFT"
         }: ${point.x.toFixed(0)}ms`}</p>
-        <p style={{ margin: 0 }}>{`WER: ${point.y.toFixed(1)}%`}</p>
+        <p style={{ margin: 0 }}>{`Avg WER: ${point.y.toFixed(1)}%`}</p>
+        <p style={{ margin: 0 }}>{`Runs: ${point.count}`}</p>
       </div>
     );
   }
