@@ -12,26 +12,26 @@ const HeatmapSection: React.FC = () => {
     useDashboard();
 
   return (
-    <div className="mb-16">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h2 className="text-2xl font-light mb-2">
-            Model Performance Heatmap
-          </h2>
-          <p className="text-text-secondary mb-4">
-            Comprehensive model performance comparison &bull; Click column
-            headers to sort by metric
-          </p>
-        </div>
-      </div>
-
+    <div className="mb-4">
       <div
         className={`heatmap-container ${
           isMobile
             ? ""
-            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-4"
+            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
       >
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
+              Model Performance Heatmap
+            </h2>
+            <p className="text-text-secondary mb-4">
+              Comprehensive model performance comparison &bull; Click column
+              headers to sort by metric
+            </p>
+          </div>
+        </div>
+
         <HeatmapPlot
           data={data}
           formatChartLabel={formatChartLabel}

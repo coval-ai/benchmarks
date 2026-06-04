@@ -167,7 +167,7 @@ const GlobalNav: React.FC<{
 
   return (
     <>
-    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-surface-overlay backdrop-blur-xl">
+    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-white">
       <div className="flex h-full items-center justify-between px-4 md:px-6">
         {/* Logo */}
         <a
@@ -185,8 +185,9 @@ const GlobalNav: React.FC<{
           />
         </a>
 
-        {/* Desktop nav groups */}
-        <nav className="hidden items-center gap-1 lg:flex">
+        {/* Desktop nav groups — absolutely centered on the viewport, independent
+            of the logo/CTA widths on either side. */}
+        <nav className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 lg:flex">
           {NAV_GROUPS.map((group) => (
             <DesktopGroup key={group.label} group={group} />
           ))}

@@ -11,20 +11,11 @@ const PageHeader: React.FC = () => {
 
   return (
     <div className="mb-16 text-center">
-      <h1 className="text-4xl font-bold mb-4">{pageTitle}</h1>
-      <p className="text-text-primary text-default mb-6 max-w-3xl mx-auto">
+      <h1 className="text-5xl md:text-6xl font-bold tracking-tight leading-[1.05] text-text-primary mb-6">
+        {pageTitle}
+      </h1>
+      <p className="text-xl md:text-2xl font-light leading-snug text-text-secondary mb-6 max-w-3xl mx-auto">
         {pageSubtitle}
-      </p>
-      <p className="text-text-secondary">
-        Run evals for your Voice AI on{" "}
-        <a
-          href="https://coval.dev"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-text-secondary hover:text-text-primary transition-colors font-medium"
-        >
-          Coval.dev
-        </a>
       </p>
     </div>
   );

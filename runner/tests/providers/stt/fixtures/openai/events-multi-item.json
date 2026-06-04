@@ -1,0 +1,9 @@
+[
+  {"type": "session.created", "session": {"id": "sess_multi"}},
+  {"type": "session.updated", "session": {"type": "transcription", "audio": {"input": {"turn_detection": null}}}},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_001", "content_index": 0, "delta": "hello "},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_002", "content_index": 0, "delta": "world "},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_001", "content_index": 0, "delta": "how "},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_002", "content_index": 0, "delta": "are you"},
+  {"type": "conversation.item.input_audio_transcription.completed", "item_id": "item_001", "content_index": 0, "transcript": "hello how"}
+]

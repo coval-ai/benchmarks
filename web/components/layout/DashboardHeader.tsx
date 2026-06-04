@@ -29,16 +29,16 @@ const DashboardHeader: React.FC = () => {
           60px global nav. Hidden on mobile while the full-screen menu is open. */}
       <nav
         aria-label="Benchmark sections"
-        className={`fixed inset-x-0 top-[60px] z-40 h-12 border-b border-border-primary bg-surface-overlay backdrop-blur-xl ${
+        className={`fixed inset-x-0 top-[60px] z-40 h-12 border-b border-border-primary bg-white ${
           mobileNavOpen ? "max-lg:hidden" : ""
         }`}
       >
         {/* Anchored to the full-width nav (not the centered container) so it
             always lines up with the logo's left margin, like the global nav. */}
         <span className="absolute left-4 top-1/2 hidden -translate-y-1/2 font-mono text-xs uppercase tracking-wider text-text-tertiary sm:inline md:left-6">
-          Benchmarks
+          Voice Model Benchmarks
         </span>
-        <div className="relative mx-auto flex h-full max-w-[1400px] items-center justify-center gap-1 px-4 md:px-6">
+        <div className="absolute left-1/2 top-0 flex h-full -translate-x-1/2 items-center gap-1 px-4 md:px-6">
           {SECTIONS.map((section) => {
             const active = pathname === section.href;
             return (

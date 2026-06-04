@@ -13,6 +13,9 @@ export const modelColors: Record<string, string> = {
   // ElevenLabs STT
   scribe_v2_realtime: "#E67E22",
 
+  // OpenAI STT
+  "gpt-realtime-whisper": "#10A37F",
+
   // Cartesia TTS
   "sonic-3": "#3498DB",
 

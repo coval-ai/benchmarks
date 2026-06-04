@@ -16,40 +16,47 @@ export interface KeyMetricData {
 }
 
 const KeyMetrics: React.FC = () => {
-  const { primaryKeyMetric: primary, secondaryKeyMetric: secondary } = useDashboard();
+  const {
+    primaryKeyMetric: primary,
+    secondaryKeyMetric: secondary,
+    modelsComparedMetric,
+    providersMetric,
+  } = useDashboard();
+
+  const metrics: KeyMetricData[] = [
+    primary,
+    secondary,
+    modelsComparedMetric,
+    providersMetric,
+  ];
 
   return (
-    <div className="grid grid-cols-2 gap-16 mb-16 max-w-4xl mx-auto">
-      <div className="text-center">
-        <div className="text-text-secondary mb-2">{primary.label}</div>
-        <div className="text-5xl font-light mb-2">{primary.displayValue}</div>
-        {primary.subtitle && (
-          <div className="text-text-secondary">
-            {primary.subtitle.name && <div>{primary.subtitle.name}</div>}
-            {primary.subtitle.detail && (
-              <div className="text-sm text-text-tertiary">
-                {primary.subtitle.detail}
-              </div>
-            )}
+    <div className="grid grid-cols-4 gap-4 mb-4">
+      {metrics.map((metric, index) => (
+        <div
+          key={index}
+          className="text-left border border-border-secondary rounded-lg bg-white p-8 min-w-0"
+        >
+          <div className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
+            {metric.label}
           </div>
-        )}
-      </div>
-      <div className="text-center">
-        <div className="text-text-secondary mb-2">{secondary.label}</div>
-        <div className="text-5xl font-light mb-2">
-          {secondary.displayValue}
+          <div className="font-mono text-5xl font-bold mb-4 break-words leading-tight">
+            {metric.displayValue}
+          </div>
+          {metric.subtitle && (
+            <div className="text-text-secondary flex items-baseline gap-2">
+              {metric.subtitle.name && (
+                <span className="font-medium">{metric.subtitle.name}</span>
+              )}
+              {metric.subtitle.detail && (
+                <span className="text-sm text-text-tertiary">
+                  {metric.subtitle.detail}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        {secondary.subtitle && (
-          <div className="text-text-secondary">
-            {secondary.subtitle.name && <div>{secondary.subtitle.name}</div>}
-            {secondary.subtitle.detail && (
-              <div className="text-sm text-text-tertiary">
-                {secondary.subtitle.detail}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      ))}
     </div>
   );
 };
