@@ -36,8 +36,6 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
@@ -154,14 +152,6 @@ export function useDashboardState(page: "tts" | "stt") {
     []
   );
 
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
-    // Wait for CSS transition to complete (300ms), then trigger resize
-    setTimeout(() => {
-      window.dispatchEvent(new Event("resize"));
-    }, 300);
-  }, []);
-
   // Heatmap scaling for mobile
   useEffect(() => {
     const scaleHeatmapForMobile = () => {
@@ -252,16 +242,16 @@ export function useDashboardState(page: "tts" | "stt") {
     avgPrimary = 0;
     avgSecondary = 0;
   } else if (page === "stt") {
-    const rankingData = chartData.getSTTRankingData();
-
-    if (rankingData.length > 0) {
-      const fastestModel = rankingData[0];
-      if (fastestModel) {
-        fastestLatencyModel = fastestModel.model;
-        fastestLatencyProvider = normalizeSTTProviderName(fastestModel.provider);
-        avgPrimary = fastestModel.latencyMs;
-      }
-    }
+    let fastestPrimary = Infinity;
+    selectedModels.forEach((model) => {
+      const stat = chartData.getStat(model, primaryMetric);
+      if (!stat || stat.p50 >= fastestPrimary) return;
+      fastestPrimary = stat.p50;
+      fastestLatencyModel = model;
+      fastestLatencyProvider = parseModelKey(model).provider;
+    });
+    // TTFT is stored in seconds; display in ms like TTFA
+    avgPrimary = fastestPrimary !== Infinity ? fastestPrimary * 1000 : 0;
 
     const sttSecondaryData = currentData.filter(
       (item) => item.metric_type === secondaryMetric
@@ -545,13 +535,10 @@ export function useDashboardState(page: "tts" | "stt") {
     modelsByProvider,
 
     // UI state
-    sidebarCollapsed,
     isMobile,
-    chartRefreshKey,
 
     // Actions
     toggleModelSelection,
-    toggleSidebar,
 
     // Timeline
     isDragging,
@@ -563,11 +550,8 @@ export function useDashboardState(page: "tts" | "stt") {
     getWindowedTimelineData: chartData.getWindowedTimelineData,
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
     getTimelineTicks: chartData.getTimelineTicks,
-    getWindowedGapData: chartData.getWindowedGapData,
     getModelsWithTimelineData: chartData.getModelsWithTimelineData,
-    getModelsWithGapData: chartData.getModelsWithGapData,
     getViolinData: chartData.getViolinData,
-    getSTTRankingData: chartData.getSTTRankingData,
 
     // Computed chart data
     scatterData,

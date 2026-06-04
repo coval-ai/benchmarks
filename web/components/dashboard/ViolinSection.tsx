@@ -17,8 +17,6 @@ const ViolinSection: React.FC = () => {
     getViolinData,
     getProviderForModel,
     isMobile,
-    sidebarCollapsed,
-    chartRefreshKey,
   } = useDashboard();
 
   const violinData = getViolinData();
@@ -59,8 +57,6 @@ const ViolinSection: React.FC = () => {
           getProviderForModel={getProviderForModel}
           normalizeModelName={normalizeModelName}
           isMobile={isMobile}
-          sidebarCollapsed={sidebarCollapsed}
-          key={`violin-${chartRefreshKey}-${sidebarCollapsed}`}
         />
       </div>
     </div>

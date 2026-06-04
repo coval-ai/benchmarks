@@ -370,99 +370,6 @@ export function useChartData({
     [scatterDataMemo]
   );
 
-  // Gap data needs per-timestamp comparisons — cannot use pre-aggregated stats
-  const gapDataMemo = useMemo<TimelineDataPoint[]>(() => {
-    if (activeTab !== "stt" || selectedSTTModels.length === 0) {
-      return [];
-    }
-
-    const primaryMetric = "TTFT";
-
-    const selectedSTTModelKeys = new Set(selectedSTTModels);
-    const ttftData = rawData
-      .filter(
-        (item) =>
-          selectedSTTModelKeys.has(toModelKey(item.provider, item.model)) &&
-          item.metric_type === primaryMetric &&
-          INCLUDED_STATUSES.has(item.status) &&
-          item.metric_value !== null &&
-          item.metric_value !== undefined
-      )
-      .map((item) => ({
-        timestamp: new Date(item.scheduled_at).getTime(),
-        value: (item.metric_value as number) * 1000,
-        model: toModelKey(item.provider, item.model),
-        benchmark: item.benchmark
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    const timestampGroups: {
-      [key: number]: {
-        timestamp: number;
-        timestampLabel: string;
-        models: { [key: string]: { total: number; count: number } };
-        fastest: number;
-      };
-    } = {};
-
-    ttftData.forEach((item) => {
-      if (!timestampGroups[item.timestamp]) {
-        timestampGroups[item.timestamp] = {
-          timestamp: item.timestamp,
-          timestampLabel: new Date(item.timestamp).toISOString(),
-          models: {},
-          fastest: Infinity
-        };
-      }
-
-      const group = timestampGroups[item.timestamp];
-      if (group) {
-        if (!group.models[item.model]) {
-          group.models[item.model] = { total: 0, count: 0 };
-        }
-        const modelStats = group.models[item.model];
-        if (modelStats) {
-          modelStats.total += item.value;
-          modelStats.count += 1;
-        }
-      }
-    });
-
-    const gapData: TimelineDataPoint[] = [];
-
-    Object.values(timestampGroups).forEach((group) => {
-      const dataPoint: TimelineDataPoint = {
-        timestamp: group.timestamp,
-        timestampLabel: group.timestampLabel
-      };
-
-      const avgValueByModel: { [key: string]: number } = {};
-      Object.entries(group.models).forEach(([model, stats]) => {
-        avgValueByModel[model] = stats.total / stats.count;
-      });
-
-      const averagedValues = Object.values(avgValueByModel);
-      group.fastest = averagedValues.length > 0 ? Math.min(...averagedValues) : 0;
-
-      selectedSTTModels.forEach((model) => {
-        const modelAvg = avgValueByModel[model];
-        if (modelAvg !== undefined) {
-          const gap = modelAvg - group.fastest;
-          dataPoint[`${model}_gap`] = gap;
-        }
-      });
-
-      gapData.push(dataPoint);
-    });
-
-    return gapData;
-  }, [rawData, activeTab, selectedSTTModels]);
-
-  const getGapData = useCallback(
-    (): TimelineDataPoint[] => gapDataMemo,
-    [gapDataMemo]
-  );
-
   // ─── Functions using SQL-aggregated modelStats ───
 
   // STT heatmap still needs raw data for per-timestamp delta calculation
@@ -701,19 +608,6 @@ export function useChartData({
     );
   }, [getCurrentTimeWindow, getTimelineData]);
 
-  const getWindowedGapData = useCallback((): TimelineDataPoint[] => {
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const fullData = getGapData();
-
-    const buffer = 30 * 60 * 1000;
-    const extendedStart = windowStart - buffer;
-    const extendedEnd = windowEnd + buffer;
-
-    return fullData.filter(
-      (item) => item.timestamp >= extendedStart && item.timestamp <= extendedEnd
-    );
-  }, [getCurrentTimeWindow, getGapData]);
-
   /** Models that have at least one plotted point in the current timeline window. */
   const getModelsWithTimelineData = useCallback((): string[] => {
     const selectedModels =
@@ -737,70 +631,10 @@ export function useChartData({
     getTimelineData,
   ]);
 
-  /** Models that have at least one gap point in the current performance-delta window. */
-  const getModelsWithGapData = useCallback((): string[] => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const windowed = getGapData().filter(
-      (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
-    );
-    return selectedModels.filter((model) =>
-      windowed.some(
-        (point) =>
-          point[`${model}_gap`] !== undefined && point[`${model}_gap`] !== null
-      )
-    );
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getCurrentTimeWindow, getGapData]);
-
-  const sttRankingDataMemo = useMemo(() => {
-    if (activeTab !== "stt" || selectedSTTModels.length === 0) {
-      return [];
-    }
-
-    const heatmapData = activeTab === "stt" ? getModelHeatmapData() : [];
-
-    if (heatmapData.length === 0) {
-      return [];
-    }
-
-    const fastestModel = [...heatmapData].sort(
-      (a, b) => a.latencyP50 - b.latencyP50
-    )[0];
-
-    if (!fastestModel) return [];
-
-    const rankingData = heatmapData.map((modelData) => ({
-      model: modelData.model,
-      provider: getProviderForModel(modelData.model),
-      p25Delta: modelData.latencyP25 - fastestModel.latencyP25,
-      p50Delta: modelData.latencyP50 - fastestModel.latencyP50,
-      p75Delta: modelData.latencyP75 - fastestModel.latencyP75
-    }));
-
-    rankingData.sort((a, b) => a.p50Delta - b.p50Delta);
-
-    return rankingData.map((stat, index) => ({
-      position: index + 1,
-      model: stat.model,
-      provider: stat.provider,
-      // Absolute median latency (ms); raw STT values are in seconds.
-      latencyMs: (getStat(stat.model, "TTFT")?.p50 ?? 0) * 1000,
-      p25Delta: stat.p25Delta,
-      p50Delta: stat.p50Delta,
-      p75Delta: stat.p75Delta,
-      isFirst: index === 0
-    }));
-  }, [activeTab, selectedSTTModels, getModelHeatmapData, getProviderForModel, getStat]);
-
-  const getSTTRankingData = useCallback(
-    () => sttRankingDataMemo,
-    [sttRankingDataMemo]
-  );
-
   return {
     formatChartLabel,
     getProviderForModel,
+    getStat,
     getCurrentData,
     getTimelineData,
     getViolinData,
@@ -808,14 +642,10 @@ export function useChartData({
     getModelHeatmapData,
     getTTSHeatmapData,
     getWERBarData,
-    getGapData,
     getFullTimeRange,
     getCurrentTimeWindow,
     getTimelineTicks,
     getWindowedTimelineData,
-    getWindowedGapData,
-    getModelsWithTimelineData,
-    getModelsWithGapData,
-    getSTTRankingData
+    getModelsWithTimelineData
   };
 }

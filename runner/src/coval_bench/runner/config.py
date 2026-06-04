@@ -35,6 +35,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="deepgram", model="flux-general-en", enabled=True),
     ProviderEntry(provider="deepgram", model="flux-general-multi", enabled=True),
     ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+    ProviderEntry(provider="openai", model="gpt-realtime-whisper", enabled=True),
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),

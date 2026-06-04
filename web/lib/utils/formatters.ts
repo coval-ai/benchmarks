@@ -96,6 +96,7 @@ export function normalizeModelName(modelKey: string): string {
     "flux-general-en": "Flux",
     "flux-general-multi": "Flux Multilingual",
     scribe_v2_realtime: "Scribe v2 Realtime",
+    "gpt-realtime-whisper": "GPT Realtime Whisper",
     "universal-streaming": "Universal Streaming",
     default: "Default",
     enhanced: "Enhanced"
@@ -139,6 +140,7 @@ export function normalizeSTTProviderName(providerName: string): string {
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
+    openai: "OpenAI",
     rime: "Rime",
     speechmatics: "Speechmatics"
   };

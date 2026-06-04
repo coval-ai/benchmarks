@@ -25,7 +25,6 @@ const AccuracyBarSection: React.FC = () => {
     werBarDataWithColors,
     getProviderForModel,
     isMobile,
-    sidebarCollapsed,
     handleWERBarClick,
   } = useDashboard();
 
@@ -67,7 +66,6 @@ const AccuracyBarSection: React.FC = () => {
                   <CustomBarChartTick
                     getProviderForModel={getProviderForModel}
                     isMobile={isMobile}
-                    sidebarCollapsed={sidebarCollapsed}
                   />
                 }
                 height={isMobile ? 100 : 80}
