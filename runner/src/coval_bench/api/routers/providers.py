@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends
 from posthog import Posthog
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_posthog
+from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ModelInfo, ProviderInfo, ProvidersResponse
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
@@ -92,14 +92,13 @@ async def get_providers(
     hide or grey out models that are known but not actively benchmarked.
     """
     response = _describe()
-    if posthog_client is not None:
-        posthog_client.capture(
-            "coval-bench-api",
-            "providers listed",
-            properties={
-                "stt_provider_count": len(response.stt),
-                "tts_provider_count": len(response.tts),
-                "$process_person_profile": False,
-            },
-        )
+    capture_api_event(
+        posthog_client,
+        "providers listed",
+        {
+            "stt_provider_count": len(response.stt),
+            "tts_provider_count": len(response.tts),
+            "$process_person_profile": False,
+        },
+    )
     return response

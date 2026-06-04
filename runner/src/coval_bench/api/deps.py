@@ -12,12 +12,15 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import structlog
 from fastapi import HTTPException
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.config import Settings
+
+logger = structlog.get_logger("coval_bench.api")
 
 
 async def get_pool(request: Request) -> AsyncConnectionPool[Any]:
@@ -40,3 +43,13 @@ def get_settings(request: Request) -> Settings:
 def get_posthog(request: Request) -> Posthog | None:
     """Return the PostHog client from app state, or None if analytics is disabled."""
     return cast("Posthog | None", request.app.state.posthog)
+
+
+def capture_api_event(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:
+    """Best-effort PostHog capture for API routes; never fails the request."""
+    if client is None:
+        return
+    try:
+        client.capture("coval-bench-api", event, properties=properties)
+    except Exception:
+        logger.warning("posthog_capture_failed", event_name=event, exc_info=True)

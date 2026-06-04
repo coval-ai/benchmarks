@@ -578,6 +578,17 @@ async def _run_tts_item(
 # ---------------------------------------------------------------------------
 
 
+def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:
+    """Best-effort run-event capture + flush; never raises into the run outcome."""
+    if client is None:
+        return
+    try:
+        client.capture("coval-bench-runner", event, properties=properties)
+        client.flush()  # type: ignore[no-untyped-call]
+    except Exception:
+        _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -609,12 +620,16 @@ async def run_benchmarks(
 
     posthog_client: Posthog | None = None
     if not settings.posthog_disabled and settings.posthog_project_token:
-        posthog_client = Posthog(
-            settings.posthog_project_token,
-            host=settings.posthog_host,
-            enable_exception_autocapture=True,
-        )
-        atexit.register(posthog_client.shutdown)
+        try:
+            posthog_client = Posthog(
+                settings.posthog_project_token,
+                host=settings.posthog_host,
+                enable_exception_autocapture=True,
+            )
+            atexit.register(posthog_client.shutdown)
+        except Exception:
+            _log.warning("posthog_init_failed", exc_info=True)
+            posthog_client = None
 
     # ------------------------------------------------------------------
     # 1. Resolve + filter provider matrix
@@ -835,22 +850,20 @@ async def run_benchmarks(
                 fail_count=fail_count,
                 duration_s=duration_s,
             )
-            if posthog_client is not None:
-                posthog_client.capture(
-                    "coval-bench-runner",
-                    "benchmark run completed",
-                    properties={
-                        "status": str(final_status),
-                        "total_results": total_results,
-                        "success_count": success_count,
-                        "fail_count": fail_count,
-                        "duration_s": duration_s,
-                        "benchmark_kind": benchmark_kind,
-                        "smoke": smoke,
-                        "$process_person_profile": False,
-                    },
-                )
-                posthog_client.flush()  # type: ignore[no-untyped-call]
+            _emit_posthog(
+                posthog_client,
+                "benchmark run completed",
+                {
+                    "status": str(final_status),
+                    "total_results": total_results,
+                    "success_count": success_count,
+                    "fail_count": fail_count,
+                    "duration_s": duration_s,
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "$process_person_profile": False,
+                },
+            )
             return summary
 
         except asyncio.CancelledError:
@@ -890,23 +903,21 @@ async def run_benchmarks(
                 fail_count=fail_count,
                 duration_s=sigterm_duration_s,
             )
-            if posthog_client is not None:
-                posthog_client.capture(
-                    "coval-bench-runner",
-                    "benchmark run completed",
-                    properties={
-                        "status": str(RunStatus.PARTIAL),
-                        "total_results": total_results,
-                        "success_count": success_count,
-                        "fail_count": fail_count,
-                        "duration_s": sigterm_duration_s,
-                        "benchmark_kind": benchmark_kind,
-                        "smoke": smoke,
-                        "sigterm": True,
-                        "$process_person_profile": False,
-                    },
-                )
-                posthog_client.flush()  # type: ignore[no-untyped-call]
+            _emit_posthog(
+                posthog_client,
+                "benchmark run completed",
+                {
+                    "status": str(RunStatus.PARTIAL),
+                    "total_results": total_results,
+                    "success_count": success_count,
+                    "fail_count": fail_count,
+                    "duration_s": sigterm_duration_s,
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "sigterm": True,
+                    "$process_person_profile": False,
+                },
+            )
             return RunSummary(
                 run_id=run_id,
                 started_at=started_at,
@@ -938,17 +949,15 @@ async def run_benchmarks(
                     run_id=run_id,
                     exc_info=write_exc,
                 )
-            if posthog_client is not None:
-                posthog_client.capture(
-                    "coval-bench-runner",
-                    "benchmark run failed",
-                    properties={
-                        "benchmark_kind": benchmark_kind,
-                        "smoke": smoke,
-                        "$process_person_profile": False,
-                    },
-                )
-                posthog_client.flush()  # type: ignore[no-untyped-call]
+            _emit_posthog(
+                posthog_client,
+                "benchmark run failed",
+                {
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "$process_person_profile": False,
+                },
+            )
             raise
 
         finally:

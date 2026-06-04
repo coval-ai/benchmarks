@@ -36,7 +36,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool, get_posthog
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
 from coval_bench.config import get_settings
@@ -218,21 +218,20 @@ async def list_results(
         result_rows = await rows.fetchall()
 
     results = [ResultOut.model_validate(r) for r in result_rows]
-    if posthog_client is not None:
-        posthog_client.capture(
-            "coval-bench-api",
-            "results queried",
-            properties={
-                "provider": provider,
-                "benchmark": benchmark,
-                "metric_type": resolved_metric,
-                "window": window,
-                "has_since_filter": since is not None,
-                "has_until_filter": until is not None,
-                "include_failed": include_failed,
-                "result_count": len(results),
-                "limit": limit,
-                "$process_person_profile": False,
-            },
-        )
+    capture_api_event(
+        posthog_client,
+        "results queried",
+        {
+            "provider": provider,
+            "benchmark": benchmark,
+            "metric_type": resolved_metric,
+            "window": window,
+            "has_since_filter": since is not None,
+            "has_until_filter": until is not None,
+            "include_failed": include_failed,
+            "result_count": len(results),
+            "limit": limit,
+            "$process_person_profile": False,
+        },
+    )
     return ResultsResponse(results=results)

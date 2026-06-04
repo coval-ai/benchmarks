@@ -18,7 +18,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool, get_posthog
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import RunOut, RunsResponse
 
@@ -65,15 +65,14 @@ async def list_runs(
     next_before: int | None = None
     if len(runs) == limit:
         next_before = min(r.id for r in runs)
-    if posthog_client is not None:
-        posthog_client.capture(
-            "coval-bench-api",
-            "runs listed",
-            properties={
-                "limit": limit,
-                "has_cursor": before is not None,
-                "run_count": len(runs),
-                "$process_person_profile": False,
-            },
-        )
+    capture_api_event(
+        posthog_client,
+        "runs listed",
+        {
+            "limit": limit,
+            "has_cursor": before is not None,
+            "run_count": len(runs),
+            "$process_person_profile": False,
+        },
+    )
     return RunsResponse(runs=runs, next_before=next_before)

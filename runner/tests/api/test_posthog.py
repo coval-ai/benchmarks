@@ -39,7 +39,7 @@ async def test_lifespan_builds_client_and_route_captures(
             response = await client.get("/v1/providers")
         assert response.status_code == 200
         fake.capture.assert_called()
-    fake.flush.assert_called()
+    fake.shutdown.assert_called()
 
 
 async def test_disabled_builds_no_client(
@@ -100,3 +100,17 @@ async def test_router_emits_event_with_payload(
     properties = fake.capture.call_args.kwargs["properties"]
     assert required_keys <= set(properties.keys())
     assert properties["$process_person_profile"] is False
+
+
+async def test_capture_failure_does_not_break_endpoint(app: FastAPI, client: AsyncClient) -> None:
+    """A raising PostHog client is swallowed; the route still returns 200."""
+    fake = MagicMock()
+    fake.capture.side_effect = RuntimeError("posthog down")
+    app.dependency_overrides[get_posthog] = lambda: fake
+    try:
+        response = await client.get("/v1/providers")
+    finally:
+        app.dependency_overrides.pop(get_posthog, None)
+
+    assert response.status_code == 200
+    fake.capture.assert_called_once()

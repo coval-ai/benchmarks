@@ -51,19 +51,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info("api_startup", runner_sha=resolved.runner_sha)
         posthog_client: Posthog | None = None
         if not resolved.posthog_disabled and resolved.posthog_project_token:
-            posthog_client = Posthog(
-                resolved.posthog_project_token,
-                host=resolved.posthog_host,
-                enable_exception_autocapture=True,
-            )
-            atexit.register(posthog_client.shutdown)
+            try:
+                posthog_client = Posthog(
+                    resolved.posthog_project_token,
+                    host=resolved.posthog_host,
+                    enable_exception_autocapture=True,
+                )
+                atexit.register(posthog_client.shutdown)
+            except Exception:
+                logger.warning("posthog_init_failed", exc_info=True)
+                posthog_client = None
         app.state.posthog = posthog_client
-        async with lifespan_pool(resolved) as pool:
-            app.state.pool = pool
-            app.state.settings = resolved
-            yield
-        if posthog_client is not None:
-            posthog_client.flush()  # type: ignore[no-untyped-call]
+        try:
+            async with lifespan_pool(resolved) as pool:
+                app.state.pool = pool
+                app.state.settings = resolved
+                yield
+        finally:
+            if posthog_client is not None:
+                try:
+                    posthog_client.shutdown()  # type: ignore[no-untyped-call]
+                except Exception:
+                    logger.warning("posthog_shutdown_failed", exc_info=True)
+                atexit.unregister(posthog_client.shutdown)
         logger.info("api_shutdown")
 
     app = FastAPI(

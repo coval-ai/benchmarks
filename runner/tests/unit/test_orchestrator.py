@@ -1760,3 +1760,41 @@ async def test_posthog_failed_event(settings: Settings) -> None:
     assert fake.capture.call_args.args[1] == "benchmark run failed"
     assert fake.capture.call_args.kwargs["properties"]["$process_person_profile"] is False
     fake.flush.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_posthog_capture_failure_does_not_fail_run(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A raising PostHog client must not flip a successful run to FAILED."""
+    fake = MagicMock()
+    fake.capture.side_effect = RuntimeError("posthog down")
+    settings = settings.model_copy(
+        update={"posthog_project_token": "phc_test", "posthog_disabled": False}
+    )
+
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider)
+    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    with patch("coval_bench.runner.orchestrator.Posthog", lambda *a, **k: fake):
+        async with _orchestrator_env(
+            audio_path=audio_file,
+            stt_items=[_make_dataset_item(audio_file)],
+            stt_providers={"deepgram": provider_cls},
+            run=run,
+            writer=writer,
+        ):
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    fake.capture.assert_called_once()
