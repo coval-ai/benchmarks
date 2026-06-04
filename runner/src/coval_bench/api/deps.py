@@ -50,6 +50,8 @@ def capture_api_event(client: Posthog | None, event: str, properties: dict[str, 
     if client is None:
         return
     try:
-        client.capture(event, distinct_id="coval-bench-api", properties=properties)
+        client.capture(
+            event, distinct_id="coval-bench-api", properties=properties, disable_geoip=True
+        )
     except Exception:
         logger.warning("posthog_capture_failed", event_name=event, exc_info=True)

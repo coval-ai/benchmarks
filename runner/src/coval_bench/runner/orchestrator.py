@@ -583,7 +583,9 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
     if client is None:
         return
     try:
-        client.capture(event, distinct_id="coval-bench-runner", properties=properties)
+        client.capture(
+            event, distinct_id="coval-bench-runner", properties=properties, disable_geoip=True
+        )
         client.flush()  # type: ignore[no-untyped-call]
     except Exception:
         _log.warning("posthog_emit_failed", event_name=event, exc_info=True)

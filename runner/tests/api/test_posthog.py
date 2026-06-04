@@ -99,6 +99,7 @@ async def test_router_emits_event_with_payload(
     fake.capture.assert_called_once()
     assert fake.capture.call_args.args[0] == event
     assert fake.capture.call_args.kwargs["distinct_id"] == "coval-bench-api"
+    assert fake.capture.call_args.kwargs["disable_geoip"] is True
     properties = fake.capture.call_args.kwargs["properties"]
     assert required_keys <= set(properties.keys())
     assert properties["$process_person_profile"] is False
