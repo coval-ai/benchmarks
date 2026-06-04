@@ -5,14 +5,17 @@ import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
+const modelFontSize = "10px";
+const providerFontSize = "9px";
+const mobileFontSize = "10px";
+
 const CustomBarChartTick: React.FC<{
   x?: number;
   y?: number;
   payload?: { value: string };
   getProviderForModel: (model: string) => string;
   isMobile?: boolean;
-  sidebarCollapsed?: boolean;
-}> = ({ x = 0, y = 0, payload, getProviderForModel, isMobile = false, sidebarCollapsed = true }) => {
+}> = ({ x = 0, y = 0, payload, getProviderForModel, isMobile = false }) => {
   const themeColors = useThemeColors();
 
   if (!payload) return null;
@@ -20,11 +23,6 @@ const CustomBarChartTick: React.FC<{
   const model = payload.value;
   const normalizedModel = normalizeModelName(model);
   const provider = getProviderForModel(model);
-
-  // Adjust font sizes based on sidebar state
-  const modelFontSize = sidebarCollapsed ? "12px" : "10px";
-  const providerFontSize = sidebarCollapsed ? "10px" : "9px";
-  const mobileFontSize = sidebarCollapsed ? "11px" : "10px";
 
   // Mobile: model name + provider, diagonal
   if (isMobile) {

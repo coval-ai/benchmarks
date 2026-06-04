@@ -21,10 +21,5 @@ export const metricDescriptions = {
     short: "Word Error Rate (%) \u2022 Click bar to compare models",
     detailed:
       "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounces complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
-  },
-  performanceGap: {
-    short: "Time to First Token",
-    detailed:
-      "We measure how quickly the system returns the first transcribed token after the audio begins across multiple test cases. The fastest model is set as the baseline and we measure the delta relative to the fastest performer. Hover to view the first token."
   }
 };

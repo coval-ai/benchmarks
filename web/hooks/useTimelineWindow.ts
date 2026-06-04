@@ -24,8 +24,8 @@ export const useTimelineWindow = ({
   const [timelineWindowEnd, setTimelineWindowEnd] = useState<number>(initialEnd);
   // Capture the chart element at mousedown time so drag math uses the chart
   // the user actually clicked. Prior implementation shared a single chartRef
-  // between TimelineChart and PerformanceDeltaSection — last-mounted wins —
-  // which made drag distance scale wrong when the wrong rect was used.
+  // between chart sections — last-mounted wins — which made drag distance
+  // scale wrong when the wrong rect was used.
   const dragElementRef = useRef<HTMLElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);

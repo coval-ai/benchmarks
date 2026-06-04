@@ -19,6 +19,7 @@ dependencies = [
     # Audio
     "soundfile>=0.12",
     "numpy>=1.26",
+    "scipy>=1.11",
     # DB
     "psycopg[binary,pool]>=3.2",
     "alembic>=1.13",
@@ -101,6 +102,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "whisper_normalizer.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "scipy.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

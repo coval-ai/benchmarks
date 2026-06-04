@@ -11,16 +11,6 @@ import PageHeader from "@/components/dashboard/PageHeader";
 import KeyMetrics from "@/components/dashboard/KeyMetrics";
 
 // Lazy-load heavy chart components — D3 and Recharts do not support SSR
-const PerformanceDeltaSection = dynamic(
-  () => import("@/components/dashboard/PerformanceDeltaSection"),
-  { ssr: false }
-);
-
-const PerformanceRankings = dynamic(
-  () => import("@/components/dashboard/PerformanceRankings"),
-  { ssr: false }
-);
-
 const TimelineChart = dynamic(
   () => import("@/components/visualizations/TimelineChart"),
   { ssr: false }
@@ -53,12 +43,10 @@ export function STTDashboard() {
         <DashboardLayout>
           <PageHeader />
           <KeyMetrics />
-          <PerformanceDeltaSection />
-          <PerformanceRankings />
           <TimelineChart />
           <ViolinSection />
-          <LatencyAccuracySection />
           <AccuracyBarSection />
+          <LatencyAccuracySection />
           <HeatmapSection />
         </DashboardLayout>
       </SidebarMenuProvider>

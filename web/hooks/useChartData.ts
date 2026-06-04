@@ -10,7 +10,6 @@ import type {
   ModelStats,
   TimelineDataPoint,
   ScatterDataPoint,
-  ScatterDataResult,
   ViolinPlotData,
   ViolinDataPoint,
   ModelHeatmapData,
@@ -300,15 +299,16 @@ export function useChartData({
     [violinDataMemo]
   );
 
-  // Scatter needs paired per-run values — cannot use pre-aggregated stats
-  const scatterDataMemo = useMemo<ScatterDataResult>(() => {
+  // Pair latency with WER per run, then average per model — pairing restricts
+  // the average to runs that produced both metrics
+  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
     const yMetric = "WER";
 
     if (selectedModels.length === 0) {
-      return { points: [], p99X: 0, outlierCount: 0 };
+      return [];
     }
 
     const benchmarkGroups: {
@@ -319,8 +319,10 @@ export function useChartData({
     rawData.forEach((item) => {
       if (!selectedModelKeys.has(toModelKey(item.provider, item.model))) return;
       if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
 
-      const key = `${item.benchmark}_${item.provider}_${item.model}_${item.timestamp}`;
+      const key = `${item.run_id}\x00${item.provider}\x00${item.model}\x00${item.voice}\x00${item.audio_filename}`;
       if (!benchmarkGroups[key]) {
         benchmarkGroups[key] = {};
       }
@@ -333,134 +335,62 @@ export function useChartData({
       }
     });
 
-    const scatterPoints: ScatterDataPoint[] = [];
+    // One averaged point per model: sum paired run values, divide by run count
+    const modelAggregates: {
+      [model: string]: {
+        xSum: number;
+        ySum: number;
+        count: number;
+        benchmark: string;
+        provider: string;
+      };
+    } = {};
 
     Object.values(benchmarkGroups).forEach((group) => {
       const xData = group[xMetric]?.[0];
       const yData = group[yMetric]?.[0];
 
       if (xData && yData) {
-        scatterPoints.push({
-          x:
-            activeTab === "tts"
-              ? xData.metric_value ?? 0
-              : (xData.metric_value ?? 0) * 1000,
-          y: yData.metric_value ?? 0,
-          model: toModelKey(xData.provider, xData.model),
-          benchmark: xData.benchmark,
-          provider:
-            activeTab === "stt"
-              ? normalizeSTTProviderName(xData.provider)
-              : normalizeTTSProviderName(xData.provider)
-        });
+        const model = toModelKey(xData.provider, xData.model);
+        const x =
+          activeTab === "tts"
+            ? xData.metric_value ?? 0
+            : (xData.metric_value ?? 0) * 1000;
+        const y = yData.metric_value ?? 0;
+
+        const agg = modelAggregates[model];
+        if (agg) {
+          agg.xSum += x;
+          agg.ySum += y;
+          agg.count += 1;
+        } else {
+          modelAggregates[model] = {
+            xSum: x,
+            ySum: y,
+            count: 1,
+            benchmark: xData.benchmark,
+            provider:
+              activeTab === "stt"
+                ? normalizeSTTProviderName(xData.provider)
+                : normalizeTTSProviderName(xData.provider)
+          };
+        }
       }
     });
 
-    const xValues = scatterPoints.map((point) => point.x);
-    const sortedX = xValues.sort((a, b) => a - b);
-    const p99Index = Math.floor(sortedX.length * 0.99);
-    const p99X = sortedX.length > 0 ? (sortedX[p99Index] ?? 0) : 0;
-    const outlierCount = xValues.filter((val) => val > p99X).length;
-
-    return { points: scatterPoints, p99X, outlierCount };
+    return Object.entries(modelAggregates).map(([model, agg]) => ({
+      x: agg.xSum / agg.count,
+      y: agg.ySum / agg.count,
+      model,
+      benchmark: agg.benchmark,
+      provider: agg.provider,
+      count: agg.count
+    }));
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getScatterData = useCallback(
-    (): ScatterDataResult => scatterDataMemo,
+    (): ScatterDataPoint[] => scatterDataMemo,
     [scatterDataMemo]
-  );
-
-  // Gap data needs per-timestamp comparisons — cannot use pre-aggregated stats
-  const gapDataMemo = useMemo<TimelineDataPoint[]>(() => {
-    if (activeTab !== "stt" || selectedSTTModels.length === 0) {
-      return [];
-    }
-
-    const primaryMetric = "TTFT";
-
-    const selectedSTTModelKeys = new Set(selectedSTTModels);
-    const ttftData = rawData
-      .filter(
-        (item) =>
-          selectedSTTModelKeys.has(toModelKey(item.provider, item.model)) &&
-          item.metric_type === primaryMetric &&
-          INCLUDED_STATUSES.has(item.status) &&
-          item.metric_value !== null &&
-          item.metric_value !== undefined
-      )
-      .map((item) => ({
-        timestamp: new Date(item.scheduled_at).getTime(),
-        value: (item.metric_value as number) * 1000,
-        model: toModelKey(item.provider, item.model),
-        benchmark: item.benchmark
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    const timestampGroups: {
-      [key: number]: {
-        timestamp: number;
-        timestampLabel: string;
-        models: { [key: string]: { total: number; count: number } };
-        fastest: number;
-      };
-    } = {};
-
-    ttftData.forEach((item) => {
-      if (!timestampGroups[item.timestamp]) {
-        timestampGroups[item.timestamp] = {
-          timestamp: item.timestamp,
-          timestampLabel: new Date(item.timestamp).toISOString(),
-          models: {},
-          fastest: Infinity
-        };
-      }
-
-      const group = timestampGroups[item.timestamp];
-      if (group) {
-        if (!group.models[item.model]) {
-          group.models[item.model] = { total: 0, count: 0 };
-        }
-        const modelStats = group.models[item.model];
-        if (modelStats) {
-          modelStats.total += item.value;
-          modelStats.count += 1;
-        }
-      }
-    });
-
-    const gapData: TimelineDataPoint[] = [];
-
-    Object.values(timestampGroups).forEach((group) => {
-      const dataPoint: TimelineDataPoint = {
-        timestamp: group.timestamp,
-        timestampLabel: group.timestampLabel
-      };
-
-      const avgValueByModel: { [key: string]: number } = {};
-      Object.entries(group.models).forEach(([model, stats]) => {
-        avgValueByModel[model] = stats.total / stats.count;
-      });
-
-      const averagedValues = Object.values(avgValueByModel);
-      group.fastest = averagedValues.length > 0 ? Math.min(...averagedValues) : 0;
-
-      selectedSTTModels.forEach((model) => {
-        const modelAvg = avgValueByModel[model];
-        if (modelAvg !== undefined) {
-          const gap = modelAvg - group.fastest;
-          dataPoint[`${model}_gap`] = gap;
-        }
-      });
-
-      gapData.push(dataPoint);
-    });
-
-    return gapData;
-  }, [rawData, activeTab, selectedSTTModels]);
-
-  const getGapData = useCallback(
-    (): TimelineDataPoint[] => gapDataMemo,
-    [gapDataMemo]
   );
 
   // ─── Functions using SQL-aggregated modelStats ───
@@ -701,19 +631,6 @@ export function useChartData({
     );
   }, [getCurrentTimeWindow, getTimelineData]);
 
-  const getWindowedGapData = useCallback((): TimelineDataPoint[] => {
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const fullData = getGapData();
-
-    const buffer = 30 * 60 * 1000;
-    const extendedStart = windowStart - buffer;
-    const extendedEnd = windowEnd + buffer;
-
-    return fullData.filter(
-      (item) => item.timestamp >= extendedStart && item.timestamp <= extendedEnd
-    );
-  }, [getCurrentTimeWindow, getGapData]);
-
   /** Models that have at least one plotted point in the current timeline window. */
   const getModelsWithTimelineData = useCallback((): string[] => {
     const selectedModels =
@@ -737,70 +654,10 @@ export function useChartData({
     getTimelineData,
   ]);
 
-  /** Models that have at least one gap point in the current performance-delta window. */
-  const getModelsWithGapData = useCallback((): string[] => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const windowed = getGapData().filter(
-      (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
-    );
-    return selectedModels.filter((model) =>
-      windowed.some(
-        (point) =>
-          point[`${model}_gap`] !== undefined && point[`${model}_gap`] !== null
-      )
-    );
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getCurrentTimeWindow, getGapData]);
-
-  const sttRankingDataMemo = useMemo(() => {
-    if (activeTab !== "stt" || selectedSTTModels.length === 0) {
-      return [];
-    }
-
-    const heatmapData = activeTab === "stt" ? getModelHeatmapData() : [];
-
-    if (heatmapData.length === 0) {
-      return [];
-    }
-
-    const fastestModel = [...heatmapData].sort(
-      (a, b) => a.latencyP50 - b.latencyP50
-    )[0];
-
-    if (!fastestModel) return [];
-
-    const rankingData = heatmapData.map((modelData) => ({
-      model: modelData.model,
-      provider: getProviderForModel(modelData.model),
-      p25Delta: modelData.latencyP25 - fastestModel.latencyP25,
-      p50Delta: modelData.latencyP50 - fastestModel.latencyP50,
-      p75Delta: modelData.latencyP75 - fastestModel.latencyP75
-    }));
-
-    rankingData.sort((a, b) => a.p50Delta - b.p50Delta);
-
-    return rankingData.map((stat, index) => ({
-      position: index + 1,
-      model: stat.model,
-      provider: stat.provider,
-      // Absolute median latency (ms); raw STT values are in seconds.
-      latencyMs: (getStat(stat.model, "TTFT")?.p50 ?? 0) * 1000,
-      p25Delta: stat.p25Delta,
-      p50Delta: stat.p50Delta,
-      p75Delta: stat.p75Delta,
-      isFirst: index === 0
-    }));
-  }, [activeTab, selectedSTTModels, getModelHeatmapData, getProviderForModel, getStat]);
-
-  const getSTTRankingData = useCallback(
-    () => sttRankingDataMemo,
-    [sttRankingDataMemo]
-  );
-
   return {
     formatChartLabel,
     getProviderForModel,
+    getStat,
     getCurrentData,
     getTimelineData,
     getViolinData,
@@ -808,14 +665,10 @@ export function useChartData({
     getModelHeatmapData,
     getTTSHeatmapData,
     getWERBarData,
-    getGapData,
     getFullTimeRange,
     getCurrentTimeWindow,
     getTimelineTicks,
     getWindowedTimelineData,
-    getWindowedGapData,
-    getModelsWithTimelineData,
-    getModelsWithGapData,
-    getSTTRankingData
+    getModelsWithTimelineData
   };
 }
