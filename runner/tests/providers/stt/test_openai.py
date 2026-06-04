@@ -289,6 +289,76 @@ async def test_openai_in_stream_error_event(
     assert result.complete_transcript is None
 
 
+class _RecvFailsSendBlocksWebSocket:
+    """Handshake succeeds, the receiver reports a failure, and the sender never ends."""
+
+    def __init__(self, ready_events: list[dict[str, Any]], fail_event: dict[str, Any]) -> None:
+        self._ready_events = list(ready_events)
+        self._fail_events = [fail_event]
+        self._never = asyncio.Event()
+        self._sent: list[Any] = []
+
+    async def __aenter__(self) -> _RecvFailsSendBlocksWebSocket:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+    async def send(self, msg: bytes | str) -> None:
+        self._sent.append(msg)
+        if isinstance(msg, str) and "input_audio_buffer.append" in msg:
+            await self._never.wait()  # sender blocks until cancelled
+
+    async def recv(self) -> str:
+        if self._ready_events:
+            return json.dumps(self._ready_events.pop(0))
+        await self._never.wait()
+        raise AssertionError("unreachable")
+
+    def __aiter__(self) -> _RecvFailsSendBlocksWebSocket:
+        return self
+
+    async def __anext__(self) -> str:
+        if self._fail_events:
+            return json.dumps(self._fail_events.pop(0))
+        await self._never.wait()
+        raise AssertionError("unreachable")
+
+
+@pytest.mark.asyncio
+async def test_openai_transcription_failed_aborts_sender_without_hang(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A failed event cancels the still-running sender instead of awaiting the full clip."""
+    provider = OpenAISTTProvider(api_key=fake_api_key)
+    ws = _RecvFailsSendBlocksWebSocket(
+        [{"type": "session.updated", "session": {"type": "transcription"}}],
+        {
+            "type": "conversation.item.input_audio_transcription.failed",
+            "error": {"message": "audio too short"},
+        },
+    )
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("coval_bench.providers.stt.openai.ws_client.connect", return_value=cm):
+        result = await asyncio.wait_for(
+            provider.measure_ttft(
+                audio_data=audio_pcm_bytes,
+                channels=1,
+                sample_width=2,
+                sample_rate=16000,
+                realtime_resolution=0.5,
+            ),
+            timeout=2.0,
+        )
+
+    assert result.error is not None
+    assert "audio too short" in result.error
+    assert result.complete_transcript is None
+
+
 @pytest.mark.asyncio
 async def test_openai_session_ready_timeout_fires(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes

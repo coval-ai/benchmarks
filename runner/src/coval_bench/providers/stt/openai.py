@@ -43,6 +43,12 @@ _INPUT_SAMPLE_RATE = 24000
 _READY_TIMEOUT_S = 30.0
 _RECV_TIMEOUT_S = 10.0
 
+signal.resample_poly(np.zeros(8, dtype=np.float32), up=3, down=2)
+
+
+class _TranscriptionAborted(Exception):
+    pass
+
 
 class OpenAISTTProvider(STTProvider):
     """OpenAI Realtime API STT provider (gpt-realtime-whisper)."""
@@ -121,7 +127,8 @@ class OpenAISTTProvider(STTProvider):
 
         except Exception as exc:
             logger.exception("openai measure_ttft failed", error=str(exc))
-            result.error = str(exc)
+            if result.error is None:
+                result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
         return result
@@ -242,12 +249,14 @@ class OpenAISTTProvider(STTProvider):
                     result.error = str(
                         event.get("error", {}).get("message", "OpenAI transcription failed")
                     )
-                    break
+                    raise _TranscriptionAborted
 
                 if event_type == "error":
                     result.error = str(event.get("error", {}).get("message", "OpenAI error"))
-                    break
+                    raise _TranscriptionAborted
 
+        except _TranscriptionAborted:
+            raise
         except Exception as exc:
             logger.exception("openai receive error", error=str(exc))
             if result.error is None:
