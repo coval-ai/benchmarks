@@ -38,7 +38,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       if (containerRef.current) {
         const containerWidth = containerRef.current.offsetWidth;
         setDimensions({
-          width: Math.max(400, containerWidth - 32),
+          width: Math.max(400, containerWidth),
           height: height
         });
       } else {
@@ -112,7 +112,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
 
-    const margin = { top: 20, right: 30, bottom: 80, left: 60 };
+    const margin = { top: 20, right: 12, bottom: 80, left: 50 };
     const chartWidth = dimensions.width - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
 
@@ -124,7 +124,8 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       .scaleBand()
       .domain(data.data.map((d) => d.model))
       .range([0, chartWidth])
-      .padding(0.2);
+      .paddingInner(0.2)
+      .paddingOuter(0);
 
     const yScale = d3
       .scaleLinear()

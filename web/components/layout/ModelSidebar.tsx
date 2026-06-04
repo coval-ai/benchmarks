@@ -87,15 +87,29 @@ const ModelSidebar: React.FC = () => {
                         key={model}
                         className="flex items-center gap-2 py-1.5 px-2 rounded-lg text-xs cursor-pointer text-text-tertiary"
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => onToggleModelSelection(model)}
-                          aria-label={`${
-                            checked ? "Deselect" : "Select"
-                          } ${model} model`}
-                          className="h-3.5 w-3.5 shrink-0 rounded accent-text-primary cursor-pointer"
-                        />
+                        <span className="relative inline-flex h-3.5 w-3.5 shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => onToggleModelSelection(model)}
+                            aria-label={`${
+                              checked ? "Deselect" : "Select"
+                            } ${model} model`}
+                            className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] border border-text-tertiary bg-transparent"
+                          />
+                          <svg
+                            aria-hidden
+                            viewBox="0 0 14 14"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 text-text-primary peer-checked:block"
+                          >
+                            <path d="M3.5 7.5l2.5 2.5 4.5-5" />
+                          </svg>
+                        </span>
                         <span
                           className={`truncate text-xs leading-tight ${
                             checked ? "text-text-primary" : ""

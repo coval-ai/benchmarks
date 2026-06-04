@@ -30,20 +30,7 @@ const DashboardFooter: React.FC = () => {
       <div aria-hidden className="footer-noise" />
 
       {/* .footer-inner */}
-      <div className="relative z-[1] flex w-full flex-1 flex-col px-4 py-8 md:px-6">
-        {/* CTA — centered in the space above the links */}
-        <div className="flex flex-1 items-center justify-center py-6">
-          <p className="text-center text-lg text-[#ccc] sm:text-xl">
-            For questions or feedback, contact{" "}
-            <a
-              href="mailto:henry@coval.dev"
-              className="text-[#f2f1ee] transition-colors duration-150 hover:text-[#ccc]"
-            >
-              henry@coval.dev
-            </a>
-          </p>
-        </div>
-
+      <div className="relative z-[1] flex w-full flex-1 flex-col justify-center px-4 py-8 md:px-6">
         {/* .footer-bottom */}
         <div className="flex flex-col items-start gap-3">
           <span className="font-sans text-lg font-medium tracking-wide text-[#f2f1ee]">
