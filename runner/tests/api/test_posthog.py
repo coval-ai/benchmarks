@@ -62,18 +62,18 @@ async def test_disabled_builds_no_client(
 @pytest.mark.parametrize(
     ("path", "params", "event", "required_keys"),
     [
-        ("/v1/providers", {}, "providers listed", {"stt_provider_count", "tts_provider_count"}),
-        ("/v1/runs", {}, "runs listed", {"limit", "run_count"}),
+        ("/v1/providers", {}, "providers_listed", {"stt_provider_count", "tts_provider_count"}),
+        ("/v1/runs", {}, "runs_listed", {"limit", "run_count"}),
         (
             "/v1/results",
             {"benchmark": "STT"},
-            "results queried",
+            "results_queried",
             {"benchmark", "result_count", "limit"},
         ),
         (
             "/v1/leaderboard",
             {"metric": "WER", "benchmark": "STT"},
-            "leaderboard queried",
+            "leaderboard_queried",
             {"metric", "window", "entry_count"},
         ),
     ],

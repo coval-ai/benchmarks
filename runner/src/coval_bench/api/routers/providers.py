@@ -94,7 +94,7 @@ async def get_providers(
     response = _describe()
     capture_api_event(
         posthog_client,
-        "providers listed",
+        "providers_listed",
         {
             "stt_provider_count": len(response.stt),
             "tts_provider_count": len(response.tts),

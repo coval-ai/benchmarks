@@ -67,7 +67,7 @@ async def list_runs(
         next_before = min(r.id for r in runs)
     capture_api_event(
         posthog_client,
-        "runs listed",
+        "runs_listed",
         {
             "limit": limit,
             "has_cursor": before is not None,

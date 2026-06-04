@@ -220,7 +220,7 @@ async def list_results(
     results = [ResultOut.model_validate(r) for r in result_rows]
     capture_api_event(
         posthog_client,
-        "results queried",
+        "results_queried",
         {
             "provider": provider,
             "benchmark": benchmark,

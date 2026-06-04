@@ -852,7 +852,7 @@ async def run_benchmarks(
             )
             _emit_posthog(
                 posthog_client,
-                "benchmark run completed",
+                "benchmark_run_completed",
                 {
                     "status": str(final_status),
                     "total_results": total_results,
@@ -905,7 +905,7 @@ async def run_benchmarks(
             )
             _emit_posthog(
                 posthog_client,
-                "benchmark run completed",
+                "benchmark_run_completed",
                 {
                     "status": str(RunStatus.PARTIAL),
                     "total_results": total_results,
@@ -951,7 +951,7 @@ async def run_benchmarks(
                 )
             _emit_posthog(
                 posthog_client,
-                "benchmark run failed",
+                "benchmark_run_failed",
                 {
                     "benchmark_kind": benchmark_kind,
                     "smoke": smoke,

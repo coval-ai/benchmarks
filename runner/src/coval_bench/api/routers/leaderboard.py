@@ -128,7 +128,7 @@ async def get_leaderboard(
     entries = [LeaderboardEntry.model_validate(r) for r in entry_rows]
     capture_api_event(
         posthog_client,
-        "leaderboard queried",
+        "leaderboard_queried",
         {
             "metric": metric,
             "benchmark": benchmark,

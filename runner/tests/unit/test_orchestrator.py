@@ -1693,7 +1693,7 @@ async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> 
 
     assert summary.status == str(RunStatus.SUCCEEDED)
     fake.capture.assert_called_once()
-    assert fake.capture.call_args.args[0] == "benchmark run completed"
+    assert fake.capture.call_args.args[0] == "benchmark_run_completed"
     assert fake.capture.call_args.kwargs["distinct_id"] == "coval-bench-runner"
     properties = fake.capture.call_args.kwargs["properties"]
     assert properties["status"] == str(RunStatus.SUCCEEDED)
@@ -1759,7 +1759,7 @@ async def test_posthog_failed_event(settings: Settings) -> None:
         )
 
     fake.capture.assert_called_once()
-    assert fake.capture.call_args.args[0] == "benchmark run failed"
+    assert fake.capture.call_args.args[0] == "benchmark_run_failed"
     assert fake.capture.call_args.kwargs["properties"]["$process_person_profile"] is False
     fake.flush.assert_called_once()
 
