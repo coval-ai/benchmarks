@@ -51,6 +51,7 @@ class ResultOut(BaseModel):
     metric_units: str | None
     audio_filename: str | None
     created_at: datetime
+    scheduled_at: datetime
     status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
 
     model_config = ConfigDict(from_attributes=True)

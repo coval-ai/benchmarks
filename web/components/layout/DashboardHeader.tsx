@@ -4,108 +4,68 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname } from "next/navigation";
-import React from "react";
-import { ThemeToggle } from "@/components/ui/ThemeToggle";
+import React, { useState } from "react";
+import GlobalNav from "@/components/layout/GlobalNav";
 
+// Benchmark sections, shown in the secondary nav beneath the global coval.ai nav.
+const SECTIONS = [
+  { href: "/tts", label: "Text-to-Speech", short: "TTS" },
+  { href: "/stt", label: "Speech-to-Text", short: "STT" },
+  { href: "/playground", label: "Playground", short: "Playground" }
+];
 
 const DashboardHeader: React.FC = () => {
   const pathname = usePathname();
-  const isTTS = pathname === "/tts";
-  const isSTT = pathname === "/stt";
-  const isPlayground = pathname === "/playground";
+  // True while the global nav's full-screen mobile menu is open — used to hide
+  // the secondary nav's tabs so they don't paint over the overlay.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 h-16 bg-surface-overlay backdrop-blur-xl border-b border-border-primary">
-      <div className="flex items-center justify-between h-full px-6">
-        {/* Logo - Different sizes for mobile/desktop */}
-        <div className="flex items-center">
-          <a
-            href="https://coval.dev"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:opacity-80 transition-opacity"
-          >
-            <Image
-              src="/Coval.webp"
-              alt="Coval"
-              width={120}
-              height={32}
-              priority
-              style={{ width: "auto", height: "auto" }}
-              className="h-8 w-auto hidden md:block dark:invert-0 invert"
-            />
-            <Image
-              src="/Coval.webp"
-              alt="Coval"
-              width={90}
-              height={24}
-              priority
-              style={{ width: "auto", height: "auto" }}
-              className="h-6 w-auto md:hidden dark:invert-0 invert"
-            />
-          </a>
-        </div>
+    <>
+      <GlobalNav onMobileOpenChange={setMobileNavOpen} />
 
-        <div className="flex-1 flex justify-start px-4 md:px-20">
-          <div className="relative flex space-x-4 md:space-x-8">
-            {/* TTS Link */}
-            <Link
-              href="/tts"
-              aria-label="Switch to Text-to-Speech view"
-              className="relative px-2 md:px-3 py-2 text-text-primary font-light tracking-wide transition-all duration-300 ease-out hover:text-text-secondary text-xs md:text-sm"
-            >
-              <span className="md:hidden">TTS</span>
-              <span className="hidden md:inline">Text-to-Speech</span>
-              <div
-                className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-500 ease-out ${
-                  isTTS ? "w-full opacity-100" : "w-0 opacity-0"
+      {/* Secondary nav — in-app benchmark navigation. Sits flush under the
+          60px global nav. Hidden on mobile while the full-screen menu is open. */}
+      <nav
+        aria-label="Benchmark sections"
+        className={`fixed inset-x-0 top-[60px] z-40 h-12 border-b border-border-primary bg-white ${
+          mobileNavOpen ? "max-lg:hidden" : ""
+        }`}
+      >
+        {/* Anchored to the full-width nav (not the centered container) so it
+            always lines up with the logo's left margin, like the global nav. */}
+        <span className="absolute left-4 top-1/2 hidden -translate-y-1/2 font-mono text-xs uppercase tracking-wider text-text-tertiary sm:inline md:left-6">
+          Voice Model Benchmarks
+        </span>
+        <div className="absolute left-1/2 top-0 flex h-full -translate-x-1/2 items-center gap-1 px-4 md:px-6">
+          {SECTIONS.map((section) => {
+            const active = pathname === section.href;
+            return (
+              <Link
+                key={section.href}
+                href={section.href}
+                aria-current={active ? "page" : undefined}
+                aria-label={section.label}
+                className={`relative flex h-full items-center px-3 text-sm tracking-wide transition-colors ${
+                  active
+                    ? "text-text-primary"
+                    : "text-text-secondary hover:text-text-primary"
                 }`}
-                style={{ transformOrigin: "left center" }}
-              />
-            </Link>
-
-            {/* STT Link */}
-            <Link
-              href="/stt"
-              aria-label="Switch to Speech-to-Text view"
-              className="relative px-2 md:px-3 py-2 text-text-primary font-light tracking-wide transition-all duration-300 ease-out hover:text-text-secondary text-xs md:text-sm"
-            >
-              <span className="md:hidden">STT</span>
-              <span className="hidden md:inline">Speech-to-Text</span>
-              <div
-                className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-500 ease-out ${
-                  isSTT ? "w-full opacity-100" : "w-0 opacity-0"
-                }`}
-                style={{ transformOrigin: "left center" }}
-              />
-            </Link>
-
-            {/* Playground Link */}
-            <Link
-              href="/playground"
-              aria-current={isPlayground ? "page" : undefined}
-              aria-label="Switch to Playground"
-              className="relative px-2 md:px-3 py-2 text-text-primary font-light tracking-wide transition-all duration-300 ease-out hover:text-text-secondary text-xs md:text-sm"
-            >
-              Playground
-              <div
-                className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-500 ease-out ${
-                  isPlayground ? "w-full opacity-100" : "w-0 opacity-0"
-                }`}
-                style={{ transformOrigin: "left center" }}
-              />
-            </Link>
-          </div>
+              >
+                <span className="sm:hidden">{section.short}</span>
+                <span className="hidden sm:inline">{section.label}</span>
+                <span
+                  className={`absolute bottom-0 left-0 h-0.5 bg-text-primary transition-all duration-300 ease-out ${
+                    active ? "w-full opacity-100" : "w-0 opacity-0"
+                  }`}
+                />
+              </Link>
+            );
+          })}
         </div>
-
-        {/* Right Side - Theme Toggle */}
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-        </div>
-      </div>
-    </div>
+      </nav>
+    </>
   );
 };
 

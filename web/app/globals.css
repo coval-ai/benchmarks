@@ -1,107 +1,80 @@
 @import "tailwindcss";
 
+/* Keep the .dark variant scoped to a .dark ancestor (which no longer exists)
+   so the stray `dark:` utilities left in components never activate via the OS
+   prefers-color-scheme fallback. The dashboard is light-only (coval.ai cream). */
 @custom-variant dark (&:is(.dark *));
 
-/* Light mode (default) */
+/* coval.ai cream palette — single light theme. */
 :root {
   /* Surfaces */
-  --color-surface-primary: #FFFFFF;
-  --color-surface-secondary: rgba(243, 244, 246, 0.5);
-  --color-surface-elevated: #F9FAFB;
-  --color-surface-tooltip: #FFFFFF;
-  --color-surface-backdrop: rgba(0, 0, 0, 0.5);
-  --color-surface-overlay: rgba(255, 255, 255, 0.9);
+  --color-surface-primary: #fdfcf8;
+  --color-surface-secondary: #f2f1ee;
+  --color-surface-elevated: #f5f4f0;
+  --color-surface-tooltip: #fdfcf8;
+  --color-surface-backdrop: rgba(10, 10, 10, 0.5);
+  --color-surface-overlay: rgba(242, 241, 238, 0.85);
 
   /* Text */
-  --color-text-primary: #111827;
-  --color-text-secondary: #6B7280;
-  --color-text-tertiary: #9CA3AF;
-  --color-text-on-tooltip: #111827;
-  --color-text-on-tooltip-secondary: #6B7280;
+  --color-text-primary: #0a0a0a;
+  --color-text-secondary: #515151;
+  --color-text-tertiary: #8a8780;
+  --color-text-on-tooltip: #0a0a0a;
+  --color-text-on-tooltip-secondary: #515151;
 
   /* Borders */
-  --color-border-primary: #E5E7EB;
-  --color-border-secondary: #E5E7EB;
+  --color-border-primary: #dddbd4;
+  --color-border-secondary: #e8e6e0;
 
   /* Charts */
-  --color-chart-grid: #E5E7EB;
-  --color-chart-axis-text: #6B7280;
-  --color-chart-label: #111827;
-  --color-chart-median: #111827;
-  --color-chart-box-fill: rgba(0, 0, 0, 0.08);
-  --color-chart-bar-stroke: #D1D5DB;
+  --color-chart-grid: #dddbd4;
+  --color-chart-axis-text: #515151;
+  --color-chart-label: #0a0a0a;
+  --color-chart-median: #0a0a0a;
+  --color-chart-box-fill: rgba(10, 10, 10, 0.08);
+  --color-chart-bar-stroke: #c8c6c2;
 
   /* Interactive */
-  --color-hover-bg: rgba(0, 0, 0, 0.05);
-  --color-selected-bg: rgba(0, 0, 0, 0.08);
-  --color-selected-border: rgba(0, 0, 0, 0.15);
+  --color-hover-bg: rgba(10, 10, 10, 0.05);
+  --color-selected-bg: rgba(10, 10, 10, 0.08);
+  --color-selected-border: rgba(10, 10, 10, 0.15);
 
   /* Toggle */
-  --color-surface-toggle-active: #000000;
-  --color-text-on-toggle-active: #FFFFFF;
-  --color-surface-toggle-inactive: rgba(243, 244, 246, 1);
-  --color-text-on-toggle-inactive: #6B7280;
+  --color-surface-toggle-active: #0a0a0a;
+  --color-text-on-toggle-active: #fdfcf8;
+  --color-surface-toggle-inactive: #e8e6e0;
+  --color-text-on-toggle-inactive: #515151;
 
   /* Spinner */
-  --color-spinner-track: rgba(0, 0, 0, 0.2);
-  --color-spinner-head: #111827;
+  --color-spinner-track: rgba(10, 10, 10, 0.15);
+  --color-spinner-head: #0a0a0a;
 
   /* Screen glow */
-  --color-screen-glow: rgba(0, 0, 0, 0.15);
+  --color-screen-glow: rgba(10, 10, 10, 0.15);
 
-  /* Fonts */
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  /* Brand accents (coval.ai) */
+  --color-accent-rust: #c0401e;
+  --color-accent-teal: #5cb8bf;
+  --color-accent-terracotta: #c06a60;
+  --color-accent-pink: #e8789a;
+  --color-accent-orange: #efa875;
+  --color-accent-sage: #b5c4a8;
+  --color-accent-blue: #a8b8c8;
+  --color-accent-lavender: #a8a0c0;
 
-/* Dark mode */
-.dark {
-  --color-surface-primary: #000000;
-  --color-surface-secondary: rgba(17, 24, 39, 0.2);
-  --color-surface-elevated: #111827;
-  --color-surface-tooltip: #1F2937;
-  --color-surface-backdrop: rgba(0, 0, 0, 0.5);
-  --color-surface-overlay: rgba(0, 0, 0, 0.9);
+  /* Base */
+  --background: #f2f1ee;
+  --foreground: #0a0a0a;
 
-  --color-text-primary: #FFFFFF;
-  --color-text-secondary: #9CA3AF;
-  --color-text-tertiary: #6B7280;
-  --color-text-on-tooltip: #F9FAFB;
-  --color-text-on-tooltip-secondary: #9CA3AF;
-
-  --color-border-primary: rgba(255, 255, 255, 0.1);
-  --color-border-secondary: #1F2937;
-
-  --color-chart-grid: #374151;
-  --color-chart-axis-text: #9CA3AF;
-  --color-chart-label: #F9FAFB;
-  --color-chart-median: #FFFFFF;
-  --color-chart-box-fill: rgba(255, 255, 255, 0.15);
-  --color-chart-bar-stroke: #374151;
-
-  --color-hover-bg: rgba(255, 255, 255, 0.05);
-  --color-selected-bg: rgba(255, 255, 255, 0.12);
-  --color-selected-border: rgba(255, 255, 255, 0.15);
-
-  --color-surface-toggle-active: #FFFFFF;
-  --color-text-on-toggle-active: #000000;
-  --color-surface-toggle-inactive: rgba(17, 24, 39, 1);
-  --color-text-on-toggle-inactive: #9CA3AF;
-
-  --color-spinner-track: rgba(255, 255, 255, 0.2);
-  --color-spinner-head: #FFFFFF;
-
-  --color-screen-glow: rgba(255, 255, 255, 0.6);
-
-  --background: #0a0a0a;
-  --foreground: #ededed;
+  /* Film grain (coval.ai). Tiled fractal-noise SVG; layered via overlays. */
+  --noise-bg: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='5' seed='23' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-montserrat);
-  --font-mono: var(--font-montserrat);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 
   /* Surface colors */
   --color-surface-primary: var(--color-surface-primary);
@@ -133,6 +106,16 @@
   /* Spinner */
   --color-spinner-track: var(--color-spinner-track);
   --color-spinner-head: var(--color-spinner-head);
+
+  /* Brand accents */
+  --color-accent-rust: var(--color-accent-rust);
+  --color-accent-teal: var(--color-accent-teal);
+  --color-accent-terracotta: var(--color-accent-terracotta);
+  --color-accent-pink: var(--color-accent-pink);
+  --color-accent-orange: var(--color-accent-orange);
+  --color-accent-sage: var(--color-accent-sage);
+  --color-accent-blue: var(--color-accent-blue);
+  --color-accent-lavender: var(--color-accent-lavender);
 }
 
 @keyframes screenGlow {
@@ -157,9 +140,9 @@ body.screen-glow::before {
 }
 
 body {
-  background: var(--color-surface-primary);
+  background: var(--background);
   color: var(--color-text-primary);
-  font-family: var(--font-montserrat), "Montserrat", Arial, Helvetica,
+  font-family: var(--font-sans), "PP Mori", system-ui, -apple-system,
     sans-serif;
 }
 
@@ -171,4 +154,41 @@ body {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+/* Subtle global film grain over the cream pages. Fixed overlay that sits below
+   the nav/sidebar (z-50/z-10) but over scrolling content; never intercepts
+   pointer events. */
+.noise-overlay {
+  background-image: var(--noise-bg);
+  background-repeat: repeat;
+  background-size: 200px 200px;
+  opacity: 0.04;
+  mix-blend-mode: multiply;
+}
+
+/* Footer grain — coval.ai's `.footer-noise`: screen-blended, fading in toward
+   the bottom of the dark band. */
+.footer-noise {
+  position: absolute;
+  inset: 0;
+  background-image: var(--noise-bg);
+  background-repeat: repeat;
+  background-size: 256px 256px;
+  opacity: 0.27;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.4) 25%,
+    rgba(0, 0, 0, 1) 60%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.4) 25%,
+    rgba(0, 0, 0, 1) 60%
+  );
 }

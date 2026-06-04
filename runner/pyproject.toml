@@ -18,7 +18,6 @@ dependencies = [
     "anyio>=4.4",
     # Audio
     "soundfile>=0.12",
-    "librosa>=0.10",
     "numpy>=1.26",
     "scipy>=1.11",
     # DB
@@ -33,7 +32,7 @@ dependencies = [
     # TTS provider SDKs
     "openai>=1.40",
     "cartesia>=2",
-    "aiohttp>=3.9",
+    "aiohttp>=3.14.0",
     # Dataset
     "google-cloud-storage>=2.18",
     # WER
@@ -92,10 +91,6 @@ extend-select = ["E", "F", "I", "B", "UP", "SIM", "S", "ANN"]
 strict = true
 python_version = "3.12"
 plugins = ["pydantic.mypy"]
-
-[[tool.mypy.overrides]]
-module = "librosa.*"
-ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "soundfile.*"

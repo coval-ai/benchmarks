@@ -27,6 +27,7 @@ function adaptResult(row: Result): BenchmarkData {
     metric_units: row.metric_units,
     audio_filename: row.audio_filename ?? "",
     timestamp: row.created_at,
+    scheduled_at: (row as { scheduled_at?: string }).scheduled_at ?? row.created_at,
     status: row.status,
     transcript: "",
   };
@@ -35,9 +36,7 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [expandedProviders, setExpandedProviders] = useState<{[key: string]: boolean;}>({});
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
-  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
@@ -89,15 +88,15 @@ export function useDashboardState(page: "tts" | "stt") {
 
   const modelsByProvider = page === "tts" ? ttsModelsByProvider : sttModelsByProvider;
 
-  // Anchor the timeline window to the latest data timestamp, not Date.now().
-  // The data we plot is from a benchmark run that may have finished hours
-  // before the user opens this page; using Date.now() pushes all rendered
-  // points to the far-left edge of a window that ends "now".
+  // Anchor the timeline window to the latest plotted bucket, not Date.now().
+  // Charts plot scheduled_at so every result from one benchmark run shares a
+  // tick; fall back to created_at during API rollout or for legacy rows.
   const latestTimestamp = useMemo<number>(() => {
     if (rawData.length === 0) return Date.now();
     let max = 0;
     for (const item of rawData) {
-      const t = new Date(item.timestamp).getTime();
+      const t = new Date(item.scheduled_at || item.timestamp).getTime();
+      if (Number.isNaN(t)) continue;
       if (t > max) max = t;
     }
     return max > 0 ? max : Date.now();
@@ -144,16 +143,6 @@ export function useDashboardState(page: "tts" | "stt") {
   }, [timelineWindowEnd]);
 
   // Event handlers
-  const toggleProvider = useCallback(
-    (provider: string) => {
-      setExpandedProviders((prev) => ({
-        ...prev,
-        [provider]: !prev[provider],
-      }));
-    },
-    []
-  );
-
   const toggleModelSelection = useCallback(
     (model: string) => {
       setSelectedModels((prev) =>
@@ -226,12 +215,6 @@ export function useDashboardState(page: "tts" | "stt") {
     ) {
       const allModels: string[] = Object.values(modelsByProvider).flat();
       setSelectedModels(allModels);
-
-      const expanded: Record<string, boolean> = {};
-      Object.keys(modelsByProvider).forEach((provider) => {
-        expanded[provider] = true;
-      });
-      setExpandedProviders(expanded);
     }
   }, [modelsByProvider, selectedModels.length]);
 
@@ -276,6 +259,7 @@ export function useDashboardState(page: "tts" | "stt") {
       if (fastestModel) {
         fastestLatencyModel = fastestModel.model;
         fastestLatencyProvider = normalizeSTTProviderName(fastestModel.provider);
+        avgPrimary = fastestModel.latencyMs;
       }
     }
 
@@ -448,13 +432,11 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Derived display values
   const latencyLabel = page === "tts" ? "TTFA" : "TTFT";
-  const pageTitle = page === "tts" ? "TTS Model Comparison" : "STT Model Comparison";
+  const pageTitle = page === "tts" ? "Text to Speech Model Comparisons" : "Speech to Text Model Comparisons";
   const pageSubtitle = page === "tts"
     ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
     : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
-  const sidebarTitle = page === "tts"
-    ? "Select TTS Models to Compare"
-    : "Select STT Models to Compare";
+  const sidebarTitle = "Models to Compare";
   const mobileSheetTitle = page === "tts"
     ? "Text-to-Speech Models"
     : "Speech-to-Text Models";
@@ -485,19 +467,12 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
-    const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyLabel}`;
-    if (page === "stt" && selectedModels.length > 0 && fastestLatencyModel) {
-      return {
-        label,
-        displayValue: normalizeModelName(fastestLatencyModel),
-        subtitle: fastestLatencyProvider
-          ? { detail: normalizeProviderName(fastestLatencyProvider) }
-          : undefined,
-      };
-    }
+    const latencyFullLabel =
+      page === "tts" ? "Time to First Audio" : "Time to First Token";
+    const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyFullLabel}`;
     return {
       label,
-      displayValue: avgPrimary.toFixed(0),
+      displayValue: `${avgPrimary.toFixed(0)} ms`,
       subtitle:
         selectedModels.length > 1 && fastestLatencyModel
           ? {
@@ -511,7 +486,7 @@ export function useDashboardState(page: "tts" | "stt") {
   })();
 
   const secondaryKeyMetric = {
-    label: `${selectedModels.length > 1 ? "Lowest" : "Average"} WER`,
+    label: `${selectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
     displayValue: `${avgSecondary.toFixed(1)}%`,
     subtitle:
       selectedModels.length > 1 && lowestWERModel
@@ -522,6 +497,18 @@ export function useDashboardState(page: "tts" | "stt") {
               : undefined,
           }
         : undefined,
+  };
+
+  const modelsComparedMetric = {
+    label: "Models Compared",
+    displayValue: `${selectedModels.length}`,
+  };
+
+  const providersMetric = {
+    label: "Providers",
+    displayValue: `${
+      new Set(selectedModels.map((model) => parseModelKey(model).provider)).size
+    }`,
   };
 
   return {
@@ -542,6 +529,8 @@ export function useDashboardState(page: "tts" | "stt") {
     // Key metrics
     primaryKeyMetric,
     secondaryKeyMetric,
+    modelsComparedMetric,
+    providersMetric,
 
     // Data loading
     loading,
@@ -550,17 +539,13 @@ export function useDashboardState(page: "tts" | "stt") {
     // Model state
     selectedModels,
     modelsByProvider,
-    expandedProviders,
 
     // UI state
     sidebarCollapsed,
-    mobileSheetOpen,
-    setMobileSheetOpen,
     isMobile,
     chartRefreshKey,
 
     // Actions
-    toggleProvider,
     toggleModelSelection,
     toggleSidebar,
 

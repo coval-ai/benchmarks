@@ -5,10 +5,10 @@
 
 import dynamic from "next/dynamic";
 import { DashboardProvider } from "@/contexts/DashboardContext";
+import { SidebarMenuProvider } from "@/contexts/SidebarMenuContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import PageHeader from "@/components/dashboard/PageHeader";
 import KeyMetrics from "@/components/dashboard/KeyMetrics";
-import DashboardFooter from "@/components/dashboard/DashboardFooter";
 
 // Lazy-load heavy chart components — D3 and Recharts do not support SSR
 const PerformanceDeltaSection = dynamic(
@@ -49,18 +49,19 @@ const HeatmapSection = dynamic(
 export function STTDashboard() {
   return (
     <DashboardProvider page="stt">
-      <DashboardLayout>
-        <PageHeader />
-        <KeyMetrics />
-        <PerformanceDeltaSection />
-        <PerformanceRankings />
-        <TimelineChart />
-        <ViolinSection />
-        <LatencyAccuracySection />
-        <AccuracyBarSection />
-        <HeatmapSection />
-        <DashboardFooter />
-      </DashboardLayout>
+      <SidebarMenuProvider>
+        <DashboardLayout>
+          <PageHeader />
+          <KeyMetrics />
+          <PerformanceDeltaSection />
+          <PerformanceRankings />
+          <TimelineChart />
+          <ViolinSection />
+          <LatencyAccuracySection />
+          <AccuracyBarSection />
+          <HeatmapSection />
+        </DashboardLayout>
+      </SidebarMenuProvider>
     </DashboardProvider>
   );
 }

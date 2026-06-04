@@ -5,7 +5,7 @@
 
 import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
-import ExpandableDescription from "@/components/shared/ExpandableDescription";
+import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 
 const PerformanceRankings: React.FC = () => {
@@ -13,20 +13,18 @@ const PerformanceRankings: React.FC = () => {
   const rankingData = getSTTRankingData();
 
   return (
-    <div className="mb-16">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h2 className="text-2xl font-light mb-2">Performance Rankings</h2>
-          <ExpandableDescription
-            description={{
-              short: "Latency Delta",
-              detailed:
-                "We measure how far behind each model falls at every individual test run, then calculate the 25th, 50th, and 75th percentiles of those deltas. Models ranked higher offer more reliable performance across various test cases.",
-            }}
-          />
-        </div>
-      </div>
-      <div className="overflow-x-auto">
+    <div className="mb-4">
+      <div className="w-[75vw] mx-auto border border-border-secondary rounded-lg bg-white p-8">
+        <SectionHeader
+          label="Performance Rankings"
+          description={{
+            short: "Latency Delta",
+            detailed:
+              "We measure how far behind each model falls at every individual test run, then calculate the 25th, 50th, and 75th percentiles of those deltas. Models ranked higher offer more reliable performance across various test cases.",
+          }}
+          stat={{ label: "Models Ranked", value: `${rankingData.length}` }}
+        />
+        <div className="overflow-x-auto">
         <div className="min-w-full">
           <div className="grid grid-cols-6 gap-2 md:gap-6 px-2 md:px-4 py-3 text-[10px] md:text-xs font-medium text-text-secondary uppercase tracking-wider border-b border-border-secondary">
             <div>POS.</div>
@@ -76,6 +74,7 @@ const PerformanceRankings: React.FC = () => {
               No STT models selected
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

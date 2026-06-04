@@ -1,7 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
 const N = 44;
 const W = 200;
@@ -79,14 +78,8 @@ type Props = {
  * Triangle pulse: animates only while `recording` is true; decays when stopped.
  */
 export function SttTrianglePulseCanvas({ className, recording }: Props) {
-  const { resolvedTheme } = useTheme();
-  const lightBarsRef = useRef(false);
-  lightBarsRef.current = resolvedTheme === "light";
-
-  const [canvasThemeEpoch, setCanvasThemeEpoch] = useState(0);
-  useEffect(() => {
-    setCanvasThemeEpoch((n) => n + 1);
-  }, [resolvedTheme]);
+  // Light-only theme (coval.ai cream); bars always use the light treatment.
+  const lightBarsRef = useRef(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const recordingRef = useRef(recording);
@@ -258,7 +251,7 @@ export function SttTrianglePulseCanvas({ className, recording }: Props) {
       diskProbe.remove();
       loopRunning = false;
     };
-  }, [canvasThemeEpoch]);
+  }, []);
 
   useEffect(() => {
     recordingRef.current = recording;
