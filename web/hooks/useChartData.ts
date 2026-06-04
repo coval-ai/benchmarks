@@ -419,6 +419,51 @@ export function useChartData({
   // ─── Functions using SQL-aggregated modelStats ───
 
   // STT heatmap still needs raw data for per-timestamp delta calculation
+  // Per-model latency series (timestamp → averaged value) for the STT model
+  // heatmap — the heavy scan, computed once per dataset.
+  const heatmapAvgByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    const acc: Record<
+      string,
+      { [key: number]: { total: number; count: number } }
+    > = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== latencyMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
+
+      const itemKey = toModelKey(item.provider, item.model);
+      const timestamp = new Date(item.scheduled_at).getTime();
+      const latencyValue =
+        activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
+
+      if (!acc[itemKey]) {
+        acc[itemKey] = {};
+      }
+      const modelAcc = acc[itemKey];
+      if (!modelAcc[timestamp]) {
+        modelAcc[timestamp] = { total: 0, count: 0 };
+      }
+      const bucket = modelAcc[timestamp];
+      if (bucket) {
+        bucket.total += latencyValue;
+        bucket.count += 1;
+      }
+    });
+
+    const byModel: Record<string, Record<number, number>> = {};
+    Object.entries(acc).forEach(([model, tsMap]) => {
+      const series: Record<number, number> = {};
+      Object.entries(tsMap).forEach(([timestamp, stats]) => {
+        series[Number(timestamp)] = stats.total / stats.count;
+      });
+      byModel[model] = series;
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
   const modelHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -428,47 +473,21 @@ export function useChartData({
       return [];
     }
 
-    // Delta calculation requires raw per-timestamp data
-    // Group latency data by timestamp across all selected models
-    const timestampGroups: {
-      [key: number]: { [key: string]: { total: number; count: number } };
-    } = {};
-
-    const selectedModelKeys = new Set(selectedModels);
-    rawData.forEach((item) => {
-      const itemKey = toModelKey(item.provider, item.model);
-      if (!selectedModelKeys.has(itemKey)) return;
-      if (item.metric_type !== latencyMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      const timestamp = new Date(item.scheduled_at).getTime();
-      if (!timestampGroups[timestamp]) {
-        timestampGroups[timestamp] = {};
-      }
-      const latencyValue =
-        activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
-      const bucket = timestampGroups[timestamp];
-      if (bucket) {
-        if (!bucket[itemKey]) {
-          bucket[itemKey] = { total: 0, count: 0 };
-        }
-        const modelAcc = bucket[itemKey];
-        if (modelAcc) {
-          modelAcc.total += latencyValue;
-          modelAcc.count += 1;
-        }
-      }
-    });
-
+    // Rebuild per-timestamp averages for the selected models from the
+    // precomputed per-model series (deltas are relative to the fastest
+    // selected model, so this part stays selection-dependent).
     const averagedTimestampGroups: { [key: number]: { [key: string]: number } } = {};
-    Object.entries(timestampGroups).forEach(([bucketTimestamp, perModelStats]) => {
-      const bucket = Number(bucketTimestamp);
-      averagedTimestampGroups[bucket] = {};
-      Object.entries(perModelStats).forEach(([model, stats]) => {
-        const avg = averagedTimestampGroups[bucket];
-        if (avg) {
-          avg[model] = stats.total / stats.count;
+    selectedModels.forEach((model) => {
+      const tsMap = heatmapAvgByModel[model];
+      if (!tsMap) return;
+      Object.entries(tsMap).forEach(([timestamp, avg]) => {
+        const bucket = Number(timestamp);
+        if (!averagedTimestampGroups[bucket]) {
+          averagedTimestampGroups[bucket] = {};
+        }
+        const group = averagedTimestampGroups[bucket];
+        if (group) {
+          group[model] = avg;
         }
       });
     });
@@ -529,7 +548,7 @@ export function useChartData({
         a.model.localeCompare(b.model)
     );
   }, [
-    rawData,
+    heatmapAvgByModel,
     activeTab,
     selectedTTSModels,
     selectedSTTModels,
