@@ -14,7 +14,7 @@ const PerformanceRankings: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="w-[75vw] mx-auto border border-border-secondary rounded-lg bg-white p-8">
+      <div className="border border-border-secondary rounded-lg bg-white p-8">
         <SectionHeader
           label="Performance Rankings"
           description={{

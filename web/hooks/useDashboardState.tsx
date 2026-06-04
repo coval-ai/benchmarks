@@ -36,8 +36,6 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
@@ -153,14 +151,6 @@ export function useDashboardState(page: "tts" | "stt") {
     },
     []
   );
-
-  const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => !prev);
-    // Wait for CSS transition to complete (300ms), then trigger resize
-    setTimeout(() => {
-      window.dispatchEvent(new Event("resize"));
-    }, 300);
-  }, []);
 
   // Heatmap scaling for mobile
   useEffect(() => {
@@ -541,13 +531,10 @@ export function useDashboardState(page: "tts" | "stt") {
     modelsByProvider,
 
     // UI state
-    sidebarCollapsed,
     isMobile,
-    chartRefreshKey,
 
     // Actions
     toggleModelSelection,
-    toggleSidebar,
 
     // Timeline
     isDragging,

@@ -17,7 +17,7 @@ const ModelSidebar: React.FC = () => {
   } = useDashboard();
 
   return (
-    <div className="hidden lg:flex flex-col fixed left-4 top-28 bottom-4 z-10 py-3 w-64">
+    <div className="hidden lg:flex flex-col fixed left-4 top-28 bottom-4 z-10 py-3 w-48">
       {/* Scrollable content area */}
       <div className="flex-1 overflow-y-auto scrollbar-hide">
         {/* Model Selection Content */}

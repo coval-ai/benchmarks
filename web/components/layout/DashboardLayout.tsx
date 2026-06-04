@@ -11,11 +11,7 @@ import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { sidebarCollapsed, loading } = useDashboard();
-
-  // Offset for the content column so the fixed sidebar doesn't overlap it.
-  // The footer is intentionally left full-width (spanning under the sidebar).
-  const columnOffset = sidebarCollapsed ? "lg:ml-20" : "lg:ml-72";
+  const { loading } = useDashboard();
 
   return (
     <div className="min-h-screen bg-background text-text-primary">
@@ -23,26 +19,26 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <MobileModelSheet />
       <ModelSidebar />
 
-      <div
-        className={`transition-all duration-300 pt-28 p-8 pb-24 lg:pb-8 overflow-x-hidden ${columnOffset} ${
-          sidebarCollapsed ? "lg:w-[calc(100vw-5rem)]" : "lg:w-[calc(100vw-18rem)]"
-        }`}
-      >
-        {loading && (
-          <div className="-mx-8 w-screen flex flex-col items-center justify-center min-h-[70vh] lg:-translate-x-9 bg-background text-text-primary">
-            <div className="w-6 h-6 border-[3px] border-spinner-track border-t-spinner-head rounded-full animate-spin" />
-            <h1 className="mt-6 text-base tracking-tight">
-              Loading benchmarks
-            </h1>
-          </div>
-        )}
+      {/* Below 1440px content fills the space right of the sidebar; from 1440px
+          the gutters go symmetric so content centers with the nav and footer. */}
+      <div className="pt-28 p-8 pb-24 lg:pb-8 overflow-x-hidden lg:ml-52 min-[90rem]:mr-52">
+        <div className="max-w-[1400px] mx-auto">
+          {loading && (
+            <div className="flex flex-col items-center justify-center min-h-[70vh] bg-background text-text-primary">
+              <div className="w-6 h-6 border-[3px] border-spinner-track border-t-spinner-head rounded-full animate-spin" />
+              <h1 className="mt-6 text-base tracking-tight">
+                Loading benchmarks
+              </h1>
+            </div>
+          )}
 
-        {!loading && (
-          <>
-            <div className="mb-16"></div>
-            {children}
-          </>
-        )}
+          {!loading && (
+            <>
+              <div className="mb-16"></div>
+              {children}
+            </>
+          )}
+        </div>
       </div>
 
       {!loading && <DashboardFooter />}
