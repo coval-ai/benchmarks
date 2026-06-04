@@ -31,7 +31,7 @@ const KeyMetrics: React.FC = () => {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4 mb-4 w-[75vw] mx-auto">
+    <div className="grid grid-cols-4 gap-4 mb-4">
       {metrics.map((metric, index) => (
         <div
           key={index}

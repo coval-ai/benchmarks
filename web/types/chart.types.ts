@@ -25,7 +25,6 @@ export interface ViolinPlotProps {
   getProviderForModel: (model: string) => string;
   normalizeModelName: (model: string) => string;
   isMobile?: boolean;
-  sidebarCollapsed?: boolean;
 }
 
 export interface TooltipProps {

@@ -8,6 +8,11 @@ import * as d3 from "d3";
 import { ViolinPlotProps } from "@/types/chart.types";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
+const modelFontSize = "10px";
+const providerFontSize = "9px";
+const axisLabelFontSize = "12px";
+const yAxisTickFontSize = "10px";
+
 const ViolinPlot: React.FC<ViolinPlotProps> = ({
   data,
   width = 800,
@@ -15,8 +20,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
   getModelColor,
   getProviderForModel,
   normalizeModelName,
-  isMobile = false,
-  sidebarCollapsed = true
+  isMobile = false
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -25,12 +29,6 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
     height
   });
   const themeColors = useThemeColors();
-
-  // Define font sizes based on sidebar state
-  const modelFontSize = sidebarCollapsed ? "12px" : "10px";
-  const providerFontSize = sidebarCollapsed ? "10px" : "9px";
-  const axisLabelFontSize = sidebarCollapsed ? "14px" : "12px";
-  const yAxisTickFontSize = sidebarCollapsed ? "12px" : "10px";
 
   // Handle responsive sizing
   useEffect(() => {
@@ -55,7 +53,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
     handleResize();
     window.addEventListener("resize", handleResize);
 
-    // Also listen for sidebar changes by checking container size periodically
+    // Track container size changes that happen without a window resize
     const resizeObserver = new ResizeObserver(handleResize);
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
@@ -464,7 +462,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
           g.select(".violin-tooltip").remove();
         });
     });
-  }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, sidebarCollapsed, modelFontSize, providerFontSize, axisLabelFontSize, yAxisTickFontSize, themeColors]);
+  }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
 
   if (data.data.length === 0) {
     return (
