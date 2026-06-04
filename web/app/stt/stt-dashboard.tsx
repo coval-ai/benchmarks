@@ -57,8 +57,8 @@ export function STTDashboard() {
           <PerformanceRankings />
           <TimelineChart />
           <ViolinSection />
-          <LatencyAccuracySection />
           <AccuracyBarSection />
+          <LatencyAccuracySection />
           <HeatmapSection />
         </DashboardLayout>
       </SidebarMenuProvider>

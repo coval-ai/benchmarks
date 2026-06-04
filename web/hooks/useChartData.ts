@@ -10,7 +10,6 @@ import type {
   ModelStats,
   TimelineDataPoint,
   ScatterDataPoint,
-  ScatterDataResult,
   ViolinPlotData,
   ViolinDataPoint,
   ModelHeatmapData,
@@ -301,14 +300,14 @@ export function useChartData({
   );
 
   // Scatter needs paired per-run values — cannot use pre-aggregated stats
-  const scatterDataMemo = useMemo<ScatterDataResult>(() => {
+  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
     const yMetric = "WER";
 
     if (selectedModels.length === 0) {
-      return { points: [], p99X: 0, outlierCount: 0 };
+      return [];
     }
 
     const benchmarkGroups: {
@@ -333,40 +332,53 @@ export function useChartData({
       }
     });
 
-    const scatterPoints: ScatterDataPoint[] = [];
+    // One averaged point per model: sum paired run values, divide by run count
+    const modelAggregates: {
+      [model: string]: ScatterDataPoint;
+    } = {};
 
     Object.values(benchmarkGroups).forEach((group) => {
       const xData = group[xMetric]?.[0];
       const yData = group[yMetric]?.[0];
 
       if (xData && yData) {
-        scatterPoints.push({
-          x:
-            activeTab === "tts"
-              ? xData.metric_value ?? 0
-              : (xData.metric_value ?? 0) * 1000,
-          y: yData.metric_value ?? 0,
-          model: toModelKey(xData.provider, xData.model),
-          benchmark: xData.benchmark,
-          provider:
-            activeTab === "stt"
-              ? normalizeSTTProviderName(xData.provider)
-              : normalizeTTSProviderName(xData.provider)
-        });
+        const model = toModelKey(xData.provider, xData.model);
+        const x =
+          activeTab === "tts"
+            ? xData.metric_value ?? 0
+            : (xData.metric_value ?? 0) * 1000;
+        const y = yData.metric_value ?? 0;
+
+        const agg = modelAggregates[model];
+        if (agg) {
+          agg.x += x;
+          agg.y += y;
+          agg.count += 1;
+        } else {
+          modelAggregates[model] = {
+            x,
+            y,
+            model,
+            benchmark: xData.benchmark,
+            provider:
+              activeTab === "stt"
+                ? normalizeSTTProviderName(xData.provider)
+                : normalizeTTSProviderName(xData.provider),
+            count: 1
+          };
+        }
       }
     });
 
-    const xValues = scatterPoints.map((point) => point.x);
-    const sortedX = xValues.sort((a, b) => a - b);
-    const p99Index = Math.floor(sortedX.length * 0.99);
-    const p99X = sortedX.length > 0 ? (sortedX[p99Index] ?? 0) : 0;
-    const outlierCount = xValues.filter((val) => val > p99X).length;
-
-    return { points: scatterPoints, p99X, outlierCount };
+    return Object.values(modelAggregates).map((agg) => ({
+      ...agg,
+      x: agg.x / agg.count,
+      y: agg.y / agg.count
+    }));
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getScatterData = useCallback(
-    (): ScatterDataResult => scatterDataMemo,
+    (): ScatterDataPoint[] => scatterDataMemo,
     [scatterDataMemo]
   );
 

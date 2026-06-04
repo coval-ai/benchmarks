@@ -404,10 +404,7 @@ export function useDashboardState(page: "tts" | "stt") {
   }
 
   // Get computed data
-  const scatterDataResult = chartData.getScatterData();
-  const scatterData = scatterDataResult.points;
-  const scatterP99X = scatterDataResult.p99X;
-  const scatterOutlierCount = scatterDataResult.outlierCount;
+  const scatterData = chartData.getScatterData();
   const heatmapData = chartData.getModelHeatmapData();
   const werBarData = chartData.getWERBarData();
 
@@ -554,8 +551,6 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // Computed chart data
     scatterData,
-    scatterP99X,
-    scatterOutlierCount,
     heatmapDisplayData,
     werBarDataWithColors,
 

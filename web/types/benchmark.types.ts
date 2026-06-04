@@ -34,6 +34,7 @@ export interface ScatterDataPoint {
   model: string;
   benchmark: string;
   provider: string;
+  count: number;
 }
 
 export interface ModelHeatmapData {
@@ -44,12 +45,6 @@ export interface ModelHeatmapData {
   latencyIQR: number;
   avgWER: number;
   werStdDev: number;
-}
-
-export interface ScatterDataResult {
-  points: ScatterDataPoint[];
-  p99X: number;
-  outlierCount: number;
 }
 
 export interface BarDataPoint {
