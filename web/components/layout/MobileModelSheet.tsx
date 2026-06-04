@@ -85,7 +85,7 @@ const MobileModelSheet: React.FC = () => {
                             : "text-text-tertiary hover:text-text-secondary hover:bg-hover-bg"
                         }`}
                       >
-                        <span className="font-mono text-sm">
+                        <span className="text-sm">
                           {normalizeModelName(model)}
                         </span>
                       </button>

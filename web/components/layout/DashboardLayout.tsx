@@ -9,40 +9,26 @@ import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
+import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { sidebarCollapsed, loading } = useDashboard();
-
-  // Offset for the content column so the fixed sidebar doesn't overlap it.
-  // The footer is intentionally left full-width (spanning under the sidebar).
-  const columnOffset = sidebarCollapsed ? "lg:ml-20" : "lg:ml-72";
+  const { loading, benchmarkTitle } = useDashboard();
 
   return (
-    <div className="min-h-screen bg-background text-text-primary">
+    <div className="relative min-h-screen overflow-hidden bg-background text-text-primary">
       <DashboardHeader />
       <MobileModelSheet />
       <ModelSidebar />
 
-      <div
-        className={`transition-all duration-300 pt-28 p-8 pb-24 lg:pb-8 overflow-x-hidden ${columnOffset} ${
-          sidebarCollapsed ? "lg:w-[calc(100vw-5rem)]" : "lg:w-[calc(100vw-18rem)]"
-        }`}
-      >
-        {loading && (
-          <div className="-mx-8 w-screen flex flex-col items-center justify-center min-h-[70vh] lg:-translate-x-9 bg-background text-text-primary">
-            <div className="w-6 h-6 border-[3px] border-spinner-track border-t-spinner-head rounded-full animate-spin" />
-            <h1 className="mt-6 text-base tracking-tight">
-              Loading benchmarks
-            </h1>
-          </div>
-        )}
+      {/* Content column — centered on the page (under the centered tabs). The
+          18rem side gutters keep its left edge clear of the fixed sidebar
+          (17rem wide) with a 1rem gap. The footer stays full-width. */}
+      <div className="relative z-10 transition-all duration-300 pt-20 p-8 pb-24 lg:pb-8 overflow-x-hidden mx-auto lg:w-[calc(100vw-36rem)]">
+        <h1 className="mb-6 text-2xl font-bold tracking-tight text-text-primary">
+          {benchmarkTitle}
+        </h1>
 
-        {!loading && (
-          <>
-            <div className="mb-16"></div>
-            {children}
-          </>
-        )}
+        {loading ? <DashboardSkeleton /> : children}
       </div>
 
       {!loading && <DashboardFooter />}

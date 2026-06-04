@@ -14,7 +14,7 @@ const PerformanceRankings: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="w-[75vw] mx-auto border border-border-secondary rounded-lg bg-white p-8">
+      <div className="w-full border border-border-secondary rounded-lg bg-white p-8">
         <SectionHeader
           label="Performance Rankings"
           description={{
@@ -51,17 +51,17 @@ const PerformanceRankings: React.FC = () => {
               <div className="text-text-secondary text-[10px] md:text-sm">
                 {row.provider}
               </div>
-              <div className="text-right font-mono text-[10px] md:text-sm">
+              <div className="text-right font-mono text-[8px] md:text-[0.7rem]">
                 {row.isFirst
                   ? "\u2014"
                   : `+${(row.p25Delta / 1000).toFixed(3)}s`}
               </div>
-              <div className="text-right font-mono text-[10px] md:text-sm">
+              <div className="text-right font-mono text-[8px] md:text-[0.7rem]">
                 {row.isFirst
                   ? "\u2014"
                   : `+${(row.p50Delta / 1000).toFixed(3)}s`}
               </div>
-              <div className="text-right font-mono text-[10px] md:text-sm">
+              <div className="text-right font-mono text-[8px] md:text-[0.7rem]">
                 {row.isFirst
                   ? "\u2014"
                   : `+${(row.p75Delta / 1000).toFixed(3)}s`}
