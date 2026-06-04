@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import {
   LineChart,
   Line,
@@ -29,12 +29,9 @@ const TimelineChart: React.FC = () => {
     getWindowedTimelineData,
     getCurrentTimeWindow,
     getTimelineTicks,
-    isDragging,
-    handleMouseDown,
     formatChartLabel,
     getProviderForModel,
   } = useDashboard();
-  const chartRef = useRef<HTMLDivElement>(null);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData();
@@ -79,15 +76,7 @@ const TimelineChart: React.FC = () => {
           }}
         />
 
-        <div
-          ref={chartRef}
-          className="h-96"
-          onMouseDown={handleMouseDown}
-          style={{
-            userSelect: "none",
-            cursor: isDragging ? "grabbing" : "grab"
-          }}
-        >
+        <div className="h-96">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={windowedTimelineData}>
               <XAxis
