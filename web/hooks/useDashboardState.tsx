@@ -36,7 +36,7 @@ function adaptResult(row: Result): BenchmarkData {
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [chartRefreshKey] = useState(0);
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
@@ -436,9 +436,7 @@ export function useDashboardState(page: "tts" | "stt") {
   const pageSubtitle = page === "tts"
     ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
     : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
-  const sidebarTitle = page === "tts"
-    ? "Select TTS Models to Compare"
-    : "Select STT Models to Compare";
+  const sidebarTitle = "Models to Compare";
   const mobileSheetTitle = page === "tts"
     ? "Text-to-Speech Models"
     : "Speech-to-Text Models";
