@@ -185,8 +185,9 @@ const GlobalNav: React.FC<{
           />
         </a>
 
-        {/* Desktop nav groups */}
-        <nav className="hidden items-center gap-1 lg:flex">
+        {/* Desktop nav groups — absolutely centered on the viewport, independent
+            of the logo/CTA widths on either side. */}
+        <nav className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 lg:flex">
           {NAV_GROUPS.map((group) => (
             <DesktopGroup key={group.label} group={group} />
           ))}
