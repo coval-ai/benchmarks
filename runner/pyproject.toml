@@ -38,6 +38,8 @@ dependencies = [
     # WER
     "jiwer>=3.0",
     "whisper-normalizer>=0.0.10",
+    # Analytics
+    "posthog>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -126,6 +128,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "aiohttp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "posthog.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]

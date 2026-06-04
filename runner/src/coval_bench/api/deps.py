@@ -10,9 +10,10 @@ populated during the FastAPI lifespan (see ``app.py``).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
@@ -34,3 +35,8 @@ def get_settings(request: Request) -> Settings:
     """Return the Settings instance from app state."""
     settings: Settings = request.app.state.settings
     return settings
+
+
+def get_posthog(request: Request) -> Posthog | None:
+    """Return the PostHog client from app state, or None if analytics is disabled."""
+    return cast("Posthog | None", request.app.state.posthog)

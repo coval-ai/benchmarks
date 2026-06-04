@@ -15,12 +15,14 @@ and all five routers.
 
 from __future__ import annotations
 
+import atexit
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -47,10 +49,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("api_startup", runner_sha=resolved.runner_sha)
+        posthog_client: Posthog | None = None
+        if not resolved.posthog_disabled and resolved.posthog_project_token:
+            posthog_client = Posthog(
+                resolved.posthog_project_token,
+                host=resolved.posthog_host,
+                enable_exception_autocapture=True,
+            )
+            atexit.register(posthog_client.shutdown)
+        app.state.posthog = posthog_client
         async with lifespan_pool(resolved) as pool:
             app.state.pool = pool
             app.state.settings = resolved
             yield
+        if posthog_client is not None:
+            posthog_client.flush()  # type: ignore[no-untyped-call]
         logger.info("api_shutdown")
 
     app = FastAPI(
