@@ -120,70 +120,86 @@ export function useChartData({
 
   // Memoized result so repeated callers (getFullTimeRange, getWindowedTimelineData,
   // useTimelineWindow) share a single computation per (rawData, tab, selection).
+  // Per-model timeline series (timestamp → averaged value) — the heavy pass,
+  // computed once per dataset so selection only merges precomputed series.
+  const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+
+    const acc: Record<
+      string,
+      { [key: number]: { total: number; count: number } }
+    > = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== primaryMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+
+      const modelKey = toModelKey(item.provider, item.model);
+      const timestamp = new Date(item.scheduled_at).getTime();
+      const value =
+        activeTab === "tts"
+          ? item.metric_value ?? 0
+          : (item.metric_value ?? 0) * 1000;
+
+      if (!acc[modelKey]) {
+        acc[modelKey] = {};
+      }
+      const modelAcc = acc[modelKey];
+      if (!modelAcc[timestamp]) {
+        modelAcc[timestamp] = { total: 0, count: 0 };
+      }
+      const bucket = modelAcc[timestamp];
+      if (bucket) {
+        bucket.total += value;
+        bucket.count += 1;
+      }
+    });
+
+    const byModel: Record<string, Record<number, number>> = {};
+    Object.entries(acc).forEach(([model, tsMap]) => {
+      const series: Record<number, number> = {};
+      Object.entries(tsMap).forEach(([timestamp, stats]) => {
+        series[Number(timestamp)] = stats.total / stats.count;
+      });
+      byModel[model] = series;
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
+  // Timeline rows: merge the selected models' precomputed series into one row
+  // per timestamp (ascending), each with a `${model}_value` column.
   const timelineData = useMemo<TimelineDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
     if (selectedModels.length === 0) {
       return [];
     }
 
-    const selectedModelKeys = new Set(selectedModels);
-    const points = rawData
-      .filter(
-        (item) =>
-          selectedModelKeys.has(toModelKey(item.provider, item.model)) &&
-          item.metric_type === primaryMetric &&
-          INCLUDED_STATUSES.has(item.status)
-      )
-      .map((item) => ({
-        timestamp: new Date(item.scheduled_at).getTime(),
-        value:
-          activeTab === "tts"
-            ? item.metric_value ?? 0
-            : (item.metric_value ?? 0) * 1000,
-        modelKey: toModelKey(item.provider, item.model),
-        benchmark: item.benchmark
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    const timestampGroups: { [key: number]: TimelineDataPoint } = {};
-    const modelValueAccumulator: { [key: number]: { [key: string]: { total: number; count: number } } } = {};
-
-    points.forEach((item) => {
-      if (!timestampGroups[item.timestamp]) {
-        timestampGroups[item.timestamp] = {
-          timestamp: item.timestamp,
-          timestampLabel: new Date(item.timestamp).toISOString()
-        };
-        modelValueAccumulator[item.timestamp] = {};
-      }
-      const bucketAcc = modelValueAccumulator[item.timestamp];
-      if (bucketAcc) {
-        if (!bucketAcc[item.modelKey]) {
-          bucketAcc[item.modelKey] = { total: 0, count: 0 };
-        }
-        const modelAcc = bucketAcc[item.modelKey];
-        if (modelAcc) {
-          modelAcc.total += item.value;
-          modelAcc.count += 1;
-        }
+    const timestampSet = new Set<number>();
+    selectedModels.forEach((model) => {
+      const tsMap = timelineByModel[model];
+      if (tsMap) {
+        Object.keys(tsMap).forEach((ts) => timestampSet.add(Number(ts)));
       }
     });
+    const timestamps = [...timestampSet].sort((a, b) => a - b);
 
-    Object.entries(modelValueAccumulator).forEach(([bucketTimestamp, bucketModelStats]) => {
-      const bucket = Number(bucketTimestamp);
-      Object.entries(bucketModelStats).forEach(([model, stats]) => {
-        const group = timestampGroups[bucket];
-        if (group) {
-          group[`${model}_value`] = stats.total / stats.count;
+    return timestamps.map((timestamp) => {
+      const row: TimelineDataPoint = {
+        timestamp,
+        timestampLabel: new Date(timestamp).toISOString()
+      };
+      selectedModels.forEach((model) => {
+        const value = timelineByModel[model]?.[timestamp];
+        if (value !== undefined) {
+          row[`${model}_value`] = value;
         }
       });
+      return row;
     });
-
-    return Object.values(timestampGroups);
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [timelineByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getTimelineData = useCallback(
     (): TimelineDataPoint[] => timelineData,
