@@ -299,7 +299,8 @@ export function useChartData({
     [violinDataMemo]
   );
 
-  // Scatter needs paired per-run values — cannot use pre-aggregated stats
+  // Pair latency with WER per run, then average per model — pairing restricts
+  // the average to runs that produced both metrics
   const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -318,8 +319,10 @@ export function useChartData({
     rawData.forEach((item) => {
       if (!selectedModelKeys.has(toModelKey(item.provider, item.model))) return;
       if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
 
-      const key = `${item.benchmark}_${item.provider}_${item.model}_${item.timestamp}`;
+      const key = `${item.benchmark}_${item.provider}_${item.model}_${item.voice}_${item.audio_filename}_${item.scheduled_at}`;
       if (!benchmarkGroups[key]) {
         benchmarkGroups[key] = {};
       }
@@ -334,7 +337,13 @@ export function useChartData({
 
     // One averaged point per model: sum paired run values, divide by run count
     const modelAggregates: {
-      [model: string]: ScatterDataPoint;
+      [model: string]: {
+        xSum: number;
+        ySum: number;
+        count: number;
+        benchmark: string;
+        provider: string;
+      };
     } = {};
 
     Object.values(benchmarkGroups).forEach((group) => {
@@ -351,29 +360,31 @@ export function useChartData({
 
         const agg = modelAggregates[model];
         if (agg) {
-          agg.x += x;
-          agg.y += y;
+          agg.xSum += x;
+          agg.ySum += y;
           agg.count += 1;
         } else {
           modelAggregates[model] = {
-            x,
-            y,
-            model,
+            xSum: x,
+            ySum: y,
+            count: 1,
             benchmark: xData.benchmark,
             provider:
               activeTab === "stt"
                 ? normalizeSTTProviderName(xData.provider)
-                : normalizeTTSProviderName(xData.provider),
-            count: 1
+                : normalizeTTSProviderName(xData.provider)
           };
         }
       }
     });
 
-    return Object.values(modelAggregates).map((agg) => ({
-      ...agg,
-      x: agg.x / agg.count,
-      y: agg.y / agg.count
+    return Object.entries(modelAggregates).map(([model, agg]) => ({
+      x: agg.xSum / agg.count,
+      y: agg.ySum / agg.count,
+      model,
+      benchmark: agg.benchmark,
+      provider: agg.provider,
+      count: agg.count
     }));
   }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
 
