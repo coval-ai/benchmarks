@@ -190,7 +190,53 @@ export function useChartData({
     [timelineData]
   );
 
-  // Violin plots need raw values for KDE — cannot use pre-aggregated stats
+  // Per-model violin pieces (values, KDE, quartiles, stats) — the heavy work.
+  // Computed once per dataset (independent of selection) so toggling a model
+  // only reassembles the precomputed pieces instead of re-scanning rawData.
+  const violinByModel = useMemo<Record<string, ViolinDataPoint>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    const modelGroups: { [key: string]: BenchmarkData[] } = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== primaryMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
+
+      const itemKey = toModelKey(item.provider, item.model);
+      if (!modelGroups[itemKey]) {
+        modelGroups[itemKey] = [];
+      }
+      const modelGroup = modelGroups[itemKey];
+      if (modelGroup) {
+        modelGroup.push(item);
+      }
+    });
+
+    const byModel: Record<string, ViolinDataPoint> = {};
+    Object.entries(modelGroups).forEach(([model, items]) => {
+      const values = items.map((item) =>
+        activeTab === "tts"
+          ? item.metric_value ?? 0
+          : (item.metric_value ?? 0) * 1000
+      );
+
+      if (values.length === 0) return;
+
+      byModel[model] = {
+        model,
+        provider: items[0]?.provider ?? "Unknown",
+        values,
+        density: calculateKernelDensity(values),
+        quartiles: calculateQuartiles(values),
+        stats: calculateStats(values)
+      };
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
+  // Violin plot data: gather the selected models' precomputed pieces and
+  // recompute only the pooled summary (axis bounds, whisker cap, outliers).
   const violinDataMemo = useMemo<ViolinPlotData>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -205,55 +251,16 @@ export function useChartData({
       };
     }
 
-    const selectedModelKeys = new Set(selectedModels);
-    const modelGroups: { [key: string]: BenchmarkData[] } = {};
-
-    rawData.forEach((item) => {
-      const itemKey = toModelKey(item.provider, item.model);
-      if (!selectedModelKeys.has(itemKey)) return;
-      if (item.metric_type !== primaryMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      if (!modelGroups[itemKey]) {
-        modelGroups[itemKey] = [];
-      }
-      const modelGroup = modelGroups[itemKey];
-      if (modelGroup) {
-        modelGroup.push(item);
-      }
-    });
-
     const violinData: ViolinDataPoint[] = [];
     let globalMin = Infinity;
     let globalMax = -Infinity;
 
-    Object.entries(modelGroups).forEach(([model, items]) => {
-      const values = items.map((item) =>
-        activeTab === "tts"
-          ? item.metric_value ?? 0
-          : (item.metric_value ?? 0) * 1000
-      );
-
-      if (values.length === 0) return;
-
-      const quartiles = calculateQuartiles(values);
-      const stats = calculateStats(values);
-      const density = calculateKernelDensity(values);
-
-      globalMin = Math.min(globalMin, ...values);
-      globalMax = Math.max(globalMax, ...values);
-
-      const provider = items[0]?.provider ?? "Unknown";
-
-      violinData.push({
-        model,
-        provider,
-        values,
-        density,
-        quartiles,
-        stats
-      });
+    selectedModels.forEach((model) => {
+      const entry = violinByModel[model];
+      if (!entry) return;
+      violinData.push(entry);
+      globalMin = Math.min(globalMin, ...entry.values);
+      globalMax = Math.max(globalMax, ...entry.values);
     });
 
     if (violinData.length === 0) {
@@ -279,7 +286,7 @@ export function useChartData({
       maxUpperWhisker = 0;
     }
 
-    const sortedViolinData = violinData.sort(
+    const sortedViolinData = [...violinData].sort(
       (a, b) => a.quartiles.median - b.quartiles.median
     );
 
@@ -292,7 +299,7 @@ export function useChartData({
       cappedAt: maxUpperWhisker,
       metricType: primaryMetric
     };
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [violinByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getViolinData = useCallback(
     (): ViolinPlotData => violinDataMemo,
