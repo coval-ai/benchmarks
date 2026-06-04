@@ -13,8 +13,8 @@ import ModelSidebar from "@/components/layout/ModelSidebar";
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { sidebarCollapsed, loading } = useDashboard();
 
-  // Offset shared by the content column and the footer so the dark footer band
-  // fills the content width without the fixed sidebar overlapping it.
+  // Offset for the content column so the fixed sidebar doesn't overlap it.
+  // The footer is intentionally left full-width (spanning under the sidebar).
   const columnOffset = sidebarCollapsed ? "lg:ml-20" : "lg:ml-72";
 
   return (
@@ -45,11 +45,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
         )}
       </div>
 
-      {!loading && (
-        <div className={`transition-all duration-300 ${columnOffset}`}>
-          <DashboardFooter />
-        </div>
-      )}
+      {!loading && <DashboardFooter />}
     </div>
   );
 };
