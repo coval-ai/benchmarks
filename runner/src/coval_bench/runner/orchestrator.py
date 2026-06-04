@@ -583,7 +583,7 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
     if client is None:
         return
     try:
-        client.capture("coval-bench-runner", event, properties=properties)
+        client.capture(event, distinct_id="coval-bench-runner", properties=properties)
         client.flush()  # type: ignore[no-untyped-call]
     except Exception:
         _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
@@ -965,3 +965,7 @@ async def run_benchmarks(
                 loop.remove_signal_handler(signal.SIGTERM)
             with contextlib.suppress(Exception):
                 await _close_http_clients()
+            if posthog_client is not None:
+                with contextlib.suppress(Exception):
+                    posthog_client.shutdown()  # type: ignore[no-untyped-call]
+                atexit.unregister(posthog_client.shutdown)

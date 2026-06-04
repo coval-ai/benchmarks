@@ -29,9 +29,10 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
+from posthog import Posthog
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
@@ -1662,7 +1663,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
 @pytest.mark.asyncio
 async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> None:
     """A successful run emits 'benchmark run completed' and flushes."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     settings = settings.model_copy(
         update={"posthog_project_token": "phc_test", "posthog_disabled": False}
     )
@@ -1692,7 +1693,8 @@ async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> 
 
     assert summary.status == str(RunStatus.SUCCEEDED)
     fake.capture.assert_called_once()
-    assert fake.capture.call_args.args[1] == "benchmark run completed"
+    assert fake.capture.call_args.args[0] == "benchmark run completed"
+    assert fake.capture.call_args.kwargs["distinct_id"] == "coval-bench-runner"
     properties = fake.capture.call_args.kwargs["properties"]
     assert properties["status"] == str(RunStatus.SUCCEEDED)
     assert properties["$process_person_profile"] is False
@@ -1702,7 +1704,7 @@ async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> 
 @pytest.mark.asyncio
 async def test_posthog_failed_event(settings: Settings) -> None:
     """An unrecoverable run error emits 'benchmark run failed', flushes, re-raises."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     settings = settings.model_copy(
         update={"posthog_project_token": "phc_test", "posthog_disabled": False}
     )
@@ -1757,7 +1759,7 @@ async def test_posthog_failed_event(settings: Settings) -> None:
         )
 
     fake.capture.assert_called_once()
-    assert fake.capture.call_args.args[1] == "benchmark run failed"
+    assert fake.capture.call_args.args[0] == "benchmark run failed"
     assert fake.capture.call_args.kwargs["properties"]["$process_person_profile"] is False
     fake.flush.assert_called_once()
 
@@ -1767,7 +1769,7 @@ async def test_posthog_capture_failure_does_not_fail_run(
     audio_file: Path, settings: Settings
 ) -> None:
     """A raising PostHog client must not flip a successful run to FAILED."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     fake.capture.side_effect = RuntimeError("posthog down")
     settings = settings.model_copy(
         update={"posthog_project_token": "phc_test", "posthog_disabled": False}

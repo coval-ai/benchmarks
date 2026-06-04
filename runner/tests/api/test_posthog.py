@@ -12,12 +12,13 @@ lifespan tests stub the DB pool, so they do not spin up Postgres.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, create_autospec
 
 import pytest
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from posthog import Posthog
 
 from coval_bench.api.deps import get_posthog
 
@@ -29,7 +30,7 @@ async def test_lifespan_builds_client_and_route_captures(
 ) -> None:
     """Token set: lifespan builds the client, stores it on app.state, the real
     get_posthog returns it, the route captures, and shutdown flushes."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     monkeypatch.setattr("coval_bench.api.app.Posthog", lambda *args, **kwargs: fake)
     app = await app_factory({"POSTHOG_PROJECT_TOKEN": "phc_test", "POSTHOG_DISABLED": "false"})
 
@@ -87,7 +88,7 @@ async def test_router_emits_event_with_payload(
 ) -> None:
     """Each router emits its named event with the expected property keys and the
     $process_person_profile guard set to False."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     app.dependency_overrides[get_posthog] = lambda: fake
     try:
         response = await client.get(path, params=params)
@@ -96,7 +97,8 @@ async def test_router_emits_event_with_payload(
 
     assert response.status_code == 200
     fake.capture.assert_called_once()
-    assert fake.capture.call_args.args[1] == event
+    assert fake.capture.call_args.args[0] == event
+    assert fake.capture.call_args.kwargs["distinct_id"] == "coval-bench-api"
     properties = fake.capture.call_args.kwargs["properties"]
     assert required_keys <= set(properties.keys())
     assert properties["$process_person_profile"] is False
@@ -104,7 +106,7 @@ async def test_router_emits_event_with_payload(
 
 async def test_capture_failure_does_not_break_endpoint(app: FastAPI, client: AsyncClient) -> None:
     """A raising PostHog client is swallowed; the route still returns 200."""
-    fake = MagicMock()
+    fake = create_autospec(Posthog, instance=True)
     fake.capture.side_effect = RuntimeError("posthog down")
     app.dependency_overrides[get_posthog] = lambda: fake
     try:
