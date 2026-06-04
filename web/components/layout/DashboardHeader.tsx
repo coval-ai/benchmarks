@@ -38,7 +38,7 @@ const DashboardHeader: React.FC = () => {
         <span className="absolute left-4 top-1/2 hidden -translate-y-1/2 font-mono text-xs uppercase tracking-wider text-text-tertiary sm:inline md:left-6">
           Benchmarks
         </span>
-        <div className="relative mx-auto flex h-full max-w-[1400px] items-center justify-center gap-1 px-4 md:px-6">
+        <div className="absolute left-1/2 top-0 flex h-full -translate-x-1/2 items-center gap-1 px-4 md:px-6">
           {SECTIONS.map((section) => {
             const active = pathname === section.href;
             return (
