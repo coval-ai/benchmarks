@@ -26,6 +26,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
@@ -35,8 +36,6 @@ logger = structlog.get_logger("coval_bench.api")
 router = APIRouter(tags=["leaderboard"])
 
 MetricLiteral = Literal["WER", "TTFA", "TTFT"]
-BenchmarkLiteral = Literal["STT", "TTS"]
-WindowLiteral = Literal["24h", "7d", "30d"]
 
 # Valid (metric, benchmark) combinations — lower is better for all.
 _VALID_COMBOS: set[tuple[str, str]] = {
