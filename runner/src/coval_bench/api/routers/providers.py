@@ -17,9 +17,11 @@ No DB hit is made by this endpoint.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from posthog import Posthog
 from starlette.requests import Request
 
+from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ModelInfo, ProviderInfo, ProvidersResponse
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
@@ -79,11 +81,24 @@ def _describe() -> ProvidersResponse:
 
 @router.get("/providers", response_model=ProvidersResponse)
 @limiter.limit("60/minute")
-async def get_providers(request: Request) -> ProvidersResponse:
+async def get_providers(
+    request: Request,
+    posthog_client: Posthog | None = Depends(get_posthog),
+) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
     Sourced from the full runner matrix (all entries, not just enabled ones).
     Each model includes a ``disabled`` flag that the frontend can use to
     hide or grey out models that are known but not actively benchmarked.
     """
-    return _describe()
+    response = _describe()
+    capture_api_event(
+        posthog_client,
+        "providers_listed",
+        {
+            "stt_provider_count": len(response.stt),
+            "tts_provider_count": len(response.tts),
+            "$process_person_profile": False,
+        },
+    )
+    return response

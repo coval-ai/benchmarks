@@ -43,8 +43,8 @@ export function TTSDashboard() {
           <KeyMetrics />
           <TimelineChart />
           <ViolinSection />
-          <LatencyAccuracySection />
           <AccuracyBarSection />
+          <LatencyAccuracySection />
           <HeatmapSection />
         </DashboardLayout>
       </SidebarMenuProvider>

@@ -10,6 +10,8 @@ import { ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const HeatmapPlot: React.FC<HeatmapProps> = ({
   data,
@@ -152,10 +154,15 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
 
   // Handle column header clicks
   const handleSort = (key: keyof ModelHeatmapData) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc"
-    }));
+    const direction =
+      sortConfig.key === key && sortConfig.direction === "asc" ? "desc" : "asc";
+    capturePostHogEvent(POSTHOG_EVENTS.dashboardHeatmapSorted, {
+      surface: `${activeTab}_dashboard`,
+      mode: activeTab,
+      metric: key,
+      direction
+    });
+    setSortConfig({ key, direction });
   };
 
   // Create color scales for each metric

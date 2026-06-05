@@ -2,6 +2,8 @@
 
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS, type PlaygroundModeSwitchTrigger } from "@/lib/posthog/events";
 
 export type PlaygroundMode = "tts" | "stt";
 
@@ -28,7 +30,7 @@ function playgroundModeFromQueryValue(raw: string | null): PlaygroundMode {
  */
 export function usePlaygroundMode(): {
   mode: PlaygroundMode;
-  setMode: (next: PlaygroundMode) => void;
+  setMode: (next: PlaygroundMode, trigger: PlaygroundModeSwitchTrigger) => void;
 } {
   const router = useRouter();
   const pathname = usePathname();
@@ -40,8 +42,15 @@ export function usePlaygroundMode(): {
   }, [searchParams]);
 
   const setMode = useCallback(
-    (next: PlaygroundMode) => {
+    (next: PlaygroundMode, trigger: PlaygroundModeSwitchTrigger) => {
       if (next === mode) return;
+
+      capturePostHogEvent(POSTHOG_EVENTS.playgroundModeSwitched, {
+        surface: "playground",
+        from: mode,
+        to: next,
+        trigger
+      });
 
       // Preserve unrelated query params when switching mode; only
       // `playground_mode` is updated.

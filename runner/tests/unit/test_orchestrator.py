@@ -29,9 +29,10 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
+from posthog import Posthog
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
@@ -53,6 +54,7 @@ _TEST_SETTINGS = Settings(
     log_level="DEBUG",
     openai_api_key=SecretStr("sk-test"),
     deepgram_api_key=SecretStr("dg-test"),
+    posthog_disabled=True,
 )
 
 
@@ -1651,3 +1653,150 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         assert by_metric["WER"].metric_value is None
         assert "wer blew up" in (by_metric["WER"].error or "")
         assert summary.status == str(RunStatus.PARTIAL)
+
+
+# ---------------------------------------------------------------------------
+# 11. PostHog run events
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> None:
+    """A successful run emits 'benchmark run completed' and flushes."""
+    fake = create_autospec(Posthog, instance=True)
+    settings = settings.model_copy(
+        update={"posthog_project_token": "phc_test", "posthog_disabled": False}
+    )
+
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider)
+    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    with patch("coval_bench.runner.orchestrator.Posthog", lambda *a, **k: fake):
+        async with _orchestrator_env(
+            audio_path=audio_file,
+            stt_items=[_make_dataset_item(audio_file)],
+            stt_providers={"deepgram": provider_cls},
+            run=run,
+            writer=writer,
+        ):
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    fake.capture.assert_called_once()
+    assert fake.capture.call_args.args[0] == "benchmark_run_completed"
+    assert fake.capture.call_args.kwargs["distinct_id"] == "coval-bench-runner"
+    properties = fake.capture.call_args.kwargs["properties"]
+    assert properties["status"] == str(RunStatus.SUCCEEDED)
+    assert properties["$process_person_profile"] is False
+    fake.flush.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_posthog_failed_event(settings: Settings) -> None:
+    """An unrecoverable run error emits 'benchmark run failed', flushes, re-raises."""
+    fake = create_autospec(Posthog, instance=True)
+    settings = settings.model_copy(
+        update={"posthog_project_token": "phc_test", "posthog_disabled": False}
+    )
+
+    class _DatasetIntegrityError(Exception):
+        pass
+
+    def _bad_load(dataset_id: str, *, settings: Any) -> Any:
+        raise _DatasetIntegrityError("hash mismatch")
+
+    deepgram_cls = MagicMock()
+    deepgram_cls.warmup = AsyncMock(return_value=None)
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    fake_pool = MagicMock()
+
+    @contextlib.asynccontextmanager
+    async def _fake_lifespan_pool(s: Any) -> AsyncIterator[MagicMock]:
+        yield fake_pool
+
+    models_mod = MagicMock()
+    models_mod.Benchmark = Benchmark
+    models_mod.Result = Result
+    models_mod.ResultStatus = ResultStatus
+    models_mod.RunStatus = RunStatus
+
+    def _fake_get_db_symbols() -> tuple[Any, Any, Any, Any]:
+        return _fake_lifespan_pool, MagicMock(return_value=writer), RunStatus, models_mod
+
+    with (
+        patch("coval_bench.runner.orchestrator.Posthog", lambda *a, **k: fake),
+        patch(
+            "coval_bench.runner.orchestrator._get_db_symbols",
+            side_effect=_fake_get_db_symbols,
+        ),
+        patch(
+            "coval_bench.runner.orchestrator._get_stt_providers",
+            return_value={"deepgram": deepgram_cls},
+        ),
+        patch("coval_bench.runner.orchestrator._get_tts_providers", return_value={}),
+        patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_bad_load),
+        patch(
+            "coval_bench.runner.orchestrator._get_metrics",
+            return_value=(MagicMock(), MagicMock()),
+        ),
+        pytest.raises(_DatasetIntegrityError),
+    ):
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            matrix_overrides=[ProviderEntry(provider="deepgram", model="nova-2", enabled=True)],
+        )
+
+    fake.capture.assert_called_once()
+    assert fake.capture.call_args.args[0] == "benchmark_run_failed"
+    assert fake.capture.call_args.kwargs["properties"]["$process_person_profile"] is False
+    fake.flush.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_posthog_capture_failure_does_not_fail_run(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A raising PostHog client must not flip a successful run to FAILED."""
+    fake = create_autospec(Posthog, instance=True)
+    fake.capture.side_effect = RuntimeError("posthog down")
+    settings = settings.model_copy(
+        update={"posthog_project_token": "phc_test", "posthog_disabled": False}
+    )
+
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider)
+    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    with patch("coval_bench.runner.orchestrator.Posthog", lambda *a, **k: fake):
+        async with _orchestrator_env(
+            audio_path=audio_file,
+            stt_items=[_make_dataset_item(audio_file)],
+            stt_providers={"deepgram": provider_cls},
+            run=run,
+            writer=writer,
+        ):
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    fake.capture.assert_called_once()

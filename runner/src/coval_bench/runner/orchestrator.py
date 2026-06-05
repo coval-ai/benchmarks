@@ -32,6 +32,7 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import hashlib
 import importlib
@@ -41,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
+from posthog import Posthog
 from pydantic import BaseModel
 
 from coval_bench.providers._http_session import close_all as _close_http_clients
@@ -576,6 +578,19 @@ async def _run_tts_item(
 # ---------------------------------------------------------------------------
 
 
+def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:
+    """Best-effort run-event capture + flush; never raises into the run outcome."""
+    if client is None:
+        return
+    try:
+        client.capture(
+            event, distinct_id="coval-bench-runner", properties=properties, disable_geoip=True
+        )
+        client.flush()  # type: ignore[no-untyped-call]
+    except Exception:
+        _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -604,6 +619,19 @@ async def run_benchmarks(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     load_dataset = _get_load_dataset()
+
+    posthog_client: Posthog | None = None
+    if not settings.posthog_disabled and settings.posthog_project_token:
+        try:
+            posthog_client = Posthog(
+                settings.posthog_project_token,
+                host=settings.posthog_host,
+                enable_exception_autocapture=True,
+            )
+            atexit.register(posthog_client.shutdown)
+        except Exception:
+            _log.warning("posthog_init_failed", exc_info=True)
+            posthog_client = None
 
     # ------------------------------------------------------------------
     # 1. Resolve + filter provider matrix
@@ -814,6 +842,7 @@ async def run_benchmarks(
                 fail_count=fail_count,
             )
 
+            duration_s = (finished_at - started_at).total_seconds()
             _log.info(
                 "benchmark run finished",
                 run_id=run_id,
@@ -821,7 +850,21 @@ async def run_benchmarks(
                 total_results=total_results,
                 success_count=success_count,
                 fail_count=fail_count,
-                duration_s=(finished_at - started_at).total_seconds(),
+                duration_s=duration_s,
+            )
+            _emit_posthog(
+                posthog_client,
+                "benchmark_run_completed",
+                {
+                    "status": str(final_status),
+                    "total_results": total_results,
+                    "success_count": success_count,
+                    "fail_count": fail_count,
+                    "duration_s": duration_s,
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "$process_person_profile": False,
+                },
             )
             return summary
 
@@ -852,6 +895,7 @@ async def run_benchmarks(
                     exc_info=write_exc,
                 )
             finished_at = datetime.now(tz=UTC)
+            sigterm_duration_s = (finished_at - started_at).total_seconds()
             _log.warning(
                 "benchmark run finished early due to SIGTERM",
                 run_id=run_id,
@@ -859,7 +903,22 @@ async def run_benchmarks(
                 total_results=total_results,
                 success_count=success_count,
                 fail_count=fail_count,
-                duration_s=(finished_at - started_at).total_seconds(),
+                duration_s=sigterm_duration_s,
+            )
+            _emit_posthog(
+                posthog_client,
+                "benchmark_run_completed",
+                {
+                    "status": str(RunStatus.PARTIAL),
+                    "total_results": total_results,
+                    "success_count": success_count,
+                    "fail_count": fail_count,
+                    "duration_s": sigterm_duration_s,
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "sigterm": True,
+                    "$process_person_profile": False,
+                },
             )
             return RunSummary(
                 run_id=run_id,
@@ -892,6 +951,15 @@ async def run_benchmarks(
                     run_id=run_id,
                     exc_info=write_exc,
                 )
+            _emit_posthog(
+                posthog_client,
+                "benchmark_run_failed",
+                {
+                    "benchmark_kind": benchmark_kind,
+                    "smoke": smoke,
+                    "$process_person_profile": False,
+                },
+            )
             raise
 
         finally:
@@ -899,3 +967,7 @@ async def run_benchmarks(
                 loop.remove_signal_handler(signal.SIGTERM)
             with contextlib.suppress(Exception):
                 await _close_http_clients()
+            if posthog_client is not None:
+                with contextlib.suppress(Exception):
+                    posthog_client.shutdown()  # type: ignore[no-untyped-call]
+                atexit.unregister(posthog_client.shutdown)

@@ -22,10 +22,11 @@ from typing import Any, Literal
 import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 
@@ -89,6 +90,7 @@ async def get_leaderboard(
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
@@ -124,4 +126,15 @@ async def get_leaderboard(
         entry_rows = await rows.fetchall()
 
     entries = [LeaderboardEntry.model_validate(r) for r in entry_rows]
+    capture_api_event(
+        posthog_client,
+        "leaderboard_queried",
+        {
+            "metric": metric,
+            "benchmark": benchmark,
+            "window": window,
+            "entry_count": len(entries),
+            "$process_person_profile": False,
+        },
+    )
     return LeaderboardResponse(metric=metric, window=window, entries=entries)
