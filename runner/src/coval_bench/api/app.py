@@ -10,7 +10,7 @@ Usage::
 
 The factory wires the psycopg3 connection pool lifespan, CORS middleware
 (ADR-015 — configured in-app, not infra), slowapi rate-limiting (ADR-013),
-and all five routers.
+and all routers.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
-from coval_bench.api.routers import health, leaderboard, providers, results, runs
+from coval_bench.api.routers import aggregates, health, leaderboard, providers, results, runs
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 
@@ -104,6 +104,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(runs.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")
+    app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
 
