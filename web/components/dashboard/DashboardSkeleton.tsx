@@ -20,11 +20,12 @@ const Bar: React.FC<{ className?: string }> = ({ className = "" }) => (
 // font sizes), so the card height equals the loaded card. The metric grid uses
 // the default `align-items: stretch`, so all four match the tallest card.
 const MetricSkeleton: React.FC = () => (
-  <Card className="text-left min-w-0">
+  <Card className="text-left min-w-0" padding="p-5 lg:p-8">
+
     <div className="text-[0.9rem] font-light text-text-secondary mb-2">
       <Bar className="h-[0.7em] w-24" />
     </div>
-    <div className="font-mono text-5xl font-bold mb-4 break-words leading-tight">
+    <div className="font-mono text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 break-words leading-tight">
       <Bar className="h-[0.7em] w-32" />
     </div>
     <div className="text-text-secondary flex items-baseline gap-2">
@@ -77,7 +78,7 @@ const ChartSkeleton: React.FC = () => (
 // first chart card, each matching the height of its loaded counterpart.
 const DashboardSkeleton: React.FC = () => (
   <>
-    <div className="grid grid-cols-4 gap-4 mb-4 w-full">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-[0.8rem] mb-[0.8rem] w-full">
       {["a", "b", "c", "d"].map((k) => (
         <MetricSkeleton key={k} />
       ))}

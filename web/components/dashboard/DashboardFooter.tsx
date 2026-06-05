@@ -34,7 +34,7 @@ const DashboardFooter: React.FC = () => {
         {/* .footer-bottom */}
         <div className="flex flex-col items-start gap-3">
           <span className="font-sans text-lg font-medium tracking-wide text-[#f2f1ee]">
-            Voice Model Benchmarks
+            Voice AI Benchmarks
           </span>
 
           <nav
