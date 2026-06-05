@@ -71,7 +71,7 @@ const OverviewLeaderboards: React.FC = () => {
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <LeaderboardCard
-        title="Text-to-Speech Leaderboard"
+        title="Text-to-Speech"
         metricLabel="Time to First Audio"
         rows={ttsRows}
         href="/tts"
@@ -79,7 +79,7 @@ const OverviewLeaderboards: React.FC = () => {
         error={ttsQuery.isError}
       />
       <LeaderboardCard
-        title="Speech-to-Text Leaderboard"
+        title="Speech-to-Text"
         metricLabel="Word Error Rate"
         rows={sttRows}
         href="/stt"
