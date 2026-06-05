@@ -22,7 +22,7 @@ const HeatmapSection: React.FC = () => {
         <div className="heatmap-container">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h2 className="text-[0.72rem] font-light text-text-secondary mb-2">
+              <h2 className="text-[0.9rem] font-light text-text-secondary mb-2">
                 Model Performance Heatmap
               </h2>
               <p className="text-text-secondary mb-4">
