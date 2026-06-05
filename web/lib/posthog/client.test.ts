@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const posthogMocks = vi.hoisted(() => ({

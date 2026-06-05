@@ -213,6 +213,23 @@ export function STTPlaygroundPanel({
   useEffect(() => {
     if (!carouselActivityKey) return;
     const vp = carouselViewportRef.current;
+    if (!vp) return;
+    const onScroll = () => {
+      if (transcriptBrowsedFiredRef.current) return;
+      transcriptBrowsedFiredRef.current = true;
+      capturePostHogEvent(POSTHOG_EVENTS.sttTranscriptBrowsed, {
+        surface: "playground",
+        mode: "stt",
+        method: "scroll"
+      });
+    };
+    vp.addEventListener("scroll", onScroll, { passive: true });
+    return () => vp.removeEventListener("scroll", onScroll);
+  }, [carouselActivityKey]);
+
+  useEffect(() => {
+    if (!carouselActivityKey) return;
+    const vp = carouselViewportRef.current;
     const trackMaybe = carouselTrackRef.current;
     if (!vp || !trackMaybe) return;
     const trackEl = trackMaybe;

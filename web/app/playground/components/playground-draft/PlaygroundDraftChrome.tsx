@@ -3,10 +3,11 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef } from "react";
 import type { PlaygroundMode } from "../../hooks/usePlaygroundMode";
+import type { PlaygroundModeSwitchTrigger } from "@/lib/posthog/events";
 
 type PlaygroundDraftChromeProps = {
   mode: PlaygroundMode;
-  onModeChange: (mode: PlaygroundMode) => void;
+  onModeChange: (mode: PlaygroundMode, trigger: PlaygroundModeSwitchTrigger) => void;
   /** True while a benchmark / results modal is open — mode tabs and shortcuts are disabled. */
   modeTabsLocked?: boolean;
   children: ReactNode;
@@ -28,8 +29,8 @@ export function PlaygroundDraftChrome({
       if (modeTabsLocked) return;
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       e.preventDefault();
-      if (e.key === "ArrowLeft") onModeChange("tts");
-      else onModeChange("stt");
+      if (e.key === "ArrowLeft") onModeChange("tts", "keyboard");
+      else onModeChange("stt", "keyboard");
     };
     el.addEventListener("keydown", onKey);
     return () => el.removeEventListener("keydown", onKey);
@@ -73,7 +74,7 @@ export function PlaygroundDraftChrome({
                     : "text-text-secondary hover:text-text-primary"
                 }`}
                 onClick={() => {
-                  onModeChange("tts");
+                  onModeChange("tts", "tab");
                 }}
               >
                 TTS
@@ -92,7 +93,7 @@ export function PlaygroundDraftChrome({
                     : "text-text-secondary hover:text-text-primary"
                 }`}
                 onClick={() => {
-                  onModeChange("stt");
+                  onModeChange("stt", "tab");
                 }}
               >
                 STT

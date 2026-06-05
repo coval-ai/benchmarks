@@ -1,3 +1,6 @@
+// Copyright 2026 The Coval Benchmarks Authors
+// SPDX-License-Identifier: Apache-2.0
+
 export const POSTHOG_EVENTS = {
   dashboardModelSelectionChanged: "dashboard_model_selection_changed",
   playgroundModelSelectionChanged: "playground_model_selection_changed",
@@ -13,8 +16,7 @@ export const POSTHOG_EVENTS = {
   sttTranscriptBrowsed: "stt_transcript_browsed",
   playgroundExamplePromptUsed: "playground_example_prompt_used",
   playgroundModeSwitched: "playground_mode_switched",
-  playgroundResultPlayed: "playground_result_played",
-  resultShared: "result_shared"
+  playgroundResultPlayed: "playground_result_played"
 } as const;
 
 export type PostHogSurface = "tts_dashboard" | "stt_dashboard" | "playground";

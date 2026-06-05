@@ -38,7 +38,6 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       }
     };
     window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
     return () => window.removeEventListener("scroll", onScroll);
   }, [mode]);
 
