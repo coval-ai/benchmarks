@@ -79,7 +79,7 @@ const LatencyAccuracySection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
+      <div className="w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}

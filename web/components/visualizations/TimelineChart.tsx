@@ -82,7 +82,7 @@ const TimelineChart: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
+      <div className="w-full p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
         <SectionHeader
           label={
             activeTab === "tts"

@@ -19,13 +19,13 @@ const HeatmapSection: React.FC = () => {
         className={`heatmap-container ${
           isMobile
             ? ""
-            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
+            : "w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
         onMouseEnter={trackChartHover}
       >
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h2 className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
+            <h2 className="text-[0.72rem] font-light text-text-secondary mb-2">
               Model Performance Heatmap
             </h2>
             <p className="text-text-secondary mb-4">

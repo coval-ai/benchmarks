@@ -41,7 +41,7 @@ const ViolinSection: React.FC = () => {
         className={`${
           isMobile
             ? ""
-            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
+            : "w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
         onMouseEnter={trackChartHover}
       >

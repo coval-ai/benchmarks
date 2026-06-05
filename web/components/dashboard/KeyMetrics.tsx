@@ -31,13 +31,13 @@ const KeyMetrics: React.FC = () => {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4 mb-4">
+    <div className="grid grid-cols-4 gap-4 mb-4 w-full">
       {metrics.map((metric, index) => (
         <div
           key={index}
           className="text-left border border-border-secondary rounded-lg bg-white p-8 min-w-0"
         >
-          <div className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
+          <div className="text-[0.9rem] font-light text-text-secondary mb-2">
             {metric.label}
           </div>
           <div className="font-mono text-5xl font-bold mb-4 break-words leading-tight">

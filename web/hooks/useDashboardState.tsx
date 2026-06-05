@@ -436,6 +436,9 @@ export function useDashboardState(page: "tts" | "stt") {
     ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
     : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
   const sidebarTitle = "Models to Compare";
+  const benchmarkTitle = page === "tts"
+    ? "Text to Speech Voice Model Benchmarks"
+    : "Speech to Text Voice Model Benchmarks";
   const mobileSheetTitle = page === "tts"
     ? "Text-to-Speech Models"
     : "Speech-to-Text Models";
@@ -518,6 +521,7 @@ export function useDashboardState(page: "tts" | "stt") {
     pageTitle,
     pageSubtitle,
     sidebarTitle,
+    benchmarkTitle,
     mobileSheetTitle,
     normalizeProviderName,
 
