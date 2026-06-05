@@ -15,6 +15,8 @@ import { buildModelsByProviderFromResults, pruneSelection } from "@/lib/utils/mo
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useResultsQuery, useProvidersQuery } from "@/lib/api/queries";
 import { computeModelStats, type Result } from "@/lib/aggregates";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 function adaptResult(row: Result): BenchmarkData {
   return {
@@ -144,13 +146,22 @@ export function useDashboardState(page: "tts" | "stt") {
   // Event handlers
   const toggleModelSelection = useCallback(
     (model: string) => {
-      setSelectedModels((prev) =>
-        prev.includes(model)
-          ? prev.filter((m) => m !== model)
-          : [...prev, model]
-      );
+      const willBeSelected = !selectedModels.includes(model);
+      const nextSelected = willBeSelected
+        ? [...selectedModels, model]
+        : selectedModels.filter((m) => m !== model);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardModelSelectionChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        action: willBeSelected ? "add" : "remove",
+        model_id: model,
+        selected_model_ids: nextSelected,
+        selected_model_count: nextSelected.length,
+        is_comparison: nextSelected.length >= 2
+      });
+      setSelectedModels(nextSelected);
     },
-    []
+    [selectedModels, page]
   );
 
   // Heatmap scaling for mobile

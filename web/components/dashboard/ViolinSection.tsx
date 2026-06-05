@@ -9,6 +9,7 @@ import { normalizeModelName } from "@/lib/utils/formatters";
 import ViolinPlot from "@/components/charts/d3/ViolinPlot";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const ViolinSection: React.FC = () => {
   const {
@@ -18,6 +19,7 @@ const ViolinSection: React.FC = () => {
     getProviderForModel,
     isMobile,
   } = useDashboard();
+  const trackChartHover = useChartHoverTracking("violin");
 
   const violinData = getViolinData();
   const medianLatency = useMemo(() => {
@@ -41,6 +43,7 @@ const ViolinSection: React.FC = () => {
             ? ""
             : "relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
+        onMouseEnter={trackChartHover}
       >
         <SectionHeader
           label="Latency Variation"

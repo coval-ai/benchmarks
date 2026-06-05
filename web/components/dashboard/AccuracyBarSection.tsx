@@ -18,6 +18,10 @@ import CustomBarChartTick from "@/components/charts/CustomBarChartTick";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { useActiveTab } from "@/hooks/useActiveTab";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const AccuracyBarSection: React.FC = () => {
   const {
@@ -29,6 +33,21 @@ const AccuracyBarSection: React.FC = () => {
   } = useDashboard();
 
   const themeColors = useThemeColors();
+  const mode = useActiveTab();
+  const trackChartHover = useChartHoverTracking("wer_bar");
+
+  const handleWERBarClickTracked = (
+    data: Parameters<typeof handleWERBarClick>[0]
+  ) => {
+    if (data?.model) {
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardWerBarClicked, {
+        surface: `${mode}_dashboard`,
+        mode,
+        model_id: data.model
+      });
+    }
+    handleWERBarClick(data);
+  };
 
   const avgWER = useMemo(() => {
     if (werBarDataWithColors.length === 0) return 0;
@@ -47,7 +66,7 @@ const AccuracyBarSection: React.FC = () => {
           description={description}
           stat={{ label: "Avg WER", value: `${avgWER.toFixed(1)}%` }}
         />
-        <div className="h-64">
+        <div className="h-64" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={werBarDataWithColors}
@@ -93,7 +112,7 @@ const AccuracyBarSection: React.FC = () => {
                 stroke={themeColors.barStroke}
                 strokeWidth={1}
                 radius={[4, 4, 0, 0]}
-                onClick={handleWERBarClick}
+                onClick={handleWERBarClickTracked}
                 label={{
                   position: "top",
                   fill: themeColors.label,

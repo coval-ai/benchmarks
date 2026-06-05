@@ -21,6 +21,9 @@ import SectionHeader from "@/components/shared/SectionHeader";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
@@ -35,6 +38,20 @@ const TimelineChart: React.FC = () => {
     getProviderForModel,
   } = useDashboard();
   const chartRef = useRef<HTMLDivElement>(null);
+  const panFiredRef = useRef(false);
+  const trackChartHover = useChartHoverTracking("timeline");
+
+  const handleChartMouseDown = (e: Parameters<typeof handleMouseDown>[0]) => {
+    if (!panFiredRef.current) {
+      panFiredRef.current = true;
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardChartPanned, {
+        surface: `${activeTab}_dashboard`,
+        mode: activeTab,
+        chart: "timeline"
+      });
+    }
+    handleMouseDown(e);
+  };
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData();
@@ -82,7 +99,8 @@ const TimelineChart: React.FC = () => {
         <div
           ref={chartRef}
           className="h-96"
-          onMouseDown={handleMouseDown}
+          onMouseDown={handleChartMouseDown}
+          onMouseEnter={trackChartHover}
           style={{
             userSelect: "none",
             cursor: isDragging ? "grabbing" : "grab"
