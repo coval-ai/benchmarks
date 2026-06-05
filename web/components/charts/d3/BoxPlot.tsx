@@ -61,9 +61,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
 
-    // Left margin matches the recharts plots' 40px YAxis so the plot areas
-    // line up across cards.
-    const margin = { top: 20, right: 8, bottom: 80, left: 40 };
+    // STT hides the y-axis tick labels, so it needs almost no left margin —
+    // reclaim that space for a wider plot. TTS keeps room for the "1.4s" ticks.
+    const showYTicks = !(
+      data.metricType === "NTTFT" || data.metricType === "TTFT"
+    );
+    const margin = { top: 20, right: 8, bottom: 80, left: showYTicks ? 40 : 10 };
     const chartWidth = dimensions.width - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
 
@@ -116,9 +119,14 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .attr("stroke", themeColors.grid)
       .attr("stroke-dasharray", "2 2");
 
-    yAxisGroup.selectAll("text")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", yAxisTickFontSize);
+    // STT hides the y-axis tick labels (see showYTicks); TTS keeps them styled.
+    if (showYTicks) {
+      yAxisGroup.selectAll("text")
+        .attr("fill", themeColors.axisText)
+        .attr("font-size", yAxisTickFontSize);
+    } else {
+      yAxisGroup.selectAll("text").style("display", "none");
+    }
 
     yAxisGroup.select(".domain").remove();
 

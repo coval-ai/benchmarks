@@ -123,7 +123,7 @@ const LatencyAccuracySection: React.FC = () => {
               <YAxis
                 dataKey="y"
                 type="number"
-                name="WER"
+                name="WER (%)"
                 width={40}
                 domain={[0, yMax]}
                 ticks={yTicks}
