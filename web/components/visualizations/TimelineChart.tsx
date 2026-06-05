@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import {
   LineChart,
   Line,
@@ -23,8 +23,6 @@ import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
-import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
@@ -33,26 +31,10 @@ const TimelineChart: React.FC = () => {
     getWindowedTimelineData,
     getCurrentTimeWindow,
     getTimelineTicks,
-    isDragging,
-    handleMouseDown,
     formatChartLabel,
     getProviderForModel,
   } = useDashboard();
-  const chartRef = useRef<HTMLDivElement>(null);
-  const panFiredRef = useRef(false);
   const trackChartHover = useChartHoverTracking("timeline");
-
-  const handleChartMouseDown = (e: Parameters<typeof handleMouseDown>[0]) => {
-    if (!panFiredRef.current) {
-      panFiredRef.current = true;
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardChartPanned, {
-        surface: `${activeTab}_dashboard`,
-        mode: activeTab,
-        chart: "timeline"
-      });
-    }
-    handleMouseDown(e);
-  };
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData();
@@ -97,16 +79,7 @@ const TimelineChart: React.FC = () => {
           }}
         />
 
-        <div
-          ref={chartRef}
-          className="h-96"
-          onMouseDown={handleChartMouseDown}
-          onMouseEnter={trackChartHover}
-          style={{
-            userSelect: "none",
-            cursor: isDragging ? "grabbing" : "grab"
-          }}
-        >
+        <div className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={windowedTimelineData}>
               <XAxis

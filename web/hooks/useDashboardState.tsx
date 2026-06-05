@@ -8,15 +8,12 @@ import {
   useEffect,
   useMemo,
   useCallback,
-  useRef,
   useDeferredValue,
 } from "react";
 import type { BenchmarkData } from "@/types/benchmark.types";
-import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
-import { useTimelineWindow } from "@/hooks/useTimelineWindow";
 import { median } from "@/lib/utils/median";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProviderFromResults, pruneSelection } from "@/lib/utils/modelsFromResults";
@@ -97,34 +94,8 @@ export function useDashboardState(page: "tts" | "stt") {
 
   const modelsByProvider = page === "tts" ? ttsModelsByProvider : sttModelsByProvider;
 
-  // Anchor the timeline window to the latest plotted bucket, not Date.now().
-  // Charts plot scheduled_at so every result from one benchmark run shares a
-  // tick; fall back to created_at during API rollout or for legacy rows.
-  const latestTimestamp = useMemo<number>(() => {
-    if (rawData.length === 0) return Date.now();
-    let max = 0;
-    for (const item of rawData) {
-      const t = new Date(item.scheduled_at || item.timestamp).getTime();
-      if (Number.isNaN(t)) continue;
-      if (t > max) max = t;
-    }
-    return max > 0 ? max : Date.now();
-  }, [rawData]);
-
-  const [timelineWindowEndTemp, setTimelineWindowEndTemp] =
-    useState<number>(latestTimestamp);
-
-  // Anchor once on first successful fetch, then leave the user's window alone.
-  // Re-anchoring on every refetch yanks the chart out from under the user mid-drag.
-  const hasAnchoredRef = useRef(false);
-  useEffect(() => {
-    if (hasAnchoredRef.current) return;
-    if (rawData.length === 0) return;
-    setTimelineWindowEndTemp(latestTimestamp);
-    hasAnchoredRef.current = true;
-  }, [rawData.length, latestTimestamp]);
-
   const deferredSelectedModels = useDeferredValue(selectedModels);
+
 
   // useChartData hook - pass page as activeTab internally
   const chartData = useChartData({
@@ -133,25 +104,8 @@ export function useDashboardState(page: "tts" | "stt") {
     modelStats,
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
-    timelineWindowEnd: timelineWindowEndTemp,
     modelsByProvider: page === "tts" ? ttsModelsByProvider : sttModelsByProvider,
   });
-
-  // useTimelineWindow hook
-  const {
-    timelineWindowEnd,
-    isDragging,
-    handleMouseDown,
-  } = useTimelineWindow({
-    initialEnd: timelineWindowEndTemp,
-    getTimelineData: chartData.getTimelineData,
-    visibleWindowMs: TWENTY_FOUR_HOURS_MS,
-  });
-
-  // Sync the timeline window end
-  useEffect(() => {
-    setTimelineWindowEndTemp(timelineWindowEnd);
-  }, [timelineWindowEnd]);
 
   // Event handlers
   const toggleModelSelection = useCallback(
@@ -587,10 +541,6 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // Actions
     toggleModelSelection,
-
-    // Timeline
-    isDragging,
-    handleMouseDown,
 
     // Chart data functions
     formatChartLabel: chartData.formatChartLabel,
