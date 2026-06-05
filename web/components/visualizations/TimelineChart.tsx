@@ -21,6 +21,7 @@ import SectionHeader from "@/components/shared/SectionHeader";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
@@ -32,6 +33,7 @@ const TimelineChart: React.FC = () => {
     formatChartLabel,
     getProviderForModel,
   } = useDashboard();
+  const trackChartHover = useChartHoverTracking("timeline");
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData();
@@ -62,7 +64,7 @@ const TimelineChart: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
+      <div className="w-full p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
         <SectionHeader
           label={
             activeTab === "tts"
@@ -76,7 +78,7 @@ const TimelineChart: React.FC = () => {
           }}
         />
 
-        <div className="h-96">
+        <div className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={windowedTimelineData}>
               <XAxis
@@ -133,6 +135,7 @@ const TimelineChart: React.FC = () => {
                   stroke={getModelColor(model)}
                   strokeWidth={modelsWithData.length === 1 ? 3 : 2}
                   dot={false}
+                  isAnimationActive={false}
                   activeDot={{
                     r: modelsWithData.length === 1 ? 7 : 6,
                     fill: getModelColor(model)

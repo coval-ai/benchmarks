@@ -32,10 +32,11 @@ from typing import Any, Literal
 import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
 from coval_bench.config import get_settings
@@ -122,6 +123,7 @@ async def list_results(
         description="Maximum rows to return (1–100000, default 100000).",
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
 ) -> ResultsResponse:
     """Return a newest-first page of successful benchmark results.
 
@@ -216,4 +218,20 @@ async def list_results(
         result_rows = await rows.fetchall()
 
     results = [ResultOut.model_validate(r) for r in result_rows]
+    capture_api_event(
+        posthog_client,
+        "results_queried",
+        {
+            "provider": provider,
+            "benchmark": benchmark,
+            "metric_type": resolved_metric,
+            "window": window,
+            "has_since_filter": since is not None,
+            "has_until_filter": until is not None,
+            "include_failed": include_failed,
+            "result_count": len(results),
+            "limit": limit,
+            "$process_person_profile": False,
+        },
+    )
     return ResultsResponse(results=results)

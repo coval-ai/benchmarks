@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     # the Google STT provider is enabled (optional `google-stt` extra).
     google_project_id: str | None = None
 
+    # --- Analytics ---
+    posthog_project_token: str = ""
+    posthog_host: str = "https://us.i.posthog.com"
+    posthog_disabled: bool = False
+
     # --- API ---
     cors_origins: list[str] = [
         "https://benchmarks.coval.ai",

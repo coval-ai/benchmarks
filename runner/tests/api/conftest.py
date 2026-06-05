@@ -18,10 +18,11 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 import psycopg
 import psycopg.rows
@@ -115,6 +116,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
+    monkeypatch.setenv("POSTHOG_DISABLED", "true")
 
     settings = Settings()
 
@@ -142,6 +144,33 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     test_app = create_app(settings)
     async with LifespanManager(test_app):
         yield test_app
+
+
+@pytest.fixture
+def app_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[dict[str, str] | None], Awaitable[FastAPI]]:
+    """Build an app with a stubbed pool so lifespan and analytics wiring can be
+    tested without spinning up Postgres. The caller drives the lifespan.
+    """
+
+    async def _factory(extra_env: dict[str, str] | None = None) -> FastAPI:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
+        monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
+        monkeypatch.setenv("DATASET_ID", "stt-v1")
+        monkeypatch.setenv("RUNNER_SHA", "test-sha")
+        monkeypatch.setenv("POSTHOG_DISABLED", "true")
+        for key, value in (extra_env or {}).items():
+            monkeypatch.setenv(key, value)
+
+        @asynccontextmanager
+        async def stub_lifespan_pool(s: Settings) -> AsyncIterator[MagicMock]:
+            yield MagicMock()
+
+        monkeypatch.setattr("coval_bench.api.app.lifespan_pool", stub_lifespan_pool)
+        return create_app(Settings())
+
+    return _factory
 
 
 @pytest_asyncio.fixture

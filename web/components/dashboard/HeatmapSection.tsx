@@ -6,10 +6,12 @@
 import React from "react";
 import HeatmapPlot from "@/components/charts/d3/HeatmapPlot";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const HeatmapSection: React.FC = () => {
   const { heatmapDisplayData: data, formatChartLabel, getProviderForModel, isMobile } =
     useDashboard();
+  const trackChartHover = useChartHoverTracking("heatmap");
 
   return (
     <div className="mb-4">
@@ -17,12 +19,13 @@ const HeatmapSection: React.FC = () => {
         className={`heatmap-container ${
           isMobile
             ? ""
-            : "relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
+            : "w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
         }`}
+        onMouseEnter={trackChartHover}
       >
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h2 className="font-mono text-[0.9rem] font-light text-text-secondary mb-2">
+            <h2 className="text-[0.72rem] font-light text-text-secondary mb-2">
               Model Performance Heatmap
             </h2>
             <p className="text-text-secondary mb-4">

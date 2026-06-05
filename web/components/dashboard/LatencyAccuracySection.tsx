@@ -20,12 +20,14 @@ import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const LatencyAccuracySection: React.FC = () => {
   const { latencyLabel, selectedModels, scatterData } = useDashboard();
 
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
+  const trackChartHover = useChartHoverTracking("scatter");
 
   const description = {
     short: `Average ${latencyLabel} and WER per model`,
@@ -77,7 +79,7 @@ const LatencyAccuracySection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
+      <div className="w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}
@@ -87,7 +89,7 @@ const LatencyAccuracySection: React.FC = () => {
           }}
         />
 
-        <div className="h-64">
+        <div className="h-64" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart>
               <CartesianGrid
@@ -145,6 +147,7 @@ const LatencyAccuracySection: React.FC = () => {
                   )}
                   fill={getModelColor(model)}
                   name={model}
+                  isAnimationActive={false}
                   shape={(props: { cx?: number; cy?: number; fill?: string }) => (
                     <circle
                       cx={props.cx}

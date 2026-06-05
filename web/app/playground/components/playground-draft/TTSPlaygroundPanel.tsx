@@ -18,6 +18,8 @@ import {
 } from "@/lib/playground/provider-styles";
 import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS, type PlaygroundRunTrigger } from "@/lib/posthog/events";
 
 /** HARDCODED: demo prompt chips only — not provider data. */
 const EXAMPLES = [
@@ -83,6 +85,7 @@ export function TTSPlaygroundPanel({
     Object.fromEntries(models.map((m) => [m.id, true]))
   );
   const [benchmarkOpen, setBenchmarkOpen] = useState(false);
+  const typingFiredRef = useRef(false);
   const { rows: generationRows, runBenchmark, cancelAll, resetRows, hasInFlight } = useTTSGeneration();
   const { playingModelId, toggle, stop } = useAudioPlayback();
 
@@ -140,8 +143,20 @@ export function TTSPlaygroundPanel({
   const toggleModel = useCallback((id: string) => {
     if (hasInFlight) return;
     if (!modelsById.has(id)) return;
-    setSelectedMap((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, [hasInFlight, modelsById]);
+    const willBeSelected = !selectedMap[id];
+    const nextMap = { ...selectedMap, [id]: willBeSelected };
+    const selectedIds = models.filter((m) => nextMap[m.id] !== false).map((m) => m.id);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundModelSelectionChanged, {
+      surface: "playground",
+      mode: "tts",
+      action: willBeSelected ? "add" : "remove",
+      model_id: id,
+      selected_model_ids: selectedIds,
+      selected_model_count: selectedIds.length,
+      is_comparison: selectedIds.length >= 2
+    });
+    setSelectedMap(nextMap);
+  }, [hasInFlight, modelsById, selectedMap, models]);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const doneBtnRef = useRef<HTMLButtonElement>(null);
@@ -201,12 +216,37 @@ export function TTSPlaygroundPanel({
     []
   );
 
-  const openBenchmarkRef = useRef<() => Promise<void>>(async () => {});
-  openBenchmarkRef.current = async () => {
+  const openBenchmarkRef = useRef<(trigger: PlaygroundRunTrigger) => Promise<void>>(async () => {});
+  openBenchmarkRef.current = async (trigger: PlaygroundRunTrigger) => {
     if (!canBenchmark || hasInFlight) return;
     const selectedIds = activeModels.map((model) => model.id);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundTtsBenchmarkPressed, {
+      surface: "playground",
+      mode: "tts",
+      text_length: text.trim().length,
+      selected_model_ids: selectedIds,
+      selected_model_count: selectedIds.length,
+      trigger,
+      is_comparison: selectedIds.length >= 2
+    });
     const summary = await runBenchmark(text, selectedIds);
     if (!summary) return;
+    const ttfas = summary.successes
+      .map((s) => s.ttfaMs)
+      .filter((v): v is number => v != null);
+    const totals = summary.successes.map((s) => s.totalMs);
+    capturePostHogEvent(POSTHOG_EVENTS.playgroundBenchmarkCompleted, {
+      surface: "playground",
+      mode: "tts",
+      selected_model_ids: selectedIds,
+      selected_model_count: selectedIds.length,
+      success_count: summary.successes.length,
+      failure_count: summary.failures.length,
+      overall_duration_ms: Math.round(summary.overallDurationMs),
+      best_ttfa_ms: ttfas.length ? Math.min(...ttfas) : null,
+      best_total_ms: totals.length ? Math.min(...totals) : null,
+      is_comparison: selectedIds.length >= 2
+    });
     setBenchmarkOpen(true);
   };
 
@@ -220,7 +260,7 @@ export function TTSPlaygroundPanel({
       if (!cmdEnterFromPrompt && isTypingInteractionTarget(e.target)) return;
       if (!canBenchmark || hasInFlight) return;
       e.preventDefault();
-      void openBenchmarkRef.current();
+      void openBenchmarkRef.current("keyboard");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -268,7 +308,7 @@ export function TTSPlaygroundPanel({
 
   const handleBenchmarkButtonClick = useCallback(() => {
     if (!canBenchmark || hasInFlight) return;
-    void openBenchmarkRef.current();
+    void openBenchmarkRef.current("button");
   }, [canBenchmark, hasInFlight]);
 
   return (
@@ -282,7 +322,17 @@ export function TTSPlaygroundPanel({
         <div className="min-w-0 flex-1 space-y-3">
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (!typingFiredRef.current && value.trim().length > 0) {
+                typingFiredRef.current = true;
+                capturePostHogEvent(POSTHOG_EVENTS.playgroundTtsTypingStarted, {
+                  surface: "playground",
+                  mode: "tts"
+                });
+              }
+              setText(value);
+            }}
             placeholder="Write something to say…"
             rows={8}
             className="font-sans w-full resize-y rounded-xl border border-border-primary bg-surface-primary px-4 py-3 text-sm leading-relaxed text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-tertiary/30"
@@ -308,7 +358,14 @@ export function TTSPlaygroundPanel({
                   key={ex.label}
                   type="button"
                   className="rounded-full border border-border-primary bg-transparent px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-text-tertiary hover:text-text-primary"
-                  onClick={() => setText(ex.text)}
+                  onClick={() => {
+                    capturePostHogEvent(POSTHOG_EVENTS.playgroundExamplePromptUsed, {
+                      surface: "playground",
+                      mode: "tts",
+                      example_id: ex.label
+                    });
+                    setText(ex.text);
+                  }}
                 >
                   {ex.label}
                 </button>
@@ -451,7 +508,16 @@ export function TTSPlaygroundPanel({
                             className="text-text-tertiary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/30 dark:text-zinc-500 dark:hover:text-zinc-200"
                             aria-label={playing ? `Pause ${row.model.label}` : `Play ${row.model.label}`}
                             aria-pressed={playing}
-                            onClick={() => toggle(row.model.id, row.audioUrl)}
+                            onClick={() => {
+                              if (!playing && row.audioUrl) {
+                                capturePostHogEvent(POSTHOG_EVENTS.playgroundResultPlayed, {
+                                  surface: "playground",
+                                  mode: "tts",
+                                  model_id: row.model.id
+                                });
+                              }
+                              toggle(row.model.id, row.audioUrl);
+                            }}
                           >
                             {playing ? (
                               <Pause className="size-3" aria-hidden strokeWidth={2.25} />
