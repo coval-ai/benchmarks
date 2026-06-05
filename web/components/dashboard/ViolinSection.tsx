@@ -7,6 +7,7 @@ import React, { useMemo } from "react";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import ViolinPlot from "@/components/charts/d3/ViolinPlot";
+import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
@@ -37,14 +38,7 @@ const ViolinSection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div
-        className={`${
-          isMobile
-            ? ""
-            : "w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8"
-        }`}
-        onMouseEnter={trackChartHover}
-      >
+      <Card onMouseEnter={trackChartHover}>
         <SectionHeader
           label="Latency Variation"
           description={description}
@@ -61,7 +55,7 @@ const ViolinSection: React.FC = () => {
           normalizeModelName={normalizeModelName}
           isMobile={isMobile}
         />
-      </div>
+      </Card>
     </div>
   );
 };

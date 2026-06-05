@@ -4,6 +4,7 @@
 "use client";
 
 import React from "react";
+import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
 
 export interface KeyMetricData {
@@ -33,10 +34,7 @@ const KeyMetrics: React.FC = () => {
   return (
     <div className="grid grid-cols-4 gap-4 mb-4 w-full">
       {metrics.map((metric, index) => (
-        <div
-          key={index}
-          className="text-left border border-border-secondary rounded-lg bg-white p-8 min-w-0"
-        >
+        <Card key={index} className="text-left min-w-0">
           <div className="text-[0.9rem] font-light text-text-secondary mb-2">
             {metric.label}
           </div>
@@ -55,7 +53,7 @@ const KeyMetrics: React.FC = () => {
               )}
             </div>
           )}
-        </div>
+        </Card>
       ))}
     </div>
   );

@@ -164,8 +164,12 @@ export function useDashboardState(page: "tts" | "stt") {
     [selectedModels, page]
   );
 
-  // Heatmap scaling for mobile
+  // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
+  // in the DOM); re-runs when loading completes so the first paint of the
+  // heatmap gets scaled without waiting for a resize event.
   useEffect(() => {
+    if (loading) return;
+
     const scaleHeatmapForMobile = () => {
       const mobile = window.innerWidth < 768;
 
@@ -179,9 +183,11 @@ export function useDashboardState(page: "tts" | "stt") {
           ) as SVGElement;
 
           if (heatmapContainer && heatmapSvg) {
-            const screenWidth = window.innerWidth;
-            const padding = 32;
-            const availableWidth = screenWidth - padding;
+            // Reset any prior scaling so measurements reflect natural layout
+            heatmapContainer.style.transform = "";
+            heatmapContainer.style.width = "";
+            const availableWidth =
+              heatmapContainer.getBoundingClientRect().width;
             const heatmapWidth = heatmapSvg.getBoundingClientRect().width;
             const scaleFactor = availableWidth / heatmapWidth;
 
@@ -207,7 +213,7 @@ export function useDashboardState(page: "tts" | "stt") {
     scaleHeatmapForMobile();
     window.addEventListener("resize", scaleHeatmapForMobile);
     return () => window.removeEventListener("resize", scaleHeatmapForMobile);
-  }, [page]);
+  }, [page, loading]);
 
   // Auto-select all models when data loads (disabled models already filtered out by useMemo above).
   useEffect(() => {
