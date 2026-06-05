@@ -17,6 +17,7 @@ import { getModelColor } from "@/lib/utils/colors";
 import { formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
+import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
@@ -82,7 +83,7 @@ const TimelineChart: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="w-full p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
+      <Card>
         <SectionHeader
           label={
             activeTab === "tts"
@@ -174,7 +175,7 @@ const TimelineChart: React.FC = () => {
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </Card>
     </div>
   );
 };

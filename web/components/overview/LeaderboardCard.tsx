@@ -5,6 +5,7 @@
 
 import React from "react";
 import Link from "next/link";
+import Card from "@/components/shared/Card";
 
 export interface LeaderboardRow {
   /** Stable key — composite `provider:model`. */
@@ -36,7 +37,7 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
   error = false,
 }) => {
   return (
-    <div className="flex flex-col rounded-lg border border-border-secondary bg-white p-6 md:p-8">
+    <Card padding="p-6 md:p-8" className="flex flex-col">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-lg font-medium text-text-primary md:text-xl">{title}</h2>
         <span className="text-xs font-light tracking-wider text-text-secondary">
@@ -111,7 +112,7 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
           <span aria-hidden>&rarr;</span>
         </Link>
       )}
-    </div>
+    </Card>
   );
 };
 
