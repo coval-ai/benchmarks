@@ -32,7 +32,7 @@ const BoxPlotSection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <Card onMouseEnter={trackChartHover}>
+      <Card padding="p-5 lg:p-8" onMouseEnter={trackChartHover}>
         <SectionHeader
           label="Latency Variation"
           description={description}

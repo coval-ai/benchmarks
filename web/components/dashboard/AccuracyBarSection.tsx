@@ -9,6 +9,7 @@ import {
   Bar,
   XAxis,
   YAxis,
+  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   Cell,
@@ -61,23 +62,29 @@ const AccuracyBarSection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <Card>
+      <Card padding="p-5 lg:p-8">
         <SectionHeader
           label="Accuracy by Model"
           description={description}
+          hint="Click bar to compare models"
           stat={{ label: "Avg WER", value: `${avgWER.toFixed(1)}%` }}
         />
-        <div className="h-64" onMouseEnter={trackChartHover}>
+        <div className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={werBarDataWithColors}
               margin={{
                 top: 20,
-                right: 30,
-                left: 20,
-                bottom: isMobile ? 80 : 60,
+                right: 8,
+                left: 0,
+                bottom: 80,
               }}
             >
+              <CartesianGrid
+                vertical={false}
+                strokeDasharray="0"
+                stroke={themeColors.grid}
+              />
               <XAxis
                 dataKey="model"
                 axisLine={false}
@@ -88,30 +95,19 @@ const AccuracyBarSection: React.FC = () => {
                     isMobile={isMobile}
                   />
                 }
-                height={isMobile ? 100 : 80}
+                height={100}
                 interval={0}
               />
               <YAxis
+                width={40}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${value}%`}
-                label={{
-                  value: "Average WER",
-                  angle: -90,
-                  position: "insideLeft",
-                  style: {
-                    textAnchor: "middle",
-                    fill: themeColors.axisText,
-                    fontSize: "14px",
-                  },
-                }}
               />
               <Tooltip content={<CustomBarTooltip getProviderForModel={getProviderForModel} />} cursor={false} />
               <Bar
                 dataKey="averageWER"
-                stroke={themeColors.barStroke}
-                strokeWidth={1}
                 radius={[4, 4, 0, 0]}
                 isAnimationActive={false}
                 onClick={handleWERBarClickTracked}
@@ -122,8 +118,6 @@ const AccuracyBarSection: React.FC = () => {
                   formatter: (value: number) => `${value.toFixed(1)}%`,
                 }}
                 style={{
-                  filter:
-                    "drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1))",
                   cursor: "pointer",
                 }}
               >

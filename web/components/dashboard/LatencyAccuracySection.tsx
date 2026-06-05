@@ -80,7 +80,7 @@ const LatencyAccuracySection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <Card>
+      <Card padding="p-5 lg:p-8">
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}
@@ -92,7 +92,9 @@ const LatencyAccuracySection: React.FC = () => {
 
         <div className="h-64" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart>
+            <ScatterChart
+              margin={{ top: 10, right: 8, left: 0, bottom: 20 }}
+            >
               <CartesianGrid
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
@@ -122,22 +124,13 @@ const LatencyAccuracySection: React.FC = () => {
                 dataKey="y"
                 type="number"
                 name="WER"
+                width={40}
                 domain={[0, yMax]}
                 ticks={yTicks}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${value}%`}
-                label={{
-                  value: "WER",
-                  angle: -90,
-                  position: "insideLeft",
-                  style: {
-                    textAnchor: "middle",
-                    fill: themeColors.axisText,
-                    fontSize: "14px",
-                  },
-                }}
               />
               <Tooltip content={<CustomScatterTooltip activeTab={activeTab} />} />
               {selectedModels.map((model: string) => (

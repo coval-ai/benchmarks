@@ -8,10 +8,13 @@ import * as d3 from "d3";
 import { BoxPlotProps } from "@/types/chart.types";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
-const modelFontSize = "10px";
-const providerFontSize = "9px";
-const axisLabelFontSize = "12px";
-const yAxisTickFontSize = "10px";
+// Match the text sizes on the timeline chart above: 14px axis labels, 12px
+// tick/legend/category text.
+const modelFontSize = "12px";
+const providerFontSize = "12px";
+const axisLabelFontSize = "14px";
+const yAxisTickFontSize = "12px";
+const modelLineHeight = 14;
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -66,7 +69,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
 
-    const margin = { top: 20, right: 12, bottom: 80, left: 50 };
+    // STT hides the y-axis tick labels, so it needs almost no left margin —
+    // reclaim that space for a wider plot. TTS keeps room for the "1.4s" ticks.
+    const showYTicks = !(
+      data.metricType === "NTTFT" || data.metricType === "TTFT"
+    );
+    const margin = { top: 20, right: 8, bottom: 80, left: showYTicks ? 40 : 10 };
     const chartWidth = dimensions.width - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
 
@@ -105,8 +113,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Always show gridlines
     yAxisGroup.selectAll("line")
-      .attr("stroke", themeColors.grid)
-      .attr("stroke-dasharray", "2,2");
+      .attr("stroke", themeColors.grid);
 
     yAxisGroup.selectAll("text")
       .attr("fill", themeColors.axisText)
@@ -164,7 +171,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         modelLines.forEach((line, lineIndex) => {
           g.append("text")
             .attr("x", xPosition)
-            .attr("y", yPosition + lineIndex * 12)
+            .attr("y", yPosition + lineIndex * modelLineHeight)
             .attr("text-anchor", "middle")
             .attr("fill", themeColors.label)
             .attr("font-size", modelFontSize)
@@ -173,7 +180,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         });
 
         // Add provider name with dynamic font size
-        const providerYPosition = yPosition + modelLines.length * 12 + 8;
+        const providerYPosition =
+          yPosition + modelLines.length * modelLineHeight + 1;
         g.append("text")
           .attr("x", xPosition)
           .attr("y", providerYPosition)
@@ -184,17 +192,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       });
     }
 
-    // Add axis labels with dynamic font size
-    g.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("y", 0 - margin.left)
-      .attr("x", 0 - chartHeight / 2)
-      .attr("dy", "1em")
-      .style("text-anchor", "middle")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", axisLabelFontSize)
-      .text(data.metricType);
-
+    // X-axis label (the Y axis title is omitted — it's redundant with the
+    // card heading).
     g.append("text")
       .attr(
         "transform",

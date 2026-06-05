@@ -32,17 +32,18 @@ const KeyMetrics: React.FC = () => {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-4 mb-4 w-full">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-[0.8rem] mb-[0.8rem] w-full">
       {metrics.map((metric, index) => (
-        <Card key={index} className="text-left min-w-0">
+        <Card key={index} className="text-left min-w-0" padding="p-5 lg:p-8">
+
           <div className="text-[0.9rem] font-light text-text-secondary mb-2">
             {metric.label}
           </div>
-          <div className="font-mono text-5xl font-bold mb-4 break-words leading-tight">
+          <div className="font-mono text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 break-words leading-tight">
             {metric.displayValue}
           </div>
           {metric.subtitle && (
-            <div className="text-text-secondary flex items-baseline gap-2">
+            <div className="text-text-secondary flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2">
               {metric.subtitle.name && (
                 <span className="font-medium">{metric.subtitle.name}</span>
               )}

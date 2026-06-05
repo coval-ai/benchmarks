@@ -8,14 +8,11 @@ import {
   useEffect,
   useMemo,
   useCallback,
-  useRef,
   useDeferredValue,
 } from "react";
-import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
-import { useTimelineWindow } from "@/hooks/useTimelineWindow";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
 import { metricDescriptions } from "@/lib/config/metrics";
@@ -55,32 +52,8 @@ export function useDashboardState(page: "tts" | "stt") {
   const { clickedWERBars, handleWERBarClick } =
     useBarInteraction();
 
-  // Anchor the timeline window to the latest plotted bucket, not Date.now().
-  const latestTimestamp = useMemo<number>(() => {
-    if (series.length === 0) return Date.now();
-    let max = 0;
-    for (const point of series) {
-      const t = new Date(point.scheduled_at).getTime();
-      if (Number.isNaN(t)) continue;
-      if (t > max) max = t;
-    }
-    return max > 0 ? max : Date.now();
-  }, [series]);
-
-  const [timelineWindowEndTemp, setTimelineWindowEndTemp] =
-    useState<number>(latestTimestamp);
-
-  // Anchor once on first successful fetch, then leave the user's window alone.
-  // Re-anchoring on every refetch yanks the chart out from under the user mid-drag.
-  const hasAnchoredRef = useRef(false);
-  useEffect(() => {
-    if (hasAnchoredRef.current) return;
-    if (series.length === 0) return;
-    setTimelineWindowEndTemp(latestTimestamp);
-    hasAnchoredRef.current = true;
-  }, [series.length, latestTimestamp]);
-
   const deferredSelectedModels = useDeferredValue(selectedModels);
+
 
   // useChartData hook - pass page as activeTab internally
   const chartData = useChartData({
@@ -89,25 +62,8 @@ export function useDashboardState(page: "tts" | "stt") {
     series,
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
-    timelineWindowEnd: timelineWindowEndTemp,
     modelsByProvider,
   });
-
-  // useTimelineWindow hook
-  const {
-    timelineWindowEnd,
-    isDragging,
-    handleMouseDown,
-  } = useTimelineWindow({
-    initialEnd: timelineWindowEndTemp,
-    getTimelineData: chartData.getTimelineData,
-    visibleWindowMs: TWENTY_FOUR_HOURS_MS,
-  });
-
-  // Sync the timeline window end
-  useEffect(() => {
-    setTimelineWindowEndTemp(timelineWindowEnd);
-  }, [timelineWindowEnd]);
 
   // Event handlers
   const toggleModelSelection = useCallback(
@@ -264,9 +220,11 @@ export function useDashboardState(page: "tts" | "stt") {
   const werBarDataWithColors = useMemo(() => {
     return werBarData.map((item) => ({
       ...item,
+      // Default bars are an opaque, light tint of the selected-state orange
+      // (#FF851B). Opaque so the chart gridlines don't show through them.
       fill: clickedWERBars.has(item.model)
         ? "#FF851B"
-        : "rgba(255, 255, 255, 0.12)",
+        : "#FFE5CC",
     }));
   }, [werBarData, clickedWERBars]);
 
@@ -278,8 +236,8 @@ export function useDashboardState(page: "tts" | "stt") {
     : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
   const sidebarTitle = "Models to Compare";
   const benchmarkTitle = page === "tts"
-    ? "Text to Speech Voice Model Benchmarks"
-    : "Speech to Text Voice Model Benchmarks";
+    ? "Text to Speech Voice AI Benchmarks"
+    : "Speech to Text Voice AI Benchmarks";
   const mobileSheetTitle = page === "tts"
     ? "Text-to-Speech Models"
     : "Speech-to-Text Models";
@@ -299,7 +257,7 @@ export function useDashboardState(page: "tts" | "stt") {
         detailed: metricDescriptions.wer.detailed,
       }
     : {
-        short: "Word Error Rate",
+        short: "Word Error Rate (%)",
         detailed:
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
@@ -389,14 +347,11 @@ export function useDashboardState(page: "tts" | "stt") {
     // Actions
     toggleModelSelection,
 
-    // Timeline
-    isDragging,
-    handleMouseDown,
-
     // Chart data functions
     formatChartLabel: chartData.formatChartLabel,
     getProviderForModel: chartData.getProviderForModel,
     getWindowedTimelineData: chartData.getWindowedTimelineData,
+    getTimelineData: chartData.getTimelineData,
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
     getTimelineTicks: chartData.getTimelineTicks,
     getModelsWithTimelineData: chartData.getModelsWithTimelineData,

@@ -242,7 +242,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
       top: 60,
       right: 30,
       bottom: 20,
-      left: isMobile ? 100 : 180
+      left: isMobile ? 100 : 120
     };
     const chartWidth = dimensions.width - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
@@ -277,50 +277,48 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
       headerGroup
         .append("rect")
         .attr("x", xScale(metric.key as string) ?? 0)
-        .attr("y", -50)
+        .attr("y", -52)
         .attr("width", xScale.bandwidth())
-        .attr("height", 40)
+        .attr("height", 50)
         .attr("fill", "transparent");
 
-      // Header text
-      const headerText = metric.label;
+      // Header text. Columns are wide enough for these labels on a single line,
+      // but wrap longer ones as needed.
       const xPosition =
         (xScale(metric.key as string) ?? 0) + xScale.bandwidth() / 2;
+      const words = metric.label.split(" ");
+      const headerLines: string[] = [];
+      let currentLine = "";
+      words.forEach((word) => {
+        if ((currentLine ? `${currentLine} ${word}` : word).length <= 12) {
+          currentLine = currentLine ? `${currentLine} ${word}` : word;
+        } else {
+          if (currentLine) headerLines.push(currentLine);
+          currentLine = word;
+        }
+      });
+      if (currentLine) headerLines.push(currentLine);
 
-      if (isMobile && headerText.includes(" ")) {
-        const words = headerText.split(" ");
-        words.forEach((word, index) => {
-          headerGroup
-            .append("text")
-            .attr("x", xPosition)
-            .attr("y", -35 + index * 12)
-            .attr("text-anchor", "middle")
-            .attr("fill", themeColors.label)
-            .attr("font-size", "10px")
-            .attr("font-weight", "bold")
-            .text(word);
-        });
-      } else {
+      const lineHeight = 13;
+      headerLines.forEach((line, index) => {
+        const y = -20 - (headerLines.length - 1 - index) * lineHeight;
         headerGroup
           .append("text")
           .attr("x", xPosition)
-          .attr("y", -25)
+          .attr("y", y)
           .attr("text-anchor", "middle")
           .attr("fill", themeColors.label)
           .attr("font-size", "12px")
           .attr("font-weight", "bold")
-          .text(headerText);
-      }
+          .text(line);
+      });
 
       // Sort indicator
       if (sortConfig.key === metric.key) {
         headerGroup
           .append("text")
-          .attr(
-            "x",
-            (xScale(metric.key as string) ?? 0) + xScale.bandwidth() / 2
-          )
-          .attr("y", -10)
+          .attr("x", xPosition)
+          .attr("y", -6)
           .attr("text-anchor", "middle")
           .attr("fill", themeColors.label)
           .attr("font-size", "10px")
@@ -379,7 +377,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
           .attr("text-anchor", "end")
           .attr("dominant-baseline", "middle")
           .attr("fill", themeColors.axisText)
-          .attr("font-size", "9px")
+          .attr("font-size", "11px")
           .attr("font-weight", "500")
           .text(provider);
 
@@ -389,19 +387,37 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
           .attr("text-anchor", "end")
           .attr("dominant-baseline", "middle")
           .attr("fill", themeColors.label)
-          .attr("font-size", "10px")
+          .attr("font-size", "12px")
           .text(normalizeModelName(model.model));
       } else {
-        // Desktop: Single line as before
+        // Desktop: wrap the label to fit the narrower label column. Group words
+        // into lines of up to ~14 characters and vertically center the block.
         const labelText = formatChartLabel(model.model, provider);
-        g.append("text")
-          .attr("x", -10)
-          .attr("y", yPosition)
-          .attr("text-anchor", "end")
-          .attr("dominant-baseline", "middle")
-          .attr("fill", themeColors.label)
-          .attr("font-size", "11px")
-          .text(labelText);
+        const words = labelText.split(" ");
+        const labelLines: string[] = [];
+        let currentLine = "";
+        words.forEach((word) => {
+          if ((currentLine ? `${currentLine} ${word}` : word).length <= 14) {
+            currentLine = currentLine ? `${currentLine} ${word}` : word;
+          } else {
+            if (currentLine) labelLines.push(currentLine);
+            currentLine = word;
+          }
+        });
+        if (currentLine) labelLines.push(currentLine);
+
+        const lineHeight = 13;
+        const startY = yPosition - ((labelLines.length - 1) * lineHeight) / 2;
+        labelLines.forEach((line, index) => {
+          g.append("text")
+            .attr("x", -10)
+            .attr("y", startY + index * lineHeight)
+            .attr("text-anchor", "end")
+            .attr("dominant-baseline", "middle")
+            .attr("fill", themeColors.label)
+            .attr("font-size", "12px")
+            .text(line);
+        });
       }
     });
   }, [

@@ -24,7 +24,6 @@ interface UseChartDataParams {
   series: SeriesPoint[];
   selectedTTSModels: string[];
   selectedSTTModels: string[];
-  timelineWindowEnd: number;
   modelsByProvider: ModelsByProvider;
 }
 
@@ -34,7 +33,6 @@ export function useChartData({
   series,
   selectedTTSModels,
   selectedSTTModels,
-  timelineWindowEnd,
   modelsByProvider
 }: UseChartDataParams) {
   const toDisplayUnits = useCallback(
@@ -433,14 +431,19 @@ export function useChartData({
 
   // ─── Timeline window functions ───
 
-  const getFullTimeRange = useCallback((): [number, number] => {
-    const allTimelineData = getTimelineData().map((item) => item.timestamp);
-
-    if (allTimelineData.length === 0)
-      return [Date.now() - TWENTY_FOUR_HOURS_MS, Date.now()];
-
-    return [Math.min(...allTimelineData), Math.max(...allTimelineData)];
-  }, [getTimelineData]);
+  // Anchor the timeline window to the latest plotted bucket, not Date.now().
+  // Charts plot scheduled_at so every result from one benchmark run shares a
+  // tick.
+  const timelineWindowEnd = useMemo<number>(() => {
+    if (series.length === 0) return Date.now();
+    let max = 0;
+    for (const point of series) {
+      const t = new Date(point.scheduled_at).getTime();
+      if (Number.isNaN(t)) continue;
+      if (t > max) max = t;
+    }
+    return max > 0 ? max : Date.now();
+  }, [series]);
 
   const getCurrentTimeWindow = useCallback((): [number, number] => {
     const windowStart = timelineWindowEnd - TWENTY_FOUR_HOURS_MS;
@@ -448,14 +451,10 @@ export function useChartData({
   }, [timelineWindowEnd]);
 
   // Pinned tick positions for the X axis. Letting Recharts auto-pick ticks
-  // gives uneven spacing that shifts as the window pans. Six ticks (every
-  // 4 hours, snapped to whole-hour boundaries inside the window) stays
-  // readable without crowding.
+  // gives uneven spacing. Six ticks (every 4 hours, snapped to whole-hour
+  // boundaries inside the window) stays readable without crowding.
   const getTimelineTicks = useCallback((): number[] => {
-    const [windowStart, windowEnd] = [
-      timelineWindowEnd - TWENTY_FOUR_HOURS_MS,
-      timelineWindowEnd,
-    ];
+    const [windowStart, windowEnd] = getCurrentTimeWindow();
     const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
     const firstTick =
       Math.ceil(windowStart / FOUR_HOURS_MS) * FOUR_HOURS_MS;
@@ -464,18 +463,12 @@ export function useChartData({
       ticks.push(t);
     }
     return ticks;
-  }, [timelineWindowEnd]);
+  }, [getCurrentTimeWindow]);
 
   const getWindowedTimelineData = useCallback((): TimelineDataPoint[] => {
     const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const fullData = getTimelineData();
-
-    const buffer = 30 * 60 * 1000;
-    const extendedStart = windowStart - buffer;
-    const extendedEnd = windowEnd + buffer;
-
-    return fullData.filter(
-      (item) => item.timestamp >= extendedStart && item.timestamp <= extendedEnd
+    return getTimelineData().filter(
+      (item) => item.timestamp >= windowStart && item.timestamp <= windowEnd
     );
   }, [getCurrentTimeWindow, getTimelineData]);
 
@@ -512,7 +505,6 @@ export function useChartData({
     getModelHeatmapData,
     getTTSHeatmapData,
     getWERBarData,
-    getFullTimeRange,
     getCurrentTimeWindow,
     getTimelineTicks,
     getWindowedTimelineData,
