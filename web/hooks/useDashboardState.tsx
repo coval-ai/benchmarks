@@ -416,9 +416,11 @@ export function useDashboardState(page: "tts" | "stt") {
   const werBarDataWithColors = useMemo(() => {
     return werBarData.map((item) => ({
       ...item,
+      // Default bars are an opaque, light tint of the selected-state orange
+      // (#FF851B). Opaque so the chart gridlines don't show through them.
       fill: clickedWERBars.has(item.model)
         ? "#FF851B"
-        : "rgba(255, 255, 255, 0.12)",
+        : "#FFE5CC",
     }));
   }, [werBarData, clickedWERBars]);
 
@@ -451,7 +453,7 @@ export function useDashboardState(page: "tts" | "stt") {
         detailed: metricDescriptions.wer.detailed,
       }
     : {
-        short: "Word Error Rate (%) \u2022 Click bar to compare models",
+        short: "Word Error Rate (%)",
         detailed:
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions.",
       };
@@ -546,6 +548,7 @@ export function useDashboardState(page: "tts" | "stt") {
     formatChartLabel: chartData.formatChartLabel,
     getProviderForModel: chartData.getProviderForModel,
     getWindowedTimelineData: chartData.getWindowedTimelineData,
+    getTimelineData: chartData.getTimelineData,
     getCurrentTimeWindow: chartData.getCurrentTimeWindow,
     getTimelineTicks: chartData.getTimelineTicks,
     getModelsWithTimelineData: chartData.getModelsWithTimelineData,

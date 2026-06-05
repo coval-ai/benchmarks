@@ -18,7 +18,7 @@ export const metricDescriptions = {
       "This visualization shows the full distribution of latency measurements, including quartiles, outliers, and density curves. The violin shape reveals performance consistency - wider sections indicate more common latency values."
   },
   wer: {
-    short: "Word Error Rate (%) \u2022 Click bar to compare models",
+    short: "Word Error Rate (%)",
     detailed:
       "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounces complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
   }
