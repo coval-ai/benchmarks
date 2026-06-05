@@ -7,32 +7,28 @@ import React, { useMemo } from "react";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { median } from "@/lib/utils/median";
-import ViolinPlot from "@/components/charts/d3/ViolinPlot";
+import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
-const ViolinSection: React.FC = () => {
+const BoxPlotSection: React.FC = () => {
   const {
-    violinDescription: description,
+    boxPlotDescription: description,
     latencyLabel,
-    getViolinData,
+    getBoxPlotData,
     getProviderForModel,
     isMobile,
   } = useDashboard();
-  const trackChartHover = useChartHoverTracking("violin");
+  const trackChartHover = useChartHoverTracking("box_plot");
 
-  const violinData = getViolinData();
-  const medianLatency = useMemo(() => {
-    const values: number[] = [];
-    for (const modelData of violinData.data) {
-      for (const value of modelData.values) {
-        values.push(value);
-      }
-    }
-    return median(values);
-  }, [violinData]);
+  const boxPlotData = getBoxPlotData();
+  // Median across the selected models' per-model medians.
+  const medianLatency = useMemo(
+    () => median(boxPlotData.data.map((modelData) => modelData.quartiles.median)),
+    [boxPlotData]
+  );
 
   return (
     <div className="mb-4">
@@ -46,8 +42,8 @@ const ViolinSection: React.FC = () => {
           }}
         />
 
-        <ViolinPlot
-          data={violinData}
+        <BoxPlot
+          data={boxPlotData}
           getModelColor={getModelColor}
           getProviderForModel={getProviderForModel}
           normalizeModelName={normalizeModelName}
@@ -58,4 +54,4 @@ const ViolinSection: React.FC = () => {
   );
 };
 
-export default ViolinSection;
+export default BoxPlotSection;

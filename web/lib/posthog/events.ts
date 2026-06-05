@@ -26,7 +26,7 @@ export type DashboardChartId =
   | "timeline"
   | "scatter"
   | "wer_bar"
-  | "violin"
+  | "box_plot"
   | "heatmap"
   | "performance_delta";
 export type PlaygroundRunTrigger = "button" | "keyboard";

@@ -2,38 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { Result } from "../aggregates";
-import { buildModelsByProviderFromResults, pruneSelection } from "./modelsFromResults";
+import type { ProviderModelRef } from "./modelsFromResults";
+import { buildModelsByProvider, pruneSelection } from "./modelsFromResults";
 
-function row(
-  provider: string,
-  model: string,
-  benchmark: "STT" | "TTS" = "STT"
-): Result {
-  return {
-    id: 1,
-    provider,
-    model,
-    benchmark,
-    metric_type: "TTFT",
-    metric_value: 0.5,
-    metric_units: "seconds",
-    status: "SUCCEEDED",
-    created_at: "2026-05-18T12:00:00Z",
-    run_id: 1,
-    audio_filename: "a.wav",
-    transcript: null,
-    error: null,
-    voice: null,
-  } as Result;
+function entry(provider: string, model: string): ProviderModelRef {
+  return { provider, model };
 }
 
-describe("buildModelsByProviderFromResults", () => {
-  it("includes providers/models present in result rows when no catalogue is available", () => {
-    const out = buildModelsByProviderFromResults(
+describe("buildModelsByProvider", () => {
+  it("includes providers/models present in entries when no catalogue is available", () => {
+    const out = buildModelsByProvider(
       [
-        row("deepgram", "nova-2"),
-        row("xai", "grok-stt"),
+        entry("deepgram", "nova-2"),
+        entry("xai", "grok-stt"),
       ],
       "STT"
     );
@@ -43,8 +24,8 @@ describe("buildModelsByProviderFromResults", () => {
   });
 
   it("keeps same-slug models from different providers distinct", () => {
-    const out = buildModelsByProviderFromResults(
-      [row("speechmatics", "default"), row("gradium", "default")],
+    const out = buildModelsByProvider(
+      [entry("speechmatics", "default"), entry("gradium", "default")],
       "STT"
     );
     expect(out.speechmatics).toEqual(["speechmatics:default"]);
@@ -64,8 +45,8 @@ describe("buildModelsByProviderFromResults", () => {
         },
       ],
     };
-    const out = buildModelsByProviderFromResults(
-      [row("deepgram", "nova-2")],
+    const out = buildModelsByProvider(
+      [entry("deepgram", "nova-2")],
       "STT",
       catalogue as never
     );
@@ -76,11 +57,11 @@ describe("buildModelsByProviderFromResults", () => {
   });
 
   it("works when catalogue is undefined", () => {
-    const out = buildModelsByProviderFromResults([row("hume", "octave-2", "TTS")], "TTS");
+    const out = buildModelsByProvider([entry("hume", "octave-2")], "TTS");
     expect(out.hume).toEqual(["hume:octave-2"]);
   });
 
-  it("does not include disabled catalogue models or disabled result rows", () => {
+  it("does not include disabled catalogue models or disabled data-backed entries", () => {
     const catalogue = {
       tts: [],
       stt: [
@@ -94,10 +75,10 @@ describe("buildModelsByProviderFromResults", () => {
       ],
     };
 
-    const out = buildModelsByProviderFromResults(
+    const out = buildModelsByProvider(
       [
-        row("openai", "gpt-realtime-whisper"),
-        row("openai", "legacy-whisper"),
+        entry("openai", "gpt-realtime-whisper"),
+        entry("openai", "legacy-whisper"),
       ],
       "STT",
       catalogue as never
@@ -106,7 +87,7 @@ describe("buildModelsByProviderFromResults", () => {
     expect(out.openai).toEqual(["openai:gpt-realtime-whisper"]);
   });
 
-  it("adds result-backed TTS models alongside catalogue models", () => {
+  it("adds data-backed TTS models alongside catalogue models", () => {
     const catalogue = {
       stt: [],
       tts: [
@@ -121,11 +102,11 @@ describe("buildModelsByProviderFromResults", () => {
       ],
     };
 
-    const out = buildModelsByProviderFromResults(
+    const out = buildModelsByProvider(
       [
-        row("openai", "tts-1-hd", "TTS"),
-        row("hume", "octave-tts", "TTS"),
-        row("hume", "octave-2", "TTS"),
+        entry("openai", "tts-1-hd"),
+        entry("hume", "octave-tts"),
+        entry("hume", "octave-2"),
       ],
       "TTS",
       catalogue as never
@@ -134,6 +115,18 @@ describe("buildModelsByProviderFromResults", () => {
     expect(out.openai).toEqual(["openai:tts-1-hd"]);
     expect(out.elevenlabs).toEqual(["elevenlabs:eleven_flash_v2_5"]);
     expect(out.hume).toEqual(["hume:octave-tts", "hume:octave-2"]);
+  });
+
+  it("does not deduplicate repeated entries into duplicate keys", () => {
+    const out = buildModelsByProvider(
+      [
+        entry("deepgram", "nova-2"),
+        entry("deepgram", "nova-2"),
+        entry("deepgram", "nova-2"),
+      ],
+      "STT"
+    );
+    expect(out.deepgram).toEqual(["deepgram:nova-2"]);
   });
 });
 
