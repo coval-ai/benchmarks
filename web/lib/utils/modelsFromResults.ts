@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ProvidersApiResponse } from "../api/client";
-import type { Result } from "../aggregates";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import { toModelKey } from "./formatters";
+
+/** Anything that names a (provider, model) pair — e.g. a ModelStatEntry. */
+export interface ProviderModelRef {
+  provider: string;
+  model: string;
+}
 
 function modelIsEnabled(
   providers: ProvidersApiResponse | undefined,
@@ -53,17 +58,21 @@ function buildModelsByProviderFromCatalogue(
   return modelsByProvider;
 }
 
-export function buildModelsByProviderFromResults(
-  rows: readonly Result[],
+/**
+ * Catalogue models (minus disabled ones) plus any data-backed models the
+ * catalogue doesn't know about yet. `entries` must already be scoped to
+ * `benchmark` — the aggregates endpoint returns one benchmark per response.
+ */
+export function buildModelsByProvider(
+  entries: readonly ProviderModelRef[],
   benchmark: "STT" | "TTS",
   providers?: ProvidersApiResponse
 ): ModelsByProvider {
   const modelsByProvider = buildModelsByProviderFromCatalogue(benchmark, providers);
 
-  for (const row of rows) {
-    if (row.benchmark !== benchmark) continue;
-    if (!modelIsEnabled(providers, benchmark, row.provider, row.model)) continue;
-    addModel(modelsByProvider, row.provider, row.model);
+  for (const entry of entries) {
+    if (!modelIsEnabled(providers, benchmark, entry.provider, entry.model)) continue;
+    addModel(modelsByProvider, entry.provider, entry.model);
   }
 
   return modelsByProvider;

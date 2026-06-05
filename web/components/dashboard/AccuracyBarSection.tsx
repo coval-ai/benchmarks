@@ -97,7 +97,7 @@ const AccuracyBarSection: React.FC = () => {
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${value}%`}
                 label={{
-                  value: "Average WER (%)",
+                  value: "Average WER",
                   angle: -90,
                   position: "insideLeft",
                   style: {

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import * as d3 from "d3";
-import { ViolinPlotProps } from "@/types/chart.types";
+import { BoxPlotProps } from "@/types/chart.types";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
 const modelFontSize = "10px";
@@ -13,7 +13,7 @@ const providerFontSize = "9px";
 const axisLabelFontSize = "12px";
 const yAxisTickFontSize = "10px";
 
-const ViolinPlot: React.FC<ViolinPlotProps> = ({
+const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
   width = 800,
   height = 500,
@@ -30,24 +30,19 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
   });
   const themeColors = useThemeColors();
 
-  // Handle responsive sizing
+  // Handle responsive sizing — always fit the card's content box.
   useEffect(() => {
-    // On mobile the chart must fit the card's content box; the 400px floor is
-    // desktop-only so the plot stays legible in narrow sidebars.
-    const minWidth = isMobile ? 0 : 400;
     const handleResize = () => {
       if (containerRef.current) {
-        const containerWidth = containerRef.current.offsetWidth;
         setDimensions({
-          width: Math.max(minWidth, containerWidth),
+          width: containerRef.current.offsetWidth,
           height: height
         });
       } else {
         // Fallback for initial render - use a more conservative width
         const viewportWidth = window.innerWidth;
-        const estimatedAvailableWidth = viewportWidth * 0.85; // Use 85% of viewport width
         setDimensions({
-          width: Math.max(minWidth, estimatedAvailableWidth),
+          width: viewportWidth * 0.85, // Use 85% of viewport width
           height: height
         });
       }
@@ -66,49 +61,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
     };
-  }, [height, isMobile]);
-
-  // Helper function to create violin path from density data
-  const createViolinPath = (
-    densityData: { value: number; density: number }[],
-    xScale: d3.ScaleBand<string>,
-    yScale: d3.ScaleLinear<number, number>,
-    modelName: string,
-    maxDensity: number
-  ): string => {
-    if (densityData.length === 0) return "";
-
-    const bandwidth = xScale.bandwidth();
-    const centerX = (xScale(modelName) ?? 0) + bandwidth / 2;
-    const maxWidth = bandwidth * 0.4; // Max width of violin
-
-    // Create path points for the right side of the violin
-    const rightSidePoints: [number, number][] = densityData.map((point) => {
-      const w = (point.density / maxDensity) * maxWidth;
-      return [centerX + w, yScale(point.value)];
-    });
-
-    // Create path points for the left side (mirror of right side)
-    const leftSidePoints: [number, number][] = densityData
-      .slice()
-      .reverse()
-      .map((point) => {
-        const w = (point.density / maxDensity) * maxWidth;
-        return [centerX - w, yScale(point.value)];
-      });
-
-    // Combine both sides to create a closed path
-    const allPoints = rightSidePoints.concat(leftSidePoints);
-
-    // Create the path using D3's line generator with curve
-    const line = d3
-      .line()
-      .x((d) => d[0])
-      .y((d) => d[1])
-      .curve(d3.curveBasis); // Smooth curves for organic violin shape
-
-    return line(allPoints) ?? "";
-  };
+  }, [height]);
 
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
@@ -133,13 +86,6 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       .domain([Math.max(0, data.globalMin - 50), data.globalMax * 1.05])
       .range([chartHeight, 0]);
 
-    // Find the maximum density across all models for consistent scaling
-    const maxDensity = Math.max(
-      ...data.data.flatMap((modelData) =>
-        modelData.density.map((point) => point.density)
-      )
-    );
-
     // Create main group
     const g = svg
       .append("g")
@@ -149,7 +95,9 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
     const yAxis = d3
       .axisLeft(yScale)
       .tickSize(-chartWidth)
-      .tickFormat((d) => `${(Number(d) / 1000).toFixed(1)}s`);
+      // Seconds with up to two decimals, trailing zeros stripped, so
+      // sub-second ticks stay distinct (0.25s, 0.3s) without clutter (1s, 2.2s).
+      .tickFormat((d) => `${parseFloat((Number(d) / 1000).toFixed(2))}s`);
 
     const yAxisGroup = g.append("g")
       .attr("class", "y-axis")
@@ -160,16 +108,9 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       .attr("stroke", themeColors.grid)
       .attr("stroke-dasharray", "2,2");
 
-    // Hide text labels for STT, show for TTS with dynamic font size
-    if (data.metricType === "NTTFT" || data.metricType === "TTFT") {
-      // STT - hide text labels only
-      yAxisGroup.selectAll("text").style("display", "none");
-    } else {
-      // TTS - show text labels with dynamic styling
-      yAxisGroup.selectAll("text")
-        .attr("fill", themeColors.axisText)
-        .attr("font-size", yAxisTickFontSize);
-    }
+    yAxisGroup.selectAll("text")
+      .attr("fill", themeColors.axisText)
+      .attr("font-size", yAxisTickFontSize);
 
     yAxisGroup.select(".domain").remove();
 
@@ -252,7 +193,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       .style("text-anchor", "middle")
       .attr("fill", themeColors.axisText)
       .attr("font-size", axisLabelFontSize)
-      .text(`${data.metricType} (ms)`);
+      .text(data.metricType);
 
     g.append("text")
       .attr(
@@ -264,50 +205,20 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       .attr("font-size", axisLabelFontSize)
       .text("Ranked by P50 latency");
 
-    // Render violin plots for each model
+    // Render a box plot for each model
     data.data.forEach((modelData) => {
       const color = getModelColor(modelData.model);
-      const { min, q1, median, q3, max, outliers } = modelData.quartiles;
+      const { min, q1, median, q3, max } = modelData.quartiles;
 
-      // Create a group for this model's violin plot
-      const violinGroup = g
+      const boxGroup = g
         .append("g")
         .attr(
           "class",
-          `violin-${modelData.model.replace(/[^a-zA-Z0-9]/g, "-")}`
+          `box-${modelData.model.replace(/[^a-zA-Z0-9]/g, "-")}`
         );
 
-      // 1. Render the violin shape (density curve)
-      if (modelData.density.length > 0) {
-        const visibleDensity = modelData.density.filter(
-          (point) => point.value <= data.globalMax
-        );
-
-        const violinPath = createViolinPath(
-          visibleDensity,
-          xScale,
-          yScale,
-          modelData.model,
-          maxDensity
-        );
-
-        violinGroup
-          .append("path")
-          .attr("d", violinPath)
-          .attr("fill", color)
-          .attr("fill-opacity", 0.3)
-          .attr("stroke", color)
-          .attr("stroke-width", 1)
-          .attr("stroke-opacity", 0.8);
-      }
-
-      // 2. Overlay box plot elements on top of violin
       const centerX = (xScale(modelData.model) ?? 0) + xScale.bandwidth() / 2;
-      const boxWidth = Math.min(xScale.bandwidth() * 0.15, 20);
-
-      const boxGroup = violinGroup
-        .append("g")
-        .attr("class", "box-plot-overlay");
+      const boxWidth = Math.min(xScale.bandwidth() * 0.5, 48);
 
       // Main box (IQR)
       boxGroup
@@ -316,7 +227,8 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         .attr("y", yScale(q3))
         .attr("width", boxWidth)
         .attr("height", yScale(q1) - yScale(q3))
-        .attr("fill", themeColors.boxFill)
+        .attr("fill", color)
+        .attr("fill-opacity", 0.3)
         .attr("stroke", color)
         .attr("stroke-width", 2)
         .attr("rx", 2);
@@ -329,7 +241,8 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         .attr("y1", yScale(median))
         .attr("y2", yScale(median))
         .attr("stroke", themeColors.median)
-        .attr("stroke-width", 3);
+        .attr("stroke-opacity", 0.55)
+        .attr("stroke-width", 1.5);
 
       // Whiskers
       const whiskerWidth = boxWidth * 0.8;
@@ -353,15 +266,13 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         .attr("stroke", color)
         .attr("stroke-width", 1.5);
 
-      // Upper whisker - cap at visible maximum
-      const visibleMax = Math.min(max, data.globalMax);
-
+      // Upper whisker
       boxGroup
         .append("line")
         .attr("x1", centerX)
         .attr("x2", centerX)
         .attr("y1", yScale(q3))
-        .attr("y2", yScale(visibleMax))
+        .attr("y2", yScale(max))
         .attr("stroke", color)
         .attr("stroke-width", 1.5);
 
@@ -369,39 +280,22 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         .append("line")
         .attr("x1", centerX - whiskerWidth / 2)
         .attr("x2", centerX + whiskerWidth / 2)
-        .attr("y1", yScale(visibleMax))
-        .attr("y2", yScale(visibleMax))
+        .attr("y1", yScale(max))
+        .attr("y2", yScale(max))
         .attr("stroke", color)
         .attr("stroke-width", 1.5);
 
-      // Outliers - only plot those within the visible range
-      const visibleOutliers = outliers.filter(
-        (outlier) => outlier <= data.globalMax
-      );
-      visibleOutliers.forEach((outlier) => {
-        boxGroup
-          .append("circle")
-          .attr("cx", centerX)
-          .attr("cy", yScale(outlier))
-          .attr("r", 4)
-          .attr("fill", color)
-          .attr("fill-opacity", 0.8)
-          .attr("stroke", themeColors.median)
-          .attr("stroke-width", 1);
-      });
-
       // Add interactive hover effects
-      violinGroup
+      boxGroup
         .style("cursor", "pointer")
         .on("mouseenter", function () {
           d3.select(this)
-            .select("path")
-            .attr("fill-opacity", 0.5)
-            .attr("stroke-width", 2);
+            .select("rect")
+            .attr("fill-opacity", 0.5);
 
           const tooltip = g
             .append("g")
-            .attr("class", "violin-tooltip")
+            .attr("class", "box-tooltip")
             .attr("transform", `translate(${centerX + 30}, ${yScale(median)})`);
 
           tooltip
@@ -459,11 +353,10 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         })
         .on("mouseleave", function () {
           d3.select(this)
-            .select("path")
-            .attr("fill-opacity", 0.3)
-            .attr("stroke-width", 1);
+            .select("rect")
+            .attr("fill-opacity", 0.3);
 
-          g.select(".violin-tooltip").remove();
+          g.select(".box-tooltip").remove();
         });
     });
   }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
@@ -471,7 +364,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
   if (data.data.length === 0) {
     return (
       <div className="h-64 flex items-center justify-center text-text-secondary">
-        <p>No data available for violin plot</p>
+        <p>No data available for box plot</p>
       </div>
     );
   }
@@ -485,17 +378,8 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         className="overflow-visible"
         style={{ background: "transparent" }}
       />
-      {/* Outlier indicator */}
-      {data.outlierCount && data.outlierCount > 0 && (
-        <div className="text-center mt-2">
-          <p className="text-text-tertiary text-xs">
-            {data.outlierCount} statistical outliers above{" "}
-            {((data.cappedAt ?? 0) / 1000).toFixed(1)}s not shown
-          </p>
-        </div>
-      )}
     </div>
   );
 };
 
-export default ViolinPlot;
+export default BoxPlot;

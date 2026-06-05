@@ -49,6 +49,14 @@ export function getLocalTimeZoneAbbr(): string {
 }
 
 /**
+ * Convert a latency metric value to display milliseconds.
+ * STT latency metrics (TTFT) are stored in seconds; TTS (TTFA) already in ms.
+ */
+export function latencyToMs(value: number, benchmark: "tts" | "stt"): number {
+  return benchmark === "stt" ? value * 1000 : value;
+}
+
+/**
  * Build a composite model key from provider and model slug.
  * Used throughout the frontend to uniquely identify a (provider, model) pair,
  * since multiple providers can share the same model slug (e.g. "default").

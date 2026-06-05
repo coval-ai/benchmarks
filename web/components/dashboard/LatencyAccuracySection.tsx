@@ -100,15 +100,15 @@ const LatencyAccuracySection: React.FC = () => {
               <XAxis
                 dataKey="x"
                 type="number"
-                name={`${latencyLabel} (ms)`}
+                name={latencyLabel}
                 domain={[0, xMax]}
                 ticks={xTicks}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
-                tickFormatter={(value) => `${Number(value).toFixed(0)}ms`}
+                tickFormatter={(value) => `${parseFloat((Number(value) / 1000).toFixed(2))}s`}
                 label={{
-                  value: `${latencyLabel} (ms)`,
+                  value: latencyLabel,
                   position: "insideBottom",
                   offset: -20,
                   style: {
@@ -121,7 +121,7 @@ const LatencyAccuracySection: React.FC = () => {
               <YAxis
                 dataKey="y"
                 type="number"
-                name="WER (%)"
+                name="WER"
                 domain={[0, yMax]}
                 ticks={yTicks}
                 axisLine={false}
@@ -129,7 +129,7 @@ const LatencyAccuracySection: React.FC = () => {
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${value}%`}
                 label={{
-                  value: "WER (%)",
+                  value: "WER",
                   angle: -90,
                   position: "insideLeft",
                   style: {

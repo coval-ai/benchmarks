@@ -12,14 +12,9 @@ export const metricDescriptions = {
     detailed:
       "We run TTFT measurements on a fixed test case to measure consistency over time. A model that consistently responds within a narrow time range provides better user experience than one with highly variable timing, even if the variable model is sometimes faster. Unpredictable delays can be seen through sudden latency spikes."
   },
-  latencyVariation: {
-    short: "Latency distribution across all measurements",
-    detailed:
-      "This visualization shows the full distribution of latency measurements, including quartiles, outliers, and density curves. The violin shape reveals performance consistency - wider sections indicate more common latency values."
-  },
   wer: {
-    short: "Word Error Rate (%) \u2022 Click bar to compare models",
+    short: "Word Error Rate",
     detailed:
-      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounces complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
+      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users. Click a bar to highlight it for comparison."
   }
 };

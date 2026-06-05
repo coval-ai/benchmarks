@@ -5,13 +5,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import {
-  getResults,
+  getAggregates,
   getProviders,
   getRuns,
   getLeaderboard,
 } from "./client";
 import type {
-  ResultsQueryParams,
+  AggregatesQueryParams,
   FetchOptions,
 } from "./client";
 import type { paths } from "./generated/schema";
@@ -24,11 +24,11 @@ type LeaderboardQueryParams = NonNullable<
   paths["/v1/leaderboard"]["get"]["parameters"]["query"]
 >;
 
-export function useResultsQuery(params: ResultsQueryParams) {
+export function useAggregatesQuery(params: AggregatesQueryParams) {
   return useQuery({
-    queryKey: ["results", params],
+    queryKey: ["aggregates", params],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
-      getResults(params, { signal } satisfies FetchOptions),
+      getAggregates(params, { signal } satisfies FetchOptions),
   });
 }
 

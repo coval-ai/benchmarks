@@ -31,7 +31,7 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
           activeTab === "tts" ? "TTFA" : "TTFT"
         }: ${point.x.toFixed(0)}ms`}</p>
         <p style={{ margin: 0 }}>{`Avg WER: ${point.y.toFixed(1)}%`}</p>
-        <p style={{ margin: 0 }}>{`Runs: ${point.count}`}</p>
+        <p style={{ margin: 0 }}>{`Samples: ${point.count}`}</p>
       </div>
     );
   }

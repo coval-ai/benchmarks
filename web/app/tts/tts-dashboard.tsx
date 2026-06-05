@@ -15,8 +15,8 @@ const TimelineChart = dynamic(
   { ssr: false }
 );
 
-const ViolinSection = dynamic(
-  () => import("@/components/dashboard/ViolinSection"),
+const BoxPlotSection = dynamic(
+  () => import("@/components/dashboard/BoxPlotSection"),
   { ssr: false }
 );
 
@@ -42,7 +42,7 @@ export function TTSDashboard() {
         <DashboardLayout>
           <KeyMetrics />
           <TimelineChart />
-          <ViolinSection />
+          <BoxPlotSection />
           <AccuracyBarSection />
           <LatencyAccuracySection />
           <HeatmapSection />

@@ -138,7 +138,7 @@ const TimelineChart: React.FC = () => {
                 domain={[0, "dataMax"]}
                 tickFormatter={(value) => `${(value / 1000).toFixed(1)}s`}
                 label={{
-                  value: `${activeTab === "tts" ? "TTFA" : "TTFT"} (ms)`,
+                  value: activeTab === "tts" ? "TTFA" : "TTFT",
                   angle: -90,
                   position: "insideLeft",
                   style: {

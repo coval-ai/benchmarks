@@ -45,8 +45,6 @@ async function request<T>(path: string, init?: Parameters<typeof fetch>[1]): Pro
 }
 
 // Response and row types from codegen
-export type ResultRow = components["schemas"]["ResultOut"];
-export type ResultsApiResponse = components["schemas"]["ResultsResponse"];
 export type ProvidersApiResponse = components["schemas"]["ProvidersResponse"];
 export type ProviderInfo = components["schemas"]["ProviderInfo"];
 export type ModelInfo = components["schemas"]["ModelInfo"];
@@ -54,10 +52,13 @@ export type LeaderboardApiResponse = components["schemas"]["LeaderboardResponse"
 export type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
 export type RunRow = components["schemas"]["RunOut"];
 export type RunsApiResponse = components["schemas"]["RunsResponse"];
+export type AggregatesApiResponse = components["schemas"]["AggregatesResponse"];
+export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
+export type SeriesPoint = components["schemas"]["SeriesPoint"];
 
 // Query-param types from codegen
-export type ResultsQueryParams = NonNullable<
-  paths["/v1/results"]["get"]["parameters"]["query"]
+export type AggregatesQueryParams = NonNullable<
+  paths["/v1/results/aggregates"]["get"]["parameters"]["query"]
 >;
 type RunsQueryParams = NonNullable<paths["/v1/runs"]["get"]["parameters"]["query"]>;
 type LeaderboardQueryParams = NonNullable<
@@ -115,14 +116,16 @@ export async function postPlaygroundTts(
   return { audioBlob: blob, ttfaMs: Number.isFinite(ttfaMs) ? ttfaMs : null, totalMs };
 }
 
-export async function getResults(
-  params: ResultsQueryParams,
+export async function getAggregates(
+  params: AggregatesQueryParams,
   opts?: FetchOptions
-): Promise<ResultsApiResponse> {
+): Promise<AggregatesApiResponse> {
   const qs = buildQueryString(
     params as Record<string, string | number | boolean | null | undefined>
   );
-  return request<ResultsApiResponse>(`/v1/results${qs}`, { signal: opts?.signal });
+  return request<AggregatesApiResponse>(`/v1/results/aggregates${qs}`, {
+    signal: opts?.signal,
+  });
 }
 
 export async function getProviders(

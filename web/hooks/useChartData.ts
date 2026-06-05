@@ -5,34 +5,23 @@
 
 import { useCallback, useMemo } from "react";
 import type {
-  BenchmarkData,
   ModelsByProvider,
   ModelStats,
   TimelineDataPoint,
   ScatterDataPoint,
-  ViolinPlotData,
-  ViolinDataPoint,
+  BoxPlotData,
+  BoxPlotDataPoint,
   ModelHeatmapData,
   BarDataPoint
 } from "@/types/benchmark.types";
-import {
-  calculateQuartiles,
-  calculateStats,
-  calculateKernelDensity
-} from "@/lib/utils/statistics";
-import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
+import type { SeriesPoint } from "@/lib/api/client";
+import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
-
-// Parent-run statuses that should contribute to chart aggregates. Mirrors the
-// filter used in `lib/aggregates.ts` — keep in sync. The result-row status is
-// always 'success' because the API filters server-side; this gate is on the
-// PARENT-RUN status (uppercase enum) which is denormalized into ResultOut.
-const INCLUDED_STATUSES = new Set<string>(["SUCCEEDED", "PARTIAL"]);
 
 interface UseChartDataParams {
   activeTab: "tts" | "stt";
-  rawData: BenchmarkData[];
   modelStats: ModelStats[];
+  series: SeriesPoint[];
   selectedTTSModels: string[];
   selectedSTTModels: string[];
   timelineWindowEnd: number;
@@ -41,13 +30,18 @@ interface UseChartDataParams {
 
 export function useChartData({
   activeTab,
-  rawData,
   modelStats,
+  series,
   selectedTTSModels,
   selectedSTTModels,
   timelineWindowEnd,
   modelsByProvider
 }: UseChartDataParams) {
+  const toDisplayUnits = useCallback(
+    (value: number): number => latencyToMs(value, activeTab),
+    [activeTab]
+  );
+
   // Helper: find a stat row for a given model key and metric.
   // Accepts composite "provider:model" keys or bare model slugs.
   const getStat = useCallback(
@@ -81,11 +75,9 @@ export function useChartData({
           ? normalizeSTTProviderName(provider)
           : normalizeTTSProviderName(provider);
       }
-      // Fallback for bare slugs: search modelStats, then rawData, then providers config
-      const stat = modelStats.find((s) => s.model === model);
-      const rawFromData = stat?.provider ?? rawData.find((d) => d.model === model)?.provider;
+      // Fallback for bare slugs: search modelStats, then providers config
       const rawProvider =
-        rawFromData ??
+        modelStats.find((s) => s.model === model)?.provider ??
         Object.entries(modelsByProvider).find(([, models]) =>
           models.includes(modelKey)
         )?.[0] ??
@@ -94,81 +86,31 @@ export function useChartData({
         ? normalizeSTTProviderName(rawProvider)
         : normalizeTTSProviderName(rawProvider);
     },
-    [modelStats, rawData, activeTab, modelsByProvider]
+    [modelStats, activeTab, modelsByProvider]
   );
 
-  // ─── Functions that still need raw data (distributions, individual points) ───
-
-  const getCurrentData = useCallback(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const metricTypes = activeTab === "tts" ? ["TTFA", "WER"] : ["TTFT", "WER"];
-
-    if (selectedModels.length === 0) {
-      return [];
-    }
-
-    const selectedModelKeys = new Set(selectedModels);
-    return rawData.filter(
-      (item) =>
-        selectedModelKeys.has(toModelKey(item.provider, item.model)) &&
-        metricTypes.includes(item.metric_type) &&
-        item.metric_value !== null &&
-        item.metric_value !== undefined
-    );
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
-
-  // Memoized result so repeated callers (getFullTimeRange, getWindowedTimelineData,
-  // useTimelineWindow) share a single computation per (rawData, tab, selection).
-  // Per-model timeline series (timestamp → averaged value) — the heavy pass,
-  // computed once per dataset so selection only merges precomputed series.
+  // Per-model timeline series (scheduled_at bucket → avg) for the primary
+  // latency metric. Feeds the timeline chart and the STT heatmap deltas.
   const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
     const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
-    const acc: Record<
-      string,
-      { [key: number]: { total: number; count: number } }
-    > = {};
-
-    rawData.forEach((item) => {
-      if (item.metric_type !== primaryMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-
-      const modelKey = toModelKey(item.provider, item.model);
-      const timestamp = new Date(item.scheduled_at).getTime();
-      const value =
-        activeTab === "tts"
-          ? item.metric_value ?? 0
-          : (item.metric_value ?? 0) * 1000;
-
-      if (!acc[modelKey]) {
-        acc[modelKey] = {};
-      }
-      const modelAcc = acc[modelKey];
-      if (!modelAcc[timestamp]) {
-        modelAcc[timestamp] = { total: 0, count: 0 };
-      }
-      const bucket = modelAcc[timestamp];
-      if (bucket) {
-        bucket.total += value;
-        bucket.count += 1;
-      }
-    });
-
     const byModel: Record<string, Record<number, number>> = {};
-    Object.entries(acc).forEach(([model, tsMap]) => {
-      const series: Record<number, number> = {};
-      Object.entries(tsMap).forEach(([timestamp, stats]) => {
-        series[Number(timestamp)] = stats.total / stats.count;
-      });
-      byModel[model] = series;
+    series.forEach((point) => {
+      if (point.metric_type !== primaryMetric) return;
+
+      const modelKey = toModelKey(point.provider, point.model);
+      const timestamp = new Date(point.scheduled_at).getTime();
+      if (!byModel[modelKey]) {
+        byModel[modelKey] = {};
+      }
+      byModel[modelKey][timestamp] = toDisplayUnits(point.avg_value);
     });
 
     return byModel;
-  }, [rawData, activeTab]);
+  }, [series, activeTab, toDisplayUnits]);
 
-  // Timeline rows: merge the selected models' precomputed series into one row
-  // per timestamp (ascending), each with a `${model}_value` column.
+  // Timeline rows: merge the selected models' series into one row per
+  // timestamp (ascending), each with a `${model}_value` column.
   const timelineData = useMemo<TimelineDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -206,206 +148,107 @@ export function useChartData({
     [timelineData]
   );
 
-  // Per-model violin pieces (values, KDE, quartiles, stats) — the heavy work.
-  // Computed once per dataset (independent of selection) so toggling a model
-  // only reassembles the precomputed pieces instead of re-scanning rawData.
-  const violinByModel = useMemo<Record<string, ViolinDataPoint>>(() => {
+  // Per-model box-plot pieces from the SQL stats: box = p25..p75, whiskers
+  // clamped to 1.5x IQR beyond the box (against the true data extremes).
+  const boxByModel = useMemo<Record<string, BoxPlotDataPoint>>(() => {
     const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-    const modelGroups: { [key: string]: BenchmarkData[] } = {};
 
-    rawData.forEach((item) => {
-      if (item.metric_type !== primaryMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
+    const byModel: Record<string, BoxPlotDataPoint> = {};
+    modelStats.forEach((stat) => {
+      if (stat.metric_type !== primaryMetric) return;
 
-      const itemKey = toModelKey(item.provider, item.model);
-      if (!modelGroups[itemKey]) {
-        modelGroups[itemKey] = [];
-      }
-      const modelGroup = modelGroups[itemKey];
-      if (modelGroup) {
-        modelGroup.push(item);
-      }
-    });
+      const q1 = toDisplayUnits(stat.p25);
+      const median = toDisplayUnits(stat.p50);
+      const q3 = toDisplayUnits(stat.p75);
+      const iqr = q3 - q1;
 
-    const byModel: Record<string, ViolinDataPoint> = {};
-    Object.entries(modelGroups).forEach(([model, items]) => {
-      const values = items.map((item) =>
-        activeTab === "tts"
-          ? item.metric_value ?? 0
-          : (item.metric_value ?? 0) * 1000
-      );
-
-      if (values.length === 0) return;
-
-      byModel[model] = {
-        model,
-        provider: items[0]?.provider ?? "Unknown",
-        values,
-        density: calculateKernelDensity(values),
-        quartiles: calculateQuartiles(values),
-        stats: calculateStats(values)
+      byModel[toModelKey(stat.provider, stat.model)] = {
+        model: toModelKey(stat.provider, stat.model),
+        provider: stat.provider,
+        quartiles: {
+          min: Math.max(toDisplayUnits(stat.min_value), q1 - 1.5 * iqr),
+          q1,
+          median,
+          q3,
+          max: Math.min(toDisplayUnits(stat.max_value), q3 + 1.5 * iqr)
+        },
+        stats: {
+          mean: toDisplayUnits(stat.avg_value),
+          std: toDisplayUnits(stat.stddev_value),
+          count: stat.sample_count
+        }
       };
     });
 
     return byModel;
-  }, [rawData, activeTab]);
+  }, [modelStats, activeTab, toDisplayUnits]);
 
-  // Violin plot data: gather the selected models' precomputed pieces and
-  // recompute only the pooled summary (axis bounds, whisker cap, outliers).
-  const violinDataMemo = useMemo<ViolinPlotData>(() => {
+  // Box plot data: the selected models' pieces, sorted by median, with the
+  // pooled axis bounds.
+  const boxPlotDataMemo = useMemo<BoxPlotData>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
-    if (selectedModels.length === 0) {
-      return {
-        data: [],
-        globalMin: 0,
-        globalMax: 0,
-        metricType: primaryMetric
-      };
-    }
-
-    const violinData: ViolinDataPoint[] = [];
+    const data: BoxPlotDataPoint[] = [];
     let globalMin = Infinity;
     let globalMax = -Infinity;
 
     selectedModels.forEach((model) => {
-      const entry = violinByModel[model];
+      const entry = boxByModel[model];
       if (!entry) return;
-      violinData.push(entry);
-      globalMin = Math.min(globalMin, ...entry.values);
-      globalMax = Math.max(globalMax, ...entry.values);
+      data.push(entry);
+      globalMin = Math.min(globalMin, entry.quartiles.min);
+      globalMax = Math.max(globalMax, entry.quartiles.max);
     });
 
-    if (violinData.length === 0) {
+    if (data.length === 0) {
       globalMin = 0;
       globalMax = 0;
     }
 
-    let maxUpperWhisker = 0;
-    let totalOutliers = 0;
-
-    violinData.forEach((modelData) => {
-      const { q3, max } = modelData.quartiles;
-      const iqr = q3 - modelData.quartiles.q1;
-      const upperWhisker = Math.min(max, q3 + 1.5 * iqr);
-      maxUpperWhisker = Math.max(maxUpperWhisker, upperWhisker);
-
-      totalOutliers += modelData.quartiles.outliers.filter(
-        (outlier) => outlier > upperWhisker
-      ).length;
-    });
-
-    if (violinData.length === 0) {
-      maxUpperWhisker = 0;
-    }
-
-    const sortedViolinData = [...violinData].sort(
-      (a, b) => a.quartiles.median - b.quartiles.median
-    );
+    data.sort((a, b) => a.quartiles.median - b.quartiles.median);
 
     return {
-      data: sortedViolinData,
+      data,
       globalMin,
-      globalMax: maxUpperWhisker,
-      trueGlobalMax: globalMax,
-      outlierCount: totalOutliers,
-      cappedAt: maxUpperWhisker,
+      globalMax,
       metricType: primaryMetric
     };
-  }, [violinByModel, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [boxByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
-  const getViolinData = useCallback(
-    (): ViolinPlotData => violinDataMemo,
-    [violinDataMemo]
+  const getBoxPlotData = useCallback(
+    (): BoxPlotData => boxPlotDataMemo,
+    [boxPlotDataMemo]
   );
 
-  // Pair latency with WER per run, then average per model — pairing restricts
-  // the average to runs that produced both metrics
+  // One (avg latency, avg WER) point per model. The averages are independent
+  // per metric — not restricted to runs that produced both.
   const scatterByModel = useMemo<Record<string, ScatterDataPoint>>(() => {
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-    const yMetric = "WER";
-
-    const benchmarkGroups: {
-      [key: string]: { [key: string]: BenchmarkData[] };
-    } = {};
-
-    rawData.forEach((item) => {
-      if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      const key = `${item.run_id}\x00${item.provider}\x00${item.model}\x00${item.voice}\x00${item.audio_filename}`;
-      if (!benchmarkGroups[key]) {
-        benchmarkGroups[key] = {};
-      }
-      if (!benchmarkGroups[key][item.metric_type]) {
-        benchmarkGroups[key][item.metric_type] = [];
-      }
-      const metricGroup = benchmarkGroups[key][item.metric_type];
-      if (metricGroup) {
-        metricGroup.push(item);
-      }
-    });
-
-    // One averaged point per model: sum paired run values, divide by run count
-    const modelAggregates: {
-      [model: string]: {
-        xSum: number;
-        ySum: number;
-        count: number;
-        benchmark: string;
-        provider: string;
-      };
-    } = {};
-
-    Object.values(benchmarkGroups).forEach((group) => {
-      const xData = group[xMetric]?.[0];
-      const yData = group[yMetric]?.[0];
-
-      if (xData && yData) {
-        const model = toModelKey(xData.provider, xData.model);
-        const x =
-          activeTab === "tts"
-            ? xData.metric_value ?? 0
-            : (xData.metric_value ?? 0) * 1000;
-        const y = yData.metric_value ?? 0;
-
-        const agg = modelAggregates[model];
-        if (agg) {
-          agg.xSum += x;
-          agg.ySum += y;
-          agg.count += 1;
-        } else {
-          modelAggregates[model] = {
-            xSum: x,
-            ySum: y,
-            count: 1,
-            benchmark: xData.benchmark,
-            provider:
-              activeTab === "stt"
-                ? normalizeSTTProviderName(xData.provider)
-                : normalizeTTSProviderName(xData.provider)
-          };
-        }
-      }
-    });
 
     const byModel: Record<string, ScatterDataPoint> = {};
-    Object.entries(modelAggregates).forEach(([model, agg]) => {
-      byModel[model] = {
-        x: agg.xSum / agg.count,
-        y: agg.ySum / agg.count,
-        model,
-        benchmark: agg.benchmark,
-        provider: agg.provider,
-        count: agg.count
+    modelStats.forEach((stat) => {
+      if (stat.metric_type !== xMetric) return;
+
+      const modelKey = toModelKey(stat.provider, stat.model);
+      const werStat = getStat(modelKey, "WER");
+      if (!werStat) return;
+
+      byModel[modelKey] = {
+        x: toDisplayUnits(stat.avg_value),
+        y: werStat.avg_value,
+        model: modelKey,
+        benchmark: activeTab === "tts" ? "TTS" : "STT",
+        provider:
+          activeTab === "stt"
+            ? normalizeSTTProviderName(stat.provider)
+            : normalizeTTSProviderName(stat.provider),
+        count: stat.sample_count
       };
     });
     return byModel;
-  }, [rawData, activeTab]);
+  }, [modelStats, activeTab, getStat, toDisplayUnits]);
 
   const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
     const selectedModels =
@@ -426,54 +269,9 @@ export function useChartData({
     [scatterDataMemo]
   );
 
-  // ─── Functions using SQL-aggregated modelStats ───
-
-  // STT heatmap still needs raw data for per-timestamp delta calculation
-  // Per-model latency series (timestamp → averaged value) for the STT model
-  // heatmap — the heavy scan, computed once per dataset.
-  const heatmapAvgByModel = useMemo<Record<string, Record<number, number>>>(() => {
-    const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-    const acc: Record<
-      string,
-      { [key: number]: { total: number; count: number } }
-    > = {};
-
-    rawData.forEach((item) => {
-      if (item.metric_type !== latencyMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      const itemKey = toModelKey(item.provider, item.model);
-      const timestamp = new Date(item.scheduled_at).getTime();
-      const latencyValue =
-        activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
-
-      if (!acc[itemKey]) {
-        acc[itemKey] = {};
-      }
-      const modelAcc = acc[itemKey];
-      if (!modelAcc[timestamp]) {
-        modelAcc[timestamp] = { total: 0, count: 0 };
-      }
-      const bucket = modelAcc[timestamp];
-      if (bucket) {
-        bucket.total += latencyValue;
-        bucket.count += 1;
-      }
-    });
-
-    const byModel: Record<string, Record<number, number>> = {};
-    Object.entries(acc).forEach(([model, tsMap]) => {
-      const series: Record<number, number> = {};
-      Object.entries(tsMap).forEach(([timestamp, stats]) => {
-        series[Number(timestamp)] = stats.total / stats.count;
-      });
-      byModel[model] = series;
-    });
-
-    return byModel;
-  }, [rawData, activeTab]);
-
+  // STT heatmap: latency deltas relative to the fastest selected model at
+  // each timestamp, percentiled per model. Deltas depend on the selection, so
+  // they are computed here from the per-model series.
   const modelHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -483,12 +281,10 @@ export function useChartData({
       return [];
     }
 
-    // Rebuild per-timestamp averages for the selected models from the
-    // precomputed per-model series (deltas are relative to the fastest
-    // selected model, so this part stays selection-dependent).
+    // Per-timestamp averages for the selected models.
     const averagedTimestampGroups: { [key: number]: { [key: string]: number } } = {};
     selectedModels.forEach((model) => {
-      const tsMap = heatmapAvgByModel[model];
+      const tsMap = timelineByModel[model];
       if (!tsMap) return;
       Object.entries(tsMap).forEach(([timestamp, avg]) => {
         const bucket = Number(timestamp);
@@ -523,7 +319,7 @@ export function useChartData({
         }
       });
 
-      // Compute delta percentiles in JS (these are relative, can't be pre-aggregated)
+      // Delta percentiles (relative to the selection, so computed here)
       const sorted = [...latencyDeltas].sort((a, b) => a - b);
       const n = sorted.length;
       let p25 = 0, p50 = 0, p75 = 0;
@@ -558,7 +354,7 @@ export function useChartData({
         a.model.localeCompare(b.model)
     );
   }, [
-    heatmapAvgByModel,
+    timelineByModel,
     activeTab,
     selectedTTSModels,
     selectedSTTModels,
@@ -570,7 +366,7 @@ export function useChartData({
     [modelHeatmapDataMemo]
   );
 
-  // TTS heatmap uses absolute percentiles — fully from SQL stats
+  // TTS heatmap uses absolute percentiles — straight from the SQL stats
   const ttsHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     if (activeTab !== "tts" || selectedTTSModels.length === 0) {
       return [];
@@ -710,9 +506,8 @@ export function useChartData({
     formatChartLabel,
     getProviderForModel,
     getStat,
-    getCurrentData,
     getTimelineData,
-    getViolinData,
+    getBoxPlotData,
     getScatterData,
     getModelHeatmapData,
     getTTSHeatmapData,
