@@ -62,9 +62,7 @@ _STATS_SQL = (
     " PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY r.metric_value)::float8 AS p75,"
     " MIN(r.metric_value)::float8 AS min_value,"
     " MAX(r.metric_value)::float8 AS max_value,"
-    " COUNT(*)::int AS sample_count"
-    + _FROM_WHERE
-    + " GROUP BY r.provider, r.model, r.metric_type"
+    " COUNT(*)::int AS sample_count" + _FROM_WHERE + " GROUP BY r.provider, r.model, r.metric_type"
     " ORDER BY r.provider, r.model, r.metric_type"
 )
 

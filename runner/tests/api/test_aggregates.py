@@ -117,9 +117,7 @@ async def test_series_buckets_by_scheduled_at(client: AsyncClient, postgresql: A
     assert point["sample_count"] == 2
 
 
-async def test_series_legacy_rows_floor_created_at(
-    client: AsyncClient, postgresql: Any
-) -> None:
+async def test_series_legacy_rows_floor_created_at(client: AsyncClient, postgresql: Any) -> None:
     """Runs without scheduled_at fall back to created_at floored to the
     schedule period (1800s default), same as GET /v1/results."""
     run_id = await _insert_run(postgresql, scheduled_at=None)
