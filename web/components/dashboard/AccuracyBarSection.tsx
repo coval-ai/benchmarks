@@ -82,7 +82,7 @@ const AccuracyBarSection: React.FC = () => {
             >
               <CartesianGrid
                 vertical={false}
-                strokeDasharray="0"
+                strokeDasharray="2 2"
                 stroke={themeColors.grid}
               />
               <XAxis

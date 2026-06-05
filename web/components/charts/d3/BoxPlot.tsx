@@ -36,19 +36,11 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // Handle responsive sizing — always fit the card's content box.
   useEffect(() => {
     const handleResize = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.offsetWidth,
-          height: height
-        });
-      } else {
-        // Fallback for initial render - use a more conservative width
-        const viewportWidth = window.innerWidth;
-        setDimensions({
-          width: viewportWidth * 0.85, // Use 85% of viewport width
-          height: height
-        });
-      }
+      if (!containerRef.current) return;
+      setDimensions({
+        width: containerRef.current.offsetWidth,
+        height: height
+      });
     };
 
     handleResize();
@@ -89,9 +81,16 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .paddingInner(0.2)
       .paddingOuter(0);
 
+    // Ticks every 0.5 s. The domain snaps to those boundaries so the
+    // outermost gridlines — the visible floor and ceiling — enclose the
+    // whiskers.
+    const tickStepMs = 500;
+    const yMin = Math.max(0, Math.floor(data.globalMin / tickStepMs) * tickStepMs);
+    let yMax = Math.ceil(data.globalMax / tickStepMs) * tickStepMs;
+    if (yMax === yMin) yMax = yMin + tickStepMs;
     const yScale = d3
       .scaleLinear()
-      .domain([Math.max(0, data.globalMin - 50), data.globalMax * 1.05])
+      .domain([yMin, yMax])
       .range([chartHeight, 0]);
 
     // Create main group
@@ -102,6 +101,10 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     // Add Y axis
     const yAxis = d3
       .axisLeft(yScale)
+      // d3 pixel-snaps ticks for crisp 1px lines; recharts doesn't. Disable
+      // the snapping so the gridlines render as softly as the other charts'.
+      .offset(0)
+      .tickValues(d3.range(yMin, yMax + 1, tickStepMs))
       .tickSize(-chartWidth)
       // Seconds with up to two decimals, trailing zeros stripped, so
       // sub-second ticks stay distinct (0.25s, 0.3s) without clutter (1s, 2.2s).
@@ -111,9 +114,10 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .attr("class", "y-axis")
       .call(yAxis);
 
-    // Always show gridlines
+    // Always show gridlines, dotted to match the recharts plots
     yAxisGroup.selectAll("line")
-      .attr("stroke", themeColors.grid);
+      .attr("stroke", themeColors.grid)
+      .attr("stroke-dasharray", "2 2");
 
     yAxisGroup.selectAll("text")
       .attr("fill", themeColors.axisText)
@@ -360,23 +364,24 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
   }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
 
-  if (data.data.length === 0) {
-    return (
-      <div className="h-64 flex items-center justify-center text-text-secondary">
-        <p>No data available for box plot</p>
-      </div>
-    );
-  }
-
+  // The measured container must always render — an early return here would
+  // leave the sizing effect's ResizeObserver attached to nothing, freezing
+  // dimensions at their initial value once data arrives.
   return (
     <div ref={containerRef} className="w-full">
-      <svg
-        ref={svgRef}
-        width={dimensions.width}
-        height={dimensions.height}
-        className="overflow-visible"
-        style={{ background: "transparent" }}
-      />
+      {data.data.length === 0 ? (
+        <div className="h-64 flex items-center justify-center text-text-secondary">
+          <p>No data available for box plot</p>
+        </div>
+      ) : (
+        <svg
+          ref={svgRef}
+          width={dimensions.width}
+          height={dimensions.height}
+          className="overflow-visible"
+          style={{ background: "transparent" }}
+        />
+      )}
     </div>
   );
 };
