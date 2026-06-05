@@ -145,6 +145,7 @@ const DashboardHeader: React.FC = () => {
               key={section.href}
               href={section.href}
               aria-current={active ? "page" : undefined}
+              tabIndex={menuOpen ? undefined : -1}
               onClick={() => setMenuOpen(false)}
               className={`flex items-center rounded-xl px-4 py-4 text-2xl tracking-wide transition-colors ${
                 active
@@ -160,6 +161,7 @@ const DashboardHeader: React.FC = () => {
           href="https://github.com/coval-ai/benchmarks"
           target="_blank"
           rel="noopener noreferrer"
+          tabIndex={menuOpen ? undefined : -1}
           onClick={() => setMenuOpen(false)}
           className="mt-auto flex items-center gap-3 rounded-xl px-4 py-4 text-2xl tracking-wide text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary"
         >
