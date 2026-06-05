@@ -4,6 +4,7 @@
 "use client";
 
 import React from "react";
+import Card from "@/components/shared/Card";
 
 // A single shimmering placeholder bar. Rendered inline so that the surrounding
 // text element's font strut governs the line-box height — this keeps every
@@ -14,12 +15,13 @@ const Bar: React.FC<{ className?: string }> = ({ className = "" }) => (
   />
 );
 
-// Mirrors a single KeyMetrics card. The wrapper and text-element classes match
-// KeyMetrics.tsx exactly (p-8 padding, mb-2/mb-4 spacing, label/value/subtitle
+// Mirrors a single KeyMetrics card. The wrapper (shared Card) and text-element
+// classes match KeyMetrics.tsx exactly (mb-2/mb-4 spacing, label/value/subtitle
 // font sizes), so the card height equals the loaded card. The metric grid uses
 // the default `align-items: stretch`, so all four match the tallest card.
 const MetricSkeleton: React.FC = () => (
-  <div className="text-left border border-border-secondary rounded-lg bg-white p-5 lg:p-8 min-w-0">
+  <Card className="text-left min-w-0" padding="p-5 lg:p-8">
+
     <div className="text-[0.9rem] font-light text-text-secondary mb-2">
       <Bar className="h-[0.7em] w-24" />
     </div>
@@ -31,15 +33,15 @@ const MetricSkeleton: React.FC = () => (
         <Bar className="h-[0.7em] w-20" />
       </span>
     </div>
-  </div>
+  </Card>
 );
 
-// Mirrors the first chart card (TimelineChart). The wrapper (p-8 border card)
+// Mirrors the first chart card (TimelineChart). The wrapper (shared Card)
 // and SectionHeader structure match, and the h-96 chart area is reproduced
 // verbatim so the overall card height equals the loaded chart.
 const ChartSkeleton: React.FC = () => (
   <div className="mb-4">
-    <div className="w-full p-8 relative z-[2] border border-border-secondary rounded-lg bg-white">
+    <Card>
       {/* SectionHeader mirror */}
       <div className="flex justify-between items-start gap-8 mb-4">
         <div className="w-3/4 min-w-0">
@@ -68,7 +70,7 @@ const ChartSkeleton: React.FC = () => (
       <div className="h-96">
         <Bar className="block h-full w-full" />
       </div>
-    </div>
+    </Card>
   </div>
 );
 

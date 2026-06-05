@@ -120,77 +120,139 @@ export function useChartData({
 
   // Memoized result so repeated callers (getFullTimeRange, getWindowedTimelineData,
   // useTimelineWindow) share a single computation per (rawData, tab, selection).
+  // Per-model timeline series (timestamp → averaged value) — the heavy pass,
+  // computed once per dataset so selection only merges precomputed series.
+  const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+
+    const acc: Record<
+      string,
+      { [key: number]: { total: number; count: number } }
+    > = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== primaryMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+
+      const modelKey = toModelKey(item.provider, item.model);
+      const timestamp = new Date(item.scheduled_at).getTime();
+      const value =
+        activeTab === "tts"
+          ? item.metric_value ?? 0
+          : (item.metric_value ?? 0) * 1000;
+
+      if (!acc[modelKey]) {
+        acc[modelKey] = {};
+      }
+      const modelAcc = acc[modelKey];
+      if (!modelAcc[timestamp]) {
+        modelAcc[timestamp] = { total: 0, count: 0 };
+      }
+      const bucket = modelAcc[timestamp];
+      if (bucket) {
+        bucket.total += value;
+        bucket.count += 1;
+      }
+    });
+
+    const byModel: Record<string, Record<number, number>> = {};
+    Object.entries(acc).forEach(([model, tsMap]) => {
+      const series: Record<number, number> = {};
+      Object.entries(tsMap).forEach(([timestamp, stats]) => {
+        series[Number(timestamp)] = stats.total / stats.count;
+      });
+      byModel[model] = series;
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
+  // Timeline rows: merge the selected models' precomputed series into one row
+  // per timestamp (ascending), each with a `${model}_value` column.
   const timelineData = useMemo<TimelineDataPoint[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
     if (selectedModels.length === 0) {
       return [];
     }
 
-    const selectedModelKeys = new Set(selectedModels);
-    const points = rawData
-      .filter(
-        (item) =>
-          selectedModelKeys.has(toModelKey(item.provider, item.model)) &&
-          item.metric_type === primaryMetric &&
-          INCLUDED_STATUSES.has(item.status)
-      )
-      .map((item) => ({
-        timestamp: new Date(item.scheduled_at).getTime(),
-        value:
-          activeTab === "tts"
-            ? item.metric_value ?? 0
-            : (item.metric_value ?? 0) * 1000,
-        modelKey: toModelKey(item.provider, item.model),
-        benchmark: item.benchmark
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    const timestampGroups: { [key: number]: TimelineDataPoint } = {};
-    const modelValueAccumulator: { [key: number]: { [key: string]: { total: number; count: number } } } = {};
-
-    points.forEach((item) => {
-      if (!timestampGroups[item.timestamp]) {
-        timestampGroups[item.timestamp] = {
-          timestamp: item.timestamp,
-          timestampLabel: new Date(item.timestamp).toISOString()
-        };
-        modelValueAccumulator[item.timestamp] = {};
-      }
-      const bucketAcc = modelValueAccumulator[item.timestamp];
-      if (bucketAcc) {
-        if (!bucketAcc[item.modelKey]) {
-          bucketAcc[item.modelKey] = { total: 0, count: 0 };
-        }
-        const modelAcc = bucketAcc[item.modelKey];
-        if (modelAcc) {
-          modelAcc.total += item.value;
-          modelAcc.count += 1;
-        }
+    const timestampSet = new Set<number>();
+    selectedModels.forEach((model) => {
+      const tsMap = timelineByModel[model];
+      if (tsMap) {
+        Object.keys(tsMap).forEach((ts) => timestampSet.add(Number(ts)));
       }
     });
+    const timestamps = [...timestampSet].sort((a, b) => a - b);
 
-    Object.entries(modelValueAccumulator).forEach(([bucketTimestamp, bucketModelStats]) => {
-      const bucket = Number(bucketTimestamp);
-      Object.entries(bucketModelStats).forEach(([model, stats]) => {
-        const group = timestampGroups[bucket];
-        if (group) {
-          group[`${model}_value`] = stats.total / stats.count;
+    return timestamps.map((timestamp) => {
+      const row: TimelineDataPoint = {
+        timestamp,
+        timestampLabel: new Date(timestamp).toISOString()
+      };
+      selectedModels.forEach((model) => {
+        const value = timelineByModel[model]?.[timestamp];
+        if (value !== undefined) {
+          row[`${model}_value`] = value;
         }
       });
+      return row;
     });
-
-    return Object.values(timestampGroups);
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [timelineByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getTimelineData = useCallback(
     (): TimelineDataPoint[] => timelineData,
     [timelineData]
   );
 
-  // Violin plots need raw values for KDE — cannot use pre-aggregated stats
+  // Per-model violin pieces (values, KDE, quartiles, stats) — the heavy work.
+  // Computed once per dataset (independent of selection) so toggling a model
+  // only reassembles the precomputed pieces instead of re-scanning rawData.
+  const violinByModel = useMemo<Record<string, ViolinDataPoint>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    const modelGroups: { [key: string]: BenchmarkData[] } = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== primaryMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
+
+      const itemKey = toModelKey(item.provider, item.model);
+      if (!modelGroups[itemKey]) {
+        modelGroups[itemKey] = [];
+      }
+      const modelGroup = modelGroups[itemKey];
+      if (modelGroup) {
+        modelGroup.push(item);
+      }
+    });
+
+    const byModel: Record<string, ViolinDataPoint> = {};
+    Object.entries(modelGroups).forEach(([model, items]) => {
+      const values = items.map((item) =>
+        activeTab === "tts"
+          ? item.metric_value ?? 0
+          : (item.metric_value ?? 0) * 1000
+      );
+
+      if (values.length === 0) return;
+
+      byModel[model] = {
+        model,
+        provider: items[0]?.provider ?? "Unknown",
+        values,
+        density: calculateKernelDensity(values),
+        quartiles: calculateQuartiles(values),
+        stats: calculateStats(values)
+      };
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
+  // Violin plot data: gather the selected models' precomputed pieces and
+  // recompute only the pooled summary (axis bounds, whisker cap, outliers).
   const violinDataMemo = useMemo<ViolinPlotData>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -205,55 +267,16 @@ export function useChartData({
       };
     }
 
-    const selectedModelKeys = new Set(selectedModels);
-    const modelGroups: { [key: string]: BenchmarkData[] } = {};
-
-    rawData.forEach((item) => {
-      const itemKey = toModelKey(item.provider, item.model);
-      if (!selectedModelKeys.has(itemKey)) return;
-      if (item.metric_type !== primaryMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      if (!modelGroups[itemKey]) {
-        modelGroups[itemKey] = [];
-      }
-      const modelGroup = modelGroups[itemKey];
-      if (modelGroup) {
-        modelGroup.push(item);
-      }
-    });
-
     const violinData: ViolinDataPoint[] = [];
     let globalMin = Infinity;
     let globalMax = -Infinity;
 
-    Object.entries(modelGroups).forEach(([model, items]) => {
-      const values = items.map((item) =>
-        activeTab === "tts"
-          ? item.metric_value ?? 0
-          : (item.metric_value ?? 0) * 1000
-      );
-
-      if (values.length === 0) return;
-
-      const quartiles = calculateQuartiles(values);
-      const stats = calculateStats(values);
-      const density = calculateKernelDensity(values);
-
-      globalMin = Math.min(globalMin, ...values);
-      globalMax = Math.max(globalMax, ...values);
-
-      const provider = items[0]?.provider ?? "Unknown";
-
-      violinData.push({
-        model,
-        provider,
-        values,
-        density,
-        quartiles,
-        stats
-      });
+    selectedModels.forEach((model) => {
+      const entry = violinByModel[model];
+      if (!entry) return;
+      violinData.push(entry);
+      globalMin = Math.min(globalMin, ...entry.values);
+      globalMax = Math.max(globalMax, ...entry.values);
     });
 
     if (violinData.length === 0) {
@@ -279,7 +302,7 @@ export function useChartData({
       maxUpperWhisker = 0;
     }
 
-    const sortedViolinData = violinData.sort(
+    const sortedViolinData = [...violinData].sort(
       (a, b) => a.quartiles.median - b.quartiles.median
     );
 
@@ -292,7 +315,7 @@ export function useChartData({
       cappedAt: maxUpperWhisker,
       metricType: primaryMetric
     };
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+  }, [violinByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getViolinData = useCallback(
     (): ViolinPlotData => violinDataMemo,
@@ -301,23 +324,15 @@ export function useChartData({
 
   // Pair latency with WER per run, then average per model — pairing restricts
   // the average to runs that produced both metrics
-  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+  const scatterByModel = useMemo<Record<string, ScatterDataPoint>>(() => {
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
     const yMetric = "WER";
-
-    if (selectedModels.length === 0) {
-      return [];
-    }
 
     const benchmarkGroups: {
       [key: string]: { [key: string]: BenchmarkData[] };
     } = {};
 
-    const selectedModelKeys = new Set(selectedModels);
     rawData.forEach((item) => {
-      if (!selectedModelKeys.has(toModelKey(item.provider, item.model))) return;
       if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
@@ -378,15 +393,33 @@ export function useChartData({
       }
     });
 
-    return Object.entries(modelAggregates).map(([model, agg]) => ({
-      x: agg.xSum / agg.count,
-      y: agg.ySum / agg.count,
-      model,
-      benchmark: agg.benchmark,
-      provider: agg.provider,
-      count: agg.count
-    }));
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+    const byModel: Record<string, ScatterDataPoint> = {};
+    Object.entries(modelAggregates).forEach(([model, agg]) => {
+      byModel[model] = {
+        x: agg.xSum / agg.count,
+        y: agg.ySum / agg.count,
+        model,
+        benchmark: agg.benchmark,
+        provider: agg.provider,
+        count: agg.count
+      };
+    });
+    return byModel;
+  }, [rawData, activeTab]);
+
+  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
+    const selectedModels =
+      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+
+    const points: ScatterDataPoint[] = [];
+    selectedModels.forEach((model) => {
+      const point = scatterByModel[model];
+      if (point) {
+        points.push(point);
+      }
+    });
+    return points;
+  }, [scatterByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getScatterData = useCallback(
     (): ScatterDataPoint[] => scatterDataMemo,
@@ -396,6 +429,51 @@ export function useChartData({
   // ─── Functions using SQL-aggregated modelStats ───
 
   // STT heatmap still needs raw data for per-timestamp delta calculation
+  // Per-model latency series (timestamp → averaged value) for the STT model
+  // heatmap — the heavy scan, computed once per dataset.
+  const heatmapAvgByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    const acc: Record<
+      string,
+      { [key: number]: { total: number; count: number } }
+    > = {};
+
+    rawData.forEach((item) => {
+      if (item.metric_type !== latencyMetric) return;
+      if (!INCLUDED_STATUSES.has(item.status)) return;
+      if (item.metric_value === null || item.metric_value === undefined) return;
+
+      const itemKey = toModelKey(item.provider, item.model);
+      const timestamp = new Date(item.scheduled_at).getTime();
+      const latencyValue =
+        activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
+
+      if (!acc[itemKey]) {
+        acc[itemKey] = {};
+      }
+      const modelAcc = acc[itemKey];
+      if (!modelAcc[timestamp]) {
+        modelAcc[timestamp] = { total: 0, count: 0 };
+      }
+      const bucket = modelAcc[timestamp];
+      if (bucket) {
+        bucket.total += latencyValue;
+        bucket.count += 1;
+      }
+    });
+
+    const byModel: Record<string, Record<number, number>> = {};
+    Object.entries(acc).forEach(([model, tsMap]) => {
+      const series: Record<number, number> = {};
+      Object.entries(tsMap).forEach(([timestamp, stats]) => {
+        series[Number(timestamp)] = stats.total / stats.count;
+      });
+      byModel[model] = series;
+    });
+
+    return byModel;
+  }, [rawData, activeTab]);
+
   const modelHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
@@ -405,47 +483,21 @@ export function useChartData({
       return [];
     }
 
-    // Delta calculation requires raw per-timestamp data
-    // Group latency data by timestamp across all selected models
-    const timestampGroups: {
-      [key: number]: { [key: string]: { total: number; count: number } };
-    } = {};
-
-    const selectedModelKeys = new Set(selectedModels);
-    rawData.forEach((item) => {
-      const itemKey = toModelKey(item.provider, item.model);
-      if (!selectedModelKeys.has(itemKey)) return;
-      if (item.metric_type !== latencyMetric) return;
-      if (!INCLUDED_STATUSES.has(item.status)) return;
-      if (item.metric_value === null || item.metric_value === undefined) return;
-
-      const timestamp = new Date(item.scheduled_at).getTime();
-      if (!timestampGroups[timestamp]) {
-        timestampGroups[timestamp] = {};
-      }
-      const latencyValue =
-        activeTab === "tts" ? item.metric_value : item.metric_value * 1000;
-      const bucket = timestampGroups[timestamp];
-      if (bucket) {
-        if (!bucket[itemKey]) {
-          bucket[itemKey] = { total: 0, count: 0 };
-        }
-        const modelAcc = bucket[itemKey];
-        if (modelAcc) {
-          modelAcc.total += latencyValue;
-          modelAcc.count += 1;
-        }
-      }
-    });
-
+    // Rebuild per-timestamp averages for the selected models from the
+    // precomputed per-model series (deltas are relative to the fastest
+    // selected model, so this part stays selection-dependent).
     const averagedTimestampGroups: { [key: number]: { [key: string]: number } } = {};
-    Object.entries(timestampGroups).forEach(([bucketTimestamp, perModelStats]) => {
-      const bucket = Number(bucketTimestamp);
-      averagedTimestampGroups[bucket] = {};
-      Object.entries(perModelStats).forEach(([model, stats]) => {
-        const avg = averagedTimestampGroups[bucket];
-        if (avg) {
-          avg[model] = stats.total / stats.count;
+    selectedModels.forEach((model) => {
+      const tsMap = heatmapAvgByModel[model];
+      if (!tsMap) return;
+      Object.entries(tsMap).forEach(([timestamp, avg]) => {
+        const bucket = Number(timestamp);
+        if (!averagedTimestampGroups[bucket]) {
+          averagedTimestampGroups[bucket] = {};
+        }
+        const group = averagedTimestampGroups[bucket];
+        if (group) {
+          group[model] = avg;
         }
       });
     });
@@ -506,7 +558,7 @@ export function useChartData({
         a.model.localeCompare(b.model)
     );
   }, [
-    rawData,
+    heatmapAvgByModel,
     activeTab,
     selectedTTSModels,
     selectedSTTModels,

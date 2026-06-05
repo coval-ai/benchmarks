@@ -32,11 +32,14 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
 
   // Handle responsive sizing
   useEffect(() => {
+    // On mobile the chart must fit the card's content box; the 400px floor is
+    // desktop-only so the plot stays legible in narrow sidebars.
+    const minWidth = isMobile ? 0 : 400;
     const handleResize = () => {
       if (containerRef.current) {
         const containerWidth = containerRef.current.offsetWidth;
         setDimensions({
-          width: Math.max(400, containerWidth),
+          width: Math.max(minWidth, containerWidth),
           height: height
         });
       } else {
@@ -44,7 +47,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
         const viewportWidth = window.innerWidth;
         const estimatedAvailableWidth = viewportWidth * 0.85; // Use 85% of viewport width
         setDimensions({
-          width: Math.max(400, estimatedAvailableWidth),
+          width: Math.max(minWidth, estimatedAvailableWidth),
           height: height
         });
       }
@@ -63,7 +66,7 @@ const ViolinPlot: React.FC<ViolinPlotProps> = ({
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
     };
-  }, [height]);
+  }, [height, isMobile]);
 
   // Helper function to create violin path from density data
   const createViolinPath = (

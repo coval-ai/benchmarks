@@ -3,13 +3,21 @@
 
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  useDeferredValue,
+} from "react";
 import type { BenchmarkData } from "@/types/benchmark.types";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { useTimelineWindow } from "@/hooks/useTimelineWindow";
+import { median } from "@/lib/utils/median";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProviderFromResults, pruneSelection } from "@/lib/utils/modelsFromResults";
 import { metricDescriptions } from "@/lib/config/metrics";
@@ -116,13 +124,15 @@ export function useDashboardState(page: "tts" | "stt") {
     hasAnchoredRef.current = true;
   }, [rawData.length, latestTimestamp]);
 
+  const deferredSelectedModels = useDeferredValue(selectedModels);
+
   // useChartData hook - pass page as activeTab internally
   const chartData = useChartData({
     activeTab: page,
     rawData,
     modelStats,
-    selectedTTSModels: page === "tts" ? selectedModels : [],
-    selectedSTTModels: page === "stt" ? selectedModels : [],
+    selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
+    selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
     timelineWindowEnd: timelineWindowEndTemp,
     modelsByProvider: page === "tts" ? ttsModelsByProvider : sttModelsByProvider,
   });
@@ -164,8 +174,12 @@ export function useDashboardState(page: "tts" | "stt") {
     [selectedModels, page]
   );
 
-  // Heatmap scaling for mobile
+  // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
+  // in the DOM); re-runs when loading completes so the first paint of the
+  // heatmap gets scaled without waiting for a resize event.
   useEffect(() => {
+    if (loading) return;
+
     const scaleHeatmapForMobile = () => {
       const mobile = window.innerWidth < 768;
 
@@ -179,9 +193,11 @@ export function useDashboardState(page: "tts" | "stt") {
           ) as SVGElement;
 
           if (heatmapContainer && heatmapSvg) {
-            const screenWidth = window.innerWidth;
-            const padding = 32;
-            const availableWidth = screenWidth - padding;
+            // Reset any prior scaling so measurements reflect natural layout
+            heatmapContainer.style.transform = "";
+            heatmapContainer.style.width = "";
+            const availableWidth =
+              heatmapContainer.getBoundingClientRect().width;
             const heatmapWidth = heatmapSvg.getBoundingClientRect().width;
             const scaleFactor = availableWidth / heatmapWidth;
 
@@ -207,7 +223,7 @@ export function useDashboardState(page: "tts" | "stt") {
     scaleHeatmapForMobile();
     window.addEventListener("resize", scaleHeatmapForMobile);
     return () => window.removeEventListener("resize", scaleHeatmapForMobile);
-  }, [page]);
+  }, [page, loading]);
 
   // Auto-select all models when data loads (disabled models already filtered out by useMemo above).
   useEffect(() => {
@@ -232,188 +248,211 @@ export function useDashboardState(page: "tts" | "stt") {
   }, [modelsByProvider]);
 
   // Calculate metrics
-  const currentData = chartData.getCurrentData();
-  const primaryMetric = page === "tts" ? "TTFA" : "TTFT";
-  const secondaryMetric = "WER";
+  const { getCurrentData, getStat } = chartData;
 
-  const primaryData = currentData.filter(
-    (item) => item.metric_type === primaryMetric
-  );
-  const secondaryData = currentData.filter(
-    (item) => item.metric_type === secondaryMetric
-  );
+  const keyMetrics = useMemo(() => {
+    const currentData = getCurrentData();
+    const primaryMetric = page === "tts" ? "TTFA" : "TTFT";
+    const secondaryMetric = "WER";
 
-  let avgPrimary = 0;
-  let avgSecondary = 0;
-  let fastestLatencyModel = "";
-  let lowestWERModel = "";
-  let fastestLatencyProvider = "";
-  let lowestWERProvider = "";
-
-  if (selectedModels.length === 0) {
-    avgPrimary = 0;
-    avgSecondary = 0;
-  } else if (page === "stt") {
-    let fastestPrimary = Infinity;
-    selectedModels.forEach((model) => {
-      const stat = chartData.getStat(model, primaryMetric);
-      if (!stat || stat.p50 >= fastestPrimary) return;
-      fastestPrimary = stat.p50;
-      fastestLatencyModel = model;
-      fastestLatencyProvider = parseModelKey(model).provider;
-    });
-    // TTFT is stored in seconds; display in ms like TTFA
-    avgPrimary = fastestPrimary !== Infinity ? fastestPrimary * 1000 : 0;
-
-    const sttSecondaryData = currentData.filter(
+    const primaryData = currentData.filter(
+      (item) => item.metric_type === primaryMetric
+    );
+    const secondaryData = currentData.filter(
       (item) => item.metric_type === secondaryMetric
     );
-    if (selectedModels.length === 1) {
-      if (sttSecondaryData.length > 0) {
-        avgSecondary =
-          sttSecondaryData.reduce(
-            (sum, item) => sum + (item.metric_value ?? 0),
-            0
-          ) / sttSecondaryData.length;
+
+    const groupByModel = (rows: BenchmarkData[]) => {
+      const map = new Map<string, BenchmarkData[]>();
+      for (const item of rows) {
+        const key = `${item.model}\x00${item.provider}`;
+        const arr = map.get(key);
+        if (arr) arr.push(item);
+        else map.set(key, [item]);
       }
-    } else {
-      const modelMetrics: {
-        [key: string]: { avgSecondary: number; provider: string };
-      } = {};
+      return map;
+    };
+    const primaryByModel = groupByModel(primaryData);
+    const secondaryByModel = groupByModel(secondaryData);
 
-      selectedModels.forEach((model) => {
-        const { model: modelSlug, provider: modelProvider } = parseModelKey(model);
-        const modelSecondaryData = sttSecondaryData.filter(
-          (item) => item.model === modelSlug && item.provider === modelProvider
-        );
+    let avgPrimary = 0;
+    let avgSecondary = 0;
+    let fastestLatencyModel = "";
+    let lowestWERModel = "";
+    let fastestLatencyProvider = "";
+    let lowestWERProvider = "";
 
-        let modelAvgSecondary = Infinity;
-        if (modelSecondaryData.length > 0) {
-          modelAvgSecondary =
-            modelSecondaryData.reduce(
+    if (deferredSelectedModels.length === 0) {
+      avgPrimary = 0;
+      avgSecondary = 0;
+    } else if (page === "stt") {
+      let fastestPrimary = Infinity;
+      deferredSelectedModels.forEach((model) => {
+        const stat = getStat(model, primaryMetric);
+        if (!stat || stat.p50 >= fastestPrimary) return;
+        fastestPrimary = stat.p50;
+        fastestLatencyModel = model;
+        fastestLatencyProvider = parseModelKey(model).provider;
+      });
+      // TTFT is stored in seconds; display in ms like TTFA
+      avgPrimary = fastestPrimary !== Infinity ? fastestPrimary * 1000 : 0;
+
+      if (deferredSelectedModels.length === 1) {
+        if (secondaryData.length > 0) {
+          avgSecondary =
+            secondaryData.reduce(
               (sum, item) => sum + (item.metric_value ?? 0),
               0
-            ) / modelSecondaryData.length;
+            ) / secondaryData.length;
         }
+      } else {
+        const modelMetrics: {
+          [key: string]: { avgSecondary: number; provider: string };
+        } = {};
 
-        const provider = modelSecondaryData[0]?.provider ?? "Unknown";
-        modelMetrics[model] = {
-          avgSecondary: modelAvgSecondary,
-          provider: provider,
-        };
-      });
+        deferredSelectedModels.forEach((model) => {
+          const { model: modelSlug, provider: modelProvider } =
+            parseModelKey(model);
+          const modelSecondaryData =
+            secondaryByModel.get(`${modelSlug}\x00${modelProvider}`) ?? [];
 
-      let lowestSecondary = Infinity;
-      Object.entries(modelMetrics).forEach(([model, metrics]) => {
-        if (
-          metrics.avgSecondary < lowestSecondary &&
-          metrics.avgSecondary !== Infinity
-        ) {
-          lowestSecondary = metrics.avgSecondary;
-          lowestWERModel = model;
-          lowestWERProvider = metrics.provider;
-        }
-      });
+          let modelAvgSecondary = Infinity;
+          if (modelSecondaryData.length > 0) {
+            modelAvgSecondary =
+              modelSecondaryData.reduce(
+                (sum, item) => sum + (item.metric_value ?? 0),
+                0
+              ) / modelSecondaryData.length;
+          }
 
-      avgSecondary = lowestSecondary !== Infinity ? lowestSecondary : 0;
-    }
-  } else {
-    // TTS logic
-    if (selectedModels.length === 1) {
-      if (primaryData.length > 0) {
-        const primaryValues = primaryData.map((item) => item.metric_value ?? 0);
-        const sortedPrimary = primaryValues.sort((a, b) => a - b);
-        const medianIndex = Math.floor(sortedPrimary.length / 2);
-        avgPrimary =
-          sortedPrimary.length % 2 === 0
-            ? ((sortedPrimary[medianIndex - 1] ?? 0) + (sortedPrimary[medianIndex] ?? 0)) / 2
-            : (sortedPrimary[medianIndex] ?? 0);
-      }
+          const provider = modelSecondaryData[0]?.provider ?? "Unknown";
+          modelMetrics[model] = {
+            avgSecondary: modelAvgSecondary,
+            provider: provider,
+          };
+        });
 
-      if (secondaryData.length > 0) {
-        avgSecondary =
-          secondaryData.reduce(
-            (sum, item) => sum + (item.metric_value ?? 0),
-            0
-          ) / secondaryData.length;
+        let lowestSecondary = Infinity;
+        Object.entries(modelMetrics).forEach(([model, metrics]) => {
+          if (
+            metrics.avgSecondary < lowestSecondary &&
+            metrics.avgSecondary !== Infinity
+          ) {
+            lowestSecondary = metrics.avgSecondary;
+            lowestWERModel = model;
+            lowestWERProvider = metrics.provider;
+          }
+        });
+
+        avgSecondary = lowestSecondary !== Infinity ? lowestSecondary : 0;
       }
     } else {
-      const modelMetrics: {
-        [key: string]: {
-          medianPrimary: number;
-          avgSecondary: number;
-          provider: string;
-        };
-      } = {};
-
-      selectedModels.forEach((model) => {
-        const { model: modelSlug, provider: modelProvider } = parseModelKey(model);
-        const modelPrimaryData = primaryData.filter(
-          (item) => item.model === modelSlug && item.provider === modelProvider
-        );
-        const modelSecondaryData = secondaryData.filter(
-          (item) => item.model === modelSlug && item.provider === modelProvider
-        );
-
-        let modelMedianPrimary = Infinity;
-        let modelAvgSecondary = Infinity;
-
-        if (modelPrimaryData.length > 0) {
-          const primaryValues = modelPrimaryData.map(
+      // TTS logic
+      if (deferredSelectedModels.length === 1) {
+        if (primaryData.length > 0) {
+          const primaryValues = primaryData.map(
             (item) => item.metric_value ?? 0
           );
-          const sortedPrimary = primaryValues.sort((a, b) => a - b);
-          const medianIndex = Math.floor(sortedPrimary.length / 2);
-          modelMedianPrimary =
-            sortedPrimary.length % 2 === 0
-              ? ((sortedPrimary[medianIndex - 1] ?? 0) + (sortedPrimary[medianIndex] ?? 0)) / 2
-              : (sortedPrimary[medianIndex] ?? 0);
+          avgPrimary = median(primaryValues);
         }
 
-        if (modelSecondaryData.length > 0) {
-          modelAvgSecondary =
-            modelSecondaryData.reduce(
+        if (secondaryData.length > 0) {
+          avgSecondary =
+            secondaryData.reduce(
               (sum, item) => sum + (item.metric_value ?? 0),
               0
-            ) / modelSecondaryData.length;
+            ) / secondaryData.length;
         }
+      } else {
+        const modelMetrics: {
+          [key: string]: {
+            medianPrimary: number;
+            avgSecondary: number;
+            provider: string;
+          };
+        } = {};
 
-        const provider =
-          (modelPrimaryData[0] ?? modelSecondaryData[0])?.provider ?? "Unknown";
+        deferredSelectedModels.forEach((model) => {
+          const { model: modelSlug, provider: modelProvider } =
+            parseModelKey(model);
+          const mapKey = `${modelSlug}\x00${modelProvider}`;
+          const modelPrimaryData = primaryByModel.get(mapKey) ?? [];
+          const modelSecondaryData = secondaryByModel.get(mapKey) ?? [];
 
-        modelMetrics[model] = {
-          medianPrimary: modelMedianPrimary,
-          avgSecondary: modelAvgSecondary,
-          provider: provider,
-        };
-      });
+          let modelMedianPrimary = Infinity;
+          let modelAvgSecondary = Infinity;
 
-      let fastestPrimary = Infinity;
-      let lowestSecondary = Infinity;
+          if (modelPrimaryData.length > 0) {
+            const primaryValues = modelPrimaryData.map(
+              (item) => item.metric_value ?? 0
+            );
+            modelMedianPrimary = median(primaryValues);
+          }
 
-      Object.entries(modelMetrics).forEach(([model, metrics]) => {
-        if (
-          metrics.medianPrimary < fastestPrimary &&
-          metrics.medianPrimary !== Infinity
-        ) {
-          fastestPrimary = metrics.medianPrimary;
-          fastestLatencyModel = model;
-          fastestLatencyProvider = normalizeTTSProviderName(metrics.provider);
-        }
-        if (
-          metrics.avgSecondary < lowestSecondary &&
-          metrics.avgSecondary !== Infinity
-        ) {
-          lowestSecondary = metrics.avgSecondary;
-          lowestWERModel = model;
-          lowestWERProvider = normalizeTTSProviderName(metrics.provider);
-        }
-      });
+          if (modelSecondaryData.length > 0) {
+            modelAvgSecondary =
+              modelSecondaryData.reduce(
+                (sum, item) => sum + (item.metric_value ?? 0),
+                0
+              ) / modelSecondaryData.length;
+          }
 
-      avgPrimary = fastestPrimary !== Infinity ? fastestPrimary : 0;
-      avgSecondary = lowestSecondary !== Infinity ? lowestSecondary : 0;
+          const provider =
+            (modelPrimaryData[0] ?? modelSecondaryData[0])?.provider ??
+            "Unknown";
+
+          modelMetrics[model] = {
+            medianPrimary: modelMedianPrimary,
+            avgSecondary: modelAvgSecondary,
+            provider: provider,
+          };
+        });
+
+        let fastestPrimary = Infinity;
+        let lowestSecondary = Infinity;
+
+        Object.entries(modelMetrics).forEach(([model, metrics]) => {
+          if (
+            metrics.medianPrimary < fastestPrimary &&
+            metrics.medianPrimary !== Infinity
+          ) {
+            fastestPrimary = metrics.medianPrimary;
+            fastestLatencyModel = model;
+            fastestLatencyProvider = normalizeTTSProviderName(metrics.provider);
+          }
+          if (
+            metrics.avgSecondary < lowestSecondary &&
+            metrics.avgSecondary !== Infinity
+          ) {
+            lowestSecondary = metrics.avgSecondary;
+            lowestWERModel = model;
+            lowestWERProvider = normalizeTTSProviderName(metrics.provider);
+          }
+        });
+
+        avgPrimary = fastestPrimary !== Infinity ? fastestPrimary : 0;
+        avgSecondary = lowestSecondary !== Infinity ? lowestSecondary : 0;
+      }
     }
-  }
+
+    return {
+      avgPrimary,
+      avgSecondary,
+      fastestLatencyModel,
+      lowestWERModel,
+      fastestLatencyProvider,
+      lowestWERProvider,
+    };
+  }, [getCurrentData, getStat, deferredSelectedModels, page]);
+
+  const {
+    avgPrimary,
+    avgSecondary,
+    fastestLatencyModel,
+    lowestWERModel,
+    fastestLatencyProvider,
+    lowestWERProvider,
+  } = keyMetrics;
 
   // Get computed data
   const scatterData = chartData.getScatterData();

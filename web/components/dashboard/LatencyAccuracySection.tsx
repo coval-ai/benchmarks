@@ -16,6 +16,7 @@ import {
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
+import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
@@ -79,7 +80,7 @@ const LatencyAccuracySection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
+      <Card>
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}
@@ -147,6 +148,7 @@ const LatencyAccuracySection: React.FC = () => {
                   )}
                   fill={getModelColor(model)}
                   name={model}
+                  isAnimationActive={false}
                   shape={(props: { cx?: number; cy?: number; fill?: string }) => (
                     <circle
                       cx={props.cx}
@@ -160,7 +162,7 @@ const LatencyAccuracySection: React.FC = () => {
             </ScatterChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </Card>
     </div>
   );
 };

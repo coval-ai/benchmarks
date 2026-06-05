@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import CustomBarChartTick from "@/components/charts/CustomBarChartTick";
+import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
@@ -60,7 +61,7 @@ const AccuracyBarSection: React.FC = () => {
 
   return (
     <div className="mb-4">
-      <div className="w-full relative z-[2] border border-border-secondary rounded-lg bg-white p-8">
+      <Card>
         <SectionHeader
           label="Accuracy by Model"
           description={description}
@@ -112,6 +113,7 @@ const AccuracyBarSection: React.FC = () => {
                 stroke={themeColors.barStroke}
                 strokeWidth={1}
                 radius={[4, 4, 0, 0]}
+                isAnimationActive={false}
                 onClick={handleWERBarClickTracked}
                 label={{
                   position: "top",
@@ -132,7 +134,7 @@ const AccuracyBarSection: React.FC = () => {
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
+      </Card>
     </div>
   );
 };
