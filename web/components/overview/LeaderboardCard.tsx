@@ -38,7 +38,7 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
   return (
     <div className="flex flex-col rounded-lg border border-border-secondary bg-white p-6 md:p-8">
       <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="text-base font-medium text-text-primary">{title}</h2>
+        <h2 className="text-lg font-medium text-text-primary md:text-xl">{title}</h2>
         <span className="text-xs font-light tracking-wider text-text-secondary">
           Last 24h
         </span>
@@ -91,9 +91,9 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">
                 {row.model}
-              </div>
-              <div className="truncate text-xs text-text-tertiary">
-                {row.provider}
+                <span className="ml-1 font-normal text-text-tertiary">
+                  {row.provider}
+                </span>
               </div>
             </div>
             <div className="justify-self-end text-right font-mono text-lg">

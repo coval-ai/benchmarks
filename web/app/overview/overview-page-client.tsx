@@ -12,7 +12,12 @@ export function OverviewPageClient() {
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-background text-text-primary">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 opacity-[0.14]"
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{ backgroundColor: "rgba(120, 72, 40, 0.06)" }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 opacity-[0.07]"
         style={{
           backgroundImage: "url(/chladni-13-1-6.svg)",
           backgroundSize: "max(120vw, 120vh)",

@@ -23,15 +23,21 @@ const DashboardHeader: React.FC = () => {
     <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-white">
       <div className="relative flex h-full items-center px-4 md:px-6">
         {/* Brand — "Voice Model Benchmarks" wordmark over a "By Coval" lockup */}
-        <Link
-          href="/"
-          aria-label="Voice Model Benchmarks — by Coval"
-          className="flex flex-col justify-center leading-none transition-opacity hover:opacity-80"
-        >
-          <span className="font-sans text-lg font-medium tracking-wide text-text-primary">
+        <div className="flex flex-col justify-center leading-none">
+          <Link
+            href="/"
+            aria-label="Voice Model Benchmarks"
+            className="font-sans text-lg font-medium tracking-wide text-text-primary transition-opacity hover:opacity-80"
+          >
             Voice Model Benchmarks
-          </span>
-          <span className="flex items-center gap-1 text-[11px] text-text-tertiary">
+          </Link>
+          <a
+            href="https://www.coval.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="By Coval"
+            className="flex items-center gap-1 text-[11px] text-text-tertiary transition-opacity hover:opacity-80"
+          >
             By
             <Image
               src="/coval-logo.svg"
@@ -41,8 +47,8 @@ const DashboardHeader: React.FC = () => {
               priority
               className="h-2 w-auto"
             />
-          </span>
-        </Link>
+          </a>
+        </div>
 
         {/* Section tabs — centered on the page, independent of the brand width */}
         <nav
