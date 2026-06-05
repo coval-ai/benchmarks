@@ -9,6 +9,7 @@ import {
   Line,
   XAxis,
   YAxis,
+  CartesianGrid,
   ResponsiveContainer,
   Legend,
   Tooltip
@@ -26,11 +27,38 @@ import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
+interface LegendEntry {
+  value: string;
+  color?: string;
+}
+
+// Custom legend: names are rendered in black (recharts colors them per-series
+// by default), and the items lay out in a grid that grows from two columns on
+// mobile to more columns on larger screens.
+const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
+  <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-2 pt-5 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-2 lg:grid-cols-4">
+    {payload?.map((entry, index) => (
+      <li
+        key={`${entry.value}-${index}`}
+        className="flex items-start gap-1.5 text-xs leading-tight text-text-primary"
+      >
+        <span
+          className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
+          style={{ backgroundColor: entry.color }}
+          aria-hidden="true"
+        />
+        <span>{entry.value}</span>
+      </li>
+    ))}
+  </ul>
+);
+
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
   const {
     getModelsWithTimelineData,
     getWindowedTimelineData,
+    getTimelineData,
     getCurrentTimeWindow,
     getTimelineTicks,
     isDragging,
@@ -81,9 +109,28 @@ const TimelineChart: React.FC = () => {
     return count > 0 ? sum / count : 0;
   }, [windowedTimelineData, modelsWithData]);
 
+  // Fix the Y axis to the max across the full dataset (not just the visible
+  // window) so the scale stays consistent while panning. Rounded up to a clean
+  // 0.5s step so the gridlines land on tidy values.
+  const yAxisMax = useMemo(() => {
+    let max = 0;
+    for (const point of getTimelineData()) {
+      const record = point as Record<string, number>;
+      for (const model of modelsWithData) {
+        const value = record[`${model}_value`];
+        if (typeof value === "number" && !Number.isNaN(value) && value > max) {
+          max = value;
+        }
+      }
+    }
+    if (max === 0) return "dataMax" as const;
+    const step = 500;
+    return Math.ceil(max / step) * step;
+  }, [getTimelineData, modelsWithData]);
+
   return (
     <div className="mb-4">
-      <Card>
+      <Card padding="p-5 lg:p-8">
         <SectionHeader
           label={
             activeTab === "tts"
@@ -108,7 +155,15 @@ const TimelineChart: React.FC = () => {
           }}
         >
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={windowedTimelineData}>
+            <LineChart
+              data={windowedTimelineData}
+              margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
+            >
+              <CartesianGrid
+                vertical={false}
+                strokeDasharray="0"
+                stroke={themeColors.grid}
+              />
               <XAxis
                 dataKey="timestamp"
                 type="number"
@@ -132,28 +187,16 @@ const TimelineChart: React.FC = () => {
                 }}
               />
               <YAxis
+                width={40}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
-                domain={[0, "dataMax"]}
+                domain={[0, yAxisMax]}
                 tickFormatter={(value) => `${(value / 1000).toFixed(1)}s`}
-                label={{
-                  value: `${activeTab === "tts" ? "TTFA" : "TTFT"} (ms)`,
-                  angle: -90,
-                  position: "insideLeft",
-                  style: {
-                    textAnchor: "middle",
-                    fill: themeColors.axisText,
-                    fontSize: "14px"
-                  }
-                }}
               />
               <Tooltip content={<CustomTimelineTooltip getProviderForModel={getProviderForModel} />} />
               {modelsWithData.length > 1 && (
-                <Legend
-                  wrapperStyle={{ color: themeColors.axisText, paddingTop: "20px" }}
-                  iconType="line"
-                />
+                <Legend content={<TimelineLegend />} />
               )}
               {modelsWithData.map((model) => (
                 <Line

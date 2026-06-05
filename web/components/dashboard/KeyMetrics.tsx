@@ -43,7 +43,7 @@ const KeyMetrics: React.FC = () => {
             {metric.displayValue}
           </div>
           {metric.subtitle && (
-            <div className="text-text-secondary flex items-baseline gap-2">
+            <div className="text-text-secondary flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2">
               {metric.subtitle.name && (
                 <span className="font-medium">{metric.subtitle.name}</span>
               )}
