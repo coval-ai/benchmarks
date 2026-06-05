@@ -162,6 +162,7 @@ const TimelineChart: React.FC = () => {
                   stroke={getModelColor(model)}
                   strokeWidth={modelsWithData.length === 1 ? 3 : 2}
                   dot={false}
+                  isAnimationActive={false}
                   activeDot={{
                     r: modelsWithData.length === 1 ? 7 : 6,
                     fill: getModelColor(model)

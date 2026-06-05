@@ -324,23 +324,15 @@ export function useChartData({
 
   // Pair latency with WER per run, then average per model — pairing restricts
   // the average to runs that produced both metrics
-  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+  const scatterByModel = useMemo<Record<string, ScatterDataPoint>>(() => {
     const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
     const yMetric = "WER";
-
-    if (selectedModels.length === 0) {
-      return [];
-    }
 
     const benchmarkGroups: {
       [key: string]: { [key: string]: BenchmarkData[] };
     } = {};
 
-    const selectedModelKeys = new Set(selectedModels);
     rawData.forEach((item) => {
-      if (!selectedModelKeys.has(toModelKey(item.provider, item.model))) return;
       if (item.metric_type !== xMetric && item.metric_type !== yMetric) return;
       if (!INCLUDED_STATUSES.has(item.status)) return;
       if (item.metric_value === null || item.metric_value === undefined) return;
@@ -401,15 +393,33 @@ export function useChartData({
       }
     });
 
-    return Object.entries(modelAggregates).map(([model, agg]) => ({
-      x: agg.xSum / agg.count,
-      y: agg.ySum / agg.count,
-      model,
-      benchmark: agg.benchmark,
-      provider: agg.provider,
-      count: agg.count
-    }));
-  }, [rawData, activeTab, selectedTTSModels, selectedSTTModels]);
+    const byModel: Record<string, ScatterDataPoint> = {};
+    Object.entries(modelAggregates).forEach(([model, agg]) => {
+      byModel[model] = {
+        x: agg.xSum / agg.count,
+        y: agg.ySum / agg.count,
+        model,
+        benchmark: agg.benchmark,
+        provider: agg.provider,
+        count: agg.count
+      };
+    });
+    return byModel;
+  }, [rawData, activeTab]);
+
+  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
+    const selectedModels =
+      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+
+    const points: ScatterDataPoint[] = [];
+    selectedModels.forEach((model) => {
+      const point = scatterByModel[model];
+      if (point) {
+        points.push(point);
+      }
+    });
+    return points;
+  }, [scatterByModel, activeTab, selectedTTSModels, selectedSTTModels]);
 
   const getScatterData = useCallback(
     (): ScatterDataPoint[] => scatterDataMemo,

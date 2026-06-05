@@ -112,6 +112,7 @@ const AccuracyBarSection: React.FC = () => {
                 stroke={themeColors.barStroke}
                 strokeWidth={1}
                 radius={[4, 4, 0, 0]}
+                isAnimationActive={false}
                 onClick={handleWERBarClickTracked}
                 label={{
                   position: "top",

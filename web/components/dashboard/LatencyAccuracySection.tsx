@@ -147,6 +147,7 @@ const LatencyAccuracySection: React.FC = () => {
                   )}
                   fill={getModelColor(model)}
                   name={model}
+                  isAnimationActive={false}
                   shape={(props: { cx?: number; cy?: number; fill?: string }) => (
                     <circle
                       cx={props.cx}
