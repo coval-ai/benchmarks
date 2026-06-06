@@ -108,15 +108,21 @@ export function useDashboardState(page: "tts" | "stt") {
             // Reset any prior scaling so measurements reflect natural layout
             heatmapContainer.style.transform = "";
             heatmapContainer.style.width = "";
+            heatmapContainer.style.height = "";
             const availableWidth =
               heatmapContainer.getBoundingClientRect().width;
             const heatmapWidth = heatmapSvg.getBoundingClientRect().width;
+            const heatmapHeight = heatmapSvg.getBoundingClientRect().height;
             const scaleFactor = availableWidth / heatmapWidth;
 
             if (scaleFactor < 1) {
               heatmapContainer.style.transform = `scale(${scaleFactor})`;
               heatmapContainer.style.transformOrigin = "top left";
               heatmapContainer.style.width = `${100 / scaleFactor}%`;
+              // A scaled element keeps its natural layout height, leaving
+              // white space below. Collapse the layout box to the scaled
+              // height so standard card padding applies beneath the map.
+              heatmapContainer.style.height = `${heatmapHeight * scaleFactor}px`;
             }
           }
         }, 100);
@@ -128,6 +134,7 @@ export function useDashboardState(page: "tts" | "stt") {
           heatmapContainer.style.transform = "";
           heatmapContainer.style.transformOrigin = "";
           heatmapContainer.style.width = "";
+          heatmapContainer.style.height = "";
         }
       }
     };
