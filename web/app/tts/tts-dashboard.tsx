@@ -8,31 +8,34 @@ import { DashboardProvider } from "@/contexts/DashboardContext";
 import { SidebarMenuProvider } from "@/contexts/SidebarMenuContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import KeyMetrics from "@/components/dashboard/KeyMetrics";
+import { ChartSkeleton } from "@/components/dashboard/DashboardSkeleton";
 
-// Lazy-load heavy chart components — D3 and Recharts do not support SSR
+// Lazy-load heavy chart components — D3 and Recharts do not support SSR.
+// Each renders a chart-sized skeleton while its chunk loads so the page keeps
+// its full height and the footer never flashes up into view during the gap.
 const TimelineChart = dynamic(
   () => import("@/components/visualizations/TimelineChart"),
-  { ssr: false }
+  { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
 const BoxPlotSection = dynamic(
   () => import("@/components/dashboard/BoxPlotSection"),
-  { ssr: false }
+  { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
 const LatencyAccuracySection = dynamic(
   () => import("@/components/dashboard/LatencyAccuracySection"),
-  { ssr: false }
+  { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
 const AccuracyBarSection = dynamic(
   () => import("@/components/dashboard/AccuracyBarSection"),
-  { ssr: false }
+  { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
 const HeatmapSection = dynamic(
   () => import("@/components/dashboard/HeatmapSection"),
-  { ssr: false }
+  { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
 export function TTSDashboard() {

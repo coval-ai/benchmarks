@@ -20,19 +20,12 @@ const KeyMetrics: React.FC = () => {
   const {
     primaryKeyMetric: primary,
     secondaryKeyMetric: secondary,
-    modelsComparedMetric,
-    providersMetric,
   } = useDashboard();
 
-  const metrics: KeyMetricData[] = [
-    primary,
-    secondary,
-    modelsComparedMetric,
-    providersMetric,
-  ];
+  const metrics: KeyMetricData[] = [primary, secondary];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-[0.8rem] mb-[0.8rem] w-full">
+    <div className="grid grid-cols-2 gap-[0.8rem] mb-[0.8rem] w-full">
       {metrics.map((metric, index) => (
         <Card key={index} className="text-left min-w-0" padding="p-5 lg:p-8">
 

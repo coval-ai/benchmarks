@@ -43,7 +43,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   }, [mode]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-background text-text-primary">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background text-text-primary">
       <DashboardHeader />
       <MobileModelSheet />
       <ModelSidebar />
@@ -51,7 +51,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Content column — centered on the page (under the centered tabs). The
           18rem side gutters keep its left edge clear of the fixed sidebar
           (17rem wide) with a 1rem gap. The footer stays full-width. */}
-      <div className="relative z-10 transition-all duration-300 pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden mx-auto lg:w-[calc(100vw-36rem)]">
+      <div className="relative z-10 flex-1 transition-all duration-300 pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden mx-auto lg:w-[calc(100vw-36rem)]">
         <h1 className="mb-6 text-2xl font-bold tracking-tight text-text-primary">
           {benchmarkTitle}
         </h1>
