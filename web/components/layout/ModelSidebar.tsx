@@ -95,14 +95,14 @@ const ModelSidebar: React.FC = () => {
                             aria-label={`${
                               checked ? "Deselect" : "Select"
                             } ${model} model`}
-                            className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] border border-text-tertiary bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] bg-[#d4d2cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                           />
                           <svg
                             aria-hidden
                             viewBox="0 0 14 14"
                             fill="none"
                             stroke="currentColor"
-                            strokeWidth={2}
+                            strokeWidth={1.5}
                             strokeLinecap="round"
                             strokeLinejoin="round"
                             className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 text-text-primary peer-checked:block"

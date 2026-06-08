@@ -307,18 +307,6 @@ export function useDashboardState(page: "tts" | "stt") {
         : undefined,
   };
 
-  const modelsComparedMetric = {
-    label: "Models Compared",
-    displayValue: `${selectedModels.length}`,
-  };
-
-  const providersMetric = {
-    label: "Providers",
-    displayValue: `${
-      new Set(selectedModels.map((model) => parseModelKey(model).provider)).size
-    }`,
-  };
-
   return {
     // Page identity
     latencyLabel,
@@ -338,8 +326,6 @@ export function useDashboardState(page: "tts" | "stt") {
     // Key metrics
     primaryKeyMetric,
     secondaryKeyMetric,
-    modelsComparedMetric,
-    providersMetric,
 
     // Data loading
     loading,

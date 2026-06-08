@@ -39,7 +39,7 @@ const MetricSkeleton: React.FC = () => (
 // Mirrors the first chart card (TimelineChart). The wrapper (shared Card)
 // and SectionHeader structure match, and the h-96 chart area is reproduced
 // verbatim so the overall card height equals the loaded chart.
-const ChartSkeleton: React.FC = () => (
+export const ChartSkeleton: React.FC = () => (
   <div className="mb-4">
     <Card>
       {/* SectionHeader mirror */}
@@ -74,16 +74,23 @@ const ChartSkeleton: React.FC = () => (
   </div>
 );
 
-// Loading placeholder for the dashboard: the four key-metric cards plus the
-// first chart card, each matching the height of its loaded counterpart.
+// Loading placeholder for the dashboard: mirrors the full page so every
+// skeleton card is on screen at once — the two key-metric cards (matching
+// KeyMetrics) plus one chart card per chart section (TimelineChart, BoxPlot,
+// AccuracyBar, LatencyAccuracy, Heatmap). Each matches its loaded counterpart's
+// height, so nothing pops in after the top of the page has rendered.
+const CHART_SECTION_COUNT = 5;
+
 const DashboardSkeleton: React.FC = () => (
   <>
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-[0.8rem] mb-[0.8rem] w-full">
-      {["a", "b", "c", "d"].map((k) => (
+    <div className="grid grid-cols-2 gap-[0.8rem] mb-[0.8rem] w-full">
+      {["a", "b"].map((k) => (
         <MetricSkeleton key={k} />
       ))}
     </div>
-    <ChartSkeleton />
+    {Array.from({ length: CHART_SECTION_COUNT }, (_, i) => (
+      <ChartSkeleton key={i} />
+    ))}
   </>
 );
 
