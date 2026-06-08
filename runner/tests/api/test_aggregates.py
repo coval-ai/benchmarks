@@ -146,6 +146,35 @@ async def test_window_excludes_old_rows(client: AsyncClient, postgresql: Any) ->
     assert response_30d.json()["model_stats"][0]["sample_count"] == 1
 
 
+async def test_cache_serves_stale_within_ttl(client: AsyncClient, postgresql: Any) -> None:
+    """A second identical request is served from cache, not re-queried."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, metric_value=1.0)
+
+    first = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert first.json()["model_stats"][0]["sample_count"] == 1
+
+    # Out-of-band insert that a fresh query would pick up.
+    await _insert_result(postgresql, run_id, metric_value=3.0)
+
+    second = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    # Unchanged — served from the cached response, DB not re-scanned.
+    assert second.json() == first.json()
+
+
+async def test_cache_keyed_by_params(client: AsyncClient, postgresql: Any) -> None:
+    """Different params are computed independently, not cross-served."""
+    run_id = await _insert_run(postgresql)
+    old = datetime.now(dt.UTC) - timedelta(days=10)
+    await _insert_result(postgresql, run_id, created_at=old, metric_value=1.0)
+
+    # 24h excludes the 10-day-old row; 30d includes it. Distinct cache keys.
+    r_24h = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    r_30d = await client.get("/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"})
+    assert r_24h.json()["model_stats"] == []
+    assert r_30d.json()["model_stats"][0]["sample_count"] == 1
+
+
 async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -> None:
     """Distinct (provider, model, metric_type) groups stay separate and sorted."""
     run_id = await _insert_run(postgresql)
