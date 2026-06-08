@@ -27,6 +27,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "slowapi>=0.1.9",
+    "cachetools>=5.3",
     # WebSocket clients (STT providers)
     "websockets>=13,<14",
     # TTS provider SDKs
