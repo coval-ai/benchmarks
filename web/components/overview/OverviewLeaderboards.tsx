@@ -4,56 +4,55 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { useLeaderboardQuery } from "@/lib/api/queries";
+import { useAggregatesQuery } from "@/lib/api/queries";
 import {
   normalizeModelName,
   normalizeSTTProviderName,
   normalizeTTSProviderName,
   toModelKey,
 } from "@/lib/utils/formatters";
-import type { LeaderboardEntry } from "@/lib/api/client";
+import type { ModelStatEntry } from "@/lib/api/client";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
 
 const TOP_N = 5;
 
-/**
- * Map leaderboard entries (already sorted ascending by avg — lower is better)
- * into display rows, formatting each model's average with `formatValue`.
- */
+// Rank field is chosen to match the /tts and /stt pages exactly, so the
+// overview cards never disagree with the full leaderboards: TTS ranks by p50
+// of TTFA, STT by avg of WER. All are "lower is better".
 function toRows(
-  entries: LeaderboardEntry[] | undefined,
+  stats: ModelStatEntry[] | undefined,
+  metricType: string,
+  rankField: "p50" | "avg_value",
   normalizeProvider: (p: string) => string,
-  formatValue: (avg: number) => string
+  formatValue: (value: number) => string
 ): LeaderboardRow[] {
-  if (!entries) return [];
-  return entries.slice(0, TOP_N).map((entry) => ({
-    key: toModelKey(entry.provider, entry.model),
-    model: normalizeModelName(toModelKey(entry.provider, entry.model)),
-    provider: normalizeProvider(entry.provider),
-    value: formatValue(entry.avg),
-  }));
+  if (!stats) return [];
+  return stats
+    .filter((s) => s.metric_type === metricType)
+    .sort((a, b) => a[rankField] - b[rankField])
+    .slice(0, TOP_N)
+    .map((s) => ({
+      key: toModelKey(s.provider, s.model),
+      model: normalizeModelName(toModelKey(s.provider, s.model)),
+      provider: normalizeProvider(s.provider),
+      value: formatValue(s[rankField]),
+    }));
 }
 
 const OverviewLeaderboards: React.FC = () => {
-  // TTS ranked by Time to First Audio; STT ranked by Word Error Rate.
-  // Both metrics are "lower is better", so rank 1 is the API's first entry.
-  const ttsQuery = useLeaderboardQuery({
-    metric: "TTFA",
-    benchmark: "TTS",
-    window: "24h",
-  });
-  const sttQuery = useLeaderboardQuery({
-    metric: "WER",
-    benchmark: "STT",
-    window: "24h",
-  });
+  // Same endpoint and params the /tts and /stt pages use, so React Query
+  // serves both from one cache entry and the numbers are identical.
+  const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: "24h" });
+  const sttQuery = useAggregatesQuery({ benchmark: "STT", window: "24h" });
 
   const ttsRows = useMemo(
     () =>
       toRows(
-        ttsQuery.data?.entries,
+        ttsQuery.data?.model_stats,
+        "TTFA",
+        "p50",
         normalizeTTSProviderName,
-        (avg) => `${Math.round(avg)} ms`
+        (value) => `${Math.round(value)} ms`
       ),
     [ttsQuery.data]
   );
@@ -61,9 +60,11 @@ const OverviewLeaderboards: React.FC = () => {
   const sttRows = useMemo(
     () =>
       toRows(
-        sttQuery.data?.entries,
+        sttQuery.data?.model_stats,
+        "WER",
+        "avg_value",
         normalizeSTTProviderName,
-        (avg) => `${avg.toFixed(1)}%`
+        (value) => `${value.toFixed(1)}%`
       ),
     [sttQuery.data]
   );
