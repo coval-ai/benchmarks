@@ -22,6 +22,7 @@ from typing import Any
 
 import psycopg.rows
 import structlog
+from cachetools import TTLCache
 from fastapi import APIRouter, Depends, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
@@ -33,7 +34,13 @@ from coval_bench.api.common import (
     BenchmarkLiteral,
     WindowLiteral,
 )
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
+from coval_bench.api.deps import (
+    capture_api_event,
+    get_cache,
+    get_pool,
+    get_posthog,
+    get_settings,
+)
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
 from coval_bench.config import Settings
@@ -88,6 +95,7 @@ async def get_results_aggregates(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
+    cache: TTLCache[Any, Any] = Depends(get_cache),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -95,36 +103,43 @@ async def get_results_aggregates(
         benchmark: One of STT, TTS.
         window: Time window over results.created_at. Defaults to 24h.
     """
-    params: dict[str, Any] = {
-        "benchmark": benchmark,
-        "interval": WINDOW_INTERVALS[window],
-    }
-    series_params: dict[str, Any] = {
-        **params,
-        "schedule_period": settings.schedule_period_seconds,
-    }
+    cache_key = ("aggregates", benchmark, window)
+    response: AggregatesResponse | None = cache.get(cache_key)
+    cache_hit = response is not None
 
-    async with pool.connection() as conn:
-        conn.row_factory = psycopg.rows.dict_row
-        stat_rows = await (await conn.execute(_STATS_SQL, params)).fetchall()
-        series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
+    if response is None:
+        params: dict[str, Any] = {
+            "benchmark": benchmark,
+            "interval": WINDOW_INTERVALS[window],
+        }
+        series_params: dict[str, Any] = {
+            **params,
+            "schedule_period": settings.schedule_period_seconds,
+        }
 
-    model_stats = [ModelStatEntry.model_validate(r) for r in stat_rows]
-    series = [SeriesPoint.model_validate(r) for r in series_rows]
+        async with pool.connection() as conn:
+            conn.row_factory = psycopg.rows.dict_row
+            stat_rows = await (await conn.execute(_STATS_SQL, params)).fetchall()
+            series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
+
+        response = AggregatesResponse(
+            benchmark=benchmark,
+            window=window,
+            model_stats=[ModelStatEntry.model_validate(r) for r in stat_rows],
+            series=[SeriesPoint.model_validate(r) for r in series_rows],
+        )
+        cache[cache_key] = response
+
     capture_api_event(
         posthog_client,
         "results_aggregates_queried",
         {
             "benchmark": benchmark,
             "window": window,
-            "model_stat_count": len(model_stats),
-            "series_point_count": len(series),
+            "model_stat_count": len(response.model_stats),
+            "series_point_count": len(response.series),
+            "cache_hit": cache_hit,
             "$process_person_profile": False,
         },
     )
-    return AggregatesResponse(
-        benchmark=benchmark,
-        window=window,
-        model_stats=model_stats,
-        series=series,
-    )
+    return response

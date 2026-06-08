@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import structlog
+from cachetools import TTLCache
 from fastapi import HTTPException
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
@@ -43,6 +44,11 @@ def get_settings(request: Request) -> Settings:
 def get_posthog(request: Request) -> Posthog | None:
     """Return the PostHog client from app state, or None if analytics is disabled."""
     return cast("Posthog | None", request.app.state.posthog)
+
+
+def get_cache(request: Request) -> TTLCache[Any, Any]:
+    """Return the per-app response TTL cache from app state."""
+    return cast("TTLCache[Any, Any]", request.app.state.response_cache)
 
 
 def capture_api_event(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:
