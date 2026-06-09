@@ -86,6 +86,13 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
         enabled=True,
     ),
+    # Cartesia — sonic-3.5 (cleared for public benchmarking 2026-06-08).
+    ProviderEntry(
+        provider="cartesia",
+        model="sonic-3.5",
+        voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        enabled=True,
+    ),
     # Deepgram — re-activated 2026-04-30: aura-2-thalia-en.
     ProviderEntry(
         provider="deepgram",
