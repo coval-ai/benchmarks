@@ -16,8 +16,14 @@ import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { loading, benchmarkTitle, timeWindow, changeTimeWindow, windowDataStale } =
-    useDashboard();
+  const {
+    loading,
+    loadError,
+    benchmarkTitle,
+    timeWindow,
+    changeTimeWindow,
+    windowDataStale,
+  } = useDashboard();
   const mode = useActiveTab();
   const firedDepthsRef = useRef<Set<number>>(new Set());
 
@@ -73,7 +79,16 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             windowDataStale ? "opacity-60" : ""
           }`}
         >
-          {loading ? <DashboardSkeleton /> : children}
+          {loading ? (
+            <DashboardSkeleton />
+          ) : loadError ? (
+            <div className="py-24 text-center text-sm text-text-tertiary">
+              Couldn&rsquo;t load benchmark results. Try another time window or
+              refresh the page.
+            </div>
+          ) : (
+            children
+          )}
         </div>
       </div>
 

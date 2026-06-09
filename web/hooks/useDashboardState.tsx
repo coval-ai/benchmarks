@@ -41,6 +41,7 @@ export function useDashboardState(page: "tts" | "stt") {
   // so window-derived rendering must follow the data, not the toggle.
   const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
   const windowDataStale = aggregatesQuery.isPlaceholderData;
+  const loadError = aggregatesQuery.isError;
 
   const modelStats = useMemo(
     () => aggregatesQuery.data?.model_stats ?? [],
@@ -340,6 +341,7 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // Data loading
     loading,
+    loadError,
 
     // Model state
     selectedModels,

@@ -15,17 +15,14 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.api.common import WINDOW_INTERVALS, WindowLiteral
-from coval_bench.api.routers.aggregates import _WINDOW_BUCKET_SECONDS
+from coval_bench.api.common import WINDOWS, WindowLiteral
 from tests.api.conftest import _insert_result, _insert_run
 
 
-def test_window_dicts_cover_every_window() -> None:
-    """Every WindowLiteral value must have an interval and a bucket entry —
-    a window added to one map but not the others 500s after validation."""
-    windows = set(get_args(WindowLiteral))
-    assert set(WINDOW_INTERVALS) == windows
-    assert set(_WINDOW_BUCKET_SECONDS) == windows
+def test_windows_table_covers_every_window() -> None:
+    """Every WindowLiteral value must have a WINDOWS entry — a window added
+    to the literal but not the table 500s after validation."""
+    assert set(WINDOWS) == set(get_args(WindowLiteral))
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:
@@ -280,6 +277,33 @@ async def test_concurrent_misses_coalesce(
     bodies = [r.json() for r in responses]
     assert all(b == bodies[0] for b in bodies)
     assert bodies[0]["model_stats"][0]["sample_count"] == 1
+    assert acquisitions == 1
+
+
+async def test_failed_fill_shared_not_retried(client: AsyncClient, app: FastAPI) -> None:
+    """A failing query is re-raised to requests inside the failure window
+    instead of each one re-running it against the pool."""
+    from coval_bench.api import deps
+
+    acquisitions = 0
+
+    class FailingPool:
+        @asynccontextmanager
+        async def connection(self) -> Any:
+            nonlocal acquisitions
+            acquisitions += 1
+            raise RuntimeError("db down")
+            yield  # noqa: B901 — unreachable; makes this an async generator
+
+    app.dependency_overrides[deps.get_pool] = FailingPool
+    try:
+        with pytest.raises(RuntimeError, match="db down"):
+            await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+        with pytest.raises(RuntimeError, match="db down"):
+            await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    finally:
+        app.dependency_overrides.clear()
+
     assert acquisitions == 1
 
 

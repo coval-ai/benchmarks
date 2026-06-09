@@ -47,8 +47,8 @@ const windowBadge = (window: TimeWindow): string => `Last ${WINDOW_LABELS[window
 const OverviewLeaderboards: React.FC = () => {
   const { timeWindow, changeTimeWindow } = useTimeWindow("overview");
 
-  // Same endpoint and params the /tts and /stt pages use, so React Query
-  // serves both from one cache entry and the numbers are identical.
+  // Params match what /tts and /stt send, so React Query shares a cache
+  // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
 

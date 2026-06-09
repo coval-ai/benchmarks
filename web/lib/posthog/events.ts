@@ -20,7 +20,11 @@ export const POSTHOG_EVENTS = {
   dashboardTimeWindowChanged: "dashboard_time_window_changed"
 } as const;
 
-export type PostHogSurface = "tts_dashboard" | "stt_dashboard" | "playground";
+export type PostHogSurface =
+  | "tts_dashboard"
+  | "stt_dashboard"
+  | "playground"
+  | "overview";
 export type PostHogMode = "tts" | "stt";
 export type SelectionAction = "add" | "remove";
 export type DashboardChartId =
