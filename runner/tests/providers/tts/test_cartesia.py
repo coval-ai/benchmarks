@@ -92,6 +92,15 @@ def test_cartesia_name_and_model(fake_settings: Settings) -> None:
     assert p.model == "sonic-turbo"
 
 
+def test_cartesia_supports_sonic_3_5(fake_settings: Settings) -> None:
+    """sonic-3.5 (the public matrix entry) must pass the model-support guard."""
+    p = CartesiaTTSProvider(
+        fake_settings, model="sonic-3.5", voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    )
+    assert p.name == "cartesia-sonic-3.5"
+    assert p._model_supported("sonic-3.5")
+
+
 # ---------------------------------------------------------------------------
 # Missing API key
 # ---------------------------------------------------------------------------
