@@ -1,0 +1,14 @@
+[
+  { "type": "transcript", "is_final": true, "request_id": "req_test001", "text": "hello", "duration": 0.6 },
+  { "type": "transcript", "is_final": true, "request_id": "req_test001", "text": " world", "duration": 1.2 },
+  {
+    "type": "transcript",
+    "is_final": true,
+    "request_id": "req_test001",
+    "text": " how are you",
+    "duration": 2.4,
+    "words": [{ "word": "how", "start": 1.2, "end": 1.5 }]
+  },
+  { "type": "flush_done", "request_id": "req_test001" },
+  { "type": "done", "request_id": "req_test001" }
+]
