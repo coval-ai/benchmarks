@@ -53,7 +53,7 @@ router = APIRouter(tags=["results"])
 
 # ``MetricLiteral`` is kept as the type for the legacy ``metric`` param.
 # The canonical FE-facing param is ``metric_type`` (plain ``str``).
-MetricLiteral = Literal["WER", "TTFA", "TTFT", "RTF", "AUDIO_TO_FINAL"]
+MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS", "RTF", "AUDIO_TO_FINAL"]
 
 # Base SELECT used by all three query paths.
 # S608 false-positive: the interpolated fragment is a fixed constant; user

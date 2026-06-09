@@ -66,3 +66,28 @@ def compute_rtf(audio_to_final_seconds: float, audio_duration_seconds: float) ->
     if audio_duration_seconds <= 0:
         raise ValueError("audio_duration_seconds must be > 0")
     return audio_to_final_seconds / audio_duration_seconds
+
+
+def compute_ttfs(audio_to_final_seconds: float, speech_end_offset_seconds: float) -> float:
+    """Return Time-To-Final-Segment (TTFS) in **seconds**.
+
+    TTFS is latency from VAD-detected end-of-speech to the final transcript:
+    ``audio_to_final_seconds - speech_end_offset_seconds``. The offset is the
+    precomputed, shared end-of-speech anchor for the clip (same for every
+    provider), so TTFS isolates finalization speed given a client end-of-speech
+    signal.
+
+    Args:
+        audio_to_final_seconds: Output of :func:`compute_audio_to_final`.
+        speech_end_offset_seconds: VAD end-of-speech offset for the clip.
+
+    Returns:
+        Elapsed time in seconds (float).
+
+    Raises:
+        ValueError: If the result would be negative.
+    """
+    ttfs = audio_to_final_seconds - speech_end_offset_seconds
+    if ttfs < 0:
+        raise ValueError("ttfs must be >= 0 (speech_end_offset exceeds audio_to_final)")
+    return ttfs

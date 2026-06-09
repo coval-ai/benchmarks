@@ -83,6 +83,7 @@ def _make_dataset_item(path: Path, transcript: str = "hello world") -> Any:
     item.transcript = transcript
     item.duration_sec = 1.0
     item.sha256 = "abc"
+    item.speech_end_offset_ms = 100.0
     item.metadata = {}
     return item
 
@@ -369,11 +370,11 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
 
     assert summary.status == str(RunStatus.FAILED)
     # Unified failure model: a raised exception fails every metric row for the item
-    # (TTFT, AudioToFinal, RTF), each carrying the real exception string.
-    assert summary.fail_count == 3
+    # (TTFT, AudioToFinal, RTF, TTFS), each carrying the real exception string.
+    assert summary.fail_count == 4
     assert summary.success_count == 0
     rows = _recorded_rows(writer)
-    assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF"}
+    assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF", "TTFS"}
     assert all(r.status == ResultStatus.FAILED for r in rows)
     assert all("always fails" in (r.error or "") for r in rows)
 
@@ -1376,6 +1377,55 @@ async def test_stt_partial_keeps_real_ttft(audio_file: Path, settings: Settings)
     assert by_metric["AudioToFinal"].status == ResultStatus.FAILED
     assert by_metric["RTF"].status == ResultStatus.FAILED
     assert summary.status == str(RunStatus.PARTIAL)
+
+
+@pytest.mark.asyncio
+async def test_stt_ttfs_status_tracks_value(audio_file: Path, settings: Settings) -> None:
+    """TTFS succeeds with audio_to_final − offset when an offset is pinned, and fails
+    (never a null-valued success) when the offset is missing."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],  # speech_end_offset_ms = 100.0
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFS"].status == ResultStatus.SUCCESS
+    assert by_metric["TTFS"].metric_value == pytest.approx(0.85 - 0.1)
+
+    item_no_offset = _make_dataset_item(audio_file)
+    item_no_offset.speech_end_offset_ms = None
+    provider_inst2 = MagicMock()
+    provider_inst2.measure_ttft = AsyncMock(return_value=_good_transcription())
+    run2 = _make_run()
+    writer2 = _make_stub_writer(run2)
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[item_no_offset],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst2)},
+        run=run2,
+        writer=writer2,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+    by_metric2 = {r.metric_type: r for r in _recorded_rows(writer2)}
+    assert by_metric2["TTFS"].metric_value is None
+    assert by_metric2["TTFS"].status == ResultStatus.FAILED
 
 
 @pytest.mark.asyncio

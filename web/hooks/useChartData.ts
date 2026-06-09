@@ -87,63 +87,82 @@ export function useChartData({
     [modelStats, activeTab, modelsByProvider]
   );
 
-  // Per-model timeline series (scheduled_at bucket → avg) for the primary
-  // latency metric. Feeds the timeline chart and the STT heatmap deltas.
-  const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-
-    const byModel: Record<string, Record<number, number>> = {};
-    series.forEach((point) => {
-      if (point.metric_type !== primaryMetric) return;
-
-      const modelKey = toModelKey(point.provider, point.model);
-      const timestamp = new Date(point.scheduled_at).getTime();
-      if (!byModel[modelKey]) {
-        byModel[modelKey] = {};
+  // Merge a per-model series map into one row per timestamp (ascending), each
+  // with a `${model}_value` column. Shared by every metric's timeline.
+  const buildTimelineRows = useCallback(
+    (
+      byModel: Record<string, Record<number, number>>,
+      models: string[]
+    ): TimelineDataPoint[] => {
+      if (models.length === 0) {
+        return [];
       }
-      byModel[modelKey][timestamp] = toDisplayUnits(point.avg_value);
-    });
 
-    return byModel;
-  }, [series, activeTab, toDisplayUnits]);
-
-  // Timeline rows: merge the selected models' series into one row per
-  // timestamp (ascending), each with a `${model}_value` column.
-  const timelineData = useMemo<TimelineDataPoint[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-
-    if (selectedModels.length === 0) {
-      return [];
-    }
-
-    const timestampSet = new Set<number>();
-    selectedModels.forEach((model) => {
-      const tsMap = timelineByModel[model];
-      if (tsMap) {
-        Object.keys(tsMap).forEach((ts) => timestampSet.add(Number(ts)));
-      }
-    });
-    const timestamps = [...timestampSet].sort((a, b) => a - b);
-
-    return timestamps.map((timestamp) => {
-      const row: TimelineDataPoint = {
-        timestamp,
-        timestampLabel: new Date(timestamp).toISOString()
-      };
-      selectedModels.forEach((model) => {
-        const value = timelineByModel[model]?.[timestamp];
-        if (value !== undefined) {
-          row[`${model}_value`] = value;
+      const timestampSet = new Set<number>();
+      models.forEach((model) => {
+        const tsMap = byModel[model];
+        if (tsMap) {
+          Object.keys(tsMap).forEach((ts) => timestampSet.add(Number(ts)));
         }
       });
-      return row;
-    });
-  }, [timelineByModel, activeTab, selectedTTSModels, selectedSTTModels]);
+      const timestamps = [...timestampSet].sort((a, b) => a - b);
 
+      return timestamps.map((timestamp) => {
+        const row: TimelineDataPoint = {
+          timestamp,
+          timestampLabel: new Date(timestamp).toISOString()
+        };
+        models.forEach((model) => {
+          const value = byModel[model]?.[timestamp];
+          if (value !== undefined) {
+            row[`${model}_value`] = value;
+          }
+        });
+        return row;
+      });
+    },
+    []
+  );
+
+  // Per-metric, per-model timeline series (scheduled_at bucket → avg) built in
+  // one pass. Indexed by metric_type so any metric can read its own series.
+  const timelineByMetricModel = useMemo<
+    Record<string, Record<string, Record<number, number>>>
+  >(() => {
+    const out: Record<string, Record<string, Record<number, number>>> = {};
+    series.forEach((point) => {
+      const byModel = (out[point.metric_type] ??= {});
+      const modelKey = toModelKey(point.provider, point.model);
+      const modelSeries = (byModel[modelKey] ??= {});
+      modelSeries[new Date(point.scheduled_at).getTime()] = toDisplayUnits(
+        point.avg_value
+      );
+    });
+    return out;
+  }, [series, toDisplayUnits]);
+
+  // Primary latency metric series (TTFT for STT, TTFA for TTS). Also feeds the
+  // STT heatmap deltas and the gap chart.
+  const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    return timelineByMetricModel[primaryMetric] ?? {};
+  }, [timelineByMetricModel, activeTab]);
+
+  // Timeline rows for a given metric. Models follow the active tab (STT models
+  // for TTFS/TTFT, TTS models for TTFA).
   const getTimelineData = useCallback(
-    (): TimelineDataPoint[] => timelineData,
-    [timelineData]
+    (metric: string): TimelineDataPoint[] => {
+      const models =
+        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+      return buildTimelineRows(timelineByMetricModel[metric] ?? {}, models);
+    },
+    [
+      buildTimelineRows,
+      timelineByMetricModel,
+      activeTab,
+      selectedTTSModels,
+      selectedSTTModels
+    ]
   );
 
   // Per-model box-plot pieces from the SQL stats: box = p25..p75, whiskers
@@ -465,35 +484,41 @@ export function useChartData({
     return ticks;
   }, [getCurrentTimeWindow]);
 
-  const getWindowedTimelineData = useCallback((): TimelineDataPoint[] => {
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    return getTimelineData().filter(
-      (item) => item.timestamp >= windowStart && item.timestamp <= windowEnd
-    );
-  }, [getCurrentTimeWindow, getTimelineData]);
+  const getWindowedTimelineData = useCallback(
+    (metric: string): TimelineDataPoint[] => {
+      const [windowStart, windowEnd] = getCurrentTimeWindow();
+      return getTimelineData(metric).filter(
+        (item) => item.timestamp >= windowStart && item.timestamp <= windowEnd
+      );
+    },
+    [getCurrentTimeWindow, getTimelineData]
+  );
 
   /** Models that have at least one plotted point in the current timeline window. */
-  const getModelsWithTimelineData = useCallback((): string[] => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const windowed = getTimelineData().filter(
-      (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
-    );
-    return selectedModels.filter((model) =>
-      windowed.some(
-        (point) =>
-          point[`${model}_value`] !== undefined &&
-          point[`${model}_value`] !== null
-      )
-    );
-  }, [
-    activeTab,
-    selectedTTSModels,
-    selectedSTTModels,
-    getCurrentTimeWindow,
-    getTimelineData,
-  ]);
+  const getModelsWithTimelineData = useCallback(
+    (metric: string): string[] => {
+      const selectedModels =
+        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+      const [windowStart, windowEnd] = getCurrentTimeWindow();
+      const windowed = getTimelineData(metric).filter(
+        (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
+      );
+      return selectedModels.filter((model) =>
+        windowed.some(
+          (point) =>
+            point[`${model}_value`] !== undefined &&
+            point[`${model}_value`] !== null
+        )
+      );
+    },
+    [
+      activeTab,
+      selectedTTSModels,
+      selectedSTTModels,
+      getCurrentTimeWindow,
+      getTimelineData
+    ]
+  );
 
   return {
     formatChartLabel,

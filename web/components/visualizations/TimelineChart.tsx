@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   LineChart,
   Line,
@@ -64,16 +64,21 @@ const TimelineChart: React.FC = () => {
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
+  // STT shows a TTFS (default) / TTFT toggle; TTS is single-metric (TTFA).
+  const [metric, setMetric] = useState<string>(
+    activeTab === "stt" ? "TTFS" : "TTFA"
+  );
+
   const themeColors = useThemeColors();
-  const modelsWithData = getModelsWithTimelineData();
-  const windowedTimelineData = getWindowedTimelineData();
+  const modelsWithData = getModelsWithTimelineData(metric);
+  const windowedTimelineData = getWindowedTimelineData(metric);
   const currentTimeWindow = getCurrentTimeWindow();
   const tzAbbr = getLocalTimeZoneAbbr();
   const xAxisLabel = tzAbbr ? `Time (${tzAbbr})` : "Time";
 
-  const metricLabel = activeTab === "tts" ? "TTFA" : "TTFT";
+  const metricLabel = metric;
   const description =
-    metricDescriptions[activeTab === "tts" ? "ttfa" : "ttft"];
+    metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions];
 
   const avgValue = useMemo(() => {
     let sum = 0;
@@ -96,7 +101,7 @@ const TimelineChart: React.FC = () => {
   // 0.5s step so the gridlines land on tidy values.
   const yAxisMax = useMemo(() => {
     let max = 0;
-    for (const point of getTimelineData()) {
+    for (const point of getTimelineData(metric)) {
       const record = point as Record<string, number>;
       for (const model of modelsWithData) {
         const value = record[`${model}_value`];
@@ -108,7 +113,7 @@ const TimelineChart: React.FC = () => {
     if (max === 0) return "dataMax" as const;
     const step = 500;
     return Math.ceil(max / step) * step;
-  }, [getTimelineData, modelsWithData]);
+  }, [getTimelineData, metric, modelsWithData]);
 
   return (
     <div className="mb-4">
@@ -125,6 +130,26 @@ const TimelineChart: React.FC = () => {
             value: `${avgValue.toFixed(0)} ms`,
           }}
         />
+
+        {activeTab === "stt" && (
+          <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-gray-100 p-0.5">
+            {(["TTFS", "TTFT"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMetric(m)}
+                className={
+                  "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
+                  (metric === m
+                    ? "bg-white text-text-primary shadow-sm"
+                    : "text-gray-500 hover:text-text-primary")
+                }
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">

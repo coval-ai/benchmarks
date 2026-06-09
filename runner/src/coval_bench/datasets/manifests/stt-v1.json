@@ -12,7 +12,8 @@
       "duration_sec": 10.435,
       "speaker_id": "1089",
       "chapter_id": "134686",
-      "utterance_id": "1089-134686-0000"
+      "utterance_id": "1089-134686-0000",
+      "speech_end_offset_ms": 10435.0
     },
     {
       "path": "audio/0002.wav",
@@ -21,7 +22,8 @@
       "duration_sec": 3.275,
       "speaker_id": "1089",
       "chapter_id": "134686",
-      "utterance_id": "1089-134686-0001"
+      "utterance_id": "1089-134686-0001",
+      "speech_end_offset_ms": 2980.0
     },
     {
       "path": "audio/0003.wav",
@@ -30,7 +32,8 @@
       "duration_sec": 10.725,
       "speaker_id": "1188",
       "chapter_id": "133604",
-      "utterance_id": "1188-133604-0000"
+      "utterance_id": "1188-133604-0000",
+      "speech_end_offset_ms": 10308.0
     },
     {
       "path": "audio/0004.wav",
@@ -39,7 +42,8 @@
       "duration_sec": 9.04,
       "speaker_id": "1188",
       "chapter_id": "133604",
-      "utterance_id": "1188-133604-0001"
+      "utterance_id": "1188-133604-0001",
+      "speech_end_offset_ms": 8580.0
     },
     {
       "path": "audio/0005.wav",
@@ -48,7 +52,8 @@
       "duration_sec": 8.46,
       "speaker_id": "121",
       "chapter_id": "121726",
-      "utterance_id": "121-121726-0000"
+      "utterance_id": "121-121726-0000",
+      "speech_end_offset_ms": 8100.0
     },
     {
       "path": "audio/0006.wav",
@@ -57,7 +62,8 @@
       "duration_sec": 5.925,
       "speaker_id": "121",
       "chapter_id": "121726",
-      "utterance_id": "121-121726-0001"
+      "utterance_id": "121-121726-0001",
+      "speech_end_offset_ms": 5925.0
     },
     {
       "path": "audio/0007.wav",
@@ -66,7 +72,8 @@
       "duration_sec": 12.435,
       "speaker_id": "1221",
       "chapter_id": "135766",
-      "utterance_id": "1221-135766-0000"
+      "utterance_id": "1221-135766-0000",
+      "speech_end_offset_ms": 12435.0
     },
     {
       "path": "audio/0008.wav",
@@ -75,7 +82,8 @@
       "duration_sec": 4.825,
       "speaker_id": "1221",
       "chapter_id": "135766",
-      "utterance_id": "1221-135766-0002"
+      "utterance_id": "1221-135766-0002",
+      "speech_end_offset_ms": 4825.0
     },
     {
       "path": "audio/0009.wav",
@@ -84,7 +92,8 @@
       "duration_sec": 8.12,
       "speaker_id": "1284",
       "chapter_id": "1180",
-      "utterance_id": "1284-1180-0000"
+      "utterance_id": "1284-1180-0000",
+      "speech_end_offset_ms": 8120.0
     },
     {
       "path": "audio/0010.wav",
@@ -93,7 +102,8 @@
       "duration_sec": 7.755,
       "speaker_id": "1284",
       "chapter_id": "1180",
-      "utterance_id": "1284-1180-0001"
+      "utterance_id": "1284-1180-0001",
+      "speech_end_offset_ms": 7755.0
     },
     {
       "path": "audio/0011.wav",
@@ -102,7 +112,8 @@
       "duration_sec": 13.48,
       "speaker_id": "1320",
       "chapter_id": "122612",
-      "utterance_id": "1320-122612-0000"
+      "utterance_id": "1320-122612-0000",
+      "speech_end_offset_ms": 13092.0
     },
     {
       "path": "audio/0012.wav",
@@ -111,7 +122,8 @@
       "duration_sec": 9.52,
       "speaker_id": "1320",
       "chapter_id": "122612",
-      "utterance_id": "1320-122612-0001"
+      "utterance_id": "1320-122612-0001",
+      "speech_end_offset_ms": 9124.0
     },
     {
       "path": "audio/0013.wav",
@@ -120,7 +132,8 @@
       "duration_sec": 8.94,
       "speaker_id": "1580",
       "chapter_id": "141083",
-      "utterance_id": "1580-141083-0000"
+      "utterance_id": "1580-141083-0000",
+      "speech_end_offset_ms": 8580.0
     },
     {
       "path": "audio/0014.wav",
@@ -129,7 +142,8 @@
       "duration_sec": 10.255,
       "speaker_id": "1580",
       "chapter_id": "141083",
-      "utterance_id": "1580-141083-0001"
+      "utterance_id": "1580-141083-0001",
+      "speech_end_offset_ms": 9924.0
     },
     {
       "path": "audio/0015.wav",
@@ -138,7 +152,8 @@
       "duration_sec": 9.485,
       "speaker_id": "1995",
       "chapter_id": "1826",
-      "utterance_id": "1995-1826-0000"
+      "utterance_id": "1995-1826-0000",
+      "speech_end_offset_ms": 9188.0
     },
     {
       "path": "audio/0016.wav",
@@ -147,7 +162,8 @@
       "duration_sec": 10.17,
       "speaker_id": "1995",
       "chapter_id": "1826",
-      "utterance_id": "1995-1826-0001"
+      "utterance_id": "1995-1826-0001",
+      "speech_end_offset_ms": 10170.0
     },
     {
       "path": "audio/0017.wav",
@@ -156,7 +172,8 @@
       "duration_sec": 8.03,
       "speaker_id": "2094",
       "chapter_id": "142345",
-      "utterance_id": "2094-142345-0001"
+      "utterance_id": "2094-142345-0001",
+      "speech_end_offset_ms": 7684.0
     },
     {
       "path": "audio/0018.wav",
@@ -165,7 +182,8 @@
       "duration_sec": 14.675,
       "speaker_id": "2094",
       "chapter_id": "142345",
-      "utterance_id": "2094-142345-0003"
+      "utterance_id": "2094-142345-0003",
+      "speech_end_offset_ms": 14276.0
     },
     {
       "path": "audio/0019.wav",
@@ -174,7 +192,8 @@
       "duration_sec": 5.08,
       "speaker_id": "2300",
       "chapter_id": "131720",
-      "utterance_id": "2300-131720-0000"
+      "utterance_id": "2300-131720-0000",
+      "speech_end_offset_ms": 5080.0
     },
     {
       "path": "audio/0020.wav",
@@ -183,7 +202,8 @@
       "duration_sec": 14.63,
       "speaker_id": "2300",
       "chapter_id": "131720",
-      "utterance_id": "2300-131720-0001"
+      "utterance_id": "2300-131720-0001",
+      "speech_end_offset_ms": 14308.0
     },
     {
       "path": "audio/0021.wav",
@@ -192,7 +212,8 @@
       "duration_sec": 13.29,
       "speaker_id": "237",
       "chapter_id": "126133",
-      "utterance_id": "237-126133-0000"
+      "utterance_id": "237-126133-0000",
+      "speech_end_offset_ms": 12964.0
     },
     {
       "path": "audio/0022.wav",
@@ -201,7 +222,8 @@
       "duration_sec": 7.04,
       "speaker_id": "260",
       "chapter_id": "123286",
-      "utterance_id": "260-123286-0000"
+      "utterance_id": "260-123286-0000",
+      "speech_end_offset_ms": 7040.0
     },
     {
       "path": "audio/0023.wav",
@@ -210,7 +232,8 @@
       "duration_sec": 6.12,
       "speaker_id": "2830",
       "chapter_id": "3979",
-      "utterance_id": "2830-3979-0000"
+      "utterance_id": "2830-3979-0000",
+      "speech_end_offset_ms": 5796.0
     },
     {
       "path": "audio/0024.wav",
@@ -219,7 +242,8 @@
       "duration_sec": 8.250063,
       "speaker_id": "2961",
       "chapter_id": "960",
-      "utterance_id": "2961-960-0001"
+      "utterance_id": "2961-960-0001",
+      "speech_end_offset_ms": 7972.0
     },
     {
       "path": "audio/0025.wav",
@@ -228,7 +252,8 @@
       "duration_sec": 12.085,
       "speaker_id": "3570",
       "chapter_id": "5694",
-      "utterance_id": "3570-5694-0000"
+      "utterance_id": "3570-5694-0000",
+      "speech_end_offset_ms": 12085.0
     },
     {
       "path": "audio/0026.wav",
@@ -237,7 +262,8 @@
       "duration_sec": 8.23,
       "speaker_id": "3575",
       "chapter_id": "170457",
-      "utterance_id": "3575-170457-0000"
+      "utterance_id": "3575-170457-0000",
+      "speech_end_offset_ms": 7940.0
     },
     {
       "path": "audio/0027.wav",
@@ -246,7 +272,8 @@
       "duration_sec": 11.17,
       "speaker_id": "3729",
       "chapter_id": "6852",
-      "utterance_id": "3729-6852-0000"
+      "utterance_id": "3729-6852-0000",
+      "speech_end_offset_ms": 10948.0
     },
     {
       "path": "audio/0028.wav",
@@ -255,7 +282,8 @@
       "duration_sec": 9.56,
       "speaker_id": "4077",
       "chapter_id": "13751",
-      "utterance_id": "4077-13751-0000"
+      "utterance_id": "4077-13751-0000",
+      "speech_end_offset_ms": 9560.0
     },
     {
       "path": "audio/0029.wav",
@@ -264,7 +292,8 @@
       "duration_sec": 3.495,
       "speaker_id": "4446",
       "chapter_id": "2271",
-      "utterance_id": "4446-2271-0000"
+      "utterance_id": "4446-2271-0000",
+      "speech_end_offset_ms": 3495.0
     },
     {
       "path": "audio/0030.wav",
@@ -273,7 +302,8 @@
       "duration_sec": 2.59,
       "speaker_id": "4507",
       "chapter_id": "16021",
-      "utterance_id": "4507-16021-0000"
+      "utterance_id": "4507-16021-0000",
+      "speech_end_offset_ms": 2244.0
     },
     {
       "path": "audio/0031.wav",
@@ -282,7 +312,8 @@
       "duration_sec": 3.03,
       "speaker_id": "4970",
       "chapter_id": "29093",
-      "utterance_id": "4970-29093-0000"
+      "utterance_id": "4970-29093-0000",
+      "speech_end_offset_ms": 2724.0
     },
     {
       "path": "audio/0032.wav",
@@ -291,7 +322,8 @@
       "duration_sec": 6.645,
       "speaker_id": "4992",
       "chapter_id": "23283",
-      "utterance_id": "4992-23283-0000"
+      "utterance_id": "4992-23283-0000",
+      "speech_end_offset_ms": 6308.0
     },
     {
       "path": "audio/0033.wav",
@@ -300,7 +332,8 @@
       "duration_sec": 4.51,
       "speaker_id": "5105",
       "chapter_id": "28233",
-      "utterance_id": "5105-28233-0000"
+      "utterance_id": "5105-28233-0000",
+      "speech_end_offset_ms": 4260.0
     },
     {
       "path": "audio/0034.wav",
@@ -309,7 +342,8 @@
       "duration_sec": 2.005,
       "speaker_id": "5142",
       "chapter_id": "33396",
-      "utterance_id": "5142-33396-0000"
+      "utterance_id": "5142-33396-0000",
+      "speech_end_offset_ms": 2005.0
     },
     {
       "path": "audio/0035.wav",
@@ -318,7 +352,8 @@
       "duration_sec": 12.44,
       "speaker_id": "5639",
       "chapter_id": "40744",
-      "utterance_id": "5639-40744-0001"
+      "utterance_id": "5639-40744-0001",
+      "speech_end_offset_ms": 12132.0
     },
     {
       "path": "audio/0036.wav",
@@ -327,7 +362,8 @@
       "duration_sec": 2.19,
       "speaker_id": "5683",
       "chapter_id": "32865",
-      "utterance_id": "5683-32865-0000"
+      "utterance_id": "5683-32865-0000",
+      "speech_end_offset_ms": 2190.0
     },
     {
       "path": "audio/0037.wav",
@@ -336,7 +372,8 @@
       "duration_sec": 4.905,
       "speaker_id": "61",
       "chapter_id": "70968",
-      "utterance_id": "61-70968-0000"
+      "utterance_id": "61-70968-0000",
+      "speech_end_offset_ms": 4905.0
     },
     {
       "path": "audio/0038.wav",
@@ -345,7 +382,8 @@
       "duration_sec": 4.07,
       "speaker_id": "672",
       "chapter_id": "122797",
-      "utterance_id": "672-122797-0000"
+      "utterance_id": "672-122797-0000",
+      "speech_end_offset_ms": 3716.0
     },
     {
       "path": "audio/0039.wav",
@@ -354,7 +392,8 @@
       "duration_sec": 11.695,
       "speaker_id": "6829",
       "chapter_id": "68769",
-      "utterance_id": "6829-68769-0000"
+      "utterance_id": "6829-68769-0000",
+      "speech_end_offset_ms": 11695.0
     },
     {
       "path": "audio/0040.wav",
@@ -363,7 +402,8 @@
       "duration_sec": 3.505,
       "speaker_id": "6930",
       "chapter_id": "75918",
-      "utterance_id": "6930-75918-0000"
+      "utterance_id": "6930-75918-0000",
+      "speech_end_offset_ms": 3505.0
     },
     {
       "path": "audio/0041.wav",
@@ -372,7 +412,8 @@
       "duration_sec": 2.44,
       "speaker_id": "7021",
       "chapter_id": "79730",
-      "utterance_id": "7021-79730-0000"
+      "utterance_id": "7021-79730-0000",
+      "speech_end_offset_ms": 2052.0
     },
     {
       "path": "audio/0042.wav",
@@ -381,7 +422,8 @@
       "duration_sec": 2.17,
       "speaker_id": "7127",
       "chapter_id": "75946",
-      "utterance_id": "7127-75946-0001"
+      "utterance_id": "7127-75946-0001",
+      "speech_end_offset_ms": 2170.0
     },
     {
       "path": "audio/0043.wav",
@@ -390,7 +432,8 @@
       "duration_sec": 5.695,
       "speaker_id": "7176",
       "chapter_id": "88083",
-      "utterance_id": "7176-88083-0000"
+      "utterance_id": "7176-88083-0000",
+      "speech_end_offset_ms": 5695.0
     },
     {
       "path": "audio/0044.wav",
@@ -399,7 +442,8 @@
       "duration_sec": 3.285,
       "speaker_id": "7729",
       "chapter_id": "102255",
-      "utterance_id": "7729-102255-0000"
+      "utterance_id": "7729-102255-0000",
+      "speech_end_offset_ms": 3285.0
     },
     {
       "path": "audio/0045.wav",
@@ -408,7 +452,8 @@
       "duration_sec": 13.085,
       "speaker_id": "8224",
       "chapter_id": "274381",
-      "utterance_id": "8224-274381-0003"
+      "utterance_id": "8224-274381-0003",
+      "speech_end_offset_ms": 12836.0
     },
     {
       "path": "audio/0046.wav",
@@ -417,7 +462,8 @@
       "duration_sec": 8.805,
       "speaker_id": "8230",
       "chapter_id": "279154",
-      "utterance_id": "8230-279154-0000"
+      "utterance_id": "8230-279154-0000",
+      "speech_end_offset_ms": 8452.0
     },
     {
       "path": "audio/0047.wav",
@@ -426,7 +472,8 @@
       "duration_sec": 8.745,
       "speaker_id": "8455",
       "chapter_id": "210777",
-      "utterance_id": "8455-210777-0000"
+      "utterance_id": "8455-210777-0000",
+      "speech_end_offset_ms": 8452.0
     },
     {
       "path": "audio/0048.wav",
@@ -435,7 +482,8 @@
       "duration_sec": 4.73,
       "speaker_id": "8463",
       "chapter_id": "287645",
-      "utterance_id": "8463-287645-0000"
+      "utterance_id": "8463-287645-0000",
+      "speech_end_offset_ms": 4730.0
     },
     {
       "path": "audio/0049.wav",
@@ -444,7 +492,8 @@
       "duration_sec": 9.605,
       "speaker_id": "8555",
       "chapter_id": "284447",
-      "utterance_id": "8555-284447-0000"
+      "utterance_id": "8555-284447-0000",
+      "speech_end_offset_ms": 9252.0
     },
     {
       "path": "audio/0050.wav",
@@ -453,7 +502,8 @@
       "duration_sec": 12.62,
       "speaker_id": "908",
       "chapter_id": "157963",
-      "utterance_id": "908-157963-0000"
+      "utterance_id": "908-157963-0000",
+      "speech_end_offset_ms": 12356.0
     }
   ]
 }

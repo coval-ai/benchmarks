@@ -222,6 +222,16 @@ async def _run_stt_item(
         duration_sec: float = item.duration_sec
         audio_bytes = audio_path.read_bytes()
 
+        speech_end_offset_ms = item.speech_end_offset_ms
+        if isinstance(speech_end_offset_ms, (int, float)):
+            trailing_ms = max(0.0, duration_sec * 1000.0 - speech_end_offset_ms)
+            tail_bytes = int(round(trailing_ms / 1000.0 * 16000)) * 2
+            if 0 < tail_bytes < len(audio_bytes):
+                audio_bytes = audio_bytes[: len(audio_bytes) - tail_bytes]
+                # Audio now ends at speech-end; reflect the trimmed length so RTF and the
+                # provider duration hint match what was actually sent.
+                duration_sec = speech_end_offset_ms / 1000.0
+
         transcription_result = None
         item_error: str | None = None
         try:
@@ -292,6 +302,36 @@ async def _run_stt_item(
                 transcript=complete_transcript,
                 status=atf_status,
                 error=atf_error,
+            )
+        )
+
+        # 2b. TTFS — time-to-final from VAD end-of-speech (primary headline metric). Status
+        # tracks ttfs_value (not audio_to_final): a missing offset or a failed calculation
+        # fails the row instead of passing as a null-valued success, and calc errors surface.
+        ttfs_value: float | None = None
+        ttfs_calc_error: str | None = None
+        if audio_to_final is not None and isinstance(speech_end_offset_ms, (int, float)):
+            try:
+                compute_ttfs = importlib.import_module("coval_bench.metrics").compute_ttfs
+                ttfs_value = compute_ttfs(audio_to_final, speech_end_offset_ms / 1000.0)
+            except Exception as exc:
+                ttfs_calc_error = str(exc)
+        ttfs_status, ttfs_error = _metric_outcome(
+            ttfs_value, item_error or ttfs_calc_error, "TTFS", ResultStatus
+        )
+        results.append(
+            Result(
+                run_id=run_id,
+                provider=entry.provider,
+                model=entry.model,
+                benchmark=Benchmark.STT,
+                metric_type="TTFS",
+                metric_value=ttfs_value,
+                metric_units="seconds",
+                audio_filename=audio_path.name,
+                transcript=complete_transcript,
+                status=ttfs_status,
+                error=ttfs_error,
             )
         )
 
