@@ -32,6 +32,10 @@ _SPEECH_MODEL_MAP: dict[str, str] = {
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 
+# Held high so the semantic end-of-turn model can't auto-finalize mid-utterance
+# before our ForceEndpoint at speech-end (TTFS parity). Tune after a re-run.
+_END_OF_TURN_CONFIDENCE_THRESHOLD = 0.9
+
 
 class AssemblyAIProvider(STTProvider):
     """AssemblyAI v3 streaming STT provider."""
@@ -71,7 +75,10 @@ class AssemblyAIProvider(STTProvider):
 
         try:
             speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+            url = (
+                f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+                f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            )
             headers = {"Authorization": self._api_key.get_secret_value()}
             async with ws_client.connect(url, additional_headers=headers) as ws:
                 send_task = asyncio.create_task(
@@ -117,6 +124,8 @@ class AssemblyAIProvider(STTProvider):
                     first_chunk = False
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
+            # Force finalization at speech-end (TTFS parity) before terminating.
+            await ws.send(json.dumps({"type": "ForceEndpoint"}))
             await ws.send(json.dumps({"type": "Terminate"}))
         except Exception as exc:
             logger.exception("assemblyai send error", error=str(exc))

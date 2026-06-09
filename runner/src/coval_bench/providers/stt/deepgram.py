@@ -78,6 +78,9 @@ class DeepgramProvider(STTProvider):
             f"&vad_events=true"
             f"&no_delay=true"
             f"&punctuate=true"
+            # Disable native silence endpointing; we force the final at speech-end
+            # via a Finalize message instead (TTFS parity).
+            f"&endpointing=false"
         )
         if self._model != "default":
             url += f"&model={self._model}"
@@ -151,6 +154,10 @@ class DeepgramProvider(STTProvider):
                     first_chunk = False
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
+            # nova finalizes on our signal (endpointing disabled); Flux has no
+            # Finalize and can't be forced, so it's left on its native EOT.
+            if not self._model.startswith("flux-"):
+                await ws.send(json.dumps({"type": "Finalize"}))
             await ws.send(json.dumps({"type": "CloseStream"}))
         except Exception as exc:
             logger.exception("deepgram send error", error=str(exc))

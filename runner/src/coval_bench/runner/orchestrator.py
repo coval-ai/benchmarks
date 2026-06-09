@@ -319,21 +319,25 @@ async def _run_stt_item(
         ttfs_status, ttfs_error = _metric_outcome(
             ttfs_value, item_error or ttfs_calc_error, "TTFS", ResultStatus
         )
-        results.append(
-            Result(
-                run_id=run_id,
-                provider=entry.provider,
-                model=entry.model,
-                benchmark=Benchmark.STT,
-                metric_type="TTFS",
-                metric_value=ttfs_value,
-                metric_units="seconds",
-                audio_filename=audio_path.name,
-                transcript=complete_transcript,
-                status=ttfs_status,
-                error=ttfs_error,
+        # Flux can't finalize on our signal (no Finalize, EOT can't be disabled), so it's
+        # outside the TTFS parity cohort. Other metrics still run; only the TTFS row is omitted.
+        ttfs_excluded = entry.provider == "deepgram" and entry.model.startswith("flux-")
+        if not ttfs_excluded:
+            results.append(
+                Result(
+                    run_id=run_id,
+                    provider=entry.provider,
+                    model=entry.model,
+                    benchmark=Benchmark.STT,
+                    metric_type="TTFS",
+                    metric_value=ttfs_value,
+                    metric_units="seconds",
+                    audio_filename=audio_path.name,
+                    transcript=complete_transcript,
+                    status=ttfs_status,
+                    error=ttfs_error,
+                )
             )
-        )
 
         # 3. RTF — derived from AudioToFinal, so its outcome tracks whether a final was
         # produced. A present final with an uncomputable RTF (e.g. zero duration) stays a

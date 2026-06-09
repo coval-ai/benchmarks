@@ -77,6 +77,36 @@ def test_websocket_url_contains_required_params() -> None:
         assert "format_turns" not in api_name
 
 
+@pytest.mark.asyncio
+async def test_force_endpoint_sent_before_terminate(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    sent: list[Any] = []
+    ws = FakeWebSocket([], on_send=sent.append)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "end_of_turn_confidence_threshold=" in url
+
+    text = [m for m in sent if isinstance(m, str)]
+    assert '"ForceEndpoint"' in text[-2]
+    assert '"Terminate"' in text[-1]
+
+
 # ---------------------------------------------------------------------------
 # Provider name
 # ---------------------------------------------------------------------------
