@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Public API for coval_bench metrics (WER, TTFA, TTFT, RTF)."""
+"""Public API for coval_bench metrics """
 
 from coval_bench.metrics.ttfa import compute_ttfa, first_audible_offset_ms
 from coval_bench.metrics.ttft import (
