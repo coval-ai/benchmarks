@@ -107,6 +107,7 @@ export function normalizeModelName(modelKey: string): string {
     scribe_v2_realtime: "Scribe v2 Realtime",
     "gpt-realtime-whisper": "GPT Realtime Whisper",
     "universal-streaming": "Universal Streaming",
+    "ink-2": "Ink 2",
     default: "Default",
     enhanced: "Enhanced"
   };
@@ -146,6 +147,7 @@ function capitalizeProviderSlug(providerName: string): string {
 export function normalizeSTTProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     assemblyai: "AssemblyAI",
+    cartesia: "Cartesia",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",

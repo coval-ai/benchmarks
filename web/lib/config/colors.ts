@@ -20,6 +20,9 @@ export const modelColors: Record<string, string> = {
   "sonic-3": "#3498DB",
   "sonic-3.5": "#2563EB",
 
+  // Cartesia STT
+  "ink-2": "#6366F1",
+
   // Rime TTS
   arcana: "#33FF99",
   mistv3: "#0E5C32",

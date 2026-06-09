@@ -24,12 +24,14 @@ export const modelDisplayNames: Record<string, string> = {
   scribe_v2_realtime: "Scribe v2 Realtime",
   "gpt-realtime-whisper": "GPT Realtime Whisper",
   "universal-streaming": "Universal Streaming",
+  "ink-2": "Ink 2",
   default: "Default",
   enhanced: "Enhanced"
 };
 
 export const sttProviderNames: Record<string, string> = {
   assemblyai: "AssemblyAI",
+  cartesia: "Cartesia",
   deepgram: "Deepgram",
   elevenlabs: "ElevenLabs",
   gradium: "Gradium",
