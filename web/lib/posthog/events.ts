@@ -16,7 +16,8 @@ export const POSTHOG_EVENTS = {
   sttTranscriptBrowsed: "stt_transcript_browsed",
   playgroundExamplePromptUsed: "playground_example_prompt_used",
   playgroundModeSwitched: "playground_mode_switched",
-  playgroundResultPlayed: "playground_result_played"
+  playgroundResultPlayed: "playground_result_played",
+  dashboardTimeWindowChanged: "dashboard_time_window_changed"
 } as const;
 
 export type PostHogSurface = "tts_dashboard" | "stt_dashboard" | "playground";

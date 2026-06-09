@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   getAggregates,
   getProviders,
@@ -29,6 +29,9 @@ export function useAggregatesQuery(params: AggregatesQueryParams) {
     queryKey: ["aggregates", params],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       getAggregates(params, { signal } satisfies FetchOptions),
+    // Keep showing the previous window's data while a new window loads so
+    // toggling doesn't flash the page back to the skeleton.
+    placeholderData: keepPreviousData,
   });
 }
 

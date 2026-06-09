@@ -19,16 +19,18 @@ import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import type { TimeWindow } from "@/components/shared/TimeWindowToggle";
 
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
-    window: "24h",
+    window: timeWindow,
   });
   const providersQuery = useProvidersQuery();
 
@@ -63,6 +65,7 @@ export function useDashboardState(page: "tts" | "stt") {
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
     modelsByProvider,
+    timeWindow,
   });
 
   // Event handlers
@@ -84,6 +87,20 @@ export function useDashboardState(page: "tts" | "stt") {
       setSelectedModels(nextSelected);
     },
     [selectedModels, page]
+  );
+
+  const changeTimeWindow = useCallback(
+    (next: TimeWindow) => {
+      if (next === timeWindow) return;
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardTimeWindowChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        from: timeWindow,
+        to: next
+      });
+      setTimeWindow(next);
+    },
+    [timeWindow, page]
   );
 
   // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
@@ -336,9 +353,11 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // UI state
     isMobile,
+    timeWindow,
 
     // Actions
     toggleModelSelection,
+    changeTimeWindow,
 
     // Chart data functions
     formatChartLabel: chartData.formatChartLabel,

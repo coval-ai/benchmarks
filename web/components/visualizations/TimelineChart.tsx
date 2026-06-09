@@ -15,7 +15,7 @@ import {
   Tooltip
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
-import { formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
+import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
 import Card from "@/components/shared/Card";
@@ -35,9 +35,9 @@ interface LegendEntry {
 // mobile to more columns on larger screens.
 const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
   <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-2 pt-5 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-2 lg:grid-cols-4">
-    {payload?.map((entry, index) => (
+    {payload?.map((entry) => (
       <li
-        key={`${entry.value}-${index}`}
+        key={entry.value}
         className="flex items-start gap-1.5 text-xs leading-tight text-text-primary"
       >
         <span
@@ -61,6 +61,7 @@ const TimelineChart: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
+    timeWindow,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
@@ -69,7 +70,9 @@ const TimelineChart: React.FC = () => {
   const windowedTimelineData = getWindowedTimelineData();
   const currentTimeWindow = getCurrentTimeWindow();
   const tzAbbr = getLocalTimeZoneAbbr();
-  const xAxisLabel = tzAbbr ? `Time (${tzAbbr})` : "Time";
+  // 24h ticks are times of day; the wider windows tick on dates.
+  const dateScale = timeWindow !== "24h";
+  const xAxisLabel = dateScale ? "Date" : tzAbbr ? `Time (${tzAbbr})` : "Time";
 
   const metricLabel = activeTab === "tts" ? "TTFA" : "TTFT";
   const description =
@@ -147,7 +150,9 @@ const TimelineChart: React.FC = () => {
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
-                tickFormatter={(value) => formatTime(value)}
+                tickFormatter={(value) =>
+                  dateScale ? formatDate(value) : formatTime(value)
+                }
                 label={{
                   value: xAxisLabel,
                   position: "insideBottom",
@@ -167,7 +172,14 @@ const TimelineChart: React.FC = () => {
                 domain={[0, yAxisMax]}
                 tickFormatter={(value) => `${(value / 1000).toFixed(1)}s`}
               />
-              <Tooltip content={<CustomTimelineTooltip getProviderForModel={getProviderForModel} />} />
+              <Tooltip
+                content={
+                  <CustomTimelineTooltip
+                    getProviderForModel={getProviderForModel}
+                    showDate={dateScale}
+                  />
+                }
+              />
               {modelsWithData.length > 1 && (
                 <Legend content={<TimelineLegend />} />
               )}

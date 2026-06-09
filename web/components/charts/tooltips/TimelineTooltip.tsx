@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
-import { formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
+import { formatDate, formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
 
 interface TimelineTooltipProps {
   active?: boolean;
@@ -14,9 +14,11 @@ interface TimelineTooltipProps {
   }>;
   label?: string | number;
   getProviderForModel: (model: string) => string;
+  /** Prefix the timestamp with its date — for windows longer than a day. */
+  showDate?: boolean;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -40,7 +42,9 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       <p
         style={{ margin: "0 0 8px 0", fontWeight: "bold", fontSize: "12px" }}
       >
-        {formatTimeWithSeconds(Number(label))}
+        {showDate
+          ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
+          : formatTimeWithSeconds(Number(label))}
       </p>
       <div style={{ fontSize: "11px" }}>
         {validData.map((item, index) => {

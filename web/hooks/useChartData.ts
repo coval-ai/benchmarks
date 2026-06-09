@@ -17,6 +17,13 @@ import type {
 import type { SeriesPoint } from "@/lib/api/client";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
+import type { TimeWindow } from "@/components/shared/TimeWindowToggle";
+
+const WINDOW_MS: Record<TimeWindow, number> = {
+  "24h": TWENTY_FOUR_HOURS_MS,
+  "7d": 7 * TWENTY_FOUR_HOURS_MS,
+  "30d": 30 * TWENTY_FOUR_HOURS_MS
+};
 
 interface UseChartDataParams {
   activeTab: "tts" | "stt";
@@ -25,6 +32,7 @@ interface UseChartDataParams {
   selectedTTSModels: string[];
   selectedSTTModels: string[];
   modelsByProvider: ModelsByProvider;
+  timeWindow: TimeWindow;
 }
 
 export function useChartData({
@@ -33,7 +41,8 @@ export function useChartData({
   series,
   selectedTTSModels,
   selectedSTTModels,
-  modelsByProvider
+  modelsByProvider,
+  timeWindow
 }: UseChartDataParams) {
   const toDisplayUnits = useCallback(
     (value: number): number => latencyToMs(value, activeTab),
@@ -446,24 +455,40 @@ export function useChartData({
   }, [series]);
 
   const getCurrentTimeWindow = useCallback((): [number, number] => {
-    const windowStart = timelineWindowEnd - TWENTY_FOUR_HOURS_MS;
+    const windowStart = timelineWindowEnd - WINDOW_MS[timeWindow];
     return [windowStart, timelineWindowEnd];
-  }, [timelineWindowEnd]);
+  }, [timelineWindowEnd, timeWindow]);
 
   // Pinned tick positions for the X axis. Letting Recharts auto-pick ticks
-  // gives uneven spacing. Six ticks (every 4 hours, snapped to whole-hour
-  // boundaries inside the window) stays readable without crowding.
+  // gives uneven spacing. 24h ticks every 4 hours snapped to whole-hour
+  // boundaries; the wider windows tick at local midnights (daily for 7d,
+  // every 5 days for 30d) so date labels sit on day starts in the viewer's
+  // timezone. All land at 6-8 ticks per window.
   const getTimelineTicks = useCallback((): number[] => {
     const [windowStart, windowEnd] = getCurrentTimeWindow();
-    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
-    const firstTick =
-      Math.ceil(windowStart / FOUR_HOURS_MS) * FOUR_HOURS_MS;
+    if (timeWindow === "24h") {
+      const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+      const firstTick =
+        Math.ceil(windowStart / FOUR_HOURS_MS) * FOUR_HOURS_MS;
+      const ticks: number[] = [];
+      for (let t = firstTick; t <= windowEnd; t += FOUR_HOURS_MS) {
+        ticks.push(t);
+      }
+      return ticks;
+    }
+    const stepDays = timeWindow === "7d" ? 1 : 5;
+    const cursor = new Date(windowStart);
+    cursor.setHours(0, 0, 0, 0);
+    if (cursor.getTime() < windowStart) {
+      cursor.setDate(cursor.getDate() + 1);
+    }
     const ticks: number[] = [];
-    for (let t = firstTick; t <= windowEnd; t += FOUR_HOURS_MS) {
-      ticks.push(t);
+    while (cursor.getTime() <= windowEnd) {
+      ticks.push(cursor.getTime());
+      cursor.setDate(cursor.getDate() + stepDays);
     }
     return ticks;
-  }, [getCurrentTimeWindow]);
+  }, [getCurrentTimeWindow, timeWindow]);
 
   const getWindowedTimelineData = useCallback((): TimelineDataPoint[] => {
     const [windowStart, windowEnd] = getCurrentTimeWindow();
