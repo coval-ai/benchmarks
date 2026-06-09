@@ -21,6 +21,8 @@ interface LeaderboardCardProps {
   title: string;
   /** Right-aligned metric column header, e.g. "TTFA" / "WER". */
   metricLabel: string;
+  /** Time-range badge in the header, e.g. "Last 24h". */
+  windowLabel: string;
   rows: LeaderboardRow[];
   /** Link to the full dashboard for this benchmark. */
   href: string;
@@ -31,6 +33,7 @@ interface LeaderboardCardProps {
 const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
   title,
   metricLabel,
+  windowLabel,
   rows,
   href,
   loading = false,
@@ -41,7 +44,7 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-lg font-medium text-text-primary md:text-xl">{title}</h2>
         <span className="text-xs font-light tracking-wider text-text-secondary">
-          Last 24h
+          {windowLabel}
         </span>
       </div>
 
