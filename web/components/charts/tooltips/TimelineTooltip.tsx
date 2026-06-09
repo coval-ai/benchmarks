@@ -14,7 +14,6 @@ interface TimelineTooltipProps {
   }>;
   label?: string | number;
   getProviderForModel: (model: string) => string;
-  /** Prefix the timestamp with its date — for windows longer than a day. */
   showDate?: boolean;
 }
 

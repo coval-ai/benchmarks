@@ -21,12 +21,13 @@ interface LeaderboardCardProps {
   title: string;
   /** Right-aligned metric column header, e.g. "TTFA" / "WER". */
   metricLabel: string;
-  /** Time-range badge in the header, e.g. "Last 24h". */
+  /** Time-range badge in the header, e.g. "Last 1d". */
   windowLabel: string;
   rows: LeaderboardRow[];
   /** Link to the full dashboard for this benchmark. */
   href: string;
   loading?: boolean;
+  stale?: boolean;
   error?: boolean;
 }
 
@@ -37,10 +38,16 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
   rows,
   href,
   loading = false,
+  stale = false,
   error = false,
 }) => {
   return (
-    <Card padding="p-6 md:p-8" className="flex flex-col">
+    <Card
+      padding="p-6 md:p-8"
+      className={`flex flex-col transition-opacity duration-200 ${
+        stale ? "opacity-60" : ""
+      }`}
+    >
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-lg font-medium text-text-primary md:text-xl">{title}</h2>
         <span className="text-xs font-light tracking-wider text-text-secondary">

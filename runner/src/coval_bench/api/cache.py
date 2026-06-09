@@ -19,6 +19,8 @@ only ``/v1/results/aggregates`` reads it today.
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from typing import Any
 
 from cachetools import TTLCache
@@ -34,3 +36,12 @@ def new_response_cache() -> TTLCache[Any, Any]:
     window) aggregates param combinations.
     """
     return TTLCache(maxsize=64, ttl=CACHE_TTL_SECONDS)
+
+
+def new_cache_locks() -> defaultdict[Any, asyncio.Lock]:
+    """Per-cache-key locks that coalesce concurrent misses.
+
+    N simultaneous requests for one uncached key run the SQL once; the rest
+    wait on the lock instead of each holding one of the pool's 4 connections.
+    """
+    return defaultdict(asyncio.Lock)

@@ -28,6 +28,7 @@ import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 interface LegendEntry {
   value: string;
   color?: string;
+  dataKey?: string;
 }
 
 // Custom legend: names are rendered in black (recharts colors them per-series
@@ -37,7 +38,7 @@ const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
   <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-2 pt-5 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-2 lg:grid-cols-4">
     {payload?.map((entry) => (
       <li
-        key={entry.value}
+        key={entry.dataKey ?? entry.value}
         className="flex items-start gap-1.5 text-xs leading-tight text-text-primary"
       >
         <span
@@ -61,7 +62,7 @@ const TimelineChart: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
-    timeWindow,
+    dataTimeWindow,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
@@ -70,8 +71,7 @@ const TimelineChart: React.FC = () => {
   const windowedTimelineData = getWindowedTimelineData();
   const currentTimeWindow = getCurrentTimeWindow();
   const tzAbbr = getLocalTimeZoneAbbr();
-  // 24h ticks are times of day; the wider windows tick on dates.
-  const dateScale = timeWindow !== "24h";
+  const dateScale = dataTimeWindow !== "24h";
   const xAxisLabel = dateScale ? "Date" : tzAbbr ? `Time (${tzAbbr})` : "Time";
 
   const metricLabel = activeTab === "tts" ? "TTFA" : "TTFT";

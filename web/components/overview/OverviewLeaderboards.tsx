@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import { useAggregatesQuery } from "@/lib/api/queries";
 import {
   normalizeModelName,
@@ -12,11 +12,9 @@ import {
   toModelKey,
 } from "@/lib/utils/formatters";
 import type { ModelStatEntry } from "@/lib/api/client";
-import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
-import TimeWindowToggle, {
-  type TimeWindow,
-} from "@/components/shared/TimeWindowToggle";
+import { useTimeWindow } from "@/hooks/useTimeWindow";
+import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
+import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
 
 const TOP_N = 5;
@@ -44,27 +42,10 @@ function toRows(
     }));
 }
 
-const WINDOW_BADGES: Record<TimeWindow, string> = {
-  "24h": "Last 1d",
-  "7d": "Last 7d",
-  "30d": "Last 30d",
-};
+const windowBadge = (window: TimeWindow): string => `Last ${WINDOW_LABELS[window]}`;
 
 const OverviewLeaderboards: React.FC = () => {
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
-
-  const changeTimeWindow = useCallback(
-    (next: TimeWindow) => {
-      if (next === timeWindow) return;
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardTimeWindowChanged, {
-        surface: "overview",
-        from: timeWindow,
-        to: next
-      });
-      setTimeWindow(next);
-    },
-    [timeWindow]
-  );
+  const { timeWindow, changeTimeWindow } = useTimeWindow("overview");
 
   // Same endpoint and params the /tts and /stt pages use, so React Query
   // serves both from one cache entry and the numbers are identical.
@@ -104,19 +85,21 @@ const OverviewLeaderboards: React.FC = () => {
         <LeaderboardCard
           title="Text-to-Speech"
           metricLabel="Time to First Audio"
-          windowLabel={WINDOW_BADGES[timeWindow]}
+          windowLabel={windowBadge(ttsQuery.data?.window ?? timeWindow)}
           rows={ttsRows}
           href="/tts"
           loading={ttsQuery.isLoading}
+          stale={ttsQuery.isPlaceholderData}
           error={ttsQuery.isError}
         />
         <LeaderboardCard
           title="Speech-to-Text"
           metricLabel="Word Error Rate"
-          windowLabel={WINDOW_BADGES[timeWindow]}
+          windowLabel={windowBadge(sttQuery.data?.window ?? timeWindow)}
           rows={sttRows}
           href="/stt"
           loading={sttQuery.isLoading}
+          stale={sttQuery.isPlaceholderData}
           error={sttQuery.isError}
         />
       </div>

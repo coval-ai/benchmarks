@@ -16,14 +16,7 @@ import type {
 } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
-import { TWENTY_FOUR_HOURS_MS } from "@/lib/config/constants";
-import type { TimeWindow } from "@/components/shared/TimeWindowToggle";
-
-const WINDOW_MS: Record<TimeWindow, number> = {
-  "24h": TWENTY_FOUR_HOURS_MS,
-  "7d": 7 * TWENTY_FOUR_HOURS_MS,
-  "30d": 30 * TWENTY_FOUR_HOURS_MS
-};
+import { WINDOW_MS, type TimeWindow } from "@/lib/config/timeWindows";
 
 interface UseChartDataParams {
   activeTab: "tts" | "stt";
@@ -459,11 +452,9 @@ export function useChartData({
     return [windowStart, timelineWindowEnd];
   }, [timelineWindowEnd, timeWindow]);
 
-  // Pinned tick positions for the X axis. Letting Recharts auto-pick ticks
-  // gives uneven spacing. 24h ticks every 4 hours snapped to whole-hour
-  // boundaries; the wider windows tick at local midnights (daily for 7d,
-  // every 5 days for 30d) so date labels sit on day starts in the viewer's
-  // timezone. All land at 6-8 ticks per window.
+  // Pinned ticks — Recharts' auto-picked ticks space unevenly. Wider windows
+  // tick at local midnights so date labels sit on day starts in the viewer's
+  // timezone.
   const getTimelineTicks = useCallback((): number[] => {
     const [windowStart, windowEnd] = getCurrentTimeWindow();
     if (timeWindow === "24h") {

@@ -4,17 +4,11 @@
 "use client";
 
 import React from "react";
-
-export const TIME_WINDOWS = ["24h", "7d", "30d"] as const;
-export type TimeWindow = (typeof TIME_WINDOWS)[number];
-
-// Values mirror the API's window literals; 24h displays as "1d" so the
-// options read uniformly (1d / 7d / 30d).
-const WINDOW_LABELS: Record<TimeWindow, string> = {
-  "24h": "1d",
-  "7d": "7d",
-  "30d": "30d",
-};
+import {
+  TIME_WINDOWS,
+  WINDOW_LABELS,
+  type TimeWindow,
+} from "@/lib/config/timeWindows";
 
 interface TimeWindowToggleProps {
   value: TimeWindow;
@@ -27,8 +21,7 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
   onChange,
   className = "",
 }) => {
-  // Radiogroup keyboard contract: the group is one Tab stop (roving
-  // tabIndex) and arrow keys move the selection.
+  // Radiogroup contract: one Tab stop, arrows move the selection.
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     let step: number;
     if (event.key === "ArrowRight" || event.key === "ArrowDown") {

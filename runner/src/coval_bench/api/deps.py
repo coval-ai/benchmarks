@@ -10,6 +10,8 @@ populated during the FastAPI lifespan (see ``app.py``).
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from typing import Any, cast
 
 import structlog
@@ -49,6 +51,11 @@ def get_posthog(request: Request) -> Posthog | None:
 def get_cache(request: Request) -> TTLCache[Any, Any]:
     """Return the per-app response TTL cache from app state."""
     return cast("TTLCache[Any, Any]", request.app.state.response_cache)
+
+
+def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:
+    """Return the per-app cache-key locks from app state."""
+    return cast("defaultdict[Any, asyncio.Lock]", request.app.state.cache_locks)
 
 
 def capture_api_event(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:

@@ -19,12 +19,15 @@ import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
-import type { TimeWindow } from "@/components/shared/TimeWindowToggle";
+import { useTimeWindow } from "@/hooks/useTimeWindow";
 
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
+  const { timeWindow, changeTimeWindow } = useTimeWindow(
+    `${page}_dashboard`,
+    page
+  );
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
@@ -33,6 +36,11 @@ export function useDashboardState(page: "tts" | "stt") {
     window: timeWindow,
   });
   const providersQuery = useProvidersQuery();
+
+  // The charts keep showing the prior window's data while a new one loads,
+  // so window-derived rendering must follow the data, not the toggle.
+  const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
+  const windowDataStale = aggregatesQuery.isPlaceholderData;
 
   const modelStats = useMemo(
     () => aggregatesQuery.data?.model_stats ?? [],
@@ -65,7 +73,7 @@ export function useDashboardState(page: "tts" | "stt") {
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
     modelsByProvider,
-    timeWindow,
+    timeWindow: dataTimeWindow,
   });
 
   // Event handlers
@@ -87,20 +95,6 @@ export function useDashboardState(page: "tts" | "stt") {
       setSelectedModels(nextSelected);
     },
     [selectedModels, page]
-  );
-
-  const changeTimeWindow = useCallback(
-    (next: TimeWindow) => {
-      if (next === timeWindow) return;
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardTimeWindowChanged, {
-        surface: `${page}_dashboard`,
-        mode: page,
-        from: timeWindow,
-        to: next
-      });
-      setTimeWindow(next);
-    },
-    [timeWindow, page]
   );
 
   // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
@@ -354,6 +348,8 @@ export function useDashboardState(page: "tts" | "stt") {
     // UI state
     isMobile,
     timeWindow,
+    dataTimeWindow,
+    windowDataStale,
 
     // Actions
     toggleModelSelection,
