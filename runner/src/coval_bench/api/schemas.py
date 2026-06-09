@@ -154,6 +154,6 @@ class RunsResponse(BaseModel):
 class LeaderboardResponse(BaseModel):
     """Response schema for GET /v1/leaderboard."""
 
-    metric: Literal["WER", "TTFA", "TTFT"]
+    metric: Literal["WER", "TTFA", "TTFT", "TTFS"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]

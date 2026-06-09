@@ -28,6 +28,7 @@ class STTManifestItem(BaseModel):
     speaker_id: str | None = None  # LibriSpeech provenance
     chapter_id: str | None = None
     utterance_id: str | None = None
+    speech_end_offset_ms: float | None = Field(default=None, ge=0)
 
 
 class TTSManifestItem(BaseModel):

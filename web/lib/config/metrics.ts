@@ -12,6 +12,11 @@ export const metricDescriptions = {
     detailed:
       "We run TTFT measurements on a fixed test case to measure consistency over time. A model that consistently responds within a narrow time range provides better user experience than one with highly variable timing, even if the variable model is sometimes faster. Unpredictable delays can be seen through sudden latency spikes."
   },
+  ttfs: {
+    short: "Time to Final Segment",
+    detailed:
+      "TTFS measures how quickly a provider returns the final transcript once speech has ended, anchored at a shared VAD end-of-speech point so every provider is compared from the same instant. It isolates engine finalization speed — the latency a voice agent actually waits on before it can respond — independent of how long the speaker talked."
+  },
   wer: {
     short: "Word Error Rate (%)",
     detailed:

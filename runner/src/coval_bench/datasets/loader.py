@@ -97,6 +97,7 @@ class DatasetItem(BaseModel):
     transcript: str  # ground-truth transcript
     duration_sec: float
     sha256: str
+    speech_end_offset_ms: float | None = None  # VAD end-of-speech anchor; None => no truncation
     metadata: dict[str, str] = Field(default_factory=dict)  # speaker_id etc.
 
 
@@ -286,6 +287,7 @@ def load_stt_dataset(
                 transcript=raw_item.transcript,
                 duration_sec=raw_item.duration_sec,
                 sha256=raw_item.sha256,
+                speech_end_offset_ms=raw_item.speech_end_offset_ms,
                 metadata=meta,
             )
         )
