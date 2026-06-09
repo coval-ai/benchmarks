@@ -8,9 +8,11 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
 * ``model_stats`` — per (provider, model, metric_type): avg, sample stddev
   (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75 (percentile_cont),
   min, max, count.
-* ``series`` — per (provider, model, metric_type, scheduled_at bucket): avg and
-  count. The bucket falls back to created_at floored to the scheduler period
-  for legacy rows, identical to the COALESCE in GET /v1/results.
+* ``series`` — per (provider, model, metric_type, time bucket): avg and count.
+  At 24h the bucket is the run's scheduled_at, falling back to created_at
+  floored to the scheduler period for legacy rows, identical to the COALESCE
+  in GET /v1/results. The wider windows use fixed buckets (7d: 2h, 30d: 12h)
+  so the series payload stays near its 24h size.
 
 Both blocks gate on result rows with status='success' and a non-null
 metric_value, from parent runs in (succeeded, partial).
@@ -73,17 +75,34 @@ _STATS_SQL = (
     " ORDER BY r.provider, r.model, r.metric_type"
 )
 
-# Bucket expression repeated in GROUP BY because a bare ``scheduled_at`` there
-# would resolve to the input column rn.scheduled_at, not the alias.
-_SERIES_SQL = (
-    "SELECT r.provider, r.model, r.metric_type,"
-    f" {SCHEDULED_AT_BUCKET_SQL} AS scheduled_at,"
-    " AVG(r.metric_value)::float8 AS avg_value,"
-    " COUNT(*)::int AS sample_count"
-    + _FROM_WHERE
-    + f" GROUP BY r.provider, r.model, r.metric_type, {SCHEDULED_AT_BUCKET_SQL}"
-    " ORDER BY 4, r.provider, r.model, r.metric_type"
+_WINDOW_BUCKET_SECONDS: dict[str, int | None] = {
+    "24h": None,
+    "7d": 2 * 3600,
+    "30d": 12 * 3600,
+}
+
+# Fixed-width bucket for the wider windows: scheduled_at (or created_at for
+# legacy rows) floored to the bucket width.
+_COARSE_BUCKET_SQL = (
+    "to_timestamp(floor(extract(epoch FROM COALESCE(rn.scheduled_at, r.created_at))"
+    " / %(bucket_seconds)s) * %(bucket_seconds)s)"
 )
+
+
+def _build_series_sql(bucket_sql: str) -> str:
+    return (
+        "SELECT r.provider, r.model, r.metric_type,"
+        f" {bucket_sql} AS scheduled_at,"
+        " AVG(r.metric_value)::float8 AS avg_value,"
+        " COUNT(*)::int AS sample_count"
+        + _FROM_WHERE
+        + f" GROUP BY r.provider, r.model, r.metric_type, {bucket_sql}"
+        " ORDER BY 4, r.provider, r.model, r.metric_type"
+    )
+
+
+_SERIES_SQL = _build_series_sql(SCHEDULED_AT_BUCKET_SQL)
+_COARSE_SERIES_SQL = _build_series_sql(_COARSE_BUCKET_SQL)
 
 
 @router.get("/results/aggregates", response_model=AggregatesResponse)
@@ -112,15 +131,21 @@ async def get_results_aggregates(
             "benchmark": benchmark,
             "interval": WINDOW_INTERVALS[window],
         }
-        series_params: dict[str, Any] = {
-            **params,
-            "schedule_period": settings.schedule_period_seconds,
-        }
+        bucket_seconds = _WINDOW_BUCKET_SECONDS[window]
+        if bucket_seconds is None:
+            series_sql = _SERIES_SQL
+            series_params: dict[str, Any] = {
+                **params,
+                "schedule_period": settings.schedule_period_seconds,
+            }
+        else:
+            series_sql = _COARSE_SERIES_SQL
+            series_params = {**params, "bucket_seconds": bucket_seconds}
 
         async with pool.connection() as conn:
             conn.row_factory = psycopg.rows.dict_row
             stat_rows = await (await conn.execute(_STATS_SQL, params)).fetchall()
-            series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
+            series_rows = await (await conn.execute(series_sql, series_params)).fetchall()
 
         response = AggregatesResponse(
             benchmark=benchmark,

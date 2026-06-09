@@ -132,6 +132,62 @@ async def test_series_legacy_rows_floor_created_at(client: AsyncClient, postgres
     assert bucket.timestamp() == pytest.approx(expected_epoch)
 
 
+async def test_series_7d_coarsens_to_2h_buckets(client: AsyncClient, postgresql: Any) -> None:
+    """On the 7d window, runs 30 minutes apart collapse into one 2h bucket
+    floored to a 2h boundary; their values average."""
+    base = datetime.now(dt.UTC) - timedelta(days=3)
+    base = base.replace(minute=0, second=0, microsecond=0)
+    for offset, value in ((timedelta(0), 1.0), (timedelta(minutes=30), 3.0)):
+        run_id = await _insert_run(postgresql, scheduled_at=base + offset)
+        await _insert_result(postgresql, run_id, created_at=base + offset, metric_value=value)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "7d"}
+    )
+    series = response.json()["series"]
+    assert len(series) == 1
+    point = series[0]
+    bucket = datetime.fromisoformat(point["scheduled_at"])
+    assert bucket.timestamp() == base.timestamp() // 7200 * 7200
+    assert point["avg_value"] == pytest.approx(2.0)
+    assert point["sample_count"] == 2
+
+
+async def test_series_30d_coarsens_to_12h_buckets(client: AsyncClient, postgresql: Any) -> None:
+    """On the 30d window, runs 11 hours apart share a 12h bucket while a run
+    in the next 12h block lands in its own."""
+    day = (datetime.now(dt.UTC) - timedelta(days=10)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    for offset in (timedelta(hours=0), timedelta(hours=11), timedelta(hours=13)):
+        run_id = await _insert_run(postgresql, scheduled_at=day + offset)
+        await _insert_result(postgresql, run_id, created_at=day + offset, metric_value=1.0)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
+    )
+    series = response.json()["series"]
+    assert [p["sample_count"] for p in series] == [2, 1]
+
+
+async def test_series_coarse_legacy_rows_use_created_at(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Runs without scheduled_at floor created_at to the coarse bucket width
+    on the wider windows."""
+    run_id = await _insert_run(postgresql, scheduled_at=None)
+    created = datetime.now(dt.UTC) - timedelta(days=3)
+    await _insert_result(postgresql, run_id, created_at=created, metric_value=1.0)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "7d"}
+    )
+    series = response.json()["series"]
+    assert len(series) == 1
+    bucket = datetime.fromisoformat(series[0]["scheduled_at"])
+    assert bucket.timestamp() == created.timestamp() // 7200 * 7200
+
+
 async def test_window_excludes_old_rows(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql)
     old = datetime.now(dt.UTC) - timedelta(days=10)
