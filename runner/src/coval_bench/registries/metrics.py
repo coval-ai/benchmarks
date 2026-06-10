@@ -14,7 +14,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
-from coval_bench.db.models import Benchmark
+from coval_bench.registries.benchmarks import Benchmark
 
 
 class Metric(StrEnum):

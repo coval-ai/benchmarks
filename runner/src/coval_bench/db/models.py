@@ -14,6 +14,10 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
+from coval_bench.registries.benchmarks import Benchmark
+
+__all__ = ["Benchmark", "Result", "ResultStatus", "Run", "RunStatus"]
+
 
 class RunStatus(StrEnum):
     """Lifecycle status of a benchmark run."""
@@ -29,13 +33,6 @@ class ResultStatus(StrEnum):
 
     SUCCESS = "success"
     FAILED = "failed"
-
-
-class Benchmark(StrEnum):
-    """Which benchmark a result belongs to."""
-
-    STT = "STT"
-    TTS = "TTS"
 
 
 class Run(BaseModel):

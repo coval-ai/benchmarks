@@ -6,6 +6,7 @@ Deliberately dependency-light: safe to import from the API, the db layer,
 and the orchestrator without pulling in metric-computation dependencies.
 """
 
+from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.metrics import (
     METRIC_SPECS,
     Metric,
@@ -15,6 +16,7 @@ from coval_bench.registries.metrics import (
 from coval_bench.registries.tags import TAG_CATEGORIES, ModelTag, TagCategory
 
 __all__ = [
+    "Benchmark",
     "METRIC_SPECS",
     "Metric",
     "MetricDirection",
