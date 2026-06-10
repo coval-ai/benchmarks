@@ -100,7 +100,6 @@ def _good_transcription() -> TranscriptionResult:
         ttft_seconds=0.25,
         total_time=0.9,
         audio_to_final_seconds=0.85,
-        rtf_value=0.85,
         first_token_content="hello",  # noqa: S106 — not a password
         complete_transcript="hello world",
     )

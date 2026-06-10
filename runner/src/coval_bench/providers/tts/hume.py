@@ -34,8 +34,6 @@ _DEFAULT_VOICE_ID = "176a55b1-4468-4736-8878-db82729667c1"
 class HumeTTSProvider(TTSProvider):
     """Hume TTS provider using WebSocket streaming (Octave Speak API)."""
 
-    enabled: bool = False
-
     _VALID_MODELS = frozenset(_MODEL_TO_VERSION)
 
     def __init__(self, settings: Settings, model: str, voice: str | None) -> None:

@@ -49,8 +49,6 @@ _BASE_URL = "https://api.openai.com"
 class OpenAITTSProvider(TTSProvider):
     """OpenAI TTS provider supporting HTTP and Realtime WS paths."""
 
-    enabled: bool = True
-
     _VALID_MODELS = frozenset(HTTP_MODELS | REALTIME_MODELS)
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:

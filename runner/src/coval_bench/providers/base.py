@@ -32,7 +32,6 @@ class TranscriptionResult:
     ttft_seconds: float | None = None
     total_time: float | None = None
     audio_to_final_seconds: float | None = None
-    rtf_value: float | None = None
 
     # Content
     first_token_content: str | None = None
@@ -42,7 +41,6 @@ class TranscriptionResult:
     # Transcript metrics
     transcript_length: int | None = None
     word_count: int | None = None
-    wer_percentage: float | None = None
 
     # Error handling
     error: str | None = None

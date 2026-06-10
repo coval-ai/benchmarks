@@ -36,8 +36,6 @@ export type SttModelConfig = {
   provider: SttProviderId;
   label: string;
   model: string;
-  /** Provider endpoint metadata for display/debugging; keys stay server-side. */
-  url: string;
   sampleRate: number;
   enabled: boolean;
 };
@@ -107,7 +105,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "deepgram",
     label: "Nova-2",
     model: "nova-2",
-    url: "wss://api.deepgram.com/v1/listen?sample_rate=16000&encoding=linear16&channels=1&interim_results=true&vad_events=true&no_delay=true&model=nova-2",
     sampleRate: 16_000,
     enabled: true
   },
@@ -116,7 +113,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "deepgram",
     label: "Nova-3",
     model: "nova-3",
-    url: "wss://api.deepgram.com/v1/listen?sample_rate=16000&encoding=linear16&channels=1&interim_results=true&vad_events=true&no_delay=true&model=nova-3",
     sampleRate: 16_000,
     enabled: true
   },
@@ -125,7 +121,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "deepgram",
     label: "Flux",
     model: "flux-general-en",
-    url: "wss://api.deepgram.com/v2/listen?model=flux-general-en&sample_rate=16000&encoding=linear16",
     sampleRate: 16_000,
     enabled: true
   },
@@ -134,7 +129,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "elevenlabs",
     label: "Scribe v2 Realtime",
     model: "scribe_v2_realtime",
-    url: "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime",
     sampleRate: 16_000,
     enabled: true
   },
@@ -143,7 +137,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "assemblyai",
     label: "AssemblyAI",
     model: "universal-streaming",
-    url: "wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&speech_model=universal-streaming-english",
     sampleRate: 16_000,
     enabled: true
   },
@@ -152,7 +145,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "speechmatics",
     label: "Speechmatics (default)",
     model: "default",
-    url: "wss://wus.rt.speechmatics.com/v2",
     sampleRate: 16_000,
     enabled: true
   },
@@ -161,7 +153,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "speechmatics",
     label: "Speechmatics (enhanced)",
     model: "enhanced",
-    url: "wss://wus.rt.speechmatics.com/v2",
     sampleRate: 16_000,
     enabled: true
   }

@@ -33,8 +33,6 @@ _DEEPGRAM_TTS_WS_BASE = "wss://api.deepgram.com/v1/speak"
 class DeepgramTTSProvider(TTSProvider):
     """Deepgram TTS provider using WebSocket streaming (Speak API)."""
 
-    enabled: bool = True
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
         self._voice = voice
