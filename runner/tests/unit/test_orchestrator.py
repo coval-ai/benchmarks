@@ -379,6 +379,44 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     assert all("always fails" in (r.error or "") for r in rows)
 
 
+@pytest.mark.asyncio
+async def test_flux_excluded_from_ttfs(audio_file: Path, settings: Settings) -> None:
+    """Deepgram Flux is outside the TTFS parity cohort → no TTFS row, other metrics stay."""
+    from coval_bench.runner.config import DEFAULT_STT_MATRIX
+
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    stt_providers = {"deepgram": MagicMock(return_value=provider)}
+    matrix = [
+        *[
+            ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
+            for e in DEFAULT_STT_MATRIX
+        ],
+        ProviderEntry(provider="deepgram", model="flux-general-en", enabled=True),
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    metric_types = {r.metric_type for r in _recorded_rows(writer)}
+    assert "TTFS" not in metric_types
+    assert metric_types == {"TTFT", "AudioToFinal", "RTF", "WER"}
+
+
 # ---------------------------------------------------------------------------
 # 4. test_retry_succeeds_on_third_attempt
 # ---------------------------------------------------------------------------
