@@ -48,8 +48,14 @@ from pydantic import BaseModel
 
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
-from coval_bench.registries import METRIC_SPECS, Metric
-from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
+from coval_bench.registries import (
+    METRIC_SPECS,
+    MODEL_REGISTRY,
+    Benchmark,
+    Metric,
+    ModelStatus,
+    RegisteredModel,
+)
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -180,7 +186,7 @@ def _get_metrics() -> tuple[Any, Any]:
 
 async def _run_stt_item(
     *,
-    entry: ProviderEntry,
+    entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — DatasetItem is a runtime-typed sibling-agent type
     run_id: int,
     sem: asyncio.Semaphore,
@@ -433,7 +439,7 @@ async def _run_stt_item(
 
 async def _run_tts_item(
     *,
-    entry: ProviderEntry,
+    entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — TTSDatasetItem is a runtime-typed sibling-agent type
     run_id: int,
     sem: asyncio.Semaphore,
@@ -644,7 +650,7 @@ async def run_benchmarks(
     settings: Settings,
     benchmark_kind: Literal["stt", "tts", "both"] = "both",
     smoke: bool = False,
-    matrix_overrides: list[ProviderEntry] | None = None,
+    matrix_overrides: list[RegisteredModel] | None = None,
 ) -> RunSummary:
     """Execute one complete benchmark run.
 
@@ -652,8 +658,8 @@ async def run_benchmarks(
         settings: Injected application settings (no global state).
         benchmark_kind: Which benchmark(s) to run.
         smoke: If True, process only the first dataset item (local dev mode).
-        matrix_overrides: Optional list of ``ProviderEntry`` objects that override
-            the default matrices by ``(provider, model)`` key.
+        matrix_overrides: Optional list of ``RegisteredModel`` objects that
+            override the registry by ``(benchmark, provider, model)`` key.
 
     Returns:
         A :class:`RunSummary` with final counts and run status.
@@ -682,29 +688,26 @@ async def run_benchmarks(
             posthog_client = None
 
     # ------------------------------------------------------------------
-    # 1. Resolve + filter provider matrix
+    # 1. Resolve + filter the model registry
     # ------------------------------------------------------------------
-    stt_matrix = list(DEFAULT_STT_MATRIX)
-    tts_matrix = list(DEFAULT_TTS_MATRIX)
+    stt_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.STT]
+    tts_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS]
 
     if matrix_overrides:
-        override_map: dict[tuple[str, str], ProviderEntry] = {
-            (e.provider, e.model): e for e in matrix_overrides
+        override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {
+            (e.benchmark, e.provider, e.model): e for e in matrix_overrides
         }
-        stt_matrix = [override_map.get((e.provider, e.model), e) for e in stt_matrix]
-        tts_matrix = [override_map.get((e.provider, e.model), e) for e in tts_matrix]
+        stt_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix]
+        tts_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix]
 
-        # Also apply any overrides that add *new* (provider, model) pairs
-        existing_stt_keys = {(e.provider, e.model) for e in stt_matrix}
-        existing_tts_keys = {(e.provider, e.model) for e in tts_matrix}
+        # Also apply any overrides that add *new* models
+        existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
         for ov in matrix_overrides:
-            if (ov.provider, ov.model) not in existing_stt_keys and ov.voice is None:
-                stt_matrix.append(ov)
-            if (ov.provider, ov.model) not in existing_tts_keys and ov.voice is not None:
-                tts_matrix.append(ov)
+            if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
+                (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    enabled_stt = [e for e in stt_matrix if e.enabled and not e.disabled]
-    enabled_tts = [e for e in tts_matrix if e.enabled and not e.disabled]
+    enabled_stt = [e for e in stt_matrix if e.status is ModelStatus.ACTIVE]
+    enabled_tts = [e for e in tts_matrix if e.status is ModelStatus.ACTIVE]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row
