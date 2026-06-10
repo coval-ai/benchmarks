@@ -685,51 +685,51 @@ export function STTPlaygroundPanel({
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {phase === "complete" && leaderRows.length > 0 ? (
+          {phase === "complete" && leaderRows.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => setLeaderOpen(true)}
+              className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
+            >
+              View results
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => setLeaderOpen(true)}
-            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg sm:self-auto"
+            onClick={handleRecord}
+            disabled={
+              ((phase === "idle" || phase === "complete" || phase === "error") &&
+                !canStartOrRetakeRecording) ||
+              phase === "submitting"
+            }
+            title={
+              (phase === "idle" || phase === "complete") && !canStartOrRetakeRecording
+                ? "Turn on at least one model to record a comparison."
+                : "Hold Enter to record, release to stop when focus is outside buttons and fields"
+            }
+            className={`inline-flex items-center justify-center gap-2 self-stretch rounded-full border px-5 py-2.5 text-sm font-medium transition-colors sm:self-auto ${
+              ((phase === "idle" || phase === "complete" || phase === "error") &&
+                !canStartOrRetakeRecording) ||
+              phase === "submitting"
+                ? "cursor-not-allowed border-border-primary text-text-tertiary opacity-60"
+                : "border-border-primary text-text-primary hover:bg-hover-bg"
+            }`}
           >
-            View results
+            {phase === "recording" ? (
+              <span className="relative flex size-2.5 shrink-0 items-center justify-center">
+                <span className="absolute size-2.5 animate-pulse rounded-full bg-red-500" />
+              </span>
+            ) : (
+              <Mic className="size-4 shrink-0 text-text-secondary" aria-hidden />
+            )}
+            {phase === "recording"
+              ? "Stop"
+              : phase === "submitting"
+                ? "Transcribing…"
+                : phase === "complete"
+                  ? "New take"
+                  : "Record"}
           </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={handleRecord}
-          disabled={
-            ((phase === "idle" || phase === "complete" || phase === "error") &&
-              !canStartOrRetakeRecording) ||
-            phase === "submitting"
-          }
-          title={
-            (phase === "idle" || phase === "complete") && !canStartOrRetakeRecording
-              ? "Turn on at least one model to record a comparison."
-              : "Hold Enter to record, release to stop when focus is outside buttons and fields"
-          }
-          className={`inline-flex items-center justify-center gap-2 self-stretch rounded-full border px-5 py-2.5 text-sm font-medium transition-colors sm:self-auto ${
-            ((phase === "idle" || phase === "complete" || phase === "error") &&
-              !canStartOrRetakeRecording) ||
-            phase === "submitting"
-              ? "cursor-not-allowed border-border-primary text-text-tertiary opacity-60"
-              : "border-border-primary text-text-primary hover:bg-hover-bg"
-          }`}
-        >
-          {phase === "recording" ? (
-            <span className="relative flex size-2.5 shrink-0 items-center justify-center">
-              <span className="absolute size-2.5 animate-pulse rounded-full bg-red-500" />
-            </span>
-          ) : (
-            <Mic className="size-4 shrink-0 text-text-secondary" aria-hidden />
-          )}
-          {phase === "recording"
-            ? "Stop"
-            : phase === "submitting"
-              ? "Transcribing…"
-              : phase === "complete"
-                ? "New take"
-                : "Record"}
-        </button>
         </div>
       </div>
 

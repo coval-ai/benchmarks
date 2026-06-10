@@ -411,29 +411,29 @@ export function TTSPlaygroundPanel({
           </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        {rows.length > 0 && !hasInFlight ? (
+          {rows.length > 0 && !hasInFlight ? (
+            <button
+              type="button"
+              onClick={() => setBenchmarkOpen(true)}
+              className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
+            >
+              View results
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => setBenchmarkOpen(true)}
-            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg sm:self-auto"
+            disabled={!canBenchmark || hasInFlight}
+            onClick={handleBenchmarkButtonClick}
+            title={
+              canBenchmark
+                ? "Enter runs benchmark when focus is outside fields, or ⌘/Ctrl+Enter from the text box"
+                : undefined
+            }
+            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
           >
-            View results
+            <Play className="size-4 shrink-0" aria-hidden />
+            Benchmark
           </button>
-        ) : null}
-        <button
-          type="button"
-          disabled={!canBenchmark || hasInFlight}
-          onClick={handleBenchmarkButtonClick}
-          title={
-            canBenchmark
-              ? "Enter runs benchmark when focus is outside fields, or ⌘/Ctrl+Enter from the text box"
-              : undefined
-          }
-          className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
-        >
-          <Play className="size-4 shrink-0" aria-hidden />
-          Benchmark
-        </button>
         </div>
       </div>
 
