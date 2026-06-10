@@ -11,7 +11,30 @@ at deploy time without a code change.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
+
+
+class TagCategory(StrEnum):
+    """Grouping for model tags, used to organize leaderboard filters."""
+
+    CAPABILITY = "capability"
+
+
+class ModelTag(StrEnum):
+    """Filterable/sortable model attributes surfaced on the leaderboard."""
+
+    REALTIME = "realtime"
+
+
+TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
+    ModelTag.REALTIME: TagCategory.CAPABILITY,
+}
+
+if TAG_CATEGORIES.keys() != set(ModelTag):
+    _missing = ", ".join(sorted(set(ModelTag) - TAG_CATEGORIES.keys()))
+    raise RuntimeError(f"TAG_CATEGORIES is missing categories for: {_missing}")
 
 
 class ProviderEntry(BaseModel):
@@ -22,6 +45,8 @@ class ProviderEntry(BaseModel):
     voice: str | None = None  # TTS only
     enabled: bool
     disabled: bool = False  # admin-level "hide / don't run" flag; orthogonal to enabled
+    creator: str | None = None  # who makes the model; None means same as provider
+    tags: list[ModelTag] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
