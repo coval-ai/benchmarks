@@ -73,6 +73,10 @@ class FakeWebSocket:
     async def __aexit__(self, *exc: object) -> None:
         self._closed = True
 
+    async def close(self) -> None:
+        self._closed = True
+        self._events.clear()
+
     async def send(self, msg: bytes | str) -> None:
         self._sent.append(msg)
         if self._on_send is not None:

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from typing import Any
@@ -26,6 +27,7 @@ logger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("grok-stt",)
 _BASE_WS_URL = "wss://api.x.ai/v1/stt"
+_FINAL_WAIT_S = 5.0
 
 
 class XaiSTTProvider(STTProvider):
@@ -84,6 +86,7 @@ class XaiSTTProvider(STTProvider):
                 additional_headers=headers,
             ) as ws:
                 await self._wait_for_ready(ws)
+                final_event = asyncio.Event()
                 send_task = asyncio.create_task(
                     self._send_audio(
                         ws,
@@ -91,9 +94,10 @@ class XaiSTTProvider(STTProvider):
                         sample_rate,
                         result,
                         realtime_resolution,
+                        final_event,
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
+                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
                 task_results = await asyncio.gather(send_task, recv_task, return_exceptions=True)
                 for task_result in task_results:
                     if isinstance(task_result, Exception):
@@ -130,6 +134,7 @@ class XaiSTTProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
+        final_event: asyncio.Event,
     ) -> None:
         frame_bytes = 2
         chunk_size = max(frame_bytes, int(sample_rate * frame_bytes * realtime_resolution))
@@ -144,8 +149,13 @@ class XaiSTTProvider(STTProvider):
             await asyncio.sleep(realtime_resolution)
 
         await ws.send(json.dumps({"type": "audio.done"}))
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
+        await ws.close()
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(
+        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+    ) -> None:
         # xAI is_final=True partials are cumulative restarts, not segments to join.
         last_final_text: str | None = None
         done_transcript: str | None = None
@@ -189,6 +199,8 @@ class XaiSTTProvider(STTProvider):
             logger.exception("xai receive error", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
+        finally:
+            final_event.set()
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time

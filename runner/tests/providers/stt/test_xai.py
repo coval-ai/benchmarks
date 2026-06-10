@@ -138,6 +138,32 @@ async def test_xai_websocket_connect_setup(fake_api_key: SecretStr, audio_pcm_by
     assert sent_json[-1]["type"] == "audio.done"
 
 
+@pytest.mark.asyncio
+async def test_xai_force_finalize_closes_socket(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """After audio.done the gate waits for the final, then closes the socket."""
+    events = load_fixture_events("xai", "events-success")
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+    captured: dict[str, Any] = {}
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events, captured=captured),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.audio_to_final_seconds is not None
+    assert captured["ws"]._closed is True
+
+
 def test_xai_provider_name() -> None:
     provider = XaiSTTProvider(api_key=SecretStr("test"))
     assert provider.name == "xai-grok-stt"
