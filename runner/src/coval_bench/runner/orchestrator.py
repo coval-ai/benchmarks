@@ -171,6 +171,12 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
+def _get_metric_registry() -> tuple[Any, Any]:
+    """Return (Metric, METRIC_SPECS) at call time."""
+    mod = importlib.import_module("coval_bench.metrics")
+    return mod.Metric, mod.METRIC_SPECS
+
+
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -197,6 +203,7 @@ async def _run_stt_item(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     compute_wer, compute_rtf = _get_metrics()
+    Metric, METRIC_SPECS = _get_metric_registry()
 
     results: list[Any] = []
 
@@ -268,16 +275,18 @@ async def _run_stt_item(
         )
 
         # 1. TTFT
-        ttft_status, ttft_error = _metric_outcome(ttft_seconds, item_error, "TTFT", ResultStatus)
+        ttft_status, ttft_error = _metric_outcome(
+            ttft_seconds, item_error, Metric.TTFT, ResultStatus
+        )
         results.append(
             Result(
                 run_id=run_id,
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="TTFT",
+                metric_type=Metric.TTFT,
                 metric_value=ttft_seconds,
-                metric_units="seconds",
+                metric_units=METRIC_SPECS[Metric.TTFT].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=ttft_status,
@@ -287,7 +296,7 @@ async def _run_stt_item(
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(
-            audio_to_final, item_error, "AudioToFinal", ResultStatus
+            audio_to_final, item_error, Metric.AUDIO_TO_FINAL, ResultStatus
         )
         results.append(
             Result(
@@ -295,9 +304,9 @@ async def _run_stt_item(
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="AudioToFinal",
+                metric_type=Metric.AUDIO_TO_FINAL,
                 metric_value=audio_to_final,
-                metric_units="seconds",
+                metric_units=METRIC_SPECS[Metric.AUDIO_TO_FINAL].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=atf_status,
@@ -317,7 +326,7 @@ async def _run_stt_item(
             except Exception as exc:
                 ttfs_calc_error = str(exc)
         ttfs_status, ttfs_error = _metric_outcome(
-            ttfs_value, item_error or ttfs_calc_error, "TTFS", ResultStatus
+            ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
         results.append(
             Result(
@@ -325,9 +334,9 @@ async def _run_stt_item(
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="TTFS",
+                metric_type=Metric.TTFS,
                 metric_value=ttfs_value,
-                metric_units="seconds",
+                metric_units=METRIC_SPECS[Metric.TTFS].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=ttfs_status,
@@ -343,16 +352,18 @@ async def _run_stt_item(
             with contextlib.suppress(Exception):
                 rtf_value = compute_rtf(audio_to_final, duration_sec)
 
-        rtf_status, rtf_error = _metric_outcome(audio_to_final, item_error, "RTF", ResultStatus)
+        rtf_status, rtf_error = _metric_outcome(
+            audio_to_final, item_error, Metric.RTF, ResultStatus
+        )
         results.append(
             Result(
                 run_id=run_id,
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="RTF",
+                metric_type=Metric.RTF,
                 metric_value=rtf_value,
-                metric_units="ratio",
+                metric_units=METRIC_SPECS[Metric.RTF].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=rtf_status,
@@ -371,9 +382,9 @@ async def _run_stt_item(
                         provider=entry.provider,
                         model=entry.model,
                         benchmark=Benchmark.STT,
-                        metric_type="WER",
+                        metric_type=Metric.WER,
                         metric_value=wer_result.wer_percentage,
-                        metric_units="percent",
+                        metric_units=METRIC_SPECS[Metric.WER].units,
                         audio_filename=audio_path.name,
                         transcript=complete_transcript,
                         status=ResultStatus.SUCCESS,
@@ -396,7 +407,7 @@ async def _run_stt_item(
                         provider=entry.provider,
                         model=entry.model,
                         benchmark=Benchmark.STT,
-                        metric_type="WER",
+                        metric_type=Metric.WER,
                         metric_value=None,
                         metric_units=None,
                         audio_filename=audio_path.name,
@@ -445,6 +456,7 @@ async def _run_tts_item(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     compute_wer, _ = _get_metrics()
+    Metric, METRIC_SPECS = _get_metric_registry()
 
     results: list[Any] = []
     audio_path: Path | None = None
@@ -486,7 +498,9 @@ async def _run_tts_item(
 
         try:
             # 1. TTFA
-            ttfa_status, ttfa_error = _metric_outcome(ttfa_ms, item_error, "TTFA", ResultStatus)
+            ttfa_status, ttfa_error = _metric_outcome(
+                ttfa_ms, item_error, Metric.TTFA, ResultStatus
+            )
             ttfa_value = ttfa_ms
 
             # Transport-contamination gate: a clean measurement taken over HTTP/1.1 or a cold
@@ -515,9 +529,9 @@ async def _run_tts_item(
                     model=entry.model,
                     voice=entry.voice,
                     benchmark=Benchmark.TTS,
-                    metric_type="TTFA",
+                    metric_type=Metric.TTFA,
                     metric_value=ttfa_value,
-                    metric_units="milliseconds",
+                    metric_units=METRIC_SPECS[Metric.TTFA].units,
                     audio_filename=audio_path.name if audio_path else None,
                     transcript=transcript,
                     status=ttfa_status,
@@ -555,9 +569,9 @@ async def _run_tts_item(
                                 model=entry.model,
                                 voice=entry.voice,
                                 benchmark=Benchmark.TTS,
-                                metric_type="WER",
+                                metric_type=Metric.WER,
                                 metric_value=wer_result.wer_percentage,
-                                metric_units="percent",
+                                metric_units=METRIC_SPECS[Metric.WER].units,
                                 audio_filename=audio_path.name,
                                 transcript=whisper_transcript,
                                 status=ResultStatus.SUCCESS,
@@ -578,7 +592,7 @@ async def _run_tts_item(
                                 model=entry.model,
                                 voice=entry.voice,
                                 benchmark=Benchmark.TTS,
-                                metric_type="WER",
+                                metric_type=Metric.WER,
                                 metric_value=None,
                                 metric_units=None,
                                 audio_filename=audio_path.name,
