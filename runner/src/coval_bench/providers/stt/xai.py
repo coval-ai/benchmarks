@@ -105,7 +105,7 @@ class XaiSTTProvider(STTProvider):
 
         except Exception as exc:
             logger.exception("xai measure_ttft failed", error=str(exc))
-            result.error = str(exc)
+            result.error = result.error or str(exc)
 
         result.total_time = time.monotonic() - total_start
         return result
@@ -163,6 +163,7 @@ class XaiSTTProvider(STTProvider):
         last_final_text: str | None = None
         done_transcript: str | None = None
         last_final_time: float | None = None
+        done_received = False
 
         try:
             async for raw in ws:
@@ -187,6 +188,7 @@ class XaiSTTProvider(STTProvider):
                     continue
 
                 if event_type == "transcript.done":
+                    done_received = True
                     done_transcript = str(event.get("text", "")).strip() or None
                     if done_transcript:
                         set_first_token(result, done_transcript, now=now)
@@ -204,6 +206,11 @@ class XaiSTTProvider(STTProvider):
                 result.error = str(exc)
         finally:
             final_event.set()
+
+        if not done_received:
+            if result.error is None:
+                result.error = "xAI stream ended before transcript.done"
+            return
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
