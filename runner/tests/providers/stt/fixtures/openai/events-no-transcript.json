@@ -1,0 +1,6 @@
+[
+  {"type": "session.created", "session": {"id": "sess_partial"}},
+  {"type": "session.updated", "session": {"type": "transcription", "audio": {"input": {"turn_detection": null}}}},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_001", "content_index": 0, "delta": "hello "},
+  {"type": "conversation.item.input_audio_transcription.delta", "item_id": "item_001", "content_index": 0, "delta": "world how are you"}
+]

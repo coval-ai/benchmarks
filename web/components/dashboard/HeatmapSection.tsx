@@ -5,40 +5,40 @@
 
 import React from "react";
 import HeatmapPlot from "@/components/charts/d3/HeatmapPlot";
+import Card from "@/components/shared/Card";
+import SectionHeader from "@/components/shared/SectionHeader";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const HeatmapSection: React.FC = () => {
   const { heatmapDisplayData: data, formatChartLabel, getProviderForModel, isMobile } =
     useDashboard();
+  const trackChartHover = useChartHoverTracking("heatmap");
 
   return (
-    <div className="mb-16">
-      <div className="flex justify-between items-start mb-4">
-        <div>
-          <h2 className="text-2xl font-light mb-2">
-            Model Performance Heatmap
-          </h2>
-          <p className="text-text-secondary mb-4">
-            Comprehensive model performance comparison &bull; Click column
-            headers to sort by metric
-          </p>
-        </div>
-      </div>
-
-      <div
-        className={`heatmap-container ${
-          isMobile
-            ? ""
-            : "border border-border-secondary rounded-lg bg-surface-secondary p-4"
-        }`}
-      >
-        <HeatmapPlot
-          data={data}
-          formatChartLabel={formatChartLabel}
-          getProviderForModel={getProviderForModel}
-          isMobile={isMobile}
+    <div className="mb-4">
+      <Card padding="p-5 lg:p-8" onMouseEnter={trackChartHover}>
+        <SectionHeader
+          label="Model Performance Heatmap"
+          description={{
+            short: "Comprehensive model performance comparison",
+            detailed: "Click column headers to sort by metric",
+          }}
+          expandable={false}
         />
-      </div>
+
+        {/* The mobile scale transform (useDashboardState) targets
+            .heatmap-container, so only the plot lives inside it — keeping the
+            header at full size. */}
+        <div className="heatmap-container">
+          <HeatmapPlot
+            data={data}
+            formatChartLabel={formatChartLabel}
+            getProviderForModel={getProviderForModel}
+            isMobile={isMobile}
+          />
+        </div>
+      </Card>
     </div>
   );
 };

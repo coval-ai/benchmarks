@@ -22,10 +22,12 @@ from typing import Any, Literal
 import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool
+from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 
@@ -33,14 +35,13 @@ logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["leaderboard"])
 
-MetricLiteral = Literal["WER", "TTFA", "TTFT"]
-BenchmarkLiteral = Literal["STT", "TTS"]
-WindowLiteral = Literal["24h", "7d", "30d"]
+MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS"]
 
 # Valid (metric, benchmark) combinations — lower is better for all.
 _VALID_COMBOS: set[tuple[str, str]] = {
     ("WER", "STT"),
     ("TTFT", "STT"),
+    ("TTFS", "STT"),
     ("TTFA", "TTS"),
 }
 
@@ -89,11 +90,12 @@ async def get_leaderboard(
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
     Args:
-        metric: One of WER, TTFA, TTFT.
+        metric: One of WER, TTFA, TTFT, TTFS.
         benchmark: One of STT, TTS.
         window: Time window — 24h uses the materialized view; 7d/30d run live.
 
@@ -107,7 +109,7 @@ async def get_leaderboard(
         raise HTTPException(
             400,
             f"metric={metric!r} is not compatible with benchmark={benchmark!r}. "
-            f"Valid combinations: WER+STT, TTFT+STT, TTFA+TTS.",
+            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS.",
         )
 
     params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}
@@ -124,4 +126,15 @@ async def get_leaderboard(
         entry_rows = await rows.fetchall()
 
     entries = [LeaderboardEntry.model_validate(r) for r in entry_rows]
+    capture_api_event(
+        posthog_client,
+        "leaderboard_queried",
+        {
+            "metric": metric,
+            "benchmark": benchmark,
+            "window": window,
+            "entry_count": len(entries),
+            "$process_person_profile": False,
+        },
+    )
     return LeaderboardResponse(metric=metric, window=window, entries=entries)

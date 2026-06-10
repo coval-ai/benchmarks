@@ -66,12 +66,97 @@ attributed to the pipeline version that produced it.
 A future revision may A/B-test against `whisper_normalizer`. Any such change
 will increment `NORM_VERSION` and ship a separate ADR.
 
-## 4. Library versions
+## 4. Latency metrics (TTFA)
+
+The TTS latency metric is **TTFA (Time-To-First-Audio)**, reported in
+milliseconds. It is *perceived* first-audible latency, the goal being to measure 
+what an enqueue-and-play client actually waits before it hears sound:
+
+    TTFA = (first audio chunk arrival − synthesis start)
+           + leading silence inside the stream before the first audible sample
+
+The arrival term is wall-clock (`time.monotonic`) from the synthesis trigger to
+the first non-empty audio chunk. The leading-silence term is computed from the
+assembled PCM by `runner/src/coval_bench/metrics/ttfa.py`
+(`first_audible_offset_ms`, an RMS-threshold onset detector). Both terms are
+combined in one place — `providers/tts/_common.py:finalize_tts_result` — which
+every provider routes through. The offset is best-effort: if it cannot be
+computed, TTFA degrades to arrival-only and the audio is still kept.
+
+**Methodology change (2026-05).** TTFA previously measured *network arrival
+only* (time to first chunk) and ignored any leading silence a provider
+front-loads into the stream. As of this change it is the perceived value above.
+This shifts every provider's reported TTFA upward by its leading-silence offset
+(near-zero for providers that emit audible audio immediately; several hundred ms
+for those that front-load silence), so numbers recorded before the change are
+**not comparable** with later ones. There is no schema or metric-name change —
+the existing `TTFA` metric simply carries the perceived definition from this
+point forward, distinguished by the `runner_sha` on the run.
+
+## 5. Library versions
 
 The DP edit-distance computation is delegated to `jiwer`. Pinned in
 `runner/uv.lock` (currently `jiwer == 4.0.0`). `numpy` is also locked. Every
 `uv.lock` change is reviewed against the SPDX license-set policy before
 merge.
+
+## 5. Latency measurement convention
+
+TTFT (STT) and TTFA (TTS) measure model inference time. Pre-t0 deployment
+setup — TCP, TLS, protocol handshake, optional session-setup RTT — is
+excluded for every provider. The rule is applied uniformly across cohorts;
+the magnitude of what each cohort excludes varies by deployment architecture,
+but the rule is the same.
+
+| Cohort | What is excluded from t0 |
+|---|---|
+| WS streaming (Deepgram, AssemblyAI, ElevenLabs Scribe, Speechmatics, Gradium STT, Cartesia, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
+| HTTP TTS (ElevenLabs HTTP, OpenAI `gpt-4o-mini-tts`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
+
+HTTP-pool warming lives in `runner/src/coval_bench/providers/_http_session.py`.
+Providers opt in by overriding `Provider.warmup()` in `providers/base.py`; the
+orchestrator invokes warmup on every enabled provider class before the
+dataset loop runs and tears down the pool in the run's `finally` block.
+
+### HTTP/2 for the HTTP TTS cohort
+
+The shared pool uses HTTP/2 so that every concurrent request to a host
+multiplexes over a single connection. The connection is opened once by
+`warmup()`, and the dataset loop — run at a concurrency of 8 — reuses it, so
+TCP+TLS is paid once and excluded from every TTFA row rather than just the
+first. `http2=True` and the pool limits are set on `TimedTransport`, not on
+`AsyncClient`: httpx ignores both when a custom transport is supplied. Both
+hosts (`api.openai.com`, `api.elevenlabs.io`) negotiate HTTP/2; under 8-way
+concurrency the pool stays at one socket per host. Requires the `h2` package
+(`httpx[http2]`) — a build without it raises at client construction rather
+than downgrading silently.
+
+The protocol is chosen by TLS ALPN at connect time. It can negotiate HTTP/1.1
+instead — a TLS-terminating proxy or middlebox, an `HTTPS_PROXY` tunnel, or an
+HTTP/1.1-only endpoint. On HTTP/1.1 there is no multiplexing, so concurrent
+requests open additional connections that `warmup()` did not warm, and TTFA
+reabsorbs TCP+TLS for those rows. `warmup()` logs `http_version` and emits a
+`*_prewarm_no_http2` warning on any non-h2 connection, and every HTTP TTS
+result row records the negotiated `http_version`, so HTTP/1.1 rows can be
+filtered out of analysis rather than silently inflating the published TTFA.
+
+**Follow-ups, not yet in this implementation:**
+
+- *NVCF gRPC hosted cohort (Nvidia Nemotron, Magpie).* These providers ship a
+  per-channel warmup probe that excludes TLS + gRPC channel + NVCF GPU
+  dispatch (~500–1000 ms) before t0. The probe uses the same
+  `Provider.warmup()` hook documented above and will be wired in when
+  `nvidia_hosted.py` lands on `main`; the cohort table will gain a third row
+  then.
+- *Connect-time isolation at the transport layer.* `TimedTransport` records
+  `submit-to-headers` time per request, surfaced on each HTTP TTS result row
+  as `submit_to_headers_ms` — small and stable values confirm the pool stayed
+  warm, while a spike flags a row whose connection reconnected mid-run and
+  reabsorbed connect time. It does not isolate TCP + TLS time from server
+  processing time. True per-call isolation would require subclassing
+  `httpcore.AsyncNetworkBackend` (one layer below httpx's transport).
+  Deferred — pool reuse achieves the same end result by construction, and the
+  recorded interval is sufficient to detect and filter pool eviction.
 
 ## Reproducing a result
 

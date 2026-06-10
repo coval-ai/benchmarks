@@ -14,6 +14,7 @@ Close: {"type": "CloseStream"}
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
@@ -25,6 +26,11 @@ from pydantic import SecretStr
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
+
+# After Finalize, wait this long for the forced final before sending CloseStream,
+# so the close can't race the final (the WS close-gate bug class). Falls through on
+# timeout — the outer per-item timeout still bounds the run.
+_FINAL_WAIT_S = 5.0
 
 
 class DeepgramProvider(STTProvider):
@@ -58,16 +64,15 @@ class DeepgramProvider(STTProvider):
 
     def _build_websocket_url(self, sample_rate: int, channels: int) -> str:
         if self._model.startswith("flux-"):
-            # v2/listen uses a conversational TurnInfo-based protocol — it does
-            # NOT accept interim_results / no_delay (those are v1/listen params)
-            # and rejects the WS upgrade with HTTP 400 if either is present.
-            # `flux-general-multi` shares the same endpoint as `flux-general-en`;
-            # we don't pass a language hint so the multilingual model auto-detects.
+            if channels != 1:
+                raise ValueError(
+                    f"Flux models require mono audio (channels=1), got channels={channels}"
+                )
+            # v2/listen 400s on v1-only query params (channels/interim_results/no_delay).
             return (
                 "wss://api.deepgram.com/v2/listen"
                 f"?model={self._model}"
                 f"&sample_rate={sample_rate}"
-                f"&channels={channels}"
                 f"&encoding=linear16"
             )
         url = (
@@ -79,6 +84,9 @@ class DeepgramProvider(STTProvider):
             f"&vad_events=true"
             f"&no_delay=true"
             f"&punctuate=true"
+            # Disable native silence endpointing; we force the final at speech-end
+            # via a Finalize message instead (TTFS parity).
+            f"&endpointing=false"
         )
         if self._model != "default":
             url += f"&model={self._model}"
@@ -103,6 +111,7 @@ class DeepgramProvider(STTProvider):
             url = self._build_websocket_url(sample_rate, channels)
             headers = {"Authorization": f"Token {self._api_key.get_secret_value()}"}
 
+            final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
                 send_task = asyncio.create_task(
                     self._send_audio(
@@ -113,9 +122,10 @@ class DeepgramProvider(STTProvider):
                         sample_rate,
                         result,
                         realtime_resolution,
+                        final_event,
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
+                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
@@ -138,6 +148,7 @@ class DeepgramProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
+        final_event: asyncio.Event,
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
         data = audio_data
@@ -151,6 +162,16 @@ class DeepgramProvider(STTProvider):
                     first_chunk = False
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
+            # nova finalizes on our signal (endpointing disabled): send Finalize, then
+            # wait for the forced final before closing so the close can't race it. Flux
+            # has no Finalize and can't be forced, so it's left on its native EOT.
+            if not self._model.startswith("flux-"):
+                # Clear first: nova can emit an is_final segment mid-stream, which would
+                # leave the latch set and make the wait a no-op.
+                final_event.clear()
+                await ws.send(json.dumps({"type": "Finalize"}))
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "CloseStream"}))
         except Exception as exc:
             logger.exception("deepgram send error", error=str(exc))
@@ -160,9 +181,12 @@ class DeepgramProvider(STTProvider):
     # Receive helpers
     # ------------------------------------------------------------------
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(
+        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+    ) -> None:
         final_segments: list[str] = []
-        flux_latest: str = ""
+        pending_partial: str = ""
+        flux_turns: dict[int, str] = {}
         last_final_time: float | None = None
 
         try:
@@ -187,10 +211,8 @@ class DeepgramProvider(STTProvider):
                 if msg_type in ("UtteranceEnd", "Metadata", "Connected"):
                     continue
 
-                # flux v2/listen emits TurnInfo (not Results). Each TurnInfo
-                # carries a rolling top-level "transcript" + "words" array,
-                # NOT the channel.alternatives shape. Handle it inline so we
-                # can mark the latest TurnInfo as the best transcript so far.
+                # Flux transcript is cumulative within a turn and resets per
+                # turn, so key by turn_index and concatenate turns.
                 if msg_type == "TurnInfo":
                     transcript = str(msg.get("transcript", "")).strip()
                     if not transcript:
@@ -212,8 +234,10 @@ class DeepgramProvider(STTProvider):
                             transcript[:30] + "..." if len(transcript) > 30 else transcript
                         )
                     result.partial_transcripts.append(transcript)
-                    flux_latest = transcript
-                    last_final_time = now
+                    flux_turns[int(msg.get("turn_index", 0))] = transcript
+                    # EndOfTurn is the confirmed turn-final; Start/Update are partials.
+                    if msg.get("event") == "EndOfTurn":
+                        last_final_time = now
                     continue
 
                 transcript = self._extract_transcript(msg)
@@ -229,15 +253,17 @@ class DeepgramProvider(STTProvider):
 
                 result.partial_transcripts.append(transcript)
 
-                if self._model in ("nova-2", "nova-3"):
-                    if msg.get("speech_final"):
-                        final_segments.append(transcript)
-                        last_final_time = now
+                # Full transcript is the concatenation of ALL is_final segments;
+                # speech_final alone drops the is_final-only pieces between pauses.
+                if msg.get("is_final"):
+                    final_segments.append(transcript)
+                    pending_partial = ""
+                    last_final_time = now
+                    final_event.set()
                 else:
-                    # default model — treat is_final as final
-                    if msg.get("is_final"):
-                        final_segments.append(transcript)
-                        last_final_time = now
+                    # Keep the longest interim as the not-yet-finalized tail.
+                    if len(transcript) > len(pending_partial):
+                        pending_partial = transcript
 
         except Exception as exc:
             logger.exception("deepgram receive error", error=str(exc))
@@ -247,11 +273,13 @@ class DeepgramProvider(STTProvider):
 
         # Build complete transcript
         if self._model in ("flux-general-en", "flux-general-multi"):
-            result.complete_transcript = flux_latest.strip() or None
-        elif final_segments:
-            result.complete_transcript = " ".join(final_segments).strip()
-        elif result.partial_transcripts:
-            result.complete_transcript = max(result.partial_transcripts, key=len).strip() or None
+            joined = " ".join(flux_turns[i] for i in sorted(flux_turns)).strip()
+            result.complete_transcript = joined or None
+        elif final_segments or pending_partial:
+            parts = list(final_segments)
+            if pending_partial:
+                parts.append(pending_partial)
+            result.complete_transcript = " ".join(parts).strip() or None
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)

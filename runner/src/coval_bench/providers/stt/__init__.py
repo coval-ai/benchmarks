@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from coval_bench.providers.base import STTProvider
 from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
+from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
+from coval_bench.providers.stt.openai import OpenAISTTProvider
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
 from coval_bench.providers.stt.xai import XaiSTTProvider
@@ -34,9 +36,11 @@ except ImportError:
 
 STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "deepgram": DeepgramProvider,
+    "cartesia": CartesiaSTTProvider,
     "assemblyai": AssemblyAIProvider,
     "elevenlabs": ElevenLabsSTTProvider,
     "gradium": GradiumSTTProvider,
+    "openai": OpenAISTTProvider,
     "smallest": SmallestSTTProvider,
     "speechmatics": SpeechmaticsProvider,
     "xai": XaiSTTProvider,
@@ -49,9 +53,11 @@ __all__ = [
     "STT_PROVIDERS",
     "GOOGLE_AVAILABLE",
     "DeepgramProvider",
+    "CartesiaSTTProvider",
     "AssemblyAIProvider",
     "ElevenLabsSTTProvider",
     "GradiumSTTProvider",
+    "OpenAISTTProvider",
     "SmallestSTTProvider",
     "SpeechmaticsProvider",
     "XaiSTTProvider",

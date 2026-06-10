@@ -35,12 +35,14 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="deepgram", model="flux-general-en", enabled=True),
     ProviderEntry(provider="deepgram", model="flux-general-multi", enabled=True),
     ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+    ProviderEntry(provider="openai", model="gpt-realtime-whisper", enabled=True),
     ProviderEntry(provider="assemblyai", model="universal-streaming", enabled=True),
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
     ProviderEntry(provider="gradium", model="default", enabled=True),
     ProviderEntry(provider="xai", model="grok-stt", enabled=True),
     ProviderEntry(provider="smallest", model="pulse", enabled=True),
+    ProviderEntry(provider="cartesia", model="ink-2", enabled=True),
     # OFF; disabled=True hides these from the public catalogue.
     ProviderEntry(provider="google", model="short", enabled=False, disabled=True),
     ProviderEntry(provider="google", model="long", enabled=False, disabled=True),
@@ -86,6 +88,13 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
         enabled=True,
     ),
+    # Cartesia — sonic-3.5 (cleared for public benchmarking 2026-06-08).
+    ProviderEntry(
+        provider="cartesia",
+        model="sonic-3.5",
+        voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        enabled=True,
+    ),
     # Deepgram — re-activated 2026-04-30: aura-2-thalia-en.
     ProviderEntry(
         provider="deepgram",
@@ -118,6 +127,7 @@ DEFAULT_TTS_MATRIX: list[ProviderEntry] = [
         voice="176a55b1-4468-4736-8878-db82729667c1",
         enabled=True,
     ),
+    ProviderEntry(provider="xai", model="grok-tts", voice="eve", enabled=True),
     # Placeholder entries with voice=None — never executed by the runner; surfaced only
     # in /v1/providers so the frontend can label them as disabled.
     ProviderEntry(

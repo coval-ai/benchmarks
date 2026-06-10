@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 import { TooltipProps } from "@/types/chart.types";
 
 interface ScatterTooltipProps extends TooltipProps {
   activeTab: "tts" | "stt";
+  metric: string;
 }
 
-const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab }) => {
+const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric }) => {
   if (active && payload && payload.length > 0) {
     const point = payload[0]?.payload;
     if (!point) return null;
@@ -24,12 +26,11 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
       >
         <p
           style={{ margin: 0, fontWeight: "bold" }}
-        >{`Model: ${point.model}`}</p>
-        <p style={{ margin: 0 }}>{`Provider: ${point.provider}`}</p>
-        <p style={{ margin: 0 }}>{`${
-          activeTab === "tts" ? "TTFA" : "TTFT"
-        }: ${point.x.toFixed(0)}ms`}</p>
-        <p style={{ margin: 0 }}>{`WER: ${point.y.toFixed(1)}%`}</p>
+        >{`Model: ${normalizeModelName(point.model)}`}</p>
+        <p style={{ margin: 0 }}>{`Provider: ${activeTab === "stt" ? normalizeSTTProviderName(point.provider) : normalizeTTSProviderName(point.provider)}`}</p>
+        <p style={{ margin: 0 }}>{`Avg ${metric}: ${point.x.toFixed(0)}ms`}</p>
+        <p style={{ margin: 0 }}>{`Avg WER: ${point.y.toFixed(1)}%`}</p>
+        <p style={{ margin: 0 }}>{`Samples: ${point.count}`}</p>
       </div>
     );
   }

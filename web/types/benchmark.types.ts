@@ -1,20 +1,6 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-export interface BenchmarkData {
-  provider: string;
-  model: string;
-  voice: string;
-  benchmark: string;
-  metric_type: string;
-  metric_value: number | null;
-  metric_units: string | null;
-  audio_filename: string;
-  timestamp: string;
-  status: string;
-  transcript: string;
-}
-
 export interface ModelsByProvider {
   [provider: string]: string[];
 }
@@ -33,6 +19,7 @@ export interface ScatterDataPoint {
   model: string;
   benchmark: string;
   provider: string;
+  count: number;
 }
 
 export interface ModelHeatmapData {
@@ -43,13 +30,6 @@ export interface ModelHeatmapData {
   latencyIQR: number;
   avgWER: number;
   werStdDev: number;
-  avgRTF: number; // Will be 0 for TTS models
-}
-
-export interface ScatterDataResult {
-  points: ScatterDataPoint[];
-  p99X: number;
-  outlierCount: number;
 }
 
 export interface BarDataPoint {
@@ -58,18 +38,16 @@ export interface BarDataPoint {
   provider: string;
 }
 
-export interface ViolinDataPoint {
+export interface BoxPlotDataPoint {
   model: string;
   provider: string;
-  values: number[];
-  density: { value: number; density: number }[];
+  /** Whisker ends are clamped to 1.5x IQR beyond the box. */
   quartiles: {
     min: number;
     q1: number;
     median: number;
     q3: number;
     max: number;
-    outliers: number[];
   };
   stats: {
     mean: number;
@@ -78,26 +56,13 @@ export interface ViolinDataPoint {
   };
 }
 
-export interface ModelStats {
-  provider: string;
-  model: string;
-  metric_type: string;
-  avg_value: number;
-  stddev_value: number;
-  p25: number;
-  p50: number;
-  p75: number;
-  min_value: number;
-  max_value: number;
-  sample_count: number;
-}
+// Aggregate stats are the API's ModelStatEntry — re-exported under the
+// chart layer's historical name so consumers track the codegen shape.
+export type { ModelStatEntry as ModelStats } from "@/lib/api/client";
 
-export interface ViolinPlotData {
-  data: ViolinDataPoint[];
+export interface BoxPlotData {
+  data: BoxPlotDataPoint[];
   globalMin: number;
   globalMax: number;
-  trueGlobalMax?: number;
-  outlierCount?: number;
-  cappedAt?: number;
   metricType: string;
 }

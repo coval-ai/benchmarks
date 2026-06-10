@@ -18,8 +18,8 @@ Note on window routing:
 * ``window=24h``: queries the live ``benchmarks_v2.results`` table directly with a
   24-hour filter. The ``results_24h`` materialized view is NOT used here because it
   aggregates by (provider, model, benchmark, metric_type) and lacks row-level columns
-  (id, voice, metric_value, etc.) required by ``ResultOut``. The existing index
-  ``results_provider_model_idx`` supports this path.
+  (id, voice, metric_value, etc.) required by ``ResultOut``. The index
+  ``results_benchmark_created_at_idx`` supports this path.
 * ``window=7d|30d``: live table join with interval filter.
 * ``since``/``until``: live table join with explicit timestamp bounds.
 """
@@ -32,12 +32,20 @@ from typing import Any, Literal
 import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import get_pool
+from coval_bench.api.common import (
+    SCHEDULED_AT_BUCKET_SQL,
+    WINDOW_INTERVALS,
+    BenchmarkLiteral,
+    WindowLiteral,
+)
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
+from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -45,22 +53,17 @@ router = APIRouter(tags=["results"])
 
 # ``MetricLiteral`` is kept as the type for the legacy ``metric`` param.
 # The canonical FE-facing param is ``metric_type`` (plain ``str``).
-MetricLiteral = Literal["WER", "TTFA", "TTFT", "RTF", "AUDIO_TO_FINAL"]
-BenchmarkLiteral = Literal["STT", "TTS"]
-WindowLiteral = Literal["24h", "7d", "30d"]
-
-# Fixed interval strings — looked up by Python, never user-interpolated into SQL.
-_WINDOW_INTERVALS: dict[str, str] = {
-    "24h": "24 hours",
-    "7d": "7 days",
-    "30d": "30 days",
-}
+MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS", "RTF", "AUDIO_TO_FINAL"]
 
 # Base SELECT used by all three query paths.
+# S608 false-positive: the interpolated fragment is a fixed constant; user
+# values only ever bind through %(param)s placeholders.
 _SELECT = (
-    "SELECT r.id, r.run_id, r.provider, r.model, r.voice, r.benchmark,"
+    "SELECT r.id, r.run_id, r.provider, r.model, r.voice, r.benchmark,"  # noqa: S608
     " r.metric_type, r.metric_value, r.metric_units, r.audio_filename,"
-    " r.created_at, UPPER(rn.status) AS status"
+    " r.created_at,"
+    f" {SCHEDULED_AT_BUCKET_SQL} AS scheduled_at,"
+    " UPPER(rn.status) AS status"
     " FROM benchmarks_v2.results r"
     " JOIN benchmarks_v2.runs rn ON rn.id = r.run_id"
 )
@@ -116,6 +119,8 @@ async def list_results(
         description="Maximum rows to return (1–100000, default 100000).",
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    posthog_client: Posthog | None = Depends(get_posthog),
 ) -> ResultsResponse:
     """Return a newest-first page of successful benchmark results.
 
@@ -162,7 +167,10 @@ async def list_results(
 
     # Build WHERE clause dynamically — parameterised only, no f-string SQL injection.
     conditions: list[str] = ["r.status = 'success'"]
-    params: dict[str, Any] = {"limit": limit}
+    params: dict[str, Any] = {
+        "limit": limit,
+        "schedule_period": settings.schedule_period_seconds,
+    }
 
     if provider is not None:
         conditions.append("r.provider = %(provider)s")
@@ -184,7 +192,7 @@ async def list_results(
     # -- Time window / since-until conditions
     if window is not None:
         # Use a fixed-string interval from the lookup dict — never user-interpolated.
-        interval_str = _WINDOW_INTERVALS[window]
+        interval_str = WINDOW_INTERVALS[window]
         conditions.append(f"r.created_at >= NOW() - INTERVAL '{interval_str}'")  # noqa: S608
     else:
         # Path C: explicit since/until bounds (window is None when either is set)
@@ -207,4 +215,20 @@ async def list_results(
         result_rows = await rows.fetchall()
 
     results = [ResultOut.model_validate(r) for r in result_rows]
+    capture_api_event(
+        posthog_client,
+        "results_queried",
+        {
+            "provider": provider,
+            "benchmark": benchmark,
+            "metric_type": resolved_metric,
+            "window": window,
+            "has_since_filter": since is not None,
+            "has_until_filter": until is not None,
+            "include_failed": include_failed,
+            "result_count": len(results),
+            "limit": limit,
+            "$process_person_profile": False,
+        },
+    )
     return ResultsResponse(results=results)

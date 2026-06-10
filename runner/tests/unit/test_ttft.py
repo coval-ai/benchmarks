@@ -9,6 +9,7 @@ import pytest
 from coval_bench.metrics.ttft import (
     compute_audio_to_final,
     compute_rtf,
+    compute_ttfs,
     compute_ttft,
 )
 
@@ -104,3 +105,26 @@ def test_rtf_negative_duration_raises() -> None:
 
 def test_rtf_returns_float() -> None:
     assert isinstance(compute_rtf(1.0, 2.0), float)
+
+
+# ---------------------------------------------------------------------------
+# compute_ttfs
+# ---------------------------------------------------------------------------
+
+
+def test_ttfs_basic() -> None:
+    """audio_to_final 5.3 s, speech-end at 5.0 s → 0.3 s finalization."""
+    assert compute_ttfs(5.3, 5.0) == pytest.approx(0.3)
+
+
+def test_ttfs_zero() -> None:
+    assert compute_ttfs(5.0, 5.0) == pytest.approx(0.0)
+
+
+def test_ttfs_raises_on_negative() -> None:
+    with pytest.raises(ValueError, match="ttfs must be >= 0"):
+        compute_ttfs(4.9, 5.0)
+
+
+def test_ttfs_returns_float() -> None:
+    assert isinstance(compute_ttfs(2.0, 1.0), float)

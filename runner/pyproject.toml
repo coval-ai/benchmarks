@@ -18,8 +18,8 @@ dependencies = [
     "anyio>=4.4",
     # Audio
     "soundfile>=0.12",
-    "librosa>=0.10",
     "numpy>=1.26",
+    "scipy>=1.11",
     # DB
     "psycopg[binary,pool]>=3.2",
     "alembic>=1.13",
@@ -27,18 +27,20 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "slowapi>=0.1.9",
+    "cachetools>=5.3",
     # WebSocket clients (STT providers)
     "websockets>=13,<14",
     # TTS provider SDKs
     "openai>=1.40",
     "cartesia>=2",
-    "elevenlabs>=1.5",
-    "aiohttp>=3.9",
+    "aiohttp>=3.14.0",
     # Dataset
     "google-cloud-storage>=2.18",
     # WER
     "jiwer>=3.0",
     "whisper-normalizer>=0.0.10",
+    # Analytics
+    "posthog>=3.0",
 ]
 
 [project.optional-dependencies]
@@ -94,10 +96,6 @@ python_version = "3.12"
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = "librosa.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = "soundfile.*"
 ignore_missing_imports = true
 
@@ -107,6 +105,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "whisper_normalizer.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "scipy.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -122,15 +124,15 @@ module = "cartesia.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "elevenlabs.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
 module = "hume.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "aiohttp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "posthog.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]

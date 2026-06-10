@@ -10,13 +10,20 @@ populated during the FastAPI lifespan (see ``app.py``).
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from collections import defaultdict
+from typing import Any, cast
 
+import structlog
+from cachetools import TTLCache
 from fastapi import HTTPException
+from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.config import Settings
+
+logger = structlog.get_logger("coval_bench.api")
 
 
 async def get_pool(request: Request) -> AsyncConnectionPool[Any]:
@@ -34,3 +41,30 @@ def get_settings(request: Request) -> Settings:
     """Return the Settings instance from app state."""
     settings: Settings = request.app.state.settings
     return settings
+
+
+def get_posthog(request: Request) -> Posthog | None:
+    """Return the PostHog client from app state, or None if analytics is disabled."""
+    return cast("Posthog | None", request.app.state.posthog)
+
+
+def get_cache(request: Request) -> TTLCache[Any, Any]:
+    """Return the per-app response TTL cache from app state."""
+    return cast("TTLCache[Any, Any]", request.app.state.response_cache)
+
+
+def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:
+    """Return the per-app cache-key locks from app state."""
+    return cast("defaultdict[Any, asyncio.Lock]", request.app.state.cache_locks)
+
+
+def capture_api_event(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:
+    """Best-effort PostHog capture for API routes; never fails the request."""
+    if client is None:
+        return
+    try:
+        client.capture(
+            event, distinct_id="coval-bench-api", properties=properties, disable_geoip=True
+        )
+    except Exception:
+        logger.warning("posthog_capture_failed", event_name=event, exc_info=True)

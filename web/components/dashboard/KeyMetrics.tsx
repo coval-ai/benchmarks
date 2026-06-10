@@ -4,6 +4,7 @@
 "use client";
 
 import React from "react";
+import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
 
 export interface KeyMetricData {
@@ -16,40 +17,38 @@ export interface KeyMetricData {
 }
 
 const KeyMetrics: React.FC = () => {
-  const { primaryKeyMetric: primary, secondaryKeyMetric: secondary } = useDashboard();
+  const {
+    primaryKeyMetric: primary,
+    secondaryKeyMetric: secondary,
+  } = useDashboard();
+
+  const metrics: KeyMetricData[] = [primary, secondary];
 
   return (
-    <div className="grid grid-cols-2 gap-16 mb-16 max-w-4xl mx-auto">
-      <div className="text-center">
-        <div className="text-text-secondary mb-2">{primary.label}</div>
-        <div className="text-5xl font-light mb-2">{primary.displayValue}</div>
-        {primary.subtitle && (
-          <div className="text-text-secondary">
-            {primary.subtitle.name && <div>{primary.subtitle.name}</div>}
-            {primary.subtitle.detail && (
-              <div className="text-sm text-text-tertiary">
-                {primary.subtitle.detail}
-              </div>
-            )}
+    <div className="grid grid-cols-2 gap-[0.8rem] mb-[0.8rem] w-full">
+      {metrics.map((metric, index) => (
+        <Card key={index} className="text-left min-w-0" padding="p-5 lg:p-8">
+
+          <div className="text-[0.9rem] font-light text-text-secondary mb-2">
+            {metric.label}
           </div>
-        )}
-      </div>
-      <div className="text-center">
-        <div className="text-text-secondary mb-2">{secondary.label}</div>
-        <div className="text-5xl font-light mb-2">
-          {secondary.displayValue}
-        </div>
-        {secondary.subtitle && (
-          <div className="text-text-secondary">
-            {secondary.subtitle.name && <div>{secondary.subtitle.name}</div>}
-            {secondary.subtitle.detail && (
-              <div className="text-sm text-text-tertiary">
-                {secondary.subtitle.detail}
-              </div>
-            )}
+          <div className="font-mono text-3xl sm:text-4xl lg:text-5xl font-bold mb-4 break-words leading-tight">
+            {metric.displayValue}
           </div>
-        )}
-      </div>
+          {metric.subtitle && (
+            <div className="text-text-secondary flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2">
+              {metric.subtitle.name && (
+                <span className="font-medium">{metric.subtitle.name}</span>
+              )}
+              {metric.subtitle.detail && (
+                <span className="text-sm text-text-tertiary">
+                  {metric.subtitle.detail}
+                </span>
+              )}
+            </div>
+          )}
+        </Card>
+      ))}
     </div>
   );
 };

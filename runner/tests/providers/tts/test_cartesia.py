@@ -92,6 +92,15 @@ def test_cartesia_name_and_model(fake_settings: Settings) -> None:
     assert p.model == "sonic-turbo"
 
 
+def test_cartesia_supports_sonic_3_5(fake_settings: Settings) -> None:
+    """sonic-3.5 (the public matrix entry) must pass the model-support guard."""
+    p = CartesiaTTSProvider(
+        fake_settings, model="sonic-3.5", voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    )
+    assert p.name == "cartesia-sonic-3.5"
+    assert p._model_supported("sonic-3.5")
+
+
 # ---------------------------------------------------------------------------
 # Missing API key
 # ---------------------------------------------------------------------------
@@ -167,8 +176,8 @@ async def test_cartesia_send_includes_output_format(fake_settings: Settings) -> 
     The Cartesia SDK AsyncWebSocketContext.send() does NOT inherit output_format
     from conn.context() — ctx._output_format is only used by push(), not send().
     When output_format is omitted from send(), the SDK substitutes its own default
-    (pcm_f32le / 44100 Hz). _write_wav then stamps the WAV header as pcm_s16le /
-    24000 Hz, producing a corrupt file. Whisper hallucinating on corrupt audio
+    (pcm_f32le / 44100 Hz). The finalize step then stamps the WAV header as
+    pcm_s16le / 24000 Hz, producing a corrupt file. Whisper hallucinating on corrupt audio
     causes WER > 100% in the benchmark.
     """
     from coval_bench.providers.tts.cartesia import OUTPUT_FORMAT

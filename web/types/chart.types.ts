@@ -1,7 +1,7 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import { ModelHeatmapData, ScatterDataPoint, ViolinPlotData } from './benchmark.types';
+import { ModelHeatmapData, ScatterDataPoint, BoxPlotData } from './benchmark.types';
 
 export interface HeatmapProps {
   data: ModelHeatmapData[];
@@ -17,15 +17,14 @@ export interface SortConfig {
   direction: "asc" | "desc";
 }
 
-export interface ViolinPlotProps {
-  data: ViolinPlotData;
+export interface BoxPlotProps {
+  data: BoxPlotData;
   width?: number;
   height?: number;
   getModelColor: (model: string) => string;
   getProviderForModel: (model: string) => string;
   normalizeModelName: (model: string) => string;
   isMobile?: boolean;
-  sidebarCollapsed?: boolean;
 }
 
 export interface TooltipProps {
@@ -44,4 +43,5 @@ export interface CustomBarTooltipProps {
     value: number;
   }>;
   label?: string;
+  getProviderForModel?: (model: string) => string;
 }

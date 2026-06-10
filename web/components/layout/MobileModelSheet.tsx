@@ -6,6 +6,7 @@
 import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 
 const MobileModelSheet: React.FC = () => {
   const {
@@ -13,12 +14,14 @@ const MobileModelSheet: React.FC = () => {
     normalizeProviderName,
     modelsByProvider,
     selectedModels,
+    toggleModelSelection: onToggleModelSelection,
+  } = useDashboard();
+  const {
     expandedProviders,
     mobileSheetOpen,
     setMobileSheetOpen: onSetMobileSheetOpen,
     toggleProvider: onToggleProvider,
-    toggleModelSelection: onToggleModelSelection,
-  } = useDashboard();
+  } = useSidebarMenu();
 
   return (
     <div className="lg:hidden">
@@ -82,7 +85,7 @@ const MobileModelSheet: React.FC = () => {
                             : "text-text-tertiary hover:text-text-secondary hover:bg-hover-bg"
                         }`}
                       >
-                        <span className="font-mono text-sm">
+                        <span className="text-sm">
                           {normalizeModelName(model)}
                         </span>
                       </button>

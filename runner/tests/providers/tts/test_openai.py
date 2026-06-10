@@ -11,12 +11,22 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from coval_bench.config import Settings
+from coval_bench.providers import _http_session
 from coval_bench.providers.tts.openai import HTTP_MODELS, VALID_VOICES, OpenAITTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
+
+
+@pytest.fixture(autouse=True)
+def _reset_http_clients() -> None:
+    _http_session._CLIENTS.clear()
+    yield
+    _http_session._CLIENTS.clear()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,6 +52,8 @@ def _make_streaming_response_mock(chunks: list[bytes]) -> MagicMock:
 
     mock_resp = MagicMock()
     mock_resp.iter_bytes = _iter_bytes
+    mock_resp.http_version = "HTTP/2"
+    mock_resp.http_response.request.extensions = {"__t_submit": 1.0, "__t_headers": 1.002}
     mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
     mock_resp.__aexit__ = AsyncMock(return_value=False)
 
@@ -81,6 +93,8 @@ async def test_openai_http_happy_path(fake_settings: Settings, tmp_path: Path) -
     assert result.provider == "openai"
     assert result.model == "gpt-4o-mini-tts"
     assert result.voice == "alloy"
+    assert result.http_version == "HTTP/2"
+    assert result.submit_to_headers_ms == 2.0
 
     # Orchestrator owns deletion — provider must NOT auto-delete
     result.audio_path.unlink()
@@ -214,6 +228,50 @@ def test_openai_name_property(fake_settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 # gpt-4o-mini-tts is the only OpenAI HTTP model in production.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Shared client injection + warmup
+# ---------------------------------------------------------------------------
+
+
+def test_openai_uses_shared_http_client(fake_settings: Settings) -> None:
+    """Construction registers a pooled httpx client in the shared registry."""
+    OpenAITTSProvider(fake_settings, model="gpt-4o-mini-tts", voice="alloy")
+    assert "openai" in _http_session._CLIENTS
+    assert isinstance(_http_session._CLIENTS["openai"], httpx.AsyncClient)
+
+
+@pytest.mark.asyncio
+async def test_openai_warmup_issues_head(fake_settings: Settings) -> None:
+    """warmup() HEADs /v1/models on the shared client; a 401 does not raise."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.method} {request.url.path}")
+        return httpx.Response(401, content=b"unauthorized")
+
+    _http_session._CLIENTS["openai"] = httpx.AsyncClient(
+        base_url="https://api.openai.com",
+        transport=httpx.MockTransport(handler),
+    )
+    await OpenAITTSProvider.warmup(fake_settings)
+    assert seen == ["HEAD /v1/models"]
+
+
+@pytest.mark.asyncio
+async def test_openai_warmup_propagates_transport_error(fake_settings: Settings) -> None:
+    """Transport failures propagate so the orchestrator can log them."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("dns blew up")
+
+    _http_session._CLIENTS["openai"] = httpx.AsyncClient(
+        base_url="https://api.openai.com",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(httpx.ConnectError):
+        await OpenAITTSProvider.warmup(fake_settings)
 
 
 @pytest.mark.asyncio

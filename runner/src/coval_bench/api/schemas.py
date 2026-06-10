@@ -15,6 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+
 
 class RunOut(BaseModel):
     """API response schema for a benchmark run row."""
@@ -51,6 +53,7 @@ class ResultOut(BaseModel):
     metric_units: str | None
     audio_filename: str | None
     created_at: datetime
+    scheduled_at: datetime
     status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
 
     model_config = ConfigDict(from_attributes=True)
@@ -95,6 +98,52 @@ class ResultsResponse(BaseModel):
     results: list[ResultOut]
 
 
+class ModelStatEntry(BaseModel):
+    """Per-(provider, model, metric_type) aggregate stats.
+
+    Lets us compute the stats server-side and just send the summaries.
+    """
+
+    provider: str
+    model: str
+    metric_type: str
+    avg_value: float
+    stddev_value: float
+    p25: float
+    p50: float
+    p75: float
+    min_value: float
+    max_value: float
+    sample_count: int
+
+
+class SeriesPoint(BaseModel):
+    """Per-(provider, model, metric_type) average for one scheduled_at bucket.
+
+    Used in all the timeline charts.
+    """
+
+    provider: str
+    model: str
+    metric_type: str
+    scheduled_at: datetime
+    avg_value: float
+    sample_count: int
+
+
+class AggregatesResponse(BaseModel):
+    """Response schema for GET /v1/results/aggregates.
+
+    Wraps and returns all our ModelStatEntry and SeriesPoint data for a time
+    window.
+    """
+
+    benchmark: BenchmarkLiteral
+    window: WindowLiteral
+    model_stats: list[ModelStatEntry]
+    series: list[SeriesPoint]
+
+
 class RunsResponse(BaseModel):
     """Response schema for GET /v1/runs."""
 
@@ -105,6 +154,6 @@ class RunsResponse(BaseModel):
 class LeaderboardResponse(BaseModel):
     """Response schema for GET /v1/leaderboard."""
 
-    metric: Literal["WER", "TTFA", "TTFT"]
+    metric: Literal["WER", "TTFA", "TTFT", "TTFS"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]

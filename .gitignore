@@ -64,3 +64,7 @@ runner/.uv-cache/
 
 # Playground internal docs (per Loren's PR #26 R4-1 review)
 PLAYGROUND.md
+.env*.local
+
+# Internal benchmarking doc — never commit (also matches global *-benchmarking.md)
+docs/providers/cartesia-sonic-3.5-benchmarking.md

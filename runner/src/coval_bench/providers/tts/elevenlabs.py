@@ -1,38 +1,48 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""ElevenLabs TTS provider — uses the elevenlabs SDK for streaming synthesis."""
+"""ElevenLabs TTS provider — direct REST against a shared httpx pool.
+
+TTFA is measured from the first request byte to the first PCM chunk. The
+shared client is pre-warmed by ``warmup`` before the dataset loop, so the
+measurement excludes TCP+TLS setup.
+"""
 
 from __future__ import annotations
 
-import base64
-import json
-import os
-import tempfile
 import time
-import wave
-from io import BytesIO
-from pathlib import Path
 
 import structlog
-from elevenlabs import ElevenLabs
 
 from coval_bench.config import Settings
+from coval_bench.providers._http_session import (
+    connection_reused,
+    get_shared_client,
+    submit_to_headers_ms,
+)
 from coval_bench.providers.base import TTSProvider, TTSResult
+from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
 
+_BASE_URL = "https://api.elevenlabs.io"
+_OUTPUT_FORMAT = "pcm_24000"
+
 
 class ElevenLabsTTSProvider(TTSProvider):
-    """ElevenLabs TTS provider using the official SDK streaming endpoint."""
+    """ElevenLabs TTS provider over the REST streaming endpoint."""
 
     enabled: bool = True
 
     _VALID_MODELS = frozenset({"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
+        if model not in self._VALID_MODELS:
+            raise ValueError(
+                f"Unsupported ElevenLabs model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+            )
         self._model = model
         self._voice = voice
 
@@ -49,111 +59,98 @@ class ElevenLabsTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
-    @staticmethod
-    def _is_audio_chunk(message: object) -> bool:
-        """Return True when *message* carries audio data."""
-        if isinstance(message, bytes) and len(message) > 0:
-            return True
-        if isinstance(message, str):
-            try:
-                data = json.loads(message)
-                return bool(data.get("audio"))
-            except (json.JSONDecodeError, TypeError):
-                return False
-        return False
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Pre-warm the shared httpx connection pool with a HEAD probe.
 
-    @staticmethod
-    def _extract_audio(message: object) -> bytes:
-        """Extract raw PCM bytes from a message."""
-        if isinstance(message, bytes):
-            return message
-        if isinstance(message, str):
-            try:
-                data = json.loads(message)
-                audio_b64 = data.get("audio")
-                if audio_b64:
-                    return base64.b64decode(audio_b64)
-            except (json.JSONDecodeError, TypeError, Exception):  # noqa: BLE001
-                logger.debug("elevenlabs_extract_audio_failed", message=message[:100])
-        return b""
+        Transport failures propagate to the caller, which runs warmup under
+        ``return_exceptions=True`` and logs them. A 401 still warms the
+        socket, so an unauthenticated HEAD is sufficient.
+        """
+        client = get_shared_client("elevenlabs", _BASE_URL)
+        t0 = time.monotonic()
+        response = await client.head("/v1/voices")
+        logger.info(
+            "elevenlabs_prewarm",
+            warmup_ms=round((time.monotonic() - t0) * 1000, 1),
+            http_version=response.http_version,
+        )
+        if response.http_version != "HTTP/2":
+            logger.warning("elevenlabs_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
-        """Synthesize speech via ElevenLabs SDK and return a TTSResult."""
-        if not self._model_supported(self._model):
-            return TTSResult(
-                provider="elevenlabs",
-                model=self._model,
-                voice=self._voice,
-                ttfa_ms=None,
-                audio_path=None,
-                error=(
-                    f"Unsupported ElevenLabs model: {self._model}. "
-                    f"Valid models: {sorted(self._VALID_MODELS)}"
-                ),
-            )
-        ttfa_ms: float | None = None
-        audio_stream = BytesIO()
+        client = get_shared_client("elevenlabs", _BASE_URL)
+        url = f"/v1/text-to-speech/{self._voice}/stream?output_format={_OUTPUT_FORMAT}"
+        headers = {
+            "xi-api-key": self._api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/pcm",
+        }
+        payload = {"text": text, "model_id": self._model}
+
+        audio_chunks: list[bytes] = []
+        http_version: str | None = None
+        setup_ms: float | None = None
+        reused: bool | None = None
+        start: float | None = None
+        first_chunk_at: float | None = None
 
         try:
-            client = ElevenLabs(api_key=self._api_key)
             start = time.monotonic()
-
-            response = client.text_to_speech.stream(
-                voice_id=self._voice,
-                output_format="pcm_24000",
-                text=text,
-                model_id=self._model,
-            )
-
-            for chunk in response:
-                if chunk:
-                    if self._is_audio_chunk(chunk) and ttfa_ms is None:
-                        ttfa_ms = (time.monotonic() - start) * 1000
-                        logger.debug(
-                            "elevenlabs_ttfa",
-                            model=self._model,
-                            ttfa_ms=ttfa_ms,
-                        )
-                    if isinstance(chunk, bytes):
-                        audio_stream.write(chunk)
-                    else:
-                        audio_stream.write(self._extract_audio(chunk))
-
+            async with client.stream("POST", url, headers=headers, json=payload) as response:
+                http_version = response.http_version
+                setup_ms = submit_to_headers_ms(response.request)
+                reused = connection_reused(response.request)
+                if response.is_error:
+                    body = await response.aread()
+                    detail = body.decode("utf-8", "replace").strip() or response.reason_phrase
+                    return finalize_tts_result(
+                        provider="elevenlabs",
+                        model=self._model,
+                        voice=self._voice,
+                        pcm=b"",
+                        sample_rate=SAMPLE_RATE,
+                        audio_synthesis_start=None,
+                        first_audio_chunk_at=None,
+                        error=f"HTTP {response.status_code}: {detail[:500]}",
+                        http_version=http_version,
+                        submit_to_headers_ms=setup_ms,
+                        connection_reused=reused,
+                    )
+                async for chunk in response.aiter_bytes():
+                    if chunk and first_chunk_at is None:
+                        first_chunk_at = time.monotonic()
+                    if chunk:
+                        audio_chunks.append(chunk)
         except Exception as exc:
             logger.debug("elevenlabs_error", exc_info=True)
-            return TTSResult(
+            return finalize_tts_result(
                 provider="elevenlabs",
                 model=self._model,
                 voice=self._voice,
-                ttfa_ms=ttfa_ms,
-                audio_path=None,
+                pcm=b"",
+                sample_rate=SAMPLE_RATE,
+                audio_synthesis_start=start,
+                first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
+                http_version=http_version,
+                submit_to_headers_ms=setup_ms,
+                connection_reused=reused,
             )
 
-        audio_data = audio_stream.getvalue()
-        audio_path: Path | None = None
-        if audio_data:
-            audio_path = _write_wav_from_data(audio_data, SAMPLE_RATE)
-        else:
+        audio_data = b"".join(audio_chunks)
+        if not audio_data:
             logger.warning("elevenlabs_no_audio", model=self._model)
 
-        return TTSResult(
+        return finalize_tts_result(
             provider="elevenlabs",
             model=self._model,
             voice=self._voice,
-            ttfa_ms=ttfa_ms,
-            audio_path=audio_path,
-            error=None,
+            pcm=audio_data,
+            sample_rate=SAMPLE_RATE,
+            audio_synthesis_start=start,
+            first_audio_chunk_at=first_chunk_at,
+            http_version=http_version,
+            submit_to_headers_ms=setup_ms,
+            connection_reused=reused,
         )
-
-
-def _write_wav_from_data(audio_data: bytes, sample_rate: int) -> Path:
-    """Write raw PCM data as a WAV file and return the path."""
-    fd, tmp_name = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    with wave.open(tmp_name, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(audio_data)
-    return Path(tmp_name)

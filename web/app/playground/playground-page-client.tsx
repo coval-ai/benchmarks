@@ -19,7 +19,7 @@ export function PlaygroundPageClient() {
 
   return (
     <PlaygroundShell header={<DashboardHeader />}>
-      <div className="px-4 pb-24 pt-24 md:px-6 md:pt-28">
+      <div className="px-4 pb-24 pt-20 md:px-6 md:pt-24">
         <PlaygroundDraftChrome
           mode={mode}
           onModeChange={setMode}
@@ -33,8 +33,8 @@ export function PlaygroundPageClient() {
             )}
           </div>
         </PlaygroundDraftChrome>
-        <DashboardFooter />
       </div>
+      <DashboardFooter />
     </PlaygroundShell>
   );
 }

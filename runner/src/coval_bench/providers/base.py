@@ -12,7 +12,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
+
+if TYPE_CHECKING:
+    from coval_bench.config import Settings
 
 # ---------------------------------------------------------------------------
 # Shared result types
@@ -63,6 +66,9 @@ class TTSResult:
     ttfa_ms: float | None
     audio_path: Path | None
     error: str | None
+    http_version: str | None = None
+    submit_to_headers_ms: float | None = None
+    connection_reused: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +98,17 @@ class Provider(ABC):
     @abstractmethod
     def model(self) -> str:
         """Model identifier used for this provider instance."""
+
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Optional pre-t0 setup, invoked once per run before the dataset loop.
+
+        Default: no-op. Caller handles exceptions
+        (``return_exceptions=True``), so a failed warmup never aborts the
+        run. Implementers document protocol-specific behaviour on the
+        override.
+        """
+        return None
 
 
 class STTProvider(Provider, ABC):

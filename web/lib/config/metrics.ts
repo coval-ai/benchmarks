@@ -12,24 +12,14 @@ export const metricDescriptions = {
     detailed:
       "We run TTFT measurements on a fixed test case to measure consistency over time. A model that consistently responds within a narrow time range provides better user experience than one with highly variable timing, even if the variable model is sometimes faster. Unpredictable delays can be seen through sudden latency spikes."
   },
-  latencyVariation: {
-    short: "Latency distribution across all measurements",
+  ttfs: {
+    short: "Time to Final Segment",
     detailed:
-      "This visualization shows the full distribution of latency measurements, including quartiles, outliers, and density curves. The violin shape reveals performance consistency - wider sections indicate more common latency values."
+      "TTFS measures how quickly a provider returns the final transcript once speech has ended, anchored at a shared VAD end-of-speech point so every provider is compared from the same instant. It isolates engine finalization speed — the latency a voice agent actually waits on before it can respond — independent of how long the speaker talked."
   },
   wer: {
-    short: "Word Error Rate (%) \u2022 Click bar to compare models",
+    short: "Word Error Rate (%)",
     detailed:
-      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounces complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
-  },
-  rtf: {
-    short: "Real-time factor",
-    detailed:
-      "RTF measures how fast a speech-to-text model processes audio relative to real-time. RTF = processing time / audio duration. Values < 1.0 mean faster than real-time, > 1.0 mean slower than real-time. Higher values are better for batch processing, while values close to 1.0 are ideal for real-time applications."
-  },
-  performanceGap: {
-    short: "Time to First Token",
-    detailed:
-      "We measure how quickly the system returns the first transcribed token after the audio begins across multiple test cases. The fastest model is set as the baseline and we measure the delta relative to the fastest performer. Hover to view the first token."
+      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users. Click a bar to highlight it for comparison."
   }
 };

@@ -16,8 +16,15 @@ export const modelColors: Record<string, string> = {
   // xAI STT
   "grok-stt": "#EC4899",
 
+  // OpenAI STT
+  "gpt-realtime-whisper": "#10A37F",
+
   // Cartesia TTS
   "sonic-3": "#3498DB",
+  "sonic-3.5": "#2563EB",
+
+  // Cartesia STT
+  "ink-2": "#6366F1",
 
   // Rime TTS
   arcana: "#33FF99",
@@ -27,6 +34,9 @@ export const modelColors: Record<string, string> = {
   // Hume TTS
   "octave-tts": "#7C3AED",
   "octave-2": "#C026D3",
+
+  // xAI TTS
+  "grok-tts": "#EC4899",
 
   // Deepgram TTS
   "aura-2-thalia-en": "#FC2D62",
@@ -40,11 +50,12 @@ export const modelColors: Record<string, string> = {
   // AssemblyAI STT
   "universal-streaming": "#E74C3C",
 
-  // Speechmatics STT — composite keys so `default` does not collide with other vendors
+  // Speechmatics STT
   enhanced: "#3498DB",
   default: "#21618C",
-  "speechmatics-default": "#21618C",
-  "speechmatics-enhanced": "#3498DB"
+  // Composite keys for models whose slug is shared across providers
+  "speechmatics:default": "#21618C",
+  "gradium:default": "#1ABC9C"
 };
 
 export const providerColors: Record<string, string> = {

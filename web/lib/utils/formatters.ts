@@ -20,6 +20,14 @@ export function formatTime(timestamp: number): string {
   });
 }
 
+/** Short month-day label (e.g. "Jun 5") for date-scale axis ticks. */
+export function formatDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
+}
+
 /**
  * Same as {@link formatTime} but includes seconds — used in tooltips where
  * the user is hovering a specific data point and wants higher precision.
@@ -49,12 +57,41 @@ export function getLocalTimeZoneAbbr(): string {
 }
 
 /**
- * Normalize model name for display
- * @param modelName - Raw model name from API
+ * Convert a latency metric value to display milliseconds.
+ * STT latency metrics (TTFT) are stored in seconds; TTS (TTFA) already in ms.
+ */
+export function latencyToMs(value: number, benchmark: "tts" | "stt"): number {
+  return benchmark === "stt" ? value * 1000 : value;
+}
+
+/**
+ * Build a composite model key from provider and model slug.
+ * Used throughout the frontend to uniquely identify a (provider, model) pair,
+ * since multiple providers can share the same model slug (e.g. "default").
+ */
+export function toModelKey(provider: string, model: string): string {
+  return `${provider}:${model}`;
+}
+
+/**
+ * Parse a composite model key back into its provider and model slug parts.
+ * Returns the key unchanged as `model` when no colon separator is found.
+ */
+export function parseModelKey(key: string): { provider: string; model: string } {
+  const idx = key.indexOf(":");
+  if (idx === -1) return { provider: "", model: key };
+  return { provider: key.slice(0, idx), model: key.slice(idx + 1) };
+}
+
+/**
+ * Normalize model name for display.
+ * Accepts both bare slugs ("default") and composite keys ("speechmatics:default").
+ * @param modelKey - Model slug or composite "provider:model" key
  * @returns Formatted model name for display
  */
-export function normalizeModelName(modelName: string): string {
-  // Mapping mirrors the backend's enabled provider matrix (runner/config.py).
+export function normalizeModelName(modelKey: string): string {
+  const { model } = parseModelKey(modelKey);
+  // Display labels only — sidebar/chart membership comes from result rows, not this map.
   const modelMappings: Record<string, string> = {
     // TTS
     "gpt-4o-mini-tts": "GPT-4o mini TTS",
@@ -62,12 +99,14 @@ export function normalizeModelName(modelName: string): string {
     eleven_flash_v2_5: "Flash v2.5",
     eleven_turbo_v2_5: "Turbo v2.5",
     "sonic-3": "Sonic 3",
+    "sonic-3.5": "Sonic 3.5",
     "aura-2-thalia-en": "Aura 2",
     arcana: "Arcana",
     mistv3: "Mist v3",
     "octave-tts": "Octave TTS",
     "octave-2": "Octave 2",
     coda: "Coda",
+    "grok-tts": "Grok TTS",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -75,18 +114,19 @@ export function normalizeModelName(modelName: string): string {
     "flux-general-multi": "Flux Multilingual",
     "grok-stt": "Grok STT",
     scribe_v2_realtime: "Scribe v2 Realtime",
+    "gpt-realtime-whisper": "GPT Realtime Whisper",
     "universal-streaming": "Universal Streaming",
+    "ink-2": "Ink 2",
     default: "Default",
     enhanced: "Enhanced"
   };
 
-  // Return mapped name if it exists
-  if (modelMappings[modelName]) {
-    return modelMappings[modelName];
+  if (modelMappings[model]) {
+    return modelMappings[model];
   }
 
   // Fallback: automatic normalization for unmapped models
-  return modelName
+  return model
     .replace(/-/g, " ") // Replace hyphens with spaces
     .replace(/_/g, " ") // Replace underscores with spaces
     .replace(/\bv(\d+)/g, "v$1") // Keep version format (v2, v3)
@@ -116,12 +156,14 @@ function capitalizeProviderSlug(providerName: string): string {
 export function normalizeSTTProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     assemblyai: "AssemblyAI",
+    cartesia: "Cartesia",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
-    speechmatics: "Speechmatics",
+    openai: "OpenAI",
     rime: "Rime",
-    xai: "xAI",
+    speechmatics: "Speechmatics",
+    xai: "xAI"
   };
 
   const lower = providerName.toLowerCase();
@@ -137,6 +179,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     hume: "Hume",
     openai: "OpenAI",
     rime: "Rime",
+    xai: "xAI",
   };
 
   const lower = providerName.toLowerCase();

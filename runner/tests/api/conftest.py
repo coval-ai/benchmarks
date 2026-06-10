@@ -18,10 +18,11 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 import psycopg
 import psycopg.rows
@@ -56,6 +57,7 @@ async def _apply_schema(dsn: str) -> None:
                 id             bigserial PRIMARY KEY,
                 started_at     timestamptz NOT NULL DEFAULT now(),
                 finished_at    timestamptz,
+                scheduled_at   timestamptz,
                 runner_sha     text NOT NULL,
                 dataset_id     text NOT NULL,
                 dataset_sha256 text NOT NULL,
@@ -114,6 +116,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
+    monkeypatch.setenv("POSTHOG_DISABLED", "true")
 
     settings = Settings()
 
@@ -143,6 +146,33 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
         yield test_app
 
 
+@pytest.fixture
+def app_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[dict[str, str] | None], Awaitable[FastAPI]]:
+    """Build an app with a stubbed pool so lifespan and analytics wiring can be
+    tested without spinning up Postgres. The caller drives the lifespan.
+    """
+
+    async def _factory(extra_env: dict[str, str] | None = None) -> FastAPI:
+        monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
+        monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
+        monkeypatch.setenv("DATASET_ID", "stt-v1")
+        monkeypatch.setenv("RUNNER_SHA", "test-sha")
+        monkeypatch.setenv("POSTHOG_DISABLED", "true")
+        for key, value in (extra_env or {}).items():
+            monkeypatch.setenv(key, value)
+
+        @asynccontextmanager
+        async def stub_lifespan_pool(s: Settings) -> AsyncIterator[MagicMock]:
+            yield MagicMock()
+
+        monkeypatch.setattr("coval_bench.api.app.lifespan_pool", stub_lifespan_pool)
+        return create_app(Settings())
+
+    return _factory
+
+
 @pytest_asyncio.fixture
 async def client(app: FastAPI) -> AsyncIterator[AsyncClient]:
     """httpx AsyncClient pointed at the test FastAPI app."""
@@ -163,12 +193,16 @@ async def _insert_run(postgresql: Any, **kwargs: Any) -> int:
             "dataset_id": "librispeech-test-clean-50",
             "dataset_sha256": "sha256test",
             "status": "succeeded",
+            "scheduled_at": None,
         }
         defaults.update(kwargs)
         row = await aconn.execute(
             """
-            INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
-            VALUES (%(runner_sha)s, %(dataset_id)s, %(dataset_sha256)s, %(status)s)
+            INSERT INTO benchmarks_v2.runs
+                (runner_sha, dataset_id, dataset_sha256, status, scheduled_at)
+            VALUES
+                (%(runner_sha)s, %(dataset_id)s, %(dataset_sha256)s, %(status)s,
+                 %(scheduled_at)s)
             RETURNING id
             """,
             defaults,

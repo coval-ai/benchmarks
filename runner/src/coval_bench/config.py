@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     runner_sha: str = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    # Scheduler period in seconds. The runner floors its start time to this grid
+    # to compute each run's scheduled_at. MUST stay in sync with the Cloud
+    # Scheduler cron cadence (*/30 -> 1800, */15 -> 900); set via the
+    # SCHEDULE_PERIOD_SECONDS env var, owned by the infra repo.
+    schedule_period_seconds: int = Field(default=1800, gt=0)
+
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
@@ -69,6 +75,11 @@ class Settings(BaseSettings):
     # GCP project ID hosting the Google STT v2 recognizer. Required only when
     # the Google STT provider is enabled (optional `google-stt` extra).
     google_project_id: str | None = None
+
+    # --- Analytics ---
+    posthog_project_token: str = ""
+    posthog_host: str = "https://us.i.posthog.com"
+    posthog_disabled: bool = False
 
     # --- API ---
     cors_origins: list[str] = [

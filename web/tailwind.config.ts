@@ -4,7 +4,6 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: "class",
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -46,10 +45,19 @@ const config: Config = {
         "chart-median": "var(--color-chart-median)",
         "chart-box-fill": "var(--color-chart-box-fill)",
         "chart-bar-stroke": "var(--color-chart-bar-stroke)",
+        // Brand accents (coval.ai)
+        "accent-rust": "var(--color-accent-rust)",
+        "accent-teal": "var(--color-accent-teal)",
+        "accent-terracotta": "var(--color-accent-terracotta)",
+        "accent-pink": "var(--color-accent-pink)",
+        "accent-orange": "var(--color-accent-orange)",
+        "accent-sage": "var(--color-accent-sage)",
+        "accent-blue": "var(--color-accent-blue)",
+        "accent-lavender": "var(--color-accent-lavender)",
       },
       fontFamily: {
-        sans: ["var(--font-montserrat)", "Montserrat", "Arial", "Helvetica", "sans-serif"],
-        mono: ["var(--font-montserrat)", "Montserrat", "Arial", "Helvetica", "sans-serif"],
+        sans: ["var(--font-sans)", "PP Mori", "system-ui", "-apple-system", "sans-serif"],
+        mono: ["var(--font-mono)", "Geist Mono", "ui-monospace", "monospace"],
       },
     },
   },

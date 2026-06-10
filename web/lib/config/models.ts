@@ -8,12 +8,14 @@ export const modelDisplayNames: Record<string, string> = {
   eleven_flash_v2_5: "Flash v2.5",
   eleven_turbo_v2_5: "Turbo v2.5",
   "sonic-3": "Sonic 3",
+  "sonic-3.5": "Sonic 3.5",
   "aura-2-thalia-en": "Aura 2",
   arcana: "Arcana",
   mistv3: "Mist v3",
   "octave-tts": "Octave TTS",
   "octave-2": "Octave 2",
   coda: "Coda",
+  "grok-tts": "Grok TTS",
   // STT
   "nova-2": "Nova 2",
   "nova-3": "Nova 3",
@@ -21,16 +23,20 @@ export const modelDisplayNames: Record<string, string> = {
   "flux-general-multi": "Flux Multilingual",
   "grok-stt": "Grok STT",
   scribe_v2_realtime: "Scribe v2 Realtime",
+  "gpt-realtime-whisper": "GPT Realtime Whisper",
   "universal-streaming": "Universal Streaming",
+  "ink-2": "Ink 2",
   default: "Default",
   enhanced: "Enhanced"
 };
 
 export const sttProviderNames: Record<string, string> = {
   assemblyai: "AssemblyAI",
+  cartesia: "Cartesia",
   deepgram: "Deepgram",
   elevenlabs: "ElevenLabs",
   gradium: "Gradium",
+  openai: "OpenAI",
   speechmatics: "Speechmatics",
   xai: "xAI"
 };
@@ -42,5 +48,6 @@ export const ttsProviderNames: Record<string, string> = {
   gradium: "Gradium",
   hume: "Hume",
   openai: "OpenAI",
-  rime: "Rime"
+  rime: "Rime",
+  xai: "xAI"
 };
