@@ -411,7 +411,7 @@ export function TTSPlaygroundPanel({
           </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {rows.length > 0 && !hasInFlight ? (
+          {Object.keys(generationRows).length > 0 && !hasInFlight ? (
             <button
               type="button"
               onClick={() => setBenchmarkOpen(true)}
