@@ -61,7 +61,7 @@ class Result(BaseModel):
     model: str
     voice: str | None = None
     benchmark: Benchmark
-    metric_type: str  # values come from coval_bench.metrics.registry.Metric
+    metric_type: str  # values come from coval_bench.registries.Metric
     metric_value: float | None
     metric_units: str | None
     audio_filename: str | None = None

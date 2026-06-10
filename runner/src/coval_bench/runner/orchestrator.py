@@ -17,7 +17,8 @@ Design notes
   ``importlib.import_module`` so that ``coval_bench.runner`` is importable on
   its own even when sibling agents haven't landed yet.  Names are resolved at
   call time, not at module load, which also lets tests patch ``sys.modules``
-  without triggering import errors.
+  without triggering import errors.  ``coval_bench.registries`` is the
+  exception: dependency-light by design, imported eagerly.
 - Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections.
 - Timeouts: ``asyncio.timeout(45)`` for STT, ``asyncio.timeout(60)`` for TTS.
 - Audio cleanup: TTS audio files are deleted in ``finally`` blocks; this module
@@ -47,6 +48,7 @@ from pydantic import BaseModel
 
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
+from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
 from coval_bench.runner.retry import with_retry
 
@@ -171,12 +173,6 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
-def _get_metric_registry() -> tuple[Any, Any]:
-    """Return (Metric, METRIC_SPECS) at call time."""
-    mod = importlib.import_module("coval_bench.metrics")
-    return mod.Metric, mod.METRIC_SPECS
-
-
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -203,7 +199,6 @@ async def _run_stt_item(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     compute_wer, compute_rtf = _get_metrics()
-    Metric, METRIC_SPECS = _get_metric_registry()
 
     results: list[Any] = []
 
@@ -456,7 +451,6 @@ async def _run_tts_item(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     compute_wer, _ = _get_metrics()
-    Metric, METRIC_SPECS = _get_metric_registry()
 
     results: list[Any] = []
     audio_path: Path | None = None

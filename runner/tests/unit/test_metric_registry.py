@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from coval_bench.db.models import Benchmark
-from coval_bench.metrics import METRIC_SPECS, Metric, MetricDirection
+from coval_bench.registries import METRIC_SPECS, Metric, MetricDirection
 
 
 def test_every_metric_has_a_spec() -> None:

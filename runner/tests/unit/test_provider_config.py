@@ -4,11 +4,10 @@
 
 from __future__ import annotations
 
+from coval_bench.registries import TAG_CATEGORIES, ModelTag
 from coval_bench.runner.config import (
     DEFAULT_STT_MATRIX,
     DEFAULT_TTS_MATRIX,
-    TAG_CATEGORIES,
-    ModelTag,
     ProviderEntry,
 )
 

@@ -27,7 +27,7 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.models import Result, Run, RunStatus
-from coval_bench.metrics.registry import Metric
+from coval_bench.registries import Metric
 
 
 class RunWriter:
@@ -104,7 +104,7 @@ class RunWriter:
             except ValueError as exc:
                 raise ValueError(
                     f"unknown metric_type {r.metric_type!r} (run_id={r.run_id}); "
-                    "expected a coval_bench.metrics.registry.Metric value"
+                    "expected a coval_bench.registries.Metric value"
                 ) from exc
 
         sql = """
