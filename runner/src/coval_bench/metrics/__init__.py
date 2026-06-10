@@ -2,6 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public API for coval_bench metrics."""
 
+from coval_bench.metrics.registry import (
+    METRIC_SPECS,
+    Metric,
+    MetricDirection,
+    MetricSpec,
+)
 from coval_bench.metrics.ttfa import compute_ttfa, first_audible_offset_ms
 from coval_bench.metrics.ttft import (
     compute_audio_to_final,
@@ -12,6 +18,10 @@ from coval_bench.metrics.ttft import (
 from coval_bench.metrics.wer import WERResult, WordError, compute_wer, normalize_text
 
 __all__ = [
+    "METRIC_SPECS",
+    "Metric",
+    "MetricDirection",
+    "MetricSpec",
     "WERResult",
     "WordError",
     "compute_wer",
