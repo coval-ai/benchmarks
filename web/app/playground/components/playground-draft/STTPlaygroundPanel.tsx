@@ -684,6 +684,16 @@ export function STTPlaygroundPanel({
             Hold Enter to record, release to stop (when focus isn&apos;t in a control) · Ranking by first recognized word after upload (not live TTFT)
           </p>
         </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {phase === "complete" && leaderRows.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setLeaderOpen(true)}
+            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg sm:self-auto"
+          >
+            View results
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={handleRecord}
@@ -720,6 +730,7 @@ export function STTPlaygroundPanel({
                 ? "New take"
                 : "Record"}
         </button>
+        </div>
       </div>
 
       {leaderOpen && leaderRows.length > 0 && portalRoot

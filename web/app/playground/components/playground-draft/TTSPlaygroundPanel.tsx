@@ -410,6 +410,16 @@ export function TTSPlaygroundPanel({
             ))}
           </div>
         </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        {rows.length > 0 && !hasInFlight ? (
+          <button
+            type="button"
+            onClick={() => setBenchmarkOpen(true)}
+            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg sm:self-auto"
+          >
+            View results
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={!canBenchmark || hasInFlight}
@@ -424,6 +434,7 @@ export function TTSPlaygroundPanel({
           <Play className="size-4 shrink-0" aria-hidden />
           Benchmark
         </button>
+        </div>
       </div>
 
       {benchmarkOpen && portalRoot
