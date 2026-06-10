@@ -78,7 +78,10 @@ def test_websocket_url_contains_required_params() -> None:
 
 
 @pytest.mark.asyncio
-async def test_force_endpoint_sent_before_terminate(fake_api_key: SecretStr) -> None:
+async def test_force_endpoint_sent_before_terminate(
+    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     sent: list[Any] = []
     final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
     ws = FakeWebSocket([final], on_send=sent.append)

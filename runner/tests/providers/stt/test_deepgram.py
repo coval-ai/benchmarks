@@ -126,7 +126,10 @@ def test_build_websocket_url_flux() -> None:
 
 
 @pytest.mark.asyncio
-async def test_nova_sends_finalize_before_close(fake_api_key: SecretStr) -> None:
+async def test_nova_sends_finalize_before_close(
+    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("coval_bench.providers.stt.deepgram._FINAL_WAIT_S", 0.05)
     sent: list[Any] = []
     final = {
         "type": "Results",

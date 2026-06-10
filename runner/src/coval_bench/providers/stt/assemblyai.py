@@ -135,7 +135,9 @@ class AssemblyAIProvider(STTProvider):
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
             # Force finalization at speech-end (TTFS parity), then wait for the final
-            # before terminating so the close can't race it.
+            # before terminating so the close can't race it. Clear first: the event may
+            # already be set by an earlier final, which would make the wait a no-op.
+            final_event.clear()
             await ws.send(json.dumps({"type": "ForceEndpoint"}))
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)

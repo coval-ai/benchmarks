@@ -167,6 +167,9 @@ class DeepgramProvider(STTProvider):
             # wait for the forced final before closing so the close can't race it. Flux
             # has no Finalize and can't be forced, so it's left on its native EOT.
             if not self._model.startswith("flux-"):
+                # Clear first: nova can emit an is_final segment mid-stream, which would
+                # leave the latch set and make the wait a no-op.
+                final_event.clear()
                 await ws.send(json.dumps({"type": "Finalize"}))
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
