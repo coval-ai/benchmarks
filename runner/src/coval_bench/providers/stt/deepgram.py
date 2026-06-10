@@ -14,6 +14,7 @@ Close: {"type": "CloseStream"}
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
@@ -25,6 +26,11 @@ from pydantic import SecretStr
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
+
+# After Finalize, wait this long for the forced final before sending CloseStream,
+# so the close can't race the final (the WS close-gate bug class). Falls through on
+# timeout — the outer per-item timeout still bounds the run.
+_FINAL_WAIT_S = 5.0
 
 
 class DeepgramProvider(STTProvider):
@@ -106,6 +112,7 @@ class DeepgramProvider(STTProvider):
             url = self._build_websocket_url(sample_rate, channels)
             headers = {"Authorization": f"Token {self._api_key.get_secret_value()}"}
 
+            final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
                 send_task = asyncio.create_task(
                     self._send_audio(
@@ -116,9 +123,10 @@ class DeepgramProvider(STTProvider):
                         sample_rate,
                         result,
                         realtime_resolution,
+                        final_event,
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
+                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
@@ -141,6 +149,7 @@ class DeepgramProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
+        final_event: asyncio.Event,
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
         data = audio_data
@@ -154,10 +163,13 @@ class DeepgramProvider(STTProvider):
                     first_chunk = False
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
-            # nova finalizes on our signal (endpointing disabled); Flux has no
-            # Finalize and can't be forced, so it's left on its native EOT.
+            # nova finalizes on our signal (endpointing disabled): send Finalize, then
+            # wait for the forced final before closing so the close can't race it. Flux
+            # has no Finalize and can't be forced, so it's left on its native EOT.
             if not self._model.startswith("flux-"):
                 await ws.send(json.dumps({"type": "Finalize"}))
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "CloseStream"}))
         except Exception as exc:
             logger.exception("deepgram send error", error=str(exc))
@@ -167,7 +179,9 @@ class DeepgramProvider(STTProvider):
     # Receive helpers
     # ------------------------------------------------------------------
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(
+        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+    ) -> None:
         final_segments: list[str] = []
         pending_partial: str = ""
         flux_turns: dict[int, str] = {}
@@ -243,6 +257,7 @@ class DeepgramProvider(STTProvider):
                     final_segments.append(transcript)
                     pending_partial = ""
                     last_final_time = now
+                    final_event.set()
                 else:
                     # Keep the longest interim as the not-yet-finalized tail.
                     if len(transcript) > len(pending_partial):

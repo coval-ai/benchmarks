@@ -126,19 +126,22 @@ def test_build_websocket_url_flux() -> None:
 
 
 @pytest.mark.asyncio
-async def test_nova_sends_finalize_before_close(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_nova_sends_finalize_before_close(fake_api_key: SecretStr) -> None:
     sent: list[Any] = []
-    ws = FakeWebSocket([], on_send=sent.append)
+    final = {
+        "type": "Results",
+        "is_final": True,
+        "channel": {"alternatives": [{"transcript": "hello"}]},
+    }
+    ws = FakeWebSocket([final], on_send=sent.append)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
     provider = DeepgramProvider(api_key=fake_api_key, model="nova-3")
 
     with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
-        await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
+        result = await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
             channels=1,
             sample_width=2,
             sample_rate=16000,
@@ -148,6 +151,8 @@ async def test_nova_sends_finalize_before_close(
     text = [m for m in sent if isinstance(m, str)]
     assert '"Finalize"' in text[-2]
     assert '"CloseStream"' in text[-1]
+    # The forced final is captured before the close (gate + response-capture path).
+    assert result.audio_to_final_seconds is not None
 
 
 @pytest.mark.asyncio

@@ -78,11 +78,10 @@ def test_websocket_url_contains_required_params() -> None:
 
 
 @pytest.mark.asyncio
-async def test_force_endpoint_sent_before_terminate(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_force_endpoint_sent_before_terminate(fake_api_key: SecretStr) -> None:
     sent: list[Any] = []
-    ws = FakeWebSocket([], on_send=sent.append)
+    final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
+    ws = FakeWebSocket([final], on_send=sent.append)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -91,8 +90,8 @@ async def test_force_endpoint_sent_before_terminate(
     with patch(
         "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
     ) as mock_connect:
-        await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
+        result = await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
             channels=1,
             sample_width=2,
             sample_rate=16000,
@@ -100,11 +99,13 @@ async def test_force_endpoint_sent_before_terminate(
         )
 
     url = mock_connect.call_args.args[0]
-    assert "end_of_turn_confidence_threshold=" in url
+    assert "end_of_turn_confidence_threshold=1.0" in url
 
     text = [m for m in sent if isinstance(m, str)]
     assert '"ForceEndpoint"' in text[-2]
     assert '"Terminate"' in text[-1]
+    # The forced final is captured before the close (gate + response-capture path).
+    assert result.audio_to_final_seconds is not None
 
 
 # ---------------------------------------------------------------------------
