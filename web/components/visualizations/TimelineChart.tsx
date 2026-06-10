@@ -66,9 +66,10 @@ const TimelineChart: React.FC = () => {
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
-  // STT shows a TTFS (default) / TTFT toggle; TTS is single-metric (TTFA).
+  // STT shows a TTFS / TTFT toggle; TTS is single-metric (TTFA). Defaulting to
+  // TTFT for now; flip back to "TTFS" once enough TTFS data has accumulated.
   const [metric, setMetric] = useState<string>(
-    activeTab === "stt" ? "TTFS" : "TTFA"
+    activeTab === "stt" ? "TTFT" : "TTFA"
   );
 
   const themeColors = useThemeColors();

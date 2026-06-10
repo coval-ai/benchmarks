@@ -241,19 +241,26 @@ export function useChartData({
     [boxPlotDataMemo]
   );
 
-  // One (avg latency, avg WER) point per model. The averages are independent
-  // per metric — not restricted to runs that produced both.
-  const scatterByModel = useMemo<Record<string, ScatterDataPoint>>(() => {
-    const xMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-
-    const byModel: Record<string, ScatterDataPoint> = {};
+  // Per-metric, per-model scatter point (avg latency, avg WER) built in one
+  // pass, indexed by metric_type so any latency metric can read its own points.
+  // Averages are independent per metric — not restricted to runs producing both.
+  const scatterByMetricModel = useMemo<
+    Record<string, Record<string, ScatterDataPoint>>
+  >(() => {
+    const out: Record<string, Record<string, ScatterDataPoint>> = {};
     modelStats.forEach((stat) => {
-      if (stat.metric_type !== xMetric) return;
-
+      // Only latency metrics belong on the scatter's x-axis; skip WER/RTF/etc.
+      if (
+        stat.metric_type !== "TTFS" &&
+        stat.metric_type !== "TTFT" &&
+        stat.metric_type !== "TTFA"
+      ) {
+        return;
+      }
       const modelKey = toModelKey(stat.provider, stat.model);
       const werStat = getStat(modelKey, "WER");
       if (!werStat) return;
-
+      const byModel = (out[stat.metric_type] ??= {});
       byModel[modelKey] = {
         x: toDisplayUnits(stat.avg_value),
         y: werStat.avg_value,
@@ -266,26 +273,19 @@ export function useChartData({
         count: stat.sample_count
       };
     });
-    return byModel;
+    return out;
   }, [modelStats, activeTab, getStat, toDisplayUnits]);
 
-  const scatterDataMemo = useMemo<ScatterDataPoint[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-
-    const points: ScatterDataPoint[] = [];
-    selectedModels.forEach((model) => {
-      const point = scatterByModel[model];
-      if (point) {
-        points.push(point);
-      }
-    });
-    return points;
-  }, [scatterByModel, activeTab, selectedTTSModels, selectedSTTModels]);
-
   const getScatterData = useCallback(
-    (): ScatterDataPoint[] => scatterDataMemo,
-    [scatterDataMemo]
+    (metric: string): ScatterDataPoint[] => {
+      const selectedModels =
+        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+      const byModel = scatterByMetricModel[metric] ?? {};
+      return selectedModels
+        .map((model) => byModel[model])
+        .filter((point): point is ScatterDataPoint => point !== undefined);
+    },
+    [scatterByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
   );
 
   // STT heatmap: latency deltas relative to the fastest selected model at

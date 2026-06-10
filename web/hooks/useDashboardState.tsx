@@ -232,7 +232,6 @@ export function useDashboardState(page: "tts" | "stt") {
   } = keyMetrics;
 
   // Get computed data
-  const scatterData = chartData.getScatterData();
   const heatmapData = chartData.getModelHeatmapData();
   const werBarData = chartData.getWERBarData();
 
@@ -368,7 +367,7 @@ export function useDashboardState(page: "tts" | "stt") {
     getBoxPlotData: chartData.getBoxPlotData,
 
     // Computed chart data
-    scatterData,
+    getScatterData: chartData.getScatterData,
     heatmapDisplayData,
     werBarDataWithColors,
 
