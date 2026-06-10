@@ -12,6 +12,9 @@ import {
   toModelKey,
 } from "@/lib/utils/formatters";
 import type { ModelStatEntry } from "@/lib/api/client";
+import { useTimeWindow } from "@/hooks/useTimeWindow";
+import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
+import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
 
 const TOP_N = 5;
@@ -39,11 +42,15 @@ function toRows(
     }));
 }
 
+const windowBadge = (window: TimeWindow): string => `Last ${WINDOW_LABELS[window]}`;
+
 const OverviewLeaderboards: React.FC = () => {
-  // Same endpoint and params the /tts and /stt pages use, so React Query
-  // serves both from one cache entry and the numbers are identical.
-  const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: "24h" });
-  const sttQuery = useAggregatesQuery({ benchmark: "STT", window: "24h" });
+  const { timeWindow, changeTimeWindow } = useTimeWindow("overview");
+
+  // Params match what /tts and /stt send, so React Query shares a cache
+  // entry with the dashboards whenever the selected windows coincide.
+  const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
+  const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
 
   const ttsRows = useMemo(
     () =>
@@ -70,23 +77,32 @@ const OverviewLeaderboards: React.FC = () => {
   );
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <LeaderboardCard
-        title="Text-to-Speech"
-        metricLabel="Time to First Audio"
-        rows={ttsRows}
-        href="/tts"
-        loading={ttsQuery.isLoading}
-        error={ttsQuery.isError}
-      />
-      <LeaderboardCard
-        title="Speech-to-Text"
-        metricLabel="Word Error Rate"
-        rows={sttRows}
-        href="/stt"
-        loading={sttQuery.isLoading}
-        error={sttQuery.isError}
-      />
+    <div>
+      <div className="mb-3 flex justify-end">
+        <TimeWindowToggle value={timeWindow} onChange={changeTimeWindow} />
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <LeaderboardCard
+          title="Text-to-Speech"
+          metricLabel="Time to First Audio"
+          windowLabel={windowBadge(ttsQuery.data?.window ?? timeWindow)}
+          rows={ttsRows}
+          href="/tts"
+          loading={ttsQuery.isLoading}
+          stale={ttsQuery.isPlaceholderData}
+          error={ttsQuery.isError}
+        />
+        <LeaderboardCard
+          title="Speech-to-Text"
+          metricLabel="Word Error Rate"
+          windowLabel={windowBadge(sttQuery.data?.window ?? timeWindow)}
+          rows={sttRows}
+          href="/stt"
+          loading={sttQuery.isLoading}
+          stale={sttQuery.isPlaceholderData}
+          error={sttQuery.isError}
+        />
+      </div>
     </div>
   );
 };

@@ -18,6 +18,8 @@ metric_value, from parent runs in (succeeded, partial).
 
 from __future__ import annotations
 
+import asyncio
+from collections import defaultdict
 from typing import Any
 
 import psycopg.rows
@@ -28,6 +30,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
     SCHEDULED_AT_BUCKET_SQL,
     WINDOW_INTERVALS,
@@ -37,6 +40,7 @@ from coval_bench.api.common import (
 from coval_bench.api.deps import (
     capture_api_event,
     get_cache,
+    get_cache_locks,
     get_pool,
     get_posthog,
     get_settings,
@@ -96,6 +100,7 @@ async def get_results_aggregates(
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
+    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -103,11 +108,8 @@ async def get_results_aggregates(
         benchmark: One of STT, TTS.
         window: Time window over results.created_at. Defaults to 24h.
     """
-    cache_key = ("aggregates", benchmark, window)
-    response: AggregatesResponse | None = cache.get(cache_key)
-    cache_hit = response is not None
 
-    if response is None:
+    async def fill() -> AggregatesResponse:
         params: dict[str, Any] = {
             "benchmark": benchmark,
             "interval": WINDOW_INTERVALS[window],
@@ -122,13 +124,15 @@ async def get_results_aggregates(
             stat_rows = await (await conn.execute(_STATS_SQL, params)).fetchall()
             series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
 
-        response = AggregatesResponse(
+        return AggregatesResponse(
             benchmark=benchmark,
             window=window,
             model_stats=[ModelStatEntry.model_validate(r) for r in stat_rows],
             series=[SeriesPoint.model_validate(r) for r in series_rows],
         )
-        cache[cache_key] = response
+
+    cache_key = ("aggregates", benchmark, window)
+    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
         posthog_client,
@@ -138,7 +142,8 @@ async def get_results_aggregates(
             "window": window,
             "model_stat_count": len(response.model_stats),
             "series_point_count": len(response.series),
-            "cache_hit": cache_hit,
+            "cache_hit": cache_status != "miss",
+            "cache_status": cache_status,
             "$process_person_profile": False,
         },
     )

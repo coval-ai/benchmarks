@@ -26,7 +26,7 @@ from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
-from coval_bench.api.cache import new_response_cache
+from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.routers import aggregates, health, leaderboard, providers, results, runs
 from coval_bench.config import Settings, get_settings
@@ -97,6 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.state.response_cache = new_response_cache()
+    app.state.cache_locks = new_cache_locks()
 
     # Rate limiting (ADR-013) — in-memory per-instance; see ratelimit.py for caveat.
     app.state.limiter = limiter

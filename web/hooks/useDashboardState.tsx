@@ -19,18 +19,29 @@ import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import { useTimeWindow } from "@/hooks/useTimeWindow";
 
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const { timeWindow, changeTimeWindow } = useTimeWindow(
+    `${page}_dashboard`,
+    page
+  );
 
   const benchmarkParam = page === "tts" ? "TTS" : "STT";
 
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
-    window: "24h",
+    window: timeWindow,
   });
   const providersQuery = useProvidersQuery();
+
+  // The charts keep showing the prior window's data while a new one loads,
+  // so window-derived rendering must follow the data, not the toggle.
+  const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
+  const windowDataStale = aggregatesQuery.isPlaceholderData;
+  const loadError = aggregatesQuery.isError;
 
   const modelStats = useMemo(
     () => aggregatesQuery.data?.model_stats ?? [],
@@ -63,6 +74,7 @@ export function useDashboardState(page: "tts" | "stt") {
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
     modelsByProvider,
+    timeWindow: dataTimeWindow,
   });
 
   // Event handlers
@@ -329,6 +341,7 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // Data loading
     loading,
+    loadError,
 
     // Model state
     selectedModels,
@@ -336,9 +349,13 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // UI state
     isMobile,
+    timeWindow,
+    dataTimeWindow,
+    windowDataStale,
 
     // Actions
     toggleModelSelection,
+    changeTimeWindow,
 
     // Chart data functions
     formatChartLabel: chartData.formatChartLabel,

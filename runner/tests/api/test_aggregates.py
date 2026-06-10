@@ -5,14 +5,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, get_args
 
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 
+from coval_bench.api.common import WINDOW_INTERVALS, WindowLiteral
 from tests.api.conftest import _insert_result, _insert_run
+
+
+def test_intervals_cover_every_window() -> None:
+    """Every WindowLiteral value must have an interval — a window added to
+    the literal but not the dict 500s after validation."""
+    assert set(WINDOW_INTERVALS) == set(get_args(WindowLiteral))
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:
@@ -173,6 +183,72 @@ async def test_cache_keyed_by_params(client: AsyncClient, postgresql: Any) -> No
     r_30d = await client.get("/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"})
     assert r_24h.json()["model_stats"] == []
     assert r_30d.json()["model_stats"][0]["sample_count"] == 1
+
+
+async def test_concurrent_misses_coalesce(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    """Simultaneous uncached requests for one key acquire a pool connection
+    once; the rest wait on the per-key lock and read the warmed cache."""
+    from coval_bench.api import deps
+
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, metric_value=1.0)
+
+    acquisitions = 0
+    real_pool = app.state.pool
+
+    class CountingPool:
+        @asynccontextmanager
+        async def connection(self) -> Any:
+            nonlocal acquisitions
+            acquisitions += 1
+            # Hold the connection long enough that every gathered request
+            # passes the unlocked cache check before the first one fills it.
+            await asyncio.sleep(0.2)
+            async with real_pool.connection() as conn:
+                yield conn
+
+    app.dependency_overrides[deps.get_pool] = CountingPool
+    try:
+        responses = await asyncio.gather(
+            *(client.get("/v1/results/aggregates", params={"benchmark": "STT"}) for _ in range(5))
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert all(r.status_code == 200 for r in responses)
+    bodies = [r.json() for r in responses]
+    assert all(b == bodies[0] for b in bodies)
+    assert bodies[0]["model_stats"][0]["sample_count"] == 1
+    assert acquisitions == 1
+
+
+async def test_failed_fill_shared_not_retried(client: AsyncClient, app: FastAPI) -> None:
+    """A failing query is re-raised to requests inside the failure window
+    instead of each one re-running it against the pool."""
+    from coval_bench.api import deps
+
+    acquisitions = 0
+
+    class FailingPool:
+        @asynccontextmanager
+        async def connection(self) -> Any:
+            nonlocal acquisitions
+            acquisitions += 1
+            raise RuntimeError("db down")
+            yield  # noqa: B901 — unreachable; makes this an async generator
+
+    app.dependency_overrides[deps.get_pool] = FailingPool
+    try:
+        with pytest.raises(RuntimeError, match="db down"):
+            await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+        with pytest.raises(RuntimeError, match="db down"):
+            await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert acquisitions == 1
 
 
 async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -> None:

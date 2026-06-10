@@ -13,9 +13,17 @@ import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
 import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
+import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { loading, benchmarkTitle } = useDashboard();
+  const {
+    loading,
+    loadError,
+    benchmarkTitle,
+    timeWindow,
+    changeTimeWindow,
+    windowDataStale,
+  } = useDashboard();
   const mode = useActiveTab();
   const firedDepthsRef = useRef<Set<number>>(new Set());
 
@@ -50,13 +58,38 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
       {/* Content column — centered on the page (under the centered tabs). The
           18rem side gutters keep its left edge clear of the fixed sidebar
-          (17rem wide) with a 1rem gap. The footer stays full-width. */}
-      <div className="relative z-10 flex-1 transition-all duration-300 pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden mx-auto lg:w-[calc(100vw-36rem)]">
-        <h1 className="mb-6 text-2xl font-bold tracking-tight text-text-primary">
-          {benchmarkTitle}
-        </h1>
+          (17rem wide) with a 1rem gap. The footer stays full-width.
+          w-full is load-bearing below lg: mx-auto disables the flex
+          cross-axis stretch, and the column would otherwise size to its
+          content and overflow the viewport. */}
+      <div className="relative z-10 flex-1 transition-all duration-300 pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden w-full mx-auto lg:w-[calc(100vw-36rem)]">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">
+            {benchmarkTitle}
+          </h1>
+          <TimeWindowToggle
+            value={timeWindow}
+            onChange={changeTimeWindow}
+            className="ml-auto"
+          />
+        </div>
 
-        {loading ? <DashboardSkeleton /> : children}
+        <div
+          className={`transition-opacity duration-200 ${
+            windowDataStale ? "opacity-60" : ""
+          }`}
+        >
+          {loading ? (
+            <DashboardSkeleton />
+          ) : loadError ? (
+            <div className="py-24 text-center text-sm text-text-tertiary">
+              Couldn&rsquo;t load benchmark results. Try another time window or
+              refresh the page.
+            </div>
+          ) : (
+            children
+          )}
+        </div>
       </div>
 
       {!loading && <DashboardFooter />}

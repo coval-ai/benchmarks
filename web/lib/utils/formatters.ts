@@ -20,6 +20,14 @@ export function formatTime(timestamp: number): string {
   });
 }
 
+/** Short month-day label (e.g. "Jun 5") for date-scale axis ticks. */
+export function formatDate(timestamp: number): string {
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric"
+  });
+}
+
 /**
  * Same as {@link formatTime} but includes seconds — used in tooltips where
  * the user is hovering a specific data point and wants higher precision.
