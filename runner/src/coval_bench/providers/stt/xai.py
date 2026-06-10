@@ -116,7 +116,10 @@ class XaiSTTProvider(STTProvider):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise RuntimeError(f"xAI did not signal ready within {timeout:.0f}s")
-            raw = await asyncio.wait_for(ws.recv(), timeout=min(5.0, remaining))
+            try:
+                raw = await asyncio.wait_for(ws.recv(), timeout=min(5.0, remaining))
+            except TimeoutError:
+                continue
             if isinstance(raw, bytes):
                 continue
 
