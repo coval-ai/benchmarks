@@ -112,6 +112,9 @@ class ModelStatEntry(BaseModel):
     p25: float
     p50: float
     p75: float
+    p90: float
+    p95: float
+    p99: float
     min_value: float
     max_value: float
     sample_count: int
