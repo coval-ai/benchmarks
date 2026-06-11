@@ -71,6 +71,7 @@ const TimelineChart: React.FC = () => {
   const [metric, setMetric] = useState<string>(
     activeTab === "stt" ? "TTFT" : "TTFA"
   );
+  const [pinnedLabel, setPinnedLabel] = useState<string | null>(null);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
@@ -160,6 +161,11 @@ const TimelineChart: React.FC = () => {
             <LineChart
               data={windowedTimelineData}
               margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
+              onClick={(state) => {
+                const lbl = state?.activeLabel;
+                if (lbl == null) return;
+                setPinnedLabel((cur) => (cur === lbl ? null : lbl));
+              }}
             >
               <CartesianGrid
                 vertical={false}
@@ -205,6 +211,9 @@ const TimelineChart: React.FC = () => {
                     showDate={dateScale}
                   />
                 }
+                trigger="click"
+                active={pinnedLabel !== null}
+                wrapperStyle={{ pointerEvents: "auto" }}
               />
               {modelsWithData.length > 1 && (
                 <Legend content={<TimelineLegend />} />

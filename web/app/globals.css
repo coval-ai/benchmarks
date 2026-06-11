@@ -192,3 +192,20 @@ body {
     rgba(0, 0, 0, 1) 60%
   );
 }
+
+.tooltip-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-text-tertiary) var(--color-border-secondary);
+}
+.tooltip-scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.tooltip-scroll::-webkit-scrollbar-track {
+  background: var(--color-border-secondary);
+  border-radius: 5px;
+}
+.tooltip-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--color-text-tertiary);
+  border-radius: 5px;
+  border: 2px solid var(--color-border-secondary);
+}
