@@ -11,7 +11,9 @@ at deploy time without a code change.
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from coval_bench.registries import ModelTag
 
 
 class ProviderEntry(BaseModel):
@@ -22,6 +24,8 @@ class ProviderEntry(BaseModel):
     voice: str | None = None  # TTS only
     enabled: bool
     disabled: bool = False  # admin-level "hide / don't run" flag; orthogonal to enabled
+    creator: str | None = None  # who makes the model; None means same as provider
+    tags: list[ModelTag] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

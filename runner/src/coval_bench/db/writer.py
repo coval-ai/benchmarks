@@ -27,6 +27,7 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.models import Result, Run, RunStatus
+from coval_bench.registries import Metric
 
 
 class RunWriter:
@@ -90,9 +91,21 @@ class RunWriter:
         All rows are inserted via ``executemany``.  If any row fails (e.g. a
         check-constraint violation), the whole batch is rolled back and the
         exception propagates.  The caller decides whether to retry.
+
+        Every ``metric_type`` must be a known ``Metric`` value; an unknown
+        value rejects the whole batch before any SQL is executed.
         """
         if not results:
             return
+
+        for r in results:
+            try:
+                Metric(r.metric_type)
+            except ValueError as exc:
+                raise ValueError(
+                    f"unknown metric_type {r.metric_type!r} (run_id={r.run_id}); "
+                    "expected a coval_bench.registries.Metric value"
+                ) from exc
 
         sql = """
             INSERT INTO benchmarks_v2.results

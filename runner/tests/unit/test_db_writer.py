@@ -513,3 +513,36 @@ def test_record_results_batch_rollback_on_failure(pg_conn: psycopg.Connection[An
     assert row is not None
     # Nothing committed — the batch rolled back
     assert row[0] == 0
+
+
+def test_record_results_rejects_unknown_metric_type(pg_conn: psycopg.Connection[Any]) -> None:
+    """An unknown metric_type rejects the whole batch before any SQL runs."""
+    _apply_migrations(pg_conn)
+
+    async def _run() -> int:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
+            )
+            assert run.id is not None
+            good = _make_result(run.id, idx=0)
+            bad = _make_result(run.id, idx=1).model_copy(update={"metric_type": "NOPE"})
+            with pytest.raises(ValueError, match="NOPE"):
+                await writer.record_results([good, bad])
+            return run.id
+        finally:
+            await pool.close()
+
+    run_id = asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
+            (run_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    assert row[0] == 0
