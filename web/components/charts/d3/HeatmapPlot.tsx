@@ -31,86 +31,46 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
   });
   const themeColors = useThemeColors();
 
-  // Define metrics based on active tab
   const metrics = useMemo(() => {
-    return activeTab === "tts"
-      ? [
-          {
-            key: "latencyP25" as keyof ModelHeatmapData,
-            label: "P25 Latency",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyP50" as keyof ModelHeatmapData,
-            label: "P50 Latency",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyP75" as keyof ModelHeatmapData,
-            label: "P75 Latency",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyIQR" as keyof ModelHeatmapData,
-            label: "Latency IQR",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "avgWER" as keyof ModelHeatmapData,
-            label: "Avg WER",
-            unit: "%",
-            lowerIsBetter: true
-          },
-          {
-            key: "werStdDev" as keyof ModelHeatmapData,
-            label: "WER Std Dev",
-            unit: "%",
-            lowerIsBetter: true
-          }
-        ]
-      : [
-          {
-            key: "latencyP25" as keyof ModelHeatmapData,
-            label: "P25 Delta",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyP50" as keyof ModelHeatmapData,
-            label: "P50 Delta",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyP75" as keyof ModelHeatmapData,
-            label: "P75 Delta",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "latencyIQR" as keyof ModelHeatmapData,
-            label: "Delta IQR",
-            unit: "ms",
-            lowerIsBetter: true
-          },
-          {
-            key: "avgWER" as keyof ModelHeatmapData,
-            label: "Avg WER",
-            unit: "%",
-            lowerIsBetter: true
-          },
-          {
-            key: "werStdDev" as keyof ModelHeatmapData,
-            label: "WER Std Dev",
-            unit: "%",
-            lowerIsBetter: true
-          }
-        ];
-  }, [activeTab]);
+    return [
+      {
+        key: "latencyP25" as keyof ModelHeatmapData,
+        label: "P25 Latency",
+        unit: "ms",
+        lowerIsBetter: true
+      },
+      {
+        key: "latencyP50" as keyof ModelHeatmapData,
+        label: "P50 Latency",
+        unit: "ms",
+        lowerIsBetter: true
+      },
+      {
+        key: "latencyP75" as keyof ModelHeatmapData,
+        label: "P75 Latency",
+        unit: "ms",
+        lowerIsBetter: true
+      },
+      {
+        key: "latencyIQR" as keyof ModelHeatmapData,
+        label: "Latency IQR",
+        unit: "ms",
+        lowerIsBetter: true
+      },
+      {
+        key: "avgWER" as keyof ModelHeatmapData,
+        label: "Avg WER",
+        unit: "%",
+        lowerIsBetter: true
+      },
+      {
+        key: "werStdDev" as keyof ModelHeatmapData,
+        label: "WER Std Dev",
+        unit: "%",
+        lowerIsBetter: true
+      }
+    ];
+  }, []);
 
   // Calculate dynamic height based on data
   const cellHeight = 50;
