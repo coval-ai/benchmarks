@@ -8,13 +8,9 @@ Exports the primary entrypoint `run_benchmarks` and the `RunSummary` result mode
 
 from __future__ import annotations
 
-from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
 from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
 
 __all__ = [
-    "DEFAULT_STT_MATRIX",
-    "DEFAULT_TTS_MATRIX",
-    "ProviderEntry",
     "RunSummary",
     "run_benchmarks",
 ]

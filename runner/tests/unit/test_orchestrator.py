@@ -17,7 +17,7 @@ Test catalogue
 7.  test_dataset_integrity_failure — DatasetIntegrityError → run FAILED, re-raised
 8.  test_audio_file_cleanup        — TTS audio deleted even when WER raises
 9.  test_matrix_overrides          — nova-3 disabled via override → not called
-10. test_disabled_providers_skipped — enabled=False entries not instantiated
+10. test_disabled_providers_skipped — non-ACTIVE entries not instantiated
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.runner.config import ProviderEntry
+from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel
 from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
 from coval_bench.runner.retry import with_retry
 
@@ -61,6 +61,42 @@ _TEST_SETTINGS = Settings(
 # ---------------------------------------------------------------------------
 # Stub factories
 # ---------------------------------------------------------------------------
+
+
+def _stt_entry(provider: str, model: str, *, active: bool = True) -> RegisteredModel:
+    return RegisteredModel(
+        benchmark=Benchmark.STT,
+        provider=provider,
+        model=model,
+        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
+    )
+
+
+def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) -> RegisteredModel:
+    return RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider=provider,
+        model=model,
+        voice=voice,
+        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
+    )
+
+
+def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
+    """First registered model for *provider* in *benchmark*; explicit error if missing."""
+    for m in MODEL_REGISTRY:
+        if m.benchmark is benchmark and m.provider == provider:
+            return m
+    raise AssertionError(f"no registered {benchmark} model for provider {provider!r}")
+
+
+def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
+    """Pause every registered model for *benchmark*, as an override base."""
+    return [
+        m.model_copy(update={"status": ModelStatus.PAUSED})
+        for m in MODEL_REGISTRY
+        if m.benchmark is benchmark
+    ]
 
 
 def _make_run(run_id: int = 1) -> Run:
@@ -244,8 +280,8 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     stt_providers = {"deepgram": provider_cls_a, "elevenlabs": provider_cls_b}
     items = [_make_dataset_item(audio_file)]
     matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("elevenlabs", "scribe_v2_realtime"),
     ]
 
     run = _make_run()
@@ -299,8 +335,8 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
 
     stt_providers = {"deepgram": provider_cls_ok, "elevenlabs": provider_cls_bad}
     matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("elevenlabs", "scribe_v2_realtime"),
     ]
 
     run = _make_run()
@@ -339,16 +375,10 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     provider_cls_bad = MagicMock(return_value=provider_bad)
 
     stt_providers = {"deepgram": provider_cls_bad}
-    # Override the full DEFAULT_STT_MATRIX so only nova-2 deepgram runs
-    from coval_bench.runner.config import DEFAULT_STT_MATRIX
-
+    # Override the full registry so only nova-2 deepgram runs
     matrix = [
-        # Disable all defaults and enable only the one failing provider
-        *[
-            ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
-            for e in DEFAULT_STT_MATRIX
-        ],
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", "nova-2"),
     ]
 
     run = _make_run()
@@ -382,17 +412,12 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
 @pytest.mark.asyncio
 async def test_flux_excluded_from_ttfs(audio_file: Path, settings: Settings) -> None:
     """Deepgram Flux is outside the TTFS parity cohort → no TTFS row, other metrics stay."""
-    from coval_bench.runner.config import DEFAULT_STT_MATRIX
-
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
     stt_providers = {"deepgram": MagicMock(return_value=provider)}
     matrix = [
-        *[
-            ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
-            for e in DEFAULT_STT_MATRIX
-        ],
-        ProviderEntry(provider="deepgram", model="flux-general-en", enabled=True),
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", "flux-general-en"),
     ]
 
     run = _make_run()
@@ -499,7 +524,7 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
 
     stt_providers = {"deepgram": provider_cls}
     items_50 = [_make_dataset_item(audio_file, f"item {i}") for i in range(50)]
-    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+    matrix = [_stt_entry("deepgram", "nova-2")]
 
     run = _make_run()
     writer = _make_stub_writer(run)
@@ -584,7 +609,7 @@ async def test_dataset_integrity_failure(settings: Settings) -> None:
         await run_benchmarks(
             settings=settings,
             benchmark_kind="stt",
-            matrix_overrides=[ProviderEntry(provider="deepgram", model="nova-2", enabled=True)],
+            matrix_overrides=[_stt_entry("deepgram", "nova-2")],
         )
 
     finish_call = writer.finish_run.call_args
@@ -648,14 +673,7 @@ async def test_audio_file_cleanup(settings: Settings) -> None:
         compute_wer_real = __import__("coval_bench.metrics", fromlist=["compute_wer"]).compute_wer
         compute_rtf_real = __import__("coval_bench.metrics", fromlist=["compute_rtf"]).compute_rtf
 
-        matrix = [
-            ProviderEntry(
-                provider="elevenlabs",
-                model="eleven_flash_v2_5",
-                voice="IKne3meq5aSn9XLyUdCD",
-                enabled=True,
-            )
-        ]
+        matrix = [_tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD")]
 
         with (
             patch(
@@ -748,21 +766,10 @@ async def test_tts_http1_downgrade_fails_ttfa_row(settings: Settings) -> None:
         compute_wer_real = __import__("coval_bench.metrics", fromlist=["compute_wer"]).compute_wer
         compute_rtf_real = __import__("coval_bench.metrics", fromlist=["compute_rtf"]).compute_rtf
 
-        from coval_bench.runner.config import DEFAULT_TTS_MATRIX
-
-        matrix_map = {
-            (e.provider, e.model): ProviderEntry(
-                provider=e.provider, model=e.model, voice=e.voice, enabled=False
-            )
-            for e in DEFAULT_TTS_MATRIX
-        }
-        matrix_map[("elevenlabs", "eleven_flash_v2_5")] = ProviderEntry(
-            provider="elevenlabs",
-            model="eleven_flash_v2_5",
-            voice="IKne3meq5aSn9XLyUdCD",
-            enabled=True,
-        )
-        matrix = list(matrix_map.values())
+        matrix = [
+            *_paused_registry(Benchmark.TTS),
+            _tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD"),
+        ]
 
         with (
             patch(
@@ -860,21 +867,10 @@ async def test_tts_cold_connection_fails_ttfa_row(settings: Settings) -> None:
         compute_wer_real = __import__("coval_bench.metrics", fromlist=["compute_wer"]).compute_wer
         compute_rtf_real = __import__("coval_bench.metrics", fromlist=["compute_rtf"]).compute_rtf
 
-        from coval_bench.runner.config import DEFAULT_TTS_MATRIX
-
-        matrix_map = {
-            (e.provider, e.model): ProviderEntry(
-                provider=e.provider, model=e.model, voice=e.voice, enabled=False
-            )
-            for e in DEFAULT_TTS_MATRIX
-        }
-        matrix_map[("elevenlabs", "eleven_flash_v2_5")] = ProviderEntry(
-            provider="elevenlabs",
-            model="eleven_flash_v2_5",
-            voice="IKne3meq5aSn9XLyUdCD",
-            enabled=True,
-        )
-        matrix = list(matrix_map.values())
+        matrix = [
+            *_paused_registry(Benchmark.TTS),
+            _tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD"),
+        ]
 
         with (
             patch(
@@ -940,22 +936,12 @@ async def test_matrix_overrides(audio_file: Path, settings: Settings) -> None:
 
     stt_providers = {"deepgram": _make_provider}
 
-    # Override: nova-2 enabled, nova-3 disabled; disable all others from DEFAULT too
-    from coval_bench.runner.config import DEFAULT_STT_MATRIX
-
-    full_matrix = [
-        ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
-        for e in DEFAULT_STT_MATRIX
+    # Override: nova-2 active, nova-3 paused; pause all others too
+    matrix = [
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("deepgram", "nova-3", active=False),
     ]
-    # Flip only nova-2 on
-    full_matrix_map = {(e.provider, e.model): e for e in full_matrix}
-    full_matrix_map[("deepgram", "nova-2")] = ProviderEntry(
-        provider="deepgram", model="nova-2", enabled=True
-    )
-    full_matrix_map[("deepgram", "nova-3")] = ProviderEntry(
-        provider="deepgram", model="nova-3", enabled=False
-    )
-    matrix = list(full_matrix_map.values())
 
     run = _make_run()
     writer = _make_stub_writer(run)
@@ -995,13 +981,8 @@ async def test_warmup_scoped_to_benchmark_kind(audio_file: Path, settings: Setti
     tts_cls.warmup = AsyncMock(return_value=None)
 
     matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        ProviderEntry(
-            provider="elevenlabs",
-            model="eleven_flash_v2_5",
-            voice="IKne3meq5aSn9XLyUdCD",
-            enabled=True,
-        ),
+        _stt_entry("deepgram", "nova-2"),
+        _tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD"),
     ]
 
     run = _make_run()
@@ -1033,7 +1014,7 @@ async def test_warmup_scoped_to_benchmark_kind(audio_file: Path, settings: Setti
 
 @pytest.mark.asyncio
 async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) -> None:
-    """Entries with enabled=False are never instantiated or called."""
+    """Entries whose status is not ACTIVE are never instantiated or called."""
     good = _good_transcription()
 
     provider_inst = MagicMock()
@@ -1044,8 +1025,8 @@ async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) 
 
     stt_providers = {"deepgram": provider_cls, "elevenlabs": disabled_cls}
     matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=False),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("elevenlabs", "scribe_v2_realtime", active=False),
     ]
 
     run = _make_run()
@@ -1066,54 +1047,6 @@ async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) 
         )
 
     disabled_cls.assert_not_called()
-    provider_cls.assert_called()
-
-
-# ---------------------------------------------------------------------------
-# 11. test_disabled_flag_skipped
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_disabled_flag_skipped(audio_file: Path, settings: Settings) -> None:
-    """Entries with disabled=True are never instantiated or called, even when enabled=True."""
-    good = _good_transcription()
-
-    provider_inst = MagicMock()
-    provider_inst.measure_ttft = AsyncMock(return_value=good)
-    provider_cls = MagicMock(return_value=provider_inst)
-
-    disabled_cls = MagicMock()
-
-    stt_providers = {"deepgram": provider_cls, "elevenlabs": disabled_cls}
-    matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        # enabled=True but disabled=True — the disabled flag must win
-        ProviderEntry(
-            provider="elevenlabs", model="scribe_v2_realtime", enabled=True, disabled=True
-        ),
-    ]
-
-    run = _make_run()
-    writer = _make_stub_writer(run)
-
-    async with _orchestrator_env(
-        audio_path=audio_file,
-        stt_items=[_make_dataset_item(audio_file)],
-        stt_providers=stt_providers,
-        run=run,
-        writer=writer,
-    ) as _:
-        await run_benchmarks(
-            settings=settings,
-            benchmark_kind="stt",
-            smoke=True,
-            matrix_overrides=matrix,
-        )
-
-    # The disabled provider class must never have been instantiated or called
-    disabled_cls.assert_not_called()
-    # The active provider was still called
     provider_cls.assert_called()
 
 
@@ -1152,8 +1085,8 @@ async def test_incremental_flush_persists_completed_tasks(
 
     stt_providers = {"deepgram": provider_cls_a, "elevenlabs": provider_cls_b}
     matrix = [
-        ProviderEntry(provider="deepgram", model="nova-2", enabled=True),
-        ProviderEntry(provider="elevenlabs", model="scribe_v2_realtime", enabled=True),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("elevenlabs", "scribe_v2_realtime"),
     ]
 
     run = _make_run()
@@ -1241,7 +1174,7 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     provider.measure_ttft = _slow_measure
     provider_cls = MagicMock(return_value=provider)
 
-    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+    matrix = [_stt_entry("deepgram", "nova-2")]
 
     run = _make_run()
     writer = _make_stub_writer(run)
@@ -1282,20 +1215,16 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
 # ---------------------------------------------------------------------------
 
 
-def _only_stt_matrix(provider: str, model: str) -> list[ProviderEntry]:
-    """Disable the whole default STT matrix and enable just one provider×model.
+def _only_stt_matrix(provider: str, model: str) -> list[RegisteredModel]:
+    """Pause the whole STT registry and activate just one provider×model.
 
-    Keeps a degraded-provider test isolated to a single Result set (the default
-    matrix runs deepgram across several models, which would otherwise collide).
+    Keeps a degraded-provider test isolated to a single Result set (the
+    registry runs deepgram across several models, which would otherwise
+    collide).
     """
-    from coval_bench.runner.config import DEFAULT_STT_MATRIX
-
     return [
-        *[
-            ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=False)
-            for e in DEFAULT_STT_MATRIX
-        ],
-        ProviderEntry(provider=provider, model=model, enabled=True),
+        *_paused_registry(Benchmark.STT),
+        _stt_entry(provider, model),
     ]
 
 
@@ -1469,9 +1398,7 @@ async def test_stt_ttfs_status_tracks_value(audio_file: Path, settings: Settings
 @pytest.mark.asyncio
 async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings) -> None:
     """TTS synth returns (no raise) with no ttfa/audio → TTFA FAILED, no WER row, run FAILED."""
-    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
-
-    hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+    hume_entry = _registry_entry(Benchmark.TTS, "hume")
     empty_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -1485,10 +1412,10 @@ async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings
     provider_inst.synthesize = AsyncMock(return_value=empty_tts)
     provider_cls = MagicMock(return_value=provider_inst)
 
-    # Enable exactly one hume entry; disable the rest of the default TTS matrix.
+    # Activate exactly one hume entry; pause the rest of the TTS registry.
     matrix = [
-        ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry))
-        for e in DEFAULT_TTS_MATRIX
+        *_paused_registry(Benchmark.TTS),
+        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
     ]
 
     run = _make_run()
@@ -1525,9 +1452,7 @@ async def test_tts_provider_error_wins_over_contamination(
     Transport contamination only downgrades a would-be SUCCESS; a real provider error keeps
     its own (more specific) message and suppresses WER.
     """
-    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
-
-    hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+    hume_entry = _registry_entry(Benchmark.TTS, "hume")
     errored_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -1543,8 +1468,8 @@ async def test_tts_provider_error_wins_over_contamination(
     provider_cls = MagicMock(return_value=provider_inst)
 
     matrix = [
-        ProviderEntry(provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry))
-        for e in DEFAULT_TTS_MATRIX
+        *_paused_registry(Benchmark.TTS),
+        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
     ]
 
     run = _make_run()
@@ -1618,13 +1543,12 @@ async def test_stt_wer_compute_failure_marked_failed(audio_file: Path, settings:
 @pytest.mark.asyncio
 async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
     """A Whisper transcription failure (our instrument) is logged, emits no WER row, no PARTIAL."""
-    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
 
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+        hume_entry = _registry_entry(Benchmark.TTS, "hume")
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
@@ -1640,10 +1564,8 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
         provider_cls = MagicMock(return_value=provider_inst)
 
         matrix = [
-            ProviderEntry(
-                provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry)
-            )
-            for e in DEFAULT_TTS_MATRIX
+            *_paused_registry(Benchmark.TTS),
+            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
         ]
 
         run = _make_run()
@@ -1677,7 +1599,6 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
 async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None:
     """compute_wer crashing after a good Whisper transcript → FAILED WER row, run PARTIAL."""
     from coval_bench.metrics import compute_rtf
-    from coval_bench.runner.config import DEFAULT_TTS_MATRIX
 
     def _raising_wer(*_args: Any, **_kwargs: Any) -> Any:
         raise ValueError("wer blew up")
@@ -1686,7 +1607,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = next(e for e in DEFAULT_TTS_MATRIX if e.provider == "hume")
+        hume_entry = _registry_entry(Benchmark.TTS, "hume")
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
@@ -1702,10 +1623,8 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         provider_cls = MagicMock(return_value=provider_inst)
 
         matrix = [
-            ProviderEntry(
-                provider=e.provider, model=e.model, voice=e.voice, enabled=(e is hume_entry)
-            )
-            for e in DEFAULT_TTS_MATRIX
+            *_paused_registry(Benchmark.TTS),
+            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
         ]
 
         run = _make_run()
@@ -1759,7 +1678,7 @@ async def test_posthog_completed_event(audio_file: Path, settings: Settings) -> 
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
     provider_cls = MagicMock(return_value=provider)
-    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+    matrix = [_stt_entry("deepgram", "nova-2")]
 
     run = _make_run()
     writer = _make_stub_writer(run)
@@ -1843,7 +1762,7 @@ async def test_posthog_failed_event(settings: Settings) -> None:
         await run_benchmarks(
             settings=settings,
             benchmark_kind="stt",
-            matrix_overrides=[ProviderEntry(provider="deepgram", model="nova-2", enabled=True)],
+            matrix_overrides=[_stt_entry("deepgram", "nova-2")],
         )
 
     fake.capture.assert_called_once()
@@ -1866,7 +1785,7 @@ async def test_posthog_capture_failure_does_not_fail_run(
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
     provider_cls = MagicMock(return_value=provider)
-    matrix = [ProviderEntry(provider="deepgram", model="nova-2", enabled=True)]
+    matrix = [_stt_entry("deepgram", "nova-2")]
 
     run = _make_run()
     writer = _make_stub_writer(run)
