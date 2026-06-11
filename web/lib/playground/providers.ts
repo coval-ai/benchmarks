@@ -14,7 +14,8 @@ export type TtsProviderId =
   | "cartesia"
   | "elevenlabs"
   | "deepgram"
-  | "rime";
+  | "rime"
+  | "gradium";
 
 export type SttProviderId =
   | "deepgram"
@@ -97,6 +98,14 @@ export const ttsModels: TtsModelConfig[] = [
     label: "Mist v3",
     model: "mistv3",
     voice: "luna",
+    enabled: true
+  },
+  {
+    id: "gradium:default:emma",
+    provider: "gradium",
+    label: "Default",
+    model: "default",
+    voice: "YTpq7expH9539ERJ",
     enabled: true
   }
 ];
