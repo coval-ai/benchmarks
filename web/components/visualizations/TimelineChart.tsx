@@ -172,7 +172,10 @@ const TimelineChart: React.FC = () => {
               <button
                 key={m}
                 type="button"
-                onClick={() => setMetric(m)}
+                onClick={() => {
+                  setMetric(m);
+                  setPinned(null);
+                }}
                 className={
                   "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
                   (metric === m
@@ -194,16 +197,27 @@ const TimelineChart: React.FC = () => {
               onClick={(state) => {
                 const lbl = state?.activeLabel;
                 const coord = state?.activeCoordinate;
-                if (lbl == null || !coord) return;
+                const payload = (state?.activePayload ?? []) as TooltipPayloadItem[];
+                const hasRows = payload.some(
+                  (item) => typeof item?.value === "number" && item.value > 0
+                );
+                if (lbl == null || !coord || !hasRows) return;
                 setPinned((cur) => {
                   if (cur && cur.label === lbl) return null;
                   const width = chartRef.current?.clientWidth ?? 0;
+                  const height = chartRef.current?.clientHeight ?? 0;
                   const x = coord.x ?? 0;
+                  const rawY = coord.y ?? 0;
+                  const pad = 130;
+                  const y =
+                    height > pad * 2
+                      ? Math.min(Math.max(rawY, pad), height - pad)
+                      : rawY;
                   return {
                     label: lbl,
-                    payload: (state.activePayload ?? []) as TooltipPayloadItem[],
+                    payload,
                     x,
-                    y: coord.y ?? 0,
+                    y,
                     flip: width > 0 && x > width / 2,
                   };
                 });
