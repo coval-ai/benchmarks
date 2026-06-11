@@ -12,6 +12,7 @@ Close: {"type": "Terminate"}
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
@@ -31,6 +32,16 @@ _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
+
+# 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
+# semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
+# value could let a confident short utterance auto-finalize before our signal.
+_END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
+
+# After ForceEndpoint, wait this long for the forced final before sending Terminate,
+# so the close never races the final (the WS close-gate bug class). Falls through on
+# timeout — the outer per-item timeout still bounds the run.
+_FINAL_WAIT_S = 5.0
 
 
 class AssemblyAIProvider(STTProvider):
@@ -61,18 +72,22 @@ class AssemblyAIProvider(STTProvider):
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
     ) -> TranscriptionResult:
-        if sample_rate != 16000:
-            raise ValueError(f"AssemblyAI requires 16 kHz PCM input; got {sample_rate} Hz")
-
         result = TranscriptionResult(provider=self.name)
+        if sample_rate != 16000:
+            result.error = f"AssemblyAI requires 16 kHz PCM input; got {sample_rate} Hz"
+            return result
+
         total_start = time.monotonic()
 
         try:
             speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+            url = (
+                f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+                f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            )
             headers = {"Authorization": self._api_key.get_secret_value()}
+            final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
                 send_task = asyncio.create_task(
                     self._send_audio(
@@ -83,9 +98,10 @@ class AssemblyAIProvider(STTProvider):
                         sample_rate,
                         result,
                         realtime_resolution,
+                        final_event,
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
+                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
@@ -104,6 +120,7 @@ class AssemblyAIProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
+        final_event: asyncio.Event,
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
         data = audio_data
@@ -117,12 +134,21 @@ class AssemblyAIProvider(STTProvider):
                     first_chunk = False
                 await ws.send(chunk)
                 await asyncio.sleep(realtime_resolution)
+            # Force finalization at speech-end (TTFS parity), then wait for the final
+            # before terminating so the close can't race it. Clear first: the event may
+            # already be set by an earlier final, which would make the wait a no-op.
+            final_event.clear()
+            await ws.send(json.dumps({"type": "ForceEndpoint"}))
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "Terminate"}))
         except Exception as exc:
             logger.exception("assemblyai send error", error=str(exc))
             raise
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(
+        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+    ) -> None:
         complete_turns: list[str] = []
         last_final_time: float | None = None
 
@@ -152,6 +178,7 @@ class AssemblyAIProvider(STTProvider):
                 if msg_type == "Turn" and msg.get("end_of_turn") and transcript:
                     complete_turns.append(transcript)
                     last_final_time = now
+                    final_event.set()
 
         except Exception as exc:
             logger.exception("assemblyai receive error", error=str(exc))

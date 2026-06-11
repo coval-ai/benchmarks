@@ -55,7 +55,6 @@ async def test_deepgram_nova3_success(fake_api_key: SecretStr, audio_pcm_bytes: 
             sample_width=2,
             sample_rate=16000,
             realtime_resolution=0.5,
-            audio_duration=3.0,
         )
 
     assert result.error is None
@@ -106,6 +105,8 @@ def test_build_websocket_url_nova3() -> None:
     url = p._build_websocket_url(16000, 1)
     assert "nova-3" in url
     assert "api.deepgram.com" in url
+    # Native silence endpointing disabled; we force the final via Finalize (TTFS parity).
+    assert "endpointing=false" in url
 
 
 def test_build_websocket_url_flux() -> None:
@@ -119,6 +120,64 @@ def test_build_websocket_url_flux() -> None:
     assert "interim_results" not in url
     assert "no_delay" not in url
     assert "channels" not in url
+    # endpointing is a v1-only param and Flux can't be forced anyway.
+    assert "endpointing" not in url
+
+
+@pytest.mark.asyncio
+async def test_nova_sends_finalize_before_close(
+    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("coval_bench.providers.stt.deepgram._FINAL_WAIT_S", 0.05)
+    sent: list[Any] = []
+    final = {
+        "type": "Results",
+        "is_final": True,
+        "channel": {"alternatives": [{"transcript": "hello"}]},
+    }
+    ws = FakeWebSocket([final], on_send=sent.append)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="nova-3")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    text = [m for m in sent if isinstance(m, str)]
+    assert '"Finalize"' in text[-2]
+    assert '"CloseStream"' in text[-1]
+    # The forced final is captured before the close (gate + response-capture path).
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
+async def test_flux_does_not_send_finalize(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    sent: list[Any] = []
+    ws = FakeWebSocket([], on_send=sent.append)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    text = [m for m in sent if isinstance(m, str)]
+    assert not any("Finalize" in m for m in text)
+    assert '"CloseStream"' in text[-1]
 
 
 def test_build_websocket_url_flux_rejects_non_mono() -> None:

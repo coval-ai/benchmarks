@@ -54,6 +54,10 @@ async def test_disabled_flag_exposed(client: AsyncClient) -> None:
     nova_3 = next(m for m in deepgram_entry["models"] if m["model"] == "nova-3")
     assert nova_3["disabled"] is False
 
+    xai_entry = next(e for e in data["stt"] if e["provider"] == "xai")
+    grok_stt = next(m for m in xai_entry["models"] if m["model"] == "grok-stt")
+    assert grok_stt["disabled"] is False
+
 
 async def test_response_shape_breaking_change(client: AsyncClient) -> None:
     """models is a list[ModelInfo] (dict with 'model' + 'disabled'), not a list[str]."""

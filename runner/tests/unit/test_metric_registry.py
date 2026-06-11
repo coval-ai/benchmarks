@@ -45,6 +45,4 @@ def test_benchmark_coverage() -> None:
 
 
 def test_all_current_metrics_are_lower_is_better() -> None:
-    assert all(
-        spec.direction is MetricDirection.LOWER_IS_BETTER for spec in METRIC_SPECS.values()
-    )
+    assert all(spec.direction is MetricDirection.LOWER_IS_BETTER for spec in METRIC_SPECS.values())

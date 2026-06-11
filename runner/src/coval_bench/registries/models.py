@@ -66,6 +66,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
+    RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="smallest", model="pulse", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="cartesia", model="ink-2", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="google", model="short", status=_RETIRED),
