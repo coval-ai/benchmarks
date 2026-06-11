@@ -58,8 +58,8 @@ async def test_smallest_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
     assert "hello" in result.first_token_content.lower()
-    assert result.complete_transcript is not None
-    assert "hello world how are you" in result.complete_transcript
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
 
 
 # ---------------------------------------------------------------------------

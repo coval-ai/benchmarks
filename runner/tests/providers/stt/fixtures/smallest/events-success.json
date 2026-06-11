@@ -3,6 +3,15 @@
     "type": "transcription",
     "status": "success",
     "session_id": "sess_test001",
+    "transcript": "hello",
+    "is_final": false,
+    "is_last": false,
+    "language": "en"
+  },
+  {
+    "type": "transcription",
+    "status": "success",
+    "session_id": "sess_test001",
     "transcript": "hello world",
     "is_final": false,
     "is_last": false,
@@ -12,7 +21,7 @@
     "type": "transcription",
     "status": "success",
     "session_id": "sess_test001",
-    "transcript": "hello world how are you",
+    "transcript": "hello world",
     "is_final": true,
     "is_last": false,
     "language": "en"
@@ -21,7 +30,25 @@
     "type": "transcription",
     "status": "success",
     "session_id": "sess_test001",
-    "transcript": "hello world how are you",
+    "transcript": "how are",
+    "is_final": false,
+    "is_last": false,
+    "language": "en"
+  },
+  {
+    "type": "transcription",
+    "status": "success",
+    "session_id": "sess_test001",
+    "transcript": "how are you",
+    "is_final": true,
+    "is_last": false,
+    "language": "en"
+  },
+  {
+    "type": "transcription",
+    "status": "success",
+    "session_id": "sess_test001",
+    "transcript": "",
     "is_final": true,
     "is_last": true,
     "language": "en"

@@ -57,8 +57,7 @@ async def test_assemblyai_success(fake_api_key: SecretStr, audio_pcm_bytes: byte
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
     assert "hello" in result.first_token_content.lower()
-    assert result.complete_transcript is not None
-    assert "hello world how are you" in result.complete_transcript
+    assert result.complete_transcript == "hello world how are you"
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +288,5 @@ async def test_assemblyai_multi_turn_complete_transcript(
             realtime_resolution=0.5,
         )
 
-    assert result.complete_transcript is not None
-    # Both turns should appear in the complete transcript
-    assert "hello world" in result.complete_transcript
-    assert "how are you" in result.complete_transcript
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5

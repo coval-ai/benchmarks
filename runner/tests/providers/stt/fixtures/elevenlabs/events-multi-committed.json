@@ -1,0 +1,7 @@
+[
+  {"message_type": "session_started", "session_id": "test-session-multi", "config": {"model_id": "scribe_v2_realtime"}},
+  {"message_type": "partial_transcript", "text": "hello", "is_final": false},
+  {"message_type": "committed_transcript", "text": "hello world", "is_final": true},
+  {"message_type": "partial_transcript", "text": "how are", "is_final": false},
+  {"message_type": "committed_transcript", "text": "how are you", "is_final": true}
+]

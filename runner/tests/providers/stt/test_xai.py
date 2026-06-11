@@ -64,11 +64,70 @@ async def test_xai_grok_stt_success(fake_api_key: SecretStr, audio_pcm_bytes: by
 
 
 @pytest.mark.asyncio
-async def test_xai_cumulative_is_final_without_done_text(
+async def test_xai_multi_segment_join_empty_done(
     fake_api_key: SecretStr,
     audio_pcm_bytes: bytes,
 ) -> None:
-    """is_final partials are cumulative; empty transcript.done uses last is_final only."""
+    """Two distinct speech_final segments + empty done are joined in order.
+
+    Regression guard for the pre-fix bug that scored only the last segment: a
+    paused utterance closes each segment with its own speech_final=true partial,
+    and the trailing transcript.done is empty.
+    """
+    events = load_fixture_events("xai", "events-multi-segment")
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
+    wer = compute_wer("hello world how are you", result.complete_transcript)
+    assert wer.wer_percentage == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_xai_multi_segment_join_trailing_done(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """Speech_final segments plus trailing non-empty transcript.done are all joined."""
+    events = load_fixture_events("xai", "events-multi-segment-trailing-done")
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you thanks"
+    assert result.word_count == 6
+
+
+@pytest.mark.asyncio
+async def test_xai_single_speech_final_empty_done(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """A single speech_final segment closes the utterance; empty done adds nothing."""
     events = load_fixture_events("xai", "events-success-empty-done")
     provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
 
@@ -155,6 +214,7 @@ async def test_xai_websocket_connect_setup(fake_api_key: SecretStr, audio_pcm_by
     assert query.get("interim_results") == ["true"]
     assert query.get("endpointing") == ["200"]
     assert query.get("language") == ["en"]
+    assert query.get("filler_words") == ["true"]
     auth = captured["additional_headers"].get("Authorization")
     assert auth == f"Bearer {fake_api_key.get_secret_value()}"
 

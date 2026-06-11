@@ -56,8 +56,32 @@ async def test_elevenlabs_success(fake_api_key: SecretStr, audio_pcm_bytes: byte
     assert result.ttft_seconds is not None
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
-    assert result.complete_transcript is not None
-    assert "hello world how are you" in result.complete_transcript
+    assert result.complete_transcript == "hello world how are you"
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_joins_multiple_committed(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """Two distinct committed_transcript segments are joined in order."""
+    events = load_fixture_events("elevenlabs", "events-multi-committed")
+    provider = ElevenLabsSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.elevenlabs.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
 
 
 # ---------------------------------------------------------------------------

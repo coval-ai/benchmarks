@@ -56,9 +56,8 @@ async def test_speechmatics_success(fake_api_key: SecretStr, audio_pcm_bytes: by
     assert result.ttft_seconds is not None
     assert result.ttft_seconds >= 0
     assert result.first_token_content is not None
-    assert result.complete_transcript is not None
-    # Final transcripts: "hello world" + "how are you"
-    assert "hello" in result.complete_transcript.lower()
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +83,7 @@ async def test_speechmatics_enhanced(fake_api_key: SecretStr, audio_pcm_bytes: b
         )
 
     assert result.error is None
-    assert result.complete_transcript is not None
+    assert result.complete_transcript == "hello world how are you"
 
 
 # ---------------------------------------------------------------------------

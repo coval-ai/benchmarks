@@ -1,0 +1,24 @@
+[
+  {"type": "transcript.created", "id": "xai-session-trailing"},
+  {
+    "type": "transcript.partial",
+    "text": "hello world",
+    "is_final": true,
+    "speech_final": true,
+    "start": 0.0,
+    "duration": 1.0
+  },
+  {
+    "type": "transcript.partial",
+    "text": "how are you",
+    "is_final": true,
+    "speech_final": true,
+    "start": 1.2,
+    "duration": 2.5
+  },
+  {
+    "type": "transcript.done",
+    "text": "thanks",
+    "duration": 3.0
+  }
+]

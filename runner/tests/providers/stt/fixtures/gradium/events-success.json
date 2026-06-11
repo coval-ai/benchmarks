@@ -1,0 +1,9 @@
+[
+  {"type": "step", "vad": [], "step_idx": 1, "step_duration_s": 0.08, "total_duration_s": 0.5},
+  {"type": "text", "text": "hello world", "start_s": 0.5, "stream_id": 0},
+  {"type": "end_text", "stop_s": 1.0, "stream_id": 0},
+  {"type": "text", "text": "how are you", "start_s": 1.2, "stream_id": 0},
+  {"type": "end_text", "stop_s": 1.8, "stream_id": 0},
+  {"type": "flushed", "flush_id": 1},
+  {"type": "end_of_stream"}
+]

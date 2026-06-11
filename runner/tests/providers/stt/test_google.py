@@ -37,9 +37,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "google"
 # ---------------------------------------------------------------------------
 
 
-def _load_fixture_responses() -> list[Any]:
-    """Load google/events-success.json and convert to SimpleNamespace objects."""
-    raw: list[dict[str, Any]] = json.loads((FIXTURES_DIR / "events-success.json").read_text())
+def _load_fixture_responses(scenario: str = "events-success") -> list[Any]:
+    """Load google/<scenario>.json and convert to SimpleNamespace objects."""
+    raw: list[dict[str, Any]] = json.loads((FIXTURES_DIR / f"{scenario}.json").read_text())
     responses = []
     for item in raw:
         results = []
@@ -104,8 +104,44 @@ async def test_google_success(audio_pcm_bytes: bytes) -> None:
 
     assert result.error is None
     assert result.ttft_seconds is not None
-    assert result.complete_transcript is not None
-    assert "hello world" in result.complete_transcript
+    assert result.complete_transcript == "hello world how are you"
+
+
+@pytest.mark.asyncio
+async def test_google_joins_multiple_finals(audio_pcm_bytes: bytes) -> None:
+    """Two distinct is_final results are joined in order, not just the last one."""
+    responses = _load_fixture_responses("events-multi-final")
+
+    mock_client = MagicMock()
+
+    def _fake_recognize(requests: Any) -> Any:
+        list(requests)
+        return iter(responses)
+
+    mock_client.streaming_recognize.side_effect = _fake_recognize
+
+    with patch(
+        "coval_bench.providers.stt.google.SpeechClient",
+        return_value=mock_client,
+    ):
+        provider = GoogleSTTProvider(
+            api_key=SecretStr("unused"), model="default", project_id="test-project"
+        )
+
+    provider._client = mock_client
+
+    with patch("coval_bench.providers.stt.google.time.sleep"):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
 
 
 # ---------------------------------------------------------------------------
