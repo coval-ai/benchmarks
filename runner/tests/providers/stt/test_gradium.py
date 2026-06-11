@@ -72,6 +72,41 @@ async def test_gradium_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) 
     assert wer.wer_percentage == pytest.approx(0.0)
 
 
+@pytest.mark.asyncio
+async def test_gradium_commits_text_without_end_text(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """Each `text` word group is committed on arrival; `end_text` is not required.
+
+    Pins the finalization contract: dropping every `end_text` from the stream
+    leaves the assembled transcript unchanged, documenting that the provider
+    commits on `text` rather than waiting for `end_text`.
+    """
+    events: list[Any] = [
+        {"type": "text", "text": "hello world", "start_s": 0.5, "stream_id": 0},
+        {"type": "text", "text": "how are you", "start_s": 1.2, "stream_id": 0},
+        {"type": "flushed", "flush_id": 1},
+        {"type": "end_of_stream"},
+    ]
+    provider = GradiumSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.gradium.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
+
+
 # ---------------------------------------------------------------------------
 # Provider name and model
 # ---------------------------------------------------------------------------
