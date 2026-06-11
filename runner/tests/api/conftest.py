@@ -43,14 +43,6 @@ def _make_db_url(postgresql: Any) -> str:
     return f"postgresql://{info.user}:{info.password or ''}@{info.host}:{info.port}/{info.dbname}"
 
 
-# Mirrors the per-window matview migration (20260611_0005).
-_MV_WINDOWS: dict[str, str] = {
-    "results_24h": "24 hours",
-    "results_7d": "7 days",
-    "results_30d": "30 days",
-}
-
-
 async def _apply_schema(dsn: str) -> None:
     """Create the benchmarks_v2 schema and tables needed by the API tests.
 
@@ -93,34 +85,19 @@ async def _apply_schema(dsn: str) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
-        # Per-window stats materialized views (model_stats + leaderboard).
-        # S608 false-positive: name and interval come from the _MV_WINDOWS constant.
-        for name, interval in _MV_WINDOWS.items():
-            await aconn.execute(f"""
-                CREATE MATERIALIZED VIEW IF NOT EXISTS benchmarks_v2.{name} AS
-                SELECT provider, model, benchmark, metric_type,
-                       avg_value, stddev_value, min_value,
-                       pct[1] AS p25, pct[2] AS p50, pct[3] AS p75,
-                       pct[4] AS p90, pct[5] AS p95, pct[6] AS p99,
-                       max_value, sample_count
-                FROM (
-                    SELECT r.provider, r.model, r.benchmark, r.metric_type,
-                           AVG(r.metric_value)::float8 AS avg_value,
-                           COALESCE(STDDEV_SAMP(r.metric_value), 0)::float8 AS stddev_value,
-                           MIN(r.metric_value)::float8 AS min_value,
-                           PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
-                               WITHIN GROUP (ORDER BY r.metric_value)::float8[] AS pct,
-                           MAX(r.metric_value)::float8 AS max_value,
-                           COUNT(*)::int AS sample_count
-                    FROM benchmarks_v2.results r
-                    JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-                    WHERE r.status = 'success'
-                      AND rn.status IN ('succeeded', 'partial')
-                      AND r.metric_value IS NOT NULL
-                      AND r.created_at >= now() - INTERVAL '{interval}'
-                    GROUP BY r.provider, r.model, r.benchmark, r.metric_type
-                ) stats
-            """)  # noqa: S608
+        # Materialized view for 24h leaderboard
+        await aconn.execute("""
+            CREATE MATERIALIZED VIEW IF NOT EXISTS benchmarks_v2.results_24h AS
+            SELECT provider, model, benchmark, metric_type,
+                   AVG(metric_value)::float8 AS avg_value,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY metric_value)::float8 AS p50,
+                   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY metric_value)::float8 AS p95,
+                   COUNT(*) AS n
+            FROM benchmarks_v2.results
+            WHERE status = 'success'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+            GROUP BY provider, model, benchmark, metric_type
+        """)
     finally:
         await aconn.close()
 
@@ -304,11 +281,10 @@ async def _insert_result(
 
 
 async def _refresh_mv(postgresql: Any) -> None:
-    """Refresh all per-window stats materialized views."""
+    """Refresh the results_24h materialized view."""
     dsn = _make_db_url(postgresql)
     aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
     try:
-        for name in _MV_WINDOWS:
-            await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
+        await aconn.execute("REFRESH MATERIALIZED VIEW benchmarks_v2.results_24h")
     finally:
         await aconn.close()

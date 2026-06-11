@@ -15,15 +15,14 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.api.common import WINDOW_INTERVALS, WINDOW_VIEWS, WindowLiteral
-from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
+from coval_bench.api.common import WINDOW_INTERVALS, WindowLiteral
+from tests.api.conftest import _insert_result, _insert_run
 
 
 def test_intervals_cover_every_window() -> None:
-    """Every WindowLiteral value must have an interval and a view — a window
-    added to the literal but not the dicts 500s after validation."""
+    """Every WindowLiteral value must have an interval — a window added to
+    the literal but not the dict 500s after validation."""
     assert set(WINDOW_INTERVALS) == set(get_args(WindowLiteral))
-    assert set(WINDOW_VIEWS) == set(get_args(WindowLiteral))
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:
@@ -46,7 +45,6 @@ async def test_model_stats_math(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql)
     for value in (1.0, 2.0, 3.0, 4.0):
         await _insert_result(postgresql, run_id, metric_type="WER", metric_value=value)
-    await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert response.status_code == 200
@@ -61,9 +59,6 @@ async def test_model_stats_math(client: AsyncClient, postgresql: Any) -> None:
     assert s["p25"] == pytest.approx(1.75)
     assert s["p50"] == pytest.approx(2.5)
     assert s["p75"] == pytest.approx(3.25)
-    assert s["p90"] == pytest.approx(3.7)
-    assert s["p95"] == pytest.approx(3.85)
-    assert s["p99"] == pytest.approx(3.97)
     # sample stddev of 1..4 = sqrt(5/3)
     assert s["stddev_value"] == pytest.approx(1.2909944, rel=1e-6)
     assert s["min_value"] == pytest.approx(1.0)
@@ -75,7 +70,6 @@ async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any
     """STDDEV_SAMP is NULL for n=1 — must be coalesced to 0 like the client did."""
     run_id = await _insert_run(postgresql)
     await _insert_result(postgresql, run_id, metric_value=3.5)
-    await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     s = response.json()["model_stats"][0]
@@ -101,7 +95,6 @@ async def test_excludes_failed_null_and_other_benchmark(
     # Excluded: failed parent run
     failed_run = await _insert_run(postgresql, status="failed")
     await _insert_result(postgresql, failed_run, metric_value=100.0)
-    await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     stats = response.json()["model_stats"]
@@ -113,7 +106,6 @@ async def test_excludes_failed_null_and_other_benchmark(
 async def test_partial_runs_included(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql, status="partial")
     await _insert_result(postgresql, run_id, metric_value=2.0)
-    await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert response.json()["model_stats"][0]["sample_count"] == 1
@@ -154,7 +146,6 @@ async def test_window_excludes_old_rows(client: AsyncClient, postgresql: Any) ->
     run_id = await _insert_run(postgresql)
     old = datetime.now(dt.UTC) - timedelta(days=10)
     await _insert_result(postgresql, run_id, created_at=old, metric_value=1.0)
-    await _refresh_mv(postgresql)
 
     response_24h = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert response_24h.json()["model_stats"] == []
@@ -169,14 +160,12 @@ async def test_cache_serves_stale_within_ttl(client: AsyncClient, postgresql: An
     """A second identical request is served from cache, not re-queried."""
     run_id = await _insert_run(postgresql)
     await _insert_result(postgresql, run_id, metric_value=1.0)
-    await _refresh_mv(postgresql)
 
     first = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert first.json()["model_stats"][0]["sample_count"] == 1
 
-    # Out-of-band insert + refresh that a fresh query would pick up.
+    # Out-of-band insert that a fresh query would pick up.
     await _insert_result(postgresql, run_id, metric_value=3.0)
-    await _refresh_mv(postgresql)
 
     second = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     # Unchanged — served from the cached response, DB not re-scanned.
@@ -188,7 +177,6 @@ async def test_cache_keyed_by_params(client: AsyncClient, postgresql: Any) -> No
     run_id = await _insert_run(postgresql)
     old = datetime.now(dt.UTC) - timedelta(days=10)
     await _insert_result(postgresql, run_id, created_at=old, metric_value=1.0)
-    await _refresh_mv(postgresql)
 
     # 24h excludes the 10-day-old row; 30d includes it. Distinct cache keys.
     r_24h = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
@@ -206,7 +194,6 @@ async def test_concurrent_misses_coalesce(
 
     run_id = await _insert_run(postgresql)
     await _insert_result(postgresql, run_id, metric_value=1.0)
-    await _refresh_mv(postgresql)
 
     acquisitions = 0
     real_pool = app.state.pool
@@ -277,7 +264,6 @@ async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -
         metric_type="TTFT",
         metric_value=0.5,
     )
-    await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     stats = response.json()["model_stats"]

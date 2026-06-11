@@ -15,19 +15,12 @@ BenchmarkLiteral = Literal["STT", "TTS"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 
 # Fixed interval strings — looked up by Python, never user-interpolated into
-# SQL. Used by live queries (the aggregates series block).
+# SQL. Note: the leaderboard router keeps its own 7d/30d-only dict because its
+# 24h window is served by the results_24h materialized view, not a live query.
 WINDOW_INTERVALS: dict[str, str] = {
     "24h": "24 hours",
     "7d": "7 days",
     "30d": "30 days",
-}
-
-# Per-window stats materialized views (schema-qualified). Looked up by Python
-# from the validated WindowLiteral, never user-interpolated into SQL.
-WINDOW_VIEWS: dict[str, str] = {
-    "24h": "benchmarks_v2.results_24h",
-    "7d": "benchmarks_v2.results_7d",
-    "30d": "benchmarks_v2.results_30d",
 }
 
 # Bucket expression for chart timestamps: the run's cron trigger time,
