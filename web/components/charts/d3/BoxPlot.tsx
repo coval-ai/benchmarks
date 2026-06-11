@@ -10,8 +10,8 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 
 // Match the text sizes on the timeline chart above: 14px axis labels, 12px
 // tick/legend/category text.
-const modelFontSize = "12px";
-const providerFontSize = "12px";
+const modelFontSize = 12;
+const providerFontSize = 12;
 const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
@@ -145,6 +145,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first (desktop only)
     if (!isMobile) {
+      const labelMaxWidth = xScale.step() * 0.96;
+      const minModelFont = 8;
+
       data.data.forEach((modelData) => {
         const model = modelData.model;
         const normalizedModel = normalizeModelName(model);
@@ -153,7 +156,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        // Wrap model name if too long (max ~15 characters per line)
         const maxCharsPerLine = 8;
         const modelWords = normalizedModel.split(/[-_\s]/);
         const modelLines: string[] = [];
@@ -176,28 +178,46 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           modelLines.push(currentLine);
         }
 
-        // Add model name lines with dynamic font size
-        modelLines.forEach((line, lineIndex) => {
-          g.append("text")
+        const modelTextNodes = modelLines.map((line, lineIndex) =>
+          g
+            .append("text")
             .attr("x", xPosition)
             .attr("y", yPosition + lineIndex * modelLineHeight)
             .attr("text-anchor", "middle")
             .attr("fill", themeColors.label)
-            .attr("font-size", modelFontSize)
+            .attr("font-size", `${modelFontSize}px`)
             .attr("font-weight", "bold")
-            .text(line);
-        });
+            .text(line)
+        );
 
-        // Add provider name with dynamic font size
-        const providerYPosition =
-          yPosition + modelLines.length * modelLineHeight + 1;
-        g.append("text")
+        const providerNode = g
+          .append("text")
           .attr("x", xPosition)
-          .attr("y", providerYPosition)
           .attr("text-anchor", "middle")
           .attr("fill", themeColors.axisText)
-          .attr("font-size", providerFontSize)
+          .attr("font-size", `${providerFontSize}px`)
           .text(provider);
+
+        let widest = providerNode.node()?.getComputedTextLength() ?? 0;
+        modelTextNodes.forEach((node) => {
+          widest = Math.max(widest, node.node()?.getComputedTextLength() ?? 0);
+        });
+
+        const scale =
+          widest > labelMaxWidth
+            ? Math.max(minModelFont / modelFontSize, labelMaxWidth / widest)
+            : 1;
+        const lineHeight = modelLineHeight * scale;
+
+        modelTextNodes.forEach((node, lineIndex) => {
+          node
+            .attr("font-size", `${modelFontSize * scale}px`)
+            .attr("y", yPosition + lineIndex * lineHeight);
+        });
+
+        providerNode
+          .attr("font-size", `${providerFontSize * scale}px`)
+          .attr("y", yPosition + modelLines.length * lineHeight + 1);
       });
     }
 
