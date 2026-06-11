@@ -107,6 +107,7 @@ def test_build_websocket_url_nova3() -> None:
     assert "api.deepgram.com" in url
     # Native silence endpointing disabled; we force the final via Finalize (TTFS parity).
     assert "endpointing=false" in url
+    assert "filler_words=true" in url
 
 
 def test_build_websocket_url_flux() -> None:
@@ -122,6 +123,8 @@ def test_build_websocket_url_flux() -> None:
     assert "channels" not in url
     # endpointing is a v1-only param and Flux can't be forced anyway.
     assert "endpointing" not in url
+    # filler_words is a v1-only param; Flux 400s on it.
+    assert "filler_words" not in url
 
 
 @pytest.mark.asyncio

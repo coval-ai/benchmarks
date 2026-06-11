@@ -84,6 +84,7 @@ class DeepgramProvider(STTProvider):
             f"&vad_events=true"
             f"&no_delay=true"
             f"&punctuate=true"
+            f"&filler_words=true"
             # Disable native silence endpointing; we force the final at speech-end
             # via a Finalize message instead (TTFS parity).
             f"&endpointing=false"

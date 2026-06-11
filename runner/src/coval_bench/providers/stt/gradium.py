@@ -36,6 +36,7 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 logger = structlog.get_logger(__name__)
 
 _WS_URL = "wss://api.gradium.ai/api/speech/asr"
+_FLUSH_WAIT_S = 2.0
 
 
 class GradiumSTTProvider(STTProvider):
@@ -123,7 +124,7 @@ class GradiumSTTProvider(STTProvider):
             # Wait long enough for the server to process remaining frames and
             # send back the final text/end_text messages (~delay_in_frames × 80 ms).
             await ws.send(json.dumps({"type": "flush", "flush_id": 1}))
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(_FLUSH_WAIT_S)
             await ws.send(json.dumps({"type": "end_of_stream"}))
         except Exception as exc:
             logger.exception("gradium send error", error=str(exc))
