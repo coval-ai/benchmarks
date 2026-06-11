@@ -321,16 +321,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .select("rect")
             .attr("fill-opacity", 0.5);
 
-          const tooltip = g
-            .append("g")
-            .attr("class", "box-tooltip")
-            .attr("transform", `translate(${centerX + 30}, ${yScale(median)})`);
+          const tooltip = g.append("g").attr("class", "box-tooltip");
 
-          tooltip
+          const tooltipRect = tooltip
             .append("rect")
             .attr("x", 0)
             .attr("y", -40)
-            .attr("width", 140)
             .attr("height", 80)
             .attr("fill", themeColors.tooltipBg)
             .attr("stroke", color)
@@ -338,46 +334,71 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .attr("rx", 6)
             .attr("opacity", 0.95);
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", -25)
-            .attr("fill", themeColors.tooltipText)
-            .attr("font-size", "12px")
-            .attr("font-weight", "bold")
-            .text(modelData.model);
+          const tooltipLines = [
+            {
+              text: modelData.model,
+              y: -25,
+              size: "12px",
+              weight: "bold",
+              fill: themeColors.tooltipText,
+            },
+            {
+              text: `Count: ${modelData.stats.count}`,
+              y: -8,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Mean: ${modelData.stats.mean.toFixed(0)}ms`,
+              y: 6,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Median: ${modelData.quartiles.median.toFixed(0)}ms`,
+              y: 20,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Std: ${modelData.stats.std.toFixed(0)}ms`,
+              y: 34,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+          ];
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", -8)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Count: ${modelData.stats.count}`);
+          let tooltipTextWidth = 0;
+          tooltipLines.forEach((line) => {
+            const node = tooltip
+              .append("text")
+              .attr("x", 8)
+              .attr("y", line.y)
+              .attr("fill", line.fill)
+              .attr("font-size", line.size)
+              .attr("font-weight", line.weight)
+              .text(line.text);
+            tooltipTextWidth = Math.max(
+              tooltipTextWidth,
+              node.node()?.getComputedTextLength() ?? 0
+            );
+          });
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 6)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Mean: ${modelData.stats.mean.toFixed(0)}ms`);
+          const tooltipWidth = Math.max(140, tooltipTextWidth + 16);
+          tooltipRect.attr("width", tooltipWidth);
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 20)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Median: ${modelData.quartiles.median.toFixed(0)}ms`);
-
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 34)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Std: ${modelData.stats.std.toFixed(0)}ms`);
+          const tooltipX =
+            centerX + 30 + tooltipWidth > chartWidth
+              ? centerX - 30 - tooltipWidth
+              : centerX + 30;
+          tooltip.attr(
+            "transform",
+            `translate(${tooltipX}, ${yScale(median)})`
+          );
         })
         .on("mouseleave", function () {
           d3.select(this)
