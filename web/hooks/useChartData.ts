@@ -143,6 +143,13 @@ export function useChartData({
     return out;
   }, [series, toDisplayUnits]);
 
+  // Primary latency metric series (TTFT for STT, TTFA for TTS). Also feeds the
+  // STT heatmap deltas and the gap chart.
+  const timelineByModel = useMemo<Record<string, Record<number, number>>>(() => {
+    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
+    return timelineByMetricModel[primaryMetric] ?? {};
+  }, [timelineByMetricModel, activeTab]);
+
   // Timeline rows for a given metric. Models follow the active tab (STT models
   // for TTFS/TTFT, TTS models for TTFA).
   const getTimelineData = useCallback(
@@ -281,27 +288,78 @@ export function useChartData({
     [scatterByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
   );
 
-  // Heatmap rows: absolute latency percentiles straight from the SQL stats
-  // (like the box plot), plus avg WER.
-  const heatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
+  // STT heatmap: latency deltas relative to the fastest selected model at
+  // each timestamp, percentiled per model. Deltas depend on the selection, so
+  // they are computed here from the per-model series.
+  const modelHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
     const selectedModels =
       activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
     const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
 
+    if (selectedModels.length === 0) {
+      return [];
+    }
+
+    // Per-timestamp averages for the selected models.
+    const averagedTimestampGroups: { [key: number]: { [key: string]: number } } = {};
+    selectedModels.forEach((model) => {
+      const tsMap = timelineByModel[model];
+      if (!tsMap) return;
+      Object.entries(tsMap).forEach(([timestamp, avg]) => {
+        const bucket = Number(timestamp);
+        if (!averagedTimestampGroups[bucket]) {
+          averagedTimestampGroups[bucket] = {};
+        }
+        const group = averagedTimestampGroups[bucket];
+        if (group) {
+          group[model] = avg;
+        }
+      });
+    });
+
     const heatmapData: ModelHeatmapData[] = [];
 
     selectedModels.forEach((model) => {
-      const latencyStat = getStat(model, latencyMetric);
       const werStat = getStat(model, "WER");
+      const latencyStat = getStat(model, latencyMetric);
 
-      if (!latencyStat || !werStat) return;
+      // Need both latency and WER data
+      if (!werStat || !latencyStat) return;
 
-      const p25 = toDisplayUnits(latencyStat.p25);
-      const p75 = toDisplayUnits(latencyStat.p75);
+      // Calculate latency deltas relative to fastest at each timestamp
+      const latencyDeltas: number[] = [];
+      Object.values(averagedTimestampGroups).forEach((modelValues) => {
+        const modelVal = modelValues[model];
+        if (modelVal !== undefined) {
+          const allVals = Object.values(modelValues);
+          const fastest = allVals.length > 0 ? Math.min(...allVals) : 0;
+          const delta = modelVal - fastest;
+          latencyDeltas.push(delta);
+        }
+      });
+
+      // Delta percentiles (relative to the selection, so computed here)
+      const sorted = [...latencyDeltas].sort((a, b) => a - b);
+      const n = sorted.length;
+      let p25 = 0, p50 = 0, p75 = 0;
+      if (n > 0) {
+        const getPercentile = (pct: number): number => {
+          const index = (pct / 100) * (n - 1);
+          const lower = Math.floor(index);
+          const upper = Math.ceil(index);
+          if (lower === upper) return sorted[lower] ?? 0;
+          const weight = index - lower;
+          return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
+        };
+        p25 = getPercentile(25);
+        p50 = getPercentile(50);
+        p75 = getPercentile(75);
+      }
+
       heatmapData.push({
         model,
         latencyP25: p25,
-        latencyP50: toDisplayUnits(latencyStat.p50),
+        latencyP50: p50,
         latencyP75: p75,
         latencyIQR: p75 - p25,
         avgWER: werStat.avg_value,
@@ -314,11 +372,54 @@ export function useChartData({
         normalizeModelName(a.model).localeCompare(normalizeModelName(b.model)) ||
         a.model.localeCompare(b.model)
     );
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getStat, toDisplayUnits]);
+  }, [
+    timelineByModel,
+    activeTab,
+    selectedTTSModels,
+    selectedSTTModels,
+    getStat
+  ]);
 
-  const getHeatmapData = useCallback(
-    (): ModelHeatmapData[] => heatmapDataMemo,
-    [heatmapDataMemo]
+  const getModelHeatmapData = useCallback(
+    (): ModelHeatmapData[] => modelHeatmapDataMemo,
+    [modelHeatmapDataMemo]
+  );
+
+  // TTS heatmap uses absolute percentiles — straight from the SQL stats
+  const ttsHeatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
+    if (activeTab !== "tts" || selectedTTSModels.length === 0) {
+      return [];
+    }
+
+    const heatmapData: ModelHeatmapData[] = [];
+
+    selectedTTSModels.forEach((model) => {
+      const latencyStat = getStat(model, "TTFA");
+      const werStat = getStat(model, "WER");
+
+      if (!latencyStat || !werStat) return;
+
+      heatmapData.push({
+        model,
+        latencyP25: latencyStat.p25,
+        latencyP50: latencyStat.p50,
+        latencyP75: latencyStat.p75,
+        latencyIQR: latencyStat.p75 - latencyStat.p25,
+        avgWER: werStat.avg_value,
+        werStdDev: werStat.stddev_value
+      });
+    });
+
+    return heatmapData.sort(
+      (a, b) =>
+        normalizeModelName(a.model).localeCompare(normalizeModelName(b.model)) ||
+        a.model.localeCompare(b.model)
+    );
+  }, [activeTab, selectedTTSModels, getStat]);
+
+  const getTTSHeatmapData = useCallback(
+    (): ModelHeatmapData[] => ttsHeatmapDataMemo,
+    [ttsHeatmapDataMemo]
   );
 
   const werBarDataMemo = useMemo<BarDataPoint[]>(() => {
@@ -442,7 +543,8 @@ export function useChartData({
     getTimelineData,
     getBoxPlotData,
     getScatterData,
-    getHeatmapData,
+    getModelHeatmapData,
+    getTTSHeatmapData,
     getWERBarData,
     getCurrentTimeWindow,
     getTimelineTicks,

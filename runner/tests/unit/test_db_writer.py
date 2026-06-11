@@ -340,14 +340,14 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
 
     with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         cur.execute(
-            "SELECT avg_value, p50, p95, sample_count "
+            "SELECT avg_value, p50, p95, n "
             "FROM benchmarks_v2.results_24h "
             "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
         )
         row = cur.fetchone()
 
     assert row is not None
-    assert row["sample_count"] == 5
+    assert row["n"] == 5
     # avg of [0.1, 0.2, 0.3, 0.4, 0.5] = 0.3
     assert abs(float(row["avg_value"]) - 0.3) < 0.001
     # p50 = median = 0.3

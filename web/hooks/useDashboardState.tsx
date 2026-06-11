@@ -232,6 +232,7 @@ export function useDashboardState(page: "tts" | "stt") {
   } = keyMetrics;
 
   // Get computed data
+  const heatmapData = chartData.getModelHeatmapData();
   const werBarData = chartData.getWERBarData();
 
   const werBarDataWithColors = useMemo(() => {
@@ -279,7 +280,9 @@ export function useDashboardState(page: "tts" | "stt") {
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
 
-  const heatmapDisplayData = chartData.getHeatmapData();
+  const heatmapDisplayData = page === "tts"
+    ? chartData.getTTSHeatmapData()
+    : heatmapData;
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
