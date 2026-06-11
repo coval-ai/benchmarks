@@ -8,7 +8,14 @@ const ALLOWED_ORIGINS = new Set([
 
 export function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
-  return ALLOWED_ORIGINS.has(origin);
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  if (process.env.VERCEL_ENV === "preview") {
+    return (
+      origin === `https://${process.env.VERCEL_URL}` ||
+      origin === `https://${process.env.VERCEL_BRANCH_URL}`
+    );
+  }
+  return false;
 }
 
 export const MAX_CONCURRENT_PER_SESSION = Math.max(
