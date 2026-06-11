@@ -52,6 +52,21 @@ const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
   </ul>
 );
 
+interface TooltipPayloadItem {
+  dataKey: string;
+  value: number;
+  name: string;
+  color: string;
+}
+
+interface PinnedTooltip {
+  label: string;
+  payload: TooltipPayloadItem[];
+  x: number;
+  y: number;
+  flip: boolean;
+}
+
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
   const {
@@ -71,19 +86,19 @@ const TimelineChart: React.FC = () => {
   const [metric, setMetric] = useState<string>(
     activeTab === "stt" ? "TTFT" : "TTFA"
   );
-  const [pinnedLabel, setPinnedLabel] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
+  const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
 
   useEffect(() => {
-    if (pinnedLabel === null) return;
+    if (pinned === null) return;
     const onDocMouseDown = (e: MouseEvent) => {
       if (chartRef.current && !chartRef.current.contains(e.target as Node)) {
-        setPinnedLabel(null);
+        setPinned(null);
       }
     };
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [pinnedLabel]);
+  }, [pinned]);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
@@ -168,15 +183,27 @@ const TimelineChart: React.FC = () => {
           </div>
         )}
 
-        <div ref={chartRef} className="h-96" onMouseEnter={trackChartHover}>
+        <div ref={chartRef} className="relative h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={windowedTimelineData}
               margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
               onClick={(state) => {
                 const lbl = state?.activeLabel;
-                if (lbl == null) return;
-                setPinnedLabel((cur) => (cur === lbl ? null : lbl));
+                const coord = state?.activeCoordinate;
+                if (lbl == null || !coord) return;
+                setPinned((cur) => {
+                  if (cur && cur.label === lbl) return null;
+                  const width = chartRef.current?.clientWidth ?? 0;
+                  const x = coord.x ?? 0;
+                  return {
+                    label: lbl,
+                    payload: (state.activePayload ?? []) as TooltipPayloadItem[],
+                    x,
+                    y: coord.y ?? 0,
+                    flip: width > 0 && x > width / 2,
+                  };
+                });
               }}
             >
               <CartesianGrid
@@ -223,9 +250,7 @@ const TimelineChart: React.FC = () => {
                     showDate={dateScale}
                   />
                 }
-                trigger="click"
-                active={pinnedLabel !== null}
-                wrapperStyle={{ pointerEvents: "auto" }}
+                active={pinned ? false : undefined}
               />
               {modelsWithData.length > 1 && (
                 <Legend content={<TimelineLegend />} />
@@ -249,6 +274,28 @@ const TimelineChart: React.FC = () => {
               ))}
             </LineChart>
           </ResponsiveContainer>
+          {pinned && (
+            <div
+              style={{
+                position: "absolute",
+                left: pinned.x,
+                top: pinned.y,
+                transform: pinned.flip
+                  ? "translate(calc(-100% - 12px), -50%)"
+                  : "translate(12px, -50%)",
+                pointerEvents: "auto",
+                zIndex: 20,
+              }}
+            >
+              <CustomTimelineTooltip
+                active
+                payload={pinned.payload}
+                label={pinned.label}
+                getProviderForModel={getProviderForModel}
+                showDate={dateScale}
+              />
+            </div>
+          )}
         </div>
       </Card>
     </div>
