@@ -372,8 +372,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             },
           ];
 
-          let tooltipTextWidth = 0;
-          tooltipLines.forEach((line) => {
+          const tooltipNodes = tooltipLines.map((line) => {
             const node = tooltip
               .append("text")
               .attr("x", 8)
@@ -382,19 +381,40 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
               .attr("font-size", line.size)
               .attr("font-weight", line.weight)
               .text(line.text);
-            tooltipTextWidth = Math.max(
-              tooltipTextWidth,
-              node.node()?.getComputedTextLength() ?? 0
-            );
+            return {
+              node,
+              width: node.node()?.getComputedTextLength() ?? 0,
+              size: line.size,
+            };
           });
 
-          const tooltipWidth = Math.max(140, tooltipTextWidth + 16);
+          const tooltipTextWidth = tooltipNodes.reduce(
+            (max, n) => Math.max(max, n.width),
+            0
+          );
+          const tooltipWidth = Math.min(
+            chartWidth,
+            Math.max(140, tooltipTextWidth + 16)
+          );
           tooltipRect.attr("width", tooltipWidth);
 
-          const tooltipX =
-            centerX + 30 + tooltipWidth > chartWidth
-              ? centerX - 30 - tooltipWidth
-              : centerX + 30;
+          const innerWidth = tooltipWidth - 16;
+          tooltipNodes.forEach(({ node, width, size }) => {
+            if (width > innerWidth && width > 0) {
+              const baseSize = parseFloat(size);
+              node.attr("font-size", `${baseSize * (innerWidth / width)}px`);
+            }
+          });
+
+          const tooltipX = Math.max(
+            0,
+            Math.min(
+              centerX + 30 + tooltipWidth > chartWidth
+                ? centerX - 30 - tooltipWidth
+                : centerX + 30,
+              chartWidth - tooltipWidth
+            )
+          );
           tooltip.attr(
             "transform",
             `translate(${tooltipX}, ${yScale(median)})`
