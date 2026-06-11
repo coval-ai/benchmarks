@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-from coval_bench.db.models import Benchmark
 from coval_bench.registries import (
     MODEL_REGISTRY,
     TAG_CATEGORIES,
+    Benchmark,
     ModelStatus,
     ModelTag,
     RegisteredModel,

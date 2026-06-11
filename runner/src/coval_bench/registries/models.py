@@ -10,6 +10,7 @@ even when historical result rows exist for them.
 
 from __future__ import annotations
 
+from collections import Counter
 from enum import StrEnum
 
 from pydantic import BaseModel
@@ -161,7 +162,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(benchmark=_TTS, provider="cartesia", model="sonic", status=_RETIRED),
 ]
 
-_keys = [(m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY]
-if len(_keys) != len(set(_keys)):
-    _dupes = sorted({f"{b}:{p}/{m}" for b, p, m in _keys if _keys.count((b, p, m)) > 1})
+_key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)
+_dupes = sorted(f"{b}:{p}/{m}" for (b, p, m), n in _key_counts.items() if n > 1)
+if _dupes:
     raise RuntimeError(f"MODEL_REGISTRY contains duplicate entries: {', '.join(_dupes)}")

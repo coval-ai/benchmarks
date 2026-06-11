@@ -17,7 +17,7 @@ Test catalogue
 7.  test_dataset_integrity_failure — DatasetIntegrityError → run FAILED, re-raised
 8.  test_audio_file_cleanup        — TTS audio deleted even when WER raises
 9.  test_matrix_overrides          — nova-3 disabled via override → not called
-10. test_disabled_providers_skipped — enabled=False entries not instantiated
+10. test_disabled_providers_skipped — non-ACTIVE entries not instantiated
 """
 
 from __future__ import annotations
@@ -80,6 +80,14 @@ def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) ->
         voice=voice,
         status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
     )
+
+
+def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
+    """First registered model for *provider* in *benchmark*; explicit error if missing."""
+    for m in MODEL_REGISTRY:
+        if m.benchmark is benchmark and m.provider == provider:
+            return m
+    raise AssertionError(f"no registered {benchmark} model for provider {provider!r}")
 
 
 def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
@@ -1006,7 +1014,7 @@ async def test_warmup_scoped_to_benchmark_kind(audio_file: Path, settings: Setti
 
 @pytest.mark.asyncio
 async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) -> None:
-    """Entries with enabled=False are never instantiated or called."""
+    """Entries whose status is not ACTIVE are never instantiated or called."""
     good = _good_transcription()
 
     provider_inst = MagicMock()
@@ -1390,9 +1398,7 @@ async def test_stt_ttfs_status_tracks_value(audio_file: Path, settings: Settings
 @pytest.mark.asyncio
 async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings) -> None:
     """TTS synth returns (no raise) with no ttfa/audio → TTFA FAILED, no WER row, run FAILED."""
-    hume_entry = next(
-        m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.provider == "hume"
-    )
+    hume_entry = _registry_entry(Benchmark.TTS, "hume")
     empty_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -1446,9 +1452,7 @@ async def test_tts_provider_error_wins_over_contamination(
     Transport contamination only downgrades a would-be SUCCESS; a real provider error keeps
     its own (more specific) message and suppresses WER.
     """
-    hume_entry = next(
-        m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.provider == "hume"
-    )
+    hume_entry = _registry_entry(Benchmark.TTS, "hume")
     errored_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -1544,9 +1548,7 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = next(
-            m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.provider == "hume"
-        )
+        hume_entry = _registry_entry(Benchmark.TTS, "hume")
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
@@ -1605,9 +1607,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = next(
-            m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.provider == "hume"
-        )
+        hume_entry = _registry_entry(Benchmark.TTS, "hume")
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
