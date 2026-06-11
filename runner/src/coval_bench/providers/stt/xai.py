@@ -54,7 +54,7 @@ class XaiSTTProvider(STTProvider):
             "interim_results": "true",
             "endpointing": 200,
             "language": "en",
-            "filler_words": "false",
+            "filler_words": "true",
             "diarize": "false",
         }
         return f"{_BASE_WS_URL}?{urlencode(params)}"
@@ -159,8 +159,14 @@ class XaiSTTProvider(STTProvider):
     async def _receive(
         self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
     ) -> None:
-        # xAI is_final=True partials are cumulative restarts, not segments to join.
-        last_final_text: str | None = None
+        # With endpointing enabled, xAI restarts the transcript at each endpoint:
+        # every speech segment is closed exactly once by a speech_final=true
+        # partial, and transcript.done carries only text not yet closed by a
+        # speech_final (empty when the last segment was already closed). The
+        # full utterance is the in-order join of speech_final segments plus any
+        # trailing done text. is_final=true/speech_final=false events are
+        # interim duplicates of the segment and must NOT be joined.
+        final_segments: list[str] = []
         done_transcript: str | None = None
         last_final_time: float | None = None
         done_received = False
@@ -181,8 +187,8 @@ class XaiSTTProvider(STTProvider):
 
                     set_first_token(result, transcript, now=now)
                     add_partial_transcript(result, transcript)
-                    if event.get("is_final"):
-                        last_final_text = transcript
+                    if event.get("speech_final"):
+                        final_segments.append(transcript)
                         if result.audio_start_time is not None:
                             last_final_time = now
                     continue
@@ -193,6 +199,7 @@ class XaiSTTProvider(STTProvider):
                     if done_transcript:
                         set_first_token(result, done_transcript, now=now)
                         add_partial_transcript(result, done_transcript)
+                        final_segments.append(done_transcript)
                     if result.audio_start_time is not None:
                         last_final_time = now
                     break
@@ -217,7 +224,6 @@ class XaiSTTProvider(STTProvider):
 
         finalize_transcript(
             result,
-            # transcript.done text is authoritative when present; otherwise use the last is_final.
-            explicit_transcript=done_transcript or last_final_text,
+            final_segments=final_segments,
             partial_fallback="longest",
         )
