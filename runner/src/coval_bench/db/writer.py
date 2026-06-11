@@ -29,6 +29,8 @@ from psycopg_pool import AsyncConnectionPool
 from coval_bench.db.models import Result, Run, RunStatus
 from coval_bench.registries import Metric
 
+STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
+
 
 class RunWriter:
     """Per-run persistence helper.
@@ -157,4 +159,18 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, (status, error, run_id))
+            await conn.commit()
+
+    async def refresh_stats_matviews(self) -> None:
+        """Concurrently refresh the per-window stats materialized views.
+
+        ``CONCURRENTLY`` relies on each view's unique group-key index and does
+        not block API reads. Raises on error like the rest of ``RunWriter``.
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                for view in STATS_MATVIEWS:
+                    await cur.execute(  # noqa: S608 — view names are constants
+                        f"REFRESH MATERIALIZED VIEW CONCURRENTLY benchmarks_v2.{view}"
+                    )
             await conn.commit()

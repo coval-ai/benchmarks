@@ -9,8 +9,8 @@ Metric/benchmark compatibility:
 - TTFA + TTS
 
 Every window queries its materialized view (``benchmarks_v2.results_24h``/
-``results_7d``/``results_30d``), refreshed by a Cloud Scheduler cron —
-read-only here.
+``results_7d``/``results_30d``), refreshed by the runner at the end of each
+benchmark run — read-only here.
 """
 
 from __future__ import annotations

@@ -354,6 +354,54 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
     assert abs(float(row["p50"]) - 0.3) < 0.001
 
 
+def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
+    """finish_run → refresh_stats_matviews populates all three per-window views."""
+    _apply_migrations(pg_conn)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
+            )
+            assert run.id is not None
+            results = [
+                Result(
+                    run_id=run.id,
+                    provider="openai",
+                    model="whisper-1",
+                    benchmark=Benchmark.STT,
+                    metric_type="WER",
+                    metric_value=float(i) * 0.1,
+                    metric_units="ratio",
+                    status=ResultStatus.SUCCESS,
+                )
+                for i in range(1, 6)
+            ]
+            await writer.record_results(results)
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+            await writer.refresh_stats_matviews()
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    for view in ("results_24h", "results_7d", "results_30d"):
+        with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+            cur.execute(
+                f"SELECT avg_value, p50, sample_count FROM benchmarks_v2.{view} "  # noqa: S608
+                "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
+            )
+            row = cur.fetchone()
+        assert row is not None, f"{view} was not refreshed"
+        assert row["sample_count"] == 5
+        # avg of [0.1..0.5] = 0.3; p50 = 0.3
+        assert abs(float(row["avg_value"]) - 0.3) < 0.001
+        assert abs(float(row["p50"]) - 0.3) < 0.001
+
+
 def test_records_http_diagnostics(pg_conn: psycopg.Connection[Any]) -> None:
     """http_version and submit_to_headers_ms round-trip through the writer."""
     _apply_migrations(pg_conn)

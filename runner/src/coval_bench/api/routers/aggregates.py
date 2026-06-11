@@ -8,8 +8,8 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
 * ``model_stats`` — per (provider, model, metric_type): avg, sample stddev
   (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75/p90/p95/p99
   (percentile_cont), min, max, count. Read from the per-window materialized
-  views (``results_24h``/``results_7d``/``results_30d``), refreshed
-  out-of-band — read-only here.
+  views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
+  runner at the end of each benchmark run — read-only here.
 * ``series`` — per (provider, model, metric_type, scheduled_at bucket): avg and
   count, aggregated live. The bucket falls back to created_at floored to the
   scheduler period for legacy rows, identical to the COALESCE in GET

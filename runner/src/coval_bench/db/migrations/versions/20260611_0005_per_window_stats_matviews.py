@@ -13,9 +13,9 @@ endpoint applied live.
 results_24h is dropped and recreated in this shape (it previously held only
 avg/p50/p95/n and did not gate on the parent run). Each view gets a unique
 index on the group key so it can be refreshed with REFRESH MATERIALIZED VIEW
-CONCURRENTLY. Refresh remains out-of-band (Cloud Scheduler cron); this
-migration only creates the views, so they hold data as of migration time
-until the first refresh.
+CONCURRENTLY. The runner refreshes them at the end of each benchmark run; this
+migration only creates the views, so they hold data as of migration time until
+the first post-migration run refreshes them.
 """
 
 from __future__ import annotations

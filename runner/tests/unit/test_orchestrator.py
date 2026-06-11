@@ -146,6 +146,7 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.start_run = AsyncMock(return_value=run)
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
+    writer.refresh_stats_matviews = AsyncMock()
     return writer
 
 
@@ -312,6 +313,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     # both deepgram and elevenlabs each fire multiple times via the same mock.
     assert writer.record_results.await_count >= 2
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
+    writer.refresh_stats_matviews.assert_awaited_once_with()
 
 
 # ---------------------------------------------------------------------------

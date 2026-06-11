@@ -885,6 +885,17 @@ async def run_benchmarks(
 
             await writer.finish_run(run_id, status=final_status, error=None)
 
+            # Refresh after finish_run: the view query only counts runs already
+            # marked succeeded/partial. A failed refresh must not fail the run.
+            try:
+                await writer.refresh_stats_matviews()
+            except Exception as refresh_exc:
+                _log.error(
+                    "failed to refresh stats matviews",
+                    run_id=run_id,
+                    exc_info=refresh_exc,
+                )
+
             finished_at = datetime.now(tz=UTC)
             summary = RunSummary(
                 run_id=run_id,
