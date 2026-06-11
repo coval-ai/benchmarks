@@ -15,7 +15,11 @@ const SAMPLE_RATE = 24_000;
 const GRADIUM_SAMPLE_RATE = 48_000; // Gradium streams fixed 48 kHz PCM
 const MAX_TEXT_LENGTH = 500;
 const PROVIDER_TIMEOUT_MS = 55_000;
-const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+// Cap audio by duration so providers with different sample rates get the same
+// output ceiling (16-bit mono → 2 bytes/sample).
+const MAX_AUDIO_SECONDS = 90;
+const MAX_AUDIO_BYTES = MAX_AUDIO_SECONDS * SAMPLE_RATE * 2;
+const GRADIUM_MAX_AUDIO_BYTES = MAX_AUDIO_SECONDS * GRADIUM_SAMPLE_RATE * 2;
 
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req.headers.get("origin"))) {
@@ -513,7 +517,7 @@ function synthesizeGradium(model: string, voiceId: string, text: string) {
         if (ttfaMs === null && t0 > 0) ttfaMs = performance.now() - t0;
         const buf = Buffer.from(msg.audio, "base64");
         total += buf.length;
-        if (total > MAX_AUDIO_BYTES) {
+        if (total > GRADIUM_MAX_AUDIO_BYTES) {
           clearTimer();
           ws.close();
           settle(() => reject(new Error("Provider audio exceeded cap")));
