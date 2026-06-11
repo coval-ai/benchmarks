@@ -45,7 +45,10 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
           : formatTimeWithSeconds(Number(label))}
       </p>
-      <div style={{ fontSize: "11px" }}>
+      <div
+        className="tooltip-scroll"
+        style={{ fontSize: "11px", maxHeight: "300px", overflowY: "scroll", paddingRight: "8px" }}
+      >
         {validData.map((item, index) => {
           // Extract model name from dataKey (remove '_value' suffix)
           const modelName = item.dataKey.replace(/_value$/, "");

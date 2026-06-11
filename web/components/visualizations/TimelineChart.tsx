@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -52,6 +52,21 @@ const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
   </ul>
 );
 
+interface TooltipPayloadItem {
+  dataKey: string;
+  value: number;
+  name: string;
+  color: string;
+}
+
+interface PinnedTooltip {
+  label: string;
+  payload: TooltipPayloadItem[];
+  x: number;
+  y: number;
+  flip: boolean;
+}
+
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
   const {
@@ -71,6 +86,22 @@ const TimelineChart: React.FC = () => {
   const [metric, setMetric] = useState<string>(
     activeTab === "stt" ? "TTFT" : "TTFA"
   );
+  const chartRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef<HTMLDivElement>(null);
+  const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
+
+  useEffect(() => {
+    if (pinned === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (pinnedRef.current?.contains(target)) return;
+      const surface = chartRef.current?.querySelector(".recharts-surface");
+      if (surface?.contains(target)) return;
+      setPinned(null);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [pinned]);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
@@ -141,7 +172,10 @@ const TimelineChart: React.FC = () => {
               <button
                 key={m}
                 type="button"
-                onClick={() => setMetric(m)}
+                onClick={() => {
+                  setMetric(m);
+                  setPinned(null);
+                }}
                 className={
                   "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
                   (metric === m
@@ -155,11 +189,39 @@ const TimelineChart: React.FC = () => {
           </div>
         )}
 
-        <div className="h-96" onMouseEnter={trackChartHover}>
+        <div ref={chartRef} className="relative h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={windowedTimelineData}
               margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
+              onClick={(state) => {
+                const lbl = state?.activeLabel;
+                const coord = state?.activeCoordinate;
+                const payload = (state?.activePayload ?? []) as TooltipPayloadItem[];
+                const hasRows = payload.some(
+                  (item) => typeof item?.value === "number" && item.value > 0
+                );
+                if (lbl == null || !coord || !hasRows) return;
+                setPinned((cur) => {
+                  if (cur && cur.label === lbl) return null;
+                  const width = chartRef.current?.clientWidth ?? 0;
+                  const height = chartRef.current?.clientHeight ?? 0;
+                  const x = coord.x ?? 0;
+                  const rawY = coord.y ?? 0;
+                  const pad = 130;
+                  const y =
+                    height > pad * 2
+                      ? Math.min(Math.max(rawY, pad), height - pad)
+                      : rawY;
+                  return {
+                    label: lbl,
+                    payload,
+                    x,
+                    y,
+                    flip: width > 0 && x > width / 2,
+                  };
+                });
+              }}
             >
               <CartesianGrid
                 vertical={false}
@@ -205,6 +267,7 @@ const TimelineChart: React.FC = () => {
                     showDate={dateScale}
                   />
                 }
+                active={pinned ? false : undefined}
               />
               {modelsWithData.length > 1 && (
                 <Legend content={<TimelineLegend />} />
@@ -228,6 +291,29 @@ const TimelineChart: React.FC = () => {
               ))}
             </LineChart>
           </ResponsiveContainer>
+          {pinned && (
+            <div
+              ref={pinnedRef}
+              style={{
+                position: "absolute",
+                left: pinned.x,
+                top: pinned.y,
+                transform: pinned.flip
+                  ? "translate(calc(-100% - 12px), -50%)"
+                  : "translate(12px, -50%)",
+                pointerEvents: "auto",
+                zIndex: 20,
+              }}
+            >
+              <CustomTimelineTooltip
+                active
+                payload={pinned.payload}
+                label={pinned.label}
+                getProviderForModel={getProviderForModel}
+                showDate={dateScale}
+              />
+            </div>
+          )}
         </div>
       </Card>
     </div>
