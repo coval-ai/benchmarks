@@ -34,6 +34,11 @@ def _fake_connect(events: list[Any]) -> Any:
     return cm
 
 
+@pytest.fixture(autouse=True)
+def _fast_flush_wait(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("coval_bench.providers.stt.gradium._FLUSH_WAIT_S", 0.05)
+
+
 # ---------------------------------------------------------------------------
 # Happy path — additive word groups joined in order
 # ---------------------------------------------------------------------------
