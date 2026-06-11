@@ -43,9 +43,6 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFA", "TTS"),
 }
 
-# View name comes from WINDOW_VIEWS keyed by the validated window literal —
-# never from user input. The views store ``avg_value``/``sample_count`` —
-# aliased here for LeaderboardEntry.
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,
            avg_value AS avg,
