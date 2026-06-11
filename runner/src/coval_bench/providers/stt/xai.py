@@ -54,7 +54,7 @@ class XaiSTTProvider(STTProvider):
             "interim_results": "true",
             "endpointing": 200,
             "language": "en",
-            "filler_words": "false",
+            "filler_words": "true",
             "diarize": "false",
         }
         return f"{_BASE_WS_URL}?{urlencode(params)}"
