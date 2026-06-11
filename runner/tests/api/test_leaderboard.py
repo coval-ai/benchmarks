@@ -62,8 +62,8 @@ async def test_ttfa_stt_incompatible(client: AsyncClient) -> None:
     assert response.status_code == 400
 
 
-async def test_ttft_stt_7d_live_aggregation(client: AsyncClient, postgresql: Any) -> None:
-    """window=7d runs live aggregation for TTFT+STT."""
+async def test_ttft_stt_7d_window(client: AsyncClient, postgresql: Any) -> None:
+    """window=7d serves TTFT+STT from the results_7d view."""
     run_id = await _insert_run(postgresql)
     await _insert_result(
         postgresql,
@@ -75,6 +75,7 @@ async def test_ttft_stt_7d_live_aggregation(client: AsyncClient, postgresql: Any
         metric_units="ms",
         benchmark="STT",
     )
+    await _refresh_mv(postgresql)
 
     response = await client.get(
         "/v1/leaderboard",
@@ -103,8 +104,8 @@ async def test_missing_metric_returns_422(client: AsyncClient) -> None:
     assert response.status_code == 422
 
 
-async def test_30d_window_live_aggregation(client: AsyncClient, postgresql: Any) -> None:
-    """window=30d runs live aggregation."""
+async def test_30d_window(client: AsyncClient, postgresql: Any) -> None:
+    """window=30d serves from the results_30d view."""
     run_id = await _insert_run(postgresql)
     await _insert_result(
         postgresql,
@@ -115,6 +116,7 @@ async def test_30d_window_live_aggregation(client: AsyncClient, postgresql: Any)
         metric_value=6.0,
         benchmark="STT",
     )
+    await _refresh_mv(postgresql)
     response = await client.get(
         "/v1/leaderboard",
         params={"metric": "WER", "benchmark": "STT", "window": "30d"},
