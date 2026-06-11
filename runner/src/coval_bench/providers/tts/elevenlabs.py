@@ -34,8 +34,6 @@ _OUTPUT_FORMAT = "pcm_24000"
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over the REST streaming endpoint."""
 
-    enabled: bool = True
-
     _VALID_MODELS = frozenset({"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:

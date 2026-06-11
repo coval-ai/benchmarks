@@ -3,12 +3,7 @@
 """Public API for coval_bench metrics."""
 
 from coval_bench.metrics.ttfa import compute_ttfa, first_audible_offset_ms
-from coval_bench.metrics.ttft import (
-    compute_audio_to_final,
-    compute_rtf,
-    compute_ttfs,
-    compute_ttft,
-)
+from coval_bench.metrics.ttft import compute_rtf, compute_ttfs
 from coval_bench.metrics.wer import WERResult, WordError, compute_wer, normalize_text
 
 __all__ = [
@@ -18,8 +13,6 @@ __all__ = [
     "normalize_text",
     "compute_ttfa",
     "first_audible_offset_ms",
-    "compute_ttft",
-    "compute_audio_to_final",
     "compute_rtf",
     "compute_ttfs",
 ]

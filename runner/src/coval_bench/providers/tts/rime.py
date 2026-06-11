@@ -31,8 +31,6 @@ _MODEL_SAMPLE_RATES: dict[str, int] = {
 class RimeTTSProvider(TTSProvider):
     """Rime TTS provider using WebSocket /ws3 JSON streaming."""
 
-    enabled: bool = False  # enabled via MODEL_REGISTRY entries
-
     _VALID_MODELS = frozenset({"arcana", "coda", "mistv3"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:

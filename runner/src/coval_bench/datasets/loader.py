@@ -358,13 +358,6 @@ def load_dataset(
             cache_dir=cache_dir,
             storage_client=storage_client,
         )
-    if not manifest.items or isinstance(manifest.items[0], TTSManifestItem):
-        return load_tts_dataset(
-            dataset_id,
-            settings=settings,
-            cache_dir=cache_dir,
-            storage_client=storage_client,
-        )
     return load_tts_dataset(
         dataset_id,
         settings=settings,

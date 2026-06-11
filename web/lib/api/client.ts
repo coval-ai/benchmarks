@@ -60,11 +60,6 @@ export type SeriesPoint = components["schemas"]["SeriesPoint"];
 export type AggregatesQueryParams = NonNullable<
   paths["/v1/results/aggregates"]["get"]["parameters"]["query"]
 >;
-type RunsQueryParams = NonNullable<paths["/v1/runs"]["get"]["parameters"]["query"]>;
-type LeaderboardQueryParams = NonNullable<
-  paths["/v1/leaderboard"]["get"]["parameters"]["query"]
->;
-
 export interface FetchOptions {
   signal?: AbortSignal;
 }
@@ -132,26 +127,4 @@ export async function getProviders(
   opts?: FetchOptions
 ): Promise<ProvidersApiResponse> {
   return request<ProvidersApiResponse>("/v1/providers", { signal: opts?.signal });
-}
-
-export async function getRuns(
-  params?: RunsQueryParams,
-  opts?: FetchOptions
-): Promise<RunsApiResponse> {
-  const qs = params
-    ? buildQueryString(
-        params as Record<string, string | number | boolean | null | undefined>
-      )
-    : "";
-  return request<RunsApiResponse>(`/v1/runs${qs}`, { signal: opts?.signal });
-}
-
-export async function getLeaderboard(
-  params: LeaderboardQueryParams,
-  opts?: FetchOptions
-): Promise<LeaderboardApiResponse> {
-  const qs = buildQueryString(
-    params as Record<string, string | number | boolean | null | undefined>
-  );
-  return request<LeaderboardApiResponse>(`/v1/leaderboard${qs}`, { signal: opts?.signal });
 }
