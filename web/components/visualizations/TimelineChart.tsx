@@ -87,14 +87,17 @@ const TimelineChart: React.FC = () => {
     activeTab === "stt" ? "TTFT" : "TTFA"
   );
   const chartRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
 
   useEffect(() => {
     if (pinned === null) return;
     const onDocMouseDown = (e: MouseEvent) => {
-      if (chartRef.current && !chartRef.current.contains(e.target as Node)) {
-        setPinned(null);
-      }
+      const target = e.target as Node;
+      if (pinnedRef.current?.contains(target)) return;
+      const surface = chartRef.current?.querySelector(".recharts-surface");
+      if (surface?.contains(target)) return;
+      setPinned(null);
     };
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
@@ -276,6 +279,7 @@ const TimelineChart: React.FC = () => {
           </ResponsiveContainer>
           {pinned && (
             <div
+              ref={pinnedRef}
               style={{
                 position: "absolute",
                 left: pinned.x,
