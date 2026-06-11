@@ -8,11 +8,9 @@ Metric/benchmark compatibility:
 - TTFT + STT
 - TTFA + TTS
 
-``window=24h`` queries the materialized view ``benchmarks_v2.results_24h``
-(refreshed by a Cloud Scheduler cron — read-only here).
-
-``window=7d`` / ``window=30d`` run a live aggregation query against the
-``results`` table directly.
+Every window queries its materialized view (``benchmarks_v2.results_24h``/
+``results_7d``/``results_30d``), refreshed by a Cloud Scheduler cron —
+read-only here.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
@@ -45,37 +43,16 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFA", "TTS"),
 }
 
-# Interval strings for live aggregation
-_WINDOW_INTERVALS: dict[str, str] = {
-    "7d": "7 days",
-    "30d": "30 days",
-}
-
-# SQL for live aggregation (7d / 30d)
-_LIVE_SQL = """
-    SELECT provider, model,
-           AVG(metric_value)::float8 AS avg,
-           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY metric_value)::float8 AS p50,
-           PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY metric_value)::float8 AS p95,
-           COUNT(*)::int AS n
-    FROM benchmarks_v2.results
-    WHERE status = 'success'
-      AND metric_type = %(metric)s
-      AND benchmark = %(benchmark)s
-      AND created_at >= NOW() - %(interval)s::interval
-    GROUP BY provider, model
-    ORDER BY avg ASC
-"""
-
-# SQL for materialized view (24h).
-# Note: the MV stores ``avg_value`` (not ``avg``) — aliased here for LeaderboardEntry.
-_MV_SQL = """
+# View name comes from WINDOW_VIEWS keyed by the validated window literal —
+# never from user input. The views store ``avg_value``/``sample_count`` —
+# aliased here for LeaderboardEntry.
+_MV_SQL_TEMPLATE = """
     SELECT provider, model,
            avg_value AS avg,
            p50,
            p95,
-           n::int AS n
-    FROM benchmarks_v2.results_24h
+           sample_count AS n
+    FROM {view}
     WHERE metric_type = %(metric)s
       AND benchmark = %(benchmark)s
     ORDER BY avg_value ASC
@@ -97,7 +74,7 @@ async def get_leaderboard(
     Args:
         metric: One of WER, TTFA, TTFT, TTFS.
         benchmark: One of STT, TTS.
-        window: Time window — 24h uses the materialized view; 7d/30d run live.
+        window: Time window — each is served by its materialized view.
 
     Returns:
         ``{"metric": ..., "window": ..., "entries": [LeaderboardEntry, ...]}``
@@ -113,12 +90,7 @@ async def get_leaderboard(
         )
 
     params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}
-
-    if window == "24h":
-        sql = _MV_SQL
-    else:
-        sql = _LIVE_SQL
-        params["interval"] = _WINDOW_INTERVALS[window]
+    sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
 
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
