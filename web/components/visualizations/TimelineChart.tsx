@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -72,6 +72,18 @@ const TimelineChart: React.FC = () => {
     activeTab === "stt" ? "TTFT" : "TTFA"
   );
   const [pinnedLabel, setPinnedLabel] = useState<string | null>(null);
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (pinnedLabel === null) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (chartRef.current && !chartRef.current.contains(e.target as Node)) {
+        setPinnedLabel(null);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [pinnedLabel]);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
@@ -156,7 +168,7 @@ const TimelineChart: React.FC = () => {
           </div>
         )}
 
-        <div className="h-96" onMouseEnter={trackChartHover}>
+        <div ref={chartRef} className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={windowedTimelineData}
