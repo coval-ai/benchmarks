@@ -66,12 +66,12 @@ class GradiumSTTProvider(STTProvider):
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
     ) -> TranscriptionResult:
-        if sample_rate != 16000:
-            raise ValueError(f"Gradium requires 16 kHz PCM input; got {sample_rate} Hz")
-
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
+        if sample_rate != 16000:
+            result.error = f"Gradium requires 16 kHz PCM input; got {sample_rate} Hz"
+            return result
+
         total_start = time.monotonic()
 
         try:

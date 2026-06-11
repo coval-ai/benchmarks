@@ -112,6 +112,7 @@ export function normalizeModelName(modelKey: string): string {
     "nova-3": "Nova 3",
     "flux-general-en": "Flux",
     "flux-general-multi": "Flux Multilingual",
+    "grok-stt": "Grok STT",
     scribe_v2_realtime: "Scribe v2 Realtime",
     "gpt-realtime-whisper": "GPT Realtime Whisper",
     "universal-streaming": "Universal Streaming",
@@ -161,7 +162,8 @@ export function normalizeSTTProviderName(providerName: string): string {
     gradium: "Gradium",
     openai: "OpenAI",
     rime: "Rime",
-    speechmatics: "Speechmatics"
+    speechmatics: "Speechmatics",
+    xai: "xAI"
   };
 
   const lower = providerName.toLowerCase();

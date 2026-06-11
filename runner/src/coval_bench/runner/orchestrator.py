@@ -243,7 +243,6 @@ async def _run_stt_item(
                         2,  # PCM_16 = 2 bytes/sample
                         16000,
                         0.1,
-                        duration_sec,
                     ),
                 )
         except Exception as exc:

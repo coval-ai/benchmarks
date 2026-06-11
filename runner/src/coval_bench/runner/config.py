@@ -40,6 +40,7 @@ DEFAULT_STT_MATRIX: list[ProviderEntry] = [
     ProviderEntry(provider="speechmatics", model="default", enabled=True),
     ProviderEntry(provider="speechmatics", model="enhanced", enabled=True),
     ProviderEntry(provider="gradium", model="default", enabled=True),
+    ProviderEntry(provider="xai", model="grok-stt", enabled=True),
     ProviderEntry(provider="smallest", model="pulse", enabled=True),
     ProviderEntry(provider="cartesia", model="ink-2", enabled=True),
     # OFF; disabled=True hides these from the public catalogue.

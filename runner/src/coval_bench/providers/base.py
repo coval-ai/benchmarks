@@ -122,7 +122,6 @@ class STTProvider(Provider, ABC):
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
     ) -> TranscriptionResult:
         """Measure TTFT (Time to First Token) for this provider.
 
@@ -133,8 +132,6 @@ class STTProvider(Provider, ABC):
             sample_rate: Samples per second (e.g. 16 000).
             realtime_resolution: Chunk duration in seconds for simulated real-time
                 streaming.
-            audio_duration: Total audio duration in seconds; derived from audio_data
-                length when ``None``.
 
         Returns:
             A :class:`TranscriptionResult` with timing and transcript fields
