@@ -17,7 +17,8 @@ Design notes
   ``importlib.import_module`` so that ``coval_bench.runner`` is importable on
   its own even when sibling agents haven't landed yet.  Names are resolved at
   call time, not at module load, which also lets tests patch ``sys.modules``
-  without triggering import errors.
+  without triggering import errors.  ``coval_bench.registries`` is the
+  exception: dependency-light by design, imported eagerly.
 - Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections.
 - Timeouts: ``asyncio.timeout(45)`` for STT, ``asyncio.timeout(60)`` for TTS.
 - Audio cleanup: TTS audio files are deleted in ``finally`` blocks; this module
@@ -47,7 +48,14 @@ from pydantic import BaseModel
 
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
-from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX, ProviderEntry
+from coval_bench.registries import (
+    METRIC_SPECS,
+    MODEL_REGISTRY,
+    Benchmark,
+    Metric,
+    ModelStatus,
+    RegisteredModel,
+)
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -178,7 +186,7 @@ def _get_metrics() -> tuple[Any, Any]:
 
 async def _run_stt_item(
     *,
-    entry: ProviderEntry,
+    entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — DatasetItem is a runtime-typed sibling-agent type
     run_id: int,
     sem: asyncio.Semaphore,
@@ -243,7 +251,6 @@ async def _run_stt_item(
                         2,  # PCM_16 = 2 bytes/sample
                         16000,
                         0.1,
-                        duration_sec,
                     ),
                 )
         except Exception as exc:
@@ -268,16 +275,18 @@ async def _run_stt_item(
         )
 
         # 1. TTFT
-        ttft_status, ttft_error = _metric_outcome(ttft_seconds, item_error, "TTFT", ResultStatus)
+        ttft_status, ttft_error = _metric_outcome(
+            ttft_seconds, item_error, Metric.TTFT, ResultStatus
+        )
         results.append(
             Result(
                 run_id=run_id,
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="TTFT",
+                metric_type=Metric.TTFT,
                 metric_value=ttft_seconds,
-                metric_units="seconds",
+                metric_units=METRIC_SPECS[Metric.TTFT].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=ttft_status,
@@ -287,7 +296,7 @@ async def _run_stt_item(
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(
-            audio_to_final, item_error, "AudioToFinal", ResultStatus
+            audio_to_final, item_error, Metric.AUDIO_TO_FINAL, ResultStatus
         )
         results.append(
             Result(
@@ -295,9 +304,9 @@ async def _run_stt_item(
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="AudioToFinal",
+                metric_type=Metric.AUDIO_TO_FINAL,
                 metric_value=audio_to_final,
-                metric_units="seconds",
+                metric_units=METRIC_SPECS[Metric.AUDIO_TO_FINAL].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=atf_status,
@@ -317,7 +326,7 @@ async def _run_stt_item(
             except Exception as exc:
                 ttfs_calc_error = str(exc)
         ttfs_status, ttfs_error = _metric_outcome(
-            ttfs_value, item_error or ttfs_calc_error, "TTFS", ResultStatus
+            ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
         # Flux can't finalize on our signal (no Finalize, EOT can't be disabled), so it's
         # outside the TTFS parity cohort. Other metrics still run; only the TTFS row is omitted.
@@ -329,9 +338,9 @@ async def _run_stt_item(
                     provider=entry.provider,
                     model=entry.model,
                     benchmark=Benchmark.STT,
-                    metric_type="TTFS",
+                    metric_type=Metric.TTFS,
                     metric_value=ttfs_value,
-                    metric_units="seconds",
+                    metric_units=METRIC_SPECS[Metric.TTFS].units,
                     audio_filename=audio_path.name,
                     transcript=complete_transcript,
                     status=ttfs_status,
@@ -347,16 +356,18 @@ async def _run_stt_item(
             with contextlib.suppress(Exception):
                 rtf_value = compute_rtf(audio_to_final, duration_sec)
 
-        rtf_status, rtf_error = _metric_outcome(audio_to_final, item_error, "RTF", ResultStatus)
+        rtf_status, rtf_error = _metric_outcome(
+            audio_to_final, item_error, Metric.RTF, ResultStatus
+        )
         results.append(
             Result(
                 run_id=run_id,
                 provider=entry.provider,
                 model=entry.model,
                 benchmark=Benchmark.STT,
-                metric_type="RTF",
+                metric_type=Metric.RTF,
                 metric_value=rtf_value,
-                metric_units="ratio",
+                metric_units=METRIC_SPECS[Metric.RTF].units,
                 audio_filename=audio_path.name,
                 transcript=complete_transcript,
                 status=rtf_status,
@@ -375,9 +386,9 @@ async def _run_stt_item(
                         provider=entry.provider,
                         model=entry.model,
                         benchmark=Benchmark.STT,
-                        metric_type="WER",
+                        metric_type=Metric.WER,
                         metric_value=wer_result.wer_percentage,
-                        metric_units="percent",
+                        metric_units=METRIC_SPECS[Metric.WER].units,
                         audio_filename=audio_path.name,
                         transcript=complete_transcript,
                         status=ResultStatus.SUCCESS,
@@ -400,7 +411,7 @@ async def _run_stt_item(
                         provider=entry.provider,
                         model=entry.model,
                         benchmark=Benchmark.STT,
-                        metric_type="WER",
+                        metric_type=Metric.WER,
                         metric_value=None,
                         metric_units=None,
                         audio_filename=audio_path.name,
@@ -431,7 +442,7 @@ async def _run_stt_item(
 
 async def _run_tts_item(
     *,
-    entry: ProviderEntry,
+    entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — TTSDatasetItem is a runtime-typed sibling-agent type
     run_id: int,
     sem: asyncio.Semaphore,
@@ -490,7 +501,9 @@ async def _run_tts_item(
 
         try:
             # 1. TTFA
-            ttfa_status, ttfa_error = _metric_outcome(ttfa_ms, item_error, "TTFA", ResultStatus)
+            ttfa_status, ttfa_error = _metric_outcome(
+                ttfa_ms, item_error, Metric.TTFA, ResultStatus
+            )
             ttfa_value = ttfa_ms
 
             # Transport-contamination gate: a clean measurement taken over HTTP/1.1 or a cold
@@ -519,9 +532,9 @@ async def _run_tts_item(
                     model=entry.model,
                     voice=entry.voice,
                     benchmark=Benchmark.TTS,
-                    metric_type="TTFA",
+                    metric_type=Metric.TTFA,
                     metric_value=ttfa_value,
-                    metric_units="milliseconds",
+                    metric_units=METRIC_SPECS[Metric.TTFA].units,
                     audio_filename=audio_path.name if audio_path else None,
                     transcript=transcript,
                     status=ttfa_status,
@@ -559,9 +572,9 @@ async def _run_tts_item(
                                 model=entry.model,
                                 voice=entry.voice,
                                 benchmark=Benchmark.TTS,
-                                metric_type="WER",
+                                metric_type=Metric.WER,
                                 metric_value=wer_result.wer_percentage,
-                                metric_units="percent",
+                                metric_units=METRIC_SPECS[Metric.WER].units,
                                 audio_filename=audio_path.name,
                                 transcript=whisper_transcript,
                                 status=ResultStatus.SUCCESS,
@@ -582,7 +595,7 @@ async def _run_tts_item(
                                 model=entry.model,
                                 voice=entry.voice,
                                 benchmark=Benchmark.TTS,
-                                metric_type="WER",
+                                metric_type=Metric.WER,
                                 metric_value=None,
                                 metric_units=None,
                                 audio_filename=audio_path.name,
@@ -640,7 +653,7 @@ async def run_benchmarks(
     settings: Settings,
     benchmark_kind: Literal["stt", "tts", "both"] = "both",
     smoke: bool = False,
-    matrix_overrides: list[ProviderEntry] | None = None,
+    matrix_overrides: list[RegisteredModel] | None = None,
 ) -> RunSummary:
     """Execute one complete benchmark run.
 
@@ -648,8 +661,8 @@ async def run_benchmarks(
         settings: Injected application settings (no global state).
         benchmark_kind: Which benchmark(s) to run.
         smoke: If True, process only the first dataset item (local dev mode).
-        matrix_overrides: Optional list of ``ProviderEntry`` objects that override
-            the default matrices by ``(provider, model)`` key.
+        matrix_overrides: Optional list of ``RegisteredModel`` objects that
+            override the registry by ``(benchmark, provider, model)`` key.
 
     Returns:
         A :class:`RunSummary` with final counts and run status.
@@ -678,29 +691,26 @@ async def run_benchmarks(
             posthog_client = None
 
     # ------------------------------------------------------------------
-    # 1. Resolve + filter provider matrix
+    # 1. Resolve + filter the model registry
     # ------------------------------------------------------------------
-    stt_matrix = list(DEFAULT_STT_MATRIX)
-    tts_matrix = list(DEFAULT_TTS_MATRIX)
+    stt_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.STT]
+    tts_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS]
 
     if matrix_overrides:
-        override_map: dict[tuple[str, str], ProviderEntry] = {
-            (e.provider, e.model): e for e in matrix_overrides
+        override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {
+            (e.benchmark, e.provider, e.model): e for e in matrix_overrides
         }
-        stt_matrix = [override_map.get((e.provider, e.model), e) for e in stt_matrix]
-        tts_matrix = [override_map.get((e.provider, e.model), e) for e in tts_matrix]
+        stt_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix]
+        tts_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix]
 
-        # Also apply any overrides that add *new* (provider, model) pairs
-        existing_stt_keys = {(e.provider, e.model) for e in stt_matrix}
-        existing_tts_keys = {(e.provider, e.model) for e in tts_matrix}
+        # Also apply any overrides that add *new* models
+        existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
         for ov in matrix_overrides:
-            if (ov.provider, ov.model) not in existing_stt_keys and ov.voice is None:
-                stt_matrix.append(ov)
-            if (ov.provider, ov.model) not in existing_tts_keys and ov.voice is not None:
-                tts_matrix.append(ov)
+            if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
+                (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    enabled_stt = [e for e in stt_matrix if e.enabled and not e.disabled]
-    enabled_tts = [e for e in tts_matrix if e.enabled and not e.disabled]
+    enabled_stt = [e for e in stt_matrix if e.status is ModelStatus.ACTIVE]
+    enabled_tts = [e for e in tts_matrix if e.status is ModelStatus.ACTIVE]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row

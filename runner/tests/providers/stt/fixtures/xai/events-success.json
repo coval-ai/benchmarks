@@ -1,0 +1,24 @@
+[
+  {"type": "transcript.created", "id": "xai-session-001"},
+  {
+    "type": "transcript.partial",
+    "text": "hello",
+    "is_final": false,
+    "speech_final": false,
+    "start": 0.0,
+    "duration": 0.5
+  },
+  {
+    "type": "transcript.partial",
+    "text": "hello world",
+    "is_final": true,
+    "speech_final": false,
+    "start": 0.0,
+    "duration": 1.0
+  },
+  {
+    "type": "transcript.done",
+    "text": "hello world how are you",
+    "duration": 3.0
+  }
+]

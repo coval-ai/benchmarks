@@ -1,0 +1,4 @@
+[
+  {"type": "transcript.created", "id": "xai-session-err"},
+  {"type": "error", "message": "invalid api key"}
+]

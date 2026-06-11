@@ -103,7 +103,6 @@ class DeepgramProvider(STTProvider):
         sample_width: int,
         sample_rate: int,
         realtime_resolution: float = 0.1,
-        audio_duration: float | None = None,
     ) -> TranscriptionResult:
         result = TranscriptionResult(provider=self.name, vad_events_count=0)
         total_start = time.monotonic()

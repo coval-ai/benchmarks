@@ -54,6 +54,9 @@ scripts.local/
 # Local-only markdown (never commit — use a .local.md suffix)
 **/*.local.md
 
+# Internal provider docs / planning notes — never commit
+docs/providers/
+
 # Package manager / toolchain caches (local)
 .pnpm-store/
 .uv-cache/

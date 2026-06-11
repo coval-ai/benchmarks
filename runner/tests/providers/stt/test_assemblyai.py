@@ -50,7 +50,6 @@ async def test_assemblyai_success(fake_api_key: SecretStr, audio_pcm_bytes: byte
             sample_width=2,
             sample_rate=16000,
             realtime_resolution=0.5,
-            audio_duration=3.0,
         )
 
     assert result.error is None
@@ -139,13 +138,16 @@ def test_invalid_model_raises() -> None:
 @pytest.mark.asyncio
 async def test_assemblyai_wrong_sample_rate(audio_pcm_bytes: bytes) -> None:
     provider = make_provider()
-    with pytest.raises(ValueError, match="16 kHz"):
-        await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
-            channels=1,
-            sample_width=2,
-            sample_rate=8000,
-        )
+    result = await provider.measure_ttft(
+        audio_data=audio_pcm_bytes,
+        channels=1,
+        sample_width=2,
+        sample_rate=8000,
+    )
+
+    assert result.error is not None
+    assert "16 kHz" in result.error
+    assert result.ttft_seconds is None
 
 
 # ---------------------------------------------------------------------------

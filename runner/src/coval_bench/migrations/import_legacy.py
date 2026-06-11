@@ -17,7 +17,7 @@ import psycopg
 import psycopg.rows
 
 from coval_bench.config import get_settings
-from coval_bench.runner.config import DEFAULT_STT_MATRIX, DEFAULT_TTS_MATRIX
+from coval_bench.registries import MODEL_REGISTRY
 
 LEGACY_RUNNER_SHA: Final[str] = "historical-import"
 LEGACY_DATASET_ID: Final[str] = "legacy:cv+local"
@@ -47,11 +47,8 @@ class LegacyRow:
 
 
 def _build_matrix_lookup() -> set[tuple[str, str]]:
-    """Return the canonical {(provider_lower, model)} set from both matrices."""
-    pairs: set[tuple[str, str]] = set()
-    for entry in DEFAULT_STT_MATRIX + DEFAULT_TTS_MATRIX:
-        pairs.add((entry.provider.lower(), entry.model))
-    return pairs
+    """Return the canonical {(provider_lower, model)} set from the model registry."""
+    return {(m.provider.lower(), m.model) for m in MODEL_REGISTRY}
 
 
 def _read_legacy(conn: psycopg.Connection[dict[str, object]]) -> list[LegacyRow]:
@@ -208,7 +205,7 @@ def _summarize(
         )
 
     lines.append("")
-    lines.append("Provider/model validation against DEFAULT_STT_MATRIX + DEFAULT_TTS_MATRIX:")
+    lines.append("Provider/model validation against MODEL_REGISTRY:")
 
     # Count combos per provider_lower/model
     all_combos: set[tuple[str, str]] = set()
