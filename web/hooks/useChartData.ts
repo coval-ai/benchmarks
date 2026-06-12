@@ -160,20 +160,29 @@ export function useChartData({
     ]
   );
 
-  // Per-model box-plot pieces from the SQL stats: box = p25..p75, whiskers
-  // clamped to 1.5x IQR beyond the box (against the true data extremes).
-  const boxByModel = useMemo<Record<string, BoxPlotDataPoint>>(() => {
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-
-    const byModel: Record<string, BoxPlotDataPoint> = {};
+  // Per-metric, per-model box-plot pieces from the SQL stats, built in one pass
+  // and indexed by metric_type so any latency metric can read its own pieces:
+  // box = p25..p75, whiskers clamped to 1.5x IQR beyond the box (against the
+  // true data extremes).
+  const boxByMetricModel = useMemo<
+    Record<string, Record<string, BoxPlotDataPoint>>
+  >(() => {
+    const out: Record<string, Record<string, BoxPlotDataPoint>> = {};
     modelStats.forEach((stat) => {
-      if (stat.metric_type !== primaryMetric) return;
+      if (
+        stat.metric_type !== "TTFS" &&
+        stat.metric_type !== "TTFT" &&
+        stat.metric_type !== "TTFA"
+      ) {
+        return;
+      }
 
       const q1 = toDisplayUnits(stat.p25);
       const median = toDisplayUnits(stat.p50);
       const q3 = toDisplayUnits(stat.p75);
       const iqr = q3 - q1;
 
+      const byModel = (out[stat.metric_type] ??= {});
       byModel[toModelKey(stat.provider, stat.model)] = {
         model: toModelKey(stat.provider, stat.model),
         provider: stat.provider,
@@ -192,46 +201,44 @@ export function useChartData({
       };
     });
 
-    return byModel;
-  }, [modelStats, activeTab, toDisplayUnits]);
+    return out;
+  }, [modelStats, toDisplayUnits]);
 
-  // Box plot data: the selected models' pieces, sorted by median, with the
-  // pooled axis bounds.
-  const boxPlotDataMemo = useMemo<BoxPlotData>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const primaryMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-
-    const data: BoxPlotDataPoint[] = [];
-    let globalMin = Infinity;
-    let globalMax = -Infinity;
-
-    selectedModels.forEach((model) => {
-      const entry = boxByModel[model];
-      if (!entry) return;
-      data.push(entry);
-      globalMin = Math.min(globalMin, entry.quartiles.min);
-      globalMax = Math.max(globalMax, entry.quartiles.max);
-    });
-
-    if (data.length === 0) {
-      globalMin = 0;
-      globalMax = 0;
-    }
-
-    data.sort((a, b) => a.quartiles.median - b.quartiles.median);
-
-    return {
-      data,
-      globalMin,
-      globalMax,
-      metricType: primaryMetric
-    };
-  }, [boxByModel, activeTab, selectedTTSModels, selectedSTTModels]);
-
+  // Box plot data for a given metric: the selected models' pieces, sorted by
+  // median, with the pooled axis bounds.
   const getBoxPlotData = useCallback(
-    (): BoxPlotData => boxPlotDataMemo,
-    [boxPlotDataMemo]
+    (metric: string): BoxPlotData => {
+      const selectedModels =
+        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+      const byModel = boxByMetricModel[metric] ?? {};
+
+      const data: BoxPlotDataPoint[] = [];
+      let globalMin = Infinity;
+      let globalMax = -Infinity;
+
+      selectedModels.forEach((model) => {
+        const entry = byModel[model];
+        if (!entry) return;
+        data.push(entry);
+        globalMin = Math.min(globalMin, entry.quartiles.min);
+        globalMax = Math.max(globalMax, entry.quartiles.max);
+      });
+
+      if (data.length === 0) {
+        globalMin = 0;
+        globalMax = 0;
+      }
+
+      data.sort((a, b) => a.quartiles.median - b.quartiles.median);
+
+      return {
+        data,
+        globalMin,
+        globalMax,
+        metricType: metric
+      };
+    },
+    [boxByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
   );
 
   // Per-metric, per-model scatter point (avg latency, avg WER) built in one
@@ -281,44 +288,42 @@ export function useChartData({
     [scatterByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
   );
 
-  // Heatmap rows: absolute latency percentiles straight from the SQL stats
-  // (like the box plot), plus avg WER.
-  const heatmapDataMemo = useMemo<ModelHeatmapData[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-    const latencyMetric = activeTab === "tts" ? "TTFA" : "TTFT";
-
-    const heatmapData: ModelHeatmapData[] = [];
-
-    selectedModels.forEach((model) => {
-      const latencyStat = getStat(model, latencyMetric);
-      const werStat = getStat(model, "WER");
-
-      if (!latencyStat || !werStat) return;
-
-      const p25 = toDisplayUnits(latencyStat.p25);
-      const p75 = toDisplayUnits(latencyStat.p75);
-      heatmapData.push({
-        model,
-        latencyP25: p25,
-        latencyP50: toDisplayUnits(latencyStat.p50),
-        latencyP75: p75,
-        latencyIQR: p75 - p25,
-        avgWER: werStat.avg_value,
-        werStdDev: werStat.stddev_value
-      });
-    });
-
-    return heatmapData.sort(
-      (a, b) =>
-        normalizeModelName(a.model).localeCompare(normalizeModelName(b.model)) ||
-        a.model.localeCompare(b.model)
-    );
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getStat, toDisplayUnits]);
-
+  // Heatmap rows for a given latency metric: absolute latency percentiles
+  // straight from the SQL stats (like the box plot), plus avg WER.
   const getHeatmapData = useCallback(
-    (): ModelHeatmapData[] => heatmapDataMemo,
-    [heatmapDataMemo]
+    (metric: string): ModelHeatmapData[] => {
+      const selectedModels =
+        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
+
+      const heatmapData: ModelHeatmapData[] = [];
+
+      selectedModels.forEach((model) => {
+        const latencyStat = getStat(model, metric);
+        const werStat = getStat(model, "WER");
+
+        if (!latencyStat || !werStat) return;
+
+        const p25 = toDisplayUnits(latencyStat.p25);
+        const p75 = toDisplayUnits(latencyStat.p75);
+        heatmapData.push({
+          model,
+          latencyP25: p25,
+          latencyP50: toDisplayUnits(latencyStat.p50),
+          latencyP75: p75,
+          latencyIQR: p75 - p25,
+          avgWER: werStat.avg_value,
+          werStdDev: werStat.stddev_value
+        });
+      });
+
+      return heatmapData.sort(
+        (a, b) =>
+          normalizeModelName(a.model).localeCompare(
+            normalizeModelName(b.model)
+          ) || a.model.localeCompare(b.model)
+      );
+    },
+    [activeTab, selectedTTSModels, selectedSTTModels, getStat, toDisplayUnits]
   );
 
   const werBarDataMemo = useMemo<BarDataPoint[]>(() => {

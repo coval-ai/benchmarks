@@ -25,6 +25,12 @@ import { useTimeWindow } from "@/hooks/useTimeWindow";
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
+
+  // STT shows a TTFS / TTFT toggle that drives every latency surface (headline,
+  // timeline, box plot, scatter, heatmap) in sync. TTS is single-metric (TTFA),
+  // so the toggle is hidden there and the metric stays TTFA.
+  const [sttMetric, setSttMetric] = useState<"TTFS" | "TTFT">("TTFS");
+  const activeMetric = page === "tts" ? "TTFA" : sttMetric;
   const { timeWindow, changeTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
@@ -203,10 +209,9 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Headline numbers: the median latency across selected models, and the
   // lowest average WER (with one model selected, that model's own value).
-  const primaryMetric = page === "tts" ? "TTFA" : "TTFT";
   const medianPrimary = useMemo(
-    () => getMedianLatencyMs(primaryMetric),
-    [getMedianLatencyMs, primaryMetric]
+    () => getMedianLatencyMs(activeMetric),
+    [getMedianLatencyMs, activeMetric]
   );
 
   const keyMetrics = useMemo(() => {
@@ -247,7 +252,7 @@ export function useDashboardState(page: "tts" | "stt") {
   }, [werBarData, clickedWERBars]);
 
   // Derived display values
-  const latencyLabel = page === "tts" ? "TTFA" : "TTFT";
+  const latencyLabel = activeMetric;
   const pageTitle = page === "tts" ? "Text to Speech Model Comparisons" : "Speech to Text Model Comparisons";
   const pageSubtitle = page === "tts"
     ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
@@ -280,12 +285,13 @@ export function useDashboardState(page: "tts" | "stt") {
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
 
-  const heatmapDisplayData = chartData.getHeatmapData();
+  const heatmapDisplayData = chartData.getHeatmapData(activeMetric);
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
     const latencyFullLabel =
-      page === "tts" ? "Time to First Audio" : "Time to First Token";
+      metricDescriptions[activeMetric.toLowerCase() as keyof typeof metricDescriptions]
+        .short;
     return {
       label: `Median ${latencyFullLabel}`,
       displayValue: `${medianPrimary.toFixed(0)} ms`,
@@ -321,6 +327,11 @@ export function useDashboardState(page: "tts" | "stt") {
     // Section descriptions
     boxPlotDescription,
     werDescription,
+
+    // Metric toggle (STT: TTFS/TTFT; TTS: always TTFA)
+    sttMetric,
+    setSttMetric,
+    activeMetric,
 
     // Key metrics
     primaryKeyMetric,
