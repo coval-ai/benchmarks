@@ -166,7 +166,7 @@ async function transcribeOne(modelId: string, pcm: ArrayBuffer): Promise<STTResp
         r = await callAssemblyAI(pcm, requireEnv("PLAYGROUND_ASSEMBLYAI_API_KEY"));
         break;
       case "gradium":
-        r = await callGradium(pcm, requireEnv("PLAYGROUND_GRADIUM_API_KEY"));
+        r = await callGradium(pcm, model, requireEnv("PLAYGROUND_GRADIUM_API_KEY"));
         break;
       default:
         return { modelId, error: "Unhandled provider.", code: "INVALID_MODEL" };

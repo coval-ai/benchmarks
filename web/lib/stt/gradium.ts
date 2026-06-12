@@ -16,7 +16,11 @@ export type GradiumResult = {
   audioToFinalMs: number;
 };
 
-export function callGradium(pcm: ArrayBuffer, apiKey: string): Promise<GradiumResult> {
+export function callGradium(
+  pcm: ArrayBuffer,
+  model: string,
+  apiKey: string,
+): Promise<GradiumResult> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(WS_URL, { headers: { "x-api-key": apiKey } });
 
@@ -53,7 +57,7 @@ export function callGradium(pcm: ArrayBuffer, apiKey: string): Promise<GradiumRe
       ws.send(
         JSON.stringify({
           type: "setup",
-          model_name: "default",
+          model_name: model,
           input_format: "pcm_16000",
           json_config: JSON.stringify({ language: "en" }),
         }),
@@ -82,7 +86,9 @@ export function callGradium(pcm: ArrayBuffer, apiKey: string): Promise<GradiumRe
         }
         ws.send(JSON.stringify({ type: "flush", flush_id: 1 }));
         eosTimer = setTimeout(() => {
-          ws.send(JSON.stringify({ type: "end_of_stream" }));
+          // No-op callback: the socket may be closing when the timer fires,
+          // and ws emits an error event for callback-less sends in that state.
+          ws.send(JSON.stringify({ type: "end_of_stream" }), () => {});
         }, FLUSH_SETTLE_MS);
         return;
       }
@@ -99,14 +105,8 @@ export function callGradium(pcm: ArrayBuffer, apiKey: string): Promise<GradiumRe
 
       if (msg.type === "end_of_stream") {
         gotEos = true;
-        const audioToFinalMs =
-          lastTextTime > 0
-            ? Math.round(lastTextTime - t0)
-            : t0 > 0
-              ? Math.round(performance.now() - t0)
-              : 0;
         ws.close();
-        settle(() => resolve({ transcript: texts.join(" ").trim(), ttfaMs, audioToFinalMs }));
+        settle(resolveWithTranscript);
         return;
       }
 
@@ -116,16 +116,29 @@ export function callGradium(pcm: ArrayBuffer, apiKey: string): Promise<GradiumRe
       }
     });
 
+    // The server's end_of_stream echo is just an early-exit signal (same as the
+    // runner): a close after flushed text still carries a usable transcript.
+    function resolveWithTranscript() {
+      const audioToFinalMs =
+        lastTextTime > 0
+          ? Math.round(lastTextTime - t0)
+          : t0 > 0
+            ? Math.round(performance.now() - t0)
+            : 0;
+      resolve({ transcript: texts.join(" ").trim(), ttfaMs, audioToFinalMs });
+    }
+
     ws.on("close", () => {
       settle(() => {
         if (!ready) {
           reject(new Error("Gradium: connection closed before ready"));
           return;
         }
-        if (!gotEos) {
+        if (!gotEos && texts.length === 0) {
           reject(new Error("Gradium: connection closed before end_of_stream"));
           return;
         }
+        resolveWithTranscript();
       });
     });
 
