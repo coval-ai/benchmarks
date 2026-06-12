@@ -21,7 +21,8 @@ export type SttProviderId =
   | "deepgram"
   | "assemblyai"
   | "elevenlabs"
-  | "speechmatics";
+  | "speechmatics"
+  | "gradium";
 
 export type TtsModelConfig = {
   id: string;
@@ -162,6 +163,14 @@ export const sttModels: SttModelConfig[] = [
     provider: "speechmatics",
     label: "Speechmatics (enhanced)",
     model: "enhanced",
+    sampleRate: 16_000,
+    enabled: true
+  },
+  {
+    id: "gradium:default",
+    provider: "gradium",
+    label: "Gradium",
+    model: "default",
     sampleRate: 16_000,
     enabled: true
   }
