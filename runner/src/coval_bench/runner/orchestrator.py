@@ -648,16 +648,29 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
         _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
 
 
+# Transient-failure retry for the end-of-run bucket refresh.
+_BUCKET_REFRESH_ATTEMPTS = 3
+_BUCKET_REFRESH_RETRY_DELAY_S = 0.5
+
+
 async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
     """Best-effort refresh of the run's series rollup bucket; never raises.
 
-    A failure leaves only this bucket stale (later runs fill their own
-    buckets, not this one) — not worth failing the run.
+    Transient failures are retried. A final failure leaves only this bucket
+    stale (a run sharing the slot recomputes it; the migration backfill is
+    the manual repair) — not worth failing the run.
     """
-    try:
-        await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
-    except Exception:
-        _log.warning("series_bucket_refresh_failed", run_id=run_id, exc_info=True)
+    for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
+        try:
+            await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
+        except Exception:
+            if attempt == _BUCKET_REFRESH_ATTEMPTS:
+                _log.warning("series_bucket_refresh_failed", run_id=run_id, exc_info=True)
+                return
+            _log.info("series_bucket_refresh_retry", run_id=run_id, attempt=attempt)
+            await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
+        else:
+            return
 
 
 async def run_benchmarks(

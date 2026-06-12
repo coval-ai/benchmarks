@@ -145,10 +145,10 @@ class RunWriter:
         """Recompute the series rollup bucket for this run's scheduled_at slot.
 
         Delete-then-insert the whole bucket from raw result rows in one
-        transaction. Recomputing the full bucket (not just this run's rows)
-        keeps it correct when runs share a slot, and makes the call idempotent.
-        Runs without a ``scheduled_at`` are skipped — the migration backfill
-        owns those.
+        transaction, serialized per bucket by an advisory lock. Recomputing
+        the full bucket (not just this run's rows) keeps it correct when runs
+        share a slot, and makes the call idempotent. Runs without a
+        ``scheduled_at`` are skipped — the migration backfill owns those.
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -161,10 +161,20 @@ class RunWriter:
                 if bucket_at is None:
                     return
 
+                # Serializes concurrent refreshes of one bucket. An empty
+                # bucket gives DELETE nothing to lock, so two refreshes can
+                # interleave such that the staler recompute commits and the
+                # fresher one aborts on the primary key, dropping a run from
+                # the slot. Released on commit/abort.
+                params = {"bucket": bucket_at, "period": period_seconds}
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('results_by_bucket',"
+                    " extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
+                    params,
+                )
                 # Two statements on purpose: a data-modifying CTE
                 # (WITH deleted AS (DELETE ...) INSERT) collides on the primary
                 # key — the INSERT cannot see the CTE's deletes.
-                params = {"bucket": bucket_at, "period": period_seconds}
                 await cur.execute(
                     "DELETE FROM benchmarks_v2.results_by_bucket WHERE bucket_at = %(bucket)s",
                     params,

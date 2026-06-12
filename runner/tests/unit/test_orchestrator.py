@@ -419,6 +419,38 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+async def test_refresh_series_bucket_retries_transient_failure(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient refresh failure is retried; success stops the loop."""
+    from coval_bench.runner import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
+    writer = MagicMock()
+    writer.refresh_bucket = AsyncMock(side_effect=[RuntimeError("blip"), None])
+
+    await orchestrator._refresh_series_bucket(writer, 1, settings)
+
+    assert writer.refresh_bucket.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_series_bucket_never_raises(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausting all attempts logs and returns instead of raising."""
+    from coval_bench.runner import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
+    writer = MagicMock()
+    writer.refresh_bucket = AsyncMock(side_effect=RuntimeError("db down"))
+
+    await orchestrator._refresh_series_bucket(writer, 1, settings)
+
+    assert writer.refresh_bucket.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_flux_excluded_from_ttfs(audio_file: Path, settings: Settings) -> None:
     """Deepgram Flux is outside the TTFS parity cohort → no TTFS row, other metrics stay."""
     provider = MagicMock()
