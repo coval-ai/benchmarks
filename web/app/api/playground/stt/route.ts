@@ -5,6 +5,7 @@ import { callDeepgram } from "@/lib/stt/deepgram";
 import { callElevenLabs } from "@/lib/stt/elevenlabs";
 import { callAssemblyAI } from "@/lib/stt/assemblyai";
 import { callSpeechmatics } from "@/lib/stt/speechmatics";
+import { callGradium } from "@/lib/stt/gradium";
 import { getEnabledSttModels } from "@/lib/playground/providers";
 import { getSessionFromRequest } from "@/lib/playground/session";
 import type { STTResponse } from "@/lib/stt/types";
@@ -163,6 +164,9 @@ async function transcribeOne(modelId: string, pcm: ArrayBuffer): Promise<STTResp
         break;
       case "assemblyai":
         r = await callAssemblyAI(pcm, requireEnv("PLAYGROUND_ASSEMBLYAI_API_KEY"));
+        break;
+      case "gradium":
+        r = await callGradium(pcm, requireEnv("PLAYGROUND_GRADIUM_API_KEY"));
         break;
       default:
         return { modelId, error: "Unhandled provider.", code: "INVALID_MODEL" };
