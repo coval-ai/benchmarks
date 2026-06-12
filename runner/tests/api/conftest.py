@@ -121,6 +121,24 @@ async def _apply_schema(dsn: str) -> None:
                     GROUP BY r.provider, r.model, r.benchmark, r.metric_type
                 ) stats
             """)  # noqa: S608
+        # Series rollup table (mirrors migration 20260611_0006).
+        await aconn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
+                provider      text NOT NULL,
+                model         text NOT NULL,
+                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS')),
+                metric_type   text NOT NULL,
+                bucket_at     timestamptz NOT NULL,
+                min_value     double precision NOT NULL,
+                p25           double precision NOT NULL,
+                p50           double precision NOT NULL,
+                p75           double precision NOT NULL,
+                max_value     double precision NOT NULL,
+                value_sum     double precision NOT NULL,
+                sample_count  integer NOT NULL,
+                PRIMARY KEY (provider, model, benchmark, metric_type, bucket_at)
+            )
+        """)
     finally:
         await aconn.close()
 
@@ -310,5 +328,44 @@ async def _refresh_mv(postgresql: Any) -> None:
     try:
         for name in _MV_WINDOWS:
             await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
+    finally:
+        await aconn.close()
+
+
+# Scheduler period for the legacy created_at bucket fallback (matches
+# migration 20260611_0006).
+_BUCKET_PERIOD_SECONDS = 1800
+
+
+async def _fill_buckets(postgresql: Any) -> None:
+    """Truncate and recompute results_by_bucket from all results (mirrors the backfill)."""
+    dsn = _make_db_url(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
+    bucket_sql = (
+        "COALESCE(rn.scheduled_at, to_timestamp("
+        f"floor(extract(epoch FROM r.created_at) / {_BUCKET_PERIOD_SECONDS})"
+        f" * {_BUCKET_PERIOD_SECONDS}))"
+    )
+    try:
+        await aconn.execute("TRUNCATE benchmarks_v2.results_by_bucket")
+        await aconn.execute(f"""
+            INSERT INTO benchmarks_v2.results_by_bucket
+                (provider, model, benchmark, metric_type, bucket_at,
+                 min_value, p25, p50, p75, max_value, value_sum, sample_count)
+            SELECT r.provider, r.model, r.benchmark, r.metric_type, {bucket_sql},
+                   MIN(r.metric_value)::float8,
+                   PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                   PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                   PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                   MAX(r.metric_value)::float8,
+                   SUM(r.metric_value)::float8,
+                   COUNT(*)::int
+            FROM benchmarks_v2.results r
+            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+            WHERE r.status = 'success'
+              AND rn.status IN ('succeeded', 'partial')
+              AND r.metric_value IS NOT NULL
+            GROUP BY r.provider, r.model, r.benchmark, r.metric_type, {bucket_sql}
+        """)  # noqa: S608
     finally:
         await aconn.close()

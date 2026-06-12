@@ -141,6 +141,70 @@ class RunWriter:
                 await cur.executemany(sql, params)
             await conn.commit()
 
+    async def refresh_bucket(self, run_id: int, *, period_seconds: int) -> None:
+        """Recompute the series rollup bucket for this run's scheduled_at slot.
+
+        Delete-then-insert the whole bucket from raw result rows in one
+        transaction. Recomputing the full bucket (not just this run's rows)
+        keeps it correct when runs share a slot, and makes the call idempotent.
+        Runs without a ``scheduled_at`` are skipped — the migration backfill
+        owns those.
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                await cur.execute(
+                    "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s",
+                    (run_id,),
+                )
+                row = await cur.fetchone()
+                bucket_at = row["scheduled_at"] if row is not None else None
+                if bucket_at is None:
+                    return
+
+                # Two statements on purpose: a data-modifying CTE
+                # (WITH deleted AS (DELETE ...) INSERT) collides on the primary
+                # key — the INSERT cannot see the CTE's deletes.
+                params = {"bucket": bucket_at, "period": period_seconds}
+                await cur.execute(
+                    "DELETE FROM benchmarks_v2.results_by_bucket WHERE bucket_at = %(bucket)s",
+                    params,
+                )
+                # Bucket membership: scheduled_at matches exactly, or a legacy
+                # null-scheduled row whose created_at falls in
+                # [bucket_at, bucket_at + period).
+                await cur.execute(
+                    """
+                    INSERT INTO benchmarks_v2.results_by_bucket
+                        (provider, model, benchmark, metric_type, bucket_at,
+                         min_value, p25, p50, p75, max_value, value_sum, sample_count)
+                    SELECT r.provider, r.model, r.benchmark, r.metric_type, %(bucket)s,
+                           MIN(r.metric_value)::float8,
+                           PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                           PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                           PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY r.metric_value)::float8,
+                           MAX(r.metric_value)::float8,
+                           SUM(r.metric_value)::float8,
+                           COUNT(*)::int
+                    FROM benchmarks_v2.results r
+                    JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+                    WHERE r.status = 'success'
+                      AND rn.status IN ('succeeded', 'partial')
+                      AND r.metric_value IS NOT NULL
+                      AND (
+                          rn.scheduled_at = %(bucket)s
+                          OR (
+                              rn.scheduled_at IS NULL
+                              AND r.created_at >= %(bucket)s
+                              AND r.created_at < %(bucket)s
+                                  + (%(period)s::double precision) * INTERVAL '1 second'
+                          )
+                      )
+                    GROUP BY r.provider, r.model, r.benchmark, r.metric_type
+                    """,
+                    params,
+                )
+            await conn.commit()
+
     async def finish_run(
         self,
         run_id: int,

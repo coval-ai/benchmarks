@@ -15,6 +15,7 @@ needs them via a helper ``_apply_migrations`` that calls Alembic directly.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +133,7 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         tables = {row[0] for row in cur.fetchall()}
     assert "runs" in tables
     assert "results" in tables
+    assert "results_by_bucket" in tables
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT matviewname FROM pg_matviews WHERE schemaname = 'benchmarks_v2'")
@@ -155,6 +157,51 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         )
         schemas = cur.fetchall()
     assert schemas == []
+
+
+def test_migration_backfills_existing_results(pg_conn: psycopg.Connection[Any]) -> None:
+    """Upgrade to 0005, seed results, upgrade to head — the 0006 backfill
+    fills the bucket."""
+    cfg = _alembic_cfg(_async_dsn(pg_conn))
+    alembic_command.upgrade(cfg, "20260611_0005")
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO benchmarks_v2.runs "
+            "(runner_sha, dataset_id, dataset_sha256, status, scheduled_at) "
+            "VALUES ('s', 'd', 'h', 'succeeded', now() - interval '1 hour') RETURNING id"
+        )
+        seed = cur.fetchone()
+        assert seed is not None
+        run_id = seed[0]
+        for value in (1.0, 3.0):
+            cur.execute(
+                "INSERT INTO benchmarks_v2.results "
+                "(run_id, provider, model, benchmark, metric_type, metric_value, "
+                " metric_units, status) "
+                "VALUES (%s, 'openai', 'whisper-1', 'STT', 'WER', %s, 'ratio', 'success')",
+                (run_id, value),
+            )
+
+    # Same as `coval-bench db migrate`.
+    alembic_command.upgrade(cfg, "head")
+
+    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT min_value, p50, max_value, value_sum, sample_count "
+            "FROM benchmarks_v2.results_by_bucket "
+            "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
+        )
+        rows = cur.fetchall()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["sample_count"] == 2
+    assert float(row["value_sum"]) == pytest.approx(4.0)
+    assert float(row["min_value"]) == pytest.approx(1.0)
+    assert float(row["max_value"]) == pytest.approx(3.0)
+    assert float(row["p50"]) == pytest.approx(2.0)
 
 
 def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
@@ -560,6 +607,112 @@ def test_record_results_batch_rollback_on_failure(pg_conn: psycopg.Connection[An
         row = cur.fetchone()
     assert row is not None
     # Nothing committed — the batch rolled back
+    assert row[0] == 0
+
+
+def _wer_result(run_id: int, value: float) -> Result:
+    return Result(
+        run_id=run_id,
+        provider="openai",
+        model="whisper-1",
+        benchmark=Benchmark.STT,
+        metric_type="WER",
+        metric_value=value,
+        metric_units="ratio",
+        status=ResultStatus.SUCCESS,
+    )
+
+
+def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
+    """refresh_bucket fills the run's rollup bucket, is idempotent, and
+    recomputes the whole bucket from raw rows when runs share a scheduled_at."""
+    _apply_migrations(pg_conn)
+    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123",
+                dataset_id="stt-v1",
+                dataset_sha256="deadbeef",
+                scheduled_at=scheduled,
+            )
+            assert run.id is not None
+            await writer.record_results([_wer_result(run.id, 1.0), _wer_result(run.id, 3.0)])
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+            await writer.refresh_bucket(run.id, period_seconds=1800)
+            # Twice — idempotent.
+            await writer.refresh_bucket(run.id, period_seconds=1800)
+
+            # Second run in the same bucket — refresh recomputes over both
+            # runs' rows.
+            run2 = await writer.start_run(
+                runner_sha="abc123",
+                dataset_id="stt-v1",
+                dataset_sha256="deadbeef",
+                scheduled_at=scheduled,
+            )
+            assert run2.id is not None
+            await writer.record_results([_wer_result(run2.id, 5.0)])
+            await writer.finish_run(run2.id, status=RunStatus.SUCCEEDED)
+            await writer.refresh_bucket(run2.id, period_seconds=1800)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT bucket_at, min_value, p50, max_value, value_sum, sample_count "
+            "FROM benchmarks_v2.results_by_bucket "
+            "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
+        )
+        rows = cur.fetchall()
+
+    # One bucket spanning all three samples.
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["bucket_at"] == scheduled
+    assert row["sample_count"] == 3
+    assert float(row["value_sum"]) == pytest.approx(9.0)
+    assert float(row["min_value"]) == pytest.approx(1.0)
+    assert float(row["max_value"]) == pytest.approx(5.0)
+    assert float(row["p50"]) == pytest.approx(3.0)
+
+
+def test_refresh_bucket_excludes_failed_run(pg_conn: psycopg.Connection[Any]) -> None:
+    """A failed run never seeds a bucket — the recompute drops failed parent
+    runs."""
+    _apply_migrations(pg_conn)
+    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123",
+                dataset_id="stt-v1",
+                dataset_sha256="deadbeef",
+                scheduled_at=scheduled,
+            )
+            assert run.id is not None
+            await writer.record_results([_wer_result(run.id, 1.0)])
+            await writer.finish_run(run.id, status=RunStatus.FAILED)
+            await writer.refresh_bucket(run.id, period_seconds=1800)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM benchmarks_v2.results_by_bucket")
+        row = cur.fetchone()
+    assert row is not None
     assert row[0] == 0
 
 

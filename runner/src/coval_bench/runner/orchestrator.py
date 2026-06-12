@@ -648,6 +648,18 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
         _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
 
 
+async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
+    """Best-effort refresh of the run's series rollup bucket; never raises.
+
+    A failure leaves only this bucket stale (later runs fill their own
+    buckets, not this one) — not worth failing the run.
+    """
+    try:
+        await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
+    except Exception:
+        _log.warning("series_bucket_refresh_failed", run_id=run_id, exc_info=True)
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -896,6 +908,9 @@ async def run_benchmarks(
                     exc_info=refresh_exc,
                 )
 
+            if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
+                await _refresh_series_bucket(writer, run_id, settings)
+
             finished_at = datetime.now(tz=UTC)
             summary = RunSummary(
                 run_id=run_id,
@@ -959,6 +974,9 @@ async def run_benchmarks(
                     run_id=run_id,
                     exc_info=write_exc,
                 )
+            else:
+                # Run row is PARTIAL, so its bucket qualifies.
+                await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             _log.warning(

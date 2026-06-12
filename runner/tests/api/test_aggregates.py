@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.api.common import WINDOW_INTERVALS, WINDOW_VIEWS, WindowLiteral
-from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
+from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
 
 
 def test_intervals_cover_every_window() -> None:
@@ -120,34 +120,45 @@ async def test_partial_runs_included(client: AsyncClient, postgresql: Any) -> No
 
 
 async def test_series_buckets_by_scheduled_at(client: AsyncClient, postgresql: Any) -> None:
-    """Results from one run share its scheduled_at bucket; values average."""
-    scheduled = datetime(2026, 6, 5, 12, 0, 0, tzinfo=dt.UTC)
+    """Results from one run share its scheduled_at bucket; the rollup holds
+    the bucket distribution."""
+    scheduled = datetime.now(dt.UTC).replace(microsecond=0) - timedelta(hours=1)
     run_id = await _insert_run(postgresql, scheduled_at=scheduled)
     await _insert_result(postgresql, run_id, metric_value=1.0)
     await _insert_result(postgresql, run_id, metric_value=3.0)
+    await _fill_buckets(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     series = response.json()["series"]
     assert len(series) == 1
     point = series[0]
     assert datetime.fromisoformat(point["scheduled_at"]) == scheduled
-    assert point["avg_value"] == pytest.approx(2.0)
+    assert point["min_value"] == pytest.approx(1.0)
+    assert point["p25"] == pytest.approx(1.5)
+    assert point["p50"] == pytest.approx(2.0)
+    assert point["p75"] == pytest.approx(2.5)
+    assert point["max_value"] == pytest.approx(3.0)
+    assert point["value_sum"] == pytest.approx(4.0)
     assert point["sample_count"] == 2
 
 
 async def test_series_legacy_rows_floor_created_at(client: AsyncClient, postgresql: Any) -> None:
-    """Runs without scheduled_at fall back to created_at floored to the
-    schedule period (1800s default), same as GET /v1/results."""
+    """Runs without scheduled_at bucket on created_at floored to the schedule
+    period (1800s default)."""
     run_id = await _insert_run(postgresql, scheduled_at=None)
     created = datetime.now(dt.UTC) - timedelta(minutes=10)
     await _insert_result(postgresql, run_id, created_at=created, metric_value=1.0)
+    await _fill_buckets(postgresql)
 
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     series = response.json()["series"]
     assert len(series) == 1
-    bucket = datetime.fromisoformat(series[0]["scheduled_at"])
+    point = series[0]
+    bucket = datetime.fromisoformat(point["scheduled_at"])
     expected_epoch = created.timestamp() // 1800 * 1800
     assert bucket.timestamp() == pytest.approx(expected_epoch)
+    assert point["value_sum"] == pytest.approx(1.0)
+    assert point["sample_count"] == 1
 
 
 async def test_window_excludes_old_rows(client: AsyncClient, postgresql: Any) -> None:
