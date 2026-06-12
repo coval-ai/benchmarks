@@ -10,8 +10,8 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 
 // Match the text sizes on the timeline chart above: 14px axis labels, 12px
 // tick/legend/category text.
-const modelFontSize = "12px";
-const providerFontSize = "12px";
+const modelFontSize = 12;
+const providerFontSize = 12;
 const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
@@ -145,6 +145,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first (desktop only)
     if (!isMobile) {
+      const labelMaxWidth = xScale.step() * 0.96;
+      const minModelFont = 8;
+
       data.data.forEach((modelData) => {
         const model = modelData.model;
         const normalizedModel = normalizeModelName(model);
@@ -153,7 +156,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        // Wrap model name if too long (max ~15 characters per line)
         const maxCharsPerLine = 8;
         const modelWords = normalizedModel.split(/[-_\s]/);
         const modelLines: string[] = [];
@@ -176,28 +178,46 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           modelLines.push(currentLine);
         }
 
-        // Add model name lines with dynamic font size
-        modelLines.forEach((line, lineIndex) => {
-          g.append("text")
+        const modelTextNodes = modelLines.map((line, lineIndex) =>
+          g
+            .append("text")
             .attr("x", xPosition)
             .attr("y", yPosition + lineIndex * modelLineHeight)
             .attr("text-anchor", "middle")
             .attr("fill", themeColors.label)
-            .attr("font-size", modelFontSize)
+            .attr("font-size", `${modelFontSize}px`)
             .attr("font-weight", "bold")
-            .text(line);
-        });
+            .text(line)
+        );
 
-        // Add provider name with dynamic font size
-        const providerYPosition =
-          yPosition + modelLines.length * modelLineHeight + 1;
-        g.append("text")
+        const providerNode = g
+          .append("text")
           .attr("x", xPosition)
-          .attr("y", providerYPosition)
           .attr("text-anchor", "middle")
           .attr("fill", themeColors.axisText)
-          .attr("font-size", providerFontSize)
+          .attr("font-size", `${providerFontSize}px`)
           .text(provider);
+
+        let widest = providerNode.node()?.getComputedTextLength() ?? 0;
+        modelTextNodes.forEach((node) => {
+          widest = Math.max(widest, node.node()?.getComputedTextLength() ?? 0);
+        });
+
+        const scale =
+          widest > labelMaxWidth
+            ? Math.max(minModelFont / modelFontSize, labelMaxWidth / widest)
+            : 1;
+        const lineHeight = modelLineHeight * scale;
+
+        modelTextNodes.forEach((node, lineIndex) => {
+          node
+            .attr("font-size", `${modelFontSize * scale}px`)
+            .attr("y", yPosition + lineIndex * lineHeight);
+        });
+
+        providerNode
+          .attr("font-size", `${providerFontSize * scale}px`)
+          .attr("y", yPosition + modelLines.length * lineHeight + 1);
       });
     }
 
@@ -301,16 +321,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .select("rect")
             .attr("fill-opacity", 0.5);
 
-          const tooltip = g
-            .append("g")
-            .attr("class", "box-tooltip")
-            .attr("transform", `translate(${centerX + 30}, ${yScale(median)})`);
+          const tooltip = g.append("g").attr("class", "box-tooltip");
 
-          tooltip
+          const tooltipRect = tooltip
             .append("rect")
             .attr("x", 0)
             .attr("y", -40)
-            .attr("width", 140)
             .attr("height", 80)
             .attr("fill", themeColors.tooltipBg)
             .attr("stroke", color)
@@ -318,46 +334,91 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .attr("rx", 6)
             .attr("opacity", 0.95);
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", -25)
-            .attr("fill", themeColors.tooltipText)
-            .attr("font-size", "12px")
-            .attr("font-weight", "bold")
-            .text(modelData.model);
+          const tooltipLines = [
+            {
+              text: modelData.model,
+              y: -25,
+              size: "12px",
+              weight: "bold",
+              fill: themeColors.tooltipText,
+            },
+            {
+              text: `Count: ${modelData.stats.count}`,
+              y: -8,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Mean: ${modelData.stats.mean.toFixed(0)}ms`,
+              y: 6,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Median: ${modelData.quartiles.median.toFixed(0)}ms`,
+              y: 20,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+            {
+              text: `Std: ${modelData.stats.std.toFixed(0)}ms`,
+              y: 34,
+              size: "10px",
+              weight: "normal",
+              fill: themeColors.tooltipSecondary,
+            },
+          ];
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", -8)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Count: ${modelData.stats.count}`);
+          const tooltipNodes = tooltipLines.map((line) => {
+            const node = tooltip
+              .append("text")
+              .attr("x", 8)
+              .attr("y", line.y)
+              .attr("fill", line.fill)
+              .attr("font-size", line.size)
+              .attr("font-weight", line.weight)
+              .text(line.text);
+            return {
+              node,
+              width: node.node()?.getComputedTextLength() ?? 0,
+              size: line.size,
+            };
+          });
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 6)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Mean: ${modelData.stats.mean.toFixed(0)}ms`);
+          const tooltipTextWidth = tooltipNodes.reduce(
+            (max, n) => Math.max(max, n.width),
+            0
+          );
+          const tooltipWidth = Math.min(
+            chartWidth,
+            Math.max(140, tooltipTextWidth + 16)
+          );
+          tooltipRect.attr("width", tooltipWidth);
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 20)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Median: ${modelData.quartiles.median.toFixed(0)}ms`);
+          const innerWidth = tooltipWidth - 16;
+          tooltipNodes.forEach(({ node, width, size }) => {
+            if (width > innerWidth && width > 0) {
+              const baseSize = parseFloat(size);
+              node.attr("font-size", `${baseSize * (innerWidth / width)}px`);
+            }
+          });
 
-          tooltip
-            .append("text")
-            .attr("x", 8)
-            .attr("y", 34)
-            .attr("fill", themeColors.tooltipSecondary)
-            .attr("font-size", "10px")
-            .text(`Std: ${modelData.stats.std.toFixed(0)}ms`);
+          const tooltipX = Math.max(
+            0,
+            Math.min(
+              centerX + 30 + tooltipWidth > chartWidth
+                ? centerX - 30 - tooltipWidth
+                : centerX + 30,
+              chartWidth - tooltipWidth
+            )
+          );
+          tooltip.attr(
+            "transform",
+            `translate(${tooltipX}, ${yScale(median)})`
+          );
         })
         .on("mouseleave", function () {
           d3.select(this)
