@@ -102,7 +102,7 @@ export const ttsModels: TtsModelConfig[] = [
   {
     id: "gradium:default:emma",
     provider: "gradium",
-    label: "Default",
+    label: "Gradium TTS",
     model: "default",
     voice: "YTpq7expH9539ERJ",
     enabled: true
@@ -169,7 +169,7 @@ export const sttModels: SttModelConfig[] = [
   {
     id: "gradium:default",
     provider: "gradium",
-    label: "Gradium",
+    label: "Gradium STT",
     model: "default",
     sampleRate: 16_000,
     enabled: true

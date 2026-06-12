@@ -21,6 +21,9 @@ export function ModelPill({
   onToggle,
   fullWidth = false
 }: ModelPillProps) {
+  const showProvider =
+    providerLabel && !label.toLowerCase().includes(providerLabel.toLowerCase());
+
   const className = [
     fullWidth
       ? "flex w-full max-w-full min-w-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-colors"
@@ -43,7 +46,7 @@ export function ModelPill({
         <span className="size-1.5 shrink-0 rounded-full" style={dotStyle} aria-hidden />
         <span className="min-w-0 truncate">{label}</span>
       </span>
-      {providerLabel ? (
+      {showProvider ? (
         <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-text-tertiary dark:text-zinc-500">
           {providerLabel}
         </span>
@@ -54,7 +57,7 @@ export function ModelPill({
       <span className="size-1.5 shrink-0 rounded-full" style={dotStyle} aria-hidden />
       <span className="min-w-0 truncate">
         {label}
-        {providerLabel ? (
+        {showProvider ? (
           <span className="font-normal text-text-tertiary dark:text-zinc-500"> · {providerLabel}</span>
         ) : null}
       </span>
