@@ -148,8 +148,9 @@ export function useChartData({
         p.metric_type === "WER"
           ? p.value_sum !== undefined
             ? p.value_sum / p.sample_count
-            : (p.avg_value ?? 0)
-          : (p.p50 ?? p.avg_value ?? 0);
+            : p.avg_value
+          : (p.p50 ?? p.avg_value);
+      if (value === undefined) return;
       modelSeries[new Date(point.scheduled_at).getTime()] =
         toDisplayUnits(value);
     });
