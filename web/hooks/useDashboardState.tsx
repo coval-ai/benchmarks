@@ -15,6 +15,7 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
+import { median } from "@/lib/utils/median";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
@@ -182,27 +183,38 @@ export function useDashboardState(page: "tts" | "stt") {
   // Calculate metrics
   const { getStat } = chartData;
 
-  // Headline numbers: among the selected models, the lowest median latency
-  // and the lowest average WER (with one model selected, that model's own
-  // median/average).
-  const keyMetrics = useMemo(() => {
-    const primaryMetric = page === "tts" ? "TTFA" : "TTFT";
+  // Median latency (in display units) across the selected models' per-model
+  // medians for the given metric. This is the single canonical headline number,
+  // shared by the summary card, the box plot, and the timeline so every surface
+  // reports the same statistic. Median commutes with the linear ms conversion,
+  // so this equals the box plot's median(per-model medians).
+  const getMedianLatencyMs = useCallback(
+    (metric: string) => {
+      const p50s: number[] = [];
+      deferredSelectedModels.forEach((model) => {
+        const stat = getStat(model, metric);
+        if (stat && typeof stat.p50 === "number") p50s.push(stat.p50);
+      });
+      if (p50s.length === 0) return 0;
+      return latencyToMs(median(p50s), page);
+    },
+    [getStat, deferredSelectedModels, page]
+  );
 
-    let fastestPrimary = Infinity;
+  // Headline numbers: the median latency across selected models, and the
+  // lowest average WER (with one model selected, that model's own value).
+  const primaryMetric = page === "tts" ? "TTFA" : "TTFT";
+  const medianPrimary = useMemo(
+    () => getMedianLatencyMs(primaryMetric),
+    [getMedianLatencyMs, primaryMetric]
+  );
+
+  const keyMetrics = useMemo(() => {
     let lowestSecondary = Infinity;
-    let fastestLatencyModel = "";
     let lowestWERModel = "";
-    let fastestLatencyProvider = "";
     let lowestWERProvider = "";
 
     deferredSelectedModels.forEach((model) => {
-      const latencyStat = getStat(model, primaryMetric);
-      if (latencyStat && latencyStat.p50 < fastestPrimary) {
-        fastestPrimary = latencyStat.p50;
-        fastestLatencyModel = model;
-        fastestLatencyProvider = parseModelKey(model).provider;
-      }
-
       const werStat = getStat(model, "WER");
       if (werStat && werStat.avg_value < lowestSecondary) {
         lowestSecondary = werStat.avg_value;
@@ -212,24 +224,13 @@ export function useDashboardState(page: "tts" | "stt") {
     });
 
     return {
-      avgPrimary:
-        fastestPrimary !== Infinity ? latencyToMs(fastestPrimary, page) : 0,
       avgSecondary: lowestSecondary !== Infinity ? lowestSecondary : 0,
-      fastestLatencyModel,
       lowestWERModel,
-      fastestLatencyProvider,
       lowestWERProvider,
     };
-  }, [getStat, deferredSelectedModels, page]);
+  }, [getStat, deferredSelectedModels]);
 
-  const {
-    avgPrimary,
-    avgSecondary,
-    fastestLatencyModel,
-    lowestWERModel,
-    fastestLatencyProvider,
-    lowestWERProvider,
-  } = keyMetrics;
+  const { avgSecondary, lowestWERModel, lowestWERProvider } = keyMetrics;
 
   // Get computed data
   const werBarData = chartData.getWERBarData();
@@ -285,19 +286,9 @@ export function useDashboardState(page: "tts" | "stt") {
   const primaryKeyMetric = (() => {
     const latencyFullLabel =
       page === "tts" ? "Time to First Audio" : "Time to First Token";
-    const label = `${selectedModels.length > 1 ? "Fastest" : "Median"} ${latencyFullLabel}`;
     return {
-      label,
-      displayValue: `${avgPrimary.toFixed(0)} ms`,
-      subtitle:
-        selectedModels.length > 1 && fastestLatencyModel
-          ? {
-              name: normalizeModelName(fastestLatencyModel),
-              detail: fastestLatencyProvider
-                ? normalizeProviderName(fastestLatencyProvider)
-                : undefined,
-            }
-          : undefined,
+      label: `Median ${latencyFullLabel}`,
+      displayValue: `${medianPrimary.toFixed(0)} ms`,
     };
   })();
 
@@ -334,6 +325,7 @@ export function useDashboardState(page: "tts" | "stt") {
     // Key metrics
     primaryKeyMetric,
     secondaryKeyMetric,
+    getMedianLatencyMs,
 
     // Data loading
     loading,
