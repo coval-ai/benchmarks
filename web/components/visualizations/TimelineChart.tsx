@@ -88,6 +88,12 @@ const TimelineChart: React.FC = () => {
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
 
+  // The metric is shared dashboard-wide, so clear any pinned tooltip whenever it
+  // changes — whether from this chart's toggle or another section's.
+  useEffect(() => {
+    setPinned(null);
+  }, [metric]);
+
   useEffect(() => {
     if (pinned === null) return;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -153,7 +159,7 @@ const TimelineChart: React.FC = () => {
           }}
         />
 
-        <MetricToggle onChange={() => setPinned(null)} />
+        <MetricToggle />
 
         <div ref={chartRef} className="relative h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">

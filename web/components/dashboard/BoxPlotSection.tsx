@@ -25,7 +25,10 @@ const BoxPlotSection: React.FC = () => {
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("box_plot");
 
-  const boxPlotData = getBoxPlotData(activeMetric);
+  const boxPlotData = useMemo(
+    () => getBoxPlotData(activeMetric),
+    [getBoxPlotData, activeMetric]
+  );
   // Median across the selected models' per-model medians.
   const medianLatency = useMemo(
     () => median(boxPlotData.data.map((modelData) => modelData.quartiles.median)),

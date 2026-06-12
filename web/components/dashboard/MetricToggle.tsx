@@ -9,7 +9,7 @@ import { useActiveTab } from "@/hooks/useActiveTab";
 
 // Shared TTFS / TTFT switch. Reads and writes the single dashboard-wide metric,
 // so every chart that renders it stays in sync. Hidden on TTS (single-metric).
-const MetricToggle: React.FC<{ onChange?: () => void }> = ({ onChange }) => {
+const MetricToggle: React.FC = () => {
   const activeTab = useActiveTab();
   const { sttMetric, setSttMetric } = useDashboard();
 
@@ -21,10 +21,7 @@ const MetricToggle: React.FC<{ onChange?: () => void }> = ({ onChange }) => {
         <button
           key={m}
           type="button"
-          onClick={() => {
-            setSttMetric(m);
-            onChange?.();
-          }}
+          onClick={() => setSttMetric(m)}
           className={
             "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
             (sttMetric === m

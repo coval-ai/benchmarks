@@ -187,7 +187,7 @@ export function useDashboardState(page: "tts" | "stt") {
   }, [modelsByProvider]);
 
   // Calculate metrics
-  const { getStat } = chartData;
+  const { getStat, getHeatmapData } = chartData;
 
   // Median latency (in display units) across the selected models' per-model
   // medians for the given metric. This is the single canonical headline number,
@@ -285,13 +285,17 @@ export function useDashboardState(page: "tts" | "stt") {
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
 
-  const heatmapDisplayData = chartData.getHeatmapData(activeMetric);
+  const heatmapDisplayData = useMemo(
+    () => getHeatmapData(activeMetric),
+    [getHeatmapData, activeMetric]
+  );
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
     const latencyFullLabel =
-      metricDescriptions[activeMetric.toLowerCase() as keyof typeof metricDescriptions]
-        .short;
+      metricDescriptions[
+        activeMetric.toLowerCase() as keyof typeof metricDescriptions
+      ]?.short ?? activeMetric;
     return {
       label: `Median ${latencyFullLabel}`,
       displayValue: `${medianPrimary.toFixed(0)} ms`,
