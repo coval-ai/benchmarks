@@ -64,7 +64,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     // STT hides the y-axis tick labels, so it needs almost no left margin —
     // reclaim that space for a wider plot. TTS keeps room for the "1.4s" ticks.
     const showYTicks = !(
-      data.metricType === "NTTFT" || data.metricType === "TTFT"
+      data.metricType === "NTTFT" ||
+      data.metricType === "TTFT" ||
+      data.metricType === "TTFS"
     );
     const margin = { top: 20, right: 8, bottom: 80, left: showYTicks ? 40 : 10 };
     const chartWidth = dimensions.width - margin.left - margin.right;

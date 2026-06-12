@@ -7,6 +7,7 @@ import React from "react";
 import HeatmapPlot from "@/components/charts/d3/HeatmapPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -26,6 +27,8 @@ const HeatmapSection: React.FC = () => {
           }}
           expandable={false}
         />
+
+        <MetricToggle />
 
         {/* The mobile scale transform (useDashboardState) targets
             .heatmap-container, so only the plot lives inside it — keeping the
