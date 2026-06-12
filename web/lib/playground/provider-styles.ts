@@ -31,7 +31,8 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   deepgram: "Deepgram",
   rime: "Rime",
   assemblyai: "AssemblyAI",
-  speechmatics: "Speechmatics"
+  speechmatics: "Speechmatics",
+  gradium: "Gradium"
 };
 
 /** User-facing copy when the map is missing an id (prod only — never leak raw internal ids). */
@@ -64,7 +65,8 @@ export function formatProviderDisplayName(providerId: string): string {
 
 /** Per-model colors match `web/lib/config/colors.ts` + `getModelColor` / `getProviderColor`. */
 export function getPlaygroundModelVisual(m: TtsModelConfig | SttModelConfig): ProviderVisual {
-  const dot = getModelColor(m.model);
+  // Composite key first so same-slug models (gradium/speechmatics "default") stay distinct.
+  const dot = getModelColor(`${m.provider}:${m.model}`);
   const nameColor = getProviderColor(formatProviderDisplayName(m.provider));
   return {
     dot,
