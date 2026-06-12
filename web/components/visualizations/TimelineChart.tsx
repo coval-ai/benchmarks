@@ -77,6 +77,7 @@ const TimelineChart: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
+    getMedianLatencyMs,
     dataTimeWindow,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
@@ -115,21 +116,10 @@ const TimelineChart: React.FC = () => {
   const description =
     metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions];
 
-  const avgValue = useMemo(() => {
-    let sum = 0;
-    let count = 0;
-    for (const point of windowedTimelineData) {
-      const record = point as Record<string, number>;
-      for (const model of modelsWithData) {
-        const value = record[`${model}_value`];
-        if (typeof value === "number" && !Number.isNaN(value)) {
-          sum += value;
-          count += 1;
-        }
-      }
-    }
-    return count > 0 ? sum / count : 0;
-  }, [windowedTimelineData, modelsWithData]);
+  // Headline number: the median latency across selected models — the same
+  // canonical statistic the summary card and box plot report, so all three
+  // surfaces agree.
+  const medianValue = getMedianLatencyMs(metric);
 
   // Fix the Y axis to the max across the full dataset (not just the visible
   // window) so the scale stays consistent while panning. Rounded up to a clean
@@ -161,8 +151,8 @@ const TimelineChart: React.FC = () => {
           }
           description={description}
           stat={{
-            label: `Avg ${metricLabel}`,
-            value: `${avgValue.toFixed(0)} ms`,
+            label: `Median ${metricLabel}`,
+            value: `${medianValue.toFixed(0)} ms`,
           }}
         />
 
