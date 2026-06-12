@@ -10,13 +10,12 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
   (percentile_cont), min, max, count. Read from the per-window materialized
   views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
   runner at the end of each benchmark run — read-only here.
-* ``series`` — per (provider, model, metric_type, scheduled_at bucket): avg and
-  count, aggregated live. The bucket falls back to created_at floored to the
-  scheduler period for legacy rows, identical to the COALESCE in GET
-  /v1/results.
+* ``series`` — per (provider, model, metric_type, bucket_at) distribution
+  (min/p25/p50/p75/max/value_sum/count), read from the ``results_by_bucket``
+  rollup table, filled by the orchestrator's end-of-run hook.
 
-Both blocks gate on result rows with status='success' and a non-null
-metric_value, from parent runs in (succeeded, partial).
+Both blocks are pre-aggregated from rows with status='success' and a non-null
+metric_value, from parent runs in (succeeded, partial) — read-only here.
 """
 
 from __future__ import annotations
@@ -35,7 +34,6 @@ from starlette.requests import Request
 
 from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
-    SCHEDULED_AT_BUCKET_SQL,
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
     BenchmarkLiteral,
@@ -47,26 +45,13 @@ from coval_bench.api.deps import (
     get_cache_locks,
     get_pool,
     get_posthog,
-    get_settings,
 )
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
-from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["results"])
-
-# Live FROM/WHERE for the series block.
-_FROM_WHERE = (
-    " FROM benchmarks_v2.results r"
-    " JOIN benchmarks_v2.runs rn ON rn.id = r.run_id"
-    " WHERE r.status = 'success'"
-    " AND rn.status IN ('succeeded', 'partial')"
-    " AND r.benchmark = %(benchmark)s"
-    " AND r.metric_value IS NOT NULL"
-    " AND r.created_at >= NOW() - %(interval)s::interval"
-)
 
 _STATS_SQL_TEMPLATE = (
     "SELECT provider, model, metric_type,"
@@ -77,16 +62,13 @@ _STATS_SQL_TEMPLATE = (
     " ORDER BY provider, model, metric_type"
 )
 
-# Bucket expression repeated in GROUP BY because a bare ``scheduled_at`` there
-# would resolve to the input column rn.scheduled_at, not the alias.
 _SERIES_SQL = (
-    "SELECT r.provider, r.model, r.metric_type,"
-    f" {SCHEDULED_AT_BUCKET_SQL} AS scheduled_at,"
-    " AVG(r.metric_value)::float8 AS avg_value,"
-    " COUNT(*)::int AS sample_count"
-    + _FROM_WHERE
-    + f" GROUP BY r.provider, r.model, r.metric_type, {SCHEDULED_AT_BUCKET_SQL}"
-    " ORDER BY 4, r.provider, r.model, r.metric_type"
+    "SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
+    " min_value, p25, p50, p75, max_value, value_sum, sample_count"
+    " FROM benchmarks_v2.results_by_bucket"
+    " WHERE benchmark = %(benchmark)s"
+    " AND bucket_at >= NOW() - %(interval)s::interval"
+    " ORDER BY bucket_at, provider, model, metric_type"
 )
 
 
@@ -97,7 +79,6 @@ async def get_results_aggregates(
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
-    settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
@@ -106,7 +87,8 @@ async def get_results_aggregates(
 
     Args:
         benchmark: One of STT, TTS.
-        window: Time window over results.created_at. Defaults to 24h.
+        window: Time window — stats over results.created_at, series over
+            bucket_at. Defaults to 24h.
     """
 
     async def fill() -> AggregatesResponse:
@@ -114,7 +96,6 @@ async def get_results_aggregates(
         series_params: dict[str, Any] = {
             "benchmark": benchmark,
             "interval": WINDOW_INTERVALS[window],
-            "schedule_period": settings.schedule_period_seconds,
         }
 
         async with pool.connection() as conn:

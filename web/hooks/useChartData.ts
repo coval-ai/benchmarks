@@ -126,8 +126,11 @@ export function useChartData({
     []
   );
 
-  // Per-metric, per-model timeline series (scheduled_at bucket → avg) built in
-  // one pass. Indexed by metric_type so any metric can read its own series.
+  // Per-metric, per-model timeline series (scheduled_at bucket → value) built in
+  // one pass. Latency metrics plot the bucket median (p50); WER the average.
+  // The generated SeriesPoint type follows the deployed API, which may still be
+  // the pre-rollup shape (avg_value only) — fall back to it so web and API can
+  // deploy in either order. Drop the fallback once the rollup API is live.
   const timelineByMetricModel = useMemo<
     Record<string, Record<string, Record<number, number>>>
   >(() => {
@@ -136,9 +139,20 @@ export function useChartData({
       const byModel = (out[point.metric_type] ??= {});
       const modelKey = toModelKey(point.provider, point.model);
       const modelSeries = (byModel[modelKey] ??= {});
-      modelSeries[new Date(point.scheduled_at).getTime()] = toDisplayUnits(
-        point.avg_value
-      );
+      const p = point as SeriesPoint & {
+        avg_value?: number;
+        value_sum?: number;
+        p50?: number;
+      };
+      const value =
+        p.metric_type === "WER"
+          ? p.value_sum !== undefined
+            ? p.value_sum / p.sample_count
+            : p.avg_value
+          : (p.p50 ?? p.avg_value);
+      if (value === undefined) return;
+      modelSeries[new Date(point.scheduled_at).getTime()] =
+        toDisplayUnits(value);
     });
     return out;
   }, [series, toDisplayUnits]);

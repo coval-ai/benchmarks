@@ -147,6 +147,7 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
+    writer.refresh_bucket = AsyncMock()
     return writer
 
 
@@ -314,6 +315,9 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     assert writer.record_results.await_count >= 2
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
     writer.refresh_stats_matviews.assert_awaited_once_with()
+    writer.refresh_bucket.assert_awaited_once_with(
+        1, period_seconds=settings.schedule_period_seconds
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +365,9 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     assert summary.fail_count >= 1
     assert summary.success_count >= 1
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.PARTIAL, error=None)
+    writer.refresh_bucket.assert_awaited_once_with(
+        1, period_seconds=settings.schedule_period_seconds
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +415,39 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF", "TTFS"}
     assert all(r.status == ResultStatus.FAILED for r in rows)
     assert all("always fails" in (r.error or "") for r in rows)
+    writer.refresh_bucket.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_refresh_series_bucket_retries_transient_failure(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient refresh failure is retried; success stops the loop."""
+    from coval_bench.runner import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
+    writer = MagicMock()
+    writer.refresh_bucket = AsyncMock(side_effect=[RuntimeError("blip"), None])
+
+    await orchestrator._refresh_series_bucket(writer, 1, settings)
+
+    assert writer.refresh_bucket.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_series_bucket_never_raises(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausting all attempts logs and returns instead of raising."""
+    from coval_bench.runner import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
+    writer = MagicMock()
+    writer.refresh_bucket = AsyncMock(side_effect=RuntimeError("db down"))
+
+    await orchestrator._refresh_series_bucket(writer, 1, settings)
+
+    assert writer.refresh_bucket.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1209,6 +1249,9 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     finish_kwargs = writer.finish_run.await_args.kwargs
     assert finish_kwargs["status"] == RunStatus.PARTIAL
     assert "sigterm" in (finish_kwargs.get("error") or "").lower()
+    writer.refresh_bucket.assert_awaited_once_with(
+        run.id, period_seconds=settings.schedule_period_seconds
+    )
 
 
 # ---------------------------------------------------------------------------
