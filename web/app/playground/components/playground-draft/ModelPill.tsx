@@ -21,8 +21,6 @@ export function ModelPill({
   onToggle,
   fullWidth = false
 }: ModelPillProps) {
-  // Drop the provider tag when the label already names the provider
-  // (e.g. "Gradium TTS · Gradium", "Speechmatics+ · Speechmatics").
   const showProvider =
     providerLabel && !label.toLowerCase().includes(providerLabel.toLowerCase());
 
