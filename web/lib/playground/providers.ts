@@ -171,7 +171,6 @@ export const sttModels: SttModelConfig[] = [
     provider: "gradium",
     label: "Gradium",
     model: "default",
-    url: "wss://api.gradium.ai/api/speech/asr",
     sampleRate: 16_000,
     enabled: true
   }
