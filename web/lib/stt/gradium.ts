@@ -54,8 +54,6 @@ export function callGradium(
     }, SESSION_TIMEOUT_MS);
 
     ws.on("open", () => {
-      // Unlike the runner, the TTFA clock starts at ws open (handshake included)
-      // so timings are comparable with the other playground adapters.
       t0 = performance.now();
       ws.send(
         JSON.stringify({
