@@ -2,56 +2,56 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const modelColors: Record<string, string> = {
-  // OpenAI TTS
-  "gpt-4o-mini-tts": "#943126",
+  // OpenAI TTS — red family (#E74C3C)
+  "gpt-4o-mini-tts": "#C0392B",
 
-  // ElevenLabs TTS
-  eleven_multilingual_v2: "#FFD633",
+  // OpenAI STT — red family (#E74C3C)
+  "gpt-realtime-whisper": "#F1948A",
+
+  // ElevenLabs TTS — orange family (#F39C12)
+  eleven_multilingual_v2: "#F5B041",
   eleven_flash_v2_5: "#F39C12",
-  eleven_turbo_v2_5: "#B7950B",
+  eleven_turbo_v2_5: "#CA6F1E",
 
-  // ElevenLabs STT
-  scribe_v2_realtime: "#E67E22",
+  // ElevenLabs STT — orange family (#F39C12)
+  scribe_v2_realtime: "#935116",
 
-  // xAI STT
-  "grok-stt": "#EC4899",
+  // xAI TTS — pink family (#EC4899)
+  "grok-tts": "#F472B6",
 
-  // OpenAI STT
-  "gpt-realtime-whisper": "#10A37F",
+  // xAI STT — pink family (#EC4899)
+  "grok-stt": "#BE185D",
 
-  // Cartesia TTS
-  "sonic-3": "#3498DB",
-  "sonic-3.5": "#2563EB",
+  // Cartesia TTS — blue family (#3498DB)
+  "sonic-3": "#85C1E9",
+  "sonic-3.5": "#3498DB",
 
-  // Cartesia STT
-  "ink-2": "#6366F1",
+  // Cartesia STT — blue family (#3498DB)
+  "ink-2": "#1A5276",
 
-  // Rime TTS
-  arcana: "#33FF99",
-  mistv3: "#0E5C32",
-  coda: "#1DE9B6",
+  // Rime TTS — green family (#27AE60)
+  arcana: "#82E0AA",
+  coda: "#27AE60",
+  mistv3: "#1A7A40",
 
-  // Hume TTS
+  // Hume TTS — violet family (#A855F7)
+  "octave-2": "#C084FC",
   "octave-tts": "#7C3AED",
-  "octave-2": "#C026D3",
 
-  // xAI TTS
-  "grok-tts": "#EC4899",
+  // Deepgram TTS — teal family (#16A085)
+  "aura-2-thalia-en": "#0A4F48",
 
-  // Deepgram TTS
-  "aura-2-thalia-en": "#FC2D62",
+  // Deepgram STT — teal family (#16A085)
+  "nova-3": "#52C5AE",
+  "nova-2": "#26AD94",
+  "flux-general-multi": "#16A085",
+  "flux-general-en": "#0D7065",
 
-  // Deepgram STT
-  "nova-2": "#F39C12",
-  "nova-3": "#FFD633",
-  "flux-general-en": "#FFFF66",
-  "flux-general-multi": "#FFB347",
+  // AssemblyAI STT — amethyst family (#8E44AD)
+  "universal-streaming": "#8E44AD",
 
-  // AssemblyAI STT
-  "universal-streaming": "#E74C3C",
-
-  // Speechmatics STT
-  enhanced: "#3498DB",
+  // Speechmatics STT — navy family (#21618C)
+  enhanced: "#2E86C1",
   default: "#21618C",
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#21618C",
