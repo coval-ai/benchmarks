@@ -6,6 +6,7 @@
 import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { getModelColor } from "@/lib/utils/colors";
 
 // Keep the links pinned in place until the footer is about to collide with the
 // actual bottom of the link list, then push the sidebar up so the filters slide
@@ -82,6 +83,7 @@ const ModelSidebar: React.FC = () => {
                 <div className="space-y-0">
                   {models.map((model) => {
                     const checked = selectedModels.includes(model);
+                    const modelColor = getModelColor(model);
                     return (
                       <label
                         key={model}
@@ -95,17 +97,18 @@ const ModelSidebar: React.FC = () => {
                             aria-label={`${
                               checked ? "Deselect" : "Select"
                             } ${model} model`}
-                            className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] bg-[#d4d2cc] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            style={{ backgroundColor: checked ? modelColor : "#d4d2cc" }}
                           />
                           <svg
                             aria-hidden
                             viewBox="0 0 14 14"
                             fill="none"
-                            stroke="currentColor"
+                            stroke="white"
                             strokeWidth={1.5}
                             strokeLinecap="round"
                             strokeLinejoin="round"
-                            className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 text-text-primary peer-checked:block"
+                            className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 peer-checked:block"
                           >
                             <path d="M3.5 7.5l2.5 2.5 4.5-5" />
                           </svg>
