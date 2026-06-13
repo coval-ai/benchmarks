@@ -33,10 +33,9 @@ interface LegendEntry {
 }
 
 // Custom legend: names are rendered in black (recharts colors them per-series
-// by default), and the items lay out in a grid that grows from two columns on
-// mobile to more columns on larger screens.
+// by default), and the items are stacked vertically.
 const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
-  <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-2 pt-5 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-2 lg:grid-cols-4">
+  <ul className="flex flex-col gap-y-1.5 px-2 pt-5">
     {payload?.map((entry) => (
       <li
         key={entry.dataKey ?? entry.value}
