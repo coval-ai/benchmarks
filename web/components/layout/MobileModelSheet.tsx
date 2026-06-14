@@ -7,6 +7,7 @@ import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
+import { getModelColor } from "@/lib/utils/colors";
 
 const MobileModelSheet: React.FC = () => {
   const {
@@ -75,21 +76,28 @@ const MobileModelSheet: React.FC = () => {
                 </button>
                 {expandedProviders[provider] && (
                   <div className="ml-3 space-y-1 mt-2">
-                    {models.map((model) => (
-                      <button
-                        key={model}
-                        onClick={() => onToggleModelSelection(model)}
-                        className={`block text-left py-2 px-3 rounded-lg text-sm transition-all duration-300 w-full ${
-                          selectedModels.includes(model)
-                            ? "bg-selected-bg text-text-primary shadow-md border border-selected-border"
-                            : "text-text-tertiary hover:text-text-secondary hover:bg-hover-bg"
-                        }`}
-                      >
-                        <span className="text-sm">
-                          {normalizeModelName(model)}
-                        </span>
-                      </button>
-                    ))}
+                    {models.map((model) => {
+                      const selected = selectedModels.includes(model);
+                      return (
+                        <button
+                          key={model}
+                          onClick={() => onToggleModelSelection(model)}
+                          className={`flex items-center gap-2 text-left py-2 px-3 rounded-lg text-sm transition-all duration-300 w-full ${
+                            selected
+                              ? "bg-selected-bg text-text-primary shadow-md border border-selected-border"
+                              : "text-text-tertiary hover:text-text-secondary hover:bg-hover-bg"
+                          }`}
+                        >
+                          <span
+                            className="shrink-0 h-2.5 w-2.5 rounded-full"
+                            style={{ backgroundColor: getModelColor(model) }}
+                          />
+                          <span className="text-sm">
+                            {normalizeModelName(model)}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
