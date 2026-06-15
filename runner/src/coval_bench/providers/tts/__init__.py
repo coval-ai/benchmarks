@@ -46,4 +46,10 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
 if HumeTTSProvider is not None:
     TTS_PROVIDERS["hume"] = HumeTTSProvider
 
-__all__ = ["TTS_PROVIDERS", "HUME_AVAILABLE", "GradiumTTSProvider", "SmallestTTSProvider", "XaiTTSProvider"]
+__all__ = [
+    "TTS_PROVIDERS",
+    "HUME_AVAILABLE",
+    "GradiumTTSProvider",
+    "SmallestTTSProvider",
+    "XaiTTSProvider",
+]

@@ -62,7 +62,7 @@ async def test_smallest_happy_path(fake_settings: Settings, tmp_path: Path) -> N
     assert len(fake_ws.sent) == 1
     payload = json.loads(fake_ws.sent[0])
     assert payload["text"] == "Hello from Smallest AI"
-    assert payload["voice_id"] == "meher"
+    assert payload["voice_id"] == "kaitlyn"
     assert payload["model"] == "lightning_v3.1_pro"
     assert payload["sample_rate"] == 24000
 
