@@ -156,6 +156,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     RegisteredModel(benchmark=_TTS, provider="xai", model="grok-tts", voice="eve", status=_ACTIVE),
+    # Smallest AI — Lightning v3.1 Pro, kaitlyn voice (American English).
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="smallest",
+        model="lightning_v3.1_pro",
+        voice="kaitlyn",
+        status=_ACTIVE,
+    ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
     ),
