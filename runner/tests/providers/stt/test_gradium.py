@@ -11,6 +11,7 @@ each ``text`` message carries an additive word group for the current segment
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -105,6 +106,42 @@ async def test_gradium_commits_text_without_end_text(
     assert result.error is None
     assert result.complete_transcript == "hello world how are you"
     assert result.word_count == 5
+
+
+@pytest.mark.asyncio
+async def test_gradium_closes_on_flushed_ack_not_blind_sleep(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `flushed` ack releases the close wait before the timeout cap.
+
+    The cap is set high, so a prompt return proves the ack unblocked the wait.
+    """
+    monkeypatch.setattr("coval_bench.providers.stt.gradium._FLUSH_WAIT_S", 30.0)
+    events: list[Any] = [
+        {"type": "text", "text": "hello world", "start_s": 0.5, "stream_id": 0},
+        {"type": "flushed", "flush_id": 1},
+        {"type": "end_of_stream"},
+    ]
+    provider = GradiumSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.gradium.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        start = time.monotonic()
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+        elapsed = time.monotonic() - start
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    # Ack releases the wait well before the 30s cap (audio streams ~3s).
+    assert elapsed < 5.0
 
 
 # ---------------------------------------------------------------------------

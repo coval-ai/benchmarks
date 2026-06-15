@@ -48,6 +48,11 @@ export const modelColors: Record<string, string> = {
   // Speechmatics — navy family (#21618C).
   enhanced: "#2E86C1",
   default: "#21618C",
+
+  // Soniox — gold family. The chart's only gold; sits yellower than the
+  // ElevenLabs oranges and dark enough to read on the cream background.
+  "tts-rt-v1": "#C9A227",
+
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#21618C",
   "gradium:default": "#1ABC9C"
@@ -64,5 +69,6 @@ export const providerColors: Record<string, string> = {
   Gradium: "#1ABC9C",
   Hume: "#A855F7",
   "Inworld AI": "#6366F1",
-  xAI: "#EC4899"
+  xAI: "#EC4899",
+  Soniox: "#C9A227"
 };

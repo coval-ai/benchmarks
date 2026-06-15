@@ -274,25 +274,29 @@ async def _run_stt_item(
             transcription_result.complete_transcript if transcription_result else None
         )
 
-        # 1. TTFT
+        # 1. TTFT — time-to-first-partial from first audio. For xAI Grok this reflects
+        # its min-audio gate, not engine speed, so it misrepresents the provider; TTFS
+        # (re-anchored at end-of-speech) is the fair metric. Omit TTFT for xAI; the rest run.
         ttft_status, ttft_error = _metric_outcome(
             ttft_seconds, item_error, Metric.TTFT, ResultStatus
         )
-        results.append(
-            Result(
-                run_id=run_id,
-                provider=entry.provider,
-                model=entry.model,
-                benchmark=Benchmark.STT,
-                metric_type=Metric.TTFT,
-                metric_value=ttft_seconds,
-                metric_units=METRIC_SPECS[Metric.TTFT].units,
-                audio_filename=audio_path.name,
-                transcript=complete_transcript,
-                status=ttft_status,
-                error=ttft_error,
+        ttft_excluded = entry.provider == "xai"
+        if not ttft_excluded:
+            results.append(
+                Result(
+                    run_id=run_id,
+                    provider=entry.provider,
+                    model=entry.model,
+                    benchmark=Benchmark.STT,
+                    metric_type=Metric.TTFT,
+                    metric_value=ttft_seconds,
+                    metric_units=METRIC_SPECS[Metric.TTFT].units,
+                    audio_filename=audio_path.name,
+                    transcript=complete_transcript,
+                    status=ttft_status,
+                    error=ttft_error,
+                )
             )
-        )
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(

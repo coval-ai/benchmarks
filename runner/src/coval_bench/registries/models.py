@@ -67,7 +67,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_RETIRED),
+    RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="smallest", model="pulse", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="cartesia", model="ink-2", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="google", model="short", status=_RETIRED),
@@ -156,7 +156,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     RegisteredModel(benchmark=_TTS, provider="xai", model="grok-tts", voice="eve", status=_ACTIVE),
-    # Smallest AI — Lightning v3.1 Pro, kaitlyn voice (American English).
     RegisteredModel(
         benchmark=_TTS,
         provider="smallest",
@@ -177,6 +176,9 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="inworld-tts-1.5-mini",
         voice="Ashley",
         status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_RETIRED
     ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED

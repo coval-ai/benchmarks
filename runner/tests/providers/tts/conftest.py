@@ -60,6 +60,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         xai_api_key="test-xai-key",
         smallest_api_key="test-smallest-key",  # type: ignore[arg-type]
         inworld_api_key="test-inworld-key",
+        soniox_api_key="test-soniox-key",  # type: ignore[arg-type]
     )
 
 
