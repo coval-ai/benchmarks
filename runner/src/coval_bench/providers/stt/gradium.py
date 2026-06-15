@@ -15,14 +15,16 @@ Close: {"type":"end_of_stream"}
 Protocol notes:
 - "text" messages carry a word group for the CURRENT segment (no text in "end_text").
 - "end_text" signals the segment is finalised; the text comes from the preceding "text".
-- A flush must be sent after all audio and waited on before end_of_stream, otherwise
-  the model's lookahead buffer (delay_in_frames ≈ 10 × 80 ms) is discarded.
+- A flush must be sent after all audio; wait for the "flushed" ack before
+  end_of_stream, otherwise the model's lookahead buffer
+  (delay_in_frames ≈ 10 × 80 ms) is discarded.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import time
 from typing import Any
@@ -36,6 +38,7 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 logger = structlog.get_logger(__name__)
 
 _WS_URL = "wss://api.gradium.ai/api/speech/asr"
+# Cap on waiting for the "flushed" ack before sending end_of_stream.
 _FLUSH_WAIT_S = 2.0
 
 
@@ -78,6 +81,7 @@ class GradiumSTTProvider(STTProvider):
         try:
             headers = {"x-api-key": self._api_key.get_secret_value()}
 
+            final_event = asyncio.Event()
             async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
                 await ws.send(
                     json.dumps(
@@ -91,9 +95,11 @@ class GradiumSTTProvider(STTProvider):
                 )
 
                 send_task = asyncio.create_task(
-                    self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
+                    self._send_audio(
+                        ws, audio_data, sample_rate, result, realtime_resolution, final_event
+                    )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
+                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
@@ -110,6 +116,7 @@ class GradiumSTTProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
+        final_event: asyncio.Event,
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
@@ -120,17 +127,19 @@ class GradiumSTTProvider(STTProvider):
                 b64 = base64.b64encode(chunk).decode("utf-8")
                 await ws.send(json.dumps({"type": "audio", "audio": b64}))
                 await asyncio.sleep(realtime_resolution)
-            # Flush forces the model's lookahead buffer to emit pending results.
-            # Wait long enough for the server to process remaining frames and
-            # send back the final text/end_text messages (~delay_in_frames × 80 ms).
+            # Flush drains the lookahead buffer; wait for the "flushed" ack so
+            # end_of_stream can't cut off pending results.
             await ws.send(json.dumps({"type": "flush", "flush_id": 1}))
-            await asyncio.sleep(_FLUSH_WAIT_S)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(final_event.wait(), timeout=_FLUSH_WAIT_S)
             await ws.send(json.dumps({"type": "end_of_stream"}))
         except Exception as exc:
             logger.exception("gradium send error", error=str(exc))
             raise
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(
+        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+    ) -> None:
         final_parts: list[str] = []
 
         try:
@@ -164,7 +173,11 @@ class GradiumSTTProvider(STTProvider):
                         result.audio_to_final_seconds = now - result.audio_start_time
                     continue
 
-                if msg_type in ("flushed", "ready", "end_text"):
+                if msg_type == "flushed":
+                    final_event.set()
+                    continue
+
+                if msg_type in ("ready", "end_text"):
                     continue
 
                 if msg_type == "end_of_stream":
