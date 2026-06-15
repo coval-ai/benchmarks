@@ -21,6 +21,7 @@ from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from coval_bench.providers.tts.gradium import GradiumTTSProvider
 from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
+from coval_bench.providers.tts.soniox import SonioxTTSProvider
 from coval_bench.providers.tts.xai import XaiTTSProvider
 
 try:
@@ -39,9 +40,16 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "deepgram": DeepgramTTSProvider,
     "rime": RimeTTSProvider,
     "xai": XaiTTSProvider,
+    "soniox": SonioxTTSProvider,
 }
 
 if HumeTTSProvider is not None:
     TTS_PROVIDERS["hume"] = HumeTTSProvider
 
-__all__ = ["TTS_PROVIDERS", "HUME_AVAILABLE", "GradiumTTSProvider", "XaiTTSProvider"]
+__all__ = [
+    "TTS_PROVIDERS",
+    "HUME_AVAILABLE",
+    "GradiumTTSProvider",
+    "XaiTTSProvider",
+    "SonioxTTSProvider",
+]

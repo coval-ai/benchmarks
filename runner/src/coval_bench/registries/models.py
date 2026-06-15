@@ -157,6 +157,9 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(benchmark=_TTS, provider="xai", model="grok-tts", voice="eve", status=_ACTIVE),
     RegisteredModel(
+        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
+    ),
+    RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
     ),
     RegisteredModel(benchmark=_TTS, provider="cartesia", model="sonic", status=_RETIRED),
