@@ -15,6 +15,7 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
+import { getModelColor } from "@/lib/utils/colors";
 import { median } from "@/lib/utils/median";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
@@ -241,13 +242,11 @@ export function useDashboardState(page: "tts" | "stt") {
   const werBarData = chartData.getWERBarData();
 
   const werBarDataWithColors = useMemo(() => {
+    const hasSelection = clickedWERBars.size > 0;
     return werBarData.map((item) => ({
       ...item,
-      // Default bars are an opaque, light tint of the selected-state orange
-      // (#FF851B). Opaque so the chart gridlines don't show through them.
-      fill: clickedWERBars.has(item.model)
-        ? "#FF851B"
-        : "#FFE5CC",
+      fill: getModelColor(item.model),
+      fillOpacity: hasSelection && !clickedWERBars.has(item.model) ? 0.25 : 1,
     }));
   }, [werBarData, clickedWERBars]);
 

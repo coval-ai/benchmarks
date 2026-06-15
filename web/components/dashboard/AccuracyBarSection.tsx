@@ -122,7 +122,7 @@ const AccuracyBarSection: React.FC = () => {
                 }}
               >
                 {werBarDataWithColors.map((entry) => (
-                  <Cell key={`wer-cell-${entry.model}`} fill={entry.fill} />
+                  <Cell key={`wer-cell-${entry.model}`} fill={entry.fill} fillOpacity={entry.fillOpacity} />
                 ))}
               </Bar>
             </BarChart>

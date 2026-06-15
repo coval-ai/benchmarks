@@ -33,14 +33,14 @@ interface LegendEntry {
 }
 
 // Custom legend: names are rendered in black (recharts colors them per-series
-// by default), and the items lay out in a grid that grows from two columns on
-// mobile to more columns on larger screens.
+// by default), and items fill top-to-bottom within each column so the list
+// reads alphabetically down each column rather than across rows.
 const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
-  <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 px-2 pt-5 sm:grid-cols-3 sm:gap-x-6 sm:gap-y-2 lg:grid-cols-4">
+  <ul className="columns-2 gap-x-4 px-2 pt-5 sm:columns-3 sm:gap-x-6 lg:columns-4">
     {payload?.map((entry) => (
       <li
         key={entry.dataKey ?? entry.value}
-        className="flex items-start gap-1.5 text-xs leading-tight text-text-primary"
+        className="mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid"
       >
         <span
           className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
