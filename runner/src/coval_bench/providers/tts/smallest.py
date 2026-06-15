@@ -34,8 +34,6 @@ _WS_URL = "wss://api.smallest.ai/waves/v1/tts/live"
 class SmallestTTSProvider(TTSProvider):
     """Smallest AI Lightning TTS provider using WebSocket streaming."""
 
-    enabled: bool = True
-
     _VALID_MODELS = frozenset({"lightning_v3.1_pro"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
@@ -102,7 +100,7 @@ class SmallestTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.debug("smallest_error", exc_info=True)
+            logger.warning("smallest_error", exc_info=True)
             return finalize_tts_result(
                 provider="smallest",
                 model=self._model,

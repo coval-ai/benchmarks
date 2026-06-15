@@ -48,7 +48,7 @@ async def test_smallest_happy_path(fake_settings: Settings, tmp_path: Path) -> N
     fake_ws = _make_ws([pcm, pcm, pcm, pcm])
 
     with patch("coval_bench.providers.tts.smallest.ws_client.connect", return_value=fake_ws):
-        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="meher")
+        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="kaitlyn")
         result = await provider.synthesize("Hello from Smallest AI")
 
     assert result.error is None, result.error
@@ -74,7 +74,7 @@ async def test_smallest_all_models(fake_settings: Settings) -> None:
     for model in SmallestTTSProvider._VALID_MODELS:
         fake_ws = _make_ws([make_pcm_bytes(240)])
         with patch("coval_bench.providers.tts.smallest.ws_client.connect", return_value=fake_ws):
-            provider = SmallestTTSProvider(fake_settings, model=model, voice="meher")
+            provider = SmallestTTSProvider(fake_settings, model=model, voice="kaitlyn")
             result = await provider.synthesize("test")
         assert result.error is None, f"{model}: {result.error}"
         if result.audio_path is not None:
@@ -92,7 +92,7 @@ async def test_smallest_empty_audio(fake_settings: Settings) -> None:
     fake_ws = FakeWebSocket([_done_msg()])
 
     with patch("coval_bench.providers.tts.smallest.ws_client.connect", return_value=fake_ws):
-        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="meher")
+        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="kaitlyn")
         result = await provider.synthesize("silence")
 
     assert result.error is None
@@ -107,7 +107,7 @@ async def test_smallest_done_via_done_flag(fake_settings: Settings) -> None:
     fake_ws = FakeWebSocket([_chunk_msg(make_pcm_bytes(240)), msg])
 
     with patch("coval_bench.providers.tts.smallest.ws_client.connect", return_value=fake_ws):
-        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="meher")
+        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="kaitlyn")
         result = await provider.synthesize("test")
 
     assert result.error is None
@@ -127,7 +127,7 @@ async def test_smallest_connection_error(fake_settings: Settings) -> None:
         "coval_bench.providers.tts.smallest.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
-        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="meher")
+        provider = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="kaitlyn")
         result = await provider.synthesize("hi")
 
     assert result.error is not None
@@ -142,14 +142,14 @@ async def test_smallest_connection_error(fake_settings: Settings) -> None:
 
 
 def test_smallest_name_and_model(fake_settings: Settings) -> None:
-    p = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="meher")
+    p = SmallestTTSProvider(fake_settings, model="lightning_v3.1_pro", voice="kaitlyn")
     assert p.name == "smallest-lightning_v3.1_pro"
     assert p.model == "lightning_v3.1_pro"
 
 
 def test_smallest_rejects_unsupported_model(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Unsupported Smallest AI model"):
-        SmallestTTSProvider(fake_settings, model="not-a-real-model", voice="meher")
+        SmallestTTSProvider(fake_settings, model="not-a-real-model", voice="kaitlyn")
 
 
 # ---------------------------------------------------------------------------
@@ -166,4 +166,4 @@ def test_smallest_missing_api_key() -> None:
         smallest_api_key=None,
     )
     with pytest.raises(ValueError, match="smallest_api_key"):
-        SmallestTTSProvider(settings_no_key, model="lightning_v3.1_pro", voice="meher")
+        SmallestTTSProvider(settings_no_key, model="lightning_v3.1_pro", voice="kaitlyn")
