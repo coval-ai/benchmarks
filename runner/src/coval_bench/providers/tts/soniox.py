@@ -111,7 +111,10 @@ class SonioxTTSProvider(TTSProvider):
                     event: dict[str, Any] = json.loads(raw)
 
                     if event.get("error_code") or event.get("error_message"):
-                        raise RuntimeError(str(event.get("error_message", "Soniox TTS error")))
+                        message = event.get("error_message") or (
+                            f"Soniox TTS error (code {event.get('error_code')})"
+                        )
+                        raise RuntimeError(str(message))
 
                     audio_b64 = event.get("audio")
                     if audio_b64:

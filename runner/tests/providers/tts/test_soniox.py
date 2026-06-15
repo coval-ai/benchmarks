@@ -127,6 +127,23 @@ async def test_soniox_tts_error_event(fake_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+async def test_soniox_tts_error_code_without_message(fake_settings: Settings) -> None:
+    ws = FakeWebSocket([json.dumps({"stream_id": "probe", "error_code": 503})])
+    provider = SonioxTTSProvider(fake_settings, model="tts-rt-v1", voice="Adrian")
+
+    with patch(
+        "coval_bench.providers.tts.soniox.ws_client.connect",
+        return_value=ws,
+    ):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is not None
+    assert "503" in result.error
+    assert result.audio_path is None
+    assert result.ttfa_ms is None
+
+
+@pytest.mark.asyncio
 async def test_soniox_tts_error_after_partial_audio(fake_settings: Settings) -> None:
     chunk = make_pcm_bytes(240)
     events = [
