@@ -69,7 +69,8 @@ class InworldTTSProvider(TTSProvider):
         start: float | None = None
         first_chunk_at: float | None = None
 
-        url = f"{_WS_URL}?authorization={quote(f'Basic {self._api_key}', safe='')}"
+        auth_param = quote(f"Basic {self._api_key}", safe="")
+        url = f"{_WS_URL}?authorization={auth_param}"
         create_msg = json.dumps(
             {
                 "create": {
@@ -125,6 +126,8 @@ class InworldTTSProvider(TTSProvider):
 
         except Exception as exc:
             logger.warning("inworld_error", exc_info=True)
+            # The credential rides in the URL query, so scrub it from any
+            # exception that echoes the URI before it lands in a stored result.
             return finalize_tts_result(
                 provider="inworld",
                 model=self._model,
@@ -133,7 +136,7 @@ class InworldTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
+                error=str(exc).replace(auth_param, "***"),
             )
 
         return finalize_tts_result(

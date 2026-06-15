@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.inworld import InworldTTSProvider
@@ -81,22 +82,47 @@ async def test_inworld_happy_path(fake_settings: Settings, tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_inworld_auth_in_connect_url(fake_settings: Settings) -> None:
-    """Inworld keys are already base64; the key goes in the URL verbatim (not re-encoded)."""
+    """The key goes in the URL verbatim, only percent-encoded (not re-encoded).
+
+    Uses a key with base64 reserved chars (+ / =) — what real Inworld keys
+    contain — so the encoding is actually exercised.
+    """
+    settings = fake_settings.model_copy(update={"inworld_api_key": SecretStr("ab+c/d==")})
     fake_ws = _make_ws([make_pcm_bytes(240)])
     with patch(
         "coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws
     ) as connect:
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Ashley")
         result = await provider.synthesize("hi")
 
     url = connect.call_args.args[0]
     assert url == (
         "wss://api.inworld.ai/tts/v1/voice:streamBidirectional"
-        "?authorization=Basic%20test-inworld-key"
+        "?authorization=Basic%20ab%2Bc%2Fd%3D%3D"
     )
 
     if result.audio_path is not None:
         result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_inworld_redacts_key_in_error(fake_settings: Settings) -> None:
+    """A connection error that echoes the auth URL must not leak the credential."""
+    settings = fake_settings.model_copy(update={"inworld_api_key": SecretStr("ab+c/d==")})
+    leaky = (
+        "wss://api.inworld.ai/tts/v1/voice:streamBidirectional"
+        "?authorization=Basic%20ab%2Bc%2Fd%3D%3D rejected"
+    )
+    with patch(
+        "coval_bench.providers.tts.inworld.ws_client.connect",
+        side_effect=RuntimeError(leaky),
+    ):
+        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Ashley")
+        result = await provider.synthesize("hi")
+
+    assert result.error is not None
+    assert "ab%2Bc%2Fd%3D%3D" not in result.error
+    assert "authorization=***" in result.error
 
 
 @pytest.mark.asyncio
