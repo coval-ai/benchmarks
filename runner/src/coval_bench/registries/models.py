@@ -156,12 +156,12 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     RegisteredModel(benchmark=_TTS, provider="xai", model="grok-tts", voice="eve", status=_ACTIVE),
-    # Smallest AI — Lightning v3.1 Pro, meher voice (American English).
+    # Smallest AI — Lightning v3.1 Pro, kaitlyn voice (American English).
     RegisteredModel(
         benchmark=_TTS,
         provider="smallest",
         model="lightning_v3.1_pro",
-        voice="meher",
+        voice="kaitlyn",
         status=_ACTIVE,
     ),
     RegisteredModel(
