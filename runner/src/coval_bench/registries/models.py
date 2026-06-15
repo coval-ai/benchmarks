@@ -165,6 +165,20 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     RegisteredModel(
+        benchmark=_TTS,
+        provider="inworld",
+        model="inworld-tts-1.5-max",
+        voice="Ashley",
+        status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="inworld",
+        model="inworld-tts-1.5-mini",
+        voice="Ashley",
+        status=_RETIRED,
+    ),
+    RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
     ),
     RegisteredModel(benchmark=_TTS, provider="cartesia", model="sonic", status=_RETIRED),

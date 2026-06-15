@@ -19,6 +19,7 @@ from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from coval_bench.providers.tts.gradium import GradiumTTSProvider
+from coval_bench.providers.tts.inworld import InworldTTSProvider
 from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
 from coval_bench.providers.tts.smallest import SmallestTTSProvider
@@ -39,6 +40,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "gradium": GradiumTTSProvider,
     "deepgram": DeepgramTTSProvider,
     "rime": RimeTTSProvider,
+    "inworld": InworldTTSProvider,
     "smallest": SmallestTTSProvider,
     "xai": XaiTTSProvider,
 }

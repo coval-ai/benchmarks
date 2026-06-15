@@ -30,6 +30,10 @@ export const modelColors: Record<string, string> = {
   "octave-2": "#C084FC",
   "octave-tts": "#7C3AED",
 
+  // Inworld AI — indigo family (#6366F1).
+  "inworld-tts-1.5-mini": "#818CF8",
+  "inworld-tts-1.5-max": "#4F46E5",
+
   // Deepgram — teal family (#16A085). TTS aura anchors the dark end; STT models
   // span up to light teal. All shades are visibly teal (none near-black).
   "aura-2-thalia-en": "#0C6654",
@@ -59,5 +63,6 @@ export const providerColors: Record<string, string> = {
   Rime: "#27AE60",
   Gradium: "#1ABC9C",
   Hume: "#A855F7",
+  "Inworld AI": "#6366F1",
   xAI: "#EC4899"
 };

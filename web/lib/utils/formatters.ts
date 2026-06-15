@@ -107,6 +107,8 @@ export function normalizeModelName(modelKey: string): string {
     "octave-2": "Octave 2",
     coda: "Coda",
     "grok-tts": "Grok TTS",
+    "inworld-tts-1.5-max": "TTS 1.5 Max",
+    "inworld-tts-1.5-mini": "TTS 1.5 Mini",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -177,6 +179,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
     hume: "Hume",
+    inworld: "Inworld AI",
     openai: "OpenAI",
     rime: "Rime",
     xai: "xAI",
