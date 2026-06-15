@@ -86,7 +86,7 @@ class SmallestTTSProvider(TTSProvider):
                         audio_chunks.append(raw)
                         continue
 
-                    msg: dict = json.loads(raw)
+                    msg = json.loads(raw)
                     status = msg.get("status", "")
 
                     if status == "chunk":
