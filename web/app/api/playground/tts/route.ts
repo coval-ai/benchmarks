@@ -12,9 +12,14 @@ import {
 import WebSocket from "@/lib/stt/ws";
 
 const SAMPLE_RATE = 24_000;
+const GRADIUM_SAMPLE_RATE = 48_000; // Gradium streams fixed 48 kHz PCM
 const MAX_TEXT_LENGTH = 500;
 const PROVIDER_TIMEOUT_MS = 55_000;
-const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+// Cap audio by duration so providers with different sample rates get the same
+// output ceiling (16-bit mono → 2 bytes/sample).
+const MAX_AUDIO_SECONDS = 90;
+const MAX_AUDIO_BYTES = MAX_AUDIO_SECONDS * SAMPLE_RATE * 2;
+const GRADIUM_MAX_AUDIO_BYTES = MAX_AUDIO_SECONDS * GRADIUM_SAMPLE_RATE * 2;
 
 export async function POST(req: Request) {
   if (!isAllowedOrigin(req.headers.get("origin"))) {
@@ -86,7 +91,7 @@ async function handle(req: Request, sid: string) {
   }
 
   try {
-    const { chunks, ttfaMs } = await synthesize(
+    const { chunks, ttfaMs, sampleRate } = await synthesize(
       config.provider,
       config.model,
       config.voice,
@@ -97,7 +102,7 @@ async function handle(req: Request, sid: string) {
       throw new Error("Provider returned no audio data.");
     }
 
-    const wav = buildWav(chunks);
+    const wav = buildWav(chunks, sampleRate);
     const headers: Record<string, string> = {
       "Content-Type": "audio/wav",
       "Cache-Control": "no-store",
@@ -123,15 +128,23 @@ async function synthesize(
   model: string,
   voice: string,
   text: string
-): Promise<{ chunks: Buffer[]; ttfaMs: number | null }> {
+): Promise<{ chunks: Buffer[]; ttfaMs: number | null; sampleRate: number }> {
   switch (provider) {
-    case "elevenlabs": return synthesizeElevenLabs(model, voice, text);
-    case "cartesia":   return synthesizeCartesia(model, voice, text);
-    case "deepgram":   return synthesizeDeepgram(model, text);
-    case "rime":       return synthesizeRime(model, voice, text);
+    case "elevenlabs": return withRate(synthesizeElevenLabs(model, voice, text), SAMPLE_RATE);
+    case "cartesia":   return withRate(synthesizeCartesia(model, voice, text), SAMPLE_RATE);
+    case "deepgram":   return withRate(synthesizeDeepgram(model, text), SAMPLE_RATE);
+    case "rime":       return withRate(synthesizeRime(model, voice, text), SAMPLE_RATE);
+    case "gradium":    return withRate(synthesizeGradium(model, voice, text), GRADIUM_SAMPLE_RATE);
     default:
       throw new Error(`No adapter for provider '${provider}'`);
   }
+}
+
+async function withRate(
+  p: Promise<{ chunks: Buffer[]; ttfaMs: number | null }>,
+  sampleRate: number
+) {
+  return { ...(await p), sampleRate };
 }
 
 // ── providers ─────────────────────────────────────────────────────────────────
@@ -444,6 +457,108 @@ function synthesizeRime(model: string, voice: string, text: string) {
   });
 }
 
+// Gradium: WebSocket streaming, setup → ready handshake, base64 PCM "audio"
+// messages, server "end_of_stream" terminates. Mirrors the runner's
+// providers/tts/gradium.py. TTFA t0 = text sent (after ready), like the runner.
+function synthesizeGradium(model: string, voiceId: string, text: string) {
+  const apiKey = process.env.PLAYGROUND_GRADIUM_API_KEY;
+  if (!apiKey) throw new Error("PLAYGROUND_GRADIUM_API_KEY not set");
+
+  const url = "wss://api.gradium.ai/api/speech/tts";
+
+  return new Promise<{ chunks: Buffer[]; ttfaMs: number | null }>((resolve, reject) => {
+    const ws = new WebSocket(url, { headers: { "x-api-key": apiKey } });
+
+    let settled = false;
+    let opened = false;
+    let t0 = 0;
+    let ttfaMs: number | null = null;
+    let gotEos = false;
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    const settle = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      ws.close();
+      settle(() => reject(new Error("Gradium: timeout")));
+    }, PROVIDER_TIMEOUT_MS);
+    const clearTimer = () => clearTimeout(timer);
+
+    ws.on("open", () => {
+      opened = true;
+      ws.send(
+        JSON.stringify({
+          type: "setup",
+          voice_id: voiceId,
+          model_name: model,
+          output_format: "pcm",
+        }),
+      );
+    });
+
+    ws.on("message", (raw: Buffer | string) => {
+      const msgText = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+      let msg: { type?: string; audio?: string; message?: string };
+      try {
+        msg = JSON.parse(msgText) as typeof msg;
+      } catch {
+        return;
+      }
+      if (msg.type === "ready") {
+        t0 = performance.now();
+        ws.send(JSON.stringify({ type: "text", text }));
+        ws.send(JSON.stringify({ type: "end_of_stream" }));
+      } else if (msg.type === "audio" && msg.audio) {
+        if (ttfaMs === null && t0 > 0) ttfaMs = performance.now() - t0;
+        const buf = Buffer.from(msg.audio, "base64");
+        total += buf.length;
+        if (total > GRADIUM_MAX_AUDIO_BYTES) {
+          clearTimer();
+          ws.close();
+          settle(() => reject(new Error("Provider audio exceeded cap")));
+          return;
+        }
+        chunks.push(buf);
+      } else if (msg.type === "end_of_stream") {
+        gotEos = true;
+        clearTimer();
+        ws.close();
+        settle(() => resolve({ chunks, ttfaMs }));
+      } else if (msg.type === "error") {
+        settle(() => {
+          clearTimer();
+          ws.close();
+          reject(new Error(`Gradium: ${msg.message ?? "error"}`));
+        });
+      }
+    });
+
+    ws.on("close", () => {
+      clearTimer();
+      settle(() => {
+        if (!opened) {
+          reject(new Error("Gradium: connection closed before open"));
+          return;
+        }
+        if (!gotEos) {
+          reject(new Error("Gradium: connection closed before end_of_stream"));
+          return;
+        }
+      });
+    });
+
+    ws.on("error", (err: Error) => {
+      clearTimer();
+      settle(() => reject(err));
+    });
+  });
+}
+
 // ── shared helpers ────────────────────────────────────────────────────────────
 
 // Reads a binary ReadableStream chunk by chunk.
@@ -474,8 +589,8 @@ async function readBinaryStream(
 }
 
 // Prepends a 44-byte WAV header to raw PCM data.
-// All providers output 24 kHz, 16-bit signed LE, mono — header constants match.
-function buildWav(chunks: Buffer[]): Buffer {
+// All providers output 16-bit signed LE mono; the rate varies per provider.
+function buildWav(chunks: Buffer[], sampleRate: number): Buffer {
   const pcm = Buffer.concat(chunks);
   const dataLen = pcm.byteLength;
   const header = Buffer.alloc(44);
@@ -487,8 +602,8 @@ function buildWav(chunks: Buffer[]): Buffer {
   header.writeUInt32LE(16, 16);              // fmt chunk size (PCM = 16)
   header.writeUInt16LE(1, 20);               // audio format (1 = PCM)
   header.writeUInt16LE(1, 22);               // channels (1 = mono)
-  header.writeUInt32LE(SAMPLE_RATE, 24);     // sample rate
-  header.writeUInt32LE(SAMPLE_RATE * 2, 28); // byte rate (rate × channels × bytes/sample)
+  header.writeUInt32LE(sampleRate, 24);      // sample rate
+  header.writeUInt32LE(sampleRate * 2, 28);  // byte rate (rate × channels × bytes/sample)
   header.writeUInt16LE(2, 32);               // block align (channels × bytes/sample)
   header.writeUInt16LE(16, 34);              // bits per sample
   header.write("data", 36);

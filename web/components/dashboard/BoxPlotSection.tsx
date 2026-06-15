@@ -10,6 +10,7 @@ import { median } from "@/lib/utils/median";
 import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -20,10 +21,14 @@ const BoxPlotSection: React.FC = () => {
     getBoxPlotData,
     getProviderForModel,
     isMobile,
+    activeMetric,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("box_plot");
 
-  const boxPlotData = getBoxPlotData();
+  const boxPlotData = useMemo(
+    () => getBoxPlotData(activeMetric),
+    [getBoxPlotData, activeMetric]
+  );
   // Median across the selected models' per-model medians.
   const medianLatency = useMemo(
     () => median(boxPlotData.data.map((modelData) => modelData.quartiles.median)),
@@ -41,6 +46,8 @@ const BoxPlotSection: React.FC = () => {
             value: `${medianLatency.toFixed(0)} ms`,
           }}
         />
+
+        <MetricToggle />
 
         <BoxPlot
           data={boxPlotData}

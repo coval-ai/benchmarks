@@ -14,13 +14,15 @@ export type TtsProviderId =
   | "cartesia"
   | "elevenlabs"
   | "deepgram"
-  | "rime";
+  | "rime"
+  | "gradium";
 
 export type SttProviderId =
   | "deepgram"
   | "assemblyai"
   | "elevenlabs"
-  | "speechmatics";
+  | "speechmatics"
+  | "gradium";
 
 export type TtsModelConfig = {
   id: string;
@@ -96,6 +98,14 @@ export const ttsModels: TtsModelConfig[] = [
     model: "mistv3",
     voice: "luna",
     enabled: true
+  },
+  {
+    id: "gradium:default:emma",
+    provider: "gradium",
+    label: "Gradium TTS",
+    model: "default",
+    voice: "YTpq7expH9539ERJ",
+    enabled: true
   }
 ];
 
@@ -153,6 +163,14 @@ export const sttModels: SttModelConfig[] = [
     provider: "speechmatics",
     label: "Speechmatics (enhanced)",
     model: "enhanced",
+    sampleRate: 16_000,
+    enabled: true
+  },
+  {
+    id: "gradium:default",
+    provider: "gradium",
+    label: "Gradium STT",
+    model: "default",
     sampleRate: 16_000,
     enabled: true
   }

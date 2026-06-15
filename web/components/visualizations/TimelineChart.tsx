@@ -20,6 +20,7 @@ import { metricDescriptions } from "@/lib/config/metrics";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
@@ -77,18 +78,21 @@ const TimelineChart: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
+    getMedianLatencyMs,
+    activeMetric: metric,
     dataTimeWindow,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
-  // STT shows a TTFS / TTFT toggle; TTS is single-metric (TTFA). Defaulting to
-  // TTFT for now; flip back to "TTFS" once enough TTFS data has accumulated.
-  const [metric, setMetric] = useState<string>(
-    activeTab === "stt" ? "TTFT" : "TTFA"
-  );
   const chartRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
+
+  // The metric is shared dashboard-wide, so clear any pinned tooltip whenever it
+  // changes — whether from this chart's toggle or another section's.
+  useEffect(() => {
+    setPinned(null);
+  }, [metric]);
 
   useEffect(() => {
     if (pinned === null) return;
@@ -115,21 +119,10 @@ const TimelineChart: React.FC = () => {
   const description =
     metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions];
 
-  const avgValue = useMemo(() => {
-    let sum = 0;
-    let count = 0;
-    for (const point of windowedTimelineData) {
-      const record = point as Record<string, number>;
-      for (const model of modelsWithData) {
-        const value = record[`${model}_value`];
-        if (typeof value === "number" && !Number.isNaN(value)) {
-          sum += value;
-          count += 1;
-        }
-      }
-    }
-    return count > 0 ? sum / count : 0;
-  }, [windowedTimelineData, modelsWithData]);
+  // Headline number: the median latency across selected models — the same
+  // canonical statistic the summary card and box plot report, so all three
+  // surfaces agree.
+  const medianValue = getMedianLatencyMs(metric);
 
   // Fix the Y axis to the max across the full dataset (not just the visible
   // window) so the scale stays consistent while panning. Rounded up to a clean
@@ -161,33 +154,12 @@ const TimelineChart: React.FC = () => {
           }
           description={description}
           stat={{
-            label: `Avg ${metricLabel}`,
-            value: `${avgValue.toFixed(0)} ms`,
+            label: `Median ${metricLabel}`,
+            value: `${medianValue.toFixed(0)} ms`,
           }}
         />
 
-        {activeTab === "stt" && (
-          <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-gray-100 p-0.5">
-            {(["TTFS", "TTFT"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => {
-                  setMetric(m);
-                  setPinned(null);
-                }}
-                className={
-                  "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
-                  (metric === m
-                    ? "bg-white text-text-primary shadow-sm"
-                    : "text-gray-500 hover:text-text-primary")
-                }
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
+        <MetricToggle />
 
         <div ref={chartRef} className="relative h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">

@@ -121,16 +121,21 @@ class ModelStatEntry(BaseModel):
 
 
 class SeriesPoint(BaseModel):
-    """Per-(provider, model, metric_type) average for one scheduled_at bucket.
+    """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Used in all the timeline charts.
+    Latency timelines render p50; WER renders value_sum / sample_count.
     """
 
     provider: str
     model: str
     metric_type: str
     scheduled_at: datetime
-    avg_value: float
+    min_value: float
+    p25: float
+    p50: float
+    p75: float
+    max_value: float
+    value_sum: float
     sample_count: int
 
 

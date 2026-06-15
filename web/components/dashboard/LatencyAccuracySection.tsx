@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import {
   ScatterChart,
   Scatter,
@@ -18,23 +18,19 @@ import { getModelColor } from "@/lib/utils/colors";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const LatencyAccuracySection: React.FC = () => {
-  const { selectedModels, getScatterData } = useDashboard();
+  const { selectedModels, getScatterData, activeMetric: metric } = useDashboard();
 
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
   const trackChartHover = useChartHoverTracking("scatter");
 
-  // STT shows a TTFS / TTFT toggle; TTS is single-metric (TTFA). Defaulting to
-  // TTFT for now; flip back to "TTFS" once enough TTFS data has accumulated.
-  const [metric, setMetric] = useState<string>(
-    activeTab === "stt" ? "TTFT" : "TTFA"
-  );
   const latencyLabel = metric;
   const scatterData = useMemo(
     () => getScatterData(metric),
@@ -101,25 +97,7 @@ const LatencyAccuracySection: React.FC = () => {
           }}
         />
 
-        {activeTab === "stt" && (
-          <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-gray-100 p-0.5">
-            {(["TTFS", "TTFT"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMetric(m)}
-                className={
-                  "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
-                  (metric === m
-                    ? "bg-white text-text-primary shadow-sm"
-                    : "text-gray-500 hover:text-text-primary")
-                }
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
+        <MetricToggle />
 
         <div className="h-64" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
