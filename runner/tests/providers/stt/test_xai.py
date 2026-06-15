@@ -150,6 +150,35 @@ async def test_xai_single_speech_final_empty_done(
 
 
 @pytest.mark.asyncio
+async def test_xai_empty_session_errors(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """A session with no partials and an empty transcript.done is an error.
+
+    Models a degraded/dead session (handshake ok, ASR backend emits nothing). It
+    must fail — not stamp a spurious audio_to_final from the empty terminal event.
+    """
+    events = load_fixture_events("xai", "events-empty-session")
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is not None
+    assert "empty transcript" in result.error
+    assert result.complete_transcript is None
+    assert result.ttft_seconds is None
+    assert result.audio_to_final_seconds is None
+
+
+@pytest.mark.asyncio
 async def test_xai_missing_terminal_errors(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
     """Stream ends on a chunk is_final with no transcript.done: error, no final metrics."""
     events: list[Any] = [

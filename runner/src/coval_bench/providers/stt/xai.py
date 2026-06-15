@@ -200,8 +200,8 @@ class XaiSTTProvider(STTProvider):
                         set_first_token(result, done_transcript, now=now)
                         add_partial_transcript(result, done_transcript)
                         final_segments.append(done_transcript)
-                    if result.audio_start_time is not None:
-                        last_final_time = now
+                        if result.audio_start_time is not None:
+                            last_final_time = now
                     break
 
                 if event_type == "error":
@@ -219,11 +219,19 @@ class XaiSTTProvider(STTProvider):
                 result.error = "xAI stream ended before transcript.done"
             return
 
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
         finalize_transcript(
             result,
             final_segments=final_segments,
             partial_fallback="longest",
         )
+
+        # An empty transcript.done that closed no speech_final segment means the
+        # session produced nothing (degraded/dead session) — fail it so the row is
+        # retryable, instead of stamping a spurious final from the empty terminal.
+        if result.complete_transcript is None:
+            if result.error is None:
+                result.error = "xAI returned an empty transcript"
+            return
+
+        if last_final_time is not None and result.audio_start_time is not None:
+            result.audio_to_final_seconds = last_final_time - result.audio_start_time
