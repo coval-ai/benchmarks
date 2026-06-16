@@ -115,6 +115,8 @@ export function normalizeModelName(modelKey: string): string {
     "grok-stt": "Grok STT",
     scribe_v2_realtime: "Scribe v2 Realtime",
     "gpt-realtime-whisper": "GPT Realtime Whisper",
+    "gpt-4o-transcribe": "GPT-4o Transcribe",
+    "gpt-4o-mini-transcribe": "GPT-4o mini Transcribe",
     "universal-streaming": "Universal Streaming",
     "ink-2": "Ink 2",
     default: "Default",

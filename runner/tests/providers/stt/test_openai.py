@@ -389,14 +389,51 @@ async def test_openai_session_ready_timeout_fires(
     assert "session.updated" in result.error
 
 
-def test_openai_provider_name() -> None:
-    provider = OpenAISTTProvider(api_key=SecretStr("test"))
-    assert provider.name == "openai-gpt-realtime-whisper"
+@pytest.mark.parametrize(
+    "model",
+    ["gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"],
+)
+def test_openai_valid_models_accepted(model: str) -> None:
+    provider = OpenAISTTProvider(api_key=SecretStr("test"), model=model)
+    assert provider.name == f"openai-{model}"
+    assert provider.model == model
+
+
+def test_openai_default_model_is_whisper() -> None:
+    assert OpenAISTTProvider(api_key=SecretStr("test")).model == "gpt-realtime-whisper"
 
 
 def test_openai_invalid_model_raises() -> None:
     with pytest.raises(ValueError, match="Invalid OpenAI STT model"):
         OpenAISTTProvider(api_key=SecretStr("test"), model="whisper-1")
+
+
+@pytest.mark.asyncio
+async def test_openai_session_update_carries_model(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """The constructed model is sent in the session.update transcription config."""
+    provider = OpenAISTTProvider(api_key=fake_api_key, model="gpt-4o-transcribe")
+    captured: dict[str, Any] = {}
+
+    with patch(
+        "coval_bench.providers.stt.openai.ws_client.connect",
+        return_value=_fake_connect(
+            load_fixture_events("openai", "events-success"), captured=captured
+        ),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    sent = [json.loads(m) for m in captured["ws"]._sent if isinstance(m, str)]
+    transcription = sent[0]["session"]["audio"]["input"]["transcription"]
+    assert transcription["model"] == "gpt-4o-transcribe"
 
 
 @pytest.mark.asyncio
