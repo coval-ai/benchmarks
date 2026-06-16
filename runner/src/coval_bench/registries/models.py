@@ -81,21 +81,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     #######
     RegisteredModel(
         benchmark=_TTS,
-        provider="elevenlabs",
+        provider="abs",
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
         status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
-        provider="elevenlabs",
+        provider="abs",
         model="eleven_multilingual_v2",
         voice="IKne3meq5aSn9XLyUdCD",
         status=_ACTIVE,
     ),
-    # Deprecated by ElevenLabs ("outclassed by Flash models"); the replacement
-    # eleven_flash_v2_5 is already benchmarked above. Retired, not deleted, so
-    # historical rows stay hidden on the site.
     RegisteredModel(
         benchmark=_TTS,
         provider="elevenlabs",
