@@ -93,12 +93,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="IKne3meq5aSn9XLyUdCD",
         status=_ACTIVE,
     ),
+    # Deprecated by ElevenLabs ("outclassed by Flash models"); the replacement
+    # eleven_flash_v2_5 is already benchmarked above. Retired, not deleted, so
+    # historical rows stay hidden on the site.
     RegisteredModel(
         benchmark=_TTS,
         provider="elevenlabs",
         model="eleven_turbo_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-4o-mini-tts", voice="alloy", status=_ACTIVE
