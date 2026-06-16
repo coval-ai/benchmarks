@@ -4,7 +4,7 @@
 """Smallest AI Lightning TTS provider — WebSocket streaming.
 
 Wire protocol:
-  connect → send JSON(text, voice_id, model, sample_rate)
+  connect → send JSON(text, voice_id, model, sample_rate, language)
   → recv JSON chunks: {"status": "chunk", "data": {"audio": "<base64-pcm>"}}
   → recv JSON done:   {"status": "complete", "done": true}
 
@@ -70,6 +70,8 @@ class SmallestTTSProvider(TTSProvider):
                 "voice_id": self._voice,
                 "model": self._model,
                 "sample_rate": SAMPLE_RATE,
+                # Explicit language prevents auto-detect flakiness on English-only models.
+                "language": "en",
             }
         )
 
