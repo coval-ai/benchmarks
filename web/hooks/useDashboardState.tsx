@@ -215,9 +215,6 @@ export function useDashboardState(page: "tts" | "stt") {
     [getMedianLatencyMs, activeMetric]
   );
 
-  // The fastest selected model (lowest p50) for the active latency metric.
-  // Surfaced as the primary card's subtitle so the median headline still
-  // credits a leader, mirroring the lowest-WER pick below.
   const fastestPrimary = useMemo(() => {
     let lowestP50 = Infinity;
     let fastestModel = "";
@@ -317,7 +314,7 @@ export function useDashboardState(page: "tts" | "stt") {
       label: `Median ${latencyFullLabel}`,
       displayValue: `${medianPrimary.toFixed(0)} ms`,
       subtitle:
-        selectedModels.length > 1 && fastestPrimary.fastestModel
+        deferredSelectedModels.length > 1 && fastestPrimary.fastestModel
           ? {
               name: normalizeModelName(fastestPrimary.fastestModel),
               detail: fastestPrimary.fastestProvider
@@ -329,10 +326,10 @@ export function useDashboardState(page: "tts" | "stt") {
   })();
 
   const secondaryKeyMetric = {
-    label: `${selectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
+    label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
     displayValue: `${avgSecondary.toFixed(1)}%`,
     subtitle:
-      selectedModels.length > 1 && lowestWERModel
+      deferredSelectedModels.length > 1 && lowestWERModel
         ? {
             name: normalizeModelName(lowestWERModel),
             detail: lowestWERProvider
