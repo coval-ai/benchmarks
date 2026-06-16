@@ -67,8 +67,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v4", status=_RETIRED),
-    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v5", status=_RETIRED),
+    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v4", status=_ACTIVE),
+    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v5", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="smallest", model="pulse", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="cartesia", model="ink-2", status=_ACTIVE),
@@ -166,7 +166,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_RETIRED
+        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
     ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
