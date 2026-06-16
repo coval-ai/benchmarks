@@ -81,14 +81,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     #######
     RegisteredModel(
         benchmark=_TTS,
-        provider="abs",
+        provider="elevenlabs",
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
         status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
-        provider="abs",
+        provider="elevenlabs",
         model="eleven_multilingual_v2",
         voice="IKne3meq5aSn9XLyUdCD",
         status=_ACTIVE,
