@@ -60,7 +60,7 @@ _ERROR_MSG_TYPES = frozenset(
 class ElevenLabsSTTProvider(STTProvider):
     """ElevenLabs real-time STT provider."""
 
-    _VALID_MODELS = frozenset({"scribe_v1", "scribe_v2_realtime"})
+    _VALID_MODELS = frozenset({"scribe_v2_realtime"})
 
     def __init__(self, api_key: SecretStr, model: str = "scribe_v2_realtime") -> None:
         if not self._model_supported(model):
