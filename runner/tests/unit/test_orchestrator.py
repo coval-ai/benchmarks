@@ -195,7 +195,7 @@ async def _orchestrator_env(  # noqa: ANN202
     tts_dataset = MagicMock()
     tts_dataset.items = tts_items
 
-    def _load_dataset(dataset_id: str, *, settings: Any) -> Any:
+    def _load_dataset(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
         return stt_dataset if dataset_id == "stt-v1" else tts_dataset
 
     fake_pool = MagicMock()
@@ -636,7 +636,7 @@ async def test_dataset_integrity_failure(settings: Settings) -> None:
     class DatasetIntegrityError(Exception):
         pass
 
-    def _bad_load(dataset_id: str, *, settings: Any) -> Any:
+    def _bad_load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
         raise DatasetIntegrityError("hash mismatch: expected abc actual def")
 
     run = _make_run()
@@ -729,7 +729,7 @@ async def test_audio_file_cleanup(settings: Settings) -> None:
         tts_dataset = MagicMock()
         tts_dataset.items = [tts_item]
 
-        def _load(dataset_id: str, *, settings: Any) -> Any:
+        def _load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
             return tts_dataset
 
         fake_pool = MagicMock()
@@ -822,7 +822,7 @@ async def test_tts_http1_downgrade_fails_ttfa_row(settings: Settings) -> None:
         tts_dataset = MagicMock()
         tts_dataset.items = [_make_tts_item("hello world")]
 
-        def _load(dataset_id: str, *, settings: Any) -> Any:
+        def _load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
             return tts_dataset
 
         fake_pool = MagicMock()
@@ -923,7 +923,7 @@ async def test_tts_cold_connection_fails_ttfa_row(settings: Settings) -> None:
         tts_dataset = MagicMock()
         tts_dataset.items = [_make_tts_item("hello world")]
 
-        def _load(dataset_id: str, *, settings: Any) -> Any:
+        def _load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
             return tts_dataset
 
         fake_pool = MagicMock()
@@ -1125,6 +1125,93 @@ async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) 
 
     disabled_cls.assert_not_called()
     provider_cls.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# 11b. dataset sampling — one shared sample per run (parity), smoke opts out
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_samples_dataset_once_with_configured_size(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A real run loads the dataset once with dataset_sample_size — one shared sample."""
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    matrix = [
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry("elevenlabs", "scribe_v2_realtime"),
+    ]
+    sized = settings.model_copy(update={"dataset_sample_size": 7})
+
+    items = [_make_dataset_item(audio_file, f"item {i}") for i in range(7)]
+    captured: list[int | None] = []
+
+    stt_dataset = MagicMock()
+    stt_dataset.items = items
+
+    def _load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
+        captured.append(sample_size)
+        return stt_dataset
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=items,
+        stt_providers={
+            "deepgram": MagicMock(return_value=provider),
+            "elevenlabs": MagicMock(return_value=provider),
+        },
+        run=run,
+        writer=writer,
+    ):
+        with patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load):
+            await run_benchmarks(
+                settings=sized,
+                benchmark_kind="stt",
+                smoke=False,
+                matrix_overrides=matrix,
+            )
+
+    assert captured == [7]
+
+
+@pytest.mark.asyncio
+async def test_smoke_run_skips_sampling(audio_file: Path, settings: Settings) -> None:
+    """Smoke mode bypasses sampling (sample_size=None) so local dev is deterministic."""
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    captured: list[int | None] = []
+
+    stt_dataset = MagicMock()
+    stt_dataset.items = [_make_dataset_item(audio_file, "only")]
+
+    def _load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
+        captured.append(sample_size)
+        return stt_dataset
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=stt_dataset.items,
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        run=run,
+        writer=writer,
+    ):
+        with patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[_stt_entry("deepgram", "nova-2")],
+            )
+
+    assert captured == [None]
 
 
 # ---------------------------------------------------------------------------
@@ -1799,7 +1886,7 @@ async def test_posthog_failed_event(settings: Settings) -> None:
     class _DatasetIntegrityError(Exception):
         pass
 
-    def _bad_load(dataset_id: str, *, settings: Any) -> Any:
+    def _bad_load(dataset_id: str, *, settings: Any, sample_size: int | None = None) -> Any:
         raise _DatasetIntegrityError("hash mismatch")
 
     deepgram_cls = MagicMock()

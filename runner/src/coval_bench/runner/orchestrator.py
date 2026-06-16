@@ -842,8 +842,13 @@ async def run_benchmarks(
             # 3. STT path
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
-                stt_dataset = load_dataset("stt-v1", settings=settings)
+                stt_dataset = load_dataset(
+                    "stt-v1",
+                    settings=settings,
+                    sample_size=None if smoke else settings.dataset_sample_size,
+                )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
+                _log.info("stt dataset sampled", run_id=run_id, item_count=len(items))
 
                 stt_tasks = [
                     _run_stt_item(
@@ -869,8 +874,13 @@ async def run_benchmarks(
             # 4. TTS path
             # ------------------------------------------------------------------
             if benchmark_kind in ("tts", "both") and enabled_tts:
-                tts_dataset = load_dataset("tts-v1", settings=settings)
+                tts_dataset = load_dataset(
+                    "tts-v1",
+                    settings=settings,
+                    sample_size=None if smoke else settings.dataset_sample_size,
+                )
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
+                _log.info("tts dataset sampled", run_id=run_id, item_count=len(tts_items))
 
                 tts_tasks = [
                     _run_tts_item(
