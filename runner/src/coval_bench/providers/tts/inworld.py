@@ -3,16 +3,8 @@
 
 """Inworld AI TTS provider — WebSocket bidirectional streaming.
 
-Wire protocol:
-  connect wss://api.inworld.ai/tts/v1/voice:streamBidirectional
-  → send JSON {"create": {voiceId, modelId, audioConfig}, "contextId": ...}
-  → send JSON {"send_text": {"text": ..., "flush_context": {}}, "contextId": ...}
-  → recv JSON chunks: {"result": {"audioChunk": {"audioContent": "<base64-pcm>"}}}
-  → recv flush done:  {"result": {"flushCompleted": {}}}
-
-Auth:   ?authorization=Basic <key> query param. INWORLD_API_KEY is already the
-        portal-issued base64 credential, so it is sent verbatim (re-encoding fails auth).
-Output: 16-bit mono PCM (base64-decoded from JSON envelopes), 24 kHz
+INWORLD_API_KEY is the portal-issued base64 credential and rides the
+`?authorization=Basic <key>` query param verbatim; re-encoding it fails auth.
 """
 
 from __future__ import annotations
@@ -34,6 +26,19 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 SAMPLE_RATE = 24000
 _WS_URL = "wss://api.inworld.ai/tts/v1/voice:streamBidirectional"
 _CONTEXT_ID = "coval-bench"
+
+
+def _pcm_from_chunk(chunk: bytes) -> bytes:
+    """Unwrap Inworld's per-chunk LINEAR16 WAV container, returning raw PCM.
+
+    Each audio chunk is a standalone WAV (RIFF header + ``data`` subchunk); the
+    pipeline assembles headerless PCM, so the header is stripped here. Non-WAV
+    chunks pass through unchanged.
+    """
+    if chunk[:4] != b"RIFF":
+        return chunk
+    data = chunk.find(b"data")
+    return chunk[data + 8 :] if data != -1 else chunk
 
 
 class InworldTTSProvider(TTSProvider):
@@ -99,7 +104,7 @@ class InworldTTSProvider(TTSProvider):
                         # Graceful fallback: accept raw binary if server ever sends it.
                         if first_chunk_at is None:
                             first_chunk_at = time.monotonic()
-                        audio_chunks.append(raw)
+                        audio_chunks.append(_pcm_from_chunk(raw))
                         continue
 
                     msg = json.loads(raw)
@@ -120,7 +125,7 @@ class InworldTTSProvider(TTSProvider):
                     if audio_b64:
                         if first_chunk_at is None:
                             first_chunk_at = time.monotonic()
-                        audio_chunks.append(base64.b64decode(audio_b64))
+                        audio_chunks.append(_pcm_from_chunk(base64.b64decode(audio_b64)))
                     elif "flushCompleted" in result:
                         break
 

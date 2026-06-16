@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -45,6 +47,17 @@ def _make_ws(pcm_chunks: list[bytes]) -> FakeWebSocket:
     return FakeWebSocket(messages)
 
 
+def _wav_wrap(pcm: bytes, sample_rate: int = 24000) -> bytes:
+    """Wrap raw PCM in a standalone LINEAR16 WAV, as Inworld sends each chunk."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
@@ -76,6 +89,31 @@ async def test_inworld_happy_path(fake_settings: Settings, tmp_path: Path) -> No
     send_text = json.loads(fake_ws.sent[1])
     assert send_text["send_text"]["text"] == "Hello from Inworld"
     assert "flush_context" in send_text["send_text"]
+
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_inworld_strips_per_chunk_wav_header(fake_settings: Settings, tmp_path: Path) -> None:
+    """Inworld wraps every chunk in its own WAV; the saved audio must be raw PCM.
+
+    Without stripping, the embedded RIFF headers read as audible at t=0 (corrupting
+    TTFA) and land as clicks inside the assembled audio (corrupting WER).
+    """
+    pcm = make_pcm_bytes(480)
+    fake_ws = _make_ws([_wav_wrap(pcm), _wav_wrap(pcm), _wav_wrap(pcm)])
+
+    with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        result = await provider.synthesize("header test")
+
+    assert result.error is None, result.error
+    assert result.audio_path is not None
+    with wave.open(str(result.audio_path), "rb") as w:
+        written = w.readframes(w.getnframes())
+    # Exactly the three raw PCM payloads, with no RIFF headers embedded.
+    assert written == pcm * 3
+    assert b"RIFF" not in written
 
     result.audio_path.unlink()
 
