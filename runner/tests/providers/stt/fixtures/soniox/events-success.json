@@ -1,0 +1,7 @@
+[
+  {"tokens": [{"text": "hel", "is_final": false}]},
+  {"tokens": [{"text": "hello", "is_final": true}, {"text": " wor", "is_final": false}]},
+  {"tokens": [{"text": " world", "is_final": true}, {"text": " how are", "is_final": false}]},
+  {"tokens": [{"text": " how", "is_final": true}, {"text": " are", "is_final": true}, {"text": " you", "is_final": true}]},
+  {"finished": true}
+]
