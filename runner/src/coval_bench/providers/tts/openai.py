@@ -1,18 +1,13 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenAI TTS provider — supports HTTP streaming and Realtime WebSocket modes."""
+"""OpenAI TTS provider — HTTP streaming synthesis."""
 
 from __future__ import annotations
 
-import base64
-import json
 import time
-from typing import Any
 
 import structlog
-import websockets
-import websockets.exceptions
 from openai import AsyncOpenAI
 
 from coval_bench.config import Settings
@@ -40,16 +35,15 @@ VALID_VOICES = [
 ]
 
 HTTP_MODELS = {"gpt-4o-mini-tts"}
-REALTIME_MODELS = {"gpt-realtime-2025-08-28"}
 SAMPLE_RATE = 24000
 
 _BASE_URL = "https://api.openai.com"
 
 
 class OpenAITTSProvider(TTSProvider):
-    """OpenAI TTS provider supporting HTTP and Realtime WS paths."""
+    """OpenAI TTS provider over the HTTP streaming speech API."""
 
-    _VALID_MODELS = frozenset(HTTP_MODELS | REALTIME_MODELS)
+    _VALID_MODELS = frozenset(HTTP_MODELS)
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
@@ -87,8 +81,7 @@ class OpenAITTSProvider(TTSProvider):
 
         Transport failures propagate to the caller, which runs warmup under
         ``return_exceptions=True`` and logs them. A 401 still warms the
-        socket, so an unauthenticated HEAD is sufficient. The Realtime WS
-        path is unaffected (it opens its own ws connection).
+        socket, so an unauthenticated HEAD is sufficient.
         """
         client = get_shared_client("openai", _BASE_URL)
         t0 = time.monotonic()
@@ -105,8 +98,6 @@ class OpenAITTSProvider(TTSProvider):
         """Synthesize speech and return a TTSResult."""
         if self._model in HTTP_MODELS:
             return await self._synthesize_http(text)
-        if self._model in REALTIME_MODELS:
-            return await self._synthesize_realtime(text)
         return TTSResult(
             provider="openai",
             model=self._model,
@@ -167,70 +158,4 @@ class OpenAITTSProvider(TTSProvider):
             http_version=http_version,
             submit_to_headers_ms=setup_ms,
             connection_reused=reused,
-        )
-
-    async def _synthesize_realtime(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
-
-        ws_url = f"wss://api.openai.com/v1/realtime?model={self._model}"
-        ws_extra_headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "OpenAI-Beta": "realtime=v1",
-        }
-
-        create_event: dict[str, Any] = {
-            "type": "response.create",
-            "response": {
-                "modalities": ["audio", "text"],
-                "instructions": f"Speak this text exactly as provided: {text}",
-                "voice": self._voice,
-                "output_audio_format": "pcm16",
-            },
-        }
-
-        try:
-            start = time.monotonic()
-            async with websockets.connect(ws_url, additional_headers=ws_extra_headers) as ws:
-                await ws.send(json.dumps(create_event))
-                while True:
-                    try:
-                        raw = await ws.recv()
-                        event: dict[str, Any] = json.loads(raw)
-                        event_type: str = event.get("type", "")
-
-                        if event_type == "response.audio.delta" and "delta" in event:
-                            audio_data = base64.b64decode(event["delta"])
-                            if len(audio_data) > 0:
-                                if first_chunk_at is None:
-                                    first_chunk_at = time.monotonic()
-                                audio_chunks.append(audio_data)
-
-                        if event_type == "response.done":
-                            break
-
-                    except websockets.exceptions.ConnectionClosed:
-                        break
-        except Exception as exc:
-            logger.debug("openai_realtime_error", exc_info=True)
-            return finalize_tts_result(
-                provider="openai",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
-
-        return finalize_tts_result(
-            provider="openai",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
         )

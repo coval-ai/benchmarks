@@ -168,6 +168,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
     ),
+    # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
+    # from a text "instructions" prompt folds LLM inference into TTFA and never
+    # guarantees verbatim speech, so its metrics are incomparable here. Kept
+    # retired (not deleted) so historical rows stay hidden on the site.
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
     ),
