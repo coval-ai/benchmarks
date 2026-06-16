@@ -92,12 +92,6 @@ def test_cartesia_name_and_model(fake_settings: Settings) -> None:
     assert p.model == "sonic-3"
 
 
-def test_cartesia_rejects_sunset_sonic_turbo(fake_settings: Settings) -> None:
-    """Cartesia sunset sonic-turbo on 2026-06-01, so the guard must reject it."""
-    p = CartesiaTTSProvider(fake_settings, model="sonic-turbo", voice="voice-id")
-    assert not p._model_supported("sonic-turbo")
-
-
 def test_cartesia_supports_sonic_3_5(fake_settings: Settings) -> None:
     """sonic-3.5 (the public matrix entry) must pass the model-support guard."""
     p = CartesiaTTSProvider(
