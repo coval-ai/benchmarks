@@ -154,6 +154,24 @@ async def test_soniox_wrong_sample_rate(fake_api_key: SecretStr, audio_pcm_bytes
     assert result.ttft_seconds is None
 
 
+@pytest.mark.asyncio
+async def test_soniox_rejects_non_mono_or_non_16bit(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """The config hardcodes mono 16-bit, so non-matching input is rejected upfront."""
+    provider = SonioxSTTProvider(api_key=fake_api_key)
+    result = await provider.measure_ttft(
+        audio_data=audio_pcm_bytes,
+        channels=2,
+        sample_width=2,
+        sample_rate=16000,
+    )
+
+    assert result.error is not None
+    assert "mono 16-bit" in result.error
+    assert result.ttft_seconds is None
+
+
 # ---------------------------------------------------------------------------
 # Failure path — error frame
 # ---------------------------------------------------------------------------
@@ -204,3 +222,61 @@ async def test_soniox_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
     assert result.complete_transcript is None
     assert result.ttft_seconds is None
+
+
+# ---------------------------------------------------------------------------
+# Failure path — websocket transport exceptions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_soniox_connection_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """A connect failure surfaces as result.error, not a silent empty success."""
+    provider = SonioxSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.soniox.ws_client.connect",
+        side_effect=OSError("connection refused"),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is not None
+    assert "connection refused" in result.error
+    assert result.complete_transcript is None
+    assert result.ttft_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_soniox_surfaces_send_failure(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A send failure inside the streaming task is surfaced, not swallowed by gather."""
+
+    def _raise_on_audio(msg: object) -> None:
+        if isinstance(msg, (bytes, bytearray)):
+            raise RuntimeError("send boom")
+
+    ws = FakeWebSocket([], on_send=_raise_on_audio)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    provider = SonioxSTTProvider(api_key=fake_api_key)
+    with patch("coval_bench.providers.stt.soniox.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is not None
+    assert "send boom" in result.error
+    assert result.complete_transcript is None

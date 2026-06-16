@@ -56,6 +56,12 @@ class SonioxSTTProvider(STTProvider):
         if sample_rate != 16000:
             result.error = f"Soniox requires 16 kHz PCM input; got {sample_rate} Hz"
             return result
+        if channels != 1 or sample_width != 2:
+            result.error = (
+                "Soniox requires mono 16-bit PCM input; "
+                f"got channels={channels}, sample_width={sample_width}"
+            )
+            return result
 
         total_start = time.monotonic()
 
@@ -78,7 +84,11 @@ class SonioxSTTProvider(STTProvider):
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                # Surface a task failure as result.error so it isn't a silent success.
+                for outcome in outcomes:
+                    if isinstance(outcome, Exception) and result.error is None:
+                        result.error = str(outcome)
 
         except Exception as exc:
             logger.exception("soniox measure_ttft failed", error=str(exc))
@@ -151,6 +161,8 @@ class SonioxSTTProvider(STTProvider):
 
         except Exception as exc:
             logger.exception("soniox receive error", error=str(exc))
+            if result.error is None:
+                result.error = str(exc)
 
         if final_parts:
             # Soniox tokens carry their own leading spaces — concatenate, don't " ".join.
