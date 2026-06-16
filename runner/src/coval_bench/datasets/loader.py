@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import random
 from importlib.resources import files
 from pathlib import Path
 
@@ -153,6 +154,14 @@ def _default_cache_dir() -> Path:
         return fallback
 
 
+def _sample_items[T](items: list[T], sample_size: int | None, rng: random.Random | None) -> list[T]:
+    """Return a random subset of *items*, or *items* unchanged if it already fits."""
+    if sample_size is None or sample_size >= len(items):
+        return items
+    sampler = rng if rng is not None else random.Random()  # noqa: S311
+    return sampler.sample(items, sample_size)
+
+
 def _load_manifest(dataset_id: str) -> Manifest:
     """Load and validate the packaged manifest for *dataset_id*."""
     manifest_text = (
@@ -238,6 +247,8 @@ def load_stt_dataset(
     settings: Settings,
     cache_dir: Path | None = None,
     storage_client: storage.Client | None = None,
+    sample_size: int | None = None,
+    rng: random.Random | None = None,
 ) -> Dataset:
     """Load an STT dataset from the packaged manifest + GCS.
 
@@ -251,6 +262,10 @@ def load_stt_dataset(
         Override the local file cache directory.
     storage_client:
         Injectable GCS client (for tests; production passes ``None``).
+    sample_size:
+        Draw this many items at random (before fetch); ``None`` uses all.
+    rng:
+        Random source; a fresh one is used when ``None``.
 
     Returns
     -------
@@ -262,7 +277,7 @@ def load_stt_dataset(
     client = storage_client if storage_client is not None else _make_storage_client(settings)
 
     items: list[DatasetItem] = []
-    for raw_item in manifest.items:
+    for raw_item in _sample_items(list(manifest.items), sample_size, rng):
         if not isinstance(raw_item, STTManifestItem):
             raise TypeError(
                 f"Dataset '{dataset_id}' contains non-STT items; use load_tts_dataset instead."
@@ -301,6 +316,8 @@ def load_tts_dataset(
     settings: Settings,  # noqa: ARG001 – kept for uniform call signature
     cache_dir: Path | None = None,  # noqa: ARG001 – no files to cache for TTS
     storage_client: storage.Client | None = None,  # noqa: ARG001 – no GCS needed
+    sample_size: int | None = None,
+    rng: random.Random | None = None,
 ) -> TTSDataset:
     """Load a TTS dataset (text prompts only; no GCS fetch required).
 
@@ -314,6 +331,10 @@ def load_tts_dataset(
         Accepted for call-signature symmetry; not used for TTS.
     storage_client:
         Accepted for call-signature symmetry; not used for TTS.
+    sample_size:
+        Draw this many prompts at random; ``None`` uses all.
+    rng:
+        Random source; a fresh one is used when ``None``.
 
     Returns
     -------
@@ -323,7 +344,7 @@ def load_tts_dataset(
     manifest = _load_manifest(dataset_id)
 
     tts_items: list[TTSDatasetItem] = []
-    for raw_item in manifest.items:
+    for raw_item in _sample_items(list(manifest.items), sample_size, rng):
         if not isinstance(raw_item, TTSManifestItem):
             raise TypeError(
                 f"Dataset '{dataset_id}' contains non-TTS items; use load_stt_dataset instead."
@@ -344,6 +365,8 @@ def load_dataset(
     settings: Settings,
     cache_dir: Path | None = None,
     storage_client: storage.Client | None = None,
+    sample_size: int | None = None,
+    rng: random.Random | None = None,
 ) -> Dataset | TTSDataset:
     """Dispatcher: load STT or TTS dataset based on manifest content.
 
@@ -357,10 +380,14 @@ def load_dataset(
             settings=settings,
             cache_dir=cache_dir,
             storage_client=storage_client,
+            sample_size=sample_size,
+            rng=rng,
         )
     return load_tts_dataset(
         dataset_id,
         settings=settings,
         cache_dir=cache_dir,
         storage_client=storage_client,
+        sample_size=sample_size,
+        rng=rng,
     )

@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     dataset_bucket: str = "coval-benchmarks-datasets"
     dataset_id: str = "stt-v1"
 
+    # Items drawn at random per run from each manifest, shared across all
+    # models for parity. Set >= manifest size to run everything.
+    dataset_sample_size: int = 10
+
     # --- Runner ---
     runner_sha: str = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
