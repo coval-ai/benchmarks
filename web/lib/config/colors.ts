@@ -49,6 +49,7 @@ export const modelColors: Record<string, string> = {
   // ElevenLabs oranges and dark enough to read on the cream background.
   "tts-rt-v1": "#C9A227",
   "stt-rt-v4": "#B8860B",
+  "stt-rt-v5": "#9C7400",
 
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#21618C",

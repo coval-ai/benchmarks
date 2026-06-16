@@ -115,6 +115,10 @@ def test_provider_model() -> None:
     assert make_provider().model == "stt-rt-v4"
 
 
+def test_stt_rt_v5_supported() -> None:
+    assert SonioxSTTProvider(api_key=SecretStr("k"), model="stt-rt-v5").model == "stt-rt-v5"
+
+
 # ---------------------------------------------------------------------------
 # Invalid construction
 # ---------------------------------------------------------------------------

@@ -1,25 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Soniox real-time STT provider.
-
-Supports models: stt-rt-v4
-Wire protocol: WebSocket, wss://stt-rt.soniox.com/transcribe-websocket
-Auth: in-band — the api_key rides the opening JSON config frame (no header).
-Config: {"api_key":..., "model":"stt-rt-v4", "audio_format":"pcm_s16le",
-         "sample_rate":16000, "num_channels":1, "language_hints":["en"]}
-Audio: raw PCM_16 sent as binary frames.
-End: an empty text frame (`""`) signals end of audio; the server flushes final
-     tokens and sends {"finished": true} before closing. A zero-length binary
-     frame is ignored, so the stream must be ended with the empty string.
-
-Protocol notes:
-- Responses carry a "tokens" array; each token has "text" and "is_final".
-  Final tokens (is_final=True) are committed and never change; non-final tokens
-  are interim and may be superseded by later messages.
-- Token "text" already carries its own spacing, so the transcript is the direct
-  concatenation of final-token text (not a " ".join()).
-"""
+"""Soniox real-time STT provider (WebSocket)."""
 
 from __future__ import annotations
 
@@ -42,7 +24,7 @@ _WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 class SonioxSTTProvider(STTProvider):
     """Soniox streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"stt-rt-v4"})
+    _VALID_MODELS = frozenset({"stt-rt-v4", "stt-rt-v5"})
 
     def __init__(self, api_key: SecretStr | None, model: str = "stt-rt-v4") -> None:
         if not self._model_supported(model):
@@ -79,8 +61,6 @@ class SonioxSTTProvider(STTProvider):
 
         try:
             async with ws_client.connect(_WS_URL) as ws:
-                # Soniox authenticates in-band: the api_key rides the opening config
-                # frame rather than an Authorization header.
                 await ws.send(
                     json.dumps(
                         {
@@ -122,9 +102,8 @@ class SonioxSTTProvider(STTProvider):
             for i in range(0, len(audio_data), chunk_size):
                 await ws.send(audio_data[i : i + chunk_size])
                 await asyncio.sleep(realtime_resolution)
-            # An empty *text* frame signals end of audio; the server then flushes
-            # final tokens and sends {"finished": true}. A zero-length binary frame
-            # is ignored, leaving the stream open until the server's idle timeout.
+            # End-of-audio is an empty *text* frame; a zero-length binary frame is
+            # ignored, so the server never finalizes (stalls to its idle timeout).
             await ws.send("")
         except Exception as exc:
             logger.exception("soniox send error", error=str(exc))
@@ -174,6 +153,7 @@ class SonioxSTTProvider(STTProvider):
             logger.exception("soniox receive error", error=str(exc))
 
         if final_parts:
+            # Soniox tokens carry their own leading spaces — concatenate, don't " ".join.
             result.complete_transcript = "".join(final_parts).strip() or None
 
         if result.complete_transcript:
