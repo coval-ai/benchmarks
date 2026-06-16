@@ -65,6 +65,7 @@ async def test_smallest_happy_path(fake_settings: Settings, tmp_path: Path) -> N
     assert payload["voice_id"] == "kaitlyn"
     assert payload["model"] == "lightning_v3.1_pro"
     assert payload["sample_rate"] == 24000
+    assert payload["language"] == "en"
 
     result.audio_path.unlink()
 

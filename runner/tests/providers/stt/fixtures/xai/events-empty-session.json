@@ -1,0 +1,4 @@
+[
+  {"type": "transcript.created", "id": "xai-session-empty"},
+  {"type": "transcript.done", "text": "", "duration": 3.0}
+]
