@@ -61,6 +61,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_STT, provider="openai", model="gpt-realtime-whisper", status=_ACTIVE
     ),
+    RegisteredModel(benchmark=_STT, provider="openai", model="gpt-4o-transcribe", status=_ACTIVE),
+    RegisteredModel(
+        benchmark=_STT, provider="openai", model="gpt-4o-mini-transcribe", status=_ACTIVE
+    ),
     RegisteredModel(
         benchmark=_STT, provider="assemblyai", model="universal-streaming", status=_ACTIVE
     ),

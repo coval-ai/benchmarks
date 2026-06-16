@@ -5,6 +5,8 @@ export const modelColors: Record<string, string> = {
   // OpenAI — red family (#E74C3C). Both TTS and STT use the same red range.
   "gpt-4o-mini-tts": "#C0392B",
   "gpt-realtime-whisper": "#E74C3C",
+  "gpt-4o-transcribe": "#CD6155",
+  "gpt-4o-mini-transcribe": "#922B21",
 
   // ElevenLabs — orange family (#F39C12). TTS + STT scribe all span light→dark orange.
   eleven_multilingual_v2: "#F5B041",
