@@ -98,7 +98,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_turbo_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-4o-mini-tts", voice="alloy", status=_ACTIVE
