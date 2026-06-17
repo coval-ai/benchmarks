@@ -6,7 +6,6 @@
 import React, { useMemo } from "react";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
-import { median } from "@/lib/utils/median";
 import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -19,6 +18,7 @@ const BoxPlotSection: React.FC = () => {
     boxPlotDescription: description,
     latencyLabel,
     getBoxPlotData,
+    getAvgLatencyMs,
     getProviderForModel,
     isMobile,
     activeMetric,
@@ -29,11 +29,8 @@ const BoxPlotSection: React.FC = () => {
     () => getBoxPlotData(activeMetric),
     [getBoxPlotData, activeMetric]
   );
-  // Median across the selected models' per-model medians.
-  const medianLatency = useMemo(
-    () => median(boxPlotData.data.map((modelData) => modelData.quartiles.median)),
-    [boxPlotData]
-  );
+  // Run-weighted average latency across all selected models.
+  const avgLatency = getAvgLatencyMs(activeMetric);
 
   return (
     <div className="mb-4">
@@ -42,8 +39,8 @@ const BoxPlotSection: React.FC = () => {
           label="Latency Variation"
           description={description}
           stat={{
-            label: `Median ${latencyLabel}`,
-            value: `${medianLatency.toFixed(0)} ms`,
+            label: `Average ${latencyLabel}`,
+            value: `${avgLatency.toFixed(0)} ms`,
           }}
         />
 

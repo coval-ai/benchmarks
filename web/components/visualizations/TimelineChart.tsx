@@ -78,7 +78,7 @@ const TimelineChart: React.FC = () => {
     getTimelineTicks,
     formatChartLabel,
     getProviderForModel,
-    getMedianLatencyMs,
+    getAvgLatencyMs,
     activeMetric: metric,
     dataTimeWindow,
   } = useDashboard();
@@ -119,10 +119,9 @@ const TimelineChart: React.FC = () => {
   const description =
     metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions];
 
-  // Headline number: the median latency across selected models — the same
-  // canonical statistic the summary card and box plot report, so all three
-  // surfaces agree.
-  const medianValue = getMedianLatencyMs(metric);
+  // Headline: run-weighted average latency across selected models (same stat the
+  // box plot reports).
+  const avgValue = getAvgLatencyMs(metric);
 
   // Fix the Y axis to the max across the full dataset (not just the visible
   // window) so the scale stays consistent while panning. Rounded up to a clean
@@ -154,8 +153,8 @@ const TimelineChart: React.FC = () => {
           }
           description={description}
           stat={{
-            label: `Median ${metricLabel}`,
-            value: `${medianValue.toFixed(0)} ms`,
+            label: `Average ${metricLabel}`,
+            value: `${avgValue.toFixed(0)} ms`,
           }}
         />
 
