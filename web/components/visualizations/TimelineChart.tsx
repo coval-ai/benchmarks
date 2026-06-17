@@ -81,6 +81,7 @@ const MethodologyMarkerLabel: React.FC<MarkerLabelProps> = ({
       onMouseEnter={() => onEnter(change, cx)}
       onMouseLeave={onLeave}
     >
+      <rect x={-24} y={-14} width={48} height={42} fill="transparent" />
       <rect
         x={-13}
         y={-9}
@@ -141,14 +142,20 @@ const TimelineChart: React.FC = () => {
   const [hoveredMarker, setHoveredMarker] = useState<{
     change: MethodologyChange;
     x: number;
+    ts: number;
   } | null>(null);
 
+  const currentTimeWindow = getCurrentTimeWindow();
+  const [windowStart, windowEnd] = currentTimeWindow;
+
   // The metric is shared dashboard-wide, so clear any pinned tooltip whenever it
-  // changes — whether from this chart's toggle or another section's.
+  // changes — whether from this chart's toggle or another section's. Also clear
+  // the marker popover when the time window shifts, since a marker may scroll
+  // out of range.
   useEffect(() => {
     setPinned(null);
     setHoveredMarker(null);
-  }, [metric]);
+  }, [metric, windowStart, windowEnd]);
 
   useEffect(() => {
     if (pinned === null) return;
@@ -166,13 +173,21 @@ const TimelineChart: React.FC = () => {
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
   const windowedTimelineData = getWindowedTimelineData(metric);
-  const currentTimeWindow = getCurrentTimeWindow();
-  const [windowStart, windowEnd] = currentTimeWindow;
   const activeMetricKey = metric.toLowerCase() as MethodologyMetricKey;
-  const methodologyMarkers = methodologyChanges
-    .filter((c) => !c.metrics || c.metrics.includes(activeMetricKey))
-    .map((c) => ({ change: c, ts: new Date(c.date).getTime() }))
-    .filter((m) => m.ts >= windowStart && m.ts <= windowEnd);
+  // Anchor date-only strings at UTC noon so the marker lands on the intended
+  // calendar day in every inhabited timezone (UTC midnight would shift to the
+  // previous day for the Americas).
+  const methodologyMarkers = useMemo(
+    () =>
+      methodologyChanges
+        .filter((c) => !c.metrics || c.metrics.includes(activeMetricKey))
+        .map((c) => ({
+          change: c,
+          ts: new Date(`${c.date}T12:00:00Z`).getTime(),
+        }))
+        .filter((m) => m.ts >= windowStart && m.ts <= windowEnd),
+    [activeMetricKey, windowStart, windowEnd]
+  );
   const tzAbbr = getLocalTimeZoneAbbr();
   const dateScale = dataTimeWindow !== "24h";
   const xAxisLabel = dateScale ? "Date" : tzAbbr ? `Time (${tzAbbr})` : "Time";
@@ -332,7 +347,9 @@ const TimelineChart: React.FC = () => {
                   label={
                     <MethodologyMarkerLabel
                       change={m.change}
-                      onEnter={(change, x) => setHoveredMarker({ change, x })}
+                      onEnter={(change, x) =>
+                        setHoveredMarker({ change, x, ts: m.ts })
+                      }
                       onLeave={() => setHoveredMarker(null)}
                     />
                   }
@@ -408,8 +425,7 @@ const TimelineChart: React.FC = () => {
                         color: "var(--color-text-on-tooltip-secondary)",
                       }}
                     >
-                      Methodology change ·{" "}
-                      {formatDate(new Date(hoveredMarker.change.date).getTime())}
+                      Methodology change · {formatDate(hoveredMarker.ts)}
                     </p>
                     <p
                       style={{

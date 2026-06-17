@@ -134,19 +134,24 @@ jobs:
     name: Methodology marker check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Advisory only: never let this job block a PR, even on an unexpected error.
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Warn on methodology change without a marker
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          BASE="origin/${{ github.base_ref }}"
+          BASE="origin/$BASE_REF"
           CHANGED=$(git diff --name-only "$BASE"...HEAD)
           SENSITIVE=$(echo "$CHANGED" | grep -E \
-            'runner/src/coval_bench/metrics/(wer|ttft|ttfa)\.py|runner/src/coval_bench/datasets/|docs/methodology\.md' || true)
+            'runner/src/coval_bench/metrics/(wer|ttft|ttfa|ttfs)\.py|runner/src/coval_bench/datasets/|docs/methodology\.md' || true)
           if [ -n "$SENSITIVE" ] && ! echo "$CHANGED" | grep -q 'web/lib/config/methodologyChanges\.ts'; then
             echo "::warning::Methodology-sensitive files changed but web/lib/config/methodologyChanges.ts was not updated. If this PR changes how a metric is computed or the eval dataset, add a methodology marker so the timeline charts explain the step."
             echo "Changed methodology-sensitive files:"
