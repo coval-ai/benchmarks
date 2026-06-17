@@ -17,6 +17,15 @@ download.
 **TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
 rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
 
+**Per-run sampling.** Each scheduled run draws a random sample of
+`dataset_sample_size` items (default 10) from each manifest before any provider
+is called; the STT and TTS pools are sampled independently. The sample is drawn
+once at the start of the run and shared across every model, so all models are
+scored on the identical subset within a run (parity); the draw is independent
+across runs, so the full manifest is covered over time. The manifests still
+carry the complete 50 / 30 items — sampling only controls how many run each
+cycle. Set `DATASET_SAMPLE_SIZE` ≥ the manifest size to run everything.
+
 **SHA pinning.** Every audio file referenced by `stt-v1.json` carries a
 `sha256` field. The runner verifies the SHA after fetching from GCS and raises
 `DatasetIntegrityError` on mismatch (see `runner/src/coval_bench/datasets/loader.py`).

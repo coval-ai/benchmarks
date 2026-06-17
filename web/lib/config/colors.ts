@@ -5,6 +5,8 @@ export const modelColors: Record<string, string> = {
   // OpenAI — red family (#E74C3C). Both TTS and STT use the same red range.
   "gpt-4o-mini-tts": "#C0392B",
   "gpt-realtime-whisper": "#E74C3C",
+  "gpt-4o-transcribe": "#CD6155",
+  "gpt-4o-mini-transcribe": "#922B21",
 
   // ElevenLabs — orange family (#F39C12). TTS + STT scribe all span light→dark orange.
   eleven_multilingual_v2: "#F5B041",
@@ -52,6 +54,8 @@ export const modelColors: Record<string, string> = {
   // Soniox — gold family. The chart's only gold; sits yellower than the
   // ElevenLabs oranges and dark enough to read on the cream background.
   "tts-rt-v1": "#C9A227",
+  "stt-rt-v4": "#B8860B",
+  "stt-rt-v5": "#9C7400",
 
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#21618C",

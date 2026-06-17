@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -43,7 +44,7 @@ from coval_bench.datasets.loader import (
     load_stt_dataset,
     load_tts_dataset,
 )
-from coval_bench.datasets.manifest import Manifest
+from coval_bench.datasets.manifest import Manifest, STTManifestItem, TTSManifestItem
 
 # ---------------------------------------------------------------------------
 # Fixtures directory helpers
@@ -518,3 +519,154 @@ def test_default_cache_dir_xdg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     result = _default_cache_dir()
     assert result == tmp_path / "coval-bench"
     assert result.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# Random sampling (sample_size / rng)
+# ---------------------------------------------------------------------------
+
+
+def _always_fixture_client() -> MagicMock:
+    """Fake GCS client whose download always writes the fixture WAV."""
+
+    def make_blob(name: str) -> MagicMock:
+        blob = MagicMock()
+        blob.name = name
+        blob.download_to_filename.side_effect = lambda dest, **_k: shutil.copy(
+            str(FIXTURE_WAV), dest
+        )
+        return blob
+
+    bucket_mock = MagicMock()
+    bucket_mock.blob.side_effect = make_blob
+    client_mock = MagicMock()
+    client_mock.bucket.return_value = bucket_mock
+    return client_mock
+
+
+def _stt_manifest(n: int) -> Manifest:
+    """An n-item STT manifest; every item points at a distinct verified path."""
+    return Manifest(
+        id="stt-v1",
+        version="1.0.0",
+        license="CC-BY-4.0",
+        source="test",
+        items=[
+            STTManifestItem(
+                path=f"audio/{i:04d}.wav",
+                sha256=FIXTURE_SHA256,
+                transcript=f"utterance {i}",
+                duration_sec=1.0,
+            )
+            for i in range(n)
+        ],
+    )
+
+
+def _tts_manifest(n: int) -> Manifest:
+    return Manifest(
+        id="tts-v1",
+        version="1.0.0",
+        license="proprietary",
+        source="test",
+        items=[TTSManifestItem(testcase_id=f"TC{i:03d}", transcript=f"line {i}") for i in range(n)],
+    )
+
+
+def test_stt_sample_size_limits_and_fetches_only_sample(
+    test_settings: Settings, tmp_path: Path
+) -> None:
+    """sample_size caps the item count and only the sampled files are fetched."""
+    client = _always_fixture_client()
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=_stt_manifest(10)):
+        dataset = load_stt_dataset(
+            "stt-v1",
+            settings=test_settings,
+            cache_dir=tmp_path,
+            storage_client=client,
+            sample_size=3,
+            rng=random.Random(0),
+        )
+
+    assert len(dataset.items) == 3
+    assert client.bucket.return_value.blob.call_count == 3  # only the sample is fetched
+
+
+def test_stt_sample_is_reproducible_with_seed(test_settings: Settings, tmp_path: Path) -> None:
+    """Same seed → identical selection, so every model in a run sees one subset."""
+    manifest = _stt_manifest(12)
+
+    def _load(seed: int, cache: Path) -> list[str]:
+        with patch("coval_bench.datasets.loader._load_manifest", return_value=manifest):
+            ds = load_stt_dataset(
+                "stt-v1",
+                settings=test_settings,
+                cache_dir=cache,
+                storage_client=_always_fixture_client(),
+                sample_size=4,
+                rng=random.Random(seed),
+            )
+        return [item.transcript for item in ds.items]
+
+    assert _load(123, tmp_path / "a") == _load(123, tmp_path / "b")
+
+
+def test_stt_sample_size_none_uses_full_manifest(test_settings: Settings, tmp_path: Path) -> None:
+    """Default (sample_size=None) loads the whole manifest — back-compat."""
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=_stt_manifest(5)):
+        dataset = load_stt_dataset(
+            "stt-v1",
+            settings=test_settings,
+            cache_dir=tmp_path,
+            storage_client=_always_fixture_client(),
+        )
+    assert len(dataset.items) == 5
+
+
+def test_stt_sample_size_exceeding_manifest_returns_all(
+    test_settings: Settings, tmp_path: Path
+) -> None:
+    """A sample_size larger than the manifest just returns every item."""
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=_stt_manifest(5)):
+        dataset = load_stt_dataset(
+            "stt-v1",
+            settings=test_settings,
+            cache_dir=tmp_path,
+            storage_client=_always_fixture_client(),
+            sample_size=100,
+            rng=random.Random(0),
+        )
+    assert len(dataset.items) == 5
+
+
+def test_tts_sample_size_limits_and_reproducible(test_settings: Settings) -> None:
+    """TTS sampling caps the prompt count and is reproducible under a fixed seed."""
+    manifest = _tts_manifest(8)
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=manifest):
+        first = load_tts_dataset(
+            "tts-v1", settings=test_settings, sample_size=3, rng=random.Random(7)
+        )
+        second = load_tts_dataset(
+            "tts-v1", settings=test_settings, sample_size=3, rng=random.Random(7)
+        )
+        full = load_tts_dataset("tts-v1", settings=test_settings)
+
+    assert len(first.items) == 3
+    assert [i.testcase_id for i in first.items] == [i.testcase_id for i in second.items]
+    assert len(full.items) == 8
+
+
+def test_load_dataset_dispatcher_threads_sample_size(test_settings: Settings) -> None:
+    """The load_dataset dispatcher forwards sample_size/rng to the TTS loader."""
+    from coval_bench.datasets.loader import load_dataset
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=_tts_manifest(6)):
+        result = load_dataset(
+            "tts-v1",
+            settings=test_settings,
+            sample_size=2,
+            rng=random.Random(1),
+        )
+    assert len(result.items) == 2

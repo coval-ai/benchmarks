@@ -1,15 +1,19 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenAI gpt-realtime-whisper STT provider.
+"""OpenAI Realtime API STT provider.
 
-Known limitation: this model does not support ``turn_detection: server_vad`` — OpenAI
-documents that it requires turn detection to be omitted or set to ``null`` (verified
-2026-06). Streaming is therefore single-pass manual-commit: deltas stream in real time
+Benchmarks the realtime transcription models — ``gpt-realtime-whisper``,
+``gpt-4o-transcribe``, and ``gpt-4o-mini-transcribe`` — over a single websocket
+transcription session.
+
+Streaming is single-pass manual-commit for every model: deltas stream in real time
 (TTFT stays comparable to native streaming ASR), but the final transcript requires an
 explicit ``input_audio_buffer.commit`` after all audio is sent, so AudioToFinal carries
 an extra post-audio round-trip and is not directly comparable to auto-finalizing
-streaming providers.
+streaming providers. ``gpt-realtime-whisper`` additionally rejects
+``turn_detection: server_vad`` outright, so manual-commit is the only option there
+(verified 2026-06).
 """
 
 from __future__ import annotations
@@ -37,7 +41,7 @@ from coval_bench.providers.stt._transcript_utils import (
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("gpt-realtime-whisper",)
+_VALID_MODELS = ("gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe")
 _WS_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
 _INPUT_SAMPLE_RATE = 24000
 _READY_TIMEOUT_S = 30.0
@@ -51,7 +55,7 @@ class _TranscriptionAborted(Exception):
 
 
 class OpenAISTTProvider(STTProvider):
-    """OpenAI Realtime API STT provider (gpt-realtime-whisper)."""
+    """OpenAI Realtime API STT provider for the realtime transcription models."""
 
     def __init__(self, api_key: SecretStr, model: str = "gpt-realtime-whisper") -> None:
         if model not in _VALID_MODELS:

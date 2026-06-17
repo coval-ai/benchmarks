@@ -78,7 +78,7 @@ def sample_text() -> str:
 
 
 # ---------------------------------------------------------------------------
-# FakeWebSocket — reusable for OpenAI realtime, and ElevenLabs WS tests
+# FakeWebSocket — reusable across the WebSocket-based TTS provider tests
 # ---------------------------------------------------------------------------
 
 

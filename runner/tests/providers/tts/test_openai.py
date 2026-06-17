@@ -1,12 +1,10 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the OpenAI TTS provider (HTTP + Realtime paths)."""
+"""Tests for the OpenAI TTS provider (HTTP streaming path)."""
 
 from __future__ import annotations
 
-import base64
-import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,7 +16,7 @@ from coval_bench.config import Settings
 from coval_bench.providers import _http_session
 from coval_bench.providers.tts.openai import HTTP_MODELS, VALID_VOICES, OpenAITTSProvider
 
-from .conftest import FakeWebSocket, make_pcm_bytes
+from .conftest import make_pcm_bytes
 
 
 @pytest.fixture(autouse=True)
@@ -37,10 +35,6 @@ def _make_http_provider(
     fake_settings: Settings, model: str = "gpt-4o-mini-tts"
 ) -> OpenAITTSProvider:
     return OpenAITTSProvider(fake_settings, model=model, voice="alloy")
-
-
-def _make_realtime_provider(fake_settings: Settings) -> OpenAITTSProvider:
-    return OpenAITTSProvider(fake_settings, model="gpt-realtime-2025-08-28", voice="alloy")
 
 
 def _make_streaming_response_mock(chunks: list[bytes]) -> MagicMock:
@@ -173,45 +167,6 @@ async def test_openai_unsupported_model(fake_settings: Settings) -> None:
     assert result.error is not None
     assert "Unsupported" in result.error
     assert result.audio_path is None
-
-
-# ---------------------------------------------------------------------------
-# Realtime path — happy path
-# ---------------------------------------------------------------------------
-
-
-def _make_realtime_ws_messages(audio_b64: str) -> list[str]:
-    """Build the sequence of WS messages the realtime API would send."""
-    return [
-        json.dumps({"type": "response.audio.delta", "delta": audio_b64}),
-        json.dumps({"type": "response.done"}),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_openai_realtime_happy_path(fake_settings: Settings) -> None:
-    """Realtime WS synthesize → ttfa set, audio file written."""
-    pcm = make_pcm_bytes(480)
-    audio_b64 = base64.b64encode(pcm).decode()
-    messages = _make_realtime_ws_messages(audio_b64)
-    fake_ws = FakeWebSocket(messages)
-
-    provider = _make_realtime_provider(fake_settings)
-
-    with patch(
-        "coval_bench.providers.tts.openai.websockets.connect",
-        return_value=fake_ws,
-    ):
-        result = await provider.synthesize("Hello realtime")
-
-    assert result.error is None, f"Error: {result.error}"
-    assert result.ttfa_ms is not None
-    assert 0 < result.ttfa_ms < 60_000
-    assert result.audio_path is not None
-    assert result.audio_path.exists()
-    assert result.audio_path.stat().st_size > 0
-
-    result.audio_path.unlink()
 
 
 # ---------------------------------------------------------------------------

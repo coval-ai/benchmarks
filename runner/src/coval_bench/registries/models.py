@@ -61,12 +61,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_STT, provider="openai", model="gpt-realtime-whisper", status=_ACTIVE
     ),
+    RegisteredModel(benchmark=_STT, provider="openai", model="gpt-4o-transcribe", status=_ACTIVE),
+    RegisteredModel(
+        benchmark=_STT, provider="openai", model="gpt-4o-mini-transcribe", status=_ACTIVE
+    ),
     RegisteredModel(
         benchmark=_STT, provider="assemblyai", model="universal-streaming", status=_ACTIVE
     ),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
+    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v4", status=_ACTIVE),
+    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v5", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="smallest", model="pulse", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="cartesia", model="ink-2", status=_ACTIVE),
@@ -96,7 +102,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_turbo_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-4o-mini-tts", voice="alloy", status=_ACTIVE
@@ -178,8 +184,12 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_RETIRED,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_RETIRED
+        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
     ),
+    # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
+    # from a text "instructions" prompt folds LLM inference into TTFA and never
+    # guarantees verbatim speech, so its metrics are incomparable here. Kept
+    # retired (not deleted) so historical rows stay hidden on the site.
     RegisteredModel(
         benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
     ),
