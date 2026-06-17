@@ -15,7 +15,8 @@ Three tables in the ``arena`` schema, alongside ``benchmarks_v2`` in the same DB
 - ``votes``    raw human judgments (A_WIN/B_WIN/TIE). ``voter_type`` separates internal
                ``labeler`` votes from ``external`` (public) votes; ``UNIQUE (battle_id,
                voter_type, voter_id)`` keeps one current vote per identity (re-label = UPDATE
-               that row). Raw votes are the source of truth — Bradley-Terry / Davidson are refit
+               that row, bumping ``updated_at`` so windowed refits see the corrected time).
+               Raw votes are the source of truth — Bradley-Terry / Davidson are refit
                from these at any time, for any window; nothing here is ever an input from a
                previously computed rating.
 - ``leaderboard_snapshots``  persisted computed ratings: one row per model per computation run
@@ -45,11 +46,10 @@ depends_on = None
 def upgrade() -> None:
     """Create the arena schema and its three tables."""
     op.execute("CREATE SCHEMA IF NOT EXISTS arena")
-    op.execute("SET search_path TO arena")
 
     op.execute(
         """
-        CREATE TABLE battles (
+        CREATE TABLE arena.battles (
             id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             provider_a  TEXT NOT NULL,
             model_a     TEXT NOT NULL,
@@ -63,26 +63,27 @@ def upgrade() -> None:
         )
         """
     )
-    op.execute("CREATE INDEX battles_domain_idx ON battles (domain)")
+    op.execute("CREATE INDEX battles_domain_idx ON arena.battles (domain)")
 
     op.execute(
         """
-        CREATE TABLE votes (
+        CREATE TABLE arena.votes (
             id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            battle_id  UUID NOT NULL REFERENCES battles(id),
+            battle_id  UUID NOT NULL REFERENCES arena.battles(id),
             outcome    TEXT NOT NULL CHECK (outcome IN ('A_WIN','B_WIN','TIE')),
             voter_type TEXT NOT NULL CHECK (voter_type IN ('labeler','external')),
             voter_id   TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (battle_id, voter_type, voter_id)
         )
         """
     )
-    op.execute("CREATE INDEX votes_battle_id_idx ON votes (battle_id)")
+    op.execute("CREATE INDEX votes_battle_id_idx ON arena.votes (battle_id)")
 
     op.execute(
         """
-        CREATE TABLE leaderboard_snapshots (
+        CREATE TABLE arena.leaderboard_snapshots (
             id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             computed_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
             metric_name         TEXT NOT NULL,
@@ -98,7 +99,7 @@ def upgrade() -> None:
             votes_total         INTEGER NOT NULL,
             wins                NUMERIC NOT NULL,
             losses              NUMERIC NOT NULL,
-            ties                INTEGER NOT NULL,
+            ties                NUMERIC NOT NULL,
             status              TEXT NOT NULL
                                 CHECK (status IN ('preliminary','usable','established'))
         )
@@ -106,7 +107,8 @@ def upgrade() -> None:
     )
     op.execute(
         "CREATE INDEX leaderboard_snapshots_lookup_idx "
-        "ON leaderboard_snapshots (metric_name, computed_at)"
+        "ON arena.leaderboard_snapshots "
+        "(computed_at, metric_name, methodology_version, domain)"
     )
 
 
