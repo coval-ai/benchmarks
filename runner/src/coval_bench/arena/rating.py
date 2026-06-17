@@ -160,6 +160,8 @@ def _aggregate(outcomes: Sequence[BattleOutcome]) -> _Aggregate:
     # Map an unordered pair (lo, hi) -> [wins_lo_over_hi, wins_hi_over_lo, ties].
     pairs: dict[tuple[int, int], list[float]] = {}
     for o in outcomes:
+        if o.model_a == o.model_b:
+            continue
         a, b = index[o.model_a], index[o.model_b]
         lo, hi = (a, b) if a < b else (b, a)
         cell = pairs.setdefault((lo, hi), [0.0, 0.0, 0.0])
@@ -313,7 +315,7 @@ def _bootstrap(
     ci_high = np.full(n, np.nan, dtype=np.float64)
     for k in range(n):
         vals = np.array(samples[k], dtype=np.float64)
-        if vals.size == 0:
+        if vals.size < 2:
             continue
         ci_low[k] = float(np.percentile(vals, 2.5))
         ci_high[k] = float(np.percentile(vals, 97.5))
@@ -360,7 +362,20 @@ def compute_ratings(
     Returns one :class:`ModelRating` per model seen, sorted by Elo descending.
     ``bootstrap_rounds`` controls CI precision/cost; ``seed`` makes the bootstrap
     reproducible; ``reg`` is the L2 ridge on theta.
+
+    Limitation — disconnected comparison graph: if some models never share a
+    direct or transitive matchup, their relative Elo is not identified by the
+    data. The ridge keeps the fit finite and converging, but pins each component
+    near 0, so cross-component ordering is arbitrary; ranks within a connected
+    component stay valid, and the wide bootstrap CIs on poorly-connected models
+    flag the low confidence. The intended remedy is upstream adaptive pairing
+    (steer new battles to bridge components), not a hard failure here.
     """
+    if bootstrap_rounds < 0:
+        raise ValueError("bootstrap_rounds must be >= 0")
+    if not math.isfinite(reg) or reg < 0.0:
+        raise ValueError("reg must be finite and >= 0")
+
     agg = _aggregate(outcomes)
     n = len(agg.models)
     if n == 0:
