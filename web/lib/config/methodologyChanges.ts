@@ -19,6 +19,13 @@ export const methodologyChanges: MethodologyChange[] = [
       "TTFA previously measured network arrival only (time to the first audio chunk). It now adds the leading silence a provider front-loads before the first audible sample, so it reflects what a listener actually waits to hear. Every provider's TTFA shifts upward; values before and after are not comparable.",
   },
   {
+    date: "2026-06-03",
+    metrics: ["ttfa"],
+    title: "TTFA corrected for librosa cold-start",
+    detail:
+      "Early TTFA readings were inflated because the audio library loaded lazily on the first request, adding one-off import latency to the measurement. The library is now warmed before traffic, so TTFA reflects real synthesis latency. Values drop to their corrected level after this date.",
+  },
+  {
     date: "2026-06-10",
     metrics: ["ttfs"],
     title: "TTFS anchored at end-of-speech",
