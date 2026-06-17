@@ -7,13 +7,16 @@ Benchmarks the realtime transcription models — ``gpt-realtime-whisper``,
 ``gpt-4o-transcribe``, and ``gpt-4o-mini-transcribe`` — over a single websocket
 transcription session.
 
-Streaming is single-pass manual-commit for every model: deltas stream in real time
-(TTFT stays comparable to native streaming ASR), but the final transcript requires an
-explicit ``input_audio_buffer.commit`` after all audio is sent, so AudioToFinal carries
-an extra post-audio round-trip and is not directly comparable to auto-finalizing
-streaming providers. ``gpt-realtime-whisper`` additionally rejects
-``turn_detection: server_vad`` outright, so manual-commit is the only option there
-(verified 2026-06).
+Every model runs single-pass manual-commit: audio streams in, then an explicit
+``input_audio_buffer.commit`` finalizes the buffer, so AudioToFinal carries an extra
+post-audio round-trip versus auto-finalizing streaming providers.
+
+Streaming differs by model. ``gpt-realtime-whisper`` emits partial deltas in real time, so
+its TTFT is comparable to streaming ASR; it also rejects ``turn_detection: server_vad``
+outright, leaving manual-commit the only option (verified 2026-06). ``gpt-4o-transcribe``
+and ``gpt-4o-mini-transcribe`` only transcribe a finalized segment — no partials
+mid-utterance, even with server VAD — so their TTFT is excluded upstream (see
+``_TTFT_NOT_COMPARABLE``).
 """
 
 from __future__ import annotations
