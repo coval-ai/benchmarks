@@ -16,7 +16,6 @@ import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
 import { getModelColor } from "@/lib/utils/colors";
-import { median } from "@/lib/utils/median";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
@@ -190,31 +189,31 @@ export function useDashboardState(page: "tts" | "stt") {
   // Calculate metrics
   const { getStat, getHeatmapData } = chartData;
 
-  // Median latency (in display units) across the selected models' per-model
-  // medians for the given metric. This is the single canonical headline number,
-  // shared by the summary card, the box plot, and the timeline so every surface
-  // reports the same statistic. Median commutes with the linear ms conversion,
-  // so this equals the box plot's median(per-model medians).
-  const getMedianLatencyMs = useCallback(
+  // Run-weighted average latency across selected models, in display units:
+  // Σ(avg·runs) / Σ(runs). Backs the box plot and timeline headlines.
+  const getAvgLatencyMs = useCallback(
     (metric: string) => {
-      const p50s: number[] = [];
+      let weightedSum = 0;
+      let totalRuns = 0;
       deferredSelectedModels.forEach((model) => {
         const stat = getStat(model, metric);
-        if (stat && typeof stat.p50 === "number") p50s.push(stat.p50);
+        if (
+          stat &&
+          typeof stat.avg_value === "number" &&
+          typeof stat.sample_count === "number"
+        ) {
+          weightedSum += stat.avg_value * stat.sample_count;
+          totalRuns += stat.sample_count;
+        }
       });
-      if (p50s.length === 0) return 0;
-      return latencyToMs(median(p50s), page);
+      if (totalRuns === 0) return 0;
+      return latencyToMs(weightedSum / totalRuns, page);
     },
     [getStat, deferredSelectedModels, page]
   );
 
-  // Headline numbers: the median latency across selected models, and the
-  // lowest average WER (with one model selected, that model's own value).
-  const medianPrimary = useMemo(
-    () => getMedianLatencyMs(activeMetric),
-    [getMedianLatencyMs, activeMetric]
-  );
-
+  // Latency KPI headline: the fastest model (lowest median) and its median, in
+  // display units.
   const fastestPrimary = useMemo(() => {
     let lowestP50 = Infinity;
     let fastestModel = "";
@@ -227,8 +226,12 @@ export function useDashboardState(page: "tts" | "stt") {
         fastestProvider = parseModelKey(model).provider;
       }
     });
-    return { fastestModel, fastestProvider };
-  }, [getStat, deferredSelectedModels, activeMetric]);
+    return {
+      fastestModel,
+      fastestProvider,
+      fastestMs: lowestP50 === Infinity ? 0 : latencyToMs(lowestP50, page),
+    };
+  }, [getStat, deferredSelectedModels, activeMetric, page]);
 
   const keyMetrics = useMemo(() => {
     let lowestSecondary = Infinity;
@@ -306,15 +309,12 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = (() => {
-    const latencyFullLabel =
-      metricDescriptions[
-        activeMetric.toLowerCase() as keyof typeof metricDescriptions
-      ]?.short ?? activeMetric;
+    const multiple = deferredSelectedModels.length > 1;
     return {
-      label: `Median ${latencyFullLabel}`,
-      displayValue: `${medianPrimary.toFixed(0)} ms`,
+      label: `Lowest Median ${activeMetric}`,
+      displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
       subtitle:
-        deferredSelectedModels.length > 1 && fastestPrimary.fastestModel
+        multiple && fastestPrimary.fastestModel
           ? {
               name: normalizeModelName(fastestPrimary.fastestModel),
               detail: fastestPrimary.fastestProvider
@@ -363,7 +363,7 @@ export function useDashboardState(page: "tts" | "stt") {
     // Key metrics
     primaryKeyMetric,
     secondaryKeyMetric,
-    getMedianLatencyMs,
+    getAvgLatencyMs,
 
     // Data loading
     loading,
