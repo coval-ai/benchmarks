@@ -15,7 +15,8 @@ Three tables in the ``arena`` schema, alongside ``benchmarks_v2`` in the same DB
 - ``votes``    raw human judgments (A_WIN/B_WIN/TIE). ``voter_type`` separates internal
                ``labeler`` votes from ``external`` (public) votes; ``UNIQUE (battle_id,
                voter_type, voter_id)`` keeps one current vote per identity (re-label = UPDATE
-               that row, bumping ``updated_at`` so windowed refits see the corrected time).
+               that row; a ``BEFORE UPDATE`` trigger bumps ``updated_at`` so windowed refits
+               see the corrected time even if the writer omits the column).
                Raw votes are the source of truth — Bradley-Terry / Davidson are refit
                from these at any time, for any window; nothing here is ever an input from a
                previously computed rating.
@@ -84,6 +85,25 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX votes_battle_id_idx ON arena.votes (battle_id)")
+
+    op.execute(
+        """
+        CREATE FUNCTION arena.set_updated_at() RETURNS trigger AS $$
+        BEGIN
+            NEW.updated_at := now();
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER votes_set_updated_at
+            BEFORE UPDATE ON arena.votes
+            FOR EACH ROW
+            EXECUTE FUNCTION arena.set_updated_at()
+        """
+    )
 
     op.execute(
         """
