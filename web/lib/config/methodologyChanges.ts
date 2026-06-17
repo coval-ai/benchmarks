@@ -12,18 +12,11 @@ export interface MethodologyChange {
 
 export const methodologyChanges: MethodologyChange[] = [
   {
-    date: "2026-05-20",
-    metrics: ["ttfa"],
-    title: "TTFA switched to perceived first-audible latency",
-    detail:
-      "TTFA previously measured network arrival only (time to the first audio chunk). It now adds the leading silence a provider front-loads before the first audible sample, so it reflects what a listener actually waits to hear. Every provider's TTFA shifts upward; values before and after are not comparable.",
-  },
-  {
     date: "2026-06-01",
     metrics: ["ttfa"],
-    title: "TTFA methodology updated across all providers",
+    title: "TTFA redefined as perceived first-audible latency",
     detail:
-      "A methodology change applied uniformly to every provider shifted all reported TTFA values upward on this date. Numbers before and after are not directly comparable.",
+      "TTFA previously measured network arrival only (time to the first audio chunk). It now adds the leading silence a provider front-loads before the first audible sample, so it reflects what a listener actually waits to hear. Every provider's TTFA shifts upward; values before and after are not comparable.",
   },
   {
     date: "2026-06-10",
