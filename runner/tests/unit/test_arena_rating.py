@@ -222,3 +222,40 @@ def test_bootstrap_skips_nonconverged(monkeypatch: pytest.MonkeyPatch) -> None:
     low, high = rating._bootstrap(outcomes, ["A", "B"], rounds=5, reg=0.1, rng=rng)
     assert np.all(np.isnan(low))
     assert np.all(np.isnan(high))
+
+
+def test_self_battle_is_ignored() -> None:
+    # A self-battle (model_a == model_b) carries no comparison signal and must
+    # not corrupt the per-pair tallies or shift the ratings.
+    real = [BattleOutcome(model_a="A", model_b="B", outcome="A_WIN") for _ in range(5)]
+    polluted = real + [BattleOutcome(model_a="A", model_b="A", outcome="A_WIN") for _ in range(3)]
+
+    clean = {m.model_id: m for m in compute_ratings(real, bootstrap_rounds=0, seed=1).models}
+    mixed = {m.model_id: m for m in compute_ratings(polluted, bootstrap_rounds=0, seed=1).models}
+
+    assert mixed["A"].wins == clean["A"].wins == 5.0
+    assert mixed["A"].votes_total == clean["A"].votes_total == 5
+    assert mixed["A"].rating_elo == pytest.approx(clean["A"].rating_elo)
+
+
+def test_single_bootstrap_sample_gives_no_ci() -> None:
+    # With one bootstrap round each model has at most one resample Elo. A lone
+    # sample is not a usable interval, so CI must be None and the status the
+    # preliminary floor -- not a false zero-width "established".
+    outcomes = [BattleOutcome(model_a="A", model_b="B", outcome="A_WIN") for _ in range(10)]
+    result = compute_ratings(outcomes, bootstrap_rounds=1, seed=1)
+    for m in result.models:
+        assert m.ci_low is None
+        assert m.ci_high is None
+        assert m.ci_half_width is None
+        assert m.status == "preliminary"
+
+
+def test_invalid_inputs_raise() -> None:
+    outcomes = [BattleOutcome(model_a="A", model_b="B", outcome="A_WIN")]
+    with pytest.raises(ValueError):
+        compute_ratings(outcomes, bootstrap_rounds=-1, seed=1)
+    with pytest.raises(ValueError):
+        compute_ratings(outcomes, reg=-0.1, seed=1)
+    with pytest.raises(ValueError):
+        compute_ratings(outcomes, reg=float("inf"), seed=1)
