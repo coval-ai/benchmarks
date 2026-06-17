@@ -21,8 +21,11 @@ Three tables in the ``arena`` schema, alongside ``benchmarks_v2`` in the same DB
                previously computed rating.
 - ``leaderboard_snapshots``  persisted computed ratings: one row per model per computation run
                (a board = all rows sharing ``computed_at`` + ``metric_name`` +
-               ``methodology_version`` + ``domain``). This is a cache/history of derived data,
-               refreshed from votes — never an input to the rating math.
+               ``methodology_version`` + ``domain``), enforced by a UNIQUE over those four plus
+               ``provider`` + ``model``. ``domain`` is NOT NULL with an ``'all'`` sentinel for the
+               global board, so the UNIQUE dedups global rows too (a nullable ``domain`` would not,
+               since NULLs compare unequal). This is a cache/history of derived data, refreshed
+               from votes — never an input to the rating math.
 
 Notes
 -----
@@ -59,7 +62,8 @@ def upgrade() -> None:
             prompt_text TEXT NOT NULL,
             audio_a_url TEXT NOT NULL,
             audio_b_url TEXT NOT NULL,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CHECK (NOT (provider_a = provider_b AND model_a = model_b))
         )
         """
     )
@@ -88,27 +92,23 @@ def upgrade() -> None:
             computed_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
             metric_name         TEXT NOT NULL,
             methodology_version TEXT NOT NULL,
-            domain              TEXT,
+            domain              TEXT NOT NULL DEFAULT 'all',
             provider            TEXT NOT NULL,
             model               TEXT NOT NULL,
             rating_elo          NUMERIC NOT NULL,
             rating_bt           NUMERIC NOT NULL,
             ci_low              NUMERIC,
             ci_high             NUMERIC,
-            ci_half_width       NUMERIC,
-            votes_total         INTEGER NOT NULL,
-            wins                NUMERIC NOT NULL,
-            losses              NUMERIC NOT NULL,
-            ties                NUMERIC NOT NULL,
+            ci_half_width       NUMERIC CHECK (ci_half_width >= 0),
+            votes_total         INTEGER NOT NULL CHECK (votes_total >= 0),
+            wins                NUMERIC NOT NULL CHECK (wins >= 0),
+            losses              NUMERIC NOT NULL CHECK (losses >= 0),
+            ties                NUMERIC NOT NULL CHECK (ties >= 0),
             status              TEXT NOT NULL
-                                CHECK (status IN ('preliminary','usable','established'))
+                                CHECK (status IN ('preliminary','usable','established')),
+            UNIQUE (computed_at, metric_name, methodology_version, domain, provider, model)
         )
         """
-    )
-    op.execute(
-        "CREATE INDEX leaderboard_snapshots_lookup_idx "
-        "ON arena.leaderboard_snapshots "
-        "(computed_at, metric_name, methodology_version, domain)"
     )
 
 
