@@ -12,18 +12,25 @@ export interface MethodologyChange {
 
 export const methodologyChanges: MethodologyChange[] = [
   {
+    date: "2026-05-20",
+    metrics: ["ttfa"],
+    title: "TTFA switched to perceived first-audible latency",
+    detail:
+      "TTFA previously measured network arrival only (time to the first audio chunk). It now adds the leading silence a provider front-loads before the first audible sample, so it reflects what a listener actually waits to hear. Every provider's TTFA shifts upward; values before and after are not comparable.",
+  },
+  {
+    date: "2026-06-01",
+    metrics: ["ttfa"],
+    title: "TTFA methodology updated across all providers",
+    detail:
+      "A methodology change applied uniformly to every provider shifted all reported TTFA values upward on this date. Numbers before and after are not directly comparable.",
+  },
+  {
     date: "2026-06-10",
     metrics: ["ttfs"],
     title: "TTFS anchored at end-of-speech",
     detail:
       "Streaming STT finalization is now forced at a shared VAD end-of-speech point, so every provider is timed from the same instant. Steps after this date reflect engine finalization speed, not how long the speaker talked.",
-  },
-  {
-    date: "2026-06-15",
-    metrics: ["ttft"],
-    title: "Grok excluded from TTFT",
-    detail:
-      "Grok has a ~1.1s fixed response floor that is not comparable to other providers' time-to-first-token. It is excluded from TTFT from this date onward.",
   },
   {
     date: "2026-06-15",

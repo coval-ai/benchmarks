@@ -82,24 +82,15 @@ const MethodologyMarkerLabel: React.FC<MarkerLabelProps> = ({
       onMouseLeave={onLeave}
     >
       <rect x={-24} y={-14} width={48} height={42} fill="transparent" />
-      <rect
-        x={-13}
-        y={-9}
-        width={26}
-        height={18}
-        rx={5}
-        fill="#f59e0b"
-        stroke="#ffffff"
-        strokeWidth={1.5}
-      />
+      <circle r={9} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.5} />
       <text
         textAnchor="middle"
         y={4}
-        fontSize={12}
+        fontSize={13}
         fontWeight={700}
         fill="#ffffff"
       >
-        (!)
+        !
       </text>
     </g>
   );
