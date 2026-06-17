@@ -12,11 +12,17 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Legend,
-  Tooltip
+  Tooltip,
+  ReferenceLine
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
 import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
+import {
+  methodologyChanges,
+  type MethodologyChange,
+  type MethodologyMetricKey
+} from "@/lib/config/methodologyChanges";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -53,6 +59,51 @@ const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
   </ul>
 );
 
+interface MarkerLabelProps {
+  viewBox?: { x?: number; y?: number; width?: number; height?: number };
+  change: MethodologyChange;
+  onEnter: (change: MethodologyChange, x: number) => void;
+  onLeave: () => void;
+}
+
+const MethodologyMarkerLabel: React.FC<MarkerLabelProps> = ({
+  viewBox,
+  change,
+  onEnter,
+  onLeave,
+}) => {
+  const cx = viewBox?.x ?? 0;
+  const cy = (viewBox?.y ?? 0) + 9;
+  return (
+    <g
+      transform={`translate(${cx}, ${cy})`}
+      style={{ cursor: "pointer" }}
+      onMouseEnter={() => onEnter(change, cx)}
+      onMouseLeave={onLeave}
+    >
+      <rect
+        x={-13}
+        y={-9}
+        width={26}
+        height={18}
+        rx={5}
+        fill="#f59e0b"
+        stroke="#ffffff"
+        strokeWidth={1.5}
+      />
+      <text
+        textAnchor="middle"
+        y={4}
+        fontSize={12}
+        fontWeight={700}
+        fill="#ffffff"
+      >
+        (!)
+      </text>
+    </g>
+  );
+};
+
 interface TooltipPayloadItem {
   dataKey: string;
   value: number;
@@ -87,11 +138,16 @@ const TimelineChart: React.FC = () => {
   const chartRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
+  const [hoveredMarker, setHoveredMarker] = useState<{
+    change: MethodologyChange;
+    x: number;
+  } | null>(null);
 
   // The metric is shared dashboard-wide, so clear any pinned tooltip whenever it
   // changes — whether from this chart's toggle or another section's.
   useEffect(() => {
     setPinned(null);
+    setHoveredMarker(null);
   }, [metric]);
 
   useEffect(() => {
@@ -111,6 +167,12 @@ const TimelineChart: React.FC = () => {
   const modelsWithData = getModelsWithTimelineData(metric);
   const windowedTimelineData = getWindowedTimelineData(metric);
   const currentTimeWindow = getCurrentTimeWindow();
+  const [windowStart, windowEnd] = currentTimeWindow;
+  const activeMetricKey = metric.toLowerCase() as MethodologyMetricKey;
+  const methodologyMarkers = methodologyChanges
+    .filter((c) => !c.metrics || c.metrics.includes(activeMetricKey))
+    .map((c) => ({ change: c, ts: new Date(c.date).getTime() }))
+    .filter((m) => m.ts >= windowStart && m.ts <= windowEnd);
   const tzAbbr = getLocalTimeZoneAbbr();
   const dateScale = dataTimeWindow !== "24h";
   const xAxisLabel = dateScale ? "Date" : tzAbbr ? `Time (${tzAbbr})` : "Time";
@@ -260,6 +322,22 @@ const TimelineChart: React.FC = () => {
                   name={formatChartLabel(model, getProviderForModel(model))}
                 />
               ))}
+              {methodologyMarkers.map((m) => (
+                <ReferenceLine
+                  key={`${m.change.date}-${m.change.title}`}
+                  x={m.ts}
+                  stroke="#f59e0b"
+                  strokeDasharray="4 4"
+                  strokeWidth={1.5}
+                  label={
+                    <MethodologyMarkerLabel
+                      change={m.change}
+                      onEnter={(change, x) => setHoveredMarker({ change, x })}
+                      onLeave={() => setHoveredMarker(null)}
+                    />
+                  }
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
           {pinned && (
@@ -285,6 +363,67 @@ const TimelineChart: React.FC = () => {
               />
             </div>
           )}
+          {hoveredMarker &&
+            (() => {
+              const width = chartRef.current?.clientWidth ?? 0;
+              const pad = 120;
+              const left =
+                width > pad * 2
+                  ? Math.min(Math.max(hoveredMarker.x, pad), width - pad)
+                  : hoveredMarker.x;
+              return (
+                <div
+                  style={{
+                    position: "absolute",
+                    left,
+                    top: 26,
+                    transform: "translateX(-50%)",
+                    zIndex: 25,
+                    pointerEvents: "none",
+                    maxWidth: 240,
+                  }}
+                >
+                  <div
+                    style={{
+                      backgroundColor: "var(--color-surface-tooltip)",
+                      border: "1px solid var(--color-border-secondary)",
+                      borderRadius: "8px",
+                      color: "var(--color-text-on-tooltip)",
+                      padding: "12px",
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontWeight: "bold",
+                        fontSize: "12px",
+                      }}
+                    >
+                      {hoveredMarker.change.title}
+                    </p>
+                    <p
+                      style={{
+                        margin: "4px 0 0",
+                        fontSize: "10px",
+                        color: "var(--color-text-on-tooltip-secondary)",
+                      }}
+                    >
+                      Methodology change ·{" "}
+                      {formatDate(new Date(hoveredMarker.change.date).getTime())}
+                    </p>
+                    <p
+                      style={{
+                        margin: "8px 0 0",
+                        fontSize: "11px",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {hoveredMarker.change.detail}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
         </div>
       </Card>
     </div>

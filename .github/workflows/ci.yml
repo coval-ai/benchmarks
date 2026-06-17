@@ -120,3 +120,35 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Methodology marker reminder — advisory only (warns, never blocks).
+  # If a PR changes how a metric is computed (WER normalization, TTFT/TTFA
+  # definitions) or the eval dataset, the timeline charts should get a
+  # methodology marker. Warn when those paths change but the curated marker
+  # file (web/lib/config/methodologyChanges.ts) was not touched.
+  # Provider add/exclude (orchestrator.py) is intentionally NOT watched — it
+  # changes for routine reasons and is left to human judgment.
+  # ---------------------------------------------------------------------------
+  methodology-gate:
+    name: Methodology marker check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Warn on methodology change without a marker
+        run: |
+          set -euo pipefail
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+          SENSITIVE=$(echo "$CHANGED" | grep -E \
+            'runner/src/coval_bench/metrics/(wer|ttft|ttfa)\.py|runner/src/coval_bench/datasets/|docs/methodology\.md' || true)
+          if [ -n "$SENSITIVE" ] && ! echo "$CHANGED" | grep -q 'web/lib/config/methodologyChanges\.ts'; then
+            echo "::warning::Methodology-sensitive files changed but web/lib/config/methodologyChanges.ts was not updated. If this PR changes how a metric is computed or the eval dataset, add a methodology marker so the timeline charts explain the step."
+            echo "Changed methodology-sensitive files:"
+            echo "$SENSITIVE"
+          fi
