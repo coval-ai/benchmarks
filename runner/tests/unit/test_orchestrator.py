@@ -484,17 +484,28 @@ async def test_flux_excluded_from_ttfs(audio_file: Path, settings: Settings) -> 
 
 
 @pytest.mark.asyncio
-async def test_xai_excluded_from_ttft(audio_file: Path, settings: Settings) -> None:
-    """xAI Grok's TTFT is a fixed min-audio-gate artifact, not engine speed → no TTFT row.
+@pytest.mark.parametrize(
+    ("provider_name", "model"),
+    [
+        ("xai", "grok-stt"),
+        ("openai", "gpt-4o-transcribe"),
+        ("openai", "gpt-4o-mini-transcribe"),
+    ],
+)
+async def test_non_streaming_models_excluded_from_ttft(
+    provider_name: str, model: str, audio_file: Path, settings: Settings
+) -> None:
+    """Models that can't emit a token before end-of-speech get no TTFT row.
 
-    The fair latency metric (TTFS) and the other metrics still run.
+    xAI Grok (min-audio gate) and the OpenAI transcribe models (finalize-only, no
+    mid-utterance partials) report TTFS instead; the other metrics still run.
     """
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
-    stt_providers = {"xai": MagicMock(return_value=provider)}
+    stt_providers = {provider_name: MagicMock(return_value=provider)}
     matrix = [
         *_paused_registry(Benchmark.STT),
-        _stt_entry("xai", "grok-stt"),
+        _stt_entry(provider_name, model),
     ]
 
     run = _make_run()

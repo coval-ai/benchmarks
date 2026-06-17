@@ -69,6 +69,17 @@ _TTS_TIMEOUT_S = 60
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
 # but huge stack traces choke log pipelines)
 
+# STT models whose first token can't precede end-of-speech, so TTFT reflects a buffering
+# gate, not engine speed — omit it and rely on TTFS. xai/grok-stt gates on min audio; the
+# openai transcribe models finalize per-segment (no partials mid-utterance, even with VAD).
+_TTFT_NOT_COMPARABLE: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("xai", "grok-stt"),
+        ("openai", "gpt-4o-transcribe"),
+        ("openai", "gpt-4o-mini-transcribe"),
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Public result type
@@ -274,13 +285,11 @@ async def _run_stt_item(
             transcription_result.complete_transcript if transcription_result else None
         )
 
-        # 1. TTFT — time-to-first-partial from first audio. For xAI Grok this reflects
-        # its min-audio gate, not engine speed, so it misrepresents the provider; TTFS
-        # (re-anchored at end-of-speech) is the fair metric. Omit TTFT for xAI; the rest run.
+        # 1. TTFT — time-to-first-partial from first audio.
         ttft_status, ttft_error = _metric_outcome(
             ttft_seconds, item_error, Metric.TTFT, ResultStatus
         )
-        ttft_excluded = entry.provider == "xai"
+        ttft_excluded = (entry.provider, entry.model) in _TTFT_NOT_COMPARABLE
         if not ttft_excluded:
             results.append(
                 Result(
