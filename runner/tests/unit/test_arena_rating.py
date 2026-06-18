@@ -93,7 +93,10 @@ def test_ci_shrinks_with_more_votes() -> None:
     small_hw = {m.model_id: m.ci_half_width for m in small.models}
     large_hw = {m.model_id: m.ci_half_width for m in large.models}
     for model_id in true_theta:
-        assert large_hw[model_id] < small_hw[model_id]
+        large_v = large_hw[model_id]
+        small_v = small_hw[model_id]
+        assert large_v is not None and small_v is not None
+        assert large_v < small_v
 
 
 # ---------------------------------------------------------------------------
@@ -258,4 +261,20 @@ def test_invalid_inputs_raise() -> None:
     with pytest.raises(ValueError):
         compute_ratings(outcomes, reg=-0.1, seed=1)
     with pytest.raises(ValueError):
+        compute_ratings(outcomes, reg=0.0, seed=1)  # ridge is load-bearing; reg must be > 0
+    with pytest.raises(ValueError):
         compute_ratings(outcomes, reg=float("inf"), seed=1)
+
+
+def test_zero_variance_bootstrap_gives_no_ci() -> None:
+    # Fully separated data (A always wins) refits identically in every resample,
+    # so the bootstrap distribution has zero spread. A zero-width interval is a
+    # degenerate-data artifact, not precision, so it must read as preliminary --
+    # not a false "established".
+    outcomes = [BattleOutcome(model_a="A", model_b="B", outcome="A_WIN") for _ in range(50)]
+    result = compute_ratings(outcomes, bootstrap_rounds=20, seed=1)
+    for m in result.models:
+        assert m.ci_low is None
+        assert m.ci_high is None
+        assert m.ci_half_width is None
+        assert m.status == "preliminary"

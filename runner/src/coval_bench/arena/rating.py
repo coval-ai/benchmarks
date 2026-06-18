@@ -315,7 +315,9 @@ def _bootstrap(
     ci_high = np.full(n, np.nan, dtype=np.float64)
     for k in range(n):
         vals = np.array(samples[k], dtype=np.float64)
-        if vals.size < 2:
+        # Fewer than two samples, or a zero-variance pool (degenerate/separated
+        # data that refits identically every resample), is not a real interval.
+        if vals.size < 2 or vals.min() == vals.max():
             continue
         ci_low[k] = float(np.percentile(vals, 2.5))
         ci_high[k] = float(np.percentile(vals, 97.5))
@@ -373,8 +375,8 @@ def compute_ratings(
     """
     if bootstrap_rounds < 0:
         raise ValueError("bootstrap_rounds must be >= 0")
-    if not math.isfinite(reg) or reg < 0.0:
-        raise ValueError("reg must be finite and >= 0")
+    if not math.isfinite(reg) or reg <= 0.0:
+        raise ValueError("reg must be finite and > 0")
 
     agg = _aggregate(outcomes)
     n = len(agg.models)
