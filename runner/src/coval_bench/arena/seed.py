@@ -59,6 +59,7 @@ def _sample_url(provider: str, model: str) -> str:
 async def _clear(pool: ArenaPool) -> None:
     async with pool.connection() as conn:
         async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM arena.leaderboard_snapshots")
             await cur.execute("DELETE FROM arena.votes")
             await cur.execute("DELETE FROM arena.battles")
         await conn.commit()
