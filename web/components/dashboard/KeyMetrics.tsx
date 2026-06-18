@@ -26,8 +26,8 @@ const KeyMetrics: React.FC = () => {
 
   return (
     <div className="grid grid-cols-2 gap-[0.8rem] mb-[0.8rem] w-full">
-      {metrics.map((metric, index) => (
-        <Card key={index} className="text-left min-w-0" padding="p-5 lg:p-8">
+      {metrics.map((metric) => (
+        <Card key={metric.label} className="text-left min-w-0" padding="p-5 lg:p-8">
 
           <div className="text-[0.9rem] font-light text-text-secondary mb-2">
             {metric.label}

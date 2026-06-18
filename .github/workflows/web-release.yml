@@ -1,0 +1,157 @@
+name: Benchmarks Web Production Release
+run-name: >-
+  ${{
+    github.event_name == 'repository_dispatch' &&
+    format(
+      'Switchboard benchmarks web release {0} {1}',
+      github.event.client_payload.deploy_ref || 'main',
+      github.event.client_payload.switchboard_correlation_id || github.run_id
+    ) ||
+    'Benchmarks Web Production Release'
+  }}
+
+on:
+  repository_dispatch:
+    types: [switchboard_benchmarks_web_release]
+  workflow_dispatch:
+    inputs:
+      deploy_ref:
+        description: Branch, tag, or SHA to promote.
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: benchmarks-web-production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  VERCEL_TEAM_SCOPE: covalai
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_BENCHMARKS_WEB_PROJECT_ID }}
+
+jobs:
+  promote:
+    name: Build and promote web production
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Resolve deploy ref
+        id: context
+        env:
+          DISPATCH_REF: ${{ github.event.client_payload.deploy_ref }}
+          MANUAL_REF: ${{ inputs.deploy_ref }}
+        run: |
+          set -euo pipefail
+          deploy_ref="${DISPATCH_REF:-${MANUAL_REF:-main}}"
+          echo "deploy_ref=${deploy_ref}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Benchmarks web production release"
+            echo ""
+            echo "- Deploy ref: \`${deploy_ref}\`"
+            echo "- Correlation: \`${{ github.event.client_payload.switchboard_correlation_id || 'manual' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: .
+
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.context.outputs.deploy_ref }}
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Skip if production-web already matches
+        id: up_to_date
+        run: |
+          set -euo pipefail
+          git fetch origin production-web:refs/remotes/origin/production-web 2>/dev/null || true
+          if git rev-parse --verify origin/production-web >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/production-web)" ]; then
+            echo "production-web is already at $(git rev-parse HEAD); nothing to promote."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        working-directory: .
+
+      - name: Set up pnpm
+        if: steps.up_to_date.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+          run_install: false
+
+      - name: Set up Node.js
+        if: steps.up_to_date.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        if: steps.up_to_date.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Vercel artifact
+        if: steps.up_to_date.outputs.skip != 'true'
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx vercel pull --yes --environment=production --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
+          if [ -f .vercel/.env.production.local ]; then
+            set -a
+            # shellcheck disable=SC1091
+            source .vercel/.env.production.local
+            set +a
+          fi
+          if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then
+            echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
+            exit 1
+          fi
+          pnpm codegen
+          npx vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy and promote
+        if: steps.up_to_date.outputs.skip != 'true'
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          deployment_url="$(npx vercel deploy --prebuilt --prod --skip-domain --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN")"
+          echo "deployment_url=${deployment_url}" >> "$GITHUB_OUTPUT"
+          npx vercel promote "$deployment_url" --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN" --yes
+
+      - name: Fast-forward production-web marker
+        if: steps.up_to_date.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/production-web"
+        working-directory: .
+
+      - name: Summarize release
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "### Result"
+            echo "- Skipped: \`${{ steps.up_to_date.outputs.skip || 'false' }}\`"
+            echo "- Deployment URL: ${{ steps.vercel.outputs.deployment_url || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: .

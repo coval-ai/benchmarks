@@ -7,14 +7,23 @@
 name: CI
 
 on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to check.
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to check.
+        required: false
+        type: string
+        default: main
   pull_request:
     branches:
       - main
-
-# Cancel prior runs for the same PR branch on re-push.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -28,6 +37,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -134,6 +145,7 @@ jobs:
     name: Methodology marker check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    if: github.event_name == 'pull_request'
     # Advisory only: never let this job block a PR, even on an unexpected error.
     continue-on-error: true
     steps:

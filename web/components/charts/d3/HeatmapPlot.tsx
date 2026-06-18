@@ -113,7 +113,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
   }, [data, sortConfig]);
 
   // Handle column header clicks
-  const handleSort = (key: keyof ModelHeatmapData) => {
+  const handleSort = useCallback((key: keyof ModelHeatmapData) => {
     const direction =
       sortConfig.key === key && sortConfig.direction === "asc" ? "desc" : "asc";
     capturePostHogEvent(POSTHOG_EVENTS.dashboardHeatmapSorted, {
@@ -123,7 +123,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
       direction
     });
     setSortConfig({ key, direction });
-  };
+  }, [activeTab, sortConfig.direction, sortConfig.key]);
 
   // Create color scales for each metric
   const getColorScale = useCallback(
@@ -385,6 +385,7 @@ const HeatmapPlot: React.FC<HeatmapProps> = ({
     dimensions,
     metrics,
     sortConfig,
+    handleSort,
     activeTab,
     getColorScale,
     formatValue,

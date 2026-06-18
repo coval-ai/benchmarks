@@ -1,0 +1,101 @@
+name: Benchmarks Web CI
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to check.
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to check.
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Codegen / Lint / Test / Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install runner dependencies for OpenAPI schema
+        run: uv sync --frozen --dev
+        working-directory: runner
+
+      - name: Serve local OpenAPI schema
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/benchmarks-openapi
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from coval_bench.api.app import create_app
+
+          Path("/tmp/benchmarks-openapi/openapi.json").write_text(
+              json.dumps(create_app().openapi()),
+              encoding="utf-8",
+          )
+          PY
+          python3 -m http.server 8000 --directory /tmp/benchmarks-openapi >/tmp/benchmarks-openapi/server.log 2>&1 &
+          echo $! > /tmp/benchmarks-openapi/server.pid
+        working-directory: runner
+
+      - name: Codegen
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: pnpm codegen
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
