@@ -219,6 +219,7 @@ def test_list_votes_scopes_to_battle(arena_pg: psycopg.Connection[Any]) -> None:
 
             assert len(await store.list_votes(battle_id=battle_one.id)) == 1
             assert len(await store.list_votes()) == 2
+            assert len(await store.list_votes(limit=1)) == 1
         finally:
             await pool.close()
 

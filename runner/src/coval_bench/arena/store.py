@@ -146,25 +146,27 @@ class ArenaStore:
         self,
         *,
         battle_id: UUID | None = None,
+        limit: int | None = None,
     ) -> list[Vote]:
-        """Return votes ordered by creation time, optionally scoped to one battle."""
-        if battle_id is None:
-            sql = """
-                SELECT id, battle_id, outcome, voter_type, voter_id,
-                       created_at, updated_at
-                FROM arena.votes
-                ORDER BY created_at
-            """
-            params: tuple[object, ...] = ()
-        else:
-            sql = """
-                SELECT id, battle_id, outcome, voter_type, voter_id,
-                       created_at, updated_at
-                FROM arena.votes
-                WHERE battle_id = %s
-                ORDER BY created_at
-            """
-            params = (battle_id,)
+        """Return votes ordered by creation time.
+
+        Scope to one battle with ``battle_id``. ``limit`` defaults to ``None``
+        (no cap) because the rating refit must see every vote; pass an int to
+        bound the result for a paginated caller.
+        """
+        clauses = [
+            "SELECT id, battle_id, outcome, voter_type, voter_id,"
+            " created_at, updated_at FROM arena.votes",
+        ]
+        params: list[object] = []
+        if battle_id is not None:
+            clauses.append("WHERE battle_id = %s")
+            params.append(battle_id)
+        clauses.append("ORDER BY created_at")
+        if limit is not None:
+            clauses.append("LIMIT %s")
+            params.append(limit)
+        sql = "\n".join(clauses)
         async with (
             self._pool.connection() as conn,
             conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
