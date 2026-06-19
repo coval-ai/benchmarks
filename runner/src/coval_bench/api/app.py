@@ -28,6 +28,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
+from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import aggregates, health, leaderboard, providers, results, runs
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
@@ -105,6 +106,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
+
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Routers
     app.include_router(health.router)
