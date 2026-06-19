@@ -16,7 +16,7 @@ import psycopg
 import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
-from coval_bench.arena.models import Battle, Vote, VoteOutcome, VoterType
+from coval_bench.db.models import Battle, Vote, VoteOutcome, VoterType
 
 ArenaPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 

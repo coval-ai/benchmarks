@@ -10,18 +10,21 @@ graph), and a deterministic vote pattern that yields a clear latent ranking.
 Run against a LOCAL dev database only::
 
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/benchmarks \\
-        python -m coval_bench.arena.seed [--reset]
+        python -m coval_bench.db.seed_arena [--reset]
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+from urllib.parse import urlsplit
 
-from coval_bench.arena.models import Battle, VoteOutcome, VoterType
-from coval_bench.arena.store import ArenaPool, ArenaStore
 from coval_bench.config import get_settings
+from coval_bench.db.arena_store import ArenaPool, ArenaStore
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.db.models import Battle, VoteOutcome, VoterType
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 _MODELS: list[tuple[str, str]] = [
     ("cartesia", "sonic-3.5"),
@@ -52,6 +55,20 @@ _VOTE_PATTERN: list[VoteOutcome] = [
 ]
 
 
+def _assert_local(database_url: str) -> None:
+    """Refuse to seed/reset against anything but a local DB.
+
+    Prod connects via a Cloud SQL unix socket (empty host), so requiring an
+    explicit local host blocks prod while allowing ``…@localhost:5432/…``.
+    """
+    host = urlsplit(database_url).hostname
+    if host not in _LOCAL_HOSTS:
+        raise SystemExit(
+            f"refusing to seed/reset arena: DB host {host!r} is not local "
+            f"({sorted(_LOCAL_HOSTS)}). This script is dev-only."
+        )
+
+
 def _sample_url(provider: str, model: str) -> str:
     return f"https://samples.coval.dev/arena/{provider}-{model}.wav"
 
@@ -68,6 +85,7 @@ async def _clear(pool: ArenaPool) -> None:
 async def run_seed(*, reset: bool = False) -> None:
     """Insert the sample battles + votes. Skips if already seeded (unless reset)."""
     settings = get_settings()
+    _assert_local(settings.database_url)
     async with lifespan_pool(settings) as pool:
         store = ArenaStore(pool)
 

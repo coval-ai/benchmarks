@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for coval_bench.arena.store.
+"""Tests for coval_bench.db.arena_store.
 
 Uses ``pytest-postgresql`` (embedded ``pg_ctl``, no Docker) to spin up a real
 Postgres. No remote DB is ever contacted. A separate session server (random
@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 import psycopg
 import psycopg.errors
@@ -23,8 +24,8 @@ from alembic.config import Config as AlembicConfig
 from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql.factories import postgresql, postgresql_proc
 
-from coval_bench.arena.models import Battle, VoteOutcome, VoterType
-from coval_bench.arena.store import ArenaStore
+from coval_bench.db.arena_store import ArenaStore
+from coval_bench.db.models import Battle, VoteOutcome, VoterType
 
 # Separate embedded server (random free port) so we don't collide with the
 # db-writer tests' ``pg_proc`` fixture.
@@ -51,16 +52,18 @@ def _async_dsn(conn: psycopg.Connection[Any]) -> str:
     user = info.user or ""
     password = info.password or ""
     if password:
-        return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
-    return f"postgresql://{user}@{host}:{port}/{dbname}"
+        return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{dbname}"
+    return f"postgresql://{quote_plus(user)}@{host}:{port}/{dbname}"
 
 
 def _apply_migrations(conn: psycopg.Connection[Any]) -> None:
     alembic_command.upgrade(_alembic_cfg(_async_dsn(conn)), "head")
 
 
-async def _make_pool(conn: psycopg.Connection[Any]) -> AsyncConnectionPool:  # type: ignore[type-arg]
-    pool: AsyncConnectionPool = AsyncConnectionPool(  # type: ignore[type-arg]
+async def _make_pool(
+    conn: psycopg.Connection[Any],
+) -> AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]:
+    pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = AsyncConnectionPool(
         conninfo=_async_dsn(conn),
         min_size=1,
         max_size=4,
