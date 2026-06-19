@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
 
 def configure_logging(
-    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO",
+    level: LogLevel = "INFO",
 ) -> None:
     """Configure structlog for JSON output to stdout.
 
@@ -41,11 +43,56 @@ def configure_logging(
         cache_logger_on_first_use=True,
     )
 
-    # Route third-party stdlib loggers (uvicorn, google-cloud, ...) to stdout at
+    # Route third-party stdlib loggers (google-cloud, httpx, ...) to stdout at
     # the same level. These emit plain text, not JSON — only loggers obtained via
-    # structlog.get_logger() go through the JSON pipeline above.
+    # structlog.get_logger() go through the JSON pipeline above. uvicorn's own
+    # loggers are handled separately by uvicorn_log_config().
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
         level=log_level,
     )
+
+
+def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:
+    """Return a uvicorn ``log_config`` that renders uvicorn's logs as JSON.
+
+    Pass to ``uvicorn.run(log_config=...)`` so uvicorn's startup and error logs
+    match the structlog JSON the app emits on stdout, instead of uvicorn's default
+    plain colored text. ``uvicorn.access`` is given no handler: the
+    ``RequestLoggingMiddleware`` emits the canonical per-request line, so uvicorn's
+    duplicate access log is suppressed (also pass ``access_log=False``).
+
+    Args:
+        level: The minimum log level for uvicorn's loggers.
+    """
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "json": {
+                "()": structlog.stdlib.ProcessorFormatter,
+                "processors": [
+                    structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                    structlog.processors.JSONRenderer(),
+                ],
+                "foreign_pre_chain": [
+                    structlog.processors.add_log_level,
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    structlog.processors.format_exc_info,
+                ],
+            },
+        },
+        "handlers": {
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "json",
+                "stream": "ext://sys.stdout",
+            },
+        },
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": level, "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
+            "uvicorn.access": {"handlers": [], "level": level, "propagate": False},
+        },
+    }
