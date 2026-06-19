@@ -116,8 +116,9 @@ jobs:
             echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
             exit 1
           fi
-          pnpm codegen
+          (cd web && pnpm codegen)
           npx vercel build --prod --token="$VERCEL_TOKEN"
+        working-directory: .
 
       - name: Deploy and promote
         if: steps.up_to_date.outputs.skip != 'true'
@@ -130,6 +131,7 @@ jobs:
           deployment_url="$(npx vercel deploy --prebuilt --prod --skip-domain --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN")"
           echo "deployment_url=${deployment_url}" >> "$GITHUB_OUTPUT"
           npx vercel promote "$deployment_url" --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN" --yes
+        working-directory: .
 
       - name: Fast-forward production-web marker
         if: steps.up_to_date.outputs.skip != 'true'
