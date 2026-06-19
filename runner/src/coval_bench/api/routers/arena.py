@@ -20,7 +20,6 @@ recorded.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any
 
 import psycopg.rows
@@ -28,52 +27,15 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
-from pydantic import BaseModel
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
+from coval_bench.api.schemas import ArenaLeaderboardResponse, BattleOut, LeaderboardEntryOut
 
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["arena"])
-
-
-class BattleOut(BaseModel):
-    """A battle to vote on. Blind by design: no provider/model identities."""
-
-    id: uuid.UUID
-    prompt_text: str
-    domain: str | None
-    audio_a_url: str
-    audio_b_url: str
-
-
-class LeaderboardEntryOut(BaseModel):
-    """One model's row within an arena leaderboard board."""
-
-    provider: str
-    model: str
-    rating_elo: float
-    rating_bt: float
-    ci_low: float | None
-    ci_high: float | None
-    ci_half_width: float | None
-    votes_total: int
-    wins: float
-    losses: float
-    ties: float
-    status: str
-
-
-class ArenaLeaderboardResponse(BaseModel):
-    """The latest board for a metric/domain, or empty if none computed yet."""
-
-    metric: str
-    domain: str
-    computed_at: datetime | None
-    methodology_version: str | None
-    entries: list[LeaderboardEntryOut]
 
 
 # Columns exposed by the (blind) battle endpoints — provider/model are withheld.
@@ -105,6 +67,8 @@ async def get_battle(
     """Return one battle to vote on, chosen at random. 404 if none exist."""
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
+        # Placeholder selection: a uniformly random battle. Adaptive pairing will
+        # replace this to surface the most informative matchups.
         rows = await conn.execute(
             f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
         )
