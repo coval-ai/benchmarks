@@ -162,32 +162,32 @@ class ArenaStore:
                  votes_total, wins, losses, ties, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
+        params_seq = [
+            (
+                r.metric_name,
+                r.methodology_version,
+                r.domain,
+                r.provider,
+                r.model,
+                r.rating_elo,
+                r.rating_bt,
+                r.ci_low,
+                r.ci_high,
+                r.ci_half_width,
+                r.votes_total,
+                r.wins,
+                r.losses,
+                r.ties,
+                r.status,
+            )
+            for r in rows
+        ]
         async with (
             self._pool.connection() as conn,
             conn.transaction(),
             conn.cursor() as cur,
         ):
-            for r in rows:
-                await cur.execute(
-                    sql,
-                    (
-                        r.metric_name,
-                        r.methodology_version,
-                        r.domain,
-                        r.provider,
-                        r.model,
-                        r.rating_elo,
-                        r.rating_bt,
-                        r.ci_low,
-                        r.ci_high,
-                        r.ci_half_width,
-                        r.votes_total,
-                        r.wins,
-                        r.losses,
-                        r.ties,
-                        r.status,
-                    ),
-                )
+            await cur.executemany(sql, params_seq)
         return len(rows)
 
     @asynccontextmanager

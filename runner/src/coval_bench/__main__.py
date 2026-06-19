@@ -173,6 +173,7 @@ def arena() -> None:
 )
 def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -> None:
     """Refit Davidson-BT ratings from all votes and persist a leaderboard board."""
+    from coval_bench.arena.rating import ConvergenceError
     from coval_bench.arena.snapshot import run_snapshot
     from coval_bench.config import get_settings
     from coval_bench.db.arena_store import ArenaStore
@@ -190,7 +191,20 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
             )
         return None if result is None else len(result.models)
 
-    written = asyncio.run(_run())
+    try:
+        written = asyncio.run(_run())
+    except ConvergenceError as exc:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "arena_snapshot",
+                    "metric": metric,
+                    "error": "convergence_failed",
+                    "detail": str(exc),
+                }
+            )
+        )
+        sys.exit(1)
     if written is None:
         click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "skipped": True}))
     else:

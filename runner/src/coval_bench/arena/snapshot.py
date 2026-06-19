@@ -27,7 +27,10 @@ async def _refit_and_persist(
     bootstrap_rounds: int,
     seed: int,
 ) -> RatingResult:
-    battles = {battle.id: battle for battle in await store.list_battles(limit=None)}
+    battle_domain = None if domain == "all" else domain
+    battles = {
+        battle.id: battle for battle in await store.list_battles(domain=battle_domain, limit=None)
+    }
     votes = await store.list_votes()
 
     outcomes: list[BattleOutcome] = []

@@ -109,8 +109,19 @@ def _battle(provider_b: str, model_b: str) -> Battle:
 _VOTES = [VoteOutcome.A_WIN] * 5 + [VoteOutcome.B_WIN, VoteOutcome.TIE]
 
 
-async def _seed_one_battle(store: ArenaStore) -> None:
-    battle = await store.insert_battle(_battle("openai", "gpt-4o-mini-tts"))
+async def _seed_battle(store: ArenaStore, *, domain: str, provider_b: str, model_b: str) -> None:
+    battle = await store.insert_battle(
+        Battle(
+            provider_a="cartesia",
+            model_a="sonic-3.5",
+            provider_b=provider_b,
+            model_b=model_b,
+            domain=domain,
+            prompt_text="hello there",
+            audio_a_url="https://example.test/a.wav",
+            audio_b_url="https://example.test/b.wav",
+        )
+    )
     assert battle.id is not None
     for idx, outcome in enumerate(_VOTES):
         await store.upsert_vote(
@@ -119,6 +130,10 @@ async def _seed_one_battle(store: ArenaStore) -> None:
             voter_type=VoterType.LABELER,
             voter_id=f"labeler-{idx + 1}",
         )
+
+
+async def _seed_one_battle(store: ArenaStore) -> None:
+    await _seed_battle(store, domain="general", provider_b="openai", model_b="gpt-4o-mini-tts")
 
 
 def test_snapshot_persists_one_board(snap_pg: psycopg.Connection[Any]) -> None:
@@ -219,6 +234,44 @@ def test_snapshot_force_runs_despite_held_lock(snap_pg: psycopg.Connection[Any])
             assert forced is not None
             assert len(forced.models) == 2
             assert await _snapshot_row_count(pool) == 2
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_snapshot_scoped_to_domain_excludes_other_domains(snap_pg: psycopg.Connection[Any]) -> None:
+    _apply_migrations(snap_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(snap_pg)
+        try:
+            await _reset(pool)
+            store = ArenaStore(pool)
+            await _seed_battle(
+                store, domain="general", provider_b="openai", model_b="gpt-4o-mini-tts"
+            )
+            await _seed_battle(store, domain="support", provider_b="deepgram", model_b="aura-2")
+
+            result = await run_snapshot(store, domain="support", bootstrap_rounds=50, seed=0)
+            assert result is not None
+            assert {entry.model_id for entry in result.models} == {
+                "cartesia/sonic-3.5",
+                "deepgram/aura-2",
+            }
+
+            async with (
+                pool.connection() as conn,
+                conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+            ):
+                await cur.execute("SELECT domain, provider, model FROM arena.leaderboard_snapshots")
+                rows = await cur.fetchall()
+
+            assert {r["domain"] for r in rows} == {"support"}
+            assert {(r["provider"], r["model"]) for r in rows} == {
+                ("cartesia", "sonic-3.5"),
+                ("deepgram", "aura-2"),
+            }
         finally:
             await pool.close()
 
