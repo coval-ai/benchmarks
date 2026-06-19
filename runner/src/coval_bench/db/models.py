@@ -20,10 +20,12 @@ from coval_bench.registries.benchmarks import Benchmark
 __all__ = [
     "Battle",
     "Benchmark",
+    "LeaderboardSnapshot",
     "Result",
     "ResultStatus",
     "Run",
     "RunStatus",
+    "SnapshotStatus",
     "Vote",
     "VoteOutcome",
     "VoterType",
@@ -120,3 +122,37 @@ class Vote(BaseModel):
     voter_id: str
     created_at: datetime | None = None  # set by DB default (now())
     updated_at: datetime | None = None  # maintained by the BEFORE UPDATE trigger
+
+
+class SnapshotStatus(StrEnum):
+    """Confidence tier of a leaderboard rating, gated on the CI half-width."""
+
+    PRELIMINARY = "preliminary"
+    USABLE = "usable"
+    ESTABLISHED = "established"
+
+
+class LeaderboardSnapshot(BaseModel):
+    """Domain model for one ``arena.leaderboard_snapshots`` row — one model in one board.
+
+    A board is every row sharing ``computed_at`` + ``metric_name`` +
+    ``methodology_version`` + ``domain``. ``computed_at`` is left to the DB
+    default so a board written in one transaction shares a single timestamp.
+    """
+
+    computed_at: datetime | None = None  # set by DB default (now())
+    metric_name: str
+    methodology_version: str
+    domain: str = "all"
+    provider: str
+    model: str
+    rating_elo: float
+    rating_bt: float
+    ci_low: float | None = None
+    ci_high: float | None = None
+    ci_half_width: float | None = None
+    votes_total: int
+    wins: float
+    losses: float
+    ties: float
+    status: SnapshotStatus
