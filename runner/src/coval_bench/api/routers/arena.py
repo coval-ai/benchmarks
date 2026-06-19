@@ -41,19 +41,24 @@ router = APIRouter(tags=["arena"])
 # Columns exposed by the (blind) battle endpoints — provider/model are withheld.
 _BATTLE_COLS = "id, prompt_text, domain, audio_a_url, audio_b_url"
 
-# Latest board for a (metric, domain): the rows sharing the max computed_at.
+# Latest board for a (metric, domain): the rows of the single most recent
+# (computed_at, methodology_version), so two methodology versions computed at the
+# same timestamp never mix into one board.
 _LEADERBOARD_SQL = """
-    SELECT provider, model, methodology_version, computed_at,
-           rating_elo, rating_bt, ci_low, ci_high, ci_half_width,
-           votes_total, wins, losses, ties, status
-    FROM arena.leaderboard_snapshots
-    WHERE metric_name = %(metric)s
-      AND domain = %(domain)s
-      AND computed_at = (
-          SELECT max(computed_at) FROM arena.leaderboard_snapshots
-          WHERE metric_name = %(metric)s AND domain = %(domain)s
-      )
-    ORDER BY rating_elo DESC
+    WITH latest AS (
+        SELECT computed_at, methodology_version
+        FROM arena.leaderboard_snapshots
+        WHERE metric_name = %(metric)s AND domain = %(domain)s
+        ORDER BY computed_at DESC, methodology_version DESC
+        LIMIT 1
+    )
+    SELECT s.provider, s.model, s.methodology_version, s.computed_at,
+           s.rating_elo, s.rating_bt, s.ci_low, s.ci_high, s.ci_half_width,
+           s.votes_total, s.wins, s.losses, s.ties, s.status
+    FROM arena.leaderboard_snapshots s
+    JOIN latest l USING (computed_at, methodology_version)
+    WHERE s.metric_name = %(metric)s AND s.domain = %(domain)s
+    ORDER BY s.rating_elo DESC
 """
 
 

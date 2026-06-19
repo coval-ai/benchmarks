@@ -264,3 +264,32 @@ async def test_leaderboard_latest_is_scoped_per_metric(
     data = response.json()
     assert data["metric"] == "clarity"
     assert [e["model"] for e in data["entries"]] == ["sonic-3"]
+
+
+async def test_leaderboard_does_not_mix_methodology_versions(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Two methodology versions sharing computed_at must not merge into one board."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    shared = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    await _insert_snapshot(
+        postgresql,
+        computed_at=shared,
+        methodology_version="davidson-v1",
+        provider="elevenlabs",
+        model="v2",
+    )
+    await _insert_snapshot(
+        postgresql,
+        computed_at=shared,
+        methodology_version="davidson-v2",
+        provider="cartesia",
+        model="sonic-3",
+    )
+
+    response = await client.get("/v1/arena/leaderboard")
+    assert response.status_code == 200
+    data = response.json()
+    # One board only: the tiebreaker picks davidson-v2, so v1's row is excluded.
+    assert data["methodology_version"] == "davidson-v2"
+    assert [e["model"] for e in data["entries"]] == ["sonic-3"]
