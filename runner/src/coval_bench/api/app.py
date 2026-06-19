@@ -31,6 +31,7 @@ from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.routers import aggregates, health, leaderboard, providers, results, runs
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.logging import configure_logging
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -49,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        configure_logging(level=resolved.log_level)
         logger.info("api_startup", runner_sha=resolved.runner_sha)
         posthog_client: Posthog | None = None
         if not resolved.posthog_disabled and resolved.posthog_project_token:

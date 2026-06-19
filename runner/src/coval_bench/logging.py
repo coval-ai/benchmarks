@@ -29,8 +29,7 @@ def configure_logging(
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.add_logger_name,
+            structlog.processors.add_log_level,
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
@@ -42,8 +41,9 @@ def configure_logging(
         cache_logger_on_first_use=True,
     )
 
-    # Also configure stdlib logging so that third-party libraries that use
-    # `logging.getLogger(...)` produce JSON output through structlog.
+    # Route third-party stdlib loggers (uvicorn, google-cloud, ...) to stdout at
+    # the same level. These emit plain text, not JSON — only loggers obtained via
+    # structlog.get_logger() go through the JSON pipeline above.
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
