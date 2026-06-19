@@ -28,7 +28,15 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
-from coval_bench.api.routers import aggregates, health, leaderboard, providers, results, runs
+from coval_bench.api.routers import (
+    aggregates,
+    arena,
+    health,
+    leaderboard,
+    providers,
+    results,
+    runs,
+)
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 
@@ -111,5 +119,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
+    app.include_router(arena.router, prefix="/v1")
 
     return app
