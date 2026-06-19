@@ -83,9 +83,11 @@ def _downgrade_migrations(conn: psycopg.Connection[Any]) -> None:
     alembic_command.downgrade(cfg, "base")
 
 
-async def _make_pool(conn: psycopg.Connection[Any]) -> AsyncConnectionPool:  # type: ignore[type-arg]
+async def _make_pool(
+    conn: psycopg.Connection[Any],
+) -> AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]:
     """Create and open a psycopg3 async pool for the test database."""
-    pool: AsyncConnectionPool = AsyncConnectionPool(  # type: ignore[type-arg]
+    pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = AsyncConnectionPool(
         conninfo=_async_dsn(conn),
         min_size=1,
         max_size=4,
@@ -589,7 +591,7 @@ def test_record_results_batch_rollback_on_failure(pg_conn: psycopg.Connection[An
                 status=ResultStatus.SUCCESS,  # will be overridden in raw SQL below
             )
             # Inject an invalid benchmark value to trigger CheckViolation
-            bad = bad.model_copy(update={"benchmark": "INVALID"})  # type: ignore[arg-type]
+            bad = bad.model_copy(update={"benchmark": "INVALID"})
             with pytest.raises(psycopg.errors.CheckViolation):
                 await writer.record_results([good, bad])
             return run.id

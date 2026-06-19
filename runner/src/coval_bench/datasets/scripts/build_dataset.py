@@ -72,7 +72,7 @@ import click
 import soundfile as sf
 
 if TYPE_CHECKING:
-    from google.cloud import storage as _gcs_storage
+    import google.cloud.storage as _gcs_storage
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +410,7 @@ def _build_items(selected: list[_Utterance], work_dir: Path) -> list[_BuiltItem]
 
 def _gcs_client() -> _gcs_storage.Client:
     """Create a GCS client using ADC (no service-account key file)."""
-    from google.cloud import storage
+    import google.cloud.storage as storage
 
     return storage.Client()
 

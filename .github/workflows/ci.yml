@@ -71,7 +71,7 @@ jobs:
       # -----------------------------------------------------------------------
       - name: mypy strict
         working-directory: runner
-        run: uv run mypy --strict src
+        run: uv run mypy --strict src tests
 
       # -----------------------------------------------------------------------
       # Tests
