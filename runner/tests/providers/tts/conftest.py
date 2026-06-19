@@ -11,13 +11,14 @@ monkeypatched fake SDKs.
 from __future__ import annotations
 
 import wave as _wave
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 
@@ -45,22 +46,22 @@ def vcr_config() -> dict[str, Any]:
 def fake_settings(tmp_path: Path) -> Settings:
     """Settings instance with placeholder API keys suitable for offline tests."""
     return Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]
+        database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
         runner_sha="test",
         log_level="DEBUG",
-        openai_api_key="sk-test-openai",  # type: ignore[arg-type]
-        cartesia_api_key="test-cartesia-key",  # type: ignore[arg-type]
-        elevenlabs_api_key="test-elevenlabs-key",  # type: ignore[arg-type]
-        deepgram_api_key="test-deepgram-key",  # type: ignore[arg-type]
-        hume_api_key="test-hume-key",  # type: ignore[arg-type]
-        rime_api_key="test-rime-key",  # type: ignore[arg-type]
-        gradium_tts_api_key="test-gradium-tts-key",  # type: ignore[arg-type]
-        xai_api_key="test-xai-key",
-        smallest_api_key="test-smallest-key",  # type: ignore[arg-type]
-        inworld_api_key="test-inworld-key",
-        soniox_api_key="test-soniox-key",  # type: ignore[arg-type]
+        openai_api_key=SecretStr("sk-test-openai"),
+        cartesia_api_key=SecretStr("test-cartesia-key"),
+        elevenlabs_api_key=SecretStr("test-elevenlabs-key"),
+        deepgram_api_key=SecretStr("test-deepgram-key"),
+        hume_api_key=SecretStr("test-hume-key"),
+        rime_api_key=SecretStr("test-rime-key"),
+        gradium_tts_api_key=SecretStr("test-gradium-tts-key"),
+        xai_api_key=SecretStr("test-xai-key"),
+        smallest_api_key=SecretStr("test-smallest-key"),
+        inworld_api_key=SecretStr("test-inworld-key"),
+        soniox_api_key=SecretStr("test-soniox-key"),
     )
 
 
@@ -100,7 +101,7 @@ class FakeWebSocket:
             return msg
         raise StopAsyncIteration
 
-    def __aiter__(self) -> _AsyncFakeWebSocketIter:
+    def __aiter__(self) -> AsyncIterator[str | bytes]:
         return _AsyncFakeWebSocketIter(self)
 
     async def __aenter__(self) -> FakeWebSocket:

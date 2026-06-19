@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,7 +21,7 @@ from .conftest import make_pcm_bytes
 
 
 @pytest.fixture(autouse=True)
-def _reset_http_clients() -> None:
+def _reset_http_clients() -> Generator[None, None, None]:
     _http_session._CLIENTS.clear()
     yield
     _http_session._CLIENTS.clear()

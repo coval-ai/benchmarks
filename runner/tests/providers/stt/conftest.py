@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic import SecretStr
@@ -130,10 +130,10 @@ def audio_pcm_bytes() -> bytes:
     import soundfile as sf
 
     data, _sr = sf.read(str(AUDIO_FIXTURE), dtype="int16", always_2d=False)
-    return data.tobytes()  # type: ignore[return-value]
+    return bytes(data.tobytes())
 
 
 def load_fixture_events(provider: str, scenario: str = "events-success") -> list[Any]:
     """Load JSON event list from ``fixtures/<provider>/<scenario>.json``."""
     path = FIXTURES_DIR / provider / f"{scenario}.json"
-    return json.loads(path.read_text())  # type: ignore[return-value]
+    return cast(list[Any], json.loads(path.read_text()))

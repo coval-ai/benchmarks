@@ -33,9 +33,9 @@ class RimeTTSProvider(TTSProvider):
 
     _VALID_MODELS = frozenset({"arcana", "coda", "mistv3"})
 
-    def __init__(self, settings: Settings, model: str, voice: str) -> None:
+    def __init__(self, settings: Settings, model: str, voice: str | None) -> None:
         self._model = model
-        self._voice = voice
+        self._voice = voice or "luna"
 
         api_key_secret = settings.rime_api_key
         if api_key_secret is None:
