@@ -1,8 +1,8 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 #
-# PR gate: lint + type-check + tests + secret scan + docker build (no push)
-# Triggers on every pull_request targeting main.
+# Reusable runner/API CI adapter: lint + type-check + tests + secret scan +
+# docker build (no push). PR/MQ selection is owned by switchboard.yml.
 
 name: CI
 
@@ -21,9 +21,6 @@ on:
         required: false
         type: string
         default: main
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: read
