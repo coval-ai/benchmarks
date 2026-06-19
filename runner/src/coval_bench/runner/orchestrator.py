@@ -678,9 +678,9 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
             await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
         except Exception:
             if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                _log.warning("series_bucket_refresh_failed", run_id=run_id, exc_info=True)
+                _log.warning("series_bucket_refresh_failed", exc_info=True)
                 return
-            _log.info("series_bucket_refresh_retry", run_id=run_id, attempt=attempt)
+            _log.info("series_bucket_refresh_retry", attempt=attempt)
             await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
         else:
             return
@@ -710,6 +710,8 @@ async def run_benchmarks(
             The run row is updated to ``FAILED`` before re-raising so the Cloud
             Run Job exits non-zero and the log-based metric fires.
     """
+    structlog.contextvars.clear_contextvars()
+
     lifespan_pool, RunWriter, RunStatus, models_mod = _get_db_symbols()
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
@@ -781,9 +783,10 @@ async def run_benchmarks(
         assert run_id is not None  # noqa: S101 — DB always returns an id after INSERT
         started_at = run.started_at or datetime.now(tz=UTC)
 
+        structlog.contextvars.bind_contextvars(run_id=run_id)
+
         _log.info(
             "benchmark run started",
-            run_id=run_id,
             benchmark_kind=benchmark_kind,
             smoke=smoke,
             runner_sha=settings.runner_sha,
@@ -805,7 +808,7 @@ async def run_benchmarks(
             if sigterm_received:
                 return
             sigterm_received = True
-            _log.warning("SIGTERM received — finalizing run as partial", run_id=run_id)
+            _log.warning("SIGTERM received — finalizing run as partial")
             if main_task is not None:
                 main_task.cancel()
 
@@ -857,7 +860,7 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
-                _log.info("stt dataset sampled", run_id=run_id, item_count=len(items))
+                _log.info("stt dataset sampled", item_count=len(items))
 
                 stt_tasks = [
                     _run_stt_item(
@@ -889,7 +892,7 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
-                _log.info("tts dataset sampled", run_id=run_id, item_count=len(tts_items))
+                _log.info("tts dataset sampled", item_count=len(tts_items))
 
                 tts_tasks = [
                     _run_tts_item(
@@ -940,7 +943,6 @@ async def run_benchmarks(
             except Exception as refresh_exc:
                 _log.error(
                     "failed to refresh stats matviews",
-                    run_id=run_id,
                     exc_info=refresh_exc,
                 )
 
@@ -961,7 +963,6 @@ async def run_benchmarks(
             duration_s = (finished_at - started_at).total_seconds()
             _log.info(
                 "benchmark run finished",
-                run_id=run_id,
                 status=str(final_status),
                 total_results=total_results,
                 success_count=success_count,
@@ -1007,7 +1008,6 @@ async def run_benchmarks(
             except Exception as write_exc:
                 _log.error(
                     "failed to update run row after SIGTERM",
-                    run_id=run_id,
                     exc_info=write_exc,
                 )
             else:
@@ -1017,7 +1017,6 @@ async def run_benchmarks(
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             _log.warning(
                 "benchmark run finished early due to SIGTERM",
-                run_id=run_id,
                 status=str(RunStatus.PARTIAL),
                 total_results=total_results,
                 success_count=success_count,
@@ -1058,7 +1057,6 @@ async def run_benchmarks(
             # structlog uses the first positional arg as the ``event`` key.
             _log.error(
                 "RUN_FAILED",
-                run_id=run_id,
                 error=err_msg,
                 exc_info=exc,
             )
@@ -1067,7 +1065,6 @@ async def run_benchmarks(
             except Exception as write_exc:
                 _log.error(
                     "failed to update run row after RUN_FAILED",
-                    run_id=run_id,
                     exc_info=write_exc,
                 )
             _emit_posthog(
