@@ -60,6 +60,7 @@ from __future__ import annotations
 import hashlib
 import importlib.resources as _impres
 import json
+import logging
 import sys
 import tarfile
 import tempfile
@@ -675,6 +676,7 @@ def cli() -> None:
             structlog.processors.TimeStamper(fmt="%H:%M:%S"),
             structlog.dev.ConsoleRenderer(),
         ],
+        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
         logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
     )
 

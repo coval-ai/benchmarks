@@ -39,4 +39,6 @@ if __name__ == "__main__":
         host="0.0.0.0",  # noqa: S104
         port=int(os.environ.get("PORT", "8080")),
         log_level=_log_level.lower(),
+        log_config=uvicorn_log_config(_log_level),
+        access_log=False,
     )

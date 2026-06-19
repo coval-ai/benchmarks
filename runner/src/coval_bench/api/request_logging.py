@@ -67,7 +67,7 @@ class RequestLoggingMiddleware:
                 "http_request",
                 method=method,
                 path=path,
-                status=500,
+                status=status,
                 duration_ms=round((time.perf_counter() - start) * 1000, 1),
                 exc_info=True,
             )
