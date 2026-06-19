@@ -36,13 +36,13 @@ loader falls back to ``/tmp/coval-bench``.
 from __future__ import annotations
 
 import hashlib
-import logging
 import os
 import random
 from importlib.resources import files
 from pathlib import Path
 
 import google.cloud.storage as storage
+import structlog
 from pydantic import BaseModel, Field
 
 from coval_bench.config import Settings
@@ -52,7 +52,7 @@ from coval_bench.datasets.manifest import (
     TTSManifestItem,
 )
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "Dataset",
@@ -147,9 +147,9 @@ def _default_cache_dir() -> Path:
         fallback = Path(tempfile.gettempdir()) / "coval-bench"  # noqa: S108
         fallback.mkdir(parents=True, exist_ok=True)
         logger.warning(
-            "Default cache dir %s is not writable; falling back to %s",
-            candidate,
-            fallback,
+            "default cache dir not writable; using fallback",
+            candidate=str(candidate),
+            fallback=str(fallback),
         )
         return fallback
 
@@ -219,13 +219,13 @@ def _fetch_and_verify(
     # Cache hit check
     if local_path.exists():
         if _sha256_file(local_path) == item.sha256:
-            logger.debug("Cache hit for %s", item.path)
+            logger.debug("cache hit", path=str(item.path))
             return local_path
-        logger.warning("Cached file %s has wrong hash — re-downloading", local_path)
+        logger.warning("cached file hash mismatch; re-downloading", path=str(local_path))
 
     # Download
     gcs_object = f"{dataset_id}/{item.path}"
-    logger.info("Fetching gs://%s/%s", bucket, gcs_object)
+    logger.info("fetching dataset object", bucket=bucket, object=gcs_object)
     _fetch_blob(client, bucket, gcs_object, local_path)
 
     # Post-download integrity check

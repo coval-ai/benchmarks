@@ -60,7 +60,7 @@ from __future__ import annotations
 import hashlib
 import importlib.resources as _impres
 import json
-import logging
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -70,11 +70,12 @@ from typing import TYPE_CHECKING
 
 import click
 import soundfile as sf
+import structlog
 
 if TYPE_CHECKING:
     import google.cloud.storage as _gcs_storage
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -144,10 +145,10 @@ def _download_archive(cache_root: Path) -> Path:
     dest = cache_root / _ARCHIVE_NAME
 
     if dest.exists() and dest.stat().st_size == _EXPECTED_SIZE_BYTES:
-        logger.info("Archive already cached at %s (%d bytes)", dest, dest.stat().st_size)
+        logger.info("archive already cached", dest=str(dest), size_bytes=dest.stat().st_size)
         return dest
 
-    logger.info("Downloading %s → %s", _OPENSLR_URL, dest)
+    logger.info("downloading archive", url=_OPENSLR_URL, dest=str(dest))
     req = urllib.request.Request(  # noqa: S310 (audited: hardcoded https OpenSLR URL)
         _OPENSLR_URL,
         headers={"User-Agent": "coval-bench/build-dataset"},
@@ -162,10 +163,10 @@ def _download_archive(cache_root: Path) -> Path:
             out.write(chunk)
             downloaded += len(chunk)
             if downloaded - last_logged >= _LOG_EVERY_BYTES:
-                logger.info("Downloaded %d MB …", downloaded // (1024 * 1024))
+                logger.info("download progress", downloaded_mb=downloaded // (1024 * 1024))
                 last_logged = downloaded
 
-    logger.info("Download complete: %d bytes written to %s", downloaded, dest)
+    logger.info("download complete", size_bytes=downloaded, dest=str(dest))
     return dest
 
 
@@ -176,13 +177,13 @@ def _extract_archive(archive_path: Path, cache_root: Path) -> Path:
     """
     extract_dir = cache_root / _EXTRACT_DIR_NAME
     if extract_dir.exists():
-        logger.info("Archive already extracted at %s", extract_dir)
+        logger.info("archive already extracted", extract_dir=str(extract_dir))
         return extract_dir
 
-    logger.info("Extracting %s → %s", archive_path, cache_root)
+    logger.info("extracting archive", archive=str(archive_path), dest=str(cache_root))
     with tarfile.open(archive_path, "r:gz") as tf:
         tf.extractall(path=cache_root)  # noqa: S202
-    logger.info("Extraction complete")
+    logger.info("extraction complete")
     return extract_dir
 
 
@@ -218,7 +219,7 @@ def _parse_trans_txt(
             continue
         if " " not in line:
             # Malformed — no space between utterance_id and transcript
-            logger.warning("Skipping malformed trans.txt line: %r", line)
+            logger.warning("skipping malformed trans.txt line", line=line)
             continue
         utt_id, transcript = line.split(" ", 1)
         flac_path = audio_dir / f"{utt_id}.flac"
@@ -265,13 +266,13 @@ def _enumerate_utterances(librispeech_dir: Path) -> list[_Utterance]:
                 )
                 for utt in batch:
                     if not utt.flac_path.exists():
-                        logger.warning("FLAC not found (skipping): %s", utt.flac_path)
+                        logger.warning("flac not found; skipping", path=str(utt.flac_path))
                         continue
                     info = sf.info(str(utt.flac_path))
                     utt.duration_sec = info.frames / info.samplerate
                 utterances.extend(batch)
 
-    logger.info("Enumerated %d utterances total", len(utterances))
+    logger.info("enumerated utterances", count=len(utterances))
     return utterances
 
 
@@ -363,11 +364,10 @@ def _transcode_to_wav(src_flac: Path, dest_wav: Path) -> None:
     data, samplerate = sf.read(str(src_flac), dtype="int16", always_2d=False)
     if samplerate != _TARGET_SR:
         logger.warning(
-            "Unexpected sample rate %d Hz for %s; expected 16000. "
-            "Audio written as-is at %d Hz — add resampling if needed.",
-            samplerate,
-            src_flac.name,
-            samplerate,
+            "unexpected sample rate; writing as-is (add resampling if needed)",
+            sample_rate=samplerate,
+            expected_rate=_TARGET_SR,
+            file=src_flac.name,
         )
     sf.write(str(dest_wav), data, _TARGET_SR, subtype="PCM_16")
 
@@ -393,12 +393,12 @@ def _build_items(selected: list[_Utterance], work_dir: Path) -> list[_BuiltItem]
             )
         )
         logger.info(
-            "[%d/%d] %s  sha256=%s…  %.2f s",
-            idx,
-            _NUM_UTTERANCES,
-            filename,
-            sha256[:16],
-            utt.duration_sec,
+            "built item",
+            index=idx,
+            total=_NUM_UTTERANCES,
+            filename=filename,
+            sha256=sha256[:16],
+            duration_sec=round(utt.duration_sec, 2),
         )
     return items
 
@@ -440,7 +440,7 @@ def _upload_items(
         blob = bucket.blob(blob_name)
         blob.content_type = "audio/wav"
 
-        logger.info("Uploading gs://%s/%s …", bucket_name, blob_name)
+        logger.info("uploading blob", bucket=bucket_name, blob=blob_name)
 
         if overwrite:
             blob.upload_from_filename(str(item.wav_path), content_type="audio/wav")
@@ -466,7 +466,7 @@ def _upload_items(
             raise RuntimeError(
                 f"Upload integrity failure for {blob_name}: expected={item.sha256} got={actual}"
             )
-        logger.info("Verified %s ✓", blob_name)
+        logger.info("verified blob", blob=blob_name)
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +531,7 @@ def _parse_speaker_genders(librispeech_dir: Path) -> dict[str, str]:
     """
     speakers_txt = librispeech_dir / "SPEAKERS.TXT"
     if not speakers_txt.exists():
-        logger.warning("SPEAKERS.TXT not found at %s; gender counts unavailable", speakers_txt)
+        logger.warning("speakers.txt not found; gender counts unavailable", path=str(speakers_txt))
         return {}
     genders: dict[str, str] = {}
     for line in speakers_txt.read_text(encoding="utf-8").splitlines():
@@ -669,10 +669,13 @@ def _build_stt_v1(
 @click.group()
 def cli() -> None:
     """Coval dataset builder — download, transcode, hash, upload."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s  %(message)s",
-        datefmt="%H:%M:%S",
+    structlog.configure(
+        processors=[
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="%H:%M:%S"),
+            structlog.dev.ConsoleRenderer(),
+        ],
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
     )
 
 
