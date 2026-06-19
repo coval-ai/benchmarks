@@ -69,6 +69,7 @@ class RequestLoggingMiddleware:
                 path=path,
                 status=500,
                 duration_ms=round((time.perf_counter() - start) * 1000, 1),
+                exc_info=True,
             )
             raise
         else:
