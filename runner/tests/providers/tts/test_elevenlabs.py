@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -21,16 +23,16 @@ from .conftest import make_pcm_bytes
 # ---------------------------------------------------------------------------
 
 
-def _install_mock(handler: object) -> None:
+def _install_mock(handler: Any) -> None:
     """Register a MockTransport-backed AsyncClient as the shared elevenlabs client."""
     _http_session._CLIENTS["elevenlabs"] = httpx.AsyncClient(
         base_url="https://api.elevenlabs.io",
-        transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
+        transport=httpx.MockTransport(handler),
     )
 
 
 @pytest.fixture(autouse=True)
-def reset_clients() -> None:
+def reset_clients() -> Generator[None, None, None]:
     _http_session._CLIENTS.clear()
     yield
     _http_session._CLIENTS.clear()
@@ -206,7 +208,7 @@ def test_elevenlabs_rejects_unsupported_model(fake_settings: Settings) -> None:
 
 def test_elevenlabs_missing_api_key() -> None:
     settings_no_key = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]
+        database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
         runner_sha="test",

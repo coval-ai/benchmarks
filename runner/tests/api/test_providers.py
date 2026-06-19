@@ -103,7 +103,7 @@ async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.Monk
     endpoint still returns 200.
     """
     original_pool = app.state.pool
-    app.state.pool = None  # type: ignore[assignment]
+    app.state.pool = None
     try:
         async with AsyncClient(
             transport=ASGITransport(app=app),

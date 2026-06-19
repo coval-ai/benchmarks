@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from typing import Any, cast
+
 import pytest
 
 from coval_bench.providers import _http_session
 
 
 @pytest.fixture(autouse=True)
-def _reset_clients() -> None:
+def _reset_clients() -> Generator[None, None, None]:
     _http_session._CLIENTS.clear()
     yield
     _http_session._CLIENTS.clear()
@@ -49,7 +52,8 @@ def test_get_shared_client_uses_timed_transport() -> None:
 
 def test_get_shared_client_applies_http2_and_limits() -> None:
     """http2/limits must live on the transport's pool, not the ignored client args."""
-    pool = _http_session.get_shared_client("foo", "https://example.com")._transport._pool
+    transport = cast(Any, _http_session.get_shared_client("foo", "https://example.com")._transport)
+    pool = transport._pool
     assert pool._http2 is True
     assert pool._keepalive_expiry == _http_session._KEEPALIVE_S
     assert pool._max_keepalive_connections == _http_session._MAX_KEEPALIVE_CONNECTIONS
@@ -170,6 +174,6 @@ async def test_close_all_swallows_per_client_errors() -> None:
         async def aclose(self) -> None:
             raise RuntimeError("synthetic close failure")
 
-    _http_session._CLIENTS["broken"] = _BrokenClient()  # type: ignore[assignment]
+    _http_session._CLIENTS["broken"] = cast(Any, _BrokenClient())
     await _http_session.close_all()  # must not raise
     assert _http_session._CLIENTS == {}

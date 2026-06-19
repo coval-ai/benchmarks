@@ -47,7 +47,7 @@ from coval_bench.runner.retry import with_retry
 # ---------------------------------------------------------------------------
 
 _TEST_SETTINGS = Settings(
-    database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]
+    database_url="postgresql://runner:password@localhost:5432/benchmarks",
     dataset_bucket="test-bucket",
     dataset_id="stt-v1",
     runner_sha="test-sha",
@@ -1440,7 +1440,8 @@ async def test_stt_empty_result_marked_failed(audio_file: Path, settings: Settin
     by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
     for mt in ("TTFT", "AudioToFinal", "RTF"):
         assert by_metric[mt].status == ResultStatus.FAILED
-        assert by_metric[mt].error and "produced" in by_metric[mt].error
+        error = by_metric[mt].error
+        assert error is not None and "produced" in error
     assert "WER" not in by_metric  # no transcript → no WER row
     assert summary.success_count == 0
     assert summary.status == str(RunStatus.FAILED)

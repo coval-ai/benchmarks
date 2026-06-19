@@ -20,7 +20,7 @@ def override_settings(
     receives the test settings rather than reading real env vars.
     """
     test_settings = Settings(
-        database_url="postgresql://runner:password@localhost:5432/benchmarks",  # type: ignore[arg-type]
+        database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
         runner_sha="test",
