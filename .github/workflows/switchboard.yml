@@ -1,0 +1,285 @@
+name: Switchboard
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to check.
+        required: false
+        default: main
+        type: string
+      changed_files_json:
+        description: JSON array of changed files for manual planning.
+        required: false
+        default: '["runner/pyproject.toml","web/package.json"]'
+        type: string
+
+concurrency:
+  group: switchboard-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  plan:
+    name: Plan checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      checkout_ref: ${{ steps.context.outputs.checkout_ref }}
+      run_runner_ci: ${{ steps.adapters.outputs.run_runner_ci }}
+      run_web_ci: ${{ steps.adapters.outputs.run_web_ci }}
+      selected_check_ids: ${{ steps.switchboard.outputs.selected_check_ids }}
+      required_gates: ${{ steps.switchboard.outputs.required_gates }}
+      workflow_ownership: ${{ steps.switchboard.outputs.workflow_ownership }}
+
+    steps:
+      - name: Checkout benchmarks
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve checkout context
+        id: context
+        env:
+          MANUAL_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -euo pipefail
+          checkout_ref="${GITHUB_SHA}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            checkout_ref="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${MANUAL_REF:-}" ]; then
+            checkout_ref="${MANUAL_REF}"
+          fi
+          echo "checkout_ref=${checkout_ref}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate token for Switchboard
+        id: app_token
+        if: env.RELEASE_APP_ID != '' && env.RELEASE_APP_PRIVATE_KEY != ''
+        uses: actions/create-github-app-token@v3
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: coval-ai
+          repositories: ci-cd-switchboard
+
+      - name: Checkout Switchboard
+        if: steps.app_token.outputs.token != ''
+        uses: actions/checkout@v6
+        with:
+          repository: coval-ai/ci-cd-switchboard
+          ref: main
+          token: ${{ steps.app_token.outputs.token }}
+          path: switchboard-src
+          persist-credentials: false
+
+      - name: Set up Node.js
+        if: steps.app_token.outputs.token != ''
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Resolve changed files
+        id: changed_files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          MANUAL_CHANGED_FILES_JSON: ${{ github.event.inputs.changed_files_json }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          mkdir -p switchboard
+
+          selector_failed=false
+          fallback_reason=""
+
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            selector_failed=true
+            fallback_reason="merge queue changed-file selector unavailable in benchmarks; running conservative full repo check"
+            printf '{"changedFiles":["runner/pyproject.toml","web/package.json",".github/workflows/ci.yml",".github/workflows/web-ci.yml"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate \
+              | jq -s 'add | map(.filename) | unique | {changedFiles: ., selectorMode: "file-scoped"}' > switchboard/changed-files.json
+            then
+              :
+            else
+              selector_failed=true
+              fallback_reason="pull request changed-file selector failed"
+              printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
+            fi
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            manual_changed_files_json="${MANUAL_CHANGED_FILES_JSON:-[\"runner/pyproject.toml\",\"web/package.json\"]}"
+            if jq -cen --argjson changedFiles "$manual_changed_files_json" '$changedFiles | if type == "array" then {changedFiles: (map(tostring) | unique | sort), selectorMode: "manual"} else error("changed_files_json must be a JSON array") end' > switchboard/changed-files.json; then
+              :
+            else
+              selector_failed=true
+              fallback_reason="manual changed-file input was invalid"
+              printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
+            fi
+          else
+            printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"selectorMode":"fallback-full"}\n' > switchboard/changed-files.json
+          fi
+
+          echo "selector_failed=$selector_failed" >> "$GITHUB_OUTPUT"
+          echo "fallback_reason=$fallback_reason" >> "$GITHUB_OUTPUT"
+
+      - name: Build Switchboard event
+        env:
+          SELECTOR_FAILED: ${{ steps.changed_files.outputs.selector_failed }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require("node:fs")
+
+          const payload = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"))
+          const changedFilesPayload = JSON.parse(fs.readFileSync("switchboard/changed-files.json", "utf8"))
+          const eventName = process.env.GITHUB_EVENT_NAME
+          const pullRequest = payload.pull_request
+          const mergeGroup = payload.merge_group
+
+          const event = {
+            eventName,
+            phase: eventName === "merge_group" ? "merge_group" : "pull_request",
+            repo: "benchmarks",
+            ref: process.env.GITHUB_REF,
+            sha: process.env.GITHUB_SHA,
+            actor: process.env.GITHUB_ACTOR,
+            selectorFailed: process.env.SELECTOR_FAILED === "true",
+          }
+
+          if (pullRequest) {
+            event.pullRequestNumber = pullRequest.number
+            event.pullRequestTitle = pullRequest.title
+          } else if (typeof changedFilesPayload.pullRequestNumber === "number") {
+            event.pullRequestNumber = changedFilesPayload.pullRequestNumber
+          }
+
+          if (!event.pullRequestTitle && mergeGroup?.head_commit?.message) {
+            event.pullRequestTitle = mergeGroup.head_commit.message
+          }
+
+          fs.writeFileSync("switchboard/event.json", `${JSON.stringify(event, null, 2)}\n`)
+          NODE
+
+      - name: Plan Switchboard checks
+        id: switchboard
+        if: steps.app_token.outputs.token != ''
+        uses: ./switchboard-src/.github/actions/switchboard-plan
+        continue-on-error: true
+        with:
+          event: ${{ github.workspace }}/switchboard/event.json
+          changed-files: ${{ github.workspace }}/switchboard/changed-files.json
+          config: ${{ github.workspace }}/switchboard-src/config/switchboard
+          output: ${{ github.workspace }}/switchboard-plan.json
+          artifact-name: switchboard-plan-benchmarks
+
+      - name: Resolve selected adapters
+        id: adapters
+        env:
+          PLAN_OUTCOME: ${{ steps.switchboard.outcome }}
+          SELECTED_CHECK_IDS: ${{ steps.switchboard.outputs.selected_check_ids }}
+        run: |
+          set -euo pipefail
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          if (process.env.PLAN_OUTCOME !== "success") {
+            console.log("run_runner_ci=true")
+            console.log("run_web_ci=true")
+            process.exit(0)
+          }
+          const selected = new Set(JSON.parse(process.env.SELECTED_CHECK_IDS || "[]"))
+          console.log(`run_runner_ci=${selected.has("benchmarks.runner.ci")}`)
+          console.log(`run_web_ci=${selected.has("benchmarks.web.ci")}`)
+          NODE
+
+      - name: Publish Switchboard plan summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Switchboard"
+            echo ""
+            echo "- Selected check ids: ${{ steps.switchboard.outputs.selected_check_ids || '[]' }}"
+            echo "- Required gates: ${{ steps.switchboard.outputs.required_gates || '[]' }}"
+            echo "- Workflow ownership: ${{ steps.switchboard.outputs.workflow_ownership || '{}' }}"
+            echo "- Selector failed: ${{ steps.changed_files.outputs.selector_failed || 'false' }}"
+            echo "- Planner outcome: ${{ steps.switchboard.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  runner_ci:
+    name: Benchmarks Runner CI Adapter
+    needs: plan
+    if: needs.plan.outputs.run_runner_ci == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.checkout_ref }}
+    secrets: inherit
+
+  web_ci:
+    name: Benchmarks Web CI Adapter
+    needs: plan
+    if: needs.plan.outputs.run_web_ci == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/web-ci.yml
+    with:
+      ref: ${{ needs.plan.outputs.checkout_ref }}
+    secrets: inherit
+
+  switchboard_gate:
+    name: Switchboard Gate
+    needs: [plan, runner_ci, web_ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check selected adapter results
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUNNER_RESULT: ${{ needs.runner_ci.result }}
+          WEB_RESULT: ${{ needs.web_ci.result }}
+          RUN_RUNNER_CI: ${{ needs.plan.outputs.run_runner_ci }}
+          RUN_WEB_CI: ${{ needs.plan.outputs.run_web_ci }}
+          SELECTED_CHECK_IDS: ${{ needs.plan.outputs.selected_check_ids }}
+        run: |
+          set -euo pipefail
+          failed=false
+
+          if [ "$PLAN_RESULT" != "success" ]; then
+            echo "::error::Switchboard planning failed with result ${PLAN_RESULT}."
+            failed=true
+          fi
+
+          if [ "$RUN_RUNNER_CI" = "true" ] && [ "$RUNNER_RESULT" != "success" ]; then
+            echo "::error::Runner CI adapter was selected but finished with result ${RUNNER_RESULT}."
+            failed=true
+          fi
+          if [ "$RUN_WEB_CI" = "true" ] && [ "$WEB_RESULT" != "success" ]; then
+            echo "::error::Web CI adapter was selected but finished with result ${WEB_RESULT}."
+            failed=true
+          fi
+
+          {
+            echo "## Switchboard gate"
+            echo ""
+            echo "- Selected check ids: ${SELECTED_CHECK_IDS:-[]}"
+            echo "- Runner CI adapter: ${RUNNER_RESULT}"
+            echo "- Web CI adapter: ${WEB_RESULT}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi

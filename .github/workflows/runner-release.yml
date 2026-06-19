@@ -1,0 +1,267 @@
+name: Benchmarks Runner/API Release
+run-name: >-
+  ${{
+    github.event_name == 'repository_dispatch' &&
+    format(
+      'Switchboard benchmarks runner release {0} {1}',
+      github.event.client_payload.deploy_ref || 'main',
+      github.event.client_payload.switchboard_correlation_id || github.run_id
+    ) ||
+    'Benchmarks Runner/API Release'
+  }}
+
+on:
+  repository_dispatch:
+    types: [switchboard_benchmarks_runner_release]
+  workflow_dispatch:
+    inputs:
+      deploy_ref:
+        description: Branch, tag, or SHA to release.
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: benchmarks-runner-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  context:
+    name: Resolve release context
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_ref: ${{ steps.context.outputs.deploy_ref }}
+      deploy_sha: ${{ steps.context.outputs.deploy_sha }}
+      runner_image: ${{ steps.context.outputs.runner_image }}
+      api_image: ${{ steps.context.outputs.api_image }}
+      skip: ${{ steps.context.outputs.skip }}
+    steps:
+      - name: Resolve deploy ref
+        id: input
+        env:
+          DISPATCH_REF: ${{ github.event.client_payload.deploy_ref }}
+          MANUAL_REF: ${{ inputs.deploy_ref }}
+        run: |
+          set -euo pipefail
+          echo "deploy_ref=${DISPATCH_REF:-${MANUAL_REF:-main}}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.input.outputs.deploy_ref }}
+          fetch-depth: 0
+
+      - name: Resolve image tags
+        id: context
+        run: |
+          set -euo pipefail
+          deploy_sha="$(git rev-parse HEAD)"
+          runner_image="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-runner:${deploy_sha}"
+          api_image="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-api:${deploy_sha}"
+
+          git fetch origin production-runner:refs/remotes/origin/production-runner 2>/dev/null || true
+          skip=false
+          if git rev-parse --verify origin/production-runner >/dev/null 2>&1 && [ "$deploy_sha" = "$(git rev-parse origin/production-runner)" ]; then
+            skip=true
+          fi
+
+          {
+            echo "deploy_ref=${{ steps.input.outputs.deploy_ref }}"
+            echo "deploy_sha=${deploy_sha}"
+            echo "runner_image=${runner_image}"
+            echo "api_image=${api_image}"
+            echo "skip=${skip}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Benchmarks runner/API release"
+            echo ""
+            echo "- Deploy ref: \`${{ steps.input.outputs.deploy_ref }}\`"
+            echo "- Deploy SHA: \`${deploy_sha}\`"
+            echo "- Runner image: \`${runner_image}\`"
+            echo "- API image: \`${api_image}\`"
+            echo "- Correlation: \`${{ github.event.client_payload.switchboard_correlation_id || 'manual' }}\`"
+            echo "- Already promoted: \`${skip}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build_and_push:
+    name: Build and push ${{ matrix.image }}
+    needs: context
+    if: needs.context.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    strategy:
+      matrix:
+        include:
+          - image: runner
+            dockerfile: Dockerfile
+          - image: api
+            dockerfile: Dockerfile.api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.context.outputs.deploy_sha }}
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_DEPLOY_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push ${{ matrix.image }} image
+        uses: docker/build-push-action@v7
+        with:
+          context: runner
+          file: runner/${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}:${{ needs.context.outputs.deploy_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+
+  dispatch_infra:
+    name: Dispatch and watch benchmark-infra rollout
+    needs: [context, build_and_push]
+    if: always() && needs.context.outputs.skip != 'true' && needs.build_and_push.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      infra_url: ${{ steps.dispatch.outputs.infra_url }}
+
+    steps:
+      - name: Dispatch image-bump
+        id: dispatch
+        env:
+          API_IMAGE: ${{ needs.context.outputs.api_image }}
+          DEPLOY_REF: ${{ needs.context.outputs.deploy_ref }}
+          DEPLOY_SHA: ${{ needs.context.outputs.deploy_sha }}
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+          RUNNER_IMAGE: ${{ needs.context.outputs.runner_image }}
+          SWITCHBOARD_CORRELATION_ID: ${{ github.event.client_payload.switchboard_correlation_id }}
+        run: |
+          set -euo pipefail
+          correlation_id="${SWITCHBOARD_CORRELATION_ID:-benchmarks-runner-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}}"
+          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(jq -n \
+            --arg sha "$DEPLOY_SHA" \
+            --arg ref "$DEPLOY_REF" \
+            --arg runner_image "$RUNNER_IMAGE" \
+            --arg api_image "$API_IMAGE" \
+            --arg source_repo "$GITHUB_REPOSITORY" \
+            --arg switchboard_correlation_id "$correlation_id" \
+            --arg compare_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/production-runner...${DEPLOY_SHA}" \
+            '{
+              event_type: "image-bump",
+              client_payload: {
+                sha: $sha,
+                ref: $ref,
+                runner_image: $runner_image,
+                api_image: $api_image,
+                source_repo: $source_repo,
+                switchboard_correlation_id: $switchboard_correlation_id,
+                compare_url: $compare_url
+              }
+            }')"
+          gh api repos/coval-ai/benchmark-infra/dispatches --method POST --input - <<< "$payload"
+
+          run_id=""
+          fallback_run_id=""
+          for attempt in $(seq 1 30); do
+            candidates="$(gh run list --repo coval-ai/benchmark-infra --workflow bump-images.yml --event repository_dispatch --limit 30 --json databaseId,createdAt,displayTitle \
+              | jq -c --arg started "$started_at" 'map(select(.createdAt >= $started)) | sort_by(.createdAt) | reverse')"
+            fallback_run_id="$(jq -r '.[0].databaseId // ""' <<<"$candidates")"
+            run_id="$(jq -r --arg correlation "$correlation_id" '.[] | select((.displayTitle // "") | contains($correlation)) | .databaseId' <<<"$candidates" | head -n 1)"
+            if [ -z "$run_id" ]; then
+              while IFS= read -r candidate_id; do
+                [ -z "$candidate_id" ] && continue
+                if gh run view "$candidate_id" --repo coval-ai/benchmark-infra --log 2>/dev/null | grep -Fq "$correlation_id"; then
+                  run_id="$candidate_id"
+                  break
+                fi
+              done < <(jq -r '.[].databaseId' <<<"$candidates")
+            fi
+            [ -n "$run_id" ] && break
+            if [ "$attempt" -ge 6 ] && [ -n "$fallback_run_id" ]; then
+              echo "::notice::Could not find benchmark-infra run with correlation ${correlation_id}; using newest repository_dispatch run after ${started_at}: ${fallback_run_id}."
+              run_id="$fallback_run_id"
+              break
+            fi
+            sleep 5
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::error::Could not find dispatched benchmark-infra bump-images run."
+            exit 1
+          fi
+
+          infra_url="https://github.com/coval-ai/benchmark-infra/actions/runs/${run_id}"
+          echo "infra_url=${infra_url}" >> "$GITHUB_OUTPUT"
+          echo "Watching ${infra_url}"
+          gh run watch "$run_id" --repo coval-ai/benchmark-infra --exit-status
+
+  promote_marker:
+    name: Fast-forward production-runner marker
+    needs: [context, dispatch_infra]
+    if: always() && needs.context.outputs.skip != 'true' && needs.dispatch_infra.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.context.outputs.deploy_sha }}
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Fast-forward production-runner
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/production-runner"
+
+  summarize:
+    name: Summarize release
+    needs: [context, build_and_push, dispatch_infra, promote_marker]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          {
+            echo "## Benchmarks runner/API release result"
+            echo ""
+            echo "- Skipped: \`${{ needs.context.outputs.skip || 'false' }}\`"
+            echo "- Build: \`${{ needs.build_and_push.result }}\`"
+            echo "- Infra rollout: \`${{ needs.dispatch_infra.result }}\`"
+            echo "- Marker promote: \`${{ needs.promote_marker.result }}\`"
+            echo "- Infra run: ${{ needs.dispatch_infra.outputs.infra_url || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
