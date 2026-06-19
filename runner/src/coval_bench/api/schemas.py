@@ -10,6 +10,7 @@ added later if needed.
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -165,3 +166,40 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+
+
+class BattleOut(BaseModel):
+    """A battle to vote on. Blind by design: no provider/model identities."""
+
+    id: uuid.UUID
+    prompt_text: str
+    domain: str | None
+    audio_a_url: str
+    audio_b_url: str
+
+
+class LeaderboardEntryOut(BaseModel):
+    """One model's row within an arena leaderboard board."""
+
+    provider: str
+    model: str
+    rating_elo: float
+    rating_bt: float
+    ci_low: float | None
+    ci_high: float | None
+    ci_half_width: float | None
+    votes_total: int
+    wins: float
+    losses: float
+    ties: float
+    status: str
+
+
+class ArenaLeaderboardResponse(BaseModel):
+    """The latest board for a metric/domain, or empty if none computed yet."""
+
+    metric: str
+    domain: str
+    computed_at: datetime | None
+    methodology_version: str | None
+    entries: list[LeaderboardEntryOut]
