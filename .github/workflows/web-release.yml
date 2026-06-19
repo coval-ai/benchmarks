@@ -60,19 +60,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
         working-directory: .
 
-      - name: Generate GitHub App token
-        id: app_token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ steps.context.outputs.deploy_ref }}
-          token: ${{ steps.app_token.outputs.token }}
 
       - name: Skip if production-web already matches
         id: up_to_date
