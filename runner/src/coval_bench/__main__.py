@@ -139,5 +139,77 @@ def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
     sys.exit(0 if ok else 1)
 
 
+@cli.group()
+def arena() -> None:
+    """Voice Arena maintenance commands."""
+
+
+@arena.command(name="snapshot")
+@click.option(
+    "--metric",
+    default="naturalness",
+    show_default=True,
+    help="Metric to rate (MVP: naturalness).",
+)
+@click.option(
+    "--bootstrap-rounds",
+    default=1000,
+    show_default=True,
+    type=int,
+    help="Bootstrap resamples for the confidence interval (0 disables CIs).",
+)
+@click.option(
+    "--seed",
+    default=0,
+    show_default=True,
+    type=int,
+    help="RNG seed; keeps the bootstrap CI reproducible.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Run even if another snapshot is in progress (bypass the advisory lock).",
+)
+def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -> None:
+    """Refit Davidson-BT ratings from all votes and persist a leaderboard board."""
+    from coval_bench.arena.rating import ConvergenceError
+    from coval_bench.arena.snapshot import run_snapshot
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _run() -> int | None:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            result = await run_snapshot(
+                ArenaStore(pool),
+                metric_name=metric,
+                bootstrap_rounds=bootstrap_rounds,
+                seed=seed,
+                force=force,
+            )
+        return None if result is None else len(result.models)
+
+    try:
+        written = asyncio.run(_run())
+    except ConvergenceError as exc:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "arena_snapshot",
+                    "metric": metric,
+                    "error": "convergence_failed",
+                    "detail": str(exc),
+                }
+            )
+        )
+        sys.exit(1)
+    if written is None:
+        click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "skipped": True}))
+    else:
+        click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "models": written}))
+
+
 if __name__ == "__main__":
     cli()

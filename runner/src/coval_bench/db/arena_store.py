@@ -10,15 +10,20 @@ are the source of truth; ratings are refit from them elsewhere.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 import psycopg
 import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
-from coval_bench.db.models import Battle, Vote, VoteOutcome, VoterType
+from coval_bench.db.models import Battle, LeaderboardSnapshot, Vote, VoteOutcome, VoterType
 
 ArenaPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
+
+_SNAPSHOT_LOCK_ACQUIRE = "SELECT pg_try_advisory_lock(hashtextextended('arena_snapshot', 0))"
+_SNAPSHOT_LOCK_RELEASE = "SELECT pg_advisory_unlock(hashtextextended('arena_snapshot', 0))"
 
 
 class ArenaStore:
@@ -112,28 +117,26 @@ class ArenaStore:
         self,
         *,
         domain: str | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
     ) -> list[Battle]:
-        """Return battles ordered by creation time, optionally filtered by domain."""
-        if domain is None:
-            sql = """
-                SELECT id, provider_a, model_a, provider_b, model_b, domain,
-                       prompt_text, audio_a_url, audio_b_url, created_at
-                FROM arena.battles
-                ORDER BY created_at
-                LIMIT %s
-            """
-            params: tuple[object, ...] = (limit,)
-        else:
-            sql = """
-                SELECT id, provider_a, model_a, provider_b, model_b, domain,
-                       prompt_text, audio_a_url, audio_b_url, created_at
-                FROM arena.battles
-                WHERE domain = %s
-                ORDER BY created_at
-                LIMIT %s
-            """
-            params = (domain, limit)
+        """Return battles ordered by creation time, optionally filtered by domain.
+
+        ``limit`` defaults to 100; pass ``None`` for no cap, which the rating
+        refit needs so it can map every vote back to its battle.
+        """
+        clauses = [
+            "SELECT id, provider_a, model_a, provider_b, model_b, domain,"
+            " prompt_text, audio_a_url, audio_b_url, created_at FROM arena.battles",
+        ]
+        params: list[object] = []
+        if domain is not None:
+            clauses.append("WHERE domain = %s")
+            params.append(domain)
+        clauses.append("ORDER BY created_at")
+        if limit is not None:
+            clauses.append("LIMIT %s")
+            params.append(limit)
+        sql = "\n".join(clauses)
         async with (
             self._pool.connection() as conn,
             conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
@@ -141,6 +144,76 @@ class ArenaStore:
             await cur.execute(sql, params)
             rows = await cur.fetchall()
         return [Battle.model_validate(dict(row)) for row in rows]
+
+    async def insert_snapshot_board(self, rows: list[LeaderboardSnapshot]) -> int:
+        """Persist one leaderboard board atomically; return the row count.
+
+        Every row is inserted in a single transaction with ``computed_at`` left
+        to the DB default, so the whole board shares one timestamp and a reader
+        taking ``max(computed_at)`` never sees a partial board. An empty board
+        (no votes yet) writes nothing.
+        """
+        if not rows:
+            return 0
+        sql = """
+            INSERT INTO arena.leaderboard_snapshots
+                (metric_name, methodology_version, domain, provider, model,
+                 rating_elo, rating_bt, ci_low, ci_high, ci_half_width,
+                 votes_total, wins, losses, ties, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        params_seq = [
+            (
+                r.metric_name,
+                r.methodology_version,
+                r.domain,
+                r.provider,
+                r.model,
+                r.rating_elo,
+                r.rating_bt,
+                r.ci_low,
+                r.ci_high,
+                r.ci_half_width,
+                r.votes_total,
+                r.wins,
+                r.losses,
+                r.ties,
+                r.status,
+            )
+            for r in rows
+        ]
+        async with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor() as cur,
+        ):
+            await cur.executemany(sql, params_seq)
+        return len(rows)
+
+    @asynccontextmanager
+    async def snapshot_lock(self) -> AsyncIterator[bool]:
+        """Hold the global snapshot advisory lock; yield whether it was acquired.
+
+        Non-blocking: ``pg_try_advisory_lock`` returns ``False`` at once if another
+        run already holds the lock, so the caller can skip instead of queueing.
+        The lock is session-scoped — it lives on this one connection and survives
+        commits — so the connection is held open for the whole job and released on
+        exit. Postgres drops it if the connection dies, so a crashed run never
+        wedges the lock.
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=psycopg.rows.tuple_row) as cur:
+                await cur.execute(_SNAPSHOT_LOCK_ACQUIRE)
+                row = await cur.fetchone()
+            await conn.commit()
+            acquired = bool(row[0]) if row is not None else False
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    async with conn.cursor(row_factory=psycopg.rows.tuple_row) as cur:
+                        await cur.execute(_SNAPSHOT_LOCK_RELEASE)
+                    await conn.commit()
 
     async def list_votes(
         self,
