@@ -17,6 +17,7 @@ echoed back in the ``X-Request-ID`` response header.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from collections.abc import Iterable
@@ -27,6 +28,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 _log = structlog.get_logger("coval_bench.api.access")
 
 _TRACE_HEADER = b"x-cloud-trace-context"
+_TRACE_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
 
 _QUIET_PATHS = frozenset({"/healthz", "/readyz"})
 
@@ -92,7 +94,7 @@ def _request_id(scope: Scope) -> str:
     for key, value in headers:
         if key == _TRACE_HEADER:
             trace = value.decode("latin-1").split("/", 1)[0]
-            if trace:
+            if _TRACE_ID_RE.fullmatch(trace):
                 return trace
             break
     return uuid.uuid4().hex

@@ -271,7 +271,7 @@ def _enumerate_utterances(librispeech_dir: Path) -> list[_Utterance]:
                         continue
                     info = sf.info(str(utt.flac_path))
                     utt.duration_sec = info.frames / info.samplerate
-                utterances.extend(batch)
+                    utterances.append(utt)
 
     logger.info("enumerated_utterances", count=len(utterances))
     return utterances
