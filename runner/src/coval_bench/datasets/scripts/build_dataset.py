@@ -145,10 +145,10 @@ def _download_archive(cache_root: Path) -> Path:
     dest = cache_root / _ARCHIVE_NAME
 
     if dest.exists() and dest.stat().st_size == _EXPECTED_SIZE_BYTES:
-        logger.info("archive already cached", dest=str(dest), size_bytes=dest.stat().st_size)
+        logger.info("archive_already_cached", dest=str(dest), size_bytes=dest.stat().st_size)
         return dest
 
-    logger.info("downloading archive", url=_OPENSLR_URL, dest=str(dest))
+    logger.info("downloading_archive", url=_OPENSLR_URL, dest=str(dest))
     req = urllib.request.Request(  # noqa: S310 (audited: hardcoded https OpenSLR URL)
         _OPENSLR_URL,
         headers={"User-Agent": "coval-bench/build-dataset"},
@@ -163,10 +163,10 @@ def _download_archive(cache_root: Path) -> Path:
             out.write(chunk)
             downloaded += len(chunk)
             if downloaded - last_logged >= _LOG_EVERY_BYTES:
-                logger.info("download progress", downloaded_mb=downloaded // (1024 * 1024))
+                logger.info("download_progress", downloaded_mb=downloaded // (1024 * 1024))
                 last_logged = downloaded
 
-    logger.info("download complete", size_bytes=downloaded, dest=str(dest))
+    logger.info("download_complete", size_bytes=downloaded, dest=str(dest))
     return dest
 
 
@@ -177,13 +177,13 @@ def _extract_archive(archive_path: Path, cache_root: Path) -> Path:
     """
     extract_dir = cache_root / _EXTRACT_DIR_NAME
     if extract_dir.exists():
-        logger.info("archive already extracted", extract_dir=str(extract_dir))
+        logger.info("archive_already_extracted", extract_dir=str(extract_dir))
         return extract_dir
 
-    logger.info("extracting archive", archive=str(archive_path), dest=str(cache_root))
+    logger.info("extracting_archive", archive=str(archive_path), dest=str(cache_root))
     with tarfile.open(archive_path, "r:gz") as tf:
         tf.extractall(path=cache_root)  # noqa: S202
-    logger.info("extraction complete")
+    logger.info("extraction_complete")
     return extract_dir
 
 
@@ -219,7 +219,7 @@ def _parse_trans_txt(
             continue
         if " " not in line:
             # Malformed — no space between utterance_id and transcript
-            logger.warning("skipping malformed trans.txt line", line=line)
+            logger.warning("malformed_trans_txt_line", line=line)
             continue
         utt_id, transcript = line.split(" ", 1)
         flac_path = audio_dir / f"{utt_id}.flac"
@@ -266,13 +266,13 @@ def _enumerate_utterances(librispeech_dir: Path) -> list[_Utterance]:
                 )
                 for utt in batch:
                     if not utt.flac_path.exists():
-                        logger.warning("flac not found; skipping", path=str(utt.flac_path))
+                        logger.warning("flac_not_found", path=str(utt.flac_path))
                         continue
                     info = sf.info(str(utt.flac_path))
                     utt.duration_sec = info.frames / info.samplerate
                 utterances.extend(batch)
 
-    logger.info("enumerated utterances", count=len(utterances))
+    logger.info("enumerated_utterances", count=len(utterances))
     return utterances
 
 
@@ -364,7 +364,7 @@ def _transcode_to_wav(src_flac: Path, dest_wav: Path) -> None:
     data, samplerate = sf.read(str(src_flac), dtype="int16", always_2d=False)
     if samplerate != _TARGET_SR:
         logger.warning(
-            "unexpected sample rate; writing as-is (add resampling if needed)",
+            "unexpected_sample_rate",
             sample_rate=samplerate,
             expected_rate=_TARGET_SR,
             file=src_flac.name,
@@ -393,7 +393,7 @@ def _build_items(selected: list[_Utterance], work_dir: Path) -> list[_BuiltItem]
             )
         )
         logger.info(
-            "built item",
+            "built_item",
             index=idx,
             total=_NUM_UTTERANCES,
             filename=filename,
@@ -440,7 +440,7 @@ def _upload_items(
         blob = bucket.blob(blob_name)
         blob.content_type = "audio/wav"
 
-        logger.info("uploading blob", bucket=bucket_name, blob=blob_name)
+        logger.info("uploading_blob", bucket=bucket_name, blob=blob_name)
 
         if overwrite:
             blob.upload_from_filename(str(item.wav_path), content_type="audio/wav")
@@ -466,7 +466,7 @@ def _upload_items(
             raise RuntimeError(
                 f"Upload integrity failure for {blob_name}: expected={item.sha256} got={actual}"
             )
-        logger.info("verified blob", blob=blob_name)
+        logger.info("verified_blob", blob=blob_name)
 
 
 # ---------------------------------------------------------------------------
@@ -531,7 +531,7 @@ def _parse_speaker_genders(librispeech_dir: Path) -> dict[str, str]:
     """
     speakers_txt = librispeech_dir / "SPEAKERS.TXT"
     if not speakers_txt.exists():
-        logger.warning("speakers.txt not found; gender counts unavailable", path=str(speakers_txt))
+        logger.warning("speakers_txt_not_found", path=str(speakers_txt))
         return {}
     genders: dict[str, str] = {}
     for line in speakers_txt.read_text(encoding="utf-8").splitlines():

@@ -82,7 +82,7 @@ class GradiumTTSProvider(TTSProvider):
                 raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
                 msg: dict[str, Any] = json.loads(raw)
                 if msg.get("type") != "ready":
-                    logger.warning("gradium unexpected first message", msg=msg)
+                    logger.warning("gradium_unexpected_first_message", msg=msg)
 
                 start = time.monotonic()
                 await ws.send(json.dumps({"type": "text", "text": text}))

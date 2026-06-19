@@ -65,7 +65,7 @@ async def with_retry[T](
             last_exc = exc
             if attempt + 1 >= max_attempts:
                 _log.error(
-                    "retry exhausted",
+                    "retry_exhausted",
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                     exc_info=exc,
@@ -75,7 +75,7 @@ async def with_retry[T](
             # Full jitter — non-cryptographic, used only for backoff scheduling
             delay = random.uniform(0, cap)  # noqa: S311
             _log.warning(
-                "provider call failed — retrying",
+                "provider_call_retry",
                 attempt=attempt + 1,
                 max_attempts=max_attempts,
                 delay_s=round(delay, 3),

@@ -105,7 +105,7 @@ class AssemblyAIProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("assemblyai measure_ttft failed", error=str(exc))
+            logger.exception("assemblyai_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -143,7 +143,7 @@ class AssemblyAIProvider(STTProvider):
                 await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "Terminate"}))
         except Exception as exc:
-            logger.exception("assemblyai send error", error=str(exc))
+            logger.exception("assemblyai_send_error", error=str(exc))
             raise
 
     async def _receive(
@@ -181,7 +181,7 @@ class AssemblyAIProvider(STTProvider):
                     final_event.set()
 
         except Exception as exc:
-            logger.exception("assemblyai receive error", error=str(exc))
+            logger.exception("assemblyai_receive_error", error=str(exc))
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time

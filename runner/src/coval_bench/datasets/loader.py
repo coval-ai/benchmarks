@@ -147,7 +147,7 @@ def _default_cache_dir() -> Path:
         fallback = Path(tempfile.gettempdir()) / "coval-bench"  # noqa: S108
         fallback.mkdir(parents=True, exist_ok=True)
         logger.warning(
-            "default cache dir not writable; using fallback",
+            "cache_dir_not_writable",
             candidate=str(candidate),
             fallback=str(fallback),
         )
@@ -219,13 +219,13 @@ def _fetch_and_verify(
     # Cache hit check
     if local_path.exists():
         if _sha256_file(local_path) == item.sha256:
-            logger.debug("cache hit", path=str(item.path))
+            logger.debug("cache_hit", path=str(item.path))
             return local_path
-        logger.warning("cached file hash mismatch; re-downloading", path=str(local_path))
+        logger.warning("cached_file_hash_mismatch", path=str(local_path))
 
     # Download
     gcs_object = f"{dataset_id}/{item.path}"
-    logger.info("fetching dataset object", bucket=bucket, object=gcs_object)
+    logger.info("fetching_dataset_object", bucket=bucket, object=gcs_object)
     _fetch_blob(client, bucket, gcs_object, local_path)
 
     # Post-download integrity check

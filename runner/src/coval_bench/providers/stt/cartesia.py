@@ -94,7 +94,7 @@ class CartesiaSTTProvider(STTProvider):
                         result.error = str(outcome)
 
         except Exception as exc:
-            logger.exception("cartesia stt measure_ttft failed", error=str(exc))
+            logger.exception("cartesia_stt_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -124,7 +124,7 @@ class CartesiaSTTProvider(STTProvider):
             await ws.send("finalize")
             await ws.send("close")
         except Exception as exc:
-            logger.exception("cartesia stt send error", error=str(exc))
+            logger.exception("cartesia_stt_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -169,7 +169,7 @@ class CartesiaSTTProvider(STTProvider):
                         result.audio_to_final_seconds = now - result.audio_start_time
 
         except Exception as exc:
-            logger.exception("cartesia stt receive error", error=str(exc))
+            logger.exception("cartesia_stt_receive_error", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
 

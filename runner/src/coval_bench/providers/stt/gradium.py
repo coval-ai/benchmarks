@@ -103,7 +103,7 @@ class GradiumSTTProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("gradium measure_ttft failed", error=str(exc))
+            logger.exception("gradium_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -134,7 +134,7 @@ class GradiumSTTProvider(STTProvider):
                 await asyncio.wait_for(final_event.wait(), timeout=_FLUSH_WAIT_S)
             await ws.send(json.dumps({"type": "end_of_stream"}))
         except Exception as exc:
-            logger.exception("gradium send error", error=str(exc))
+            logger.exception("gradium_send_error", error=str(exc))
             raise
 
     async def _receive(
@@ -185,11 +185,11 @@ class GradiumSTTProvider(STTProvider):
 
                 if msg_type == "error":
                     result.error = str(msg.get("message", msg))
-                    logger.error("gradium stt error", msg=msg)
+                    logger.error("gradium_stt_error", msg=msg)
                     break
 
         except Exception as exc:
-            logger.exception("gradium receive error", error=str(exc))
+            logger.exception("gradium_receive_error", error=str(exc))
 
         if final_parts:
             result.complete_transcript = " ".join(final_parts).strip() or None

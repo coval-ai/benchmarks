@@ -91,7 +91,7 @@ class SonioxSTTProvider(STTProvider):
                         result.error = str(outcome)
 
         except Exception as exc:
-            logger.exception("soniox measure_ttft failed", error=str(exc))
+            logger.exception("soniox_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -116,7 +116,7 @@ class SonioxSTTProvider(STTProvider):
             # ignored, so the server never finalizes (stalls to its idle timeout).
             await ws.send("")
         except Exception as exc:
-            logger.exception("soniox send error", error=str(exc))
+            logger.exception("soniox_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -135,7 +135,7 @@ class SonioxSTTProvider(STTProvider):
                     result.error = str(
                         msg.get("error_message") or f"Soniox STT error (code {code})"
                     )
-                    logger.error("soniox stt error", msg=msg)
+                    logger.error("soniox_stt_error", msg=msg)
                     break
 
                 tokens: list[dict[str, Any]] = msg.get("tokens") or []
@@ -160,7 +160,7 @@ class SonioxSTTProvider(STTProvider):
                     break
 
         except Exception as exc:
-            logger.exception("soniox receive error", error=str(exc))
+            logger.exception("soniox_receive_error", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
 
