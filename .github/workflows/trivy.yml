@@ -38,20 +38,20 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Authenticate to GCP via WIF so Trivy can pull the private AR image.
       # runner-scanner is a dedicated read-only SA — bound to schedule +
       # workflow_dispatch on coval-ai/benchmarks. Trivy must NOT use
       # runner-deploy (which has artifactregistry.writer).
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v3
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SCANNER_SA }}
 
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v3
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-east1-docker.pkg.dev --quiet
@@ -72,7 +72,7 @@ jobs:
 
       - name: Scan ${{ matrix.image }}:latest with Trivy
         if: steps.image-check.outputs.exists == 'true'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@cf5c088a69634cd13ccddc735d7926162c31f9a6 # master
         with:
           image-ref: us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-${{ matrix.image }}:latest
           format: sarif
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload Trivy SARIF to GitHub Security tab
         if: steps.image-check.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
         with:
           sarif_file: trivy-${{ matrix.image }}.sarif
           category: trivy-${{ matrix.image }}
