@@ -203,3 +203,23 @@ class ArenaLeaderboardResponse(BaseModel):
     computed_at: datetime | None
     methodology_version: str | None
     entries: list[LeaderboardEntryOut]
+
+
+class VoteIn(BaseModel):
+    """Request body for POST /arena/vote (voter_type is set server-side, never sent)."""
+
+    battle_id: uuid.UUID
+    outcome: Literal["A_WIN", "B_WIN", "TIE"]
+    voter_id: str
+
+
+class VoteOut(BaseModel):
+    """A recorded arena vote (the row as persisted)."""
+
+    id: uuid.UUID
+    battle_id: uuid.UUID
+    outcome: str
+    voter_type: str
+    voter_id: str
+    created_at: datetime
+    updated_at: datetime

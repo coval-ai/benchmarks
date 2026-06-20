@@ -36,6 +36,8 @@ from psycopg_pool import AsyncConnectionPool
 from coval_bench.api.app import create_app
 from coval_bench.config import Settings
 
+ARENA_LABELER_KEY = "test-labeler-key"
+
 
 def _make_db_url(postgresql: Any) -> str:
     """Build a postgresql:// URL from the pytest-postgresql fixture."""
@@ -158,6 +160,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
+    monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
 
     settings = Settings()
 

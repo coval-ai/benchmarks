@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     cors_origin_regex: str | None = r"^https://benchmarks-[a-z0-9-]+-covalai\.vercel\.app$"
     rate_limit_per_minute: int = 60
 
+    # --- Arena ---
+    arena_labeler_key: SecretStr | None = None
+
 
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
