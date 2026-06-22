@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Checkout benchmarks
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref || github.ref }}
           fetch-depth: 0
@@ -77,7 +77,7 @@ jobs:
 
       - name: Checkout Switchboard
         if: steps.app_token.outputs.token != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
           ref: main

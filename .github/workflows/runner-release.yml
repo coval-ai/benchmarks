@@ -50,7 +50,7 @@ jobs:
           echo "deploy_ref=${DISPATCH_REF:-${MANUAL_REF:-main}}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.input.outputs.deploy_ref }}
           fetch-depth: 0
@@ -108,7 +108,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.context.outputs.deploy_sha }}
           persist-credentials: false
@@ -230,7 +230,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.context.outputs.deploy_sha }}
           fetch-depth: 0
