@@ -5,6 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  postcss@<8.5.10: '>=8.5.10'
   vite: 8.0.16
 
 importers:
