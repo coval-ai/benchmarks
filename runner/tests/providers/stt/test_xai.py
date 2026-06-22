@@ -123,6 +123,90 @@ async def test_xai_multi_segment_join_trailing_done(
 
 
 @pytest.mark.asyncio
+async def test_xai_done_echoes_full_transcript_not_duplicated(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """transcript.done echoing the whole utterance must not double the transcript.
+
+    Regression guard for the incident where xAI's transcript.done carried the
+    full utterance already closed by speech_final partials instead of the
+    unclosed tail. Blindly appending it produced "X X" and ≈100% WER; the dedup
+    in _done_already_finalized must drop the echo so the final text stays single.
+    """
+    events: list[Any] = [
+        {"type": "transcript.created", "id": "xai-session-echo"},
+        {
+            "type": "transcript.partial",
+            "text": "hello world",
+            "is_final": True,
+            "speech_final": True,
+        },
+        {
+            "type": "transcript.partial",
+            "text": "how are you",
+            "is_final": True,
+            "speech_final": True,
+        },
+        {"type": "transcript.done", "text": "hello world how are you"},
+    ]
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
+    wer = compute_wer("hello world how are you", result.complete_transcript)
+    assert wer.wer_percentage == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_xai_done_echoes_single_segment_not_duplicated(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """Single speech_final segment + done repeating that same segment stays single."""
+    events: list[Any] = [
+        {"type": "transcript.created", "id": "xai-session-echo-single"},
+        {
+            "type": "transcript.partial",
+            "text": "hello world how are you",
+            "is_final": True,
+            "speech_final": True,
+        },
+        {"type": "transcript.done", "text": "hello world how are you"},
+    ]
+    provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")
+
+    with patch(
+        "coval_bench.providers.stt.xai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
+
+
+@pytest.mark.asyncio
 async def test_xai_single_speech_final_empty_done(
     fake_api_key: SecretStr,
     audio_pcm_bytes: bytes,

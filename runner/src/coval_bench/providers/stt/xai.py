@@ -30,6 +30,23 @@ _BASE_WS_URL = "wss://api.x.ai/v1/stt"
 _FINAL_WAIT_S = 5.0
 
 
+def _done_already_finalized(final_segments: list[str], done_transcript: str) -> bool:
+    """True when transcript.done only echoes text already closed by speech_final.
+
+    xAI documents transcript.done as the final transcript after audio.done, not
+    strictly the still-unclosed tail, so a session may echo the whole utterance
+    that speech_final partials already finalized. Appending it blindly doubles
+    the transcript (≈100% WER). Treat done as covered when it repeats the last
+    finalized segment or the full joined transcript.
+    """
+    if not final_segments:
+        return False
+    done = " ".join(done_transcript.split())
+    last = " ".join(final_segments[-1].split())
+    joined = " ".join(" ".join(final_segments).split())
+    return done in (last, joined)
+
+
 class XaiSTTProvider(STTProvider):
     """xAI `/v1/stt` realtime WebSocket provider."""
 
@@ -161,11 +178,13 @@ class XaiSTTProvider(STTProvider):
     ) -> None:
         # With endpointing enabled, xAI restarts the transcript at each endpoint:
         # every speech segment is closed exactly once by a speech_final=true
-        # partial, and transcript.done carries only text not yet closed by a
-        # speech_final (empty when the last segment was already closed). The
-        # full utterance is the in-order join of speech_final segments plus any
-        # trailing done text. is_final=true/speech_final=false events are
-        # interim duplicates of the segment and must NOT be joined.
+        # partial. The full utterance is the in-order join of speech_final
+        # segments. transcript.done is documented only as "final transcript
+        # after audio.done" — not guaranteed to be the unclosed tail — so it
+        # may carry the trailing tail OR echo the whole utterance; we append it
+        # only when it isn't already covered (see _done_already_finalized).
+        # is_final=true/speech_final=false events are interim duplicates of the
+        # segment and must NOT be joined.
         final_segments: list[str] = []
         done_transcript: str | None = None
         last_final_time: float | None = None
@@ -199,9 +218,10 @@ class XaiSTTProvider(STTProvider):
                     if done_transcript:
                         set_first_token(result, done_transcript, now=now)
                         add_partial_transcript(result, done_transcript)
-                        final_segments.append(done_transcript)
-                        if result.audio_start_time is not None:
-                            last_final_time = now
+                        if not _done_already_finalized(final_segments, done_transcript):
+                            final_segments.append(done_transcript)
+                            if result.audio_start_time is not None:
+                                last_final_time = now
                     break
 
                 if event_type == "error":
