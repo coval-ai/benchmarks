@@ -1,16 +1,16 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Voice Arena read endpoints.
+"""Voice Arena endpoints.
 
-``GET /v1/arena/battle``       — a battle to vote on (blind: no model identities).
-``GET /v1/arena/battle/{id}``  — a specific battle.
-``GET /v1/arena/leaderboard``  — the latest computed board for a metric/domain.
+``GET  /v1/arena/battle``       — a battle to vote on (blind: no model identities).
+``GET  /v1/arena/battle/{id}``  — a specific battle.
+``GET  /v1/arena/leaderboard``  — the latest computed board for a metric/domain.
+``POST /v1/arena/vote``         — record a labeler's vote (labeler-only at MVP).
 
-Reads only. Battles/votes are written elsewhere; leaderboard rows are produced by
-the snapshot job, so the leaderboard is empty until that job has run. Queries hit
-the pool directly, matching the other routers; this module does not depend on the
-arena DB-access layer, so it can land independently.
+Reads hit the pool directly; the write path uses the arena DB-access layer
+(``ArenaStore``). Leaderboard rows are produced by the snapshot job, so the
+leaderboard is empty until that job has run.
 
 The battle payload deliberately omits provider/model identities to keep voting
 blind — the A/B -> model mapping stays server-side, used only when a vote is
@@ -19,19 +19,29 @@ recorded.
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from typing import Any
 
 import psycopg.rows
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ArenaLeaderboardResponse, BattleOut, LeaderboardEntryOut
+from coval_bench.api.schemas import (
+    ArenaLeaderboardResponse,
+    BattleOut,
+    LeaderboardEntryOut,
+    VoteIn,
+    VoteOut,
+)
+from coval_bench.config import Settings
+from coval_bench.db.arena_store import ArenaStore
+from coval_bench.db.models import VoteOutcome, VoterType
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -141,3 +151,45 @@ async def get_arena_leaderboard(
         methodology_version=board[0]["methodology_version"] if board else None,
         entries=entries,
     )
+
+
+def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
+    """True only if a labeler key is configured and the presented key matches it."""
+    expected = settings.arena_labeler_key
+    if expected is None or provided is None:
+        return False
+    return hmac.compare_digest(provided, expected.get_secret_value())
+
+
+@router.post("/arena/vote", response_model=VoteOut, status_code=201)
+@limiter.limit("60/minute")
+async def cast_vote(
+    request: Request,  # required by slowapi
+    vote: VoteIn,
+    x_labeler_key: str | None = Header(default=None),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    posthog_client: Posthog | None = Depends(get_posthog),
+) -> VoteOut:
+    """Record a labeler's vote on a battle (labeler-only at MVP; others get 403)."""
+    if not _is_authenticated_labeler(x_labeler_key, settings):
+        raise HTTPException(403, "external voting is not enabled")
+    store = ArenaStore(pool)
+    if await store.get_battle(vote.battle_id) is None:
+        raise HTTPException(404, f"battle {vote.battle_id} not found")
+    recorded = await store.upsert_vote(
+        battle_id=vote.battle_id,
+        outcome=VoteOutcome(vote.outcome),
+        voter_type=VoterType.LABELER,
+        voter_id=vote.voter_id,
+    )
+    capture_api_event(
+        posthog_client,
+        "arena_vote_cast",
+        {
+            "outcome": vote.outcome,
+            "voter_type": VoterType.LABELER.value,
+            "$process_person_profile": False,
+        },
+    )
+    return VoteOut.model_validate(recorded.model_dump())

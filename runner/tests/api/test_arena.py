@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the Voice Arena read endpoints (GET /v1/arena/*)."""
+"""Tests for the Voice Arena endpoints (GET /v1/arena/*, POST /v1/arena/vote)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import psycopg
 from httpx import AsyncClient
 
-from tests.api.conftest import _make_db_url
+from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
 
 
 async def _apply_arena_schema(dsn: str) -> None:
@@ -32,6 +32,33 @@ async def _apply_arena_schema(dsn: str) -> None:
                 audio_b_url TEXT NOT NULL,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
             )
+        """)
+        await aconn.execute("""
+            CREATE TABLE IF NOT EXISTS arena.votes (
+                id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                battle_id  UUID NOT NULL REFERENCES arena.battles(id),
+                outcome    TEXT NOT NULL CHECK (outcome IN ('A_WIN','B_WIN','TIE')),
+                voter_type TEXT NOT NULL CHECK (voter_type IN ('labeler','external')),
+                voter_id   TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (battle_id, voter_type, voter_id)
+            )
+        """)
+        await aconn.execute("""
+            CREATE OR REPLACE FUNCTION arena.set_updated_at() RETURNS trigger AS $$
+            BEGIN
+                NEW.updated_at := now();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+        await aconn.execute("DROP TRIGGER IF EXISTS votes_set_updated_at ON arena.votes")
+        await aconn.execute("""
+            CREATE TRIGGER votes_set_updated_at
+                BEFORE UPDATE ON arena.votes
+                FOR EACH ROW
+                EXECUTE FUNCTION arena.set_updated_at()
         """)
         await aconn.execute("""
             CREATE TABLE IF NOT EXISTS arena.leaderboard_snapshots (
@@ -293,3 +320,157 @@ async def test_leaderboard_does_not_mix_methodology_versions(
     # One board only: the tiebreaker picks davidson-v2, so v1's row is excluded.
     assert data["methodology_version"] == "davidson-v2"
     assert [e["model"] for e in data["entries"]] == ["sonic-3"]
+
+
+_LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
+
+
+async def _count_votes(postgresql: Any, battle_id: str) -> int:
+    """Return the number of vote rows for a battle."""
+    dsn = _make_db_url(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
+    try:
+        row = await aconn.execute(
+            "SELECT count(*) FROM arena.votes WHERE battle_id = %s", (battle_id,)
+        )
+        result = await row.fetchone()
+        assert result is not None
+        return int(result[0])
+    finally:
+        await aconn.close()
+
+
+async def test_vote_without_labeler_key_is_403(client: AsyncClient, postgresql: Any) -> None:
+    """No labeler key -> 403 (external voting is not enabled)."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+    )
+    assert response.status_code == 403
+    assert await _count_votes(postgresql, battle_id) == 0
+
+
+async def test_vote_with_wrong_key_is_403(client: AsyncClient, postgresql: Any) -> None:
+    """A non-matching labeler key -> 403."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers={"X-Labeler-Key": "not-the-key"},
+    )
+    assert response.status_code == 403
+
+
+async def test_vote_records_a_labeler_vote(client: AsyncClient, postgresql: Any) -> None:
+    """A valid labeler key persists the vote and stamps voter_type='labeler'."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["battle_id"] == battle_id
+    assert data["outcome"] == "A_WIN"
+    assert data["voter_type"] == "labeler"
+    assert data["voter_id"] == "ann-1"
+    assert await _count_votes(postgresql, battle_id) == 1
+
+
+async def test_vote_body_cannot_override_voter_type(client: AsyncClient, postgresql: Any) -> None:
+    """A voter_type smuggled into the body is ignored; the server always pins 'labeler'."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={
+            "battle_id": battle_id,
+            "outcome": "A_WIN",
+            "voter_id": "ann-1",
+            "voter_type": "external",
+        },
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 201
+    assert response.json()["voter_type"] == "labeler"
+
+
+async def test_revote_updates_existing_row(client: AsyncClient, postgresql: Any) -> None:
+    """The same voter re-voting a battle updates their row, never adds a second."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    first = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    second = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "B_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    assert first.status_code == 201
+    assert second.status_code == 201
+    # Same row (dedup), outcome overwritten.
+    assert second.json()["id"] == first.json()["id"]
+    assert second.json()["outcome"] == "B_WIN"
+    assert await _count_votes(postgresql, battle_id) == 1
+
+
+async def test_distinct_voters_create_separate_rows(client: AsyncClient, postgresql: Any) -> None:
+    """Dedup is per-identity, not per-battle: two voter_ids on one battle keep both rows."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    for voter_id in ("ann-1", "ann-2"):
+        response = await client.post(
+            "/v1/arena/vote",
+            json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": voter_id},
+            headers=_LABELER_HEADERS,
+        )
+        assert response.status_code == 201
+    assert await _count_votes(postgresql, battle_id) == 2
+
+
+async def test_empty_voter_id_is_accepted(client: AsyncClient, postgresql: Any) -> None:
+    """Pins current MVP behavior: voter_id is not validated, so an empty string is accepted."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": ""},
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 201
+    assert response.json()["voter_id"] == ""
+
+
+async def test_vote_on_unknown_battle_is_404(client: AsyncClient, postgresql: Any) -> None:
+    """A valid key but a battle id that does not exist -> 404."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    response = await client.post(
+        "/v1/arena/vote",
+        json={
+            "battle_id": "00000000-0000-0000-0000-000000000000",
+            "outcome": "A_WIN",
+            "voter_id": "ann-1",
+        },
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+async def test_vote_with_invalid_outcome_is_422(client: AsyncClient, postgresql: Any) -> None:
+    """An outcome outside the allowed set fails request validation with 422."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "MAYBE", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 422
