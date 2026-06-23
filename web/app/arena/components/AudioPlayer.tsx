@@ -23,12 +23,10 @@ export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
   const [duration, setDuration] = useState(0);
   const disabled = !src;
 
-  // Single-playback: when another side claims focus, stop this one.
+  // Single-playback: when another side claims focus, pause this one (keep its
+  // position so play resumes rather than restarts).
   useEffect(() => {
-    if (!isActive && ref.current) {
-      ref.current.pause();
-      ref.current.currentTime = 0;
-    }
+    if (!isActive) ref.current?.pause();
   }, [isActive]);
 
   // Pause on unmount so audio never outlives the component.

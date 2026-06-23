@@ -39,6 +39,13 @@ describe("MockBattleSource", () => {
     const res = await src.submitVote({ battleId: battle.battleId, outcome: "A_WIN", voterId: "t" });
     expect(res).toEqual({ battleId: battle.battleId, outcome: "A_WIN" });
   });
+
+  it("rejects a vote for an unknown battle (mirrors the backend)", async () => {
+    const src = new MockBattleSource();
+    await expect(
+      src.submitVote({ battleId: "does-not-exist", outcome: "A_WIN", voterId: "t" }),
+    ).rejects.toThrow();
+  });
 });
 
 describe("getBattleSource", () => {

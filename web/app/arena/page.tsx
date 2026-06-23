@@ -186,15 +186,30 @@ export default function ArenaPage() {
   );
 }
 
+function makeVoterId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `anon-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 function useVoterId(): string {
   const ref = useRef<string | null>(null);
   if (ref.current === null && typeof window !== "undefined") {
-    let existing = localStorage.getItem("arena_voter_id");
-    if (!existing) {
-      existing = crypto.randomUUID();
-      localStorage.setItem("arena_voter_id", existing);
+    try {
+      const stored = localStorage.getItem("arena_voter_id");
+      if (stored) {
+        ref.current = stored;
+      } else {
+        const fresh = makeVoterId();
+        localStorage.setItem("arena_voter_id", fresh);
+        ref.current = fresh;
+      }
+    } catch {
+      // Storage blocked (private mode, sandboxed iframe, etc.): ephemeral id.
+      ref.current = makeVoterId();
     }
-    ref.current = existing;
   }
   return ref.current ?? "";
 }

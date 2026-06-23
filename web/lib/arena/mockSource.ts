@@ -74,6 +74,9 @@ export class MockBattleSource implements BattleSource {
 
   async submitVote(input: VoteInput): Promise<VoteResult> {
     await delay(200);
+    if (!this.assignments.has(input.battleId)) {
+      throw new Error(`mock vote: unknown battle ${input.battleId}`);
+    }
     return { battleId: input.battleId, outcome: input.outcome };
   }
 

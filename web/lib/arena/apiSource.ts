@@ -9,11 +9,16 @@ import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from ".
 //   POST /api/arena/vote                { battleId, outcome, voterId }  -> VoteResult
 //   GET  /api/arena/battle/{id}/reveal                                  -> Reveal
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
+// Coarse hang-backstops, not latency SLAs; tune once real backend latency is known.
+const QUICK_TIMEOUT_MS = 5_000; // vote/reveal: quick DB ops
+const SYNTH_TIMEOUT_MS = 30_000; // createBattle: on-demand TTS synthesis of two clips
+
+async function postJson<T>(url: string, body: unknown, timeoutMs = QUICK_TIMEOUT_MS): Promise<T> {
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`${url} -> ${res.status}`);
   return (await res.json()) as T;
@@ -21,7 +26,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
 
 export class ApiBattleSource implements BattleSource {
   createBattle(text: string): Promise<BlindBattle> {
-    return postJson<BlindBattle>("/api/arena/battle", { text });
+    return postJson<BlindBattle>("/api/arena/battle", { text }, SYNTH_TIMEOUT_MS);
   }
 
   submitVote(input: VoteInput): Promise<VoteResult> {
@@ -29,7 +34,9 @@ export class ApiBattleSource implements BattleSource {
   }
 
   async reveal(battleId: string): Promise<Reveal> {
-    const res = await fetch(`/api/arena/battle/${encodeURIComponent(battleId)}/reveal`);
+    const res = await fetch(`/api/arena/battle/${encodeURIComponent(battleId)}/reveal`, {
+      signal: AbortSignal.timeout(QUICK_TIMEOUT_MS),
+    });
     if (!res.ok) throw new Error(`reveal -> ${res.status}`);
     return (await res.json()) as Reveal;
   }
