@@ -217,17 +217,30 @@ async def create_battle(
     """Generate a battle from a prompt: pick two models, synthesize, persist (blind).
 
     Pairing weights informative matchups from the latest ratings, falling back to
-    uniform at cold start. Returns 502 if either side fails to synthesize (no
-    battle is written).
+    uniform at cold start. Returns 502 if either side fails to synthesize (no battle
+    is written). Guarded by a global daily cap (``arena_daily_battle_cap``, ``<= 0``
+    disables), checked before synthesis so a tripped cap spends nothing (429). Known
+    limits: it counts successful battles only (a failed one still costs ~2 calls,
+    uncounted but logged), and the non-transactional check may overshoot slightly
+    under concurrency (no data is overwritten).
     """
+    store = ArenaStore(pool)
     prompt = body.prompt.strip()
     if not prompt:
         raise HTTPException(422, "prompt must not be empty")
 
+    cap = settings.arena_daily_battle_cap
+    if cap > 0 and await store.count_battles_today() >= cap:
+        capture_api_event(
+            posthog_client,
+            "arena_battle_cap_reached",
+            {"$process_person_profile": False},
+        )
+        raise HTTPException(429, "daily generation limit reached")
+
     models = active_tts_models()
     if len(models) < 2:
         raise HTTPException(503, "not enough active TTS models to form a battle")
-    store = ArenaStore(pool)
     ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)
     pair = select_pair(models, ratings)
     battle = await generate_battle(

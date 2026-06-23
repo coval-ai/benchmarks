@@ -104,6 +104,25 @@ class ArenaStore:
             await conn.commit()
         return Vote.model_validate(dict(row))
 
+    async def count_battles_today(self) -> int:
+        """Count battles created since the start of the current UTC day.
+
+        Backs the global daily generation cap. Uses the DB clock (``now()``),
+        matching the ``created_at DEFAULT now()`` on the table, so the count and
+        the rows it counts share one clock. The window resets at 00:00 UTC.
+        """
+        sql = (
+            "SELECT count(*) FROM arena.battles "
+            "WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+        )
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.tuple_row) as cur,
+        ):
+            await cur.execute(sql)
+            row = await cur.fetchone()
+        return int(row[0]) if row is not None else 0
+
     async def get_battle(self, battle_id: UUID) -> Battle | None:
         """Return the battle with this id, or ``None`` if it does not exist."""
         sql = """
