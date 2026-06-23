@@ -20,11 +20,16 @@ export async function POST(req: Request) {
     return Response.json({ error: "battleId, outcome, voterId required." }, { status: 400 });
   }
 
-  const res = await arenaRunnerFetch("/v1/arena/vote", {
-    battle_id: battleId,
-    outcome,
-    voter_id: voterId,
-  });
+  let res: Response;
+  try {
+    res = await arenaRunnerFetch("/v1/arena/vote", {
+      battle_id: battleId,
+      outcome,
+      voter_id: voterId,
+    });
+  } catch {
+    return Response.json({ error: "Vote failed." }, { status: 502 });
+  }
   if (!res.ok) return Response.json({ error: "Vote failed." }, { status: res.status });
 
   const v = (await res.json()) as VoteOut;

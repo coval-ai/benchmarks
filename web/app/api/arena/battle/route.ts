@@ -22,7 +22,12 @@ export async function POST(req: Request) {
   const text = body.text?.trim();
   if (!text) return Response.json({ error: "Prompt is empty." }, { status: 400 });
 
-  const res = await arenaRunnerFetch("/v1/arena/battle", { prompt: text });
+  let res: Response;
+  try {
+    res = await arenaRunnerFetch("/v1/arena/battle", { prompt: text });
+  } catch {
+    return Response.json({ error: "Battle generation failed." }, { status: 502 });
+  }
   if (!res.ok) return Response.json({ error: "Battle generation failed." }, { status: res.status });
 
   const b = (await res.json()) as BattleOut;
