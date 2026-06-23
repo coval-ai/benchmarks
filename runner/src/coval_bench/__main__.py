@@ -215,5 +215,42 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
         click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "models": written}))
 
 
+@arena.command(name="seed-battles")
+@click.option(
+    "--per-domain",
+    default=1,
+    show_default=True,
+    type=int,
+    help="Demo battles to generate per domain (uses real TTS credits).",
+)
+def arena_seed_battles(per_domain: int) -> None:
+    """Generate real demo battles from example prompts so a labeler can vote."""
+    from coval_bench.arena.prompts import EXAMPLE_PROMPTS
+    from coval_bench.arena.seed import seed_demo_battles
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+    from coval_bench.db.models import Battle
+
+    async def _run() -> list[Battle]:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            return await seed_demo_battles(settings, ArenaStore(pool), per_domain=per_domain)
+
+    battles = asyncio.run(_run())
+    attempted = sum(min(per_domain, len(prompts)) for prompts in EXAMPLE_PROMPTS.values())
+    click.echo(
+        json.dumps(
+            {
+                "event": "arena_seed_battles",
+                "attempted": attempted,
+                "created": len(battles),
+                "skipped": attempted - len(battles),
+                "battles": [{"id": str(b.id), "domain": b.domain} for b in battles],
+            }
+        )
+    )
+
+
 if __name__ == "__main__":
     cli()
