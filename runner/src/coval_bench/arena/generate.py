@@ -28,6 +28,8 @@ from coval_bench.registries.models import RegisteredModel
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
+_SYNTH_TIMEOUT_S = 60.0
+
 
 async def generate_battle(
     settings: Settings,
@@ -95,7 +97,17 @@ async def _synthesize(settings: Settings, model: RegisteredModel, prompt: str) -
 
     try:
         provider = provider_cls(settings=settings, model=model.model, voice=model.voice)
-        result: TTSResult = await provider.synthesize(prompt)
+        result: TTSResult = await asyncio.wait_for(
+            provider.synthesize(prompt), timeout=_SYNTH_TIMEOUT_S
+        )
+    except TimeoutError:
+        logger.warning(
+            "arena_synthesis_timeout",
+            provider=model.provider,
+            model=model.model,
+            timeout_s=_SYNTH_TIMEOUT_S,
+        )
+        return None
     except Exception as exc:
         logger.warning(
             "arena_synthesis_exception",
