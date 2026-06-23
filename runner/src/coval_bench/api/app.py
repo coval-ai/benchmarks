@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -125,5 +126,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
+
+    # Serve locally-generated arena clips when no external audio host is set
+    # (prod points arena_audio_base_url at the GCS/CDN origin instead).
+    if not resolved.arena_audio_base_url:
+        clips_dir = resolved.arena_audio_dir / "clips"
+        clips_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/clips", StaticFiles(directory=clips_dir), name="clips")
 
     return app
