@@ -59,6 +59,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         rime_api_key=SecretStr("test-rime-key"),
         gradium_tts_api_key=SecretStr("test-gradium-tts-key"),
         xai_api_key=SecretStr("test-xai-key"),
+        groq_api_key=SecretStr("test-groq-key"),
         smallest_api_key=SecretStr("test-smallest-key"),
         inworld_api_key=SecretStr("test-inworld-key"),
         soniox_api_key=SecretStr("test-soniox-key"),
