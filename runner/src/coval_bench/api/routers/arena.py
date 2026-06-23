@@ -216,7 +216,10 @@ async def create_battle(
     if not prompt:
         raise HTTPException(422, "prompt must not be empty")
 
-    pair = select_pair(active_tts_models())
+    models = active_tts_models()
+    if len(models) < 2:
+        raise HTTPException(503, "not enough active TTS models to form a battle")
+    pair = select_pair(models)
     battle = await generate_battle(
         settings,
         ArenaStore(pool),

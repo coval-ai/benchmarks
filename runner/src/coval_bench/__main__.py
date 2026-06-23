@@ -220,7 +220,7 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
     "--per-domain",
     default=1,
     show_default=True,
-    type=int,
+    type=click.IntRange(min=0),
     help="Demo battles to generate per domain (uses real TTS credits).",
 )
 def arena_seed_battles(per_domain: int) -> None:
