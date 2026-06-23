@@ -112,8 +112,7 @@ class ArenaStore:
         the rows it counts share one clock. The window resets at 00:00 UTC.
         """
         sql = (
-            "SELECT count(*) FROM arena.battles "
-            "WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'"
+            "SELECT count(*) FROM arena.battles WHERE created_at >= date_trunc('day', now(), 'UTC')"
         )
         async with (
             self._pool.connection() as conn,
