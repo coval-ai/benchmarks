@@ -187,16 +187,16 @@ export default function ArenaPage() {
 }
 
 function useVoterId(): string {
-  const [id, setId] = useState("");
-  useEffect(() => {
+  const ref = useRef<string | null>(null);
+  if (ref.current === null && typeof window !== "undefined") {
     let existing = localStorage.getItem("arena_voter_id");
     if (!existing) {
       existing = crypto.randomUUID();
       localStorage.setItem("arena_voter_id", existing);
     }
-    setId(existing);
-  }, []);
-  return id;
+    ref.current = existing;
+  }
+  return ref.current ?? "";
 }
 
 function BattleCard({

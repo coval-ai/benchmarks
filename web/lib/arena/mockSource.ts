@@ -58,7 +58,9 @@ export class MockBattleSource implements BattleSource {
 
   async createBattle(text: string): Promise<BlindBattle> {
     await delay(600); // exercise the loading state
-    const [a, b] = [...getEnabledTtsModels()].sort(() => Math.random() - 0.5);
+    const pool = [...getEnabledTtsModels()];
+    const a = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    const b = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
     if (!a || !b) throw new Error("arena mock: need at least 2 enabled TTS models");
     const battleId = `mock-${++this.counter}-${Math.random().toString(36).slice(2, 8)}`;
     this.assignments.set(battleId, { a: toRevealed(a), b: toRevealed(b) });

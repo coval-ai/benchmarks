@@ -47,7 +47,6 @@ export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
       return;
     }
     onActivate();
-    el.currentTime = 0;
     void el.play();
   };
 
@@ -63,6 +62,7 @@ export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
           onEnded={() => {
             setPlaying(false);
             setProgress(0);
+            if (ref.current) ref.current.currentTime = 0; // rearm for replay from the start
           }}
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           onTimeUpdate={(e) =>
