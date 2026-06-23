@@ -78,7 +78,7 @@ class SmallestSTTProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("smallest measure_ttft failed", error=str(exc))
+            logger.exception("smallest_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -106,7 +106,7 @@ class SmallestSTTProvider(STTProvider):
                 await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"type": "close_stream"}))
         except Exception as exc:
-            logger.exception("smallest send error", error=str(exc))
+            logger.exception("smallest_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -148,7 +148,7 @@ class SmallestSTTProvider(STTProvider):
                     break
 
         except Exception as exc:
-            logger.exception("smallest receive error", error=str(exc))
+            logger.exception("smallest_receive_error", error=str(exc))
 
         if final_segments:
             result.complete_transcript = " ".join(final_segments).strip() or None

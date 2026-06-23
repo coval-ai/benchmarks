@@ -223,7 +223,7 @@ async def _run_stt_item(
         provider_cls = stt_providers.get(entry.provider)
         if provider_cls is None:
             _log.warning(
-                "unknown STT provider — skipping",
+                "unknown_stt_provider",
                 provider=entry.provider,
                 model=entry.model,
             )
@@ -267,7 +267,7 @@ async def _run_stt_item(
         except Exception as exc:
             item_error = _truncate(str(exc))
             _log.warning(
-                "STT provider call failed",
+                "stt_provider_call_failed",
                 provider=entry.provider,
                 model=entry.model,
                 audio=str(audio_path),
@@ -413,7 +413,7 @@ async def _run_stt_item(
                 # crash here is a genuine failure — surface it as a FAILED row rather than
                 # silently dropping it and leaving the run marked SUCCEEDED.
                 _log.warning(
-                    "WER computation failed",
+                    "wer_computation_failed",
                     provider=entry.provider,
                     model=entry.model,
                     exc_info=exc,
@@ -439,7 +439,7 @@ async def _run_stt_item(
             await writer.record_results(results)
         except Exception as exc:
             _log.warning(
-                "STT result persist failed",
+                "stt_result_persist_failed",
                 provider=entry.provider,
                 model=entry.model,
                 exc_info=exc,
@@ -481,7 +481,7 @@ async def _run_tts_item(
         provider_cls = tts_providers.get(entry.provider)
         if provider_cls is None:
             _log.warning(
-                "unknown TTS provider — skipping",
+                "unknown_tts_provider",
                 provider=entry.provider,
                 model=entry.model,
             )
@@ -501,7 +501,7 @@ async def _run_tts_item(
         except Exception as exc:
             item_error = _truncate(str(exc))
             _log.warning(
-                "TTS provider call failed",
+                "tts_provider_call_failed",
                 provider=entry.provider,
                 model=entry.model,
                 exc_info=exc,
@@ -567,7 +567,7 @@ async def _run_tts_item(
                     whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
                 except Exception as exc:
                     _log.warning(
-                        "TTS WER transcription failed",
+                        "tts_wer_transcription_failed",
                         provider=entry.provider,
                         model=entry.model,
                         exc_info=exc,
@@ -596,7 +596,7 @@ async def _run_tts_item(
                         )
                     except Exception as exc:
                         _log.warning(
-                            "TTS WER computation failed",
+                            "tts_wer_computation_failed",
                             provider=entry.provider,
                             model=entry.model,
                             exc_info=exc,
@@ -624,7 +624,7 @@ async def _run_tts_item(
                     audio_path.unlink()
                 except OSError as exc:
                     _log.warning(
-                        "failed to delete TTS audio file",
+                        "tts_audio_file_delete_failed",
                         path=str(audio_path),
                         exc_info=exc,
                     )
@@ -634,7 +634,7 @@ async def _run_tts_item(
             await writer.record_results(results)
         except Exception as exc:
             _log.warning(
-                "TTS result persist failed",
+                "tts_result_persist_failed",
                 provider=entry.provider,
                 model=entry.model,
                 exc_info=exc,
@@ -678,9 +678,9 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
             await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
         except Exception:
             if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                _log.warning("series_bucket_refresh_failed", run_id=run_id, exc_info=True)
+                _log.warning("series_bucket_refresh_failed", exc_info=True)
                 return
-            _log.info("series_bucket_refresh_retry", run_id=run_id, attempt=attempt)
+            _log.info("series_bucket_refresh_retry", attempt=attempt)
             await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
         else:
             return
@@ -710,6 +710,8 @@ async def run_benchmarks(
             The run row is updated to ``FAILED`` before re-raising so the Cloud
             Run Job exits non-zero and the log-based metric fires.
     """
+    structlog.contextvars.clear_contextvars()
+
     lifespan_pool, RunWriter, RunStatus, models_mod = _get_db_symbols()
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
@@ -781,9 +783,10 @@ async def run_benchmarks(
         assert run_id is not None  # noqa: S101 — DB always returns an id after INSERT
         started_at = run.started_at or datetime.now(tz=UTC)
 
+        structlog.contextvars.bind_contextvars(run_id=run_id)
+
         _log.info(
-            "benchmark run started",
-            run_id=run_id,
+            "benchmark_run_started",
             benchmark_kind=benchmark_kind,
             smoke=smoke,
             runner_sha=settings.runner_sha,
@@ -805,7 +808,7 @@ async def run_benchmarks(
             if sigterm_received:
                 return
             sigterm_received = True
-            _log.warning("SIGTERM received — finalizing run as partial", run_id=run_id)
+            _log.warning("sigterm_received")
             if main_task is not None:
                 main_task.cancel()
 
@@ -857,7 +860,7 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
-                _log.info("stt dataset sampled", run_id=run_id, item_count=len(items))
+                _log.info("stt_dataset_sampled", item_count=len(items))
 
                 stt_tasks = [
                     _run_stt_item(
@@ -875,7 +878,7 @@ async def run_benchmarks(
                 stt_batch = await asyncio.gather(*stt_tasks, return_exceptions=True)
                 for batch_result in stt_batch:
                     if isinstance(batch_result, BaseException):
-                        _log.warning("STT task raised unexpectedly", exc_info=batch_result)
+                        _log.warning("stt_task_raised", exc_info=batch_result)
                     else:
                         all_results.extend(batch_result)
 
@@ -889,7 +892,7 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
-                _log.info("tts dataset sampled", run_id=run_id, item_count=len(tts_items))
+                _log.info("tts_dataset_sampled", item_count=len(tts_items))
 
                 tts_tasks = [
                     _run_tts_item(
@@ -907,7 +910,7 @@ async def run_benchmarks(
                 tts_batch = await asyncio.gather(*tts_tasks, return_exceptions=True)
                 for batch_result in tts_batch:
                     if isinstance(batch_result, BaseException):
-                        _log.warning("TTS task raised unexpectedly", exc_info=batch_result)
+                        _log.warning("tts_task_raised", exc_info=batch_result)
                     else:
                         all_results.extend(batch_result)
 
@@ -939,8 +942,7 @@ async def run_benchmarks(
                 await writer.refresh_stats_matviews()
             except Exception as refresh_exc:
                 _log.error(
-                    "failed to refresh stats matviews",
-                    run_id=run_id,
+                    "stats_matviews_refresh_failed",
                     exc_info=refresh_exc,
                 )
 
@@ -960,8 +962,7 @@ async def run_benchmarks(
 
             duration_s = (finished_at - started_at).total_seconds()
             _log.info(
-                "benchmark run finished",
-                run_id=run_id,
+                "benchmark_run_finished",
                 status=str(final_status),
                 total_results=total_results,
                 success_count=success_count,
@@ -1006,8 +1007,7 @@ async def run_benchmarks(
                 )
             except Exception as write_exc:
                 _log.error(
-                    "failed to update run row after SIGTERM",
-                    run_id=run_id,
+                    "run_row_update_failed_after_sigterm",
                     exc_info=write_exc,
                 )
             else:
@@ -1016,8 +1016,7 @@ async def run_benchmarks(
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             _log.warning(
-                "benchmark run finished early due to SIGTERM",
-                run_id=run_id,
+                "benchmark_run_finished_early_sigterm",
                 status=str(RunStatus.PARTIAL),
                 total_results=total_results,
                 success_count=success_count,
@@ -1058,7 +1057,6 @@ async def run_benchmarks(
             # structlog uses the first positional arg as the ``event`` key.
             _log.error(
                 "RUN_FAILED",
-                run_id=run_id,
                 error=err_msg,
                 exc_info=exc,
             )
@@ -1066,8 +1064,7 @@ async def run_benchmarks(
                 await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
             except Exception as write_exc:
                 _log.error(
-                    "failed to update run row after RUN_FAILED",
-                    run_id=run_id,
+                    "run_row_update_failed_after_failure",
                     exc_info=write_exc,
                 )
             _emit_posthog(

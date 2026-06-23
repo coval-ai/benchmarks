@@ -133,7 +133,7 @@ class OpenAISTTProvider(STTProvider):
                     await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("openai measure_ttft failed", error=str(exc))
+            logger.exception("openai_measure_ttft_failed", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
 
@@ -215,7 +215,7 @@ class OpenAISTTProvider(STTProvider):
                 await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
         except Exception as exc:
-            logger.exception("openai send error", error=str(exc))
+            logger.exception("openai_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -265,7 +265,7 @@ class OpenAISTTProvider(STTProvider):
         except _TranscriptionAborted:
             raise
         except Exception as exc:
-            logger.exception("openai receive error", error=str(exc))
+            logger.exception("openai_receive_error", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
 

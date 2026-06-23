@@ -109,7 +109,7 @@ class SpeechmaticsProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("speechmatics measure_ttft failed", error=str(exc))
+            logger.exception("speechmatics_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -147,7 +147,7 @@ class SpeechmaticsProvider(STTProvider):
                 await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": seq_no}))
         except Exception as exc:
-            logger.exception("speechmatics send error", error=str(exc))
+            logger.exception("speechmatics_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -187,7 +187,7 @@ class SpeechmaticsProvider(STTProvider):
                     last_final_time = now
 
         except Exception as exc:
-            logger.exception("speechmatics receive error", error=str(exc))
+            logger.exception("speechmatics_receive_error", error=str(exc))
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time

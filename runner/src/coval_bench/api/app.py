@@ -28,6 +28,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
+from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
     aggregates,
     arena,
@@ -39,6 +40,7 @@ from coval_bench.api.routers import (
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.logging import configure_logging
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -57,6 +59,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        configure_logging(level=resolved.log_level)
         logger.info("api_startup", runner_sha=resolved.runner_sha)
         posthog_client: Posthog | None = None
         if not resolved.posthog_disabled and resolved.posthog_project_token:
@@ -111,6 +114,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)  # type: ignore[arg-type]
     app.add_middleware(SlowAPIMiddleware)
+
+    app.add_middleware(RequestLoggingMiddleware)
 
     # Routers
     app.include_router(health.router)

@@ -26,6 +26,10 @@ from coval_bench.migrations.import_legacy import import_legacy_cli
 @click.version_option(version=__version__, prog_name="coval-bench")
 def cli() -> None:
     """Coval voice-AI benchmarks runner."""
+    from coval_bench.config import get_settings
+    from coval_bench.logging import configure_logging
+
+    configure_logging(level=get_settings().log_level)
 
 
 @cli.command(name="run")

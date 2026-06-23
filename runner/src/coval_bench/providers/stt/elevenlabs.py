@@ -109,13 +109,13 @@ class ElevenLabsSTTProvider(STTProvider):
                     session_data: dict[str, Any] = json.loads(raw_session)
                     if session_data.get("message_type") != "session_started":
                         logger.warning(
-                            "unexpected first message from elevenlabs",
+                            "elevenlabs_unexpected_first_message",
                             msg=session_data,
                         )
                 except TimeoutError:
-                    logger.warning("timeout waiting for elevenlabs session_started")
+                    logger.warning("elevenlabs_session_started_timeout")
                 except Exception as exc:
-                    logger.exception("error reading elevenlabs session_started", error=str(exc))
+                    logger.exception("elevenlabs_session_started_error", error=str(exc))
                     raise
 
                 send_task = asyncio.create_task(
@@ -125,7 +125,7 @@ class ElevenLabsSTTProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("elevenlabs measure_ttft failed", error=str(exc))
+            logger.exception("elevenlabs_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -159,7 +159,7 @@ class ElevenLabsSTTProvider(STTProvider):
                 )
             )
         except Exception as exc:
-            logger.exception("elevenlabs send error", error=str(exc))
+            logger.exception("elevenlabs_send_error", error=str(exc))
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -178,7 +178,7 @@ class ElevenLabsSTTProvider(STTProvider):
                     error_text = msg.get("message", msg.get("error", "Unknown error"))
                     result.error = f"{msg_type}: {error_text}"
                     logger.error(
-                        "elevenlabs api error",
+                        "elevenlabs_api_error",
                         msg_type=msg_type,
                         error=error_text,
                     )
@@ -204,7 +204,7 @@ class ElevenLabsSTTProvider(STTProvider):
                             result.audio_to_final_seconds = now - result.audio_start_time
 
         except Exception as exc:
-            logger.exception("elevenlabs receive error", error=str(exc))
+            logger.exception("elevenlabs_receive_error", error=str(exc))
 
         if committed_parts:
             result.complete_transcript = " ".join(committed_parts).strip() or None

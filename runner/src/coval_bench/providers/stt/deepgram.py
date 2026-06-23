@@ -130,7 +130,7 @@ class DeepgramProvider(STTProvider):
                 await asyncio.gather(send_task, recv_task, return_exceptions=True)
 
         except Exception as exc:
-            logger.exception("deepgram measure_ttft failed", error=str(exc))
+            logger.exception("deepgram_measure_ttft_failed", error=str(exc))
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -175,7 +175,7 @@ class DeepgramProvider(STTProvider):
                     await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "CloseStream"}))
         except Exception as exc:
-            logger.exception("deepgram send error", error=str(exc))
+            logger.exception("deepgram_send_error", error=str(exc))
             raise
 
     # ------------------------------------------------------------------
@@ -267,7 +267,7 @@ class DeepgramProvider(STTProvider):
                         pending_partial = transcript
 
         except Exception as exc:
-            logger.exception("deepgram receive error", error=str(exc))
+            logger.exception("deepgram_receive_error", error=str(exc))
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
