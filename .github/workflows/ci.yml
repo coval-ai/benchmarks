@@ -26,8 +26,36 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: Lint / Test / Build
+  select:
+    name: Select CI guardrails
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_runner: ${{ steps.select.outputs.run_runner }}
+      run_web: ${{ steps.select.outputs.run_web }}
+      methodology_sensitive: ${{ steps.select.outputs.methodology_sensitive }}
+      methodology_marker: ${{ steps.select.outputs.methodology_marker }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select guardrails
+        id: select
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          python3 runner/scripts/ci_select.py \
+            --base "origin/$BASE_REF" \
+            --github-output "$GITHUB_OUTPUT"
+
+  runner-ci:
+    name: Runner CI
+    needs: select
+    if: needs.select.outputs.run_runner == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -36,6 +64,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
@@ -129,6 +158,87 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  web-ci:
+    name: Web CI
+    needs: select
+    if: needs.select.outputs.run_web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+
+      - name: Install dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: lint
+        working-directory: web
+        run: pnpm lint
+
+      - name: test
+        working-directory: web
+        run: pnpm test
+
+      - name: build
+        working-directory: web
+        run: pnpm build
+
+  ci:
+    name: Lint / Test / Build
+    needs: [select, runner-ci, web-ci]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check selected guardrails
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          RUN_RUNNER: ${{ needs.select.outputs.run_runner }}
+          RUN_WEB: ${{ needs.select.outputs.run_web }}
+          RUNNER_RESULT: ${{ needs.runner-ci.result }}
+          WEB_RESULT: ${{ needs.web-ci.result }}
+        run: |
+          set -euo pipefail
+
+          failed=0
+
+          if [ "$SELECT_RESULT" != "success" ]; then
+            echo "::error::Guardrail selector failed with result: $SELECT_RESULT"
+            failed=1
+          fi
+
+          if [ "$RUN_RUNNER" = "true" ] && [ "$RUNNER_RESULT" != "success" ]; then
+            echo "::error::Runner CI was selected but finished with result: $RUNNER_RESULT"
+            failed=1
+          fi
+
+          if [ "$RUN_WEB" = "true" ] && [ "$WEB_RESULT" != "success" ]; then
+            echo "::error::Web CI was selected but finished with result: $WEB_RESULT"
+            failed=1
+          fi
+
+          if [ "$RUN_RUNNER" != "true" ] && [ "$RUN_WEB" != "true" ]; then
+            echo "No runner/web guardrail selected for this PR."
+          fi
+
+          exit "$failed"
+
   # ---------------------------------------------------------------------------
   # Methodology marker reminder — advisory only (warns, never blocks).
   # If a PR changes how a metric is computed (WER normalization, TTFT/TTFA
@@ -140,9 +250,10 @@ jobs:
   # ---------------------------------------------------------------------------
   methodology-gate:
     name: Methodology marker check
+    needs: select
+    if: needs.select.outputs.methodology_sensitive == 'true' && needs.select.outputs.methodology_marker != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: github.event_name == 'pull_request'
     # Advisory only: never let this job block a PR, even on an unexpected error.
     continue-on-error: true
     steps:
