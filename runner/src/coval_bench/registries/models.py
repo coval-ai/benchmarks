@@ -186,6 +186,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="groq",
+        model="canopylabs/orpheus-v1-english",
+        voice="autumn",
+        status=_ACTIVE,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept

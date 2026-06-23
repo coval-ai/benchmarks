@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     gradium_api_key: SecretStr | None = None
     gradium_tts_api_key: SecretStr | None = None
     xai_api_key: SecretStr | None = None
+    groq_api_key: SecretStr | None = None
     smallest_api_key: SecretStr | None = None
     inworld_api_key: SecretStr | None = None
     soniox_api_key: SecretStr | None = None
