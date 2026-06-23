@@ -178,6 +178,13 @@ class BattleOut(BaseModel):
     audio_b_url: str
 
 
+class BattleCreate(BaseModel):
+    """Request to generate a new battle from a user prompt."""
+
+    prompt: str
+    domain: str | None = None
+
+
 class LeaderboardEntryOut(BaseModel):
     """One model's row within an arena leaderboard board."""
 
