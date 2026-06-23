@@ -34,11 +34,14 @@ from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_s
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ArenaLeaderboardResponse,
+    BattleCreate,
     BattleOut,
     LeaderboardEntryOut,
     VoteIn,
     VoteOut,
 )
+from coval_bench.arena.generate import generate_battle
+from coval_bench.arena.pairing import active_tts_models, select_pair
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
@@ -193,3 +196,43 @@ async def cast_vote(
         },
     )
     return VoteOut.model_validate(recorded.model_dump())
+
+
+@router.post("/arena/battle", response_model=BattleOut, status_code=201)
+@limiter.limit("60/minute")
+async def create_battle(
+    request: Request,  # required by slowapi
+    body: BattleCreate,
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+    posthog_client: Posthog | None = Depends(get_posthog),
+) -> BattleOut:
+    """Generate a battle from a prompt: pick two models, synthesize, persist (blind).
+
+    Pairing is uniform random here; adaptive pairing lands in a later PR. Returns
+    502 if either side fails to synthesize (no battle is written).
+    """
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(422, "prompt must not be empty")
+
+    models = active_tts_models()
+    if len(models) < 2:
+        raise HTTPException(503, "not enough active TTS models to form a battle")
+    pair = select_pair(models)
+    battle = await generate_battle(
+        settings,
+        ArenaStore(pool),
+        prompt=prompt,
+        domain=body.domain,
+        pair=pair,
+    )
+    if battle is None:
+        raise HTTPException(502, "audio synthesis failed for one or both models")
+
+    capture_api_event(
+        posthog_client,
+        "arena_battle_generated",
+        {"$process_person_profile": False},
+    )
+    return BattleOut.model_validate(battle.model_dump())
