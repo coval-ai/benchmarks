@@ -189,6 +189,23 @@ def test_insert_and_read_battle(arena_pg: psycopg.Connection[Any]) -> None:
     asyncio.run(_run())
 
 
+def test_count_battles_today(arena_pg: psycopg.Connection[Any]) -> None:
+    _apply_migrations(arena_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(arena_pg)
+        try:
+            store = ArenaStore(pool)
+            assert await store.count_battles_today() == 0
+            await store.insert_battle(_make_battle())
+            await store.insert_battle(_make_battle())
+            assert await store.count_battles_today() == 2
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
 def test_upsert_vote_dedup_updates_in_place(arena_pg: psycopg.Connection[Any]) -> None:
     _apply_migrations(arena_pg)
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.arena.pairing import active_tts_models
@@ -606,3 +607,39 @@ async def test_reveal_after_vote_returns_identities(client: AsyncClient, postgre
     assert data["a"]["model"] == "eleven_multilingual_v2"
     assert data["b"]["provider"] == "cartesia"
     assert data["b"]["model"] == "sonic-3"
+
+
+async def test_create_battle_429_when_cap_reached(
+    client: AsyncClient, app: FastAPI, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At/over the daily cap -> 429, and synthesis is never attempted."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_battle(postgresql)  # one battle already today
+
+    app.state.settings = app.state.settings.model_copy(update={"arena_daily_battle_cap": 1})
+
+    async def _no_synth(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("generate_battle must not run once the cap is reached")
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
+
+    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    assert response.status_code == 429
+
+
+async def test_create_battle_cap_disabled_when_zero(
+    client: AsyncClient, app: FastAPI, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cap of 0 disables the limit: generation proceeds even with battles present."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_battle(postgresql)
+    await _insert_battle(postgresql)
+
+    app.state.settings = app.state.settings.model_copy(update={"arena_daily_battle_cap": 0})
+    monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
+    monkeypatch.setattr(
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+    )
+
+    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    assert response.status_code == 201
