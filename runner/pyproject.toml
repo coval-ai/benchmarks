@@ -11,7 +11,7 @@ readme = "README.md"
 dependencies = [
     # Core
     "pydantic>=2.7",
-    "pydantic-settings>=2.4",
+    "pydantic-settings>=2.14.2",
     "structlog>=24",
     "click>=8.1",
     "httpx[http2]>=0.27",
