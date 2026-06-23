@@ -93,8 +93,17 @@ async def _synthesize(settings: Settings, model: RegisteredModel, prompt: str) -
         logger.warning("arena_missing_voice", provider=model.provider, model=model.model)
         return None
 
-    provider = provider_cls(settings=settings, model=model.model, voice=model.voice)
-    result: TTSResult = await provider.synthesize(prompt)
+    try:
+        provider = provider_cls(settings=settings, model=model.model, voice=model.voice)
+        result: TTSResult = await provider.synthesize(prompt)
+    except Exception as exc:
+        logger.warning(
+            "arena_synthesis_exception",
+            provider=model.provider,
+            model=model.model,
+            error=str(exc),
+        )
+        return None
     if result.error is not None or result.audio_path is None:
         logger.warning(
             "arena_synthesis_failed",
