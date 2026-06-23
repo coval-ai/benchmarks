@@ -21,6 +21,8 @@ import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
+import type { ModelStats } from "@/types/benchmark.types";
+import type { SeriesPoint } from "@/lib/api/client";
 
 export function useDashboardState(page: "tts" | "stt") {
   // State declarations
@@ -50,11 +52,11 @@ export function useDashboardState(page: "tts" | "stt") {
   const windowDataStale = aggregatesQuery.isPlaceholderData;
   const loadError = aggregatesQuery.isError;
 
-  const modelStats = useMemo(
+  const modelStats = useMemo<ModelStats[]>(
     () => aggregatesQuery.data?.model_stats ?? [],
     [aggregatesQuery.data]
   );
-  const series = useMemo(
+  const series = useMemo<SeriesPoint[]>(
     () => aggregatesQuery.data?.series ?? [],
     [aggregatesQuery.data]
   );

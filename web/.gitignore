@@ -11,7 +11,9 @@ node_modules/
 
 # Generated
 generated/
-lib/api/generated/
+!lib/api/generated/
+lib/api/generated/*
+!lib/api/generated/schema.ts
 
 # TypeScript
 *.tsbuildinfo
@@ -29,5 +31,3 @@ Thumbs.db
 
 # Vercel
 .vercel
-
-

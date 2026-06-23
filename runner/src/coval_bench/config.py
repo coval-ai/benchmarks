@@ -106,6 +106,8 @@ class Settings(BaseSettings):
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
+    arena_audio_dir: Path = Path("arena-audio")
+    arena_audio_base_url: str = ""
 
 
 @functools.lru_cache(maxsize=1)

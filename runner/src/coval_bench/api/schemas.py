@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 
@@ -176,6 +176,13 @@ class BattleOut(BaseModel):
     domain: str | None
     audio_a_url: str
     audio_b_url: str
+
+
+class BattleCreate(BaseModel):
+    """Request to generate a new battle from a user prompt."""
+
+    prompt: str = Field(..., max_length=500)
+    domain: str | None = None
 
 
 class LeaderboardEntryOut(BaseModel):
