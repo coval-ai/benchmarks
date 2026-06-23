@@ -1,16 +1,20 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the Voice Arena endpoints (GET /v1/arena/*, POST /v1/arena/vote)."""
+"""Tests for the Voice Arena endpoints (GET/POST /v1/arena/*)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import psycopg
+import pytest
 from httpx import AsyncClient
 
+from coval_bench.arena.pairing import active_tts_models
+from coval_bench.providers.base import TTSResult
 from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
 
 
@@ -474,3 +478,84 @@ async def test_vote_with_invalid_outcome_is_422(client: AsyncClient, postgresql:
         headers=_LABELER_HEADERS,
     )
     assert response.status_code == 422
+
+
+def _fake_tts_providers(fail_models: set[str]) -> dict[str, type]:
+    """A fake TTS_PROVIDERS map: every roster provider returns a stub WAV path.
+
+    Models named in *fail_models* return an error instead, to drive the failure path.
+    """
+
+    class _FakeTTS:
+        def __init__(self, settings: Any, model: str, voice: str) -> None:
+            self.model = model
+
+        async def synthesize(self, text: str) -> TTSResult:
+            if self.model in fail_models:
+                return TTSResult(
+                    provider="fake",
+                    model=self.model,
+                    voice="v",
+                    ttfa_ms=None,
+                    audio_path=None,
+                    error="boom",
+                )
+            return TTSResult(
+                provider="fake",
+                model=self.model,
+                voice="v",
+                ttfa_ms=1.0,
+                audio_path=Path(f"{self.model}.wav"),
+                error=None,
+            )
+
+    return {m.provider: _FakeTTS for m in active_tts_models()}
+
+
+async def test_create_battle_returns_blind_battle(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /arena/battle synthesizes a pair and returns a blind battle (201)."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
+    monkeypatch.setattr(
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+    )
+
+    response = await client.post(
+        "/v1/arena/battle",
+        json={"prompt": "Your appointment is confirmed.", "domain": "customer service"},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert set(data) == {"id", "prompt_text", "domain", "audio_a_url", "audio_b_url"}
+    assert "provider_a" not in data
+    assert "model_a" not in data
+    assert data["prompt_text"] == "Your appointment is confirmed."
+    assert data["domain"] == "customer service"
+    assert data["audio_a_url"].startswith("/clips/")
+
+
+async def test_create_battle_rejects_empty_prompt(client: AsyncClient, postgresql: Any) -> None:
+    """A blank prompt is rejected with 422 — no synthesis attempted."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    response = await client.post("/v1/arena/battle", json={"prompt": "   "})
+    assert response.status_code == 422
+
+
+async def test_create_battle_502_when_synthesis_fails(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If synthesis fails, no battle is persisted and the endpoint returns 502."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    every_model = {m.model for m in active_tts_models()}
+    monkeypatch.setattr(
+        "coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(every_model)
+    )
+    monkeypatch.setattr(
+        "coval_bench.arena.generate.store_clip", lambda settings, src: "/clips/x.wav"
+    )
+
+    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    assert response.status_code == 502
