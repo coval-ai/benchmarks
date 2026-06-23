@@ -562,3 +562,47 @@ async def test_create_battle_502_when_synthesis_fails(
 
     response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
     assert response.status_code == 502
+
+
+async def test_reveal_without_labeler_key_is_403(client: AsyncClient, postgresql: Any) -> None:
+    """No labeler key -> 403, identities never returned."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal")
+    assert response.status_code == 403
+
+
+async def test_reveal_before_vote_is_409(client: AsyncClient, postgresql: Any) -> None:
+    """A battle with no vote yet cannot be revealed."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal", headers=_LABELER_HEADERS)
+    assert response.status_code == 409
+
+
+async def test_reveal_unknown_battle_is_404(client: AsyncClient, postgresql: Any) -> None:
+    """A well-formed but unknown battle id returns 404."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    response = await client.get(
+        "/v1/arena/battle/00000000-0000-0000-0000-000000000000/reveal",
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 404
+
+
+async def test_reveal_after_vote_returns_identities(client: AsyncClient, postgresql: Any) -> None:
+    """Once a vote exists, reveal returns both sides' provider/model."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["a"]["provider"] == "elevenlabs"
+    assert data["a"]["model"] == "eleven_multilingual_v2"
+    assert data["b"]["provider"] == "cartesia"
+    assert data["b"]["model"] == "sonic-3"
