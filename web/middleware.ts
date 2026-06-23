@@ -81,5 +81,5 @@ export function middleware(req: NextRequest): NextResponse {
 }
 
 export const config = {
-  matcher: ["/playground", "/arena"],
+  matcher: ["/playground", "/arena", "/arena/:path*"],
 };
