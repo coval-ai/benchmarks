@@ -41,7 +41,12 @@ from coval_bench.api.schemas import (
     VoteOut,
 )
 from coval_bench.arena.generate import generate_battle
-from coval_bench.arena.pairing import active_tts_models, select_pair
+from coval_bench.arena.pairing import (
+    PAIRING_DOMAIN,
+    PAIRING_METRIC,
+    active_tts_models,
+    select_pair,
+)
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
@@ -209,8 +214,9 @@ async def create_battle(
 ) -> BattleOut:
     """Generate a battle from a prompt: pick two models, synthesize, persist (blind).
 
-    Pairing is uniform random here; adaptive pairing lands in a later PR. Returns
-    502 if either side fails to synthesize (no battle is written).
+    Pairing weights informative matchups from the latest ratings, falling back to
+    uniform at cold start. Returns 502 if either side fails to synthesize (no
+    battle is written).
     """
     prompt = body.prompt.strip()
     if not prompt:
@@ -219,10 +225,12 @@ async def create_battle(
     models = active_tts_models()
     if len(models) < 2:
         raise HTTPException(503, "not enough active TTS models to form a battle")
-    pair = select_pair(models)
+    store = ArenaStore(pool)
+    ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)
+    pair = select_pair(models, ratings)
     battle = await generate_battle(
         settings,
-        ArenaStore(pool),
+        store,
         prompt=prompt,
         domain=body.domain,
         pair=pair,
