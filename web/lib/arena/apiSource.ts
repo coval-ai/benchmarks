@@ -2,9 +2,8 @@ import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from ".
 
 // Real battle source: talks to same-origin Next.js API proxy routes under /api/arena/*,
 // which inject the server-only X-Labeler-Key and proxy to the runner. Inert until
-// NEXT_PUBLIC_ARENA_SOURCE=api is set (the factory defaults to the mock). The BFF routes and
-// the runner endpoints they call are not built yet — this adapter defines the contract they
-// must satisfy:
+// NEXT_PUBLIC_ARENA_SOURCE=api is set (the factory defaults to the mock). The BFF routes it
+// calls:
 //   POST /api/arena/battle              { text }                        -> BlindBattle
 //   POST /api/arena/vote                { battleId, outcome, voterId }  -> VoteResult
 //   GET  /api/arena/battle/{id}/reveal                                  -> Reveal
