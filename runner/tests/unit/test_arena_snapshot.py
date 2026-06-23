@@ -164,7 +164,7 @@ def test_snapshot_persists_one_board(snap_pg: psycopg.Connection[Any]) -> None:
             assert len(rows) == 2
             assert {r["metric_name"] for r in rows} == {"naturalness"}
             assert {r["domain"] for r in rows} == {"all"}
-            assert {r["methodology_version"] for r in rows} == {"davidson-bt-1"}
+            assert {r["methodology_version"] for r in rows} == {"davidson-bt-001"}
             assert len({r["computed_at"] for r in rows}) == 1
             assert {(r["provider"], r["model"]) for r in rows} == {
                 ("cartesia", "sonic-3.5"),

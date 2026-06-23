@@ -18,7 +18,14 @@ import psycopg
 import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
-from coval_bench.db.models import Battle, LeaderboardSnapshot, Vote, VoteOutcome, VoterType
+from coval_bench.db.models import (
+    Battle,
+    LeaderboardSnapshot,
+    PairingRating,
+    Vote,
+    VoteOutcome,
+    VoterType,
+)
 
 ArenaPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 
@@ -189,6 +196,46 @@ class ArenaStore:
         ):
             await cur.executemany(sql, params_seq)
         return len(rows)
+
+    async def get_latest_ratings(
+        self,
+        *,
+        metric_name: str,
+        domain: str,
+    ) -> dict[tuple[str, str], PairingRating]:
+        """Return the latest board's ratings keyed by ``(provider, model)``.
+
+        Reads the single most recent ``(computed_at, methodology_version)`` board
+        for this metric/domain, so two methodology versions never mix. Empty until
+        the snapshot job has produced a board — the cold-start signal the pairing
+        heuristic falls back to uniform on.
+        """
+        sql = """
+            WITH latest AS (
+                SELECT computed_at, methodology_version
+                FROM arena.leaderboard_snapshots
+                WHERE metric_name = %(metric)s AND domain = %(domain)s
+                ORDER BY computed_at DESC, methodology_version DESC
+                LIMIT 1
+            )
+            SELECT s.provider, s.model, s.rating_elo, s.ci_half_width
+            FROM arena.leaderboard_snapshots s
+            JOIN latest l USING (computed_at, methodology_version)
+            WHERE s.metric_name = %(metric)s AND s.domain = %(domain)s
+        """
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(sql, {"metric": metric_name, "domain": domain})
+            rows = await cur.fetchall()
+        return {
+            (row["provider"], row["model"]): PairingRating(
+                rating_elo=row["rating_elo"],
+                ci_half_width=row["ci_half_width"],
+            )
+            for row in rows
+        }
 
     @asynccontextmanager
     async def snapshot_lock(self) -> AsyncIterator[bool]:

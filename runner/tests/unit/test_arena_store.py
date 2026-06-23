@@ -25,7 +25,13 @@ from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql.factories import postgresql, postgresql_proc
 
 from coval_bench.db.arena_store import ArenaStore
-from coval_bench.db.models import Battle, VoteOutcome, VoterType
+from coval_bench.db.models import (
+    Battle,
+    LeaderboardSnapshot,
+    SnapshotStatus,
+    VoteOutcome,
+    VoterType,
+)
 
 # Separate embedded server (random free port) so we don't collide with the
 # db-writer tests' ``pg_proc`` fixture.
@@ -88,6 +94,81 @@ def _make_battle(*, provider_b: str = "elevenlabs", model_b: str = "flash") -> B
         audio_a_url="https://example.test/a.wav",
         audio_b_url="https://example.test/b.wav",
     )
+
+
+def _snapshot(
+    provider: str,
+    model: str,
+    rating_elo: float,
+    *,
+    metric_name: str = "naturalness",
+    domain: str = "all",
+) -> LeaderboardSnapshot:
+    return LeaderboardSnapshot(
+        metric_name=metric_name,
+        methodology_version="davidson-bt-1",
+        domain=domain,
+        provider=provider,
+        model=model,
+        rating_elo=rating_elo,
+        rating_bt=0.0,
+        ci_half_width=25.0,
+        votes_total=100,
+        wins=50.0,
+        losses=45.0,
+        ties=5.0,
+        status=SnapshotStatus.USABLE,
+    )
+
+
+def test_get_latest_ratings_returns_only_latest_board(
+    arena_pg: psycopg.Connection[Any],
+) -> None:
+    _apply_migrations(arena_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(arena_pg)
+        try:
+            store = ArenaStore(pool)
+            # Older board, then a newer one (distinct computed_at via now()).
+            await store.insert_snapshot_board([_snapshot("cartesia", "sonic-3.5", 1000.0)])
+            await asyncio.sleep(0.05)
+            await store.insert_snapshot_board(
+                [
+                    _snapshot("cartesia", "sonic-3.5", 1200.0),
+                    _snapshot("openai", "gpt-4o-mini-tts", 1100.0),
+                ]
+            )
+            # A different metric must not leak into the naturalness board.
+            await store.insert_snapshot_board(
+                [_snapshot("cartesia", "sonic-3.5", 999.0, metric_name="other")]
+            )
+
+            ratings = await store.get_latest_ratings(metric_name="naturalness", domain="all")
+            assert set(ratings) == {("cartesia", "sonic-3.5"), ("openai", "gpt-4o-mini-tts")}
+            assert ratings[("cartesia", "sonic-3.5")].rating_elo == 1200.0
+            assert ratings[("cartesia", "sonic-3.5")].ci_half_width == 25.0
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_get_latest_ratings_empty_before_any_snapshot(
+    arena_pg: psycopg.Connection[Any],
+) -> None:
+    _apply_migrations(arena_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(arena_pg)
+        try:
+            store = ArenaStore(pool)
+            ratings = await store.get_latest_ratings(metric_name="naturalness", domain="all")
+            assert ratings == {}
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
 
 
 def test_insert_and_read_battle(arena_pg: psycopg.Connection[Any]) -> None:

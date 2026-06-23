@@ -42,7 +42,7 @@ async def seed_demo_battles(
 
     for domain, prompts in EXAMPLE_PROMPTS.items():
         for prompt in prompts[:per_domain]:
-            pair = select_pair(models, rng=picker)
+            pair = select_pair(models, {}, rng=picker)
             battle = await generate_battle(
                 settings,
                 store,

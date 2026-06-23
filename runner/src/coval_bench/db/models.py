@@ -21,6 +21,7 @@ __all__ = [
     "Battle",
     "Benchmark",
     "LeaderboardSnapshot",
+    "PairingRating",
     "Result",
     "ResultStatus",
     "Run",
@@ -156,3 +157,10 @@ class LeaderboardSnapshot(BaseModel):
     losses: float
     ties: float
     status: SnapshotStatus
+
+
+class PairingRating(BaseModel):
+    """Minimal rating view the pairing heuristic needs from a leaderboard board."""
+
+    rating_elo: float
+    ci_half_width: float | None = None
