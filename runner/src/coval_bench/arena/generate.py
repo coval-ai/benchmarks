@@ -54,6 +54,9 @@ async def generate_battle(
         _synthesize(settings, model_b, prompt),
     )
     if path_a is None or path_b is None:
+        for path in (path_a, path_b):
+            if path is not None:
+                path.unlink(missing_ok=True)
         logger.warning(
             "arena_battle_generation_failed",
             domain=domain,
@@ -116,7 +119,7 @@ async def _synthesize(settings: Settings, model: RegisteredModel, prompt: str) -
             error=str(exc),
         )
         return None
-    if result.error is not None or result.audio_path is None:
+    if result.error is not None or result.audio_path is None or not result.audio_path.is_file():
         logger.warning(
             "arena_synthesis_failed",
             provider=model.provider,

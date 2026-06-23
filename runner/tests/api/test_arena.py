@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -500,12 +501,14 @@ def _fake_tts_providers(fail_models: set[str]) -> dict[str, type]:
                     audio_path=None,
                     error="boom",
                 )
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
+                path = Path(handle.name)
             return TTSResult(
                 provider="fake",
                 model=self.model,
                 voice="v",
                 ttfa_ms=1.0,
-                audio_path=Path(f"{self.model}.wav"),
+                audio_path=path,
                 error=None,
             )
 
