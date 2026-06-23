@@ -230,3 +230,18 @@ class VoteOut(BaseModel):
     voter_id: str
     created_at: datetime
     updated_at: datetime
+
+
+class RevealModelOut(BaseModel):
+    """One side of a battle, de-anonymized after a vote."""
+
+    provider: str
+    model: str
+    label: str
+
+
+class RevealOut(BaseModel):
+    """Post-vote reveal of both sides' identities."""
+
+    a: RevealModelOut
+    b: RevealModelOut

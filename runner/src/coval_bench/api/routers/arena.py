@@ -37,6 +37,8 @@ from coval_bench.api.schemas import (
     BattleCreate,
     BattleOut,
     LeaderboardEntryOut,
+    RevealModelOut,
+    RevealOut,
     VoteIn,
     VoteOut,
 )
@@ -236,3 +238,27 @@ async def create_battle(
         {"$process_person_profile": False},
     )
     return BattleOut.model_validate(battle.model_dump())
+
+
+@router.get("/arena/battle/{battle_id}/reveal", response_model=RevealOut)
+@limiter.limit("60/minute")
+async def reveal_battle(
+    request: Request,  # required by slowapi
+    battle_id: uuid.UUID,
+    x_labeler_key: str | None = Header(default=None),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
+) -> RevealOut:
+    """De-anonymize a battle's two sides. Labeler-only, and only after a vote exists."""
+    if not _is_authenticated_labeler(x_labeler_key, settings):
+        raise HTTPException(403, "reveal is not enabled")
+    store = ArenaStore(pool)
+    battle = await store.get_battle(battle_id)
+    if battle is None:
+        raise HTTPException(404, f"battle {battle_id} not found")
+    if not await store.list_votes(battle_id=battle_id, limit=1):
+        raise HTTPException(409, "battle has not been voted on yet")
+    return RevealOut(
+        a=RevealModelOut(provider=battle.provider_a, model=battle.model_a, label=battle.model_a),
+        b=RevealModelOut(provider=battle.provider_b, model=battle.model_b, label=battle.model_b),
+    )
