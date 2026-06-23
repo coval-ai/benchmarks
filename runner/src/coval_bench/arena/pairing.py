@@ -52,24 +52,36 @@ def select_pair(
     favors under-measured models. A model absent from ``ratings`` is treated as
     max uncertainty at the mean rating, so new models are auto-prioritized.
 
-    Falls back to uniform random when ``ratings`` is empty (cold start) or when
-    every model is fully converged (all weights zero). ``rng`` is injectable for
-    deterministic tests; ``random.sample``/``choices`` keep the two distinct.
+    Placeholders (mean rating, max CI) are taken only over active-roster models
+    that are rated, so a stale board still carrying paused/retired models does not
+    skew them. The max-CI placeholder is floored at 1.0 so a brand-new model stays
+    prioritized even when every rated model has fully converged.
+
+    Falls back to uniform random when no active model is rated yet (cold start) or
+    when every model is fully converged (all weights zero). ``rng`` is injectable
+    for deterministic tests; ``random.sample``/``choices`` keep the two distinct.
     """
     if len(models) < 2:
         raise ValueError("need at least two models to form a battle")
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise ValueError("scale must be a positive finite number")
     picker = rng if rng is not None else random.Random()  # noqa: S311
     pool = list(models)
 
-    if not ratings:
+    def _uniform() -> tuple[RegisteredModel, RegisteredModel]:
         first, second = picker.sample(pool, 2)
         return first, second
 
-    mean_elo = sum(r.rating_elo for r in ratings.values()) / len(ratings)
+    rated = [r for m in pool if (r := ratings.get((m.provider, m.model))) is not None]
+    if not rated:
+        return _uniform()
+
+    mean_elo = sum(r.rating_elo for r in rated) / len(rated)
     max_ci = max(
-        (r.ci_half_width for r in ratings.values() if r.ci_half_width is not None),
+        (r.ci_half_width for r in rated if r.ci_half_width is not None),
         default=1.0,
     )
+    max_ci = max(max_ci, 1.0)
 
     def elo(m: RegisteredModel) -> float:
         r = ratings.get((m.provider, m.model))
@@ -84,7 +96,6 @@ def select_pair(
     pairs = list(itertools.combinations(pool, 2))
     weights = [math.exp(-abs(elo(a) - elo(b)) / scale) * (ci(a) + ci(b)) for a, b in pairs]
     if sum(weights) <= 0.0:
-        first, second = picker.sample(pool, 2)
-        return first, second
+        return _uniform()
     first, second = picker.choices(pairs, weights=weights, k=1)[0]
     return first, second

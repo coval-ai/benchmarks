@@ -102,11 +102,36 @@ def test_new_model_absent_from_ratings_is_reachable() -> None:
 
 def test_all_converged_falls_back_to_uniform() -> None:
     # every model fully converged (ci=0) → weights sum to 0 → uniform fallback.
+    # Same seed must reproduce the cold-start pick, proving the fallback branch ran.
     ratings = {
         _key(m): _rating(e, 0.0) for m, e in zip(_MODELS, [1000.0, 1100.0, 1200.0], strict=True)
     }
-    first, second = select_pair(_MODELS, ratings, rng=random.Random(3))
-    assert first is not second
+    assert select_pair(_MODELS, ratings, rng=random.Random(3)) == select_pair(
+        _MODELS, {}, rng=random.Random(3)
+    )
+
+
+def test_new_model_prioritized_even_when_known_models_converged() -> None:
+    # a, b fully converged (ci=0); c is absent. The max-CI floor keeps c the only
+    # model with weight, so every selected pair must include it.
+    ratings = {_key(_MODELS[0]): _rating(1000.0, 0.0), _key(_MODELS[1]): _rating(1000.0, 0.0)}
+    pairs = [select_pair(_MODELS, ratings, rng=random.Random(i)) for i in range(50)]
+    assert all("c" in (a.model, b.model) for a, b in pairs)
+
+
+def test_no_active_model_rated_falls_back_to_uniform() -> None:
+    # Board holds only a retired model absent from the active pool → no signal →
+    # uniform, matching the cold-start pick for the same seed.
+    ratings = {("retired", "old"): _rating(1500.0, 40.0)}
+    assert select_pair(_MODELS, ratings, rng=random.Random(1)) == select_pair(
+        _MODELS, {}, rng=random.Random(1)
+    )
+
+
+def test_select_pair_rejects_non_positive_scale() -> None:
+    ratings = {_key(m): _rating(1000.0, 30.0) for m in _MODELS}
+    with pytest.raises(ValueError, match="scale must be"):
+        select_pair(_MODELS, ratings, scale=0.0)
 
 
 def test_active_tts_models_are_tts_and_active() -> None:

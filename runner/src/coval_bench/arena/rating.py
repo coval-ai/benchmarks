@@ -78,8 +78,10 @@ class ConvergenceError(RuntimeError):
 
 # Bump on any behavioural change to the rating math (model, Elo map, bootstrap,
 # status thresholds). Persisted on leaderboard snapshots so a stored rating can
-# be tied back to the method that produced it.
-METHODOLOGY_VERSION: Literal["davidson-bt-1"] = "davidson-bt-1"
+# be tied back to the method that produced it. The numeric suffix is zero-padded
+# so its lexicographic order (used as the leaderboard tiebreaker on equal
+# timestamps) still matches numeric order past version 9.
+METHODOLOGY_VERSION: Literal["davidson-bt-001"] = "davidson-bt-001"
 
 # Standard Bradley-Terry -> Elo scale: a difference of 400 Elo == 10:1 win odds.
 _ELO_BASE = 1500.0
@@ -129,7 +131,7 @@ class ModelRating(BaseModel):
 class RatingResult(BaseModel):
     """Full leaderboard fit: the tie parameter plus one entry per model."""
 
-    methodology_version: Literal["davidson-bt-1"] = METHODOLOGY_VERSION
+    methodology_version: Literal["davidson-bt-001"] = METHODOLOGY_VERSION
     tie_param: float
     models: list[ModelRating]
 
