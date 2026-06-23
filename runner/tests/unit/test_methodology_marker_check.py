@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
-from pytest import CaptureFixture
+from pytest import CaptureFixture, MonkeyPatch
 
 
 def load_methodology_marker_check() -> ModuleType:
@@ -54,6 +55,15 @@ def test_marker_satisfies_sensitive_changes() -> None:
 
 def test_provider_orchestrator_changes_do_not_warn() -> None:
     assert missing_methodology_marker(["runner/src/coval_bench/runner/orchestrator.py"]) == []
+
+
+def test_git_diff_failure_does_not_break_advisory_check(monkeypatch: MonkeyPatch) -> None:
+    def raise_git_error(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(1, ["git", "diff"])
+
+    monkeypatch.setattr(methodology_marker_check.subprocess, "run", raise_git_error)
+
+    assert methodology_marker_check.list_changed_files("origin/main") == []
 
 
 def test_cli_prints_warning_for_missing_marker(capsys: CaptureFixture[str]) -> None:

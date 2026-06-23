@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
@@ -31,7 +32,7 @@ def is_methodology_sensitive(path: str) -> bool:
 
 
 def missing_methodology_marker(changed_files: Iterable[str]) -> list[str]:
-    files = [normalize_path(path) for path in changed_files if normalize_path(path)]
+    files = [normalized for path in changed_files if (normalized := normalize_path(path))]
     sensitive_files = [path for path in files if is_methodology_sensitive(path)]
 
     if not sensitive_files or METHODOLOGY_MARKER_FILE in files:
@@ -41,12 +42,18 @@ def missing_methodology_marker(changed_files: Iterable[str]) -> list[str]:
 
 
 def list_changed_files(base: str) -> list[str]:
-    result = subprocess.run(  # noqa: S603
-        ["/usr/bin/git", "diff", "--name-only", f"{base}...HEAD"],
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
+    git = shutil.which("git") or "git"
+
+    try:
+        result = subprocess.run(  # noqa: S603,S607
+            [git, "diff", "--name-only", f"{base}...HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return []
+
     return [line for line in result.stdout.splitlines() if line]
 
 
