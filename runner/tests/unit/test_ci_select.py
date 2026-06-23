@@ -70,6 +70,15 @@ def test_git_diff_failure_fails_open(monkeypatch: MonkeyPatch) -> None:
     assert ci_select.list_changed_files("origin/main") == []
 
 
+def test_git_diff_timeout_fails_open(monkeypatch: MonkeyPatch) -> None:
+    def raise_git_timeout(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(["git", "diff"], timeout=30)
+
+    monkeypatch.setattr(ci_select.subprocess, "run", raise_git_timeout)
+
+    assert ci_select.list_changed_files("origin/main") == []
+
+
 def test_dataset_changes_are_methodology_sensitive() -> None:
     assert classify_changed_files(["runner/src/coval_bench/datasets/manifest.py"]) == {
         "run_runner": True,

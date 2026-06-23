@@ -94,8 +94,9 @@ def list_changed_files(base: str) -> list[str]:
             check=True,
             stdout=subprocess.PIPE,
             text=True,
+            timeout=30,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return []
 
     return [line for line in result.stdout.splitlines() if line]
