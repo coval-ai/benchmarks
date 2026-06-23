@@ -39,7 +39,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Select guardrails
         id: select
@@ -165,6 +167,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -202,6 +207,7 @@ jobs:
     steps:
       - name: Check selected guardrails
         env:
+          SELECT_RESULT: ${{ needs.select.result }}
           RUN_RUNNER: ${{ needs.select.outputs.run_runner }}
           RUN_WEB: ${{ needs.select.outputs.run_web }}
           RUNNER_RESULT: ${{ needs.runner-ci.result }}
@@ -210,6 +216,11 @@ jobs:
           set -euo pipefail
 
           failed=0
+
+          if [ "$SELECT_RESULT" != "success" ]; then
+            echo "::error::Guardrail selector failed with result: $SELECT_RESULT"
+            failed=1
+          fi
 
           if [ "$RUN_RUNNER" = "true" ] && [ "$RUNNER_RESULT" != "success" ]; then
             echo "::error::Runner CI was selected but finished with result: $RUNNER_RESULT"

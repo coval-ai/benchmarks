@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable, Sequence
@@ -64,7 +65,7 @@ def is_methodology_sensitive(path: str) -> bool:
 
 
 def classify_changed_files(changed_files: Iterable[str]) -> dict[str, bool]:
-    files = [normalize_path(path) for path in changed_files if normalize_path(path)]
+    files = [normalized for path in changed_files if (normalized := normalize_path(path))]
 
     # Fail open when the diff is unavailable or empty. A selector problem should
     # cost CI time, not silently skip the only relevant guardrail.
@@ -85,12 +86,18 @@ def classify_changed_files(changed_files: Iterable[str]) -> dict[str, bool]:
 
 
 def list_changed_files(base: str) -> list[str]:
-    result = subprocess.run(  # noqa: S603
-        ["/usr/bin/git", "diff", "--name-only", f"{base}...HEAD"],
-        check=True,
-        stdout=subprocess.PIPE,
-        text=True,
-    )
+    git = shutil.which("git") or "git"
+
+    try:
+        result = subprocess.run(  # noqa: S603,S607
+            [git, "diff", "--name-only", f"{base}...HEAD"],
+            check=True,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return []
+
     return [line for line in result.stdout.splitlines() if line]
 
 

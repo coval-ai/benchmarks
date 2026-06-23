@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import importlib.util
+import subprocess
 from pathlib import Path
 from types import ModuleType
+
+from pytest import MonkeyPatch
 
 
 def load_ci_select() -> ModuleType:
@@ -56,6 +59,15 @@ def test_empty_diff_fails_open_to_runner_and_web() -> None:
         "methodology_marker": False,
         "methodology_sensitive": False,
     }
+
+
+def test_git_diff_failure_fails_open(monkeypatch: MonkeyPatch) -> None:
+    def raise_git_error(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.CalledProcessError(1, ["git", "diff"])
+
+    monkeypatch.setattr(ci_select.subprocess, "run", raise_git_error)
+
+    assert ci_select.list_changed_files("origin/main") == []
 
 
 def test_dataset_changes_are_methodology_sensitive() -> None:
