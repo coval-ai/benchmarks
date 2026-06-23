@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from pytest import CaptureFixture, MonkeyPatch
 
 
@@ -57,13 +58,14 @@ def test_provider_orchestrator_changes_do_not_warn() -> None:
     assert missing_methodology_marker(["runner/src/coval_bench/runner/orchestrator.py"]) == []
 
 
-def test_git_diff_failure_does_not_break_advisory_check(monkeypatch: MonkeyPatch) -> None:
+def test_git_diff_failure_surfaces_instead_of_passing_clean(monkeypatch: MonkeyPatch) -> None:
     def raise_git_error(*_args: object, **_kwargs: object) -> None:
         raise subprocess.CalledProcessError(1, ["git", "diff"])
 
     monkeypatch.setattr(methodology_marker_check.subprocess, "run", raise_git_error)
 
-    assert methodology_marker_check.list_changed_files("origin/main") == []
+    with pytest.raises(RuntimeError, match="Unable to list changed files against origin/main"):
+        methodology_marker_check.list_changed_files("origin/main")
 
 
 def test_cli_prints_warning_for_missing_marker(capsys: CaptureFixture[str]) -> None:

@@ -51,8 +51,8 @@ def list_changed_files(base: str) -> list[str]:
             stdout=subprocess.PIPE,
             text=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        return []
+    except (FileNotFoundError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(f"Unable to list changed files against {base}") from error
 
     return [line for line in result.stdout.splitlines() if line]
 
