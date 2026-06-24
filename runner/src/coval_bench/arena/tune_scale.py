@@ -135,10 +135,11 @@ def _simulate_once(
         outcome = _sample_outcome(pa_t, pb_t, rng)
         outcomes.append(BattleOutcome(model_a=id_a, model_b=id_b, outcome=outcome))
 
-        # Score the *prediction made before* observing — only decisive battles,
-        # using the conditional win prob so ln2 is the exact coin-flip baseline.
-        if outcome != "TIE" and id_a in theta_fit and id_b in theta_fit:
-            pa, pb, _ = _davidson(theta_fit[id_a], theta_fit[id_b], nu_fit)
+        # Score every decisive battle by conditional win prob (ln2 = coin flip).
+        # Models not yet fitted use the neutral prior theta=0 (scores at ln2)
+        # instead of being dropped, so the loss covers the full run.
+        if outcome != "TIE":
+            pa, pb, _ = _davidson(theta_fit.get(id_a, 0.0), theta_fit.get(id_b, 0.0), nu_fit)
             denom = pa + pb
             p_winner = (pa if outcome == "A_WIN" else pb) / denom if denom > 0 else 0.5
             loss += _penalized_ce(p_winner, k)
@@ -179,6 +180,16 @@ def tune_scale(
     is drawn per replication. Loss is normalized by decisive count so SCALEs that
     happen to produce different tie rates stay comparable.
     """
+    if not scales:
+        raise ValueError("scales must contain at least one value")
+    if n_battles <= 0:
+        raise ValueError("n_battles must be > 0")
+    if refit_every <= 0:
+        raise ValueError("refit_every must be > 0")
+    if replications <= 0:
+        raise ValueError("replications must be > 0")
+    if bootstrap_rounds < 0:
+        raise ValueError("bootstrap_rounds must be >= 0")
     roster = active_tts_models()
     if len(roster) < 2:
         raise ValueError("need at least two active TTS models to simulate")

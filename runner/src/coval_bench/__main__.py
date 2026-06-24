@@ -266,14 +266,14 @@ def arena_seed_battles(per_domain: int) -> None:
     show_default=True,
     help="Comma-separated candidate SCALE values.",
 )
-@click.option("--battles", default=2000, show_default=True, type=int)
-@click.option("--refit-every", default=100, show_default=True, type=int)
-@click.option("--replications", default=3, show_default=True, type=int)
+@click.option("--battles", default=2000, show_default=True, type=click.IntRange(min=1))
+@click.option("--refit-every", default=100, show_default=True, type=click.IntRange(min=1))
+@click.option("--replications", default=3, show_default=True, type=click.IntRange(min=1))
 @click.option(
     "--bootstrap-rounds",
     default=100,
     show_default=True,
-    type=int,
+    type=click.IntRange(min=0),
     help="Per-refit bootstrap rounds (drives the CI term in pairing).",
 )
 @click.option(
@@ -307,7 +307,12 @@ def arena_tune_scale(
 
     from coval_bench.arena.tune_scale import render_loss_curve, tune_scale
 
-    scale_values = [float(s) for s in scales.split(",") if s.strip()]
+    try:
+        scale_values = [float(s) for s in scales.split(",") if s.strip()]
+    except ValueError as exc:
+        raise click.BadParameter(f"--scales must be comma-separated numbers: {exc}") from exc
+    if not scale_values:
+        raise click.BadParameter("--scales must contain at least one value")
     results = tune_scale(
         scales=scale_values,
         n_battles=battles,

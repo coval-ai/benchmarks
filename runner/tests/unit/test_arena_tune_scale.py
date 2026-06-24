@@ -9,6 +9,8 @@ import math
 import random
 from collections import Counter
 
+import pytest
+
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.rating import _ELO_SCALE
 from coval_bench.arena.tune_scale import (
@@ -98,3 +100,33 @@ def test_tune_scale_returns_one_finite_result_per_scale() -> None:
     assert [r.scale for r in results] == [100.0, 200.0]
     assert all(math.isfinite(r.loss) for r in results)
     assert all(r.decisive > 0 for r in results)
+
+
+def test_short_run_with_no_refit_is_still_finite() -> None:
+    # n_battles < refit_every -> the fit never runs, so every battle is scored
+    # against the neutral prior. Loss must stay finite (not collapse to inf).
+    results = tune_scale(
+        scales=(150.0,),
+        n_battles=20,
+        refit_every=100,
+        replications=1,
+        bootstrap_rounds=0,
+        seed=0,
+    )
+    assert math.isfinite(results[0].loss)
+    assert results[0].decisive > 0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"scales": ()},
+        {"n_battles": 0},
+        {"refit_every": 0},
+        {"replications": 0},
+        {"bootstrap_rounds": -1},
+    ],
+)
+def test_tune_scale_rejects_invalid_params(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        tune_scale(**kwargs)  # type: ignore[arg-type]
