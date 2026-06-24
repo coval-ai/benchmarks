@@ -14,8 +14,20 @@ import sys
 from typing import Any, Literal
 
 import structlog
+from structlog.typing import EventDict, WrappedLogger
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
+
+
+def add_gcp_severity(_logger: WrappedLogger, _method_name: str, event_dict: EventDict) -> EventDict:
+    """Copy ``level`` into a top-level ``severity`` Cloud Logging can filter on.
+
+    Must run after ``add_log_level``; GCP expects DEBUG/INFO/WARNING/ERROR.
+    """
+    level = event_dict.get("level")
+    if level is not None:
+        event_dict["severity"] = level.upper()
+    return event_dict
 
 
 def configure_logging(
@@ -32,6 +44,7 @@ def configure_logging(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
+            add_gcp_severity,
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
@@ -78,6 +91,7 @@ def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:
                 ],
                 "foreign_pre_chain": [
                     structlog.processors.add_log_level,
+                    add_gcp_severity,
                     structlog.processors.TimeStamper(fmt="iso"),
                     structlog.processors.format_exc_info,
                 ],

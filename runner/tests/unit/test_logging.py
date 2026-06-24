@@ -47,6 +47,16 @@ def test_configure_logging_emits_json(capsys: pytest.CaptureFixture[str]) -> Non
     assert "timestamp" in record
 
 
+def test_configure_logging_sets_gcp_severity(capsys: pytest.CaptureFixture[str]) -> None:
+    # Cloud Logging filters/alerts on top-level `severity`, not structlog's `level`.
+    configure_logging(level="INFO")
+    structlog.get_logger("test").warning("careful")
+
+    record: dict[str, Any] = json.loads(capsys.readouterr().out.strip())
+    assert record["level"] == "warning"
+    assert record["severity"] == "WARNING"
+
+
 def test_run_failed_event_matches_alert_filter(capsys: pytest.CaptureFixture[str]) -> None:
     # benchmark_run_failure filters on jsonPayload.event="RUN_FAILED" (see
     # benchmark-infra modules/alerting). The key name and value are a prod-alerting
@@ -91,3 +101,4 @@ def test_uvicorn_config_renders_error_log_as_json(
     record: dict[str, Any] = json.loads(lines[0])
     assert record["event"] == "Application startup complete."
     assert record["level"] == "info"
+    assert record["severity"] == "INFO"
