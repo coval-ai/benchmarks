@@ -76,10 +76,11 @@ function playgroundSession(req: NextRequest): NextResponse {
 }
 
 export function middleware(req: NextRequest): NextResponse {
+  if (req.nextUrl.pathname.startsWith("/api/arena")) return arenaGate(req);
   if (req.nextUrl.pathname.startsWith("/arena")) return arenaGate(req);
   return playgroundSession(req);
 }
 
 export const config = {
-  matcher: ["/playground", "/arena", "/arena/:path*"],
+  matcher: ["/playground", "/arena", "/arena/:path*", "/api/arena/:path*"],
 };
