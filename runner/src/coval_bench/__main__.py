@@ -252,5 +252,89 @@ def arena_seed_battles(per_domain: int) -> None:
     )
 
 
+@arena.command(name="cooccurrence")
+@click.option(
+    "--out",
+    default="arena-cooccurrence.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML output path.",
+)
+@click.option(
+    "--metric",
+    default="naturalness",
+    show_default=True,
+    help="Board metric used to Elo-order the axis.",
+)
+@click.option(
+    "--domain",
+    default="all",
+    show_default=True,
+    help="Board domain used to Elo-order the axis.",
+)
+def arena_cooccurrence(out: str, metric: str, domain: str) -> None:
+    """Render the who-battled-whom heatmap (admin: reveals model identities)."""
+    from pathlib import Path
+
+    from coval_bench.arena.monitoring import build_cooccurrence, render_cooccurrence
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _run() -> tuple[int, int]:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            store = ArenaStore(pool)
+            rows = await store.get_cooccurrence_counts()
+            ratings = await store.get_latest_ratings(metric_name=metric, domain=domain)
+        elos = {key: r.rating_elo for key, r in ratings.items()}
+        cooc = build_cooccurrence(rows, elos)
+        Path(out).write_text(render_cooccurrence(cooc), encoding="utf-8")
+        return cooc.total, len(cooc.labels)
+
+    total, models = asyncio.run(_run())
+    click.echo(
+        json.dumps({"event": "arena_cooccurrence", "out": out, "battles": total, "models": models})
+    )
+
+
+@arena.command(name="convergence")
+@click.option(
+    "--out",
+    default="arena-convergence.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML output path.",
+)
+@click.option("--metric", default="naturalness", show_default=True)
+@click.option("--domain", default="all", show_default=True)
+@click.option(
+    "--threshold",
+    default=9.0,
+    show_default=True,
+    type=float,
+    help="CI half-width (Elo) counted as converged.",
+)
+def arena_convergence(out: str, metric: str, domain: str, threshold: float) -> None:
+    """Render CI-vs-votes convergence per model from snapshot history (admin)."""
+    from pathlib import Path
+
+    from coval_bench.arena.monitoring import build_convergence, render_convergence
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _run() -> int:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            rows = await ArenaStore(pool).get_snapshot_history(metric_name=metric, domain=domain)
+        conv = build_convergence(rows, threshold=threshold)
+        Path(out).write_text(render_convergence(conv), encoding="utf-8")
+        return len(conv.series)
+
+    models = asyncio.run(_run())
+    click.echo(json.dumps({"event": "arena_convergence", "out": out, "models": models}))
+
+
 if __name__ == "__main__":
     cli()
