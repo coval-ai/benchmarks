@@ -21,6 +21,11 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._transcript_utils import (
+    add_partial_transcript,
+    finalize_transcript,
+    set_first_token,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -78,10 +83,14 @@ class GladiaSTTProvider(STTProvider):
                     )
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
-                for outcome in outcomes:
-                    if isinstance(outcome, Exception) and result.error is None:
-                        result.error = str(outcome)
+                try:
+                    await recv_task
+                finally:
+                    send_task.cancel()
+                    send_outcome = await asyncio.gather(send_task, return_exceptions=True)
+                # CancelledError is a BaseException; isinstance keeps only real send failures.
+                if isinstance(send_outcome[0], Exception) and result.error is None:
+                    result.error = str(send_outcome[0])
 
         except Exception as exc:
             logger.exception("gladia_measure_ttft_failed", error=str(exc))
@@ -162,27 +171,16 @@ class GladiaSTTProvider(STTProvider):
                 if not transcript:
                     continue
 
-                if result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    result.first_token_content = (
-                        transcript[:30] + "..." if len(transcript) > 30 else transcript
-                    )
-
+                set_first_token(result, transcript, now=now)
+                add_partial_transcript(result, transcript)
                 if data.get("is_final"):
                     final_parts.append(transcript)
                     if result.audio_start_time is not None:
                         result.audio_to_final_seconds = now - result.audio_start_time
-                else:
-                    result.partial_transcripts.append(transcript)
 
         except Exception as exc:
             logger.exception("gladia_receive_error", error=str(exc))
             if result.error is None:
                 result.error = str(exc)
 
-        if final_parts:
-            result.complete_transcript = " ".join(final_parts).strip() or None
-
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+        finalize_transcript(result, final_segments=final_parts, partial_fallback="longest")
