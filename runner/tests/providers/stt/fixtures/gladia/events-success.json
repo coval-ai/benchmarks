@@ -1,0 +1,6 @@
+[
+  { "type": "audio_chunk", "acknowledged": true },
+  { "type": "transcript", "data": { "is_final": false, "utterance": { "text": "hello" } } },
+  { "type": "transcript", "data": { "is_final": true, "utterance": { "text": "hello world" } } },
+  { "type": "transcript", "data": { "is_final": true, "utterance": { "text": "how are you" } } }
+]
