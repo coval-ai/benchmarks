@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from uuid import UUID
 
 import psycopg
@@ -254,6 +255,67 @@ class ArenaStore:
             )
             for row in rows
         }
+
+    async def get_cooccurrence_counts(
+        self,
+    ) -> list[tuple[str, str, str, str, int]]:
+        """Per-direction battle counts: ``(prov_a, model_a, prov_b, model_b, n)``.
+
+        Raw ``GROUP BY`` over battles — direction is NOT folded here (the A/B slot
+        is randomized at generation), so the caller symmetrizes. Cheap enough to
+        run live on every admin load (~105 groups for a 15-model roster).
+        """
+        sql = """
+            SELECT provider_a, model_a, provider_b, model_b, COUNT(*) AS n
+            FROM arena.battles
+            GROUP BY provider_a, model_a, provider_b, model_b
+        """
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(sql)
+            rows = await cur.fetchall()
+        return [
+            (row["provider_a"], row["model_a"], row["provider_b"], row["model_b"], int(row["n"]))
+            for row in rows
+        ]
+
+    async def get_snapshot_history(
+        self,
+        *,
+        metric_name: str,
+        domain: str,
+    ) -> list[tuple[datetime, str, str, int, float | None]]:
+        """All snapshot points for a board, oldest first.
+
+        ``(computed_at, provider, model, votes_total, ci_half_width)`` across every
+        board version for this metric/domain — the convergence view's raw input.
+        ``ci_half_width`` may be null (bootstrap produced none); the caller drops
+        those points from the line.
+        """
+        sql = """
+            SELECT computed_at, provider, model, votes_total, ci_half_width
+            FROM arena.leaderboard_snapshots
+            WHERE metric_name = %(metric)s AND domain = %(domain)s
+            ORDER BY computed_at
+        """
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(sql, {"metric": metric_name, "domain": domain})
+            rows = await cur.fetchall()
+        return [
+            (
+                row["computed_at"],
+                row["provider"],
+                row["model"],
+                int(row["votes_total"]),
+                None if row["ci_half_width"] is None else float(row["ci_half_width"]),
+            )
+            for row in rows
+        ]
 
     @asynccontextmanager
     async def snapshot_lock(self) -> AsyncIterator[bool]:
