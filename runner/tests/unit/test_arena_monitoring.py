@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from coval_bench.arena._render import line_chart
 from coval_bench.arena.monitoring import (
     _empty_inter_pairs,
     build_convergence,
@@ -87,20 +88,35 @@ def test_empty_inter_pairs_ranks_widest_gap_first() -> None:
 
 def test_convergence_time_to_threshold_is_first_crossing() -> None:
     rows = [
-        (_DT1, "p", "a", 10, 50.0),
-        (_DT2, "p", "a", 40, 8.0),
+        (_DT1, "p", "a", 110, 50.0),
+        (_DT2, "p", "a", 140, 8.0),
     ]
     conv = build_convergence(rows, threshold=9.0)
-    assert conv.time_to_threshold["p/a"] == 40
+    assert conv.time_to_threshold["p/a"] == 140
 
 
-def test_convergence_drops_null_ci_points() -> None:
+def test_convergence_keeps_null_ci_model_off_the_line() -> None:
     rows: list[tuple[datetime, str, str, int, float | None]] = [
         (_DT1, "p", "b", 10, None),
     ]
     conv = build_convergence(rows)
+    # null points never plot, but the model stays visible in the table.
     assert "p/b" not in conv.series
-    assert "p/b" not in conv.time_to_threshold
+    assert conv.time_to_threshold["p/b"] is None
+    assert conv.status["p/b"] == "preliminary"
+
+
+def test_convergence_vote_floor_blocks_tiny_sample() -> None:
+    # A tight CI on too few votes is a small-sample artifact, not convergence.
+    rows = [(_DT1, "p", "a", 20, 5.0), (_DT2, "p", "a", 120, 5.0)]
+    conv = build_convergence(rows, threshold=9.0, min_votes=100)
+    assert conv.time_to_threshold["p/a"] == 120
+
+
+def test_convergence_status_is_latest_ci_tier() -> None:
+    rows = [(_DT1, "p", "a", 50, 80.0), (_DT2, "p", "a", 200, 20.0)]
+    conv = build_convergence(rows)
+    assert conv.status["p/a"] == "established"
 
 
 def test_convergence_never_reached_is_none() -> None:
@@ -112,14 +128,30 @@ def test_convergence_never_reached_is_none() -> None:
 def test_convergence_line_is_ordered_by_votes_not_time() -> None:
     # Pathological: votes decrease over time. The plotted line must still go
     # left-to-right on the votes axis.
-    rows = [(_DT1, "p", "a", 40, 30.0), (_DT2, "p", "a", 10, 8.0)]
+    rows = [(_DT1, "p", "a", 140, 30.0), (_DT2, "p", "a", 110, 8.0)]
     conv = build_convergence(rows, threshold=9.0)
     xs = [x for x, _ in conv.series["p/a"]]
     assert xs == sorted(xs)
     # ...while time-to-threshold stays chronological (the DT2 snapshot).
-    assert conv.time_to_threshold["p/a"] == 10
+    assert conv.time_to_threshold["p/a"] == 110
 
 
 def test_render_convergence_renders_without_data() -> None:
     conv = build_convergence([])
     assert "<h1>" in render_convergence(conv)
+
+
+def test_line_chart_widens_canvas_for_long_legend_labels() -> None:
+    # Regression: legend text must fit inside the viewBox, not clip at the edge.
+    short = line_chart({"a": [(0.0, 0.0)]}, x_label="x", y_label="y")
+    long = line_chart(
+        {"anthropic/claude-opus-4-some-very-long-name": [(0.0, 0.0)]},
+        x_label="x",
+        y_label="y",
+    )
+    assert _viewbox_width(long) > _viewbox_width(short)
+
+
+def _viewbox_width(svg: str) -> float:
+    inner = svg.split('viewBox="0 0 ', 1)[1]
+    return float(inner.split(" ", 1)[0])

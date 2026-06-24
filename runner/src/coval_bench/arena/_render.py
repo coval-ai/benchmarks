@@ -124,7 +124,11 @@ def line_chart(
     def py(y: float) -> float:
         return height - pad - (y - y_min) / y_span * (height - 2 * pad)
 
-    parts = [f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}">']
+    # Legend grows rightward from the plot edge; widen the canvas so long names
+    # are not clipped at the viewBox (~6px/char at font 10).
+    label_px = max((len(name) for name in series), default=0) * 6
+    canvas_w = width - pad + 12 + label_px
+    parts = [f'<svg viewBox="0 0 {canvas_w:g} {height}" width="{canvas_w:g}" height="{height}">']
     parts.append(
         f'<line x1="{pad}" y1="{height - pad}" x2="{width - pad}" '
         f'y2="{height - pad}" stroke="#999"/>'

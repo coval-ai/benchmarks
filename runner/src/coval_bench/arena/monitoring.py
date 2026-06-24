@@ -24,10 +24,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from coval_bench.arena import _render
+from coval_bench.arena.rating import Status, classify_status
 
 # Per-model CI half-width (Elo) we treat as "converged" for time-to-threshold.
 # The established target band is +/-4..9 Elo; 9 is the loose end of that band.
 DEFAULT_CONVERGED_CI = 9.0
+# Cold-start vote floor: a tight CI on fewer votes is a small-sample artifact,
+# not convergence (adaptive-pairing plan: ~100-300 votes/model).
+DEFAULT_MIN_VOTES = 100
 
 ModelKey = tuple[str, str]  # (provider, model)
 
@@ -141,43 +145,63 @@ def render_cooccurrence(cooc: Cooccurrence) -> str:
 class Convergence:
     """Per-model CI-vs-votes trajectories plus time-to-threshold."""
 
-    # model label -> ordered (votes_total, ci_half_width) points
+    # model label -> ordered (votes_total, ci_half_width) points (null CI omitted)
     series: dict[str, list[tuple[float, float]]]
-    # model label -> votes at first crossing of the converged-CI threshold (or None)
+    # model label -> votes at first snapshot meeting BOTH bars (or None)
     time_to_threshold: dict[str, int | None]
+    # model label -> current confidence tier from its latest CI half-width
+    status: dict[str, Status]
     threshold: float
+    min_votes: int
 
 
 def build_convergence(
     rows: Sequence[tuple[datetime, str, str, int, float | None]],
     *,
     threshold: float = DEFAULT_CONVERGED_CI,
+    min_votes: int = DEFAULT_MIN_VOTES,
 ) -> Convergence:
-    """Group snapshot history into per-model trajectories.
+    """Group snapshot history ``(computed_at, provider, model, votes_total,
+    ci_half_width)`` into per-model trajectories.
 
-    ``rows`` are ``(computed_at, provider, model, votes_total, ci_half_width)``
-    across every board. Points are ordered by ``computed_at``. Snapshots with a
-    null ``ci_half_width`` (bootstrap produced none) are dropped from the line but
-    still considered "not yet converged". ``time_to_threshold`` is the votes_total
-    at the first snapshot whose CI is at or below ``threshold``.
+    Every model appears in ``time_to_threshold`` and ``status`` even if its CI is
+    always null; only null points drop from the plotted ``series``. Converged =
+    first snapshot with CI <= ``threshold`` Elo AND votes >= ``min_votes`` (the
+    floor blocks tiny-sample false positives). ``status`` is ``classify_status``
+    on the latest CI.
     """
-    by_model: dict[str, list[tuple[datetime, int, float]]] = {}
+    by_model: dict[str, list[tuple[datetime, int, float | None]]] = {}
     for computed_at, prov, model, votes, ci in rows:
-        if ci is None:
-            continue
         by_model.setdefault(_label((prov, model)), []).append((computed_at, votes, ci))
 
     series: dict[str, list[tuple[float, float]]] = {}
     ttt: dict[str, int | None] = {}
+    status: dict[str, Status] = {}
     for label, points in by_model.items():
         points.sort(key=lambda p: p[0])
-        # time-to-threshold is the *first chronological* crossing...
-        crossed = next((votes for _, votes, ci in points if ci <= threshold), None)
+        # first chronological snapshot clearing both bars
+        crossed = next(
+            (
+                votes
+                for _, votes, ci in points
+                if ci is not None and ci <= threshold and votes >= min_votes
+            ),
+            None,
+        )
         ttt[label] = crossed
-        # ...but the plotted line is ordered by votes so the x-axis is monotonic
-        # even if a snapshot's votes_total is ever out of step with its timestamp.
-        series[label] = [(float(votes), ci) for _, votes, ci in sorted(points, key=lambda p: p[1])]
-    return Convergence(series=series, time_to_threshold=ttt, threshold=threshold)
+        # latest CI drives the tier (None -> preliminary)
+        status[label] = classify_status(points[-1][2])
+        # drop null points; order by votes for a monotonic x-axis
+        pts = [(float(votes), ci) for _, votes, ci in points if ci is not None]
+        if pts:
+            series[label] = sorted(pts, key=lambda p: p[0])
+    return Convergence(
+        series=series,
+        time_to_threshold=ttt,
+        status=status,
+        threshold=threshold,
+        min_votes=min_votes,
+    )
 
 
 def render_convergence(conv: Convergence) -> str:
@@ -192,11 +216,14 @@ def render_convergence(conv: Convergence) -> str:
     def _row(label: str) -> str:
         votes = conv.time_to_threshold[label]
         cell = "not reached" if votes is None else str(votes)
-        return f"<tr><th class=rowhdr>{_render._esc(label)}</th><td>{cell}</td></tr>"
+        return (
+            f"<tr><th class=rowhdr>{_render._esc(label)}</th>"
+            f"<td>{conv.status[label]}</td><td>{cell}</td></tr>"
+        )
 
     table = (
-        f"<h2>Votes to reach +/-{conv.threshold:g} Elo</h2>"
-        "<table><tr><th></th><th>votes</th></tr>"
+        f"<h2>Convergence (target +/-{conv.threshold:g} Elo, min {conv.min_votes} votes)</h2>"
+        "<table><tr><th></th><th>tier</th><th>votes to converge</th></tr>"
         + "".join(_row(label) for label in sorted(conv.time_to_threshold))
         + "</table>"
         "<p class=muted>&gt;5,000 votes to converge ⇒ SCALE too large "
