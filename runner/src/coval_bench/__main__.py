@@ -252,5 +252,163 @@ def arena_seed_battles(per_domain: int) -> None:
     )
 
 
+@arena.command(name="cooccurrence")
+@click.option(
+    "--out",
+    default="arena-cooccurrence.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML output path.",
+)
+@click.option(
+    "--metric",
+    default="naturalness",
+    show_default=True,
+    help="Board metric used to Elo-order the axis.",
+)
+@click.option(
+    "--domain",
+    default="all",
+    show_default=True,
+    help="Board domain used to Elo-order the axis.",
+)
+def arena_cooccurrence(out: str, metric: str, domain: str) -> None:
+    """Render the who-battled-whom heatmap (admin: reveals model identities)."""
+    from pathlib import Path
+
+    from coval_bench.arena.monitoring import build_cooccurrence, render_cooccurrence
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _run() -> tuple[int, int]:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            store = ArenaStore(pool)
+            rows = await store.get_cooccurrence_counts()
+            ratings = await store.get_latest_ratings(metric_name=metric, domain=domain)
+        elos = {key: r.rating_elo for key, r in ratings.items()}
+        cooc = build_cooccurrence(rows, elos)
+        Path(out).write_text(render_cooccurrence(cooc), encoding="utf-8")
+        return cooc.total, len(cooc.labels)
+
+    total, models = asyncio.run(_run())
+    click.echo(
+        json.dumps({"event": "arena_cooccurrence", "out": out, "battles": total, "models": models})
+    )
+
+
+@arena.command(name="convergence")
+@click.option(
+    "--out",
+    default="arena-convergence.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML output path.",
+)
+@click.option("--metric", default="naturalness", show_default=True)
+@click.option("--domain", default="all", show_default=True)
+@click.option(
+    "--threshold",
+    default=9.0,
+    show_default=True,
+    type=float,
+    help="CI half-width (Elo) counted as converged.",
+)
+def arena_convergence(out: str, metric: str, domain: str, threshold: float) -> None:
+    """Render CI-vs-votes convergence per model from snapshot history (admin)."""
+    from pathlib import Path
+
+    from coval_bench.arena.monitoring import build_convergence, render_convergence
+    from coval_bench.config import get_settings
+    from coval_bench.db.arena_store import ArenaStore
+    from coval_bench.db.conn import lifespan_pool
+
+    async def _run() -> int:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            rows = await ArenaStore(pool).get_snapshot_history(metric_name=metric, domain=domain)
+        conv = build_convergence(rows, threshold=threshold)
+        Path(out).write_text(render_convergence(conv), encoding="utf-8")
+        return len(conv.series)
+
+    models = asyncio.run(_run())
+    click.echo(json.dumps({"event": "arena_convergence", "out": out, "models": models}))
+
+
+@arena.command(name="tune-scale")
+@click.option(
+    "--out",
+    default="tune-scale.html",
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="HTML loss-curve output path.",
+)
+@click.option(
+    "--scales",
+    default="50,100,150,200,250",
+    show_default=True,
+    help="Comma-separated candidate SCALE values.",
+)
+@click.option("--battles", default=2000, show_default=True, type=int)
+@click.option("--refit-every", default=100, show_default=True, type=int)
+@click.option("--replications", default=3, show_default=True, type=int)
+@click.option(
+    "--bootstrap-rounds",
+    default=100,
+    show_default=True,
+    type=int,
+    help="Per-refit bootstrap rounds (drives the CI term in pairing).",
+)
+@click.option(
+    "--elo-spread",
+    default=800.0,
+    show_default=True,
+    type=float,
+    help="True top-to-bottom Elo gap of the synthetic roster.",
+)
+@click.option(
+    "--k",
+    default=1.0,
+    show_default=True,
+    type=float,
+    help="Confidently-wrong penalty weight in the loss.",
+)
+@click.option("--seed", default=0, show_default=True, type=int)
+def arena_tune_scale(
+    out: str,
+    scales: str,
+    battles: int,
+    refit_every: int,
+    replications: int,
+    bootstrap_rounds: int,
+    elo_spread: float,
+    k: float,
+    seed: int,
+) -> None:
+    """Offline: simulate battles to pick the pairing SCALE minimizing penalized CE."""
+    from pathlib import Path
+
+    from coval_bench.arena.tune_scale import render_loss_curve, tune_scale
+
+    scale_values = [float(s) for s in scales.split(",") if s.strip()]
+    results = tune_scale(
+        scales=scale_values,
+        n_battles=battles,
+        refit_every=refit_every,
+        replications=replications,
+        bootstrap_rounds=bootstrap_rounds,
+        elo_spread=elo_spread,
+        k=k,
+        seed=seed,
+    )
+    Path(out).write_text(render_loss_curve(results), encoding="utf-8")
+    best = min(results, key=lambda r: r.loss)
+    for r in results:
+        marker = " <-- best" if r is best else ""
+        click.echo(f"SCALE {r.scale:6g}   L {r.loss:.4f}{marker}")
+    click.echo(json.dumps({"event": "arena_tune_scale", "out": out, "best_scale": best.scale}))
+
+
 if __name__ == "__main__":
     cli()
