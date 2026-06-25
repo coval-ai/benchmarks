@@ -1997,6 +1997,41 @@ async def test_stt_wer_crash_not_double_logged(audio_file: Path, settings: Setti
 
 
 @pytest.mark.asyncio
+async def test_stt_ttfs_crash_not_double_logged(audio_file: Path, settings: Settings) -> None:
+    """A TTFS compute crash warns at its source; the item summary stays silent."""
+
+    def _raising_ttfs(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("ttfs blew up")
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],  # speech_end_offset_ms set → TTFS runs
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with (
+            patch("coval_bench.metrics.compute_ttfs", _raising_ttfs),
+            structlog.testing.capture_logs() as captured,
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert _events(captured, "ttfs_computation_failed"), "source warning still emitted"
+    assert not _events(captured, "stt_item_failed"), "crash failure must not be logged twice"
+
+
+@pytest.mark.asyncio
 async def test_tts_transport_gate_logs_item_failure(settings: Settings) -> None:
     """An HTTP/1.1 contamination failure is surfaced in the per-item summary."""
     with tempfile.TemporaryDirectory() as tmpdir:

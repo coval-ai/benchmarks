@@ -151,7 +151,9 @@ def _log_item_failures(
     reasons = {
         r.metric_type: r.error
         for r in results
-        if r.status is result_status.FAILED and r.error not in logged_reasons
+        if r.status is result_status.FAILED
+        and r.error is not None
+        and r.error not in logged_reasons
     }
     if reasons:
         logger.warning(event, provider=provider, model=model, item=item, reasons=reasons)
