@@ -102,10 +102,20 @@ class AssemblyAIProvider(STTProvider):
                     )
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result, final_event))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("assemblyai_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "assemblyai_measure_ttft_failed",
+                provider="assemblyai",
+                model=self._model,
+                exc_info=exc,
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -143,7 +153,9 @@ class AssemblyAIProvider(STTProvider):
                 await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "Terminate"}))
         except Exception as exc:
-            logger.exception("assemblyai_send_error", error=str(exc))
+            logger.warning(
+                "assemblyai_send_error", provider="assemblyai", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(
@@ -181,7 +193,14 @@ class AssemblyAIProvider(STTProvider):
                     final_event.set()
 
         except Exception as exc:
-            logger.exception("assemblyai_receive_error", error=str(exc))
+            logger.warning(
+                "assemblyai_receive_error",
+                provider="assemblyai",
+                model=self._model,
+                exc_info=exc,
+            )
+            if result.error is None and last_final_time is None:
+                result.error = str(exc)
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time

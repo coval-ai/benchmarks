@@ -87,14 +87,19 @@ class CartesiaSTTProvider(STTProvider):
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
                 outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
-                # gather swallows task exceptions into the result list; surface the
-                # first one so a failed send/recv never reads as a clean run.
-                for outcome in outcomes:
-                    if isinstance(outcome, BaseException) and result.error is None:
-                        result.error = str(outcome)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("cartesia_stt_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "cartesia_stt_measure_ttft_failed",
+                provider="cartesia",
+                model=self._model,
+                exc_info=exc,
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -124,7 +129,9 @@ class CartesiaSTTProvider(STTProvider):
             await ws.send("finalize")
             await ws.send("close")
         except Exception as exc:
-            logger.exception("cartesia_stt_send_error", error=str(exc))
+            logger.warning(
+                "cartesia_stt_send_error", provider="cartesia", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -169,8 +176,13 @@ class CartesiaSTTProvider(STTProvider):
                         result.audio_to_final_seconds = now - result.audio_start_time
 
         except Exception as exc:
-            logger.exception("cartesia_stt_receive_error", error=str(exc))
-            if result.error is None:
+            logger.warning(
+                "cartesia_stt_receive_error",
+                provider="cartesia",
+                model=self._model,
+                exc_info=exc,
+            )
+            if result.error is None and result.audio_to_final_seconds is None:
                 result.error = str(exc)
 
         # Per Cartesia docs, join is_final deltas verbatim — they carry their own

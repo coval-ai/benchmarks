@@ -121,7 +121,9 @@ class ElevenLabsTTSProvider(TTSProvider):
                     if chunk:
                         audio_chunks.append(chunk)
         except Exception as exc:
-            logger.debug("elevenlabs_error", exc_info=True)
+            logger.warning(
+                "elevenlabs_error", provider="elevenlabs", model=self._model, exc_info=exc
+            )
             return finalize_tts_result(
                 provider="elevenlabs",
                 model=self._model,

@@ -173,7 +173,12 @@ class GoogleSTTProvider(STTProvider):
                         if saw_final:
                             last_final_time = now
             except Exception as exc:
-                logger.exception("google_streaming_recognize_failed", error=str(exc))
+                logger.warning(
+                    "google_streaming_recognize_failed",
+                    provider="google",
+                    model=self._model,
+                    exc_info=exc,
+                )
                 raise
 
             if last_final_time is not None and result.audio_start_time is not None:
@@ -191,7 +196,9 @@ class GoogleSTTProvider(STTProvider):
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 await loop.run_in_executor(executor, _run_sync)
         except Exception as exc:
-            logger.exception("google_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "google_measure_ttft_failed", provider="google", model=self._model, exc_info=exc
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start

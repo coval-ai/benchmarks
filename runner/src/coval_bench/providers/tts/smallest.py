@@ -102,7 +102,7 @@ class SmallestTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.warning("smallest_error", exc_info=True)
+            logger.warning("smallest_error", provider="smallest", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="smallest",
                 model=self._model,

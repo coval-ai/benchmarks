@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 
 import structlog
 
-_log = structlog.get_logger("coval_bench.runner")
+logger = structlog.get_logger("coval_bench.runner")
 
 _DEFAULT_RETRY_ON: tuple[type[BaseException], ...] = (
     TimeoutError,  # asyncio.TimeoutError is an alias for builtin TimeoutError (Python 3.11+)
@@ -64,7 +64,7 @@ async def with_retry[T](
         except retry_on as exc:
             last_exc = exc
             if attempt + 1 >= max_attempts:
-                _log.error(
+                logger.error(
                     "retry_exhausted",
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
@@ -74,7 +74,7 @@ async def with_retry[T](
             cap = min(base_delay_s * (2**attempt), max_delay_s)
             # Full jitter — non-cryptographic, used only for backoff scheduling
             delay = random.uniform(0, cap)  # noqa: S311
-            _log.warning(
+            logger.warning(
                 "provider_call_retry",
                 attempt=attempt + 1,
                 max_attempts=max_attempts,

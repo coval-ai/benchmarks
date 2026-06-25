@@ -110,7 +110,7 @@ class GradiumTTSProvider(TTSProvider):
                         raise RuntimeError(str(msg.get("message", msg)))
 
         except Exception as exc:
-            logger.debug("gradium_tts_error", exc_info=True)
+            logger.warning("gradium_tts_error", provider="gradium", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="gradium",
                 model=self._model,

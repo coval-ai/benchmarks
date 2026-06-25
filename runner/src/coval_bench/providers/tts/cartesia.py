@@ -108,7 +108,7 @@ class CartesiaTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.debug("cartesia_error", exc_info=True)
+            logger.warning("cartesia_error", provider="cartesia", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="cartesia",
                 model=self._model,

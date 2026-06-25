@@ -128,7 +128,7 @@ class SonioxTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.debug("soniox_tts_error", exc_info=True)
+            logger.warning("soniox_tts_error", provider="soniox", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="soniox",
                 model=self._model,

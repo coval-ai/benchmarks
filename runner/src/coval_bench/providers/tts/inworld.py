@@ -130,7 +130,7 @@ class InworldTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.warning("inworld_error", exc_info=True)
+            logger.warning("inworld_error", provider="inworld", model=self._model, exc_info=exc)
             # The credential rides in the URL query, so scrub it from any
             # exception that echoes the URI before it lands in a stored result.
             return finalize_tts_result(

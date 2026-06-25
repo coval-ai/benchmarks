@@ -126,7 +126,7 @@ class GroqTTSProvider(TTSProvider):
                             first_chunk_at = time.monotonic()
                         audio_chunks.append(chunk)
         except Exception as exc:
-            logger.debug("groq_http_error", exc_info=True)
+            logger.warning("groq_http_error", provider="groq", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="groq",
                 model=self._model,

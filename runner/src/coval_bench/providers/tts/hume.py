@@ -121,6 +121,7 @@ class HumeTTSProvider(TTSProvider):
         except TimeoutError:
             logger.warning(
                 "hume_timeout",
+                provider="hume",
                 model=self._model,
                 timeout_s=_WS_SESSION_TIMEOUT_S,
             )
@@ -136,7 +137,7 @@ class HumeTTSProvider(TTSProvider):
             )
 
         except Exception as exc:
-            logger.warning("hume_error", exc_info=True)
+            logger.warning("hume_error", provider="hume", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="hume",
                 model=self._model,
