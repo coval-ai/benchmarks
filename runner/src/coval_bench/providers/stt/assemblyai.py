@@ -3,7 +3,7 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Model: universal-streaming
+Models: universal-streaming, u3-rt-pro
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -25,11 +25,11 @@ from coval_bench.providers.base import STTProvider, TranscriptionResult
 
 logger = structlog.get_logger(__name__)
 
-# Maps user-facing model names to the speech_model value required by the API.
-# format_turns is omitted (default=false) — the formatting pass adds latency that
-# would inflate TTFT measurements.
+# Maps user-facing model names to the API speech_model. Pinned explicitly so
+# universal-streaming can't silently fall back to the u3-rt-pro server default.
 _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
+    "u3-rt-pro": "u3-rt-pro",
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 

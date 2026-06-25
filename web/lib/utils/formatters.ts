@@ -120,6 +120,7 @@ export function normalizeModelName(modelKey: string): string {
     "gpt-4o-transcribe": "GPT-4o Transcribe",
     "gpt-4o-mini-transcribe": "GPT-4o mini Transcribe",
     "universal-streaming": "Universal Streaming",
+    "u3-rt-pro": "Universal-3 Pro",
     "ink-2": "Ink 2",
     default: "Default",
     enhanced: "Enhanced"

@@ -76,6 +76,41 @@ def test_websocket_url_contains_required_params() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected_speech_model"),
+    [
+        # u3-rt-pro is the server default; keep universal-streaming pinned to English.
+        ("universal-streaming", "universal-streaming-english"),
+        ("u3-rt-pro", "u3-rt-pro"),
+    ],
+)
+async def test_url_pins_speech_model(
+    fake_api_key: SecretStr, model: str, expected_speech_model: str
+) -> None:
+    provider = AssemblyAIProvider(api_key=fake_api_key, model=model)
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect",
+        return_value=_fake_connect([]),
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert f"speech_model={expected_speech_model}" in url
+
+
+def test_provider_name_u3_rt_pro() -> None:
+    provider = AssemblyAIProvider(api_key=SecretStr("k"), model="u3-rt-pro")
+    assert provider.name == "assemblyai-u3-rt-pro"
+
+
+@pytest.mark.asyncio
 async def test_force_endpoint_sent_before_terminate(
     fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
 ) -> None:

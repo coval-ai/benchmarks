@@ -68,6 +68,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_STT, provider="assemblyai", model="universal-streaming", status=_ACTIVE
     ),
+    RegisteredModel(benchmark=_STT, provider="assemblyai", model="u3-rt-pro", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
