@@ -25,13 +25,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
+import structlog
 from posthog import Posthog
 from pydantic import SecretStr
 
@@ -126,6 +127,7 @@ def _make_dataset_item(path: Path, transcript: str = "hello world") -> Any:
 
 def _make_tts_item(transcript: str = "hello world") -> Any:
     item = MagicMock()
+    item.testcase_id = "tts-0001"
     item.transcript = transcript
     return item
 
@@ -1411,6 +1413,11 @@ def _recorded_rows(writer: MagicMock) -> list[Result]:
     return [row for call in writer.record_results.await_args_list for row in call.args[0]]
 
 
+def _events(captured: list[MutableMapping[str, Any]], name: str) -> list[MutableMapping[str, Any]]:
+    """Captured structlog events whose event name matches *name*."""
+    return [e for e in captured if e.get("event") == name]
+
+
 @pytest.mark.asyncio
 async def test_stt_empty_result_marked_failed(audio_file: Path, settings: Settings) -> None:
     """No-raise return with no metrics → TTFT/AudioToFinal/RTF FAILED, no WER row, run FAILED."""
@@ -1839,6 +1846,247 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         assert by_metric["WER"].metric_value is None
         assert "wer blew up" in (by_metric["WER"].error or "")
         assert summary.status == str(RunStatus.PARTIAL)
+
+
+# ---------------------------------------------------------------------------
+# 18-22. per-item failure summary logging (silent paths log; no double-log)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stt_empty_result_logs_item_failure(audio_file: Path, settings: Settings) -> None:
+    """A no-value return surfaces one stt_item_failed line keyed by metric."""
+    empty = TranscriptionResult(provider="deepgram")  # all metrics None, no error
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=empty)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    failures = _events(captured, "stt_item_failed")
+    assert len(failures) == 1, "one summary line per failed item, not one per row"
+    event = failures[0]
+    assert event["provider"] == "deepgram"
+    assert event["item"] == "0001.wav"
+    # Every silent FAILED metric is carried with its reason.
+    assert {"TTFT", "AudioToFinal", "RTF"} <= set(event["reasons"])
+    assert all("produced" in reason for reason in event["reasons"].values())
+
+
+@pytest.mark.asyncio
+async def test_stt_provider_error_logs_item_failure(audio_file: Path, settings: Settings) -> None:
+    """A provider-set result.error (no raise) surfaces in the per-item summary."""
+    errored = TranscriptionResult(
+        provider="deepgram",
+        ttft_seconds=0.3,
+        complete_transcript="partial words",
+        error="websocket closed unexpectedly",
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=errored)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    failures = _events(captured, "stt_item_failed")
+    assert len(failures) == 1
+    reasons = failures[0]["reasons"]
+    assert reasons  # the provider message reached the log
+    assert all("websocket closed" in reason for reason in reasons.values())
+
+
+@pytest.mark.asyncio
+async def test_stt_provider_exception_not_double_logged(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A raised provider error warns once at its source — no second item summary."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert _events(captured, "stt_provider_call_failed"), "source warning still emitted"
+    assert not _events(captured, "stt_item_failed"), "exception failure must not be logged twice"
+
+
+@pytest.mark.asyncio
+async def test_stt_wer_crash_not_double_logged(audio_file: Path, settings: Settings) -> None:
+    """A WER compute crash warns at its source; the item summary stays silent."""
+    from coval_bench.metrics import compute_rtf
+
+    def _raising_wer(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("wer blew up")
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._get_metrics",
+                return_value=(_raising_wer, compute_rtf),
+            ),
+            structlog.testing.capture_logs() as captured,
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert _events(captured, "wer_computation_failed"), "source warning still emitted"
+    assert not _events(captured, "stt_item_failed"), "crash failure must not be logged twice"
+
+
+@pytest.mark.asyncio
+async def test_stt_ttfs_crash_not_double_logged(audio_file: Path, settings: Settings) -> None:
+    """A TTFS compute crash warns at its source; the item summary stays silent."""
+
+    def _raising_ttfs(*_args: Any, **_kwargs: Any) -> Any:
+        raise ValueError("ttfs blew up")
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],  # speech_end_offset_ms set → TTFS runs
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with (
+            patch("coval_bench.metrics.compute_ttfs", _raising_ttfs),
+            structlog.testing.capture_logs() as captured,
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert _events(captured, "ttfs_computation_failed"), "source warning still emitted"
+    assert not _events(captured, "stt_item_failed"), "crash failure must not be logged twice"
+
+
+@pytest.mark.asyncio
+async def test_tts_transport_gate_logs_item_failure(settings: Settings) -> None:
+    """An HTTP/1.1 contamination failure is surfaced in the per-item summary."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "synth.wav"
+        audio_path.write_bytes(b"\x00" * 512)
+
+        hume_entry = _registry_entry(Benchmark.TTS, "hume")
+        tts_result = TTSResult(
+            provider="hume",
+            model=hume_entry.model,
+            voice=hume_entry.voice or "v",
+            ttfa_ms=120.0,
+            audio_path=audio_path,
+            error=None,
+            http_version="HTTP/1.1",
+        )
+
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=tts_result)
+        provider_cls = MagicMock(return_value=provider_inst)
+
+        matrix = [
+            *_paused_registry(Benchmark.TTS),
+            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+        ]
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        async with _orchestrator_env(
+            audio_path=audio_path,
+            tts_items=[_make_tts_item("hello world")],
+            tts_providers={"hume": provider_cls},
+            run=run,
+            writer=writer,
+        ) as _:
+            with (
+                patch(
+                    "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                    return_value="hello world",
+                ),
+                structlog.testing.capture_logs() as captured,
+            ):
+                await run_benchmarks(
+                    settings=settings,
+                    benchmark_kind="tts",
+                    smoke=True,
+                    matrix_overrides=matrix,
+                )
+
+    failures = _events(captured, "tts_item_failed")
+    assert len(failures) == 1
+    event = failures[0]
+    assert event["item"] == "tts-0001"
+    assert "HTTP/1.1" in event["reasons"]["TTFA"]
 
 
 # ---------------------------------------------------------------------------
