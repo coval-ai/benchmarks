@@ -128,8 +128,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(arena.router, prefix="/v1")
 
     # Serve locally-generated arena clips when no external audio host is set
-    # (prod points arena_audio_base_url at the GCS/CDN origin instead).
-    if not resolved.arena_audio_base_url:
+    # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).
+    if not resolved.arena_audio_base_url and not resolved.arena_gcs_bucket:
         clips_dir = resolved.arena_audio_dir / "clips"
         clips_dir.mkdir(parents=True, exist_ok=True)
         app.mount("/clips", StaticFiles(directory=clips_dir), name="clips")

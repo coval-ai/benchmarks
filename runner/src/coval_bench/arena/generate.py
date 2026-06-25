@@ -67,6 +67,15 @@ async def generate_battle(
         )
         return None
 
+    try:
+        audio_a_url, audio_b_url = await asyncio.gather(
+            asyncio.to_thread(store_clip, settings, path_a),
+            asyncio.to_thread(store_clip, settings, path_b),
+        )
+    except Exception:
+        path_a.unlink(missing_ok=True)
+        path_b.unlink(missing_ok=True)
+        raise
     battle = Battle(
         provider_a=model_a.provider,
         model_a=model_a.model,
@@ -74,8 +83,8 @@ async def generate_battle(
         model_b=model_b.model,
         domain=domain,
         prompt_text=prompt,
-        audio_a_url=store_clip(settings, path_a),
-        audio_b_url=store_clip(settings, path_b),
+        audio_a_url=audio_a_url,
+        audio_b_url=audio_b_url,
     )
     inserted = await store.insert_battle(battle)
     logger.info(
