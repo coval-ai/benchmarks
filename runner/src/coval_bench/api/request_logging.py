@@ -81,7 +81,7 @@ class RequestLoggingMiddleware:
                     if status >= 500
                     else logger.warning
                     if status >= 400
-                    else logger.info
+                    else logger.debug
                 )
                 emit(
                     "http_request",
