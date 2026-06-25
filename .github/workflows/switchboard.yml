@@ -64,7 +64,11 @@ jobs:
 
       - name: Generate token for Switchboard
         id: app_token
+        if: env.RELEASE_APP_ID != '' && env.RELEASE_APP_PRIVATE_KEY != ''
         uses: actions/create-github-app-token@v3
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -72,6 +76,7 @@ jobs:
           repositories: ci-cd-switchboard
 
       - name: Checkout Switchboard
+        if: steps.app_token.outputs.token != ''
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
@@ -87,6 +92,7 @@ jobs:
 
       - name: Resolve changed files
         id: changed_files
+        if: steps.app_token.outputs.token != ''
         uses: ./switchboard-src/.github/actions/resolve-changed-files
         with:
           manual-changed-files-json: ${{ github.event.inputs.changed_files_json }}
@@ -94,9 +100,32 @@ jobs:
           pull-request-fallback-json: '["runner/pyproject.toml","web/package.json"]'
           merge-group-fallback-json: '["runner/pyproject.toml","web/package.json",".github/workflows/ci.yml",".github/workflows/web-ci.yml"]'
 
+      - name: Resolve changed files without Switchboard token
+        id: changed_files_fallback
+        if: steps.app_token.outputs.token == ''
+        run: |
+          set -euo pipefail
+          mkdir -p switchboard
+          node <<'NODE'
+          const fs = require("node:fs")
+          const fallbackReason = "Switchboard app token unavailable; running conservative fallback adapters"
+          const changedFiles = [
+            "runner/pyproject.toml",
+            "web/package.json",
+            ".github/workflows/ci.yml",
+            ".github/workflows/web-ci.yml",
+          ]
+          fs.writeFileSync(
+            "switchboard/changed-files.json",
+            `${JSON.stringify({ changedFiles, fallbackReason, selectorMode: "token-unavailable-fallback" }, null, 2)}\n`,
+          )
+          NODE
+          echo "selector_failed=true" >> "$GITHUB_OUTPUT"
+          echo "fallback_reason=Switchboard app token unavailable; running conservative fallback adapters" >> "$GITHUB_OUTPUT"
+
       - name: Build Switchboard event
         env:
-          SELECTOR_FAILED: ${{ steps.changed_files.outputs.selector_failed }}
+          SELECTOR_FAILED: ${{ steps.changed_files.outputs.selector_failed || steps.changed_files_fallback.outputs.selector_failed || 'false' }}
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -134,6 +163,7 @@ jobs:
 
       - name: Plan Switchboard checks
         id: switchboard
+        if: steps.app_token.outputs.token != ''
         uses: ./switchboard-src/.github/actions/switchboard-plan
         with:
           event: ${{ github.workspace }}/switchboard/event.json
@@ -146,9 +176,15 @@ jobs:
         id: adapters
         env:
           SELECTED_CHECK_IDS: ${{ steps.switchboard.outputs.selected_check_ids }}
+          SWITCHBOARD_TOKEN_AVAILABLE: ${{ steps.app_token.outputs.token != '' }}
         run: |
           set -euo pipefail
           node <<'NODE' >> "$GITHUB_OUTPUT"
+          if (process.env.SWITCHBOARD_TOKEN_AVAILABLE !== "true") {
+            console.log("run_runner_ci=true")
+            console.log("run_web_ci=true")
+            process.exit(0)
+          }
           const selected = new Set(JSON.parse(process.env.SELECTED_CHECK_IDS || "[]"))
           console.log(`run_runner_ci=${selected.has("benchmarks.runner.ci")}`)
           console.log(`run_web_ci=${selected.has("benchmarks.web.ci")}`)
@@ -164,7 +200,8 @@ jobs:
             echo "- Selected check ids: ${{ steps.switchboard.outputs.selected_check_ids || '[]' }}"
             echo "- Required gates: ${{ steps.switchboard.outputs.required_gates || '[]' }}"
             echo "- Workflow ownership: ${{ steps.switchboard.outputs.workflow_ownership || '{}' }}"
-            echo "- Selector failed: ${{ steps.changed_files.outputs.selector_failed || 'false' }}"
+            echo "- Selector failed: ${{ steps.changed_files.outputs.selector_failed || steps.changed_files_fallback.outputs.selector_failed || 'false' }}"
+            echo "- Fallback reason: ${{ steps.changed_files.outputs.fallback_reason || steps.changed_files_fallback.outputs.fallback_reason || 'none' }}"
             echo "- Planner outcome: ${{ steps.switchboard.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
