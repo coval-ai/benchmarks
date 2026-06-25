@@ -132,6 +132,31 @@ def _metric_outcome(
     return result_status.SUCCESS, None
 
 
+def _log_item_failures(
+    event: str,
+    results: list[Any],
+    logged_reasons: set[str],
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+    *,
+    provider: str,
+    model: str,
+    item: str | None,
+) -> None:
+    """Emit one per-item warning for FAILED rows nothing else logged.
+
+    A failed item fans out to several FAILED rows, so this logs once, keyed by
+    metric, not per row. *logged_reasons* carries messages already warned at
+    their source (exceptions, metric crashes) so they are not logged twice.
+    """
+    reasons = {
+        r.metric_type: r.error
+        for r in results
+        if r.status is result_status.FAILED and r.error not in logged_reasons
+    }
+    if reasons:
+        logger.warning(event, provider=provider, model=model, item=item, reasons=reasons)
+
+
 async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
     """Transcribe *audio_path* with OpenAI ``whisper-1`` and return the text.
 
@@ -218,6 +243,8 @@ async def _run_stt_item(
     compute_wer, compute_rtf = _get_metrics()
 
     results: list[Any] = []
+    # Reasons already warned at their source; the per-item summary skips these.
+    logged_reasons: set[str] = set()
 
     async with sem:
         provider_cls = stt_providers.get(entry.provider)
@@ -266,6 +293,7 @@ async def _run_stt_item(
                 )
         except Exception as exc:
             item_error = _truncate(str(exc))
+            logged_reasons.add(item_error)
             logger.warning(
                 "stt_provider_call_failed",
                 provider=entry.provider,
@@ -352,6 +380,7 @@ async def _run_stt_item(
                 ttfs_value = compute_ttfs(audio_to_final, speech_end_offset_ms / 1000.0)
             except Exception as exc:
                 ttfs_calc_error = str(exc)
+                logged_reasons.add(_truncate(ttfs_calc_error))
                 logger.warning(
                     "ttfs_computation_failed",
                     provider=entry.provider,
@@ -459,6 +488,7 @@ async def _run_stt_item(
                 # compute_wer is deterministic over a transcript we already obtained, so a
                 # crash here is a genuine failure — surface it as a FAILED row rather than
                 # silently dropping it and leaving the run marked SUCCEEDED.
+                logged_reasons.add(_truncate(str(exc)))
                 logger.warning(
                     "wer_computation_failed",
                     provider=entry.provider,
@@ -480,6 +510,16 @@ async def _run_stt_item(
                         error=_truncate(str(exc)),
                     )
                 )
+
+    _log_item_failures(
+        "stt_item_failed",
+        results,
+        logged_reasons,
+        ResultStatus,
+        provider=entry.provider,
+        model=entry.model,
+        item=audio_path.name,
+    )
 
     if writer is not None and results:
         try:
@@ -523,6 +563,8 @@ async def _run_tts_item(
 
     results: list[Any] = []
     audio_path: Path | None = None
+    # Reasons already warned at their source; the per-item summary skips these.
+    logged_reasons: set[str] = set()
 
     async with sem:
         provider_cls = tts_providers.get(entry.provider)
@@ -547,6 +589,7 @@ async def _run_tts_item(
             audio_path = tts_result.audio_path
         except Exception as exc:
             item_error = _truncate(str(exc))
+            logged_reasons.add(item_error)
             logger.warning(
                 "tts_provider_call_failed",
                 provider=entry.provider,
@@ -648,6 +691,7 @@ async def _run_tts_item(
                             wer_percentage=wer_result.wer_percentage,
                         )
                     except Exception as exc:
+                        logged_reasons.add(_truncate(str(exc)))
                         logger.warning(
                             "tts_wer_computation_failed",
                             provider=entry.provider,
@@ -681,6 +725,16 @@ async def _run_tts_item(
                         path=str(audio_path),
                         exc_info=exc,
                     )
+
+    _log_item_failures(
+        "tts_item_failed",
+        results,
+        logged_reasons,
+        ResultStatus,
+        provider=entry.provider,
+        model=entry.model,
+        item=item.testcase_id,
+    )
 
     if writer is not None and results:
         try:
