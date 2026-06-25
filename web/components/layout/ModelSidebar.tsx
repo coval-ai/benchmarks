@@ -24,6 +24,7 @@ const ModelSidebar: React.FC = () => {
     modelsByProvider,
     selectedModels,
     toggleModelSelection: onToggleModelSelection,
+    toggleProviderSelection: onToggleProviderSelection,
   } = useDashboard();
 
   const containerRef = React.useRef<HTMLDivElement>(null);
@@ -75,11 +76,61 @@ const ModelSidebar: React.FC = () => {
         {/* Model Selection Content */}
         <div ref={linksRef} className="space-y-2">
           <div>
-            {Object.entries(modelsByProvider).map(([provider, models]) => (
+            {Object.entries(modelsByProvider).map(([provider, models]) => {
+              const selectedCount = models.filter((m) =>
+                selectedModels.includes(m)
+              ).length;
+              const allSelected =
+                models.length > 0 && selectedCount === models.length;
+              const someSelected = selectedCount > 0 && !allSelected;
+              return (
               <div key={provider} className="mt-4 first:mt-0">
-                <div className="text-text-primary pt-1.5 pb-0.5 px-2 text-sm font-bold">
+                <label className="flex items-center gap-2 text-text-primary pt-1.5 pb-0.5 px-2 text-sm font-bold cursor-pointer">
+                  <span className="relative inline-flex h-3.5 w-3.5 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someSelected;
+                      }}
+                      onChange={() => onToggleProviderSelection(provider)}
+                      aria-label={`${
+                        allSelected ? "Deselect" : "Select"
+                      } all ${normalizeProviderName(provider)} models`}
+                      className="peer h-3.5 w-3.5 shrink-0 cursor-pointer appearance-none rounded-[3px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      style={{
+                        backgroundColor:
+                          allSelected || someSelected
+                            ? "var(--color-text-primary)"
+                            : "#d4d2cc",
+                      }}
+                    />
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 14 14"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 peer-checked:block"
+                    >
+                      <path d="M3.5 7.5l2.5 2.5 4.5-5" />
+                    </svg>
+                    <svg
+                      aria-hidden
+                      viewBox="0 0 14 14"
+                      fill="none"
+                      stroke="white"
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      className="pointer-events-none absolute inset-0 hidden h-3.5 w-3.5 peer-indeterminate:block"
+                    >
+                      <path d="M3.5 7h7" />
+                    </svg>
+                  </span>
                   {normalizeProviderName(provider)}
-                </div>
+                </label>
                 <div className="space-y-0">
                   {models.map((model) => {
                     const checked = selectedModels.includes(model);
@@ -125,7 +176,8 @@ const ModelSidebar: React.FC = () => {
                   })}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
