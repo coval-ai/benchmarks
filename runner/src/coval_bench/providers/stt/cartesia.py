@@ -86,7 +86,12 @@ class CartesiaSTTProvider(STTProvider):
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
                 if result.error is None and result.audio_to_final_seconds is None:
                     for outcome in outcomes:
                         if isinstance(outcome, Exception):
