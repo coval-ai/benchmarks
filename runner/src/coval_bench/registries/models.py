@@ -69,6 +69,12 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT, provider="assemblyai", model="universal-streaming", status=_ACTIVE
     ),
     RegisteredModel(
+        benchmark=_STT,
+        provider="assemblyai",
+        model="universal-streaming-multilingual",
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
         benchmark=_STT, provider="assemblyai", model="universal-3.5-pro", status=_ACTIVE
     ),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),

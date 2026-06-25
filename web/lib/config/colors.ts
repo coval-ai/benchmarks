@@ -46,6 +46,7 @@ export const modelColors: Record<string, string> = {
 
   // AssemblyAI — amethyst family (#8E44AD).
   "universal-streaming": "#8E44AD",
+  "universal-streaming-multilingual": "#A569BD",
   "universal-3.5-pro": "#6C3483",
 
   // Speechmatics — navy family (#21618C).
