@@ -64,11 +64,7 @@ jobs:
 
       - name: Generate token for Switchboard
         id: app_token
-        if: env.RELEASE_APP_ID != '' && env.RELEASE_APP_PRIVATE_KEY != ''
         uses: actions/create-github-app-token@v3
-        env:
-          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
-          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -76,7 +72,6 @@ jobs:
           repositories: ci-cd-switchboard
 
       - name: Checkout Switchboard
-        if: steps.app_token.outputs.token != ''
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
@@ -86,54 +81,18 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        if: steps.app_token.outputs.token != ''
         uses: actions/setup-node@v6
         with:
           node-version: "22"
 
       - name: Resolve changed files
         id: changed_files
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ github.token }}
-          MANUAL_CHANGED_FILES_JSON: ${{ github.event.inputs.changed_files_json }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          mkdir -p switchboard
-
-          selector_failed=false
-          fallback_reason=""
-
-          if [ "${{ github.event_name }}" = "merge_group" ]; then
-            selector_failed=true
-            fallback_reason="merge queue changed-file selector unavailable in benchmarks; running conservative full repo check"
-            printf '{"changedFiles":["runner/pyproject.toml","web/package.json",".github/workflows/ci.yml",".github/workflows/web-ci.yml"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            if gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate \
-              | jq -s 'add | map(.filename) | unique | {changedFiles: ., selectorMode: "file-scoped"}' > switchboard/changed-files.json
-            then
-              :
-            else
-              selector_failed=true
-              fallback_reason="pull request changed-file selector failed"
-              printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
-            fi
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            manual_changed_files_json="${MANUAL_CHANGED_FILES_JSON:-[\"runner/pyproject.toml\",\"web/package.json\"]}"
-            if jq -cen --argjson changedFiles "$manual_changed_files_json" '$changedFiles | if type == "array" then {changedFiles: (map(tostring) | unique | sort), selectorMode: "manual"} else error("changed_files_json must be a JSON array") end' > switchboard/changed-files.json; then
-              :
-            else
-              selector_failed=true
-              fallback_reason="manual changed-file input was invalid"
-              printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"fallbackReason":"%s","selectorMode":"fallback-full"}\n' "$fallback_reason" > switchboard/changed-files.json
-            fi
-          else
-            printf '{"changedFiles":["runner/pyproject.toml","web/package.json"],"selectorMode":"fallback-full"}\n' > switchboard/changed-files.json
-          fi
-
-          echo "selector_failed=$selector_failed" >> "$GITHUB_OUTPUT"
-          echo "fallback_reason=$fallback_reason" >> "$GITHUB_OUTPUT"
+        uses: ./switchboard-src/.github/actions/resolve-changed-files
+        with:
+          manual-changed-files-json: ${{ github.event.inputs.changed_files_json }}
+          default-changed-files-json: '["runner/pyproject.toml","web/package.json"]'
+          pull-request-fallback-json: '["runner/pyproject.toml","web/package.json"]'
+          merge-group-fallback-json: '["runner/pyproject.toml","web/package.json",".github/workflows/ci.yml",".github/workflows/web-ci.yml"]'
 
       - name: Build Switchboard event
         env:
@@ -175,9 +134,7 @@ jobs:
 
       - name: Plan Switchboard checks
         id: switchboard
-        if: steps.app_token.outputs.token != ''
         uses: ./switchboard-src/.github/actions/switchboard-plan
-        continue-on-error: true
         with:
           event: ${{ github.workspace }}/switchboard/event.json
           changed-files: ${{ github.workspace }}/switchboard/changed-files.json
@@ -188,16 +145,10 @@ jobs:
       - name: Resolve selected adapters
         id: adapters
         env:
-          PLAN_OUTCOME: ${{ steps.switchboard.outcome }}
           SELECTED_CHECK_IDS: ${{ steps.switchboard.outputs.selected_check_ids }}
         run: |
           set -euo pipefail
           node <<'NODE' >> "$GITHUB_OUTPUT"
-          if (process.env.PLAN_OUTCOME !== "success") {
-            console.log("run_runner_ci=true")
-            console.log("run_web_ci=true")
-            process.exit(0)
-          }
           const selected = new Set(JSON.parse(process.env.SELECTED_CHECK_IDS || "[]"))
           console.log(`run_runner_ci=${selected.has("benchmarks.runner.ci")}`)
           console.log(`run_web_ci=${selected.has("benchmarks.web.ci")}`)
