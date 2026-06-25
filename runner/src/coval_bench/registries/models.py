@@ -195,7 +195,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="groq",
         model="canopylabs/orpheus-v1-english",
         voice="autumn",
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
