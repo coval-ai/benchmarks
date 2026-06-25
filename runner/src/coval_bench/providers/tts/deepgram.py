@@ -105,7 +105,7 @@ class DeepgramTTSProvider(TTSProvider):
                         logger.warning("deepgram_ws_warning", description=msg.get("description"))
 
         except Exception as exc:
-            logger.debug("deepgram_error", exc_info=True)
+            logger.warning("deepgram_error", provider="deepgram", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="deepgram",
                 model=self._model,

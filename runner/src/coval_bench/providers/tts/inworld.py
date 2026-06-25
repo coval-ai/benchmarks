@@ -130,9 +130,11 @@ class InworldTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.warning("inworld_error", exc_info=True)
-            # The credential rides in the URL query, so scrub it from any
-            # exception that echoes the URI before it lands in a stored result.
+            # Credential rides in the URL query; scrub it before the exception
+            # reaches logs or the stored result. No exc_info — the rendered
+            # traceback would echo the unredacted URI.
+            scrubbed = str(exc).replace(auth_param, "***")
+            logger.warning("inworld_error", provider="inworld", model=self._model, error=scrubbed)
             return finalize_tts_result(
                 provider="inworld",
                 model=self._model,
@@ -141,7 +143,7 @@ class InworldTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
-                error=str(exc).replace(auth_param, "***"),
+                error=scrubbed,
             )
 
         return finalize_tts_result(

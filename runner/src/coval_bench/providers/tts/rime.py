@@ -109,7 +109,7 @@ class RimeTTSProvider(TTSProvider):
                     # "timestamps" events are silently dropped — not needed for benchmark.
 
         except Exception as exc:
-            logger.warning("rime_error", exc_info=True)
+            logger.warning("rime_error", provider="rime", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="rime",
                 model=self._model,

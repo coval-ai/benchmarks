@@ -121,7 +121,9 @@ class XaiSTTProvider(STTProvider):
                         raise task_result
 
         except Exception as exc:
-            logger.exception("xai_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "xai_measure_ttft_failed", provider="xai", model=self._model, exc_info=exc
+            )
             result.error = result.error or str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -229,7 +231,7 @@ class XaiSTTProvider(STTProvider):
                     result.error = str(event.get("message", "xAI error"))
                     break
         except Exception as exc:
-            logger.exception("xai_receive_error", error=str(exc))
+            logger.warning("xai_receive_error", provider="xai", model=self._model, exc_info=exc)
             if result.error is None:
                 result.error = str(exc)
         finally:

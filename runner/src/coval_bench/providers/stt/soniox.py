@@ -84,14 +84,22 @@ class SonioxSTTProvider(STTProvider):
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                outcomes = await asyncio.gather(send_task, recv_task, return_exceptions=True)
-                # Surface a task failure as result.error so it isn't a silent success.
-                for outcome in outcomes:
-                    if isinstance(outcome, Exception) and result.error is None:
-                        result.error = str(outcome)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("soniox_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "soniox_measure_ttft_failed", provider="soniox", model=self._model, exc_info=exc
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -116,7 +124,7 @@ class SonioxSTTProvider(STTProvider):
             # ignored, so the server never finalizes (stalls to its idle timeout).
             await ws.send("")
         except Exception as exc:
-            logger.exception("soniox_send_error", error=str(exc))
+            logger.warning("soniox_send_error", provider="soniox", model=self._model, exc_info=exc)
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -135,7 +143,9 @@ class SonioxSTTProvider(STTProvider):
                     result.error = str(
                         msg.get("error_message") or f"Soniox STT error (code {code})"
                     )
-                    logger.error("soniox_stt_error", msg=msg)
+                    logger.warning(
+                        "soniox_stt_error", provider="soniox", model=self._model, msg=msg
+                    )
                     break
 
                 tokens: list[dict[str, Any]] = msg.get("tokens") or []
@@ -160,8 +170,10 @@ class SonioxSTTProvider(STTProvider):
                     break
 
         except Exception as exc:
-            logger.exception("soniox_receive_error", error=str(exc))
-            if result.error is None:
+            logger.warning(
+                "soniox_receive_error", provider="soniox", model=self._model, exc_info=exc
+            )
+            if result.error is None and result.audio_to_final_seconds is None:
                 result.error = str(exc)
 
         if final_parts:

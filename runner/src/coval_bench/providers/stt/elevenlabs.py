@@ -115,17 +115,37 @@ class ElevenLabsSTTProvider(STTProvider):
                 except TimeoutError:
                     logger.warning("elevenlabs_session_started_timeout")
                 except Exception as exc:
-                    logger.exception("elevenlabs_session_started_error", error=str(exc))
+                    logger.warning(
+                        "elevenlabs_session_started_error",
+                        provider="elevenlabs",
+                        model=self._model,
+                        exc_info=exc,
+                    )
                     raise
 
                 send_task = asyncio.create_task(
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("elevenlabs_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "elevenlabs_measure_ttft_failed",
+                provider="elevenlabs",
+                model=self._model,
+                exc_info=exc,
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -159,7 +179,9 @@ class ElevenLabsSTTProvider(STTProvider):
                 )
             )
         except Exception as exc:
-            logger.exception("elevenlabs_send_error", error=str(exc))
+            logger.warning(
+                "elevenlabs_send_error", provider="elevenlabs", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -177,8 +199,10 @@ class ElevenLabsSTTProvider(STTProvider):
                 if msg_type in _ERROR_MSG_TYPES:
                     error_text = msg.get("message", msg.get("error", "Unknown error"))
                     result.error = f"{msg_type}: {error_text}"
-                    logger.error(
+                    logger.warning(
                         "elevenlabs_api_error",
+                        provider="elevenlabs",
+                        model=self._model,
                         msg_type=msg_type,
                         error=error_text,
                     )
@@ -204,7 +228,14 @@ class ElevenLabsSTTProvider(STTProvider):
                             result.audio_to_final_seconds = now - result.audio_start_time
 
         except Exception as exc:
-            logger.exception("elevenlabs_receive_error", error=str(exc))
+            logger.warning(
+                "elevenlabs_receive_error",
+                provider="elevenlabs",
+                model=self._model,
+                exc_info=exc,
+            )
+            if result.error is None and result.audio_to_final_seconds is None:
+                result.error = str(exc)
 
         if committed_parts:
             result.complete_transcript = " ".join(committed_parts).strip() or None

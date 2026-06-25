@@ -61,7 +61,7 @@ from coval_bench.runner.retry import with_retry
 if TYPE_CHECKING:
     from coval_bench.config import Settings
 
-_log = structlog.get_logger("coval_bench.runner")
+logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
 _STT_TIMEOUT_S = 45
@@ -222,7 +222,7 @@ async def _run_stt_item(
     async with sem:
         provider_cls = stt_providers.get(entry.provider)
         if provider_cls is None:
-            _log.warning(
+            logger.warning(
                 "unknown_stt_provider",
                 provider=entry.provider,
                 model=entry.model,
@@ -266,7 +266,7 @@ async def _run_stt_item(
                 )
         except Exception as exc:
             item_error = _truncate(str(exc))
-            _log.warning(
+            logger.warning(
                 "stt_provider_call_failed",
                 provider=entry.provider,
                 model=entry.model,
@@ -338,6 +338,12 @@ async def _run_stt_item(
                 ttfs_value = compute_ttfs(audio_to_final, speech_end_offset_ms / 1000.0)
             except Exception as exc:
                 ttfs_calc_error = str(exc)
+                logger.warning(
+                    "ttfs_computation_failed",
+                    provider=entry.provider,
+                    model=entry.model,
+                    exc_info=exc,
+                )
         ttfs_status, ttfs_error = _metric_outcome(
             ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
@@ -366,8 +372,15 @@ async def _run_stt_item(
         # null-valued success rather than a failure, matching the original intent.
         rtf_value: float | None = None
         if audio_to_final is not None and duration_sec > 0:
-            with contextlib.suppress(Exception):
+            try:
                 rtf_value = compute_rtf(audio_to_final, duration_sec)
+            except Exception as exc:
+                logger.warning(
+                    "rtf_computation_failed",
+                    provider=entry.provider,
+                    model=entry.model,
+                    exc_info=exc,
+                )
 
         rtf_status, rtf_error = _metric_outcome(
             audio_to_final, item_error, Metric.RTF, ResultStatus
@@ -412,7 +425,7 @@ async def _run_stt_item(
                 # compute_wer is deterministic over a transcript we already obtained, so a
                 # crash here is a genuine failure — surface it as a FAILED row rather than
                 # silently dropping it and leaving the run marked SUCCEEDED.
-                _log.warning(
+                logger.warning(
                     "wer_computation_failed",
                     provider=entry.provider,
                     model=entry.model,
@@ -438,7 +451,7 @@ async def _run_stt_item(
         try:
             await writer.record_results(results)
         except Exception as exc:
-            _log.warning(
+            logger.warning(
                 "stt_result_persist_failed",
                 provider=entry.provider,
                 model=entry.model,
@@ -480,7 +493,7 @@ async def _run_tts_item(
     async with sem:
         provider_cls = tts_providers.get(entry.provider)
         if provider_cls is None:
-            _log.warning(
+            logger.warning(
                 "unknown_tts_provider",
                 provider=entry.provider,
                 model=entry.model,
@@ -500,7 +513,7 @@ async def _run_tts_item(
             audio_path = tts_result.audio_path
         except Exception as exc:
             item_error = _truncate(str(exc))
-            _log.warning(
+            logger.warning(
                 "tts_provider_call_failed",
                 provider=entry.provider,
                 model=entry.model,
@@ -566,7 +579,7 @@ async def _run_tts_item(
                 try:
                     whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
                 except Exception as exc:
-                    _log.warning(
+                    logger.warning(
                         "tts_wer_transcription_failed",
                         provider=entry.provider,
                         model=entry.model,
@@ -595,7 +608,7 @@ async def _run_tts_item(
                             )
                         )
                     except Exception as exc:
-                        _log.warning(
+                        logger.warning(
                             "tts_wer_computation_failed",
                             provider=entry.provider,
                             model=entry.model,
@@ -623,7 +636,7 @@ async def _run_tts_item(
                 try:
                     audio_path.unlink()
                 except OSError as exc:
-                    _log.warning(
+                    logger.warning(
                         "tts_audio_file_delete_failed",
                         path=str(audio_path),
                         exc_info=exc,
@@ -633,7 +646,7 @@ async def _run_tts_item(
         try:
             await writer.record_results(results)
         except Exception as exc:
-            _log.warning(
+            logger.warning(
                 "tts_result_persist_failed",
                 provider=entry.provider,
                 model=entry.model,
@@ -658,7 +671,7 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
         )
         client.flush()  # type: ignore[no-untyped-call]
     except Exception:
-        _log.warning("posthog_emit_failed", event_name=event, exc_info=True)
+        logger.warning("posthog_emit_failed", event_name=event, exc_info=True)
 
 
 # Transient-failure retry for the end-of-run bucket refresh.
@@ -678,9 +691,9 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
             await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
         except Exception:
             if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                _log.warning("series_bucket_refresh_failed", exc_info=True)
+                logger.warning("series_bucket_refresh_failed", exc_info=True)
                 return
-            _log.info("series_bucket_refresh_retry", attempt=attempt)
+            logger.info("series_bucket_refresh_retry", attempt=attempt)
             await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
         else:
             return
@@ -727,7 +740,7 @@ async def run_benchmarks(
             )
             atexit.register(posthog_client.shutdown)
         except Exception:
-            _log.warning("posthog_init_failed", exc_info=True)
+            logger.warning("posthog_init_failed", exc_info=True)
             posthog_client = None
 
     # ------------------------------------------------------------------
@@ -785,7 +798,7 @@ async def run_benchmarks(
 
         structlog.contextvars.bind_contextvars(run_id=run_id)
 
-        _log.info(
+        logger.info(
             "benchmark_run_started",
             benchmark_kind=benchmark_kind,
             smoke=smoke,
@@ -808,7 +821,7 @@ async def run_benchmarks(
             if sigterm_received:
                 return
             sigterm_received = True
-            _log.warning("sigterm_received")
+            logger.warning("sigterm_received")
             if main_task is not None:
                 main_task.cancel()
 
@@ -844,7 +857,7 @@ async def run_benchmarks(
                 )
                 for cls, res in zip(ordered_classes, warmup_results, strict=False):
                     if isinstance(res, BaseException):
-                        _log.warning(
+                        logger.warning(
                             "provider_warmup_failed",
                             provider=cls.__name__,
                             exc_info=res,
@@ -860,8 +873,9 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
-                _log.info("stt_dataset_sampled", item_count=len(items))
+                logger.info("stt_dataset_sampled", item_count=len(items))
 
+                stt_pairs = [(entry, item) for item in items for entry in enabled_stt]
                 stt_tasks = [
                     _run_stt_item(
                         entry=entry,
@@ -871,14 +885,18 @@ async def run_benchmarks(
                         settings=settings,
                         writer=writer,
                     )
-                    for item in items
-                    for entry in enabled_stt
+                    for entry, item in stt_pairs
                 ]
 
                 stt_batch = await asyncio.gather(*stt_tasks, return_exceptions=True)
-                for batch_result in stt_batch:
+                for (entry, _item), batch_result in zip(stt_pairs, stt_batch, strict=True):
                     if isinstance(batch_result, BaseException):
-                        _log.warning("stt_task_raised", exc_info=batch_result)
+                        logger.warning(
+                            "stt_task_raised",
+                            provider=entry.provider,
+                            model=entry.model,
+                            exc_info=batch_result,
+                        )
                     else:
                         all_results.extend(batch_result)
 
@@ -892,8 +910,9 @@ async def run_benchmarks(
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
-                _log.info("tts_dataset_sampled", item_count=len(tts_items))
+                logger.info("tts_dataset_sampled", item_count=len(tts_items))
 
+                tts_pairs = [(entry, item) for item in tts_items for entry in enabled_tts]
                 tts_tasks = [
                     _run_tts_item(
                         entry=entry,
@@ -903,14 +922,18 @@ async def run_benchmarks(
                         settings=settings,
                         writer=writer,
                     )
-                    for item in tts_items
-                    for entry in enabled_tts
+                    for entry, item in tts_pairs
                 ]
 
                 tts_batch = await asyncio.gather(*tts_tasks, return_exceptions=True)
-                for batch_result in tts_batch:
+                for (entry, _item), batch_result in zip(tts_pairs, tts_batch, strict=True):
                     if isinstance(batch_result, BaseException):
-                        _log.warning("tts_task_raised", exc_info=batch_result)
+                        logger.warning(
+                            "tts_task_raised",
+                            provider=entry.provider,
+                            model=entry.model,
+                            exc_info=batch_result,
+                        )
                     else:
                         all_results.extend(batch_result)
 
@@ -941,7 +964,7 @@ async def run_benchmarks(
             try:
                 await writer.refresh_stats_matviews()
             except Exception as refresh_exc:
-                _log.error(
+                logger.error(
                     "stats_matviews_refresh_failed",
                     exc_info=refresh_exc,
                 )
@@ -961,7 +984,7 @@ async def run_benchmarks(
             )
 
             duration_s = (finished_at - started_at).total_seconds()
-            _log.info(
+            logger.info(
                 "benchmark_run_finished",
                 status=str(final_status),
                 total_results=total_results,
@@ -1006,7 +1029,7 @@ async def run_benchmarks(
                     )
                 )
             except Exception as write_exc:
-                _log.error(
+                logger.error(
                     "run_row_update_failed_after_sigterm",
                     exc_info=write_exc,
                 )
@@ -1015,7 +1038,7 @@ async def run_benchmarks(
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
-            _log.warning(
+            logger.warning(
                 "benchmark_run_finished_early_sigterm",
                 status=str(RunStatus.PARTIAL),
                 total_results=total_results,
@@ -1055,7 +1078,7 @@ async def run_benchmarks(
             # The literal event="RUN_FAILED" in this log line triggers the
             # Cloud Logging log-based metric (see ARCHITECTURE.md § Logging + Alerting).
             # structlog uses the first positional arg as the ``event`` key.
-            _log.error(
+            logger.error(
                 "RUN_FAILED",
                 error=err_msg,
                 exc_info=exc,
@@ -1063,7 +1086,7 @@ async def run_benchmarks(
             try:
                 await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
             except Exception as write_exc:
-                _log.error(
+                logger.error(
                     "run_row_update_failed_after_failure",
                     exc_info=write_exc,
                 )

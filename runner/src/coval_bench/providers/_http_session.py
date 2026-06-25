@@ -26,7 +26,7 @@ from typing import Final
 import httpx
 import structlog
 
-_log = structlog.get_logger(__name__)
+logger = structlog.get_logger(__name__)
 
 _KEEPALIVE_S: Final[float] = 300.0
 _TIMEOUT_S: Final[float] = 30.0
@@ -61,7 +61,7 @@ class TimedTransport(httpx.AsyncHTTPTransport):
         request.extensions["__t_submit"] = t_submit
         request.extensions["__t_headers"] = t_headers
         request.extensions["__connection_reused"] = not opened_connection
-        _log.debug(
+        logger.debug(
             "http_request_timing",
             host=request.url.host,
             method=request.method,
@@ -126,5 +126,5 @@ async def close_all() -> None:
         try:
             await client.aclose()
         except Exception as exc:  # noqa: BLE001 — best-effort teardown
-            _log.debug("http_client_close_failed", provider=key, exc_info=exc)
+            logger.warning("http_client_close_failed", provider=key, exc_info=exc)
     _CLIENTS.clear()

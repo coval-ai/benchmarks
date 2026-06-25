@@ -75,10 +75,22 @@ class SmallestSTTProvider(STTProvider):
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("smallest_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "smallest_measure_ttft_failed", provider="smallest", model=self._model, exc_info=exc
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -106,7 +118,9 @@ class SmallestSTTProvider(STTProvider):
                 await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"type": "close_stream"}))
         except Exception as exc:
-            logger.exception("smallest_send_error", error=str(exc))
+            logger.warning(
+                "smallest_send_error", provider="smallest", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -148,7 +162,11 @@ class SmallestSTTProvider(STTProvider):
                     break
 
         except Exception as exc:
-            logger.exception("smallest_receive_error", error=str(exc))
+            logger.warning(
+                "smallest_receive_error", provider="smallest", model=self._model, exc_info=exc
+            )
+            if result.error is None and result.audio_to_final_seconds is None:
+                result.error = str(exc)
 
         if final_segments:
             result.complete_transcript = " ".join(final_segments).strip() or None

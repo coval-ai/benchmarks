@@ -106,10 +106,25 @@ class SpeechmaticsProvider(STTProvider):
                     )
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("speechmatics_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "speechmatics_measure_ttft_failed",
+                provider="speechmatics",
+                model=self._model,
+                exc_info=exc,
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -147,7 +162,9 @@ class SpeechmaticsProvider(STTProvider):
                 await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": seq_no}))
         except Exception as exc:
-            logger.exception("speechmatics_send_error", error=str(exc))
+            logger.warning(
+                "speechmatics_send_error", provider="speechmatics", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -187,7 +204,14 @@ class SpeechmaticsProvider(STTProvider):
                     last_final_time = now
 
         except Exception as exc:
-            logger.exception("speechmatics_receive_error", error=str(exc))
+            logger.warning(
+                "speechmatics_receive_error",
+                provider="speechmatics",
+                model=self._model,
+                exc_info=exc,
+            )
+            if result.error is None and last_final_time is None:
+                result.error = str(exc)
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time

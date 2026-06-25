@@ -100,10 +100,22 @@ class GradiumSTTProvider(STTProvider):
                     )
                 )
                 recv_task = asyncio.create_task(self._receive(ws, result, final_event))
-                await asyncio.gather(send_task, recv_task, return_exceptions=True)
+                tasks = (send_task, recv_task)
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                if any(not task.cancelled() and task.exception() is not None for task in done):
+                    for task in pending:
+                        task.cancel()
+                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and result.audio_to_final_seconds is None:
+                    for outcome in outcomes:
+                        if isinstance(outcome, Exception):
+                            result.error = str(outcome)
+                            break
 
         except Exception as exc:
-            logger.exception("gradium_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "gradium_measure_ttft_failed", provider="gradium", model=self._model, exc_info=exc
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -134,7 +146,9 @@ class GradiumSTTProvider(STTProvider):
                 await asyncio.wait_for(final_event.wait(), timeout=_FLUSH_WAIT_S)
             await ws.send(json.dumps({"type": "end_of_stream"}))
         except Exception as exc:
-            logger.exception("gradium_send_error", error=str(exc))
+            logger.warning(
+                "gradium_send_error", provider="gradium", model=self._model, exc_info=exc
+            )
             raise
 
     async def _receive(
@@ -185,11 +199,17 @@ class GradiumSTTProvider(STTProvider):
 
                 if msg_type == "error":
                     result.error = str(msg.get("message", msg))
-                    logger.error("gradium_stt_error", msg=msg)
+                    logger.warning(
+                        "gradium_stt_error", provider="gradium", model=self._model, msg=msg
+                    )
                     break
 
         except Exception as exc:
-            logger.exception("gradium_receive_error", error=str(exc))
+            logger.warning(
+                "gradium_receive_error", provider="gradium", model=self._model, exc_info=exc
+            )
+            if result.error is None and result.audio_to_final_seconds is None:
+                result.error = str(exc)
 
         if final_parts:
             result.complete_transcript = " ".join(final_parts).strip() or None

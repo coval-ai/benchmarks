@@ -25,7 +25,7 @@ from collections.abc import Iterable
 import structlog
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-_log = structlog.get_logger("coval_bench.api.access")
+logger = structlog.get_logger("coval_bench.api.access")
 
 _TRACE_HEADER = b"x-cloud-trace-context"
 _TRACE_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
@@ -65,7 +65,7 @@ class RequestLoggingMiddleware:
         try:
             await self.app(scope, receive, send_wrapper)
         except Exception:
-            _log.error(
+            logger.error(
                 "http_request",
                 method=method,
                 path=path,
@@ -76,7 +76,13 @@ class RequestLoggingMiddleware:
             raise
         else:
             if not (path in self.quiet_paths and status < 400):
-                emit = _log.error if status >= 500 else _log.warning if status >= 400 else _log.info
+                emit = (
+                    logger.error
+                    if status >= 500
+                    else logger.warning
+                    if status >= 400
+                    else logger.info
+                )
                 emit(
                     "http_request",
                     method=method,

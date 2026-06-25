@@ -99,7 +99,7 @@ class XaiTTSProvider(TTSProvider):
                         raise RuntimeError(str(event.get("message", "xAI TTS error")))
 
         except Exception as exc:
-            logger.debug("xai_tts_error", exc_info=True)
+            logger.warning("xai_tts_error", provider="xai", model=self._model, exc_info=exc)
             return finalize_tts_result(
                 provider="xai",
                 model=self._model,

@@ -91,8 +91,8 @@ def _safe_offset_ms(pcm: bytes, sample_rate: int, provider: str, model: str) -> 
     """
     try:
         return first_audible_offset_ms(pcm, sample_rate)
-    except Exception:
-        logger.warning("tts_offset_failed", provider=provider, model=model, exc_info=True)
+    except Exception as exc:
+        logger.warning("tts_offset_failed", provider=provider, model=model, exc_info=exc)
         return None
 
 
