@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+import { arenaAccessOk } from "@/lib/arena/guard";
 import { arenaRunnerFetch } from "@/lib/arena/runner";
 import type { BlindBattle } from "@/lib/arena/types";
 
@@ -13,6 +14,7 @@ interface BattleOut {
 }
 
 export async function POST(req: Request) {
+  if (!(await arenaAccessOk())) return new Response(null, { status: 404 });
   let body: { text?: string };
   try {
     body = await req.json();

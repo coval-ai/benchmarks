@@ -19,6 +19,8 @@ from coval_bench.arena.pairing import active_tts_models
 from coval_bench.providers.base import TTSResult
 from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
 
+_LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
+
 
 async def _apply_arena_schema(dsn: str) -> None:
     """Create the arena tables read by the endpoints (mirrors migration 20260615_0007)."""
@@ -171,7 +173,7 @@ async def _insert_snapshot(postgresql: Any, **kwargs: Any) -> None:
 async def test_get_battle_404_when_empty(client: AsyncClient, postgresql: Any) -> None:
     """No battles seeded -> 404."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    response = await client.get("/v1/arena/battle")
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
     assert response.status_code == 404
 
 
@@ -180,7 +182,7 @@ async def test_get_battle_is_blind(client: AsyncClient, postgresql: Any) -> None
     await _apply_arena_schema(_make_db_url(postgresql))
     await _insert_battle(postgresql)
 
-    response = await client.get("/v1/arena/battle")
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert set(data) == {"id", "prompt_text", "domain", "audio_a_url", "audio_b_url"}
@@ -194,7 +196,7 @@ async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
     await _apply_arena_schema(_make_db_url(postgresql))
     battle_id = await _insert_battle(postgresql)
 
-    response = await client.get(f"/v1/arena/battle/{battle_id}")
+    response = await client.get(f"/v1/arena/battle/{battle_id}", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     assert response.json()["id"] == battle_id
 
@@ -202,21 +204,23 @@ async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
 async def test_get_battle_by_id_unknown_returns_404(client: AsyncClient, postgresql: Any) -> None:
     """A well-formed but unknown UUID returns 404."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    response = await client.get("/v1/arena/battle/00000000-0000-0000-0000-000000000000")
+    response = await client.get(
+        "/v1/arena/battle/00000000-0000-0000-0000-000000000000", headers=_LABELER_HEADERS
+    )
     assert response.status_code == 404
 
 
 async def test_get_battle_by_id_malformed_returns_422(client: AsyncClient, postgresql: Any) -> None:
     """A non-UUID id is rejected by validation with 422."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    response = await client.get("/v1/arena/battle/not-a-uuid")
+    response = await client.get("/v1/arena/battle/not-a-uuid", headers=_LABELER_HEADERS)
     assert response.status_code == 422
 
 
 async def test_leaderboard_empty_when_no_snapshots(client: AsyncClient, postgresql: Any) -> None:
     """No snapshots -> 200 with empty entries and null computed_at."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    response = await client.get("/v1/arena/leaderboard")
+    response = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     data = response.json()
     assert data["metric"] == "naturalness"
@@ -243,7 +247,7 @@ async def test_leaderboard_returns_latest_board_sorted(
         postgresql, computed_at=latest, provider="elevenlabs", model="v2", rating_elo=1520
     )
 
-    response = await client.get("/v1/arena/leaderboard")
+    response = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     data = response.json()
     entries = data["entries"]
@@ -263,12 +267,14 @@ async def test_leaderboard_domain_filter(client: AsyncClient, postgresql: Any) -
         postgresql, computed_at=computed, domain="support", provider="cartesia", model="sonic-3"
     )
 
-    support = await client.get("/v1/arena/leaderboard", params={"domain": "support"})
+    support = await client.get(
+        "/v1/arena/leaderboard", params={"domain": "support"}, headers=_LABELER_HEADERS
+    )
     assert support.status_code == 200
     assert support.json()["domain"] == "support"
     assert [e["model"] for e in support.json()["entries"]] == ["sonic-3"]
 
-    default = await client.get("/v1/arena/leaderboard")
+    default = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
     assert [e["model"] for e in default.json()["entries"]] == ["v2"]
 
 
@@ -292,7 +298,9 @@ async def test_leaderboard_latest_is_scoped_per_metric(
         model="sonic-3",
     )
 
-    response = await client.get("/v1/arena/leaderboard", params={"metric": "clarity"})
+    response = await client.get(
+        "/v1/arena/leaderboard", params={"metric": "clarity"}, headers=_LABELER_HEADERS
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["metric"] == "clarity"
@@ -320,7 +328,7 @@ async def test_leaderboard_does_not_mix_methodology_versions(
         model="sonic-3",
     )
 
-    response = await client.get("/v1/arena/leaderboard")
+    response = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     data = response.json()
     # One board only: the tiebreaker picks davidson-v2, so v1's row is excluded.
@@ -328,7 +336,31 @@ async def test_leaderboard_does_not_mix_methodology_versions(
     assert [e["model"] for e in data["entries"]] == ["sonic-3"]
 
 
-_LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
+async def test_locked_reads_are_404_without_key(client: AsyncClient, postgresql: Any) -> None:
+    """Without a labeler key the reads/generate return 404 — indistinguishable from a route
+    that does not exist. Data is present, proving the lock fires before any DB access."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    await _insert_snapshot(postgresql)
+
+    assert (await client.get("/v1/arena/battle")).status_code == 404
+    assert (await client.get(f"/v1/arena/battle/{battle_id}")).status_code == 404
+    assert (await client.get("/v1/arena/leaderboard")).status_code == 404
+    assert (await client.post("/v1/arena/battle", json={"prompt": "hi"})).status_code == 404
+
+
+async def test_locked_reads_are_404_with_wrong_key(client: AsyncClient, postgresql: Any) -> None:
+    """A non-matching key is treated like no key on every gated route: 404, never 403."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    await _insert_snapshot(postgresql)
+    wrong = {"X-Labeler-Key": "not-the-key"}
+    assert (await client.get("/v1/arena/battle", headers=wrong)).status_code == 404
+    assert (await client.get(f"/v1/arena/battle/{battle_id}", headers=wrong)).status_code == 404
+    assert (await client.get("/v1/arena/leaderboard", headers=wrong)).status_code == 404
+    assert (
+        await client.post("/v1/arena/battle", json={"prompt": "hi"}, headers=wrong)
+    ).status_code == 404
 
 
 async def _count_votes(postgresql: Any, battle_id: str) -> int:
@@ -529,6 +561,7 @@ async def test_create_battle_returns_blind_battle(
     response = await client.post(
         "/v1/arena/battle",
         json={"prompt": "Your appointment is confirmed.", "domain": "customer service"},
+        headers=_LABELER_HEADERS,
     )
 
     assert response.status_code == 201
@@ -544,7 +577,9 @@ async def test_create_battle_returns_blind_battle(
 async def test_create_battle_rejects_empty_prompt(client: AsyncClient, postgresql: Any) -> None:
     """A blank prompt is rejected with 422 — no synthesis attempted."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    response = await client.post("/v1/arena/battle", json={"prompt": "   "})
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "   "}, headers=_LABELER_HEADERS
+    )
     assert response.status_code == 422
 
 
@@ -561,7 +596,9 @@ async def test_create_battle_502_when_synthesis_fails(
         "coval_bench.arena.generate.store_clip", lambda settings, src: "/clips/x.wav"
     )
 
-    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+    )
     assert response.status_code == 502
 
 
@@ -623,7 +660,9 @@ async def test_create_battle_429_when_cap_reached(
 
     monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
 
-    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+    )
     assert response.status_code == 429
 
 
@@ -641,5 +680,7 @@ async def test_create_battle_cap_disabled_when_zero(
         "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
     )
 
-    response = await client.post("/v1/arena/battle", json={"prompt": "hello"})
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+    )
     assert response.status_code == 201
