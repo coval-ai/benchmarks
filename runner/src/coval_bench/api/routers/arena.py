@@ -55,7 +55,7 @@ from coval_bench.db.models import VoteOutcome, VoterType
 
 logger = structlog.get_logger("coval_bench.api")
 
-router = APIRouter(tags=["arena"])
+router = APIRouter(tags=["arena"], include_in_schema=False)
 
 
 # Columns exposed by the (blind) battle endpoints — provider/model are withheld.
@@ -87,7 +87,9 @@ def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
     expected = settings.arena_labeler_key
     if expected is None or provided is None:
         return False
-    return hmac.compare_digest(provided, expected.get_secret_value())
+    return hmac.compare_digest(
+        provided.encode("utf-8"), expected.get_secret_value().encode("utf-8")
+    )
 
 
 def require_labeler(

@@ -350,11 +350,17 @@ async def test_locked_reads_are_404_without_key(client: AsyncClient, postgresql:
 
 
 async def test_locked_reads_are_404_with_wrong_key(client: AsyncClient, postgresql: Any) -> None:
-    """A non-matching key is treated like no key: 404, never 403 (no existence leak)."""
+    """A non-matching key is treated like no key on every gated route: 404, never 403."""
     await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
     await _insert_snapshot(postgresql)
     wrong = {"X-Labeler-Key": "not-the-key"}
+    assert (await client.get("/v1/arena/battle", headers=wrong)).status_code == 404
+    assert (await client.get(f"/v1/arena/battle/{battle_id}", headers=wrong)).status_code == 404
     assert (await client.get("/v1/arena/leaderboard", headers=wrong)).status_code == 404
+    assert (
+        await client.post("/v1/arena/battle", json={"prompt": "hi"}, headers=wrong)
+    ).status_code == 404
 
 
 async def _count_votes(postgresql: Any, battle_id: str) -> int:
