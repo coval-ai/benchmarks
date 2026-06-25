@@ -306,6 +306,13 @@ async def _run_stt_item(
                     error=ttft_error,
                 )
             )
+            if ttft_status is ResultStatus.SUCCESS:
+                logger.debug(
+                    "stt_ttft",
+                    provider=entry.provider,
+                    model=entry.model,
+                    ttft_seconds=ttft_seconds,
+                )
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(
@@ -326,6 +333,13 @@ async def _run_stt_item(
                 error=atf_error,
             )
         )
+        if atf_status is ResultStatus.SUCCESS:
+            logger.debug(
+                "stt_audio_to_final",
+                provider=entry.provider,
+                model=entry.model,
+                audio_to_final_seconds=audio_to_final,
+            )
 
         # 2b. TTFS — time-to-final from VAD end-of-speech (primary headline metric). Status
         # tracks ttfs_value (not audio_to_final): a missing offset or a failed calculation
@@ -366,6 +380,13 @@ async def _run_stt_item(
                     error=ttfs_error,
                 )
             )
+            if ttfs_status is ResultStatus.SUCCESS:
+                logger.debug(
+                    "stt_ttfs",
+                    provider=entry.provider,
+                    model=entry.model,
+                    ttfs_seconds=ttfs_value,
+                )
 
         # 3. RTF — derived from AudioToFinal, so its outcome tracks whether a final was
         # produced. A present final with an uncomputable RTF (e.g. zero duration) stays a
@@ -400,6 +421,13 @@ async def _run_stt_item(
                 error=rtf_error,
             )
         )
+        if rtf_status is ResultStatus.SUCCESS and rtf_value is not None:
+            logger.debug(
+                "stt_rtf",
+                provider=entry.provider,
+                model=entry.model,
+                rtf=rtf_value,
+            )
 
         # 4. WER (when ground-truth available; skip when the stream errored so we don't
         # score a transcript salvaged from a failed run)
@@ -420,6 +448,12 @@ async def _run_stt_item(
                         status=ResultStatus.SUCCESS,
                         error=None,
                     )
+                )
+                logger.debug(
+                    "stt_wer",
+                    provider=entry.provider,
+                    model=entry.model,
+                    wer_percentage=wer_result.wer_percentage,
                 )
             except Exception as exc:
                 # compute_wer is deterministic over a transcript we already obtained, so a
@@ -606,6 +640,12 @@ async def _run_tts_item(
                                 status=ResultStatus.SUCCESS,
                                 error=None,
                             )
+                        )
+                        logger.debug(
+                            "tts_wer",
+                            provider=entry.provider,
+                            model=entry.model,
+                            wer_percentage=wer_result.wer_percentage,
                         )
                     except Exception as exc:
                         logger.warning(
