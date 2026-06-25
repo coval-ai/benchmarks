@@ -19,9 +19,6 @@ import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
 
 const TOP_N = 5;
 
-// Rank field is chosen to match the /tts and /stt pages exactly, so the
-// overview cards never disagree with the full leaderboards: TTS ranks by p50
-// of TTFA, STT by avg of WER. All are "lower is better".
 function toRows(
   stats: ModelStatEntry[] | undefined,
   metricType: string,
@@ -68,10 +65,10 @@ const OverviewLeaderboards: React.FC = () => {
     () =>
       toRows(
         sttQuery.data?.model_stats,
-        "WER",
-        "avg_value",
+        "TTFS",
+        "p50",
         normalizeSTTProviderName,
-        (value) => `${value.toFixed(1)}%`
+        (value) => `${Math.round(value * 1000)} ms`
       ),
     [sttQuery.data]
   );
@@ -94,7 +91,7 @@ const OverviewLeaderboards: React.FC = () => {
         />
         <LeaderboardCard
           title="Speech-to-Text"
-          metricLabel="Word Error Rate"
+          metricLabel="Time to Final Segment"
           windowLabel={windowBadge(sttQuery.data?.window ?? timeWindow)}
           rows={sttRows}
           href="/stt"
