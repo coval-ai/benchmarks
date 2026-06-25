@@ -82,7 +82,26 @@ _LEADERBOARD_SQL = """
 """
 
 
-@router.get("/arena/battle", response_model=BattleOut)
+def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
+    """True only if a labeler key is configured and the presented key matches it."""
+    expected = settings.arena_labeler_key
+    if expected is None or provided is None:
+        return False
+    return hmac.compare_digest(provided, expected.get_secret_value())
+
+
+def require_labeler(
+    x_labeler_key: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """Gate a route behind the labeler key, raising 404 (not 403) so a locked arena is
+    indistinguishable from a route that does not exist — keeping its existence
+    confidential until launch."""
+    if not _is_authenticated_labeler(x_labeler_key, settings):
+        raise HTTPException(404)
+
+
+@router.get("/arena/battle", response_model=BattleOut, dependencies=[Depends(require_labeler)])
 @limiter.limit("60/minute")
 async def get_battle(
     request: Request,  # required by slowapi
@@ -108,7 +127,11 @@ async def get_battle(
     return BattleOut.model_validate(row)
 
 
-@router.get("/arena/battle/{battle_id}", response_model=BattleOut)
+@router.get(
+    "/arena/battle/{battle_id}",
+    response_model=BattleOut,
+    dependencies=[Depends(require_labeler)],
+)
 @limiter.limit("60/minute")
 async def get_battle_by_id(
     request: Request,  # required by slowapi
@@ -128,7 +151,11 @@ async def get_battle_by_id(
     return BattleOut.model_validate(row)
 
 
-@router.get("/arena/leaderboard", response_model=ArenaLeaderboardResponse)
+@router.get(
+    "/arena/leaderboard",
+    response_model=ArenaLeaderboardResponse,
+    dependencies=[Depends(require_labeler)],
+)
 @limiter.limit("60/minute")
 async def get_arena_leaderboard(
     request: Request,  # required by slowapi
@@ -161,14 +188,6 @@ async def get_arena_leaderboard(
         methodology_version=board[0]["methodology_version"] if board else None,
         entries=entries,
     )
-
-
-def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
-    """True only if a labeler key is configured and the presented key matches it."""
-    expected = settings.arena_labeler_key
-    if expected is None or provided is None:
-        return False
-    return hmac.compare_digest(provided, expected.get_secret_value())
 
 
 @router.post("/arena/vote", response_model=VoteOut, status_code=201)
@@ -205,7 +224,12 @@ async def cast_vote(
     return VoteOut.model_validate(recorded.model_dump())
 
 
-@router.post("/arena/battle", response_model=BattleOut, status_code=201)
+@router.post(
+    "/arena/battle",
+    response_model=BattleOut,
+    status_code=201,
+    dependencies=[Depends(require_labeler)],
+)
 @limiter.limit("60/minute")
 async def create_battle(
     request: Request,  # required by slowapi

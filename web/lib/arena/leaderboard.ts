@@ -28,10 +28,8 @@ export interface ArenaLeaderboard {
   entries: ArenaLeaderboardEntry[];
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 export async function getArenaLeaderboard(signal?: AbortSignal): Promise<ArenaLeaderboard> {
-  const res = await fetch(`${API_BASE}/v1/arena/leaderboard`, {
+  const res = await fetch("/api/arena/leaderboard", {
     headers: { Accept: "application/json" },
     signal,
   });
