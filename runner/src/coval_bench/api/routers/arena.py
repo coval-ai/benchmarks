@@ -127,10 +127,19 @@ async def get_battle(
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
         # Placeholder selection: a uniformly random battle. Adaptive pairing will
-        # replace this to surface the most informative matchups.
-        rows = await conn.execute(
-            f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
-        )
+        # replace this to surface the most informative matchups. With GCS-backed
+        # clips, skip battles older than the bucket retention — their audio is gone.
+        if settings.arena_gcs_bucket:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles "  # noqa: S608
+                "WHERE created_at >= now() - make_interval(days => %(days)s) "
+                "ORDER BY random() LIMIT 1",
+                {"days": settings.arena_clip_retention_days},
+            )
+        else:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
+            )
         row = await rows.fetchone()
     if row is None:
         raise HTTPException(404, "no battles available")

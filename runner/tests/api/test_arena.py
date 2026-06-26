@@ -191,6 +191,26 @@ async def test_get_battle_is_blind(client: AsyncClient, postgresql: Any) -> None
     assert data["domain"] == "support"
 
 
+async def test_get_battle_excludes_expired_clips(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    """With GCS storage, a battle older than the clip retention is not served."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
+    try:
+        await aconn.execute(
+            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            {"id": battle_id},
+        )
+    finally:
+        await aconn.close()
+    app.state.settings = app.state.settings.model_copy(update={"arena_gcs_bucket": "b"})
+
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
+    assert response.status_code == 404
+
+
 async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
     """GET /arena/battle/{id} returns the matching battle."""
     await _apply_arena_schema(_make_db_url(postgresql))

@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     arena_audio_dir: Path = Path("arena-audio")
     arena_audio_base_url: str = ""
     arena_gcs_bucket: str = ""
+    arena_clip_retention_days: int = 7
     arena_daily_battle_cap: int = 500
 
 
