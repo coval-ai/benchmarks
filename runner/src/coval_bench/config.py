@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     arena_labeler_key: SecretStr | None = None
     arena_audio_dir: Path = Path("arena-audio")
     arena_audio_base_url: str = ""
+    arena_gcs_bucket: str = ""
     arena_daily_battle_cap: int = 500
 
 
