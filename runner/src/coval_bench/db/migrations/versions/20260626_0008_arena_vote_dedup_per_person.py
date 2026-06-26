@@ -20,6 +20,17 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("ALTER TABLE arena.votes DROP CONSTRAINT votes_battle_id_voter_type_voter_id_key")
+    # Collapse any pre-existing cross-type duplicates (same battle+voter, different
+    # voter_type) to the most recent row so the new unique constraint can be added.
+    op.execute(
+        """
+        DELETE FROM arena.votes v
+        USING arena.votes w
+        WHERE v.battle_id = w.battle_id
+          AND v.voter_id = w.voter_id
+          AND (v.updated_at, v.id) < (w.updated_at, w.id)
+        """
+    )
     op.execute(
         "ALTER TABLE arena.votes "
         "ADD CONSTRAINT votes_battle_id_voter_id_key UNIQUE (battle_id, voter_id)"

@@ -93,7 +93,7 @@ class ArenaStore:
             INSERT INTO arena.votes (battle_id, outcome, voter_type, voter_id)
             VALUES (%s, %s, %s, %s)
             ON CONFLICT (battle_id, voter_id)
-            DO UPDATE SET outcome = EXCLUDED.outcome
+            DO UPDATE SET outcome = EXCLUDED.outcome, voter_type = EXCLUDED.voter_type
             RETURNING id, battle_id, outcome, voter_type, voter_id,
                       created_at, updated_at
         """
