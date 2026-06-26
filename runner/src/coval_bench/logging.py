@@ -66,6 +66,9 @@ def configure_logging(
         level=log_level,
     )
 
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(max(log_level, logging.WARNING))
+
 
 def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:
     """Return a uvicorn ``log_config`` that renders uvicorn's logs as JSON.

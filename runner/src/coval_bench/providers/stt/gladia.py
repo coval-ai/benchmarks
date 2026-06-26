@@ -93,7 +93,9 @@ class GladiaSTTProvider(STTProvider):
                     result.error = str(send_outcome[0])
 
         except Exception as exc:
-            logger.exception("gladia_measure_ttft_failed", error=str(exc))
+            logger.warning(
+                "gladia_measure_ttft_failed", provider="gladia", model=self._model, exc_info=exc
+            )
             result.error = str(exc)
 
         result.total_time = time.monotonic() - total_start
@@ -142,7 +144,7 @@ class GladiaSTTProvider(STTProvider):
             # Stop streaming; the server flushes pending finals and closes (1000).
             await ws.send(json.dumps({"type": "stop_recording"}))
         except Exception as exc:
-            logger.exception("gladia_send_error", error=str(exc))
+            logger.warning("gladia_send_error", provider="gladia", model=self._model, exc_info=exc)
             raise
 
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
@@ -159,7 +161,9 @@ class GladiaSTTProvider(STTProvider):
 
                 if msg_type == "error":
                     result.error = str(msg.get("message") or msg.get("error") or msg)
-                    logger.error("gladia_stt_error", msg=msg)
+                    logger.warning(
+                        "gladia_stt_error", provider="gladia", model=self._model, msg=msg
+                    )
                     break
 
                 if msg_type != "transcript":
@@ -179,7 +183,9 @@ class GladiaSTTProvider(STTProvider):
                         result.audio_to_final_seconds = now - result.audio_start_time
 
         except Exception as exc:
-            logger.exception("gladia_receive_error", error=str(exc))
+            logger.warning(
+                "gladia_receive_error", provider="gladia", model=self._model, exc_info=exc
+            )
             if result.error is None:
                 result.error = str(exc)
 
