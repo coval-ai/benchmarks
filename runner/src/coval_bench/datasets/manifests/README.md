@@ -101,6 +101,55 @@ print(json.dumps(manifest, indent=2, ensure_ascii=False))
 
 License: `Apache-2.0`.
 
+### `s2s-v1.json`
+
+**What we benchmark.** Speech-to-speech (S2S) providers are scored on a frozen
+50-clip sample of single-turn spoken user *questions* from
+[SLURP](https://github.com/pswietojanski/slurp) (Bastianelli et al., EMNLP 2020).
+The headline metric is voice-to-voice (V2V) response latency — time from
+end-of-user-speech to the model's first returned audio frame.
+
+**Sample composition:**
+
+- **Language:** English; **headset/close-talk** recordings only, `status=correct`.
+- **Intents:** **query/question-eliciting only** (`qa_*`, `*_query`, …) so every
+  clip demands a spoken reply — V2V latency is undefined for device commands that
+  produce no audio.
+- **Balance:** **25 F / 25 M**, **25 native / 25 non-native** English speakers,
+  spread across **15 SLURP scenarios**.
+- **Duration:** 2.0–10.0 s; minimum 3 words.
+- **`speech_end_offset_ms` (t0):** end-of-speech anchor from SileroVAD via
+  `scripts/precompute_vad_offsets.py` (offline; silero/torch are not runner deps).
+
+**What we measure on it.** V2V latency (first-audio-out − end-of-speech), P50/P95
+over rolling windows. No ground-truth answers are needed — latency only.
+
+**License — note the difference from `stt-v1`.** SLURP **text** (transcripts) is
+`CC-BY-4.0`; SLURP **audio** ([Zenodo 4274930](https://zenodo.org/record/4274930))
+is **`CC-BY-NC-4.0` — NonCommercial, attribution required.** Unlike LibriSpeech's
+CC-BY, the audio carries a NonCommercial restriction (a commercial license is
+available from Emotech, `info@emotech.co`). Attribution: Bastianelli, Vanzo,
+Swietojanski, Rieser, *"SLURP: A Spoken Language Understanding Resource Package,"*
+EMNLP 2020.
+
+**How it's built** (selection is deterministic from the immutable SLURP source):
+
+1. Pull SLURP metadata + the Zenodo `slurp_real.tar.gz`; exclude `train_synthetic`.
+2. Keep headset recordings with `status=correct` and a non-empty transcript;
+   derive `scenario` from the intent; join speaker gender / native-language from
+   `metadata.json` (`usrid`).
+3. Filter to query/question-eliciting intents.
+4. Select 50: balanced 25 F / 25 M and native/non-native, spread across scenarios,
+   one recording per prompt; backfill within the same (scenario, gender) stratum
+   for clips outside 2–10 s or under 3 words.
+5. Transcode to 16 kHz mono PCM_16 WAV; SHA256 each; upload to
+   `gs://coval-benchmarks-datasets/s2s-v1/audio/`.
+6. Fill `speech_end_offset_ms` with `scripts/precompute_vad_offsets.py` (SileroVAD).
+
+**Never overwrite v1.** Future expansions go in `s2s/v2/`.
+
+License: `CC-BY-NC-4.0` (SLURP audio; NonCommercial, attribution required).
+
 ## Schema
 
 ```json
