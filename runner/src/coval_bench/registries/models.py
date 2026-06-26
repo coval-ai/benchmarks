@@ -4,8 +4,8 @@
 
 One entry per model, keyed by ``(benchmark, provider, model)``. The
 orchestrator runs every ``ACTIVE`` entry; the API serves all entries and
-marks ``RETIRED`` ones disabled so the frontend keeps them off the site
-even when historical result rows exist for them.
+marks ``RETIRED`` and ``PENDING`` ones disabled so the frontend keeps them
+off the site even when historical result rows exist for them.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ class ModelStatus(StrEnum):
     ACTIVE = "active"  # benchmarked and shown
     PAUSED = "paused"  # shown, not currently benchmarked
     RETIRED = "retired"  # not benchmarked, hidden even if old data exists
+    PENDING = "pending"  # implemented but waiting on credits; hidden like retired
 
 
 class RegisteredModel(BaseModel, frozen=True):
@@ -43,6 +44,7 @@ _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _ACTIVE = ModelStatus.ACTIVE
 _RETIRED = ModelStatus.RETIRED
+_PENDING = ModelStatus.PENDING
 
 # Per-benchmark order is the model order /v1/providers returns.
 MODEL_REGISTRY: list[RegisteredModel] = [
@@ -74,7 +76,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="gladia", model="solaria-1", status=_RETIRED),
+    RegisteredModel(benchmark=_STT, provider="gladia", model="solaria-1", status=_PENDING),
     RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v4", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v5", status=_ACTIVE),
     RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
@@ -178,14 +180,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="inworld",
         model="inworld-tts-1.5-max",
         voice="Ashley",
-        status=_RETIRED,
+        status=_PENDING,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-mini",
         voice="Ashley",
-        status=_RETIRED,
+        status=_PENDING,
     ),
     RegisteredModel(
         benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
@@ -195,7 +197,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="groq",
         model="canopylabs/orpheus-v1-english",
         voice="autumn",
-        status=_RETIRED,
+        status=_PENDING,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never

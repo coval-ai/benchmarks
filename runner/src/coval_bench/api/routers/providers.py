@@ -7,8 +7,8 @@ The catalogue is sourced from the model registry
 (``coval_bench.registries.MODEL_REGISTRY``) — the same source of truth the
 orchestrator runs from, so the website can never drift from the runner's
 reality. Every registered model is exposed; ``disabled`` is true for
-``RETIRED`` models so the frontend keeps them off the site even when
-historical result rows exist.
+``RETIRED`` and ``PENDING`` models so the frontend keeps them off the site
+even when historical result rows exist.
 
 No DB hit is made by this endpoint.
 """
@@ -29,6 +29,8 @@ logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["providers"])
 
+_HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
+
 
 def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
     """Build an ordered {provider: [ModelInfo, ...]} map from the model registry.
@@ -41,7 +43,7 @@ def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
     for m in MODEL_REGISTRY:
         if m.benchmark is benchmark:
             result.setdefault(m.provider, []).append(
-                ModelInfo(model=m.model, disabled=m.status is ModelStatus.RETIRED)
+                ModelInfo(model=m.model, disabled=m.status in _HIDDEN_STATUSES)
             )
     return result
 
