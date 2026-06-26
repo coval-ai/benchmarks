@@ -28,6 +28,13 @@ class ModelStatus(StrEnum):
     PENDING = "pending"  # implemented but waiting on credits; hidden like retired
 
 
+class Tenancy(StrEnum):
+    """Whether the served model runs on shared or dedicated infrastructure."""
+
+    SHARED = "shared"
+    DEDICATED = "dedicated"
+
+
 class RegisteredModel(BaseModel, frozen=True):
     """A single benchmarked model: identity, display metadata, run config."""
 
@@ -37,6 +44,7 @@ class RegisteredModel(BaseModel, frozen=True):
     voice: str | None = None  # TTS only
     creator: str | None = None  # who makes the model; None means same as provider
     tags: tuple[ModelTag, ...] = ()
+    tenancy: Tenancy = Tenancy.SHARED
     status: ModelStatus
 
 

@@ -11,6 +11,7 @@ from coval_bench.registries import (
     ModelStatus,
     ModelTag,
     RegisteredModel,
+    Tenancy,
 )
 
 
@@ -30,6 +31,7 @@ def test_registered_model_defaults() -> None:
     assert m.voice is None
     assert m.creator is None
     assert m.tags == ()
+    assert m.tenancy is Tenancy.SHARED
 
 
 def test_models_untagged_for_now() -> None:

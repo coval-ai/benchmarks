@@ -71,11 +71,19 @@ class LeaderboardEntry(BaseModel):
     n: int
 
 
+class ModelTagOut(BaseModel):
+    """A faceted filter tag: its category and value (e.g. capability/realtime)."""
+
+    category: str
+    value: str
+
+
 class ModelInfo(BaseModel):
     """A single model entry under a provider, with admin-disabled flag."""
 
     model: str
     disabled: bool = False
+    tags: list[ModelTagOut] = []
 
 
 class ProviderInfo(BaseModel):

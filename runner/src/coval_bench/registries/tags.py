@@ -8,19 +8,38 @@ from enum import StrEnum
 
 
 class TagCategory(StrEnum):
-    """Grouping for model tags, used to organize leaderboard filters."""
+    """Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
 
-    CAPABILITY = "capability"
+    TYPE/HOST/LAB are derived from registry columns and SOURCE/TENANCY from model
+    attributes, all at the API boundary; only MODE and FEATURES draw their values
+    from ``ModelTag``.
+    """
+
+    TYPE = "type"
+    MODE = "mode"
+    HOST = "host"
+    LAB = "lab"
+    FEATURES = "features"
+    SOURCE = "source"
+    TENANCY = "tenancy"
 
 
 class ModelTag(StrEnum):
-    """Filterable/sortable model attributes surfaced on the leaderboard."""
+    """Curated model attributes surfaced as MODE and FEATURES filter chips."""
 
     REALTIME = "realtime"
+    BATCH = "batch"
+    BIDIRECTIONAL = "bidirectional"
+    MULTILINGUAL = "multilingual"
+    VAD = "vad"
 
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
-    ModelTag.REALTIME: TagCategory.CAPABILITY,
+    ModelTag.REALTIME: TagCategory.MODE,
+    ModelTag.BATCH: TagCategory.MODE,
+    ModelTag.BIDIRECTIONAL: TagCategory.MODE,
+    ModelTag.MULTILINGUAL: TagCategory.FEATURES,
+    ModelTag.VAD: TagCategory.FEATURES,
 }
 
 if TAG_CATEGORIES.keys() != set(ModelTag):
