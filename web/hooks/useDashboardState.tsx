@@ -107,6 +107,31 @@ export function useDashboardState(page: "tts" | "stt") {
     [selectedModels, page]
   );
 
+  // Select all of a provider's models unless they're all already selected.
+  const toggleProviderSelection = useCallback(
+    (provider: string) => {
+      const providerModels = modelsByProvider[provider] ?? [];
+      if (providerModels.length === 0) return;
+      const willBeSelected = !providerModels.every((m) =>
+        selectedModels.includes(m)
+      );
+      const nextSelected = willBeSelected
+        ? [...new Set([...selectedModels, ...providerModels])]
+        : selectedModels.filter((m) => !providerModels.includes(m));
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardModelSelectionChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        action: willBeSelected ? "add" : "remove",
+        provider,
+        selected_model_ids: nextSelected,
+        selected_model_count: nextSelected.length,
+        is_comparison: nextSelected.length >= 2
+      });
+      setSelectedModels(nextSelected);
+    },
+    [selectedModels, modelsByProvider, page]
+  );
+
   // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
   // in the DOM); re-runs when loading completes so the first paint of the
   // heatmap gets scaled without waiting for a resize event.
@@ -383,6 +408,7 @@ export function useDashboardState(page: "tts" | "stt") {
 
     // Actions
     toggleModelSelection,
+    toggleProviderSelection,
     changeTimeWindow,
 
     // Chart data functions
