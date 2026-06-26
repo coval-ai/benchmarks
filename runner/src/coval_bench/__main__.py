@@ -56,7 +56,7 @@ def run(kind: str, smoke: bool) -> None:
     summary: RunSummary = asyncio.run(
         run_benchmarks(settings=settings, benchmark_kind=kind, smoke=smoke)  # type: ignore[arg-type]
     )
-    click.echo(summary.model_dump_json(indent=2))
+    click.echo(summary.model_dump_json())
     if summary.status == str(RunStatus.FAILED):
         raise click.ClickException("run failed")
 
