@@ -1,12 +1,11 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Storage for generated arena clips: move a synthesized WAV into durable storage.
+"""Arena clip storage.
 
-Local-dir backend for dev; GCS backend for prod, selected by
-``settings.arena_gcs_bucket``. Keys are random and opaque so a served URL never
-reveals which model produced it (blind voting) — identity is recovered from
-``arena.battles``, never the filename.
+``store_clip`` stores a WAV under an opaque key and returns the key (kept on the battle
+row); ``clip_url`` turns a key into a playable URL at serve time — a fresh signed URL for
+GCS, so rows never serve stale links. Opaque keys keep voting blind.
 """
 
 from __future__ import annotations
@@ -31,61 +30,67 @@ def store_clip(
     *,
     storage_client: storage.Client | None = None,
 ) -> str:
-    """Consume a synthesized WAV into arena storage under a fresh opaque key; return its URL.
-
-    The source is a provider's temp WAV (``TTSResult.audio_path``); we own it once
-    synthesis returns, so it is consumed — moved locally, or uploaded then deleted.
-    With ``arena_gcs_bucket`` set the clip goes to GCS and a time-limited V4 signed
-    URL is returned (the bucket is private); otherwise it is stored under
-    ``arena_audio_dir`` and a root-relative (or ``arena_audio_base_url``-prefixed) URL
-    is returned.
-    """
+    """Consume a WAV into storage (GCS upload or local move); return its opaque key."""
     key = f"clips/{uuid.uuid4().hex}.wav"
     if settings.arena_gcs_bucket:
-        return _store_clip_gcs(settings.arena_gcs_bucket, key, src_path, storage_client)
+        _upload_gcs(settings.arena_gcs_bucket, key, src_path, storage_client)
+    else:
+        dest = settings.arena_audio_dir / key
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src_path), dest)
+    return key
 
-    dest = settings.arena_audio_dir / key
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(src_path), dest)
 
+def clip_url(
+    settings: Settings,
+    key: str,
+    *,
+    storage_client: storage.Client | None = None,
+) -> str:
+    """Build a playable URL for a key at serve time: a fresh signed URL for GCS, else local."""
+    if settings.arena_gcs_bucket:
+        return _signed_url(settings.arena_gcs_bucket, key, storage_client=storage_client)
     base = settings.arena_audio_base_url.rstrip("/")
     return f"{base}/{key}" if base else f"/{key}"
 
 
-def _store_clip_gcs(
+def _upload_gcs(
     bucket_name: str,
     key: str,
     src_path: Path,
     client: storage.Client | None,
-) -> str:
+) -> None:
     if client is None:
         from google.cloud import storage
 
         client = storage.Client()
     blob = client.bucket(bucket_name).blob(key)
     blob.upload_from_filename(str(src_path), content_type="audio/wav")
-    url = _signed_url(blob)
     src_path.unlink(missing_ok=True)
-    return url
 
 
-def _signed_url(blob: storage.Blob) -> str:
-    """V4 signed GET URL signed via the runtime SA's IAM SignBlob (no key file).
-
-    Cloud Run's default credentials carry no private key, so signing is delegated to
-    the IAM API using the SA's own token — this needs ``roles/iam.serviceAccounts.tokenCreator``
-    on the runtime SA.
-    """
+def _signed_url(
+    bucket_name: str,
+    key: str,
+    *,
+    storage_client: storage.Client | None = None,
+) -> str:
+    """Fresh V4 signed GET URL via the SA's IAM SignBlob (no key file; needs tokenCreator)."""
     import google.auth
     import google.auth.transport.requests
+
+    if storage_client is None:
+        from google.cloud import storage
+
+        storage_client = storage.Client()
+    blob = storage_client.bucket(bucket_name).blob(key)
 
     credentials, _ = google.auth.default()
     signer: Any = credentials
     if not hasattr(signer, "service_account_email"):
         raise RuntimeError(
             "Signing arena clip URLs requires service-account credentials with a "
-            "tokenCreator grant; got credentials without a service account. Set "
-            "arena_gcs_bucket only where the runtime SA is configured."
+            "tokenCreator grant; got credentials without a service account."
         )
     signer.refresh(google.auth.transport.requests.Request())
     url: str = blob.generate_signed_url(

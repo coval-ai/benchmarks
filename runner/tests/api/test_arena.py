@@ -191,6 +191,26 @@ async def test_get_battle_is_blind(client: AsyncClient, postgresql: Any) -> None
     assert data["domain"] == "support"
 
 
+async def test_get_battle_excludes_expired_clips(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    """With GCS storage, a battle older than the clip retention is not served."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
+    try:
+        await aconn.execute(
+            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            {"id": battle_id},
+        )
+    finally:
+        await aconn.close()
+    app.state.settings = app.state.settings.model_copy(update={"arena_gcs_bucket": "b"})
+
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
+    assert response.status_code == 404
+
+
 async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
     """GET /arena/battle/{id} returns the matching battle."""
     await _apply_arena_schema(_make_db_url(postgresql))
@@ -199,6 +219,26 @@ async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
     response = await client.get(f"/v1/arena/battle/{battle_id}", headers=_LABELER_HEADERS)
     assert response.status_code == 200
     assert response.json()["id"] == battle_id
+
+
+async def test_get_battle_by_id_excludes_expired_clip(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    """With GCS storage, fetching a battle whose clip has expired returns 404."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
+    try:
+        await aconn.execute(
+            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            {"id": battle_id},
+        )
+    finally:
+        await aconn.close()
+    app.state.settings = app.state.settings.model_copy(update={"arena_gcs_bucket": "b"})
+
+    response = await client.get(f"/v1/arena/battle/{battle_id}", headers=_LABELER_HEADERS)
+    assert response.status_code == 404
 
 
 async def test_get_battle_by_id_unknown_returns_404(client: AsyncClient, postgresql: Any) -> None:
@@ -555,7 +595,7 @@ async def test_create_battle_returns_blind_battle(
     await _apply_arena_schema(_make_db_url(postgresql))
     monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"clips/{src.name}"
     )
 
     response = await client.post(
@@ -593,7 +633,7 @@ async def test_create_battle_502_when_synthesis_fails(
         "coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(every_model)
     )
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: "/clips/x.wav"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: "clips/x.wav"
     )
 
     response = await client.post(
@@ -677,7 +717,7 @@ async def test_create_battle_cap_disabled_when_zero(
     app.state.settings = app.state.settings.model_copy(update={"arena_daily_battle_cap": 0})
     monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"clips/{src.name}"
     )
 
     response = await client.post(

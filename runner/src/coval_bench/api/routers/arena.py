@@ -19,6 +19,7 @@ recorded.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import uuid
 from typing import Any
@@ -42,6 +43,7 @@ from coval_bench.api.schemas import (
     VoteIn,
     VoteOut,
 )
+from coval_bench.arena.audio_store import clip_url
 from coval_bench.arena.generate import generate_battle
 from coval_bench.arena.pairing import (
     PAIRING_DOMAIN,
@@ -103,21 +105,41 @@ def require_labeler(
         raise HTTPException(404)
 
 
+async def _battle_out(settings: Settings, row: dict[str, Any]) -> BattleOut:
+    """Resolve stored clip keys to fresh playable URLs (off the loop — GCS signing is I/O)."""
+    row = dict(row)
+    row["audio_a_url"], row["audio_b_url"] = await asyncio.gather(
+        asyncio.to_thread(clip_url, settings, row["audio_a_url"]),
+        asyncio.to_thread(clip_url, settings, row["audio_b_url"]),
+    )
+    return BattleOut.model_validate(row)
+
+
 @router.get("/arena/battle", response_model=BattleOut, dependencies=[Depends(require_labeler)])
 @limiter.limit("60/minute")
 async def get_battle(
     request: Request,  # required by slowapi
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
 ) -> BattleOut:
     """Return one battle to vote on, chosen at random. 404 if none exist."""
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
         # Placeholder selection: a uniformly random battle. Adaptive pairing will
-        # replace this to surface the most informative matchups.
-        rows = await conn.execute(
-            f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
-        )
+        # replace this to surface the most informative matchups. With GCS-backed
+        # clips, skip battles older than the bucket retention — their audio is gone.
+        if settings.arena_gcs_bucket:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles "  # noqa: S608
+                "WHERE created_at >= now() - make_interval(days => %(days)s) "
+                "ORDER BY random() LIMIT 1",
+                {"days": settings.arena_clip_retention_days},
+            )
+        else:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
+            )
         row = await rows.fetchone()
     if row is None:
         raise HTTPException(404, "no battles available")
@@ -126,7 +148,7 @@ async def get_battle(
         "arena_battle_served",
         {"$process_person_profile": False},
     )
-    return BattleOut.model_validate(row)
+    return await _battle_out(settings, row)
 
 
 @router.get(
@@ -139,18 +161,27 @@ async def get_battle_by_id(
     request: Request,  # required by slowapi
     battle_id: uuid.UUID,
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    settings: Settings = Depends(get_settings),
 ) -> BattleOut:
     """Return a specific battle by id. 404 if not found (422 if id is not a UUID)."""
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
-        rows = await conn.execute(
-            f"SELECT {_BATTLE_COLS} FROM arena.battles WHERE id = %(id)s",  # noqa: S608
-            {"id": battle_id},
-        )
+        if settings.arena_gcs_bucket:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles "  # noqa: S608
+                "WHERE id = %(id)s "
+                "AND created_at >= now() - make_interval(days => %(days)s)",
+                {"id": battle_id, "days": settings.arena_clip_retention_days},
+            )
+        else:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles WHERE id = %(id)s",  # noqa: S608
+                {"id": battle_id},
+            )
         row = await rows.fetchone()
     if row is None:
         raise HTTPException(404, f"battle {battle_id} not found")
-    return BattleOut.model_validate(row)
+    return await _battle_out(settings, row)
 
 
 @router.get(
@@ -284,7 +315,7 @@ async def create_battle(
         "arena_battle_generated",
         {"$process_person_profile": False},
     )
-    return BattleOut.model_validate(battle.model_dump())
+    return await _battle_out(settings, battle.model_dump())
 
 
 @router.get("/arena/battle/{battle_id}/reveal", response_model=RevealOut)
