@@ -34,11 +34,10 @@ def test_registered_model_defaults() -> None:
     assert m.tenancy is Tenancy.SHARED
 
 
-def test_models_untagged_for_now() -> None:
-    # Scaffolding only — no registered model carries tags or a creator override yet.
+def test_every_model_has_exactly_one_mode() -> None:
+    modes = {ModelTag.REALTIME, ModelTag.BATCH}
     for m in MODEL_REGISTRY:
-        assert m.creator is None
-        assert m.tags == ()
+        assert len(set(m.tags) & modes) == 1, f"{m.provider}/{m.model} needs one mode tag"
 
 
 def test_active_tts_models_have_voices() -> None:
