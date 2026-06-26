@@ -555,7 +555,7 @@ async def test_create_battle_returns_blind_battle(
     await _apply_arena_schema(_make_db_url(postgresql))
     monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"clips/{src.name}"
     )
 
     response = await client.post(
@@ -593,7 +593,7 @@ async def test_create_battle_502_when_synthesis_fails(
         "coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(every_model)
     )
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: "/clips/x.wav"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: "clips/x.wav"
     )
 
     response = await client.post(
@@ -677,7 +677,7 @@ async def test_create_battle_cap_disabled_when_zero(
     app.state.settings = app.state.settings.model_copy(update={"arena_daily_battle_cap": 0})
     monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
     monkeypatch.setattr(
-        "coval_bench.arena.generate.store_clip", lambda settings, src: f"/clips/{src.name}"
+        "coval_bench.arena.generate.store_clip", lambda settings, src: f"clips/{src.name}"
     )
 
     response = await client.post(
