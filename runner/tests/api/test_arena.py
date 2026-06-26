@@ -50,7 +50,7 @@ async def _apply_arena_schema(dsn: str) -> None:
                 voter_id   TEXT NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                UNIQUE (battle_id, voter_type, voter_id)
+                UNIQUE (battle_id, voter_id)
             )
         """)
         await aconn.execute("""
@@ -606,7 +606,7 @@ async def test_reveal_without_labeler_key_is_403(client: AsyncClient, postgresql
     """No labeler key -> 403, identities never returned."""
     await _apply_arena_schema(_make_db_url(postgresql))
     battle_id = await _insert_battle(postgresql)
-    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal")
+    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-1")
     assert response.status_code == 403
 
 
@@ -614,7 +614,9 @@ async def test_reveal_before_vote_is_409(client: AsyncClient, postgresql: Any) -
     """A battle with no vote yet cannot be revealed."""
     await _apply_arena_schema(_make_db_url(postgresql))
     battle_id = await _insert_battle(postgresql)
-    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal", headers=_LABELER_HEADERS)
+    response = await client.get(
+        f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-1", headers=_LABELER_HEADERS
+    )
     assert response.status_code == 409
 
 
@@ -622,14 +624,14 @@ async def test_reveal_unknown_battle_is_404(client: AsyncClient, postgresql: Any
     """A well-formed but unknown battle id returns 404."""
     await _apply_arena_schema(_make_db_url(postgresql))
     response = await client.get(
-        "/v1/arena/battle/00000000-0000-0000-0000-000000000000/reveal",
+        "/v1/arena/battle/00000000-0000-0000-0000-000000000000/reveal?voter_id=ann-1",
         headers=_LABELER_HEADERS,
     )
     assert response.status_code == 404
 
 
 async def test_reveal_after_vote_returns_identities(client: AsyncClient, postgresql: Any) -> None:
-    """Once a vote exists, reveal returns both sides' provider/model."""
+    """Once this voter has voted, reveal returns both sides' provider/model."""
     await _apply_arena_schema(_make_db_url(postgresql))
     battle_id = await _insert_battle(postgresql)
     await client.post(
@@ -637,13 +639,32 @@ async def test_reveal_after_vote_returns_identities(client: AsyncClient, postgre
         json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
         headers=_LABELER_HEADERS,
     )
-    response = await client.get(f"/v1/arena/battle/{battle_id}/reveal", headers=_LABELER_HEADERS)
+    response = await client.get(
+        f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-1", headers=_LABELER_HEADERS
+    )
     assert response.status_code == 200
     data = response.json()
     assert data["a"]["provider"] == "elevenlabs"
     assert data["a"]["model"] == "eleven_multilingual_v2"
     assert data["b"]["provider"] == "cartesia"
     assert data["b"]["model"] == "sonic-3"
+
+
+async def test_reveal_requires_the_requesting_voters_own_vote(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A labeler who has not voted on this battle cannot reveal it, even if others have."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+    response = await client.get(
+        f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-2", headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 409
 
 
 async def test_create_battle_429_when_cap_reached(
