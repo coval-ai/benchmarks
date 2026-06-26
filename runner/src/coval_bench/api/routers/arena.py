@@ -166,10 +166,18 @@ async def get_battle_by_id(
     """Return a specific battle by id. 404 if not found (422 if id is not a UUID)."""
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
-        rows = await conn.execute(
-            f"SELECT {_BATTLE_COLS} FROM arena.battles WHERE id = %(id)s",  # noqa: S608
-            {"id": battle_id},
-        )
+        if settings.arena_gcs_bucket:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles "  # noqa: S608
+                "WHERE id = %(id)s "
+                "AND created_at >= now() - make_interval(days => %(days)s)",
+                {"id": battle_id, "days": settings.arena_clip_retention_days},
+            )
+        else:
+            rows = await conn.execute(
+                f"SELECT {_BATTLE_COLS} FROM arena.battles WHERE id = %(id)s",  # noqa: S608
+                {"id": battle_id},
+            )
         row = await rows.fetchone()
     if row is None:
         raise HTTPException(404, f"battle {battle_id} not found")

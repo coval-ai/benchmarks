@@ -221,6 +221,26 @@ async def test_get_battle_by_id(client: AsyncClient, postgresql: Any) -> None:
     assert response.json()["id"] == battle_id
 
 
+async def test_get_battle_by_id_excludes_expired_clip(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    """With GCS storage, fetching a battle whose clip has expired returns 404."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
+    try:
+        await aconn.execute(
+            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            {"id": battle_id},
+        )
+    finally:
+        await aconn.close()
+    app.state.settings = app.state.settings.model_copy(update={"arena_gcs_bucket": "b"})
+
+    response = await client.get(f"/v1/arena/battle/{battle_id}", headers=_LABELER_HEADERS)
+    assert response.status_code == 404
+
+
 async def test_get_battle_by_id_unknown_returns_404(client: AsyncClient, postgresql: Any) -> None:
     """A well-formed but unknown UUID returns 404."""
     await _apply_arena_schema(_make_db_url(postgresql))
