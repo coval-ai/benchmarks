@@ -84,15 +84,16 @@ class ArenaStore:
     ) -> Vote:
         """Record a vote, or update the existing one for this identity.
 
-        The schema enforces one vote per ``(battle_id, voter_type, voter_id)``;
-        ``ON CONFLICT DO UPDATE`` turns a re-vote into an update of that row
-        (the ``BEFORE UPDATE`` trigger refreshes ``updated_at``).
+        The schema enforces one vote per ``(battle_id, voter_id)`` (one identity, one
+        current vote per battle, regardless of voter_type); ``ON CONFLICT DO UPDATE``
+        turns a re-vote into an update of that row (the ``BEFORE UPDATE`` trigger
+        refreshes ``updated_at``).
         """
         sql = """
             INSERT INTO arena.votes (battle_id, outcome, voter_type, voter_id)
             VALUES (%s, %s, %s, %s)
-            ON CONFLICT (battle_id, voter_type, voter_id)
-            DO UPDATE SET outcome = EXCLUDED.outcome
+            ON CONFLICT (battle_id, voter_id)
+            DO UPDATE SET outcome = EXCLUDED.outcome, voter_type = EXCLUDED.voter_type
             RETURNING id, battle_id, outcome, voter_type, voter_id,
                       created_at, updated_at
         """
@@ -374,3 +375,13 @@ class ArenaStore:
             await cur.execute(sql, params)
             rows = await cur.fetchall()
         return [Vote.model_validate(dict(row)) for row in rows]
+
+    async def has_voted(self, *, battle_id: UUID, voter_id: str) -> bool:
+        """True if this voter already has a vote on this battle."""
+        sql = "SELECT 1 FROM arena.votes WHERE battle_id = %s AND voter_id = %s LIMIT 1"
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.tuple_row) as cur,
+        ):
+            await cur.execute(sql, (battle_id, voter_id))
+            return await cur.fetchone() is not None

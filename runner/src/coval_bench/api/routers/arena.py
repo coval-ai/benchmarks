@@ -323,19 +323,20 @@ async def create_battle(
 async def reveal_battle(
     request: Request,  # required by slowapi
     battle_id: uuid.UUID,
+    voter_id: str = Query(...),
     x_labeler_key: str | None = Header(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
 ) -> RevealOut:
-    """De-anonymize a battle's two sides. Labeler-only, and only after a vote exists."""
+    """De-anonymize a battle's two sides. Labeler-only, and only after this voter has voted."""
     if not _is_authenticated_labeler(x_labeler_key, settings):
         raise HTTPException(403, "reveal is not enabled")
     store = ArenaStore(pool)
     battle = await store.get_battle(battle_id)
     if battle is None:
         raise HTTPException(404, f"battle {battle_id} not found")
-    if not await store.list_votes(battle_id=battle_id, limit=1):
-        raise HTTPException(409, "battle has not been voted on yet")
+    if not await store.has_voted(battle_id=battle_id, voter_id=voter_id):
+        raise HTTPException(409, "you have not voted on this battle yet")
     return RevealOut(
         a=RevealModelOut(provider=battle.provider_a, model=battle.model_a, label=battle.model_a),
         b=RevealModelOut(provider=battle.provider_b, model=battle.model_b, label=battle.model_b),
