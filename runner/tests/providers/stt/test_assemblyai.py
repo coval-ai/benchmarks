@@ -300,6 +300,41 @@ async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
 
 
 @pytest.mark.asyncio
+async def test_assemblyai_partial_only_leaves_complete_transcript_none(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """No end_of_turn=true final means no scorable transcript.
+
+    The orchestrator scores WER on any non-null complete_transcript, so an
+    unfinalized partial hypothesis must not be promoted to it. Partials are
+    still captured (ttft, partial_transcripts) — they just stay out of the
+    transcript WER reads.
+    """
+    events: list[Any] = [
+        {"type": "Begin", "id": "test-session", "expires_at": 9999999999},
+        {"type": "Turn", "transcript": "hello", "end_of_turn": False},
+        {"type": "Turn", "transcript": "hello world", "end_of_turn": False},
+    ]
+    provider = AssemblyAIProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.complete_transcript is None
+    assert result.ttft_seconds is not None
+    assert result.partial_transcripts == ["hello", "hello world"]
+
+
+@pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_uses_last_end_of_turn(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:

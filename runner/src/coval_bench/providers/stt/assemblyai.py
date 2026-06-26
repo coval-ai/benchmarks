@@ -214,8 +214,6 @@ class AssemblyAIProvider(STTProvider):
 
         if complete_turns:
             result.complete_transcript = " ".join(complete_turns).strip() or None
-        elif result.partial_transcripts:
-            result.complete_transcript = result.partial_transcripts[-1].strip() or None
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
