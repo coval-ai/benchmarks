@@ -124,6 +124,11 @@ def test_provider_name_universal_3_5_pro() -> None:
     assert p.name == "assemblyai-universal-3.5-pro"
 
 
+def test_provider_name_universal_streaming_multilingual() -> None:
+    p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-streaming-multilingual")
+    assert p.name == "assemblyai-universal-streaming-multilingual"
+
+
 @pytest.mark.asyncio
 async def test_universal_3_5_pro_url_uses_api_speech_model(
     fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
@@ -149,6 +154,34 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(
 
     url = mock_connect.call_args.args[0]
     assert "speech_model=universal-3-5-pro" in url
+
+
+@pytest.mark.asyncio
+async def test_universal_streaming_multilingual_url_uses_api_speech_model(
+    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The multilingual model id maps to its speech_model value with no language lock."""
+    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
+    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hola"}])
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-streaming-multilingual")
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "speech_model=universal-streaming-multilingual" in url
+    assert "language_code" not in url
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +270,10 @@ async def test_assemblyai_audio_to_final_populated(
 
 @pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """audio_to_final_seconds is None when no end_of_turn event arrives."""
+    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     events: list[Any] = [
         {"type": "Begin", "id": "test-session", "expires_at": 9999999999},
         {
@@ -264,6 +298,42 @@ async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
         )
 
     assert result.audio_to_final_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_partial_only_leaves_complete_transcript_none(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No end_of_turn=true final means no scorable transcript.
+
+    The orchestrator scores WER on any non-null complete_transcript, so an
+    unfinalized partial hypothesis must not be promoted to it. Partials are
+    still captured (ttft, partial_transcripts) — they just stay out of the
+    transcript WER reads.
+    """
+    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
+    events: list[Any] = [
+        {"type": "Begin", "id": "test-session", "expires_at": 9999999999},
+        {"type": "Turn", "transcript": "hello", "end_of_turn": False},
+        {"type": "Turn", "transcript": "hello world", "end_of_turn": False},
+    ]
+    provider = AssemblyAIProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.complete_transcript is None
+    assert result.ttft_seconds is not None
+    assert result.partial_transcripts == ["hello", "hello world"]
 
 
 @pytest.mark.asyncio

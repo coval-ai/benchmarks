@@ -3,7 +3,7 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Models: universal-streaming, universal-3.5-pro
+Models: universal-streaming, universal-streaming-multilingual, universal-3.5-pro
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -30,6 +30,7 @@ logger = structlog.get_logger(__name__)
 # would inflate TTFT measurements.
 _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
+    "universal-streaming-multilingual": "universal-streaming-multilingual",
     "universal-3.5-pro": "universal-3-5-pro",
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
@@ -213,8 +214,6 @@ class AssemblyAIProvider(STTProvider):
 
         if complete_turns:
             result.complete_transcript = " ".join(complete_turns).strip() or None
-        elif result.partial_transcripts:
-            result.complete_transcript = result.partial_transcripts[-1].strip() or None
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
