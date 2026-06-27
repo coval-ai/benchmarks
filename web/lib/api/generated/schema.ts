@@ -49,6 +49,11 @@ export interface components {
     ModelInfo: {
       model: string;
       disabled?: boolean;
+      tags?: components["schemas"]["ModelTagOut"][];
+    };
+    ModelTagOut: {
+      category: string;
+      value: string;
     };
     ModelStatEntry: {
       provider: string;
