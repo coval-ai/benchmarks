@@ -8,6 +8,7 @@ import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import { getModelColor } from "@/lib/utils/colors";
+import FacetFilter from "@/components/layout/FacetFilter";
 
 const MobileModelSheet: React.FC = () => {
   const {
@@ -57,6 +58,7 @@ const MobileModelSheet: React.FC = () => {
 
           {/* Model Selection */}
           <div className="space-y-2">
+            <FacetFilter />
             {Object.entries(modelsByProvider).map(([provider, models]) => (
               <div key={provider}>
                 <button

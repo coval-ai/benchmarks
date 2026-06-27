@@ -15,6 +15,13 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
+import {
+  buildFacetGroups,
+  buildTagIndex,
+  filterModelsByFacets,
+  toggleFacetValue,
+  type FacetSelection,
+} from "@/lib/utils/facets";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
@@ -61,10 +68,29 @@ export function useDashboardState(page: "tts" | "stt") {
     [aggregatesQuery.data]
   );
 
-  const modelsByProvider = useMemo(
+  // Full catalogue (minus disabled) drives the facet options; the facet
+  // selection then narrows it to what the sidebar and charts actually show.
+  const allModelsByProvider = useMemo(
     () => buildModelsByProvider(modelStats, benchmarkParam, providersQuery.data),
     [providersQuery.data, modelStats, benchmarkParam]
   );
+  const tagIndex = useMemo(
+    () => buildTagIndex(benchmarkParam, providersQuery.data),
+    [benchmarkParam, providersQuery.data]
+  );
+  const [selectedFacets, setSelectedFacets] = useState<FacetSelection>({});
+  const modelsByProvider = useMemo(
+    () => filterModelsByFacets(allModelsByProvider, tagIndex, selectedFacets),
+    [allModelsByProvider, tagIndex, selectedFacets]
+  );
+  const hasActiveFacets = useMemo(
+    () => Object.values(selectedFacets).some((v) => v.length > 0),
+    [selectedFacets]
+  );
+  const toggleFacet = useCallback((category: string, value: string) => {
+    setSelectedFacets((prev) => toggleFacetValue(prev, category, value));
+  }, []);
+  const clearFacets = useCallback(() => setSelectedFacets({}), []);
 
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
 
@@ -312,6 +338,11 @@ export function useDashboardState(page: "tts" | "stt") {
     ? normalizeSTTProviderName
     : normalizeTTSProviderName;
 
+  const facetGroups = useMemo(
+    () => buildFacetGroups(allModelsByProvider, tagIndex, selectedFacets, normalizeProviderName),
+    [allModelsByProvider, tagIndex, selectedFacets, normalizeProviderName]
+  );
+
   const boxPlotDescription = {
     short: `Distribution of ${latencyLabel} values across all runs`,
     detailed:
@@ -399,6 +430,12 @@ export function useDashboardState(page: "tts" | "stt") {
     // Model state
     selectedModels,
     modelsByProvider,
+
+    // Faceted filters
+    facetGroups,
+    toggleFacet,
+    clearFacets,
+    hasActiveFacets,
 
     // UI state
     isMobile,

@@ -7,6 +7,7 @@ import React from "react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { getModelColor } from "@/lib/utils/colors";
+import FacetFilter from "@/components/layout/FacetFilter";
 
 // Keep the links pinned in place until the footer is about to collide with the
 // actual bottom of the link list, then push the sidebar up so the filters slide
@@ -75,6 +76,7 @@ const ModelSidebar: React.FC = () => {
       <div className="flex-1 overflow-y-auto scrollbar-hide">
         {/* Model Selection Content */}
         <div ref={linksRef} className="space-y-2">
+          <FacetFilter />
           <div>
             {Object.entries(modelsByProvider).map(([provider, models]) => {
               const selectedCount = models.filter((m) =>
