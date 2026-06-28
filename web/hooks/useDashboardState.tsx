@@ -302,35 +302,30 @@ export function useDashboardState(page: "tts" | "stt") {
   );
 
   // Pre-computed key metrics for display
-  const primaryKeyMetric = (() => {
-    const multiple = deferredSelectedModels.length > 1;
-    return {
-      label: `Lowest Median ${activeMetric}`,
-      displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
-      subtitle:
-        multiple && fastestPrimary.fastestModel
-          ? {
-              name: normalizeModelName(fastestPrimary.fastestModel),
-              detail: fastestPrimary.fastestProvider
-                ? normalizeProviderName(fastestPrimary.fastestProvider)
-                : undefined,
-            }
-          : undefined,
-    };
-  })();
+  const primaryKeyMetric = {
+    label: `Lowest Median ${activeMetric}`,
+    displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
+    subtitle: fastestPrimary.fastestModel
+      ? {
+          name: normalizeModelName(fastestPrimary.fastestModel),
+          detail: fastestPrimary.fastestProvider
+            ? normalizeProviderName(fastestPrimary.fastestProvider)
+            : undefined,
+        }
+      : undefined,
+  };
 
   const secondaryKeyMetric = {
     label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
     displayValue: `${avgSecondary.toFixed(1)}%`,
-    subtitle:
-      deferredSelectedModels.length > 1 && lowestWERModel
-        ? {
-            name: normalizeModelName(lowestWERModel),
-            detail: lowestWERProvider
-              ? normalizeProviderName(lowestWERProvider)
-              : undefined,
-          }
-        : undefined,
+    subtitle: lowestWERModel
+      ? {
+          name: normalizeModelName(lowestWERModel),
+          detail: lowestWERProvider
+            ? normalizeProviderName(lowestWERProvider)
+            : undefined,
+        }
+      : undefined,
   };
 
   return {
