@@ -12,11 +12,12 @@ import {
 } from "./facets";
 
 // Four STT models: every mode is realtime (single-value → not a facet); host
-// and features vary, so those are the real facets.
+// and features vary, so those are the real facets. Cast because `tags` is read
+// defensively in facets.ts and isn't part of the generated ModelInfo type.
 function tag(category: string, value: string) {
   return { category, value };
 }
-const PROVIDERS: ProvidersApiResponse = {
+const PROVIDERS = {
   stt: [
     {
       provider: "deepgram",
@@ -51,7 +52,7 @@ const PROVIDERS: ProvidersApiResponse = {
     },
   ],
   tts: [],
-};
+} as unknown as ProvidersApiResponse;
 
 const ALL: ModelsByProvider = {
   deepgram: ["deepgram:nova-2", "deepgram:flux-general-en"],

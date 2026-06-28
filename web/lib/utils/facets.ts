@@ -1,9 +1,17 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ModelTagOut, ProvidersApiResponse } from "../api/client";
+import type { ProvidersApiResponse } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import { toModelKey } from "./formatters";
+
+// Defined locally, not from the generated schema, so the build never depends on
+// the API having shipped `tags` yet — codegen rebuilds ModelInfo from the live
+// API, and the frontend reads tags defensively (absent -> no facets).
+export interface ModelTag {
+  category: string;
+  value: string;
+}
 
 /** category -> selected values. Within a category values OR; across categories they AND. */
 export type FacetSelection = Record<string, string[]>;
@@ -39,13 +47,14 @@ const VALUE_LABELS: Record<string, string> = { vad: "VAD" };
 export function buildTagIndex(
   benchmark: "STT" | "TTS",
   providers?: ProvidersApiResponse
-): Map<string, ModelTagOut[]> {
-  const index = new Map<string, ModelTagOut[]>();
+): Map<string, ModelTag[]> {
+  const index = new Map<string, ModelTag[]>();
   if (!providers) return index;
   const catalogue = benchmark === "STT" ? providers.stt : providers.tts;
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
-      index.set(toModelKey(providerInfo.provider, modelInfo.model), modelInfo.tags ?? []);
+      const tags = (modelInfo as { tags?: ModelTag[] }).tags ?? [];
+      index.set(toModelKey(providerInfo.provider, modelInfo.model), tags);
     }
   }
   return index;
@@ -63,7 +72,7 @@ function facetValueLabel(
 
 // A model passes when, for every category with a selection, it carries at least
 // one of the selected values in that category (OR within, AND across).
-function matchesSelection(tags: ModelTagOut[], selected: FacetSelection): boolean {
+function matchesSelection(tags: ModelTag[], selected: FacetSelection): boolean {
   for (const [category, values] of Object.entries(selected)) {
     if (values.length === 0) continue;
     const hit = tags.some((t) => t.category === category && values.includes(t.value));
@@ -78,7 +87,7 @@ const hasAnySelection = (selected: FacetSelection): boolean =>
 /** Narrow modelsByProvider to the models passing the current facet selection. */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,
-  tagIndex: Map<string, ModelTagOut[]>,
+  tagIndex: Map<string, ModelTag[]>,
   selected: FacetSelection
 ): ModelsByProvider {
   if (!hasAnySelection(selected)) return modelsByProvider;
@@ -98,7 +107,7 @@ export function filterModelsByFacets(
  */
 export function buildFacetGroups(
   modelsByProvider: ModelsByProvider,
-  tagIndex: Map<string, ModelTagOut[]>,
+  tagIndex: Map<string, ModelTag[]>,
   selected: FacetSelection,
   normalizeProvider: (name: string) => string
 ): FacetGroup[] {
