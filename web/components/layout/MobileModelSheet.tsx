@@ -4,25 +4,15 @@
 "use client";
 
 import React from "react";
-import { normalizeModelName } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
-import { getModelColor } from "@/lib/utils/colors";
 import FacetFilter from "@/components/layout/FacetFilter";
 
 const MobileModelSheet: React.FC = () => {
+  const { mobileSheetTitle: title } = useDashboard();
   const {
-    mobileSheetTitle: title,
-    normalizeProviderName,
-    modelsByProvider,
-    selectedModels,
-    toggleModelSelection: onToggleModelSelection,
-  } = useDashboard();
-  const {
-    expandedProviders,
     mobileSheetOpen,
     setMobileSheetOpen: onSetMobileSheetOpen,
-    toggleProvider: onToggleProvider,
   } = useSidebarMenu();
 
   return (
@@ -56,55 +46,7 @@ const MobileModelSheet: React.FC = () => {
             {title}
           </div>
 
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <FacetFilter />
-            {Object.entries(modelsByProvider).map(([provider, models]) => (
-              <div key={provider}>
-                <button
-                  onClick={() => onToggleProvider(provider)}
-                  className="flex items-center justify-between w-full text-text-secondary hover:text-text-primary py-1.5 px-2 rounded-lg text-xs transition-all duration-300 hover:bg-hover-bg group"
-                >
-                  <span className="font-medium">
-                    {normalizeProviderName(provider)}
-                  </span>
-                  <span
-                    className={`text-xs transition-all duration-300 ${
-                      expandedProviders[provider] ? "rotate-90" : ""
-                    }`}
-                  >
-                    ›
-                  </span>
-                </button>
-                {expandedProviders[provider] && (
-                  <div className="ml-3 space-y-1 mt-2">
-                    {models.map((model) => {
-                      const selected = selectedModels.includes(model);
-                      return (
-                        <button
-                          key={model}
-                          onClick={() => onToggleModelSelection(model)}
-                          className={`flex items-center gap-2 text-left py-2 px-3 rounded-lg text-sm transition-all duration-300 w-full ${
-                            selected
-                              ? "bg-selected-bg text-text-primary shadow-md border border-selected-border"
-                              : "text-text-tertiary hover:text-text-secondary hover:bg-hover-bg"
-                          }`}
-                        >
-                          <span
-                            className="shrink-0 h-2.5 w-2.5 rounded-full"
-                            style={{ backgroundColor: getModelColor(model) }}
-                          />
-                          <span className="text-sm">
-                            {normalizeModelName(model)}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+          <FacetFilter />
         </div>
       </div>
 
@@ -115,7 +57,7 @@ const MobileModelSheet: React.FC = () => {
           onClick={() => onSetMobileSheetOpen(true)}
         >
           <div className="flex items-center space-x-2 text-text-secondary text-sm">
-            <span>{selectedModels.length} selected</span>
+            <span>Filters</span>
             <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
           </div>
         </div>

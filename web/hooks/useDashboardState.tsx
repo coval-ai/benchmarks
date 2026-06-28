@@ -14,7 +14,7 @@ import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
 import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
-import { buildModelsByProvider, pruneSelection } from "@/lib/utils/modelsFromResults";
+import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
   buildTagIndex,
@@ -25,16 +25,11 @@ import {
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
-import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
 import type { ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 
 export function useDashboardState(page: "tts" | "stt") {
-  // State declarations
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
-
   // STT shows a TTFS / TTFT toggle that drives every latency surface (headline,
   // timeline, box plot, scatter, heatmap) in sync. TTS is single-metric (TTFA),
   // so the toggle is hidden there and the metric stays TTFA.
@@ -92,6 +87,16 @@ export function useDashboardState(page: "tts" | "stt") {
   }, []);
   const clearFacets = useCallback(() => setSelectedFacets({}), []);
 
+  // The facet filter is the only selector now: every visible model that has
+  // data is plotted. Catalogue-only models (no stats) are left out — nothing
+  // to chart — and clearing a facet brings its models straight back.
+  const selectedModels = useMemo(() => {
+    const visible = new Set(Object.values(modelsByProvider).flat());
+    return [...new Set(modelStats.map((s) => toModelKey(s.provider, s.model)))].filter((key) =>
+      visible.has(key)
+    );
+  }, [modelsByProvider, modelStats]);
+
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
 
   const isMobile = useMobileDetection();
@@ -111,52 +116,6 @@ export function useDashboardState(page: "tts" | "stt") {
     modelsByProvider,
     timeWindow: dataTimeWindow,
   });
-
-  // Event handlers
-  const toggleModelSelection = useCallback(
-    (model: string) => {
-      const willBeSelected = !selectedModels.includes(model);
-      const nextSelected = willBeSelected
-        ? [...selectedModels, model]
-        : selectedModels.filter((m) => m !== model);
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardModelSelectionChanged, {
-        surface: `${page}_dashboard`,
-        mode: page,
-        action: willBeSelected ? "add" : "remove",
-        model_id: model,
-        selected_model_ids: nextSelected,
-        selected_model_count: nextSelected.length,
-        is_comparison: nextSelected.length >= 2
-      });
-      setSelectedModels(nextSelected);
-    },
-    [selectedModels, page]
-  );
-
-  // Select all of a provider's models unless they're all already selected.
-  const toggleProviderSelection = useCallback(
-    (provider: string) => {
-      const providerModels = modelsByProvider[provider] ?? [];
-      if (providerModels.length === 0) return;
-      const willBeSelected = !providerModels.every((m) =>
-        selectedModels.includes(m)
-      );
-      const nextSelected = willBeSelected
-        ? [...new Set([...selectedModels, ...providerModels])]
-        : selectedModels.filter((m) => !providerModels.includes(m));
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardModelSelectionChanged, {
-        surface: `${page}_dashboard`,
-        mode: page,
-        action: willBeSelected ? "add" : "remove",
-        provider,
-        selected_model_ids: nextSelected,
-        selected_model_count: nextSelected.length,
-        is_comparison: nextSelected.length >= 2
-      });
-      setSelectedModels(nextSelected);
-    },
-    [selectedModels, modelsByProvider, page]
-  );
 
   // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
   // in the DOM); re-runs when loading completes so the first paint of the
@@ -215,29 +174,6 @@ export function useDashboardState(page: "tts" | "stt") {
     window.addEventListener("resize", scaleHeatmapForMobile);
     return () => window.removeEventListener("resize", scaleHeatmapForMobile);
   }, [page, loading]);
-
-  // Auto-select models that have aggregate stats once they load. Catalogue-only
-  // models (in modelsByProvider but absent from modelStats) stay unselected —
-  // they have nothing to plot.
-  useEffect(() => {
-    if (modelStats.length === 0 || selectedModels.length > 0) return;
-    const visible = new Set(Object.values(modelsByProvider).flat());
-    const withStats = [
-      ...new Set(modelStats.map((s) => toModelKey(s.provider, s.model))),
-    ].filter((key) => visible.has(key));
-    if (withStats.length > 0) setSelectedModels(withStats);
-  }, [modelStats, modelsByProvider, selectedModels.length]);
-
-  // Keep the selection a subset of the visible models. Once provider metadata
-  // loads, a model that results alone had surfaced may be filtered out of
-  // modelsByProvider; drop it so it stops being plotted while absent from the
-  // sidebar. Removal-only, so it never fights a manual selection.
-  useEffect(() => {
-    setSelectedModels((prev) => {
-      const next = pruneSelection(prev, modelsByProvider);
-      return next.length === prev.length ? prev : next;
-    });
-  }, [modelsByProvider]);
 
   // Calculate metrics
   const { getStat, getHeatmapData } = chartData;
@@ -444,8 +380,6 @@ export function useDashboardState(page: "tts" | "stt") {
     windowDataStale,
 
     // Actions
-    toggleModelSelection,
-    toggleProviderSelection,
     changeTimeWindow,
 
     // Chart data functions
