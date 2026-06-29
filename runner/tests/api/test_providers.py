@@ -111,6 +111,37 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
     assert ("source", "original") in facets
     assert ("tenancy", "shared") in facets
 
+    # Each tag carries a display label: provider-valued categories keep the raw
+    # id, TYPE uppercases, everything else capitalizes.
+    labels = {(t["category"], t["value"]): t["label"] for t in grok_stt["tags"]}
+    assert labels[("type", "STT")] == "STT"
+    assert labels[("host", "xai")] == "xai"
+    assert labels[("source", "original")] == "Original"
+    assert labels[("tenancy", "shared")] == "Shared"
+
+
+async def test_tag_categories_metadata(client: AsyncClient) -> None:
+    """tag_categories ships the full vocabulary in display order with labels."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    categories = data["tag_categories"]
+    assert [c["category"] for c in categories] == [
+        "type",
+        "mode",
+        "host",
+        "lab",
+        "features",
+        "source",
+        "tenancy",
+    ]
+    by_category = {c["category"]: c for c in categories}
+    assert by_category["features"]["label"] == "Features"
+    # Host/lab values are provider ids the frontend formats itself.
+    assert by_category["host"]["provider_valued"] is True
+    assert by_category["lab"]["provider_valued"] is True
+    assert by_category["mode"]["provider_valued"] is False
+
     # groq hosts canopylabs' orpheus, so the creator override drives lab and source.
     groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq_entry["models"] if m["model"] == "canopylabs/orpheus-v1-english")

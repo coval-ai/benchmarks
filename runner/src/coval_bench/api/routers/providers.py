@@ -22,14 +22,23 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ModelInfo, ModelTagOut, ProviderInfo, ProvidersResponse
+from coval_bench.api.schemas import (
+    ModelInfo,
+    ModelTagOut,
+    ProviderInfo,
+    ProvidersResponse,
+    TagCategoryOut,
+)
 from coval_bench.registries import (
+    CATEGORY_LABELS,
     MODEL_REGISTRY,
+    PROVIDER_VALUED_CATEGORIES,
     TAG_CATEGORIES,
     Benchmark,
     ModelStatus,
     RegisteredModel,
     TagCategory,
+    tag_value_label,
 )
 
 logger = structlog.get_logger("coval_bench.api")
@@ -39,16 +48,32 @@ router = APIRouter(tags=["providers"])
 _HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
 
 
+def _tag(category: TagCategory, value: str) -> ModelTagOut:
+    return ModelTagOut(category=category, value=value, label=tag_value_label(category, value))
+
+
 def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
     """Flatten a model's facets: derived columns/attributes plus curated tags."""
     source = "inference" if m.creator and m.creator != m.provider else "original"
     return [
-        ModelTagOut(category=TagCategory.TYPE, value=m.benchmark),
-        ModelTagOut(category=TagCategory.HOST, value=m.provider),
-        ModelTagOut(category=TagCategory.LAB, value=m.creator or m.provider),
-        ModelTagOut(category=TagCategory.SOURCE, value=source),
-        ModelTagOut(category=TagCategory.TENANCY, value=m.tenancy),
-        *(ModelTagOut(category=TAG_CATEGORIES[t], value=t) for t in m.tags),
+        _tag(TagCategory.TYPE, m.benchmark),
+        _tag(TagCategory.HOST, m.provider),
+        _tag(TagCategory.LAB, m.creator or m.provider),
+        _tag(TagCategory.SOURCE, source),
+        _tag(TagCategory.TENANCY, m.tenancy),
+        *(_tag(TAG_CATEGORIES[t], t) for t in m.tags),
+    ]
+
+
+def _tag_categories() -> list[TagCategoryOut]:
+    """The facet vocabulary in display order (TagCategory definition order)."""
+    return [
+        TagCategoryOut(
+            category=c,
+            label=CATEGORY_LABELS[c],
+            provider_valued=c in PROVIDER_VALUED_CATEGORIES,
+        )
+        for c in TagCategory
     ]
 
 
@@ -79,6 +104,7 @@ def _describe() -> ProvidersResponse:
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
         tts=[ProviderInfo(provider=p, models=m) for p, m in sorted(tts_map.items())],
+        tag_categories=_tag_categories(),
     )
 
 

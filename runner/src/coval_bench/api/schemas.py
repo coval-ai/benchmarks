@@ -73,10 +73,20 @@ class LeaderboardEntry(BaseModel):
 
 
 class ModelTagOut(BaseModel):
-    """A faceted filter tag: its category and value (e.g. capability/realtime)."""
+    """A faceted filter tag: its category, raw value, and display label."""
 
     category: TagCategory
     value: str
+    label: str
+
+
+class TagCategoryOut(BaseModel):
+    """A facet category's display metadata. Sent in display order."""
+
+    category: TagCategory
+    label: str
+    # Values are provider/creator ids the client formats, not the per-tag label.
+    provider_valued: bool = False
 
 
 class ModelInfo(BaseModel):
@@ -100,6 +110,8 @@ class ProvidersResponse(BaseModel):
 
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
+    # Facet vocabulary in display order, shared across STT and TTS.
+    tag_categories: list[TagCategoryOut]
 
 
 class ResultsResponse(BaseModel):
