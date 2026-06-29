@@ -61,13 +61,13 @@ async def test_disabled_flag_exposed(client: AsyncClient) -> None:
 
 
 async def test_response_shape_breaking_change(client: AsyncClient) -> None:
-    """models is a list[ModelInfo] (dict with 'model' + 'disabled'), not a list[str]."""
+    """models is a list[ModelInfo] (dict with 'model', 'disabled', 'tags'), not a list[str]."""
     response = await client.get("/v1/providers")
     data = response.json()
     first_model = data["stt"][0]["models"][0]
     assert isinstance(first_model, dict), "models must be dicts, not strings"
-    assert set(first_model.keys()) == {"model", "disabled"}, (
-        f"ModelInfo must have exactly 'model' and 'disabled' keys, got {set(first_model.keys())}"
+    assert set(first_model.keys()) == {"model", "disabled", "tags"}, (
+        f"ModelInfo keys must be model/disabled/tags, got {set(first_model.keys())}"
     )
 
     openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
@@ -94,6 +94,30 @@ async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
     for legacy in ("tts-1", "tts-1-hd"):
         model = next(m for m in openai_entry["models"] if m["model"] == legacy)
         assert model["disabled"] is True, f"{legacy} must be disabled=True"
+
+
+async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
+    """Each model emits type/host/lab/source/tenancy facets derived from the registry."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    xai_entry = next(e for e in data["stt"] if e["provider"] == "xai")
+    grok_stt = next(m for m in xai_entry["models"] if m["model"] == "grok-stt")
+    facets = {(t["category"], t["value"]) for t in grok_stt["tags"]}
+    assert ("type", "STT") in facets
+    assert ("host", "xai") in facets
+    # lab defaults to the host when no creator override is set; source is then original.
+    assert ("lab", "xai") in facets
+    assert ("source", "original") in facets
+    assert ("tenancy", "shared") in facets
+
+    # groq hosts canopylabs' orpheus, so the creator override drives lab and source.
+    groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")
+    orpheus = next(m for m in groq_entry["models"] if m["model"] == "canopylabs/orpheus-v1-english")
+    orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
+    assert ("host", "groq") in orpheus_facets
+    assert ("lab", "canopylabs") in orpheus_facets
+    assert ("source", "inference") in orpheus_facets
 
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
