@@ -48,6 +48,8 @@ async function request<T>(path: string, init?: Parameters<typeof fetch>[1]): Pro
 export type ProvidersApiResponse = components["schemas"]["ProvidersResponse"];
 export type ProviderInfo = components["schemas"]["ProviderInfo"];
 export type ModelInfo = components["schemas"]["ModelInfo"];
+export type ModelTagOut = components["schemas"]["ModelTagOut"];
+export type TagCategoryOut = components["schemas"]["TagCategoryOut"];
 export type LeaderboardApiResponse = components["schemas"]["LeaderboardResponse"];
 export type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
 export type RunRow = components["schemas"]["RunOut"];

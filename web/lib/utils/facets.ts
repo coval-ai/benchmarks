@@ -1,17 +1,9 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ProvidersApiResponse } from "../api/client";
+import type { ModelTagOut, ProvidersApiResponse, TagCategoryOut } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import { toModelKey } from "./formatters";
-
-// Defined locally, not from the generated schema, so the build never depends on
-// the API having shipped `tags` yet — codegen rebuilds ModelInfo from the live
-// API, and the frontend reads tags defensively (absent -> no facets).
-export interface ModelTag {
-  category: string;
-  value: string;
-}
 
 /** category -> selected values. Within a category values OR; across categories they AND. */
 export type FacetSelection = Record<string, string[]>;
@@ -29,50 +21,30 @@ export interface FacetGroup {
   options: FacetOption[];
 }
 
-// Display order and labels for the tag categories the API emits.
-const CATEGORY_ORDER = ["type", "mode", "host", "lab", "features", "source", "tenancy"];
-const CATEGORY_LABELS: Record<string, string> = {
-  type: "Type",
-  mode: "Mode",
-  host: "Host",
-  lab: "Lab",
-  features: "Features",
-  source: "Source",
-  tenancy: "Tenancy",
-};
-// Values whose nice form isn't just a capitalization.
-const VALUE_LABELS: Record<string, string> = { vad: "VAD" };
+/** The facet vocabulary (categories, labels, order) — sourced entirely from the API. */
+export function getTagCategories(providers?: ProvidersApiResponse): TagCategoryOut[] {
+  return providers?.tag_categories ?? [];
+}
 
 /** Map every catalogue model's composite key to its tags. */
 export function buildTagIndex(
   benchmark: "STT" | "TTS",
   providers?: ProvidersApiResponse
-): Map<string, ModelTag[]> {
-  const index = new Map<string, ModelTag[]>();
+): Map<string, ModelTagOut[]> {
+  const index = new Map<string, ModelTagOut[]>();
   if (!providers) return index;
   const catalogue = benchmark === "STT" ? providers.stt : providers.tts;
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
-      const tags = (modelInfo as { tags?: ModelTag[] }).tags ?? [];
-      index.set(toModelKey(providerInfo.provider, modelInfo.model), tags);
+      index.set(toModelKey(providerInfo.provider, modelInfo.model), modelInfo.tags ?? []);
     }
   }
   return index;
 }
 
-function facetValueLabel(
-  category: string,
-  value: string,
-  normalizeProvider: (name: string) => string
-): string {
-  if (category === "host" || category === "lab") return normalizeProvider(value);
-  if (category === "type") return value.toUpperCase();
-  return VALUE_LABELS[value] ?? value.charAt(0).toUpperCase() + value.slice(1);
-}
-
 // A model passes when, for every category with a selection, it carries at least
 // one of the selected values in that category (OR within, AND across).
-function matchesSelection(tags: ModelTag[], selected: FacetSelection): boolean {
+function matchesSelection(tags: ModelTagOut[], selected: FacetSelection): boolean {
   for (const [category, values] of Object.entries(selected)) {
     if (values.length === 0) continue;
     const hit = tags.some((t) => t.category === category && values.includes(t.value));
@@ -87,7 +59,7 @@ const hasAnySelection = (selected: FacetSelection): boolean =>
 /** Narrow modelsByProvider to the models passing the current facet selection. */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,
-  tagIndex: Map<string, ModelTag[]>,
+  tagIndex: Map<string, ModelTagOut[]>,
   selected: FacetSelection
 ): ModelsByProvider {
   if (!hasAnySelection(selected)) return modelsByProvider;
@@ -100,32 +72,33 @@ export function filterModelsByFacets(
 }
 
 /**
- * Build the chip groups. A category is shown only when it has at least two
- * distinct values across the visible models — a single-value facet can't filter
- * anything. Each option's count is the number of models that would remain if it
- * were selected, honoring the other categories' current selection.
+ * Build the chip groups, in the API's category order. A category is shown only
+ * when the visible models hold at least two distinct values for it. Each
+ * option's count is how many models would remain if it were selected, honoring
+ * the other categories' selection.
  */
 export function buildFacetGroups(
   modelsByProvider: ModelsByProvider,
-  tagIndex: Map<string, ModelTag[]>,
+  tagIndex: Map<string, ModelTagOut[]>,
   selected: FacetSelection,
+  tagCategories: TagCategoryOut[],
   normalizeProvider: (name: string) => string
 ): FacetGroup[] {
   const visibleKeys = Object.values(modelsByProvider).flat();
   const groups: FacetGroup[] = [];
 
-  for (const category of CATEGORY_ORDER) {
-    const values = new Set<string>();
+  for (const { category, label, provider_valued } of tagCategories) {
+    const valueLabels = new Map<string, string>();
     for (const key of visibleKeys) {
       for (const tag of tagIndex.get(key) ?? []) {
-        if (tag.category === category) values.add(tag.value);
+        if (tag.category === category) valueLabels.set(tag.value, tag.label);
       }
     }
-    if (values.size < 2) continue;
+    if (valueLabels.size < 2) continue;
 
     const others: FacetSelection = { ...selected, [category]: [] };
-    const options: FacetOption[] = [...values]
-      .map((value) => {
+    const options: FacetOption[] = [...valueLabels.entries()]
+      .map(([value, valueLabel]) => {
         const count = visibleKeys.filter((key) => {
           const tags = tagIndex.get(key) ?? [];
           return (
@@ -135,14 +108,14 @@ export function buildFacetGroups(
         }).length;
         return {
           value,
-          label: facetValueLabel(category, value, normalizeProvider),
+          label: provider_valued ? normalizeProvider(value) : valueLabel,
           count,
           active: (selected[category] ?? []).includes(value),
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
 
-    groups.push({ category, label: CATEGORY_LABELS[category] ?? category, options });
+    groups.push({ category, label, options });
   }
 
   return groups;

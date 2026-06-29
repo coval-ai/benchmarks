@@ -19,6 +19,7 @@ import {
   buildFacetGroups,
   buildTagIndex,
   filterModelsByFacets,
+  getTagCategories,
   toggleFacetValue,
   type FacetSelection,
 } from "@/lib/utils/facets";
@@ -72,6 +73,10 @@ export function useDashboardState(page: "tts" | "stt") {
   const tagIndex = useMemo(
     () => buildTagIndex(benchmarkParam, providersQuery.data),
     [benchmarkParam, providersQuery.data]
+  );
+  const tagCategories = useMemo(
+    () => getTagCategories(providersQuery.data),
+    [providersQuery.data]
   );
   const [selectedFacets, setSelectedFacets] = useState<FacetSelection>({});
   const modelsByProvider = useMemo(
@@ -275,8 +280,15 @@ export function useDashboardState(page: "tts" | "stt") {
     : normalizeTTSProviderName;
 
   const facetGroups = useMemo(
-    () => buildFacetGroups(allModelsByProvider, tagIndex, selectedFacets, normalizeProviderName),
-    [allModelsByProvider, tagIndex, selectedFacets, normalizeProviderName]
+    () =>
+      buildFacetGroups(
+        allModelsByProvider,
+        tagIndex,
+        selectedFacets,
+        tagCategories,
+        normalizeProviderName
+      ),
+    [allModelsByProvider, tagIndex, selectedFacets, tagCategories, normalizeProviderName]
   );
 
   const boxPlotDescription = {

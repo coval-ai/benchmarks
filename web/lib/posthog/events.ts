@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const POSTHOG_EVENTS = {
-  dashboardModelSelectionChanged: "dashboard_model_selection_changed",
   playgroundModelSelectionChanged: "playground_model_selection_changed",
   playgroundTtsBenchmarkPressed: "playground_tts_benchmark_pressed",
   playgroundSttRecordPressed: "playground_stt_record_pressed",
@@ -26,7 +25,6 @@ export type PostHogSurface =
   | "playground"
   | "overview";
 export type PostHogMode = "tts" | "stt";
-export type SelectionAction = "add" | "remove";
 export type DashboardChartId =
   | "timeline"
   | "scatter"
