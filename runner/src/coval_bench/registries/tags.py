@@ -29,7 +29,6 @@ class ModelTag(StrEnum):
 
     REALTIME = "realtime"
     BATCH = "batch"
-    BIDIRECTIONAL = "bidirectional"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
 
@@ -37,7 +36,6 @@ class ModelTag(StrEnum):
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.REALTIME: TagCategory.MODE,
     ModelTag.BATCH: TagCategory.MODE,
-    ModelTag.BIDIRECTIONAL: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
 }

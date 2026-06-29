@@ -111,6 +111,14 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
     assert ("source", "original") in facets
     assert ("tenancy", "shared") in facets
 
+    # groq hosts canopylabs' orpheus, so the creator override drives lab and source.
+    groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")
+    orpheus = next(m for m in groq_entry["models"] if m["model"] == "canopylabs/orpheus-v1-english")
+    orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
+    assert ("host", "groq") in orpheus_facets
+    assert ("lab", "canopylabs") in orpheus_facets
+    assert ("source", "inference") in orpheus_facets
+
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
     """The /v1/providers endpoint never acquires a DB connection.
