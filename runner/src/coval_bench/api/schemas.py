@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.registries import TagCategory
 
 
 class RunOut(BaseModel):
@@ -71,11 +72,29 @@ class LeaderboardEntry(BaseModel):
     n: int
 
 
+class ModelTagOut(BaseModel):
+    """A faceted filter tag: its category, raw value, and display label."""
+
+    category: TagCategory
+    value: str
+    label: str
+
+
+class TagCategoryOut(BaseModel):
+    """A facet category's display metadata. Sent in display order."""
+
+    category: TagCategory
+    label: str
+    # Values are provider/creator ids the client formats, not the per-tag label.
+    provider_valued: bool = False
+
+
 class ModelInfo(BaseModel):
     """A single model entry under a provider, with admin-disabled flag."""
 
     model: str
     disabled: bool = False
+    tags: list[ModelTagOut] = []
 
 
 class ProviderInfo(BaseModel):
@@ -91,6 +110,8 @@ class ProvidersResponse(BaseModel):
 
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
+    # Facet vocabulary in display order, shared across STT and TTS.
+    tag_categories: list[TagCategoryOut]
 
 
 class ResultsResponse(BaseModel):

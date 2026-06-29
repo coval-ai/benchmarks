@@ -28,6 +28,13 @@ class ModelStatus(StrEnum):
     PENDING = "pending"  # implemented but waiting on credits; hidden like retired
 
 
+class Tenancy(StrEnum):
+    """Whether the served model runs on shared or dedicated infrastructure."""
+
+    SHARED = "shared"
+    DEDICATED = "dedicated"
+
+
 class RegisteredModel(BaseModel, frozen=True):
     """A single benchmarked model: identity, display metadata, run config."""
 
@@ -37,6 +44,7 @@ class RegisteredModel(BaseModel, frozen=True):
     voice: str | None = None  # TTS only
     creator: str | None = None  # who makes the model; None means same as provider
     tags: tuple[ModelTag, ...] = ()
+    tenancy: Tenancy = Tenancy.SHARED
     status: ModelStatus
 
 
@@ -45,53 +53,191 @@ _TTS = Benchmark.TTS
 _ACTIVE = ModelStatus.ACTIVE
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
+_REALTIME = ModelTag.REALTIME
+_BATCH = ModelTag.BATCH
+_MULTI = ModelTag.MULTILINGUAL
+_VAD = ModelTag.VAD
 
 # Per-benchmark order is the model order /v1/providers returns.
 MODEL_REGISTRY: list[RegisteredModel] = [
     #######
     # STT #
     #######
-    RegisteredModel(benchmark=_STT, provider="deepgram", model="nova-2", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="deepgram", model="nova-3", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="deepgram", model="flux-general-en", status=_ACTIVE),
     RegisteredModel(
-        benchmark=_STT, provider="deepgram", model="flux-general-multi", status=_ACTIVE
+        benchmark=_STT,
+        provider="deepgram",
+        model="nova-2",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_STT, provider="elevenlabs", model="scribe_v2_realtime", status=_ACTIVE
+        benchmark=_STT,
+        provider="deepgram",
+        model="nova-3",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_STT, provider="openai", model="gpt-realtime-whisper", status=_ACTIVE
+        benchmark=_STT,
+        provider="deepgram",
+        model="flux-general-en",
+        tags=(_REALTIME, _VAD),
+        status=_ACTIVE,
     ),
-    RegisteredModel(benchmark=_STT, provider="openai", model="gpt-4o-transcribe", status=_ACTIVE),
     RegisteredModel(
-        benchmark=_STT, provider="openai", model="gpt-4o-mini-transcribe", status=_ACTIVE
+        benchmark=_STT,
+        provider="deepgram",
+        model="flux-general-multi",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_STT, provider="assemblyai", model="universal-streaming", status=_ACTIVE
+        benchmark=_STT,
+        provider="elevenlabs",
+        model="scribe_v2_realtime",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="openai",
+        model="gpt-realtime-whisper",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="openai",
+        model="gpt-4o-transcribe",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="openai",
+        model="gpt-4o-mini-transcribe",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="assemblyai",
+        model="universal-streaming",
+        tags=(_REALTIME, _VAD),
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_STT,
         provider="assemblyai",
         model="universal-streaming-multilingual",
+        tags=(_REALTIME, _MULTI, _VAD),
         status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_STT, provider="assemblyai", model="universal-3.5-pro", status=_ACTIVE
+        benchmark=_STT,
+        provider="assemblyai",
+        model="universal-3.5-pro",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
     ),
-    RegisteredModel(benchmark=_STT, provider="speechmatics", model="default", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="speechmatics", model="enhanced", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="gradium", model="default", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="gladia", model="solaria-1", status=_PENDING),
-    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v4", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="soniox", model="stt-rt-v5", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="xai", model="grok-stt", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="smallest", model="pulse", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="cartesia", model="ink-2", status=_ACTIVE),
-    RegisteredModel(benchmark=_STT, provider="google", model="short", status=_RETIRED),
-    RegisteredModel(benchmark=_STT, provider="google", model="long", status=_RETIRED),
-    RegisteredModel(benchmark=_STT, provider="google", model="telephony", status=_RETIRED),
-    RegisteredModel(benchmark=_STT, provider="google", model="chirp_2", status=_RETIRED),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="speechmatics",
+        model="default",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="speechmatics",
+        model="enhanced",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="gradium",
+        model="default",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="gladia",
+        model="solaria-1",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="soniox",
+        model="stt-rt-v4",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="soniox",
+        model="stt-rt-v5",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="inworld",
+        model="inworld-stt-1",
+        tags=(_REALTIME, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="xai",
+        model="grok-stt",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="smallest",
+        model="pulse",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="cartesia",
+        model="ink-2",
+        tags=(_REALTIME, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="google",
+        model="short",
+        tags=(_BATCH, _MULTI),
+        status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="google",
+        model="long",
+        tags=(_BATCH, _MULTI),
+        status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="google",
+        model="telephony",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="google",
+        model="chirp_2",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_RETIRED,
+    ),
     #######
     # TTS #
     #######
@@ -100,6 +246,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -107,6 +254,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_multilingual_v2",
         voice="IKne3meq5aSn9XLyUdCD",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -114,22 +262,39 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_turbo_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
+        tags=(_REALTIME, _MULTI),
         status=_RETIRED,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="openai", model="gpt-4o-mini-tts", voice="alloy", status=_ACTIVE
+        benchmark=_TTS,
+        provider="openai",
+        model="gpt-4o-mini-tts",
+        voice="alloy",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="openai", model="tts-1-hd", voice="alloy", status=_RETIRED
+        benchmark=_TTS,
+        provider="openai",
+        model="tts-1-hd",
+        voice="alloy",
+        tags=(_REALTIME, _MULTI),
+        status=_RETIRED,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="openai", model="tts-1", voice="alloy", status=_RETIRED
+        benchmark=_TTS,
+        provider="openai",
+        model="tts-1",
+        voice="alloy",
+        tags=(_REALTIME, _MULTI),
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="cartesia",
         model="sonic-3",
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -137,6 +302,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="cartesia",
         model="sonic-3.5",
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -144,6 +310,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
+        tags=(_REALTIME,),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -151,19 +318,49 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="gradium",
         model="default",
         voice="YTpq7expH9539ERJ",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
-    RegisteredModel(benchmark=_TTS, provider="rime", model="coda", voice="luna", status=_ACTIVE),
-    RegisteredModel(benchmark=_TTS, provider="rime", model="arcana", voice="luna", status=_ACTIVE),
-    RegisteredModel(benchmark=_TTS, provider="rime", model="mistv3", voice="luna", status=_ACTIVE),
-    RegisteredModel(benchmark=_TTS, provider="rime", model="mistv2", voice="luna", status=_RETIRED),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="rime",
+        model="coda",
+        voice="luna",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="rime",
+        model="arcana",
+        voice="luna",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="rime",
+        model="mistv3",
+        voice="luna",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="rime",
+        model="mistv2",
+        voice="luna",
+        tags=(_REALTIME, _MULTI),
+        status=_RETIRED,
+    ),
     RegisteredModel(
         benchmark=_TTS,
         provider="hume",
         model="octave-tts",
         voice="176a55b1-4468-4736-8878-db82729667c1",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -171,14 +368,23 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="hume",
         model="octave-2",
         voice="176a55b1-4468-4736-8878-db82729667c1",
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
-    RegisteredModel(benchmark=_TTS, provider="xai", model="grok-tts", voice="eve", status=_ACTIVE),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="xai",
+        model="grok-tts",
+        voice="eve",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
+    ),
     RegisteredModel(
         benchmark=_TTS,
         provider="smallest",
         model="lightning_v3.1_pro",
         voice="kaitlyn",
+        tags=(_REALTIME,),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -186,33 +392,52 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="inworld",
         model="inworld-tts-1.5-max",
         voice="Ashley",
-        status=_PENDING,
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-mini",
         voice="Ashley",
-        status=_PENDING,
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
     ),
     RegisteredModel(
-        benchmark=_TTS, provider="soniox", model="tts-rt-v1", voice="Adrian", status=_ACTIVE
+        benchmark=_TTS,
+        provider="soniox",
+        model="tts-rt-v1",
+        voice="Adrian",
+        tags=(_REALTIME, _MULTI),
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="groq",
         model="canopylabs/orpheus-v1-english",
         voice="autumn",
-        status=_PENDING,
+        creator="canopylabs",
+        tags=(_BATCH,),
+        status=_ACTIVE,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
     # retired (not deleted) so historical rows stay hidden on the site.
     RegisteredModel(
-        benchmark=_TTS, provider="openai", model="gpt-realtime-2025-08-28", status=_RETIRED
+        benchmark=_TTS,
+        provider="openai",
+        model="gpt-realtime-2025-08-28",
+        tags=(_REALTIME, _MULTI),
+        status=_RETIRED,
     ),
-    RegisteredModel(benchmark=_TTS, provider="cartesia", model="sonic", status=_RETIRED),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="cartesia",
+        model="sonic",
+        tags=(_REALTIME, _MULTI),
+        status=_RETIRED,
+    ),
 ]
 
 _key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)

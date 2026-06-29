@@ -22,14 +22,60 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ModelInfo, ProviderInfo, ProvidersResponse
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
+from coval_bench.api.schemas import (
+    ModelInfo,
+    ModelTagOut,
+    ProviderInfo,
+    ProvidersResponse,
+    TagCategoryOut,
+)
+from coval_bench.registries import (
+    CATEGORY_LABELS,
+    MODEL_REGISTRY,
+    PROVIDER_VALUED_CATEGORIES,
+    TAG_CATEGORIES,
+    Benchmark,
+    ModelStatus,
+    RegisteredModel,
+    TagCategory,
+    tag_value_label,
+)
 
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["providers"])
 
 _HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
+
+
+def _tag(category: TagCategory, value: str) -> ModelTagOut:
+    """Build a facet tag with its display label resolved from the registry."""
+    return ModelTagOut(category=category, value=value, label=tag_value_label(category, value))
+
+
+def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
+    """Flatten a model's facets: derived columns/attributes plus curated tags."""
+    source = "inference" if m.creator and m.creator != m.provider else "original"
+    return [
+        _tag(TagCategory.TYPE, m.benchmark),
+        _tag(TagCategory.HOST, m.provider),
+        _tag(TagCategory.LAB, m.creator or m.provider),
+        _tag(TagCategory.SOURCE, source),
+        _tag(TagCategory.TENANCY, m.tenancy),
+        *(_tag(TAG_CATEGORIES[t], t) for t in m.tags),
+    ]
+
+
+def _tag_categories() -> list[TagCategoryOut]:
+    """The facet vocabulary in display order (TagCategory definition order)."""
+    return [
+        TagCategoryOut(
+            category=c,
+            label=CATEGORY_LABELS[c],
+            provider_valued=c in PROVIDER_VALUED_CATEGORIES,
+        )
+        for c in TagCategory
+    ]
 
 
 def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
@@ -43,7 +89,11 @@ def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
     for m in MODEL_REGISTRY:
         if m.benchmark is benchmark:
             result.setdefault(m.provider, []).append(
-                ModelInfo(model=m.model, disabled=m.status in _HIDDEN_STATUSES)
+                ModelInfo(
+                    model=m.model,
+                    disabled=m.status in _HIDDEN_STATUSES,
+                    tags=_model_tags(m),
+                )
             )
     return result
 
@@ -55,6 +105,7 @@ def _describe() -> ProvidersResponse:
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
         tts=[ProviderInfo(provider=p, models=m) for p, m in sorted(tts_map.items())],
+        tag_categories=_tag_categories(),
     )
 
 

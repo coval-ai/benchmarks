@@ -21,6 +21,7 @@ from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
 from coval_bench.providers.stt.gladia import GladiaSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
+from coval_bench.providers.stt.inworld import InworldSTTProvider
 from coval_bench.providers.stt.openai import OpenAISTTProvider
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
@@ -43,6 +44,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "elevenlabs": ElevenLabsSTTProvider,
     "gladia": GladiaSTTProvider,
     "gradium": GradiumSTTProvider,
+    "inworld": InworldSTTProvider,
     "openai": OpenAISTTProvider,
     "smallest": SmallestSTTProvider,
     "soniox": SonioxSTTProvider,
@@ -62,6 +64,7 @@ __all__ = [
     "ElevenLabsSTTProvider",
     "GladiaSTTProvider",
     "GradiumSTTProvider",
+    "InworldSTTProvider",
     "OpenAISTTProvider",
     "SmallestSTTProvider",
     "SonioxSTTProvider",
