@@ -36,7 +36,7 @@ class InworldSTTProvider(STTProvider):
             raise ValueError(
                 f"Invalid Inworld STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
             )
-        if api_key is None:
+        if api_key is None or not api_key.get_secret_value().strip():
             raise ValueError("inworld_api_key is required for the Inworld STT provider")
         self._api_key = api_key
         self._model = model
@@ -103,6 +103,10 @@ class InworldSTTProvider(STTProvider):
                         if isinstance(outcome, Exception):
                             result.error = str(outcome)
                             break
+                    else:
+                        result.error = (
+                            "Inworld stream ended before a final transcription was received"
+                        )
 
         except Exception as exc:
             logger.warning(
@@ -126,11 +130,17 @@ class InworldSTTProvider(STTProvider):
         result.audio_start_time = time.monotonic()
         try:
             for i in range(0, len(audio_data), chunk_size):
+                # Stop early if _receive already recorded a protocol/auth error.
+                if result.error is not None:
+                    break
                 chunk = audio_data[i : i + chunk_size]
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
                 )
-                await asyncio.sleep(realtime_resolution)
+                # Pace to real time between chunks only — sleeping after the last
+                # one would delay finalization and inflate the latency clocks.
+                if i + chunk_size < len(audio_data):
+                    await asyncio.sleep(realtime_resolution)
             # endTurn forces finalization; closeStream then flushes the final
             # transcripts and closes the socket, ending the receive loop.
             await ws.send(json.dumps({"endTurn": {}}))

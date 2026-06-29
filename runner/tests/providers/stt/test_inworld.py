@@ -129,6 +129,11 @@ def test_missing_api_key_raises() -> None:
         InworldSTTProvider(api_key=None)
 
 
+def test_blank_api_key_raises() -> None:
+    with pytest.raises(ValueError, match="inworld_api_key is required"):
+        InworldSTTProvider(api_key=SecretStr("   "))
+
+
 # ---------------------------------------------------------------------------
 # Invalid sample rate / format
 # ---------------------------------------------------------------------------
@@ -201,6 +206,7 @@ async def test_inworld_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byt
 
 @pytest.mark.asyncio
 async def test_inworld_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """A stream that never yields a final transcription is a failure, not an empty success."""
     provider = InworldSTTProvider(api_key=fake_api_key)
 
     with patch(
@@ -217,6 +223,8 @@ async def test_inworld_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: by
 
     assert result.complete_transcript is None
     assert result.ttft_seconds is None
+    assert result.error is not None
+    assert "before a final transcription" in result.error
 
 
 # ---------------------------------------------------------------------------
