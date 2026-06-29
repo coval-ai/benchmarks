@@ -19,7 +19,14 @@ from coval_bench.registries.models import (
     RegisteredModel,
     Tenancy,
 )
-from coval_bench.registries.tags import TAG_CATEGORIES, ModelTag, TagCategory
+from coval_bench.registries.tags import (
+    CATEGORY_LABELS,
+    PROVIDER_VALUED_CATEGORIES,
+    TAG_CATEGORIES,
+    ModelTag,
+    TagCategory,
+    tag_value_label,
+)
 
 __all__ = [
     "Benchmark",
@@ -31,7 +38,10 @@ __all__ = [
     "ModelStatus",
     "RegisteredModel",
     "Tenancy",
+    "CATEGORY_LABELS",
+    "PROVIDER_VALUED_CATEGORIES",
     "TAG_CATEGORIES",
     "ModelTag",
     "TagCategory",
+    "tag_value_label",
 ]
