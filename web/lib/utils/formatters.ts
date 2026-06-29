@@ -123,6 +123,7 @@ export function normalizeModelName(modelKey: string): string {
     "universal-streaming-multilingual": "Universal Streaming Multilingual",
     "universal-3.5-pro": "Universal 3.5 Pro",
     "ink-2": "Ink 2",
+    "inworld-stt-1": "STT 1",
     default: "Default",
     enhanced: "Enhanced"
   };
@@ -166,6 +167,7 @@ export function normalizeSTTProviderName(providerName: string): string {
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
     gradium: "Gradium",
+    inworld: "Inworld AI",
     openai: "OpenAI",
     rime: "Rime",
     speechmatics: "Speechmatics",

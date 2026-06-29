@@ -184,6 +184,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_STT,
+        provider="inworld",
+        model="inworld-stt-1",
+        tags=(_REALTIME, _VAD),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
         provider="xai",
         model="grok-stt",
         tags=(_REALTIME, _MULTI, _VAD),
@@ -386,7 +393,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="inworld-tts-1.5-max",
         voice="Ashley",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -394,7 +401,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="inworld-tts-1.5-mini",
         voice="Ashley",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
