@@ -20,10 +20,13 @@ import {
   buildTagIndex,
   filterModelsByFacets,
   getTagCategories,
+  hasAnySelection,
   restrictToModelKeys,
   toggleFacetValue,
   type FacetSelection,
 } from "@/lib/utils/facets";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
@@ -92,13 +95,34 @@ export function useDashboardState(page: "tts" | "stt") {
     [dataBackedByProvider, tagIndex, selectedFacets]
   );
   const hasActiveFacets = useMemo(
-    () => Object.values(selectedFacets).some((v) => v.length > 0),
+    () => hasAnySelection(selectedFacets),
     [selectedFacets]
   );
-  const toggleFacet = useCallback((category: string, value: string) => {
-    setSelectedFacets((prev) => toggleFacetValue(prev, category, value));
-  }, []);
-  const clearFacets = useCallback(() => setSelectedFacets({}), []);
+  const toggleFacet = useCallback(
+    (category: string, value: string) => {
+      const removing = (selectedFacets[category] ?? []).includes(value);
+      const next = toggleFacetValue(selectedFacets, category, value);
+      setSelectedFacets(next);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        action: removing ? "remove" : "add",
+        category,
+        value,
+        active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
+      });
+    },
+    [selectedFacets, page]
+  );
+  const clearFacets = useCallback(() => {
+    if (!hasAnySelection(selectedFacets)) return;
+    setSelectedFacets({});
+    capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
+      surface: `${page}_dashboard`,
+      mode: page,
+      action: "clear",
+    });
+  }, [selectedFacets, page]);
 
   // The facet filter is the only selector now, and its universe is already the
   // data-backed models, so everything still visible after filtering is plotted.

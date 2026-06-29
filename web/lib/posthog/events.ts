@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const POSTHOG_EVENTS = {
+  dashboardFacetChanged: "dashboard_facet_changed",
   playgroundModelSelectionChanged: "playground_model_selection_changed",
   playgroundTtsBenchmarkPressed: "playground_tts_benchmark_pressed",
   playgroundSttRecordPressed: "playground_stt_record_pressed",

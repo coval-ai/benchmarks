@@ -27,8 +27,16 @@ const FacetFilter: React.FC = () => {
       </div>
 
       {facetGroups.map((group) => (
-        <div key={group.category} className="px-2">
-          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary">
+        <div
+          key={group.category}
+          role="group"
+          aria-labelledby={`facet-${group.category}`}
+          className="px-2"
+        >
+          <div
+            id={`facet-${group.category}`}
+            className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary"
+          >
             {group.label}
           </div>
           <div className="flex flex-wrap gap-1.5">

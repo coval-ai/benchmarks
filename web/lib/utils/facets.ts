@@ -53,7 +53,8 @@ function matchesSelection(tags: ModelTagOut[], selected: FacetSelection): boolea
   return true;
 }
 
-const hasAnySelection = (selected: FacetSelection): boolean =>
+/** True when any category has at least one selected value. */
+export const hasAnySelection = (selected: FacetSelection): boolean =>
   Object.values(selected).some((v) => v.length > 0);
 
 /**

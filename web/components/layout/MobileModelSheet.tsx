@@ -9,7 +9,7 @@ import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import FacetFilter from "@/components/layout/FacetFilter";
 
 const MobileModelSheet: React.FC = () => {
-  const { mobileSheetTitle: title } = useDashboard();
+  const { mobileSheetTitle: title, hasActiveFacets } = useDashboard();
   const {
     mobileSheetOpen,
     setMobileSheetOpen: onSetMobileSheetOpen,
@@ -58,6 +58,12 @@ const MobileModelSheet: React.FC = () => {
         >
           <div className="flex items-center space-x-2 text-text-secondary text-sm">
             <span>Filters</span>
+            {hasActiveFacets && (
+              <span
+                className="h-2 w-2 rounded-full bg-surface-toggle-active"
+                aria-label="Filters active"
+              />
+            )}
             <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
           </div>
         </div>
