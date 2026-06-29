@@ -9,6 +9,7 @@ import {
   buildTagIndex,
   filterModelsByFacets,
   getTagCategories,
+  restrictToModelKeys,
   toggleFacetValue,
 } from "./facets";
 
@@ -113,6 +114,26 @@ describe("buildFacetGroups", () => {
     const groups = buildFacetGroups(ALL, index(), {}, cats(), (s) => s.toUpperCase());
     const host = groups.find((g) => g.category === "host")!;
     expect(host.options.map((o) => o.label)).toEqual(["CARTESIA", "DEEPGRAM", "OPENAI"]);
+  });
+});
+
+describe("restrictToModelKeys", () => {
+  it("drops models without data and prunes emptied providers", () => {
+    // openai:gpt-4o-transcribe has no data → openai drops entirely; a chip
+    // built over the result can't count a model that would chart nothing.
+    const withData = new Set(["deepgram:nova-2", "cartesia:ink-2"]);
+    expect(restrictToModelKeys(ALL, withData)).toEqual({
+      deepgram: ["deepgram:nova-2"],
+      cartesia: ["cartesia:ink-2"],
+    });
+  });
+
+  it("hides a category once its only data-backed value collapses to one", () => {
+    // Only deepgram models have data → host has a single value → not a facet.
+    const withData = new Set(["deepgram:nova-2", "deepgram:flux-general-en"]);
+    const universe = restrictToModelKeys(ALL, withData);
+    const groups = buildFacetGroups(universe, index(), {}, cats(), (s) => s);
+    expect(groups.map((g) => g.category)).not.toContain("host");
   });
 });
 

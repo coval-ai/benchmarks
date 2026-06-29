@@ -56,6 +56,23 @@ function matchesSelection(tags: ModelTagOut[], selected: FacetSelection): boolea
 const hasAnySelection = (selected: FacetSelection): boolean =>
   Object.values(selected).some((v) => v.length > 0);
 
+/**
+ * Keep only the models whose composite key is in `keys`. Used to restrict the
+ * facet universe to models that actually have data to plot, so a chip can never
+ * count (or filter to) a catalogue-only model that would show nothing.
+ */
+export function restrictToModelKeys(
+  modelsByProvider: ModelsByProvider,
+  keys: Set<string>
+): ModelsByProvider {
+  const out: ModelsByProvider = {};
+  for (const [provider, modelKeys] of Object.entries(modelsByProvider)) {
+    const kept = modelKeys.filter((key) => keys.has(key));
+    if (kept.length > 0) out[provider] = kept;
+  }
+  return out;
+}
+
 /** Narrow modelsByProvider to the models passing the current facet selection. */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,

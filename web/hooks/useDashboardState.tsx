@@ -20,6 +20,7 @@ import {
   buildTagIndex,
   filterModelsByFacets,
   getTagCategories,
+  restrictToModelKeys,
   toggleFacetValue,
   type FacetSelection,
 } from "@/lib/utils/facets";
@@ -64,8 +65,6 @@ export function useDashboardState(page: "tts" | "stt") {
     [aggregatesQuery.data]
   );
 
-  // Full catalogue (minus disabled) drives the facet options; the facet
-  // selection then narrows it to what the sidebar and charts actually show.
   const allModelsByProvider = useMemo(
     () => buildModelsByProvider(modelStats, benchmarkParam, providersQuery.data),
     [providersQuery.data, modelStats, benchmarkParam]
@@ -78,10 +77,19 @@ export function useDashboardState(page: "tts" | "stt") {
     () => getTagCategories(providersQuery.data),
     [providersQuery.data]
   );
+
+  // Facets are driven only by models that actually have data to plot. A
+  // catalogue model without stats (e.g. a batch-only or not-yet-benchmarked
+  // model) would otherwise surface a chip that counts 1 but charts nothing.
+  const dataBackedByProvider = useMemo(() => {
+    const withData = new Set(modelStats.map((s) => toModelKey(s.provider, s.model)));
+    return restrictToModelKeys(allModelsByProvider, withData);
+  }, [allModelsByProvider, modelStats]);
+
   const [selectedFacets, setSelectedFacets] = useState<FacetSelection>({});
   const modelsByProvider = useMemo(
-    () => filterModelsByFacets(allModelsByProvider, tagIndex, selectedFacets),
-    [allModelsByProvider, tagIndex, selectedFacets]
+    () => filterModelsByFacets(dataBackedByProvider, tagIndex, selectedFacets),
+    [dataBackedByProvider, tagIndex, selectedFacets]
   );
   const hasActiveFacets = useMemo(
     () => Object.values(selectedFacets).some((v) => v.length > 0),
@@ -92,15 +100,12 @@ export function useDashboardState(page: "tts" | "stt") {
   }, []);
   const clearFacets = useCallback(() => setSelectedFacets({}), []);
 
-  // The facet filter is the only selector now: every visible model that has
-  // data is plotted. Catalogue-only models (no stats) are left out — nothing
-  // to chart — and clearing a facet brings its models straight back.
-  const selectedModels = useMemo(() => {
-    const visible = new Set(Object.values(modelsByProvider).flat());
-    return [...new Set(modelStats.map((s) => toModelKey(s.provider, s.model)))].filter((key) =>
-      visible.has(key)
-    );
-  }, [modelsByProvider, modelStats]);
+  // The facet filter is the only selector now, and its universe is already the
+  // data-backed models, so everything still visible after filtering is plotted.
+  const selectedModels = useMemo(
+    () => Object.values(modelsByProvider).flat(),
+    [modelsByProvider]
+  );
 
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
 
@@ -282,13 +287,13 @@ export function useDashboardState(page: "tts" | "stt") {
   const facetGroups = useMemo(
     () =>
       buildFacetGroups(
-        allModelsByProvider,
+        dataBackedByProvider,
         tagIndex,
         selectedFacets,
         tagCategories,
         normalizeProviderName
       ),
-    [allModelsByProvider, tagIndex, selectedFacets, tagCategories, normalizeProviderName]
+    [dataBackedByProvider, tagIndex, selectedFacets, tagCategories, normalizeProviderName]
   );
 
   const boxPlotDescription = {
