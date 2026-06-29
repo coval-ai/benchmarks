@@ -13,7 +13,12 @@ from coval_bench.registries.metrics import (
     MetricDirection,
     MetricSpec,
 )
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus, RegisteredModel
+from coval_bench.registries.models import (
+    MODEL_REGISTRY,
+    ModelStatus,
+    RegisteredModel,
+    Tenancy,
+)
 from coval_bench.registries.tags import TAG_CATEGORIES, ModelTag, TagCategory
 
 __all__ = [
@@ -25,6 +30,7 @@ __all__ = [
     "MetricSpec",
     "ModelStatus",
     "RegisteredModel",
+    "Tenancy",
     "TAG_CATEGORIES",
     "ModelTag",
     "TagCategory",

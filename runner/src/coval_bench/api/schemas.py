@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.registries import TagCategory
 
 
 class RunOut(BaseModel):
@@ -71,11 +72,19 @@ class LeaderboardEntry(BaseModel):
     n: int
 
 
+class ModelTagOut(BaseModel):
+    """A faceted filter tag: its category and value (e.g. capability/realtime)."""
+
+    category: TagCategory
+    value: str
+
+
 class ModelInfo(BaseModel):
     """A single model entry under a provider, with admin-disabled flag."""
 
     model: str
     disabled: bool = False
+    tags: list[ModelTagOut] = []
 
 
 class ProviderInfo(BaseModel):

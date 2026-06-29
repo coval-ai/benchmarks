@@ -22,14 +22,34 @@ from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import ModelInfo, ProviderInfo, ProvidersResponse
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
+from coval_bench.api.schemas import ModelInfo, ModelTagOut, ProviderInfo, ProvidersResponse
+from coval_bench.registries import (
+    MODEL_REGISTRY,
+    TAG_CATEGORIES,
+    Benchmark,
+    ModelStatus,
+    RegisteredModel,
+    TagCategory,
+)
 
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["providers"])
 
 _HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
+
+
+def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
+    """Flatten a model's facets: derived columns/attributes plus curated tags."""
+    source = "inference" if m.creator and m.creator != m.provider else "original"
+    return [
+        ModelTagOut(category=TagCategory.TYPE, value=m.benchmark),
+        ModelTagOut(category=TagCategory.HOST, value=m.provider),
+        ModelTagOut(category=TagCategory.LAB, value=m.creator or m.provider),
+        ModelTagOut(category=TagCategory.SOURCE, value=source),
+        ModelTagOut(category=TagCategory.TENANCY, value=m.tenancy),
+        *(ModelTagOut(category=TAG_CATEGORIES[t], value=t) for t in m.tags),
+    ]
 
 
 def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
@@ -43,7 +63,11 @@ def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
     for m in MODEL_REGISTRY:
         if m.benchmark is benchmark:
             result.setdefault(m.provider, []).append(
-                ModelInfo(model=m.model, disabled=m.status in _HIDDEN_STATUSES)
+                ModelInfo(
+                    model=m.model,
+                    disabled=m.status in _HIDDEN_STATUSES,
+                    tags=_model_tags(m),
+                )
             )
     return result
 
