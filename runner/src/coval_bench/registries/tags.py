@@ -64,7 +64,7 @@ if CATEGORY_LABELS.keys() != set(TagCategory):
 PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset({TagCategory.HOST, TagCategory.LAB})
 
 # Value labels that aren't a plain capitalization.
-_VALUE_LABELS: dict[str, str] = {ModelTag.VAD: "VAD"}
+_VALUE_LABELS: dict[str, str] = {ModelTag.VAD.value: "VAD"}
 
 
 def tag_value_label(category: TagCategory, value: str) -> str:

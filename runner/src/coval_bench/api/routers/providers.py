@@ -49,6 +49,7 @@ _HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
 
 
 def _tag(category: TagCategory, value: str) -> ModelTagOut:
+    """Build a facet tag with its display label resolved from the registry."""
     return ModelTagOut(category=category, value=value, label=tag_value_label(category, value))
 
 
