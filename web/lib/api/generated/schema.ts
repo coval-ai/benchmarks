@@ -49,6 +49,7 @@ export interface components {
     ModelInfo: {
       model: string;
       disabled?: boolean;
+      tags?: components["schemas"]["ModelTagOut"][];
     };
     ModelStatEntry: {
       provider: string;
@@ -66,6 +67,11 @@ export interface components {
       max_value: number;
       sample_count: number;
     };
+    ModelTagOut: {
+      category: components["schemas"]["TagCategory"];
+      value: string;
+      label: string;
+    };
     ProviderInfo: {
       provider: string;
       models: components["schemas"]["ModelInfo"][];
@@ -74,6 +80,7 @@ export interface components {
     ProvidersResponse: {
       stt: components["schemas"]["ProviderInfo"][];
       tts: components["schemas"]["ProviderInfo"][];
+      tag_categories: components["schemas"]["TagCategoryOut"][];
     };
     RunOut: {
       id: number;
@@ -101,6 +108,12 @@ export interface components {
       max_value: number;
       value_sum: number;
       sample_count: number;
+    };
+    TagCategory: "type" | "mode" | "host" | "lab" | "features" | "source" | "tenancy";
+    TagCategoryOut: {
+      category: components["schemas"]["TagCategory"];
+      label: string;
+      provider_valued?: boolean;
     };
     WindowLiteral: "24h" | "7d" | "30d";
   };
