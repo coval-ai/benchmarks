@@ -191,7 +191,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT,
         provider="gladia",
         model="solaria-1",
-        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
+        tags=(_REALTIME, _MULTI, _VAD, _TRANS, _CODESW, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
