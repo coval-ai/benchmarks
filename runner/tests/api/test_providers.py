@@ -110,6 +110,8 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
     assert ("lab", "xai") in facets
     assert ("source", "original") in facets
     assert ("tenancy", "shared") in facets
+    assert ("licensing", "proprietary") in facets
+    assert ("deployment", "cloud") in facets
 
     # Each tag carries a display label: provider-valued categories keep the raw
     # id, TYPE uppercases, everything else capitalizes.
@@ -118,6 +120,28 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
     assert labels[("host", "xai")] == "xai"
     assert labels[("source", "original")] == "Original"
     assert labels[("tenancy", "shared")] == "Shared"
+
+
+async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
+    """Curated capability tags, open-weight licensing, and self-hostable deployment surface."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    sm = next(e for e in data["stt"] if e["provider"] == "speechmatics")
+    default = next(m for m in sm["models"] if m["model"] == "default")
+    sm_facets = {(t["category"], t["value"]) for t in default["tags"]}
+    assert ("features", "diarization") in sm_facets
+    assert ("features", "translation") in sm_facets
+    assert ("deployment", "self-hostable") in sm_facets
+
+    groq = next(e for e in data["tts"] if e["provider"] == "groq")
+    orpheus = next(m for m in groq["models"] if m["model"] == "canopylabs/orpheus-v1-english")
+    orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
+    labels = {(t["category"], t["value"]): t["label"] for t in orpheus["tags"]}
+    assert ("licensing", "open-weight") in orpheus_facets
+    assert ("features", "emotion-control") in orpheus_facets
+    assert labels[("licensing", "open-weight")] == "Open-weight"
+    assert labels[("features", "emotion-control")] == "Emotion control"
 
 
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
@@ -134,6 +158,8 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
         "features",
         "source",
         "tenancy",
+        "licensing",
+        "deployment",
     ]
     by_category = {c["category"]: c for c in categories}
     assert by_category["features"]["label"] == "Features"
