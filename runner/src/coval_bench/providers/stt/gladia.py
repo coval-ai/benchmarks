@@ -21,6 +21,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -136,11 +137,10 @@ class GladiaSTTProvider(STTProvider):
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
         chunk_size = int(byte_rate * realtime_resolution)
-        result.audio_start_time = time.monotonic()
         try:
-            for i in range(0, len(audio_data), chunk_size):
-                await ws.send(audio_data[i : i + chunk_size])
-                await asyncio.sleep(realtime_resolution)
+            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
+                result.audio_start_time = start
+                await ws.send(chunk)
             # Stop streaming; the server flushes pending finals and closes (1000).
             await ws.send(json.dumps({"type": "stop_recording"}))
         except Exception as exc:

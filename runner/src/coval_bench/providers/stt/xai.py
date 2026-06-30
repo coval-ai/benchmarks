@@ -17,6 +17,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -159,16 +160,12 @@ class XaiSTTProvider(STTProvider):
         final_event: asyncio.Event,
     ) -> None:
         frame_bytes = 2
-        chunk_size = max(frame_bytes, int(sample_rate * frame_bytes * realtime_resolution))
-        first_chunk = True
+        byte_rate = sample_rate * frame_bytes
+        chunk_size = max(frame_bytes, int(byte_rate * realtime_resolution))
 
-        for start in range(0, len(audio_data), chunk_size):
-            chunk = audio_data[start : start + chunk_size]
-            if first_chunk and chunk:
-                result.audio_start_time = time.monotonic()
-                first_chunk = False
+        async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
+            result.audio_start_time = start
             await ws.send(chunk)
-            await asyncio.sleep(realtime_resolution)
 
         await ws.send(json.dumps({"type": "audio.done"}))
         with contextlib.suppress(TimeoutError):

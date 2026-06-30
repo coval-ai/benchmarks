@@ -15,6 +15,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
@@ -115,11 +116,10 @@ class SonioxSTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
-        result.audio_start_time = time.monotonic()
         try:
-            for i in range(0, len(audio_data), chunk_size):
-                await ws.send(audio_data[i : i + chunk_size])
-                await asyncio.sleep(realtime_resolution)
+            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
+                result.audio_start_time = start
+                await ws.send(chunk)
             # End-of-audio is an empty *text* frame; a zero-length binary frame is
             # ignored, so the server never finalizes (stalls to its idle timeout).
             await ws.send("")

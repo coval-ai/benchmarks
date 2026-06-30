@@ -5,7 +5,6 @@
 
 import React, { createContext, useContext } from "react";
 import { useSidebarMenuState } from "@/hooks/useSidebarMenuState";
-import { useDashboard } from "@/contexts/DashboardContext";
 
 type SidebarMenuContextType = ReturnType<typeof useSidebarMenuState>;
 
@@ -16,8 +15,7 @@ export function SidebarMenuProvider({
 }: {
   children: React.ReactNode;
 }) {
-  const { modelsByProvider } = useDashboard();
-  const value = useSidebarMenuState(modelsByProvider);
+  const value = useSidebarMenuState();
   return (
     <SidebarMenuContext.Provider value={value}>
       {children}

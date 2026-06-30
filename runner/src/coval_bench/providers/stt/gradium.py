@@ -34,6 +34,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
@@ -132,13 +133,11 @@ class GradiumSTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
-        result.audio_start_time = time.monotonic()
         try:
-            for i in range(0, len(audio_data), chunk_size):
-                chunk = audio_data[i : i + chunk_size]
+            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
+                result.audio_start_time = start
                 b64 = base64.b64encode(chunk).decode("utf-8")
                 await ws.send(json.dumps({"type": "audio", "audio": b64}))
-                await asyncio.sleep(realtime_resolution)
             # Flush drains the lookahead buffer; wait for the "flushed" ack so
             # end_of_stream can't cut off pending results.
             await ws.send(json.dumps({"type": "flush", "flush_id": 1}))
