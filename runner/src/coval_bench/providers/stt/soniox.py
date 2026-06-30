@@ -117,13 +117,15 @@ class SonioxSTTProvider(STTProvider):
         chunk_size = int(bytes_per_second * realtime_resolution)
         start = time.monotonic()
         result.audio_start_time = start
+        sent_bytes = 0
         try:
-            for chunk_index, i in enumerate(range(0, len(audio_data), chunk_size)):
-                await ws.send(audio_data[i : i + chunk_size])
-                if i + chunk_size < len(audio_data):
-                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
-                    if delay > 0:
-                        await asyncio.sleep(delay)
+            for i in range(0, len(audio_data), chunk_size):
+                chunk = audio_data[i : i + chunk_size]
+                await ws.send(chunk)
+                sent_bytes += len(chunk)
+                delay = start + sent_bytes / bytes_per_second - time.monotonic()
+                if delay > 0:
+                    await asyncio.sleep(delay)
             # End-of-audio is an empty *text* frame; a zero-length binary frame is
             # ignored, so the server never finalizes (stalls to its idle timeout).
             await ws.send("")

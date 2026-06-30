@@ -122,7 +122,7 @@ class CartesiaSTTProvider(STTProvider):
         chunk_size = int(byte_rate * realtime_resolution)
         data = audio_data
         start: float | None = None
-        chunk_index = 0
+        sent_bytes = 0
         try:
             while data:
                 chunk, data = data[:chunk_size], data[chunk_size:]
@@ -130,11 +130,10 @@ class CartesiaSTTProvider(STTProvider):
                     start = time.monotonic()
                     result.audio_start_time = start
                 await ws.send(chunk)
-                if data:
-                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-                chunk_index += 1
+                sent_bytes += len(chunk)
+                delay = start + sent_bytes / byte_rate - time.monotonic()
+                if delay > 0:
+                    await asyncio.sleep(delay)
             # Two-phase end: finalize flushes buffered audio; close ends the session.
             await ws.send("finalize")
             await ws.send("close")

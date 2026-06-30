@@ -159,17 +159,20 @@ class XaiSTTProvider(STTProvider):
         final_event: asyncio.Event,
     ) -> None:
         frame_bytes = 2
-        chunk_size = max(frame_bytes, int(sample_rate * frame_bytes * realtime_resolution))
+        byte_rate = sample_rate * frame_bytes
+        chunk_size = max(frame_bytes, int(byte_rate * realtime_resolution))
         start: float | None = None
+        sent_bytes = 0
 
-        for chunk_index, offset in enumerate(range(0, len(audio_data), chunk_size)):
+        for offset in range(0, len(audio_data), chunk_size):
             chunk = audio_data[offset : offset + chunk_size]
             if start is None and chunk:
                 start = time.monotonic()
                 result.audio_start_time = start
             await ws.send(chunk)
-            if start is not None and offset + chunk_size < len(audio_data):
-                delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+            sent_bytes += len(chunk)
+            if start is not None:
+                delay = start + sent_bytes / byte_rate - time.monotonic()
                 if delay > 0:
                     await asyncio.sleep(delay)
 

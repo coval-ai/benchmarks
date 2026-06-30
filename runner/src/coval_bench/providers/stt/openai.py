@@ -200,8 +200,9 @@ class OpenAISTTProvider(STTProvider):
         bytes_per_second = _INPUT_SAMPLE_RATE * 2
         chunk_size = max(int(bytes_per_second * realtime_resolution), 2)
         start: float | None = None
+        sent_bytes = 0
         try:
-            for chunk_index, offset in enumerate(range(0, len(audio_data), chunk_size)):
+            for offset in range(0, len(audio_data), chunk_size):
                 chunk = audio_data[offset : offset + chunk_size]
                 if start is None and chunk:
                     start = time.monotonic()
@@ -214,8 +215,9 @@ class OpenAISTTProvider(STTProvider):
                         }
                     )
                 )
-                if start is not None and offset + chunk_size < len(audio_data):
-                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                sent_bytes += len(chunk)
+                if start is not None:
+                    delay = start + sent_bytes / bytes_per_second - time.monotonic()
                     if delay > 0:
                         await asyncio.sleep(delay)
             await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))

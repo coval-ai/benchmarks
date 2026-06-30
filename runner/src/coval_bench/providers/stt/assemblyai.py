@@ -143,7 +143,7 @@ class AssemblyAIProvider(STTProvider):
         chunk_size = int(byte_rate * realtime_resolution)
         data = audio_data
         start: float | None = None
-        chunk_index = 0
+        sent_bytes = 0
         try:
             while data:
                 chunk, data = data[:chunk_size], data[chunk_size:]
@@ -151,11 +151,10 @@ class AssemblyAIProvider(STTProvider):
                     start = time.monotonic()
                     result.audio_start_time = start
                 await ws.send(chunk)
-                if data:
-                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-                chunk_index += 1
+                sent_bytes += len(chunk)
+                delay = start + sent_bytes / byte_rate - time.monotonic()
+                if delay > 0:
+                    await asyncio.sleep(delay)
             # Force finalization at speech-end (TTFS parity), then wait for the final
             # before terminating so the close can't race it. Clear first: the event may
             # already be set by an earlier final, which would make the wait a no-op.
