@@ -132,13 +132,17 @@ class GradiumSTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
-        result.audio_start_time = time.monotonic()
+        start = time.monotonic()
+        result.audio_start_time = start
         try:
-            for i in range(0, len(audio_data), chunk_size):
+            for chunk_index, i in enumerate(range(0, len(audio_data), chunk_size)):
                 chunk = audio_data[i : i + chunk_size]
                 b64 = base64.b64encode(chunk).decode("utf-8")
                 await ws.send(json.dumps({"type": "audio", "audio": b64}))
-                await asyncio.sleep(realtime_resolution)
+                if i + chunk_size < len(audio_data):
+                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             # Flush drains the lookahead buffer; wait for the "flushed" ack so
             # end_of_stream can't cut off pending results.
             await ws.send(json.dumps({"type": "flush", "flush_id": 1}))

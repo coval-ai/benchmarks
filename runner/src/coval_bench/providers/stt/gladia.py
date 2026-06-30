@@ -136,11 +136,15 @@ class GladiaSTTProvider(STTProvider):
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
         chunk_size = int(byte_rate * realtime_resolution)
-        result.audio_start_time = time.monotonic()
+        start = time.monotonic()
+        result.audio_start_time = start
         try:
-            for i in range(0, len(audio_data), chunk_size):
+            for chunk_index, i in enumerate(range(0, len(audio_data), chunk_size)):
                 await ws.send(audio_data[i : i + chunk_size])
-                await asyncio.sleep(realtime_resolution)
+                if i + chunk_size < len(audio_data):
+                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             # Stop streaming; the server flushes pending finals and closes (1000).
             await ws.send(json.dumps({"type": "stop_recording"}))
         except Exception as exc:

@@ -199,13 +199,13 @@ class OpenAISTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = _INPUT_SAMPLE_RATE * 2
         chunk_size = max(int(bytes_per_second * realtime_resolution), 2)
-        first_chunk = True
+        start: float | None = None
         try:
-            for start in range(0, len(audio_data), chunk_size):
-                chunk = audio_data[start : start + chunk_size]
-                if first_chunk and chunk:
-                    result.audio_start_time = time.monotonic()
-                    first_chunk = False
+            for chunk_index, offset in enumerate(range(0, len(audio_data), chunk_size)):
+                chunk = audio_data[offset : offset + chunk_size]
+                if start is None and chunk:
+                    start = time.monotonic()
+                    result.audio_start_time = start
                 await ws.send(
                     json.dumps(
                         {
@@ -214,7 +214,10 @@ class OpenAISTTProvider(STTProvider):
                         }
                     )
                 )
-                await asyncio.sleep(realtime_resolution)
+                if start is not None and offset + chunk_size < len(audio_data):
+                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
         except Exception as exc:
             logger.warning("openai_send_error", provider="openai", model=self._model, exc_info=exc)

@@ -127,9 +127,10 @@ class InworldSTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
-        result.audio_start_time = time.monotonic()
+        start = time.monotonic()
+        result.audio_start_time = start
         try:
-            for i in range(0, len(audio_data), chunk_size):
+            for chunk_index, i in enumerate(range(0, len(audio_data), chunk_size)):
                 # Stop early if _receive already recorded a protocol/auth error.
                 if result.error is not None:
                     break
@@ -137,10 +138,10 @@ class InworldSTTProvider(STTProvider):
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
                 )
-                # Pace to real time between chunks only — sleeping after the last
-                # one would delay finalization and inflate the latency clocks.
                 if i + chunk_size < len(audio_data):
-                    await asyncio.sleep(realtime_resolution)
+                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             # endTurn forces finalization; closeStream then flushes the final
             # transcripts and closes the socket, ending the receive loop.
             await ws.send(json.dumps({"endTurn": {}}))

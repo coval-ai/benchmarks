@@ -107,15 +107,20 @@ class SmallestSTTProvider(STTProvider):
         byte_rate = sample_rate * 2  # 16-bit mono
         chunk_size = int(byte_rate * realtime_resolution)
         data = audio_data
-        first_chunk = True
+        start: float | None = None
+        chunk_index = 0
         try:
             while data:
                 chunk, data = data[:chunk_size], data[chunk_size:]
-                if first_chunk:
-                    result.audio_start_time = time.monotonic()
-                    first_chunk = False
+                if start is None:
+                    start = time.monotonic()
+                    result.audio_start_time = start
                 await ws.send(chunk)
-                await asyncio.sleep(realtime_resolution)
+                if data:
+                    delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                chunk_index += 1
             await ws.send(json.dumps({"type": "close_stream"}))
         except Exception as exc:
             logger.warning(

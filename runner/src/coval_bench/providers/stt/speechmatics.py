@@ -151,15 +151,19 @@ class SpeechmaticsProvider(STTProvider):
         realtime_resolution: float,
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
+        chunk_size = int(byte_rate * realtime_resolution)
+        start = result.audio_start_time or time.monotonic()
         data = audio_data
         seq_no = 0
         try:
             while data:
-                chunk_size = int(byte_rate * realtime_resolution)
                 chunk, data = data[:chunk_size], data[chunk_size:]
                 await ws.send(chunk)
                 seq_no += 1
-                await asyncio.sleep(realtime_resolution)
+                if data:
+                    delay = start + seq_no * realtime_resolution - time.monotonic()
+                    if delay > 0:
+                        await asyncio.sleep(delay)
             await ws.send(json.dumps({"message": "EndOfStream", "last_seq_no": seq_no}))
         except Exception as exc:
             logger.warning(

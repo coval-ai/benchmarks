@@ -136,16 +136,20 @@ class GoogleSTTProvider(STTProvider):
                 )
                 data = audio_data
                 byte_rate = sample_width * sample_rate * channels
-                first_chunk = True
+                chunk_size = int(byte_rate * realtime_resolution)
+                start: float | None = None
+                chunk_index = 0
                 while data:
-                    chunk_size = int(byte_rate * realtime_resolution)
                     chunk, data = data[:chunk_size], data[chunk_size:]
-                    if first_chunk and chunk:
-                        result.audio_start_time = time.monotonic()
-                        first_chunk = False
+                    if start is None and chunk:
+                        start = time.monotonic()
+                        result.audio_start_time = start
                     yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
-                    if chunk:
-                        time.sleep(realtime_resolution)
+                    if start is not None and data:
+                        delay = start + (chunk_index + 1) * realtime_resolution - time.monotonic()
+                        if delay > 0:
+                            time.sleep(delay)
+                    chunk_index += 1
 
             try:
                 responses = self._client.streaming_recognize(requests=_request_iterator())
