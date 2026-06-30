@@ -423,6 +423,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_ACTIVE,
     ),
+    # Inworld offers on-prem for Max only, so mini is not self_hostable.
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",

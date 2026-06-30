@@ -84,6 +84,7 @@ PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset({TagCategory.HOST
 # Value labels that aren't a plain capitalization.
 _VALUE_LABELS: dict[str, str] = {
     ModelTag.VAD.value: "VAD",
+    ModelTag.CODE_SWITCHING.value: "Code switching",
     ModelTag.KEYTERM_BIASING.value: "Keyterm biasing",
     ModelTag.VOICE_CLONING.value: "Voice cloning",
     ModelTag.EMOTION_CONTROL.value: "Emotion control",
