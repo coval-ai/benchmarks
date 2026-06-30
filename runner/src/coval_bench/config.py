@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     smallest_api_key: SecretStr | None = None
     inworld_api_key: SecretStr | None = None
     soniox_api_key: SecretStr | None = None
+    baseten_api_key: SecretStr | None = None
+
+    # Baseten dedicated-endpoint WebSocket URLs. The hostnames embed private,
+    # pre-launch model ids, so they live in config (``.env`` locally, Secret
+    # Manager in prod) rather than hardcoded in the provider modules.
+    baseten_whisper_url: str | None = None  # STT (Whisper Large V3)
+    baseten_qwen_url: str | None = None  # TTS (Qwen3-TTS)
 
     # Path to a Google service-account JSON file mounted as a Secret-as-volume.
     google_application_credentials: Path | None = None

@@ -236,6 +236,20 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _VAD),
         status=_ACTIVE,
     ),
+    # Baseten dedicated endpoints (Whisper Large V3). PENDING: implemented and
+    # hidden while Baseten tunes the setup — kept off the scheduled runner and
+    # the public site, run manually during the daily test window.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="baseten",
+        model="whisper-large-v3",
+        creator="openai",
+        tags=(_REALTIME, _MULTI, _VAD),
+        tenancy=Tenancy.DEDICATED,
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_PENDING,
+    ),
     RegisteredModel(
         benchmark=_STT,
         provider="google",
@@ -450,6 +464,20 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         self_hostable=True,
         status=_ACTIVE,
+    ),
+    # Baseten dedicated endpoints (Qwen3-TTS 1.7B). PENDING for the same reason
+    # as the Whisper STT entry above — implemented, hidden, run manually.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="baseten",
+        model="qwen3-tts-1.7b",
+        voice="lisa",
+        creator="alibaba",
+        tags=(_REALTIME, _MULTI, _STREAM),
+        tenancy=Tenancy.DEDICATED,
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_PENDING,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
