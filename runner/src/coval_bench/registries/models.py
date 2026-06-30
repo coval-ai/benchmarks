@@ -337,7 +337,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="mistv3",
         voice="luna",
-        tags=(_REALTIME, _MULTI),
+        tags=(_REALTIME,),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -377,7 +377,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="smallest",
         model="lightning_v3.1_pro",
         voice="kaitlyn",
-        tags=(_REALTIME,),
+        tags=(_REALTIME, _MULTI),
         status=_ACTIVE,
     ),
     RegisteredModel(
