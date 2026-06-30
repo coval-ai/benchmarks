@@ -191,7 +191,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT,
         provider="gladia",
         model="solaria-1",
-        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
+        tags=(_REALTIME, _MULTI, _VAD, _TRANS, _CODESW, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -219,7 +219,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT,
         provider="xai",
         model="grok-stt",
-        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW),
+        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -371,7 +371,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="mistv3",
         voice="luna",
-        tags=(_REALTIME, _MULTI, _STREAM),
+        tags=(_REALTIME, _STREAM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -423,13 +423,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_ACTIVE,
     ),
-    # Inworld offers on-prem for Max only, so mini is not self_hostable.
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-mini",
         voice="Ashley",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -446,7 +446,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="canopylabs/orpheus-v1-english",
         voice="autumn",
         creator="canopylabs",
-        tags=(_BATCH, _EMOTION),
+        tags=(_REALTIME, _EMOTION),
         licensing=_OPEN,
         self_hostable=True,
         status=_ACTIVE,
