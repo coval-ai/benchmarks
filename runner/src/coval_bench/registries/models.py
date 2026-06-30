@@ -219,7 +219,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT,
         provider="xai",
         model="grok-stt",
-        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW),
+        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -423,13 +423,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_ACTIVE,
     ),
-    # Inworld offers on-prem for Max only, so mini is not self_hostable.
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-mini",
         voice="Ashley",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
