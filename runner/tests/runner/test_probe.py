@@ -10,12 +10,13 @@ is touched — the focus is the aggregation and that ``writer=None`` is propagat
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from coval_bench.config import Settings
 from coval_bench.db.models import ResultStatus
-from coval_bench.registries import Benchmark, Metric
+from coval_bench.registries import Benchmark, Metric, ModelStatus, RegisteredModel
 from coval_bench.runner import probe as probe_mod
 
 
@@ -64,11 +65,22 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(probe_mod, "_run_tts_item", fake_tts)
 
     models = [
-        SimpleNamespace(benchmark=Benchmark.STT, provider="baseten", model="whisper-large-v3"),
-        SimpleNamespace(benchmark=Benchmark.TTS, provider="baseten", model="qwen3-tts-1.7b"),
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider="baseten",
+            model="whisper-large-v3",
+            status=ModelStatus.PENDING,
+        ),
+        RegisteredModel(
+            benchmark=Benchmark.TTS,
+            provider="baseten",
+            model="qwen3-tts-1.7b",
+            status=ModelStatus.PENDING,
+        ),
     ]
+    # settings is forwarded to the patched runners (which ignore it); cast a stub.
     results = await probe_mod.run_probe(
-        settings=SimpleNamespace(), models=models, sample_size=3, concurrency=1
+        settings=cast(Settings, SimpleNamespace()), models=models, sample_size=3, concurrency=1
     )
 
     assert captured["stt_writer"] is None
