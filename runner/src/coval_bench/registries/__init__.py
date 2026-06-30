@@ -15,6 +15,7 @@ from coval_bench.registries.metrics import (
 )
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
+    Licensing,
     ModelStatus,
     RegisteredModel,
     Tenancy,
@@ -35,6 +36,7 @@ __all__ = [
     "Metric",
     "MetricDirection",
     "MetricSpec",
+    "Licensing",
     "ModelStatus",
     "RegisteredModel",
     "Tenancy",

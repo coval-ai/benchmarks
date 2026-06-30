@@ -10,9 +10,9 @@ from enum import StrEnum
 class TagCategory(StrEnum):
     """Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
 
-    TYPE/HOST/LAB are derived from registry columns and SOURCE/TENANCY from model
-    attributes, all at the API boundary; only MODE and FEATURES draw their values
-    from ``ModelTag``.
+    TYPE/HOST/LAB are derived from registry columns and SOURCE/TENANCY/LICENSING/
+    DEPLOYMENT from model attributes, all at the API boundary; only MODE and
+    FEATURES draw their values from ``ModelTag``.
     """
 
     TYPE = "type"
@@ -22,6 +22,8 @@ class TagCategory(StrEnum):
     FEATURES = "features"
     SOURCE = "source"
     TENANCY = "tenancy"
+    LICENSING = "licensing"
+    DEPLOYMENT = "deployment"
 
 
 class ModelTag(StrEnum):
@@ -31,6 +33,13 @@ class ModelTag(StrEnum):
     BATCH = "batch"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
+    DIARIZATION = "diarization"
+    TRANSLATION = "translation"
+    CODE_SWITCHING = "code-switching"
+    KEYTERM_BIASING = "keyterm-biasing"
+    VOICE_CLONING = "voice-cloning"
+    EMOTION_CONTROL = "emotion-control"
+    STREAMING_INPUT = "streaming-input"
 
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
@@ -38,6 +47,13 @@ TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.BATCH: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
+    ModelTag.DIARIZATION: TagCategory.FEATURES,
+    ModelTag.TRANSLATION: TagCategory.FEATURES,
+    ModelTag.CODE_SWITCHING: TagCategory.FEATURES,
+    ModelTag.KEYTERM_BIASING: TagCategory.FEATURES,
+    ModelTag.VOICE_CLONING: TagCategory.FEATURES,
+    ModelTag.EMOTION_CONTROL: TagCategory.FEATURES,
+    ModelTag.STREAMING_INPUT: TagCategory.FEATURES,
 }
 
 if TAG_CATEGORIES.keys() != set(ModelTag):
@@ -54,6 +70,8 @@ CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.FEATURES: "Features",
     TagCategory.SOURCE: "Source",
     TagCategory.TENANCY: "Tenancy",
+    TagCategory.LICENSING: "Licensing",
+    TagCategory.DEPLOYMENT: "Deployment",
 }
 
 if CATEGORY_LABELS.keys() != set(TagCategory):
@@ -64,7 +82,14 @@ if CATEGORY_LABELS.keys() != set(TagCategory):
 PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset({TagCategory.HOST, TagCategory.LAB})
 
 # Value labels that aren't a plain capitalization.
-_VALUE_LABELS: dict[str, str] = {ModelTag.VAD.value: "VAD"}
+_VALUE_LABELS: dict[str, str] = {
+    ModelTag.VAD.value: "VAD",
+    ModelTag.CODE_SWITCHING.value: "Code switching",
+    ModelTag.KEYTERM_BIASING.value: "Keyterm biasing",
+    ModelTag.VOICE_CLONING.value: "Voice cloning",
+    ModelTag.EMOTION_CONTROL.value: "Emotion control",
+    ModelTag.STREAMING_INPUT.value: "Streaming input",
+}
 
 
 def tag_value_label(category: TagCategory, value: str) -> str:
