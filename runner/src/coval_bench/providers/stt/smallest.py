@@ -23,6 +23,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
@@ -106,20 +107,10 @@ class SmallestSTTProvider(STTProvider):
     ) -> None:
         byte_rate = sample_rate * 2  # 16-bit mono
         chunk_size = int(byte_rate * realtime_resolution)
-        data = audio_data
-        start: float | None = None
-        sent_bytes = 0
         try:
-            while data:
-                chunk, data = data[:chunk_size], data[chunk_size:]
-                if start is None:
-                    start = time.monotonic()
-                    result.audio_start_time = start
+            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
+                result.audio_start_time = start
                 await ws.send(chunk)
-                sent_bytes += len(chunk)
-                delay = start + sent_bytes / byte_rate - time.monotonic()
-                if delay > 0:
-                    await asyncio.sleep(delay)
             await ws.send(json.dumps({"type": "close_stream"}))
         except Exception as exc:
             logger.warning(

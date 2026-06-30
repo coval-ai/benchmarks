@@ -24,6 +24,7 @@ import structlog
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks_sync
 
 logger = structlog.get_logger(__name__)
 
@@ -134,22 +135,12 @@ class GoogleSTTProvider(STTProvider):
                     recognizer=self._get_recognizer_name(),
                     streaming_config=streaming_config,
                 )
-                data = audio_data
                 byte_rate = sample_width * sample_rate * channels
                 chunk_size = int(byte_rate * realtime_resolution)
-                start: float | None = None
-                sent_bytes = 0
-                while data:
-                    chunk, data = data[:chunk_size], data[chunk_size:]
-                    if start is None and chunk:
-                        start = time.monotonic()
+                for chunk, start in paced_chunks_sync(audio_data, chunk_size, byte_rate):
+                    if result.audio_start_time is None:
                         result.audio_start_time = start
                     yield cloud_speech.StreamingRecognizeRequest(audio=chunk)
-                    sent_bytes += len(chunk)
-                    if start is not None:
-                        delay = start + sent_bytes / byte_rate - time.monotonic()
-                        if delay > 0:
-                            time.sleep(delay)
 
             try:
                 responses = self._client.streaming_recognize(requests=_request_iterator())
