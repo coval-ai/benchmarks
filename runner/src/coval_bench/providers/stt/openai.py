@@ -36,6 +36,7 @@ from pydantic import SecretStr
 from scipy import signal
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -199,13 +200,9 @@ class OpenAISTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = _INPUT_SAMPLE_RATE * 2
         chunk_size = max(int(bytes_per_second * realtime_resolution), 2)
-        first_chunk = True
         try:
-            for start in range(0, len(audio_data), chunk_size):
-                chunk = audio_data[start : start + chunk_size]
-                if first_chunk and chunk:
-                    result.audio_start_time = time.monotonic()
-                    first_chunk = False
+            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
+                result.audio_start_time = start
                 await ws.send(
                     json.dumps(
                         {
@@ -214,7 +211,6 @@ class OpenAISTTProvider(STTProvider):
                         }
                     )
                 )
-                await asyncio.sleep(realtime_resolution)
             await ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
         except Exception as exc:
             logger.warning("openai_send_error", provider="openai", model=self._model, exc_info=exc)

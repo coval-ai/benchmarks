@@ -22,6 +22,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
@@ -140,17 +141,11 @@ class AssemblyAIProvider(STTProvider):
         final_event: asyncio.Event,
     ) -> None:
         byte_rate = sample_width * sample_rate * channels
-        data = audio_data
-        first_chunk = True
+        chunk_size = int(byte_rate * realtime_resolution)
         try:
-            while data:
-                chunk_size = int(byte_rate * realtime_resolution)
-                chunk, data = data[:chunk_size], data[chunk_size:]
-                if first_chunk:
-                    result.audio_start_time = time.monotonic()
-                    first_chunk = False
+            async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
+                result.audio_start_time = start
                 await ws.send(chunk)
-                await asyncio.sleep(realtime_resolution)
             # Force finalization at speech-end (TTFS parity), then wait for the final
             # before terminating so the close can't race it. Clear first: the event may
             # already be set by an earlier final, which would make the wait a no-op.

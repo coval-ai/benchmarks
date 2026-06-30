@@ -20,6 +20,7 @@ import websockets.asyncio.client as ws_client
 from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
+from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
@@ -127,20 +128,15 @@ class InworldSTTProvider(STTProvider):
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
-        result.audio_start_time = time.monotonic()
         try:
-            for i in range(0, len(audio_data), chunk_size):
+            async for chunk, start in paced_chunks(audio_data, chunk_size, bytes_per_second):
                 # Stop early if _receive already recorded a protocol/auth error.
                 if result.error is not None:
                     break
-                chunk = audio_data[i : i + chunk_size]
+                result.audio_start_time = start
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
                 )
-                # Pace to real time between chunks only — sleeping after the last
-                # one would delay finalization and inflate the latency clocks.
-                if i + chunk_size < len(audio_data):
-                    await asyncio.sleep(realtime_resolution)
             # endTurn forces finalization; closeStream then flushes the final
             # transcripts and closes the socket, ending the receive loop.
             await ws.send(json.dumps({"endTurn": {}}))
