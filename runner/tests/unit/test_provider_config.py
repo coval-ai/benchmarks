@@ -8,6 +8,7 @@ from coval_bench.registries import (
     MODEL_REGISTRY,
     TAG_CATEGORIES,
     Benchmark,
+    Licensing,
     ModelStatus,
     ModelTag,
     RegisteredModel,
@@ -32,6 +33,8 @@ def test_registered_model_defaults() -> None:
     assert m.creator is None
     assert m.tags == ()
     assert m.tenancy is Tenancy.SHARED
+    assert m.licensing is Licensing.PROPRIETARY
+    assert m.self_hostable is False
 
 
 def test_every_model_has_exactly_one_mode() -> None:
