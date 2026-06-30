@@ -85,7 +85,12 @@ async def _run_model(
         if isinstance(batch, list):
             rows.extend(batch)
         else:
-            logger.warning("probe_item_raised", provider=entry.provider, model=entry.model)
+            logger.warning(
+                "probe_item_raised",
+                provider=entry.provider,
+                model=entry.model,
+                exc_info=batch,
+            )
     return {
         "benchmark": entry.benchmark.value,
         "n_items": len(items),
