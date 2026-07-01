@@ -4,8 +4,7 @@
 """Tests for coval_bench.arena.snapshot.
 
 Uses ``pytest-postgresql`` (embedded ``pg_ctl``, no Docker) to spin up a real
-Postgres. No remote DB is ever contacted. A separate session server (random
-port) keeps these independent of the other db tests.
+Postgres. No remote DB is ever contacted.
 """
 
 from __future__ import annotations
@@ -20,14 +19,13 @@ import psycopg.rows
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from psycopg_pool import AsyncConnectionPool
-from pytest_postgresql.factories import postgresql, postgresql_proc
+from pytest_postgresql.factories import postgresql
 
 from coval_bench.arena.snapshot import run_snapshot
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import Battle, VoteOutcome, VoterType
 
-snap_pg_proc = postgresql_proc(port=None)
-snap_pg = postgresql("snap_pg_proc")
+snap_pg = postgresql("pg_proc")  # shared server from conftest, own per-test DB
 
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
 

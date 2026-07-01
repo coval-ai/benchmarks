@@ -3,9 +3,11 @@
 
 """Shared fixtures for the Coval Benchmarks API test suite.
 
-Uses ``pytest-postgresql`` to spin up a real in-process Postgres for each test.
-The FastAPI lifespan is managed by ``asgi_lifespan.LifespanManager`` so that the
-psycopg3 pool is properly opened and closed for each test.
+Uses ``pytest-postgresql`` with a session-scoped in-process Postgres.  The
+schema is loaded into the template database once; each test gets a fresh
+database cloned from it.  The FastAPI lifespan is managed by
+``asgi_lifespan.LifespanManager`` so that the psycopg3 pool is properly opened
+and closed for each test.
 
 Tests use ``httpx.AsyncClient`` with ``ASGITransport`` — no real network calls.
 
@@ -32,6 +34,7 @@ from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from psycopg_pool import AsyncConnectionPool
+from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
 from coval_bench.config import Settings
@@ -53,16 +56,16 @@ _MV_WINDOWS: dict[str, str] = {
 }
 
 
-async def _apply_schema(dsn: str) -> None:
+def _load_schema(**connect_kwargs: Any) -> None:
     """Create the benchmarks_v2 schema and tables needed by the API tests.
 
-    This mirrors the Alembic migration (20260429_0001_init_schema) without
-    requiring a full Alembic migration run.
+    Runs once against the template database; per-test databases are cloned
+    from it.  Mirrors the Alembic migration (20260429_0001_init_schema)
+    without requiring a full Alembic migration run.
     """
-    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
-    try:
-        await aconn.execute("CREATE SCHEMA IF NOT EXISTS benchmarks_v2")
-        await aconn.execute("""
+    with psycopg.connect(**connect_kwargs) as conn:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS benchmarks_v2")
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.runs (
                 id             bigserial PRIMARY KEY,
                 started_at     timestamptz NOT NULL DEFAULT now(),
@@ -76,7 +79,7 @@ async def _apply_schema(dsn: str) -> None:
                 error          text
             )
         """)
-        await aconn.execute("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.results (
                 id             bigserial PRIMARY KEY,
                 run_id         bigint NOT NULL
@@ -98,7 +101,7 @@ async def _apply_schema(dsn: str) -> None:
         # Per-window stats materialized views (model_stats + leaderboard).
         # S608 false-positive: name and interval come from the _MV_WINDOWS constant.
         for name, interval in _MV_WINDOWS.items():
-            await aconn.execute(f"""
+            conn.execute(f"""
                 CREATE MATERIALIZED VIEW IF NOT EXISTS benchmarks_v2.{name} AS
                 SELECT provider, model, benchmark, metric_type,
                        avg_value, stddev_value, min_value,
@@ -124,7 +127,7 @@ async def _apply_schema(dsn: str) -> None:
                 ) stats
             """)  # noqa: S608
         # Series rollup table (mirrors migration 20260611_0006).
-        await aconn.execute("""
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
                 provider      text NOT NULL,
                 model         text NOT NULL,
@@ -141,8 +144,10 @@ async def _apply_schema(dsn: str) -> None:
                 PRIMARY KEY (provider, model, benchmark, metric_type, bucket_at)
             )
         """)
-    finally:
-        await aconn.close()
+
+
+postgresql_proc = factories.postgresql_proc(load=[_load_schema])
+postgresql = factories.postgresql("postgresql_proc")
 
 
 @pytest_asyncio.fixture
@@ -153,7 +158,6 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     ensure tests are fully isolated.
     """
     dsn = _make_db_url(postgresql)
-    await _apply_schema(dsn)
 
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
