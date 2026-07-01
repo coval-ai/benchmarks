@@ -80,7 +80,7 @@ export class MockBattleSource implements BattleSource {
     return { battleId: input.battleId, outcome: input.outcome };
   }
 
-  async reveal(battleId: string): Promise<Reveal> {
+  async reveal(battleId: string, _voterId: string): Promise<Reveal> {
     const r = this.assignments.get(battleId);
     if (!r) throw new Error(`mock reveal: unknown battle ${battleId}`);
     return r;

@@ -23,14 +23,14 @@ describe("MockBattleSource", () => {
   it("reveals two distinct models for a created battle", async () => {
     const src = new MockBattleSource();
     const battle = await src.createBattle("hi");
-    const reveal = await src.reveal(battle.battleId);
+    const reveal = await src.reveal(battle.battleId, "t");
     expect(reveal.a.model).toBeTruthy();
     expect(reveal.b.model).toBeTruthy();
     expect(reveal.a.model).not.toBe(reveal.b.model);
   });
 
   it("throws when revealing an unknown battle", async () => {
-    await expect(new MockBattleSource().reveal("does-not-exist")).rejects.toThrow();
+    await expect(new MockBattleSource().reveal("does-not-exist", "t")).rejects.toThrow();
   });
 
   it("echoes the outcome on submitVote", async () => {

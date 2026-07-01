@@ -70,7 +70,7 @@ export default function ArenaPage() {
     try {
       await source.submitVote({ battleId: battle.battleId, outcome, voterId });
       try {
-        setReveal(await source.reveal(battle.battleId));
+        setReveal(await source.reveal(battle.battleId, voterId));
       } catch {
         setReveal(null); // vote is recorded; identities just unavailable
       }
