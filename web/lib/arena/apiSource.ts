@@ -6,7 +6,7 @@ import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from ".
 // calls:
 //   POST /api/arena/battle              { text }                        -> BlindBattle
 //   POST /api/arena/vote                { battleId, outcome, voterId }  -> VoteResult
-//   GET  /api/arena/battle/{id}/reveal                                  -> Reveal
+//   GET  /api/arena/battle/{id}/reveal?voterId=...                      -> Reveal
 
 // Coarse hang-backstops, not latency SLAs; tune once real backend latency is known.
 const QUICK_TIMEOUT_MS = 5_000; // vote/reveal: quick DB ops
@@ -32,8 +32,9 @@ export class ApiBattleSource implements BattleSource {
     return postJson<VoteResult>("/api/arena/vote", input);
   }
 
-  async reveal(battleId: string): Promise<Reveal> {
-    const res = await fetch(`/api/arena/battle/${encodeURIComponent(battleId)}/reveal`, {
+  async reveal(battleId: string, voterId: string): Promise<Reveal> {
+    const url = `/api/arena/battle/${encodeURIComponent(battleId)}/reveal?voterId=${encodeURIComponent(voterId)}`;
+    const res = await fetch(url, {
       signal: AbortSignal.timeout(QUICK_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`reveal -> ${res.status}`);

@@ -36,5 +36,5 @@ export interface Reveal {
 export interface BattleSource {
   createBattle(text: string): Promise<BlindBattle>;
   submitVote(input: VoteInput): Promise<VoteResult>;
-  reveal(battleId: string): Promise<Reveal>;
+  reveal(battleId: string, voterId: string): Promise<Reveal>;
 }
