@@ -463,7 +463,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _EMOTION),
         licensing=_OPEN,
         self_hostable=True,
-        status=_ACTIVE,
+        status=_PENDING,
     ),
     # Baseten dedicated endpoints (Qwen3-TTS 1.7B). PENDING for the same reason
     # as the Whisper STT entry above — implemented, hidden, run manually.
