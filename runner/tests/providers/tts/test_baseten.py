@@ -86,6 +86,8 @@ async def test_baseten_tts_url_and_header_auth(baseten_settings: Settings) -> No
     assert captured["url"] == _WS_URL
     headers = captured["kwargs"]["additional_headers"]  # type: ignore[index]
     assert headers["Authorization"] == "Api-Key test-baseten-key"
+    if result.audio_path is not None:
+        result.audio_path.unlink()
 
 
 @pytest.mark.asyncio
@@ -94,7 +96,7 @@ async def test_baseten_tts_sends_config_text_done(baseten_settings: Settings) ->
     provider = BasetenTTSProvider(baseten_settings, model="qwen3-tts-1.7b", voice="jim")
 
     with patch("coval_bench.providers.tts.baseten.ws_client.connect", return_value=ws):
-        await provider.synthesize("Hello world")
+        result = await provider.synthesize("Hello world")
 
     sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
     assert sent[0]["type"] == "session.config"
@@ -103,6 +105,8 @@ async def test_baseten_tts_sends_config_text_done(baseten_settings: Settings) ->
     assert sent[0]["stream_audio"] is True
     assert sent[1] == {"type": "input.text", "text": "Hello world"}
     assert sent[2] == {"type": "input.done"}
+    if result.audio_path is not None:
+        result.audio_path.unlink()
 
 
 @pytest.mark.asyncio
