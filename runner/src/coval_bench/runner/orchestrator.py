@@ -263,6 +263,8 @@ async def _run_stt_item(
         kwargs: dict[str, Any] = {"api_key": api_key, "model": entry.model}
         if entry.provider == "google":
             kwargs["project_id"] = settings.google_project_id
+        elif entry.provider == "baseten":
+            kwargs["ws_url"] = settings.baseten_whisper_url
         provider = provider_cls(**kwargs)
 
         audio_path: Path = item.path

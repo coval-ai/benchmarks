@@ -21,6 +21,11 @@ from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
 from coval_bench.migrations.import_legacy import import_legacy_cli
 
+# Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
+# for a cold dedicated endpoint (handshake + cold inference); the production paths
+# use the orchestrator's tighter per-call timeouts instead.
+_SMOKE_TIMEOUT_S = 120
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name="coval-bench")
@@ -111,7 +116,25 @@ def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
 
     settings = get_settings()
     instance = provider_cls(settings=settings, model=model, voice=voice)
-    result = asyncio.run(instance.synthesize(text))
+    try:
+        result = asyncio.run(asyncio.wait_for(instance.synthesize(text), timeout=_SMOKE_TIMEOUT_S))
+    except TimeoutError:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "tts_smoke",
+                    "provider": provider,
+                    "model": model,
+                    "voice": voice,
+                    "ttfa_ms": None,
+                    "audio_path": None,
+                    "audio_bytes": None,
+                    "error": f"timed out after {_SMOKE_TIMEOUT_S}s",
+                    "ok": False,
+                }
+            )
+        )
+        sys.exit(1)
 
     audio_path_str: str | None = str(result.audio_path) if result.audio_path else None
     audio_bytes: int | None = None
@@ -135,6 +158,137 @@ def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
                 "ttfa_ms": result.ttfa_ms,
                 "audio_path": audio_path_str,
                 "audio_bytes": audio_bytes,
+                "error": result.error,
+                "ok": ok,
+            }
+        )
+    )
+    sys.exit(0 if ok else 1)
+
+
+@cli.command(name="probe")
+@click.option(
+    "--only",
+    "selectors",
+    multiple=True,
+    required=True,
+    help="provider/model to probe (repeatable), e.g. baseten/whisper-large-v3. "
+    "Runs regardless of registry status.",
+)
+@click.option("--samples", default=20, show_default=True, type=int, help="Dataset items per model.")
+@click.option(
+    "--concurrency",
+    default=1,
+    show_default=True,
+    type=int,
+    help="Concurrent items; keep at 1 for a single pinned replica.",
+)
+def probe(selectors: tuple[str, ...], samples: int, concurrency: int) -> None:
+    """Run dataset samples through selected models WITHOUT persisting (logs only).
+
+    For private latency checks of PENDING models from the production (in-region)
+    environment: writes nothing to the DB or public API, emits per-metric
+    aggregates as a single JSON line to stdout. Exits 2 if a selector matches no
+    registered model.
+    """
+    from coval_bench.config import get_settings
+    from coval_bench.registries import MODEL_REGISTRY
+    from coval_bench.runner.probe import run_probe
+
+    models = [m for m in MODEL_REGISTRY if f"{m.provider}/{m.model}" in set(selectors)]
+    matched = {f"{m.provider}/{m.model}" for m in models}
+    missing = sorted(set(selectors) - matched)
+    if missing:
+        known = sorted({f"{m.provider}/{m.model}" for m in MODEL_REGISTRY})
+        click.echo(f"Unknown model(s): {missing}. Known: {known}", err=True)
+        sys.exit(2)
+
+    settings = get_settings()
+    results = asyncio.run(
+        run_probe(settings=settings, models=models, sample_size=samples, concurrency=concurrency)
+    )
+    click.echo(json.dumps({"event": "probe_results", "samples": samples, "results": results}))
+
+
+@cli.command(name="stt-smoke")
+@click.option("--provider", required=True, help="STT provider name (e.g. deepgram, baseten).")
+@click.option("--model", required=True, help="Model ID for the provider (e.g. nova-3).")
+@click.option(
+    "--wav",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="16 kHz mono PCM16 WAV to transcribe.",
+)
+def stt_smoke(provider: str, model: str, wav: str) -> None:
+    """Probe a single (provider, model) against the real STT upstream.
+
+    Streams *wav* in real time and emits a single-line JSON to stdout with the
+    timing measurements. Exits 0 on success, 1 on provider error, 2 if
+    *provider* is not registered. Does NOT write to the database.
+    """
+    import wave
+    from typing import Any
+
+    from coval_bench.config import get_settings
+    from coval_bench.providers.stt import STT_PROVIDERS
+
+    registry: dict[str, Any] = dict(STT_PROVIDERS)
+    provider_cls = registry.get(provider)
+    if provider_cls is None:
+        click.echo(
+            f"Unknown STT provider: {provider!r}. Known: {sorted(registry.keys())}",
+            err=True,
+        )
+        sys.exit(2)
+
+    settings = get_settings()
+    kwargs: dict[str, Any] = {
+        "api_key": getattr(settings, f"{provider}_api_key", None),
+        "model": model,
+    }
+    if provider == "google":
+        kwargs["project_id"] = settings.google_project_id
+    elif provider == "baseten":
+        kwargs["ws_url"] = settings.baseten_whisper_url
+    instance = provider_cls(**kwargs)
+
+    with wave.open(wav, "rb") as w:
+        if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+            click.echo("WAV must be 16 kHz, mono, 16-bit PCM", err=True)
+            sys.exit(1)
+        pcm = w.readframes(w.getnframes())
+
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(instance.measure_ttft(pcm, 1, 2, 16000, 0.1), timeout=_SMOKE_TIMEOUT_S)
+        )
+    except TimeoutError:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "stt_smoke",
+                    "provider": provider,
+                    "model": model,
+                    "ttft_seconds": None,
+                    "audio_to_final_seconds": None,
+                    "transcript": None,
+                    "error": f"timed out after {_SMOKE_TIMEOUT_S}s",
+                    "ok": False,
+                }
+            )
+        )
+        sys.exit(1)
+    ok = result.error is None and bool(result.complete_transcript)
+
+    click.echo(
+        json.dumps(
+            {
+                "event": "stt_smoke",
+                "provider": provider,
+                "model": model,
+                "ttft_seconds": result.ttft_seconds,
+                "audio_to_final_seconds": result.audio_to_final_seconds,
+                "transcript": result.complete_transcript,
                 "error": result.error,
                 "ok": ok,
             }
