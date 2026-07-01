@@ -31,9 +31,11 @@ PAIRING_DOMAIN = "all"
 
 
 def active_tts_models() -> list[RegisteredModel]:
-    """The arena roster: every ACTIVE TTS model in the registry."""
+    """The arena roster: every ACTIVE, arena-enabled TTS model in the registry."""
     return [
-        m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE
+        m
+        for m in MODEL_REGISTRY
+        if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE and m.arena_enabled
     ]
 
 

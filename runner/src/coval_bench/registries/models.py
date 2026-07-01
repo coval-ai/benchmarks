@@ -55,6 +55,7 @@ class RegisteredModel(BaseModel, frozen=True):
     licensing: Licensing = Licensing.PROPRIETARY
     self_hostable: bool = False  # can run in the customer's own infra
     status: ModelStatus
+    arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
 
 _STT = Benchmark.STT
@@ -436,6 +437,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -445,6 +447,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -464,6 +467,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         self_hostable=True,
         status=_PENDING,
+        arena_enabled=False,
     ),
     # Baseten dedicated endpoints (Qwen3-TTS 1.7B). PENDING for the same reason
     # as the Whisper STT entry above — implemented, hidden, run manually.

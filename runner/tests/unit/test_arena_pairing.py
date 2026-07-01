@@ -11,9 +11,11 @@ from collections import Counter
 import pytest
 
 from coval_bench.arena.pairing import active_tts_models, select_pair
+from coval_bench.config import Settings
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import ModelStatus, RegisteredModel
+from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
 def _model(name: str) -> RegisteredModel:
@@ -138,3 +140,21 @@ def test_active_tts_models_are_tts_and_active() -> None:
     roster = active_tts_models()
     assert len(roster) >= 2
     assert all(m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE for m in roster)
+
+
+def test_active_tts_models_excludes_arena_disabled() -> None:
+    assert all(m.arena_enabled for m in active_tts_models())
+
+
+def test_provider_env_covers_arena_providers() -> None:
+    # Only providers the arena can actually synthesize with (ACTIVE + arena_enabled),
+    # matching active_tts_models() and the parity script — not every non-retired one.
+    providers = {m.provider for m in active_tts_models()}
+    missing = providers - PROVIDER_ENV.keys()
+    assert not missing, f"arena providers with no PROVIDER_ENV entry: {sorted(missing)}"
+
+
+def test_provider_env_names_match_settings_fields() -> None:
+    fields = Settings.model_fields
+    bad = {env for env in PROVIDER_ENV.values() if env.lower() not in fields}
+    assert not bad, f"PROVIDER_ENV names with no Settings field: {sorted(bad)}"

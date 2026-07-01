@@ -1,0 +1,72 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Cross-repo parity gate: when a PR changes the TTS provider registry, every
+# arena-eligible provider's API key must be mounted on the benchmarks-api Cloud
+# Run service in coval-ai/benchmark-infra. Path-filtered so it only runs on
+# provider-addition PRs — never on unrelated branches or already-merged work.
+name: Arena key parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "runner/src/coval_bench/registries/models.py"
+      - "runner/src/coval_bench/registries/provider_keys.py"
+      - "runner/src/coval_bench/providers/tts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: Arena provider keys mounted in infra
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: runner
+        run: uv sync --frozen --dev
+
+      - name: Fetch infra Cloud Run service module
+        id: fetch_infra
+        env:
+          GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
+        run: |
+          set -uo pipefail
+          # Warn-and-pass only for PLUMBING failures (token absent, infra unreadable):
+          # these mean "couldn't verify", not "key unmounted". A real parity miss is
+          # decided by the next step, which still fails hard.
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::skipping arena key parity — INFRA_DISPATCH_TOKEN unavailable (e.g. fork PR); could not verify, not a parity failure."
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! gh api repos/coval-ai/benchmark-infra/contents/modules/cloud_run_service/main.tf \
+               -H "Accept: application/vnd.github.raw" > infra_cloud_run_service.tf; then
+            echo "::warning::skipping arena key parity — could not read benchmark-infra (token scope/expiry or infra perms); could not verify, not a parity failure."
+            echo "verified=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "verified=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check arena provider key parity
+        if: steps.fetch_infra.outputs.verified == 'true'
+        working-directory: runner
+        run: uv run --with 'python-hcl2==8.1.2' python scripts/check_arena_keys.py ../infra_cloud_run_service.tf
