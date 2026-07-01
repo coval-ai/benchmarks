@@ -21,6 +21,11 @@ from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
 from coval_bench.migrations.import_legacy import import_legacy_cli
 
+# Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
+# for a cold dedicated endpoint (handshake + cold inference); the production paths
+# use the orchestrator's tighter per-call timeouts instead.
+_SMOKE_TIMEOUT_S = 120
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name="coval-bench")
@@ -111,7 +116,25 @@ def tts_smoke(provider: str, model: str, voice: str, text: str) -> None:
 
     settings = get_settings()
     instance = provider_cls(settings=settings, model=model, voice=voice)
-    result = asyncio.run(instance.synthesize(text))
+    try:
+        result = asyncio.run(asyncio.wait_for(instance.synthesize(text), timeout=_SMOKE_TIMEOUT_S))
+    except TimeoutError:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "tts_smoke",
+                    "provider": provider,
+                    "model": model,
+                    "voice": voice,
+                    "ttfa_ms": None,
+                    "audio_path": None,
+                    "audio_bytes": None,
+                    "error": f"timed out after {_SMOKE_TIMEOUT_S}s",
+                    "ok": False,
+                }
+            )
+        )
+        sys.exit(1)
 
     audio_path_str: str | None = str(result.audio_path) if result.audio_path else None
     audio_bytes: int | None = None
@@ -235,7 +258,26 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
             sys.exit(1)
         pcm = w.readframes(w.getnframes())
 
-    result = asyncio.run(instance.measure_ttft(pcm, 1, 2, 16000, 0.1))
+    try:
+        result = asyncio.run(
+            asyncio.wait_for(instance.measure_ttft(pcm, 1, 2, 16000, 0.1), timeout=_SMOKE_TIMEOUT_S)
+        )
+    except TimeoutError:
+        click.echo(
+            json.dumps(
+                {
+                    "event": "stt_smoke",
+                    "provider": provider,
+                    "model": model,
+                    "ttft_seconds": None,
+                    "audio_to_final_seconds": None,
+                    "transcript": None,
+                    "error": f"timed out after {_SMOKE_TIMEOUT_S}s",
+                    "ok": False,
+                }
+            )
+        )
+        sys.exit(1)
     ok = result.error is None and result.complete_transcript is not None
 
     click.echo(
