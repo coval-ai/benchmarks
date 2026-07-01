@@ -76,10 +76,7 @@ def test_websocket_url_contains_required_params() -> None:
 
 
 @pytest.mark.asyncio
-async def test_force_endpoint_sent_before_terminate(
-    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
+async def test_force_endpoint_sent_before_terminate(fake_api_key: SecretStr) -> None:
     sent: list[Any] = []
     final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
     ws = FakeWebSocket([final], on_send=sent.append)
@@ -130,11 +127,8 @@ def test_provider_name_universal_streaming_multilingual() -> None:
 
 
 @pytest.mark.asyncio
-async def test_universal_3_5_pro_url_uses_api_speech_model(
-    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretStr) -> None:
     """The friendly model id maps to the API's speech_model value on the wire."""
-    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
@@ -158,10 +152,9 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(
 
 @pytest.mark.asyncio
 async def test_universal_streaming_multilingual_url_uses_api_speech_model(
-    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+    fake_api_key: SecretStr,
 ) -> None:
     """The multilingual model id maps to its speech_model value with no language lock."""
-    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hola"}])
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
@@ -270,10 +263,9 @@ async def test_assemblyai_audio_to_final_populated(
 
 @pytest.mark.asyncio
 async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
     """audio_to_final_seconds is None when no end_of_turn event arrives."""
-    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     events: list[Any] = [
         {"type": "Begin", "id": "test-session", "expires_at": 9999999999},
         {
@@ -302,7 +294,7 @@ async def test_assemblyai_audio_to_final_none_when_no_end_of_turn(
 
 @pytest.mark.asyncio
 async def test_assemblyai_partial_only_leaves_complete_transcript_none(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
     """No end_of_turn=true final means no scorable transcript.
 
@@ -311,7 +303,6 @@ async def test_assemblyai_partial_only_leaves_complete_transcript_none(
     still captured (ttft, partial_transcripts) — they just stay out of the
     transcript WER reads.
     """
-    monkeypatch.setattr("coval_bench.providers.stt.assemblyai._FINAL_WAIT_S", 0.05)
     events: list[Any] = [
         {"type": "Begin", "id": "test-session", "expires_at": 9999999999},
         {"type": "Turn", "transcript": "hello", "end_of_turn": False},

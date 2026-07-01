@@ -140,7 +140,7 @@ async def test_gradium_closes_on_flushed_ack_not_blind_sleep(
 
     assert result.error is None
     assert result.complete_transcript == "hello world"
-    # Ack releases the wait well before the 30s cap (audio streams ~3s).
+    # Ack releases the wait well before the 30s cap.
     assert elapsed < 5.0
 
 

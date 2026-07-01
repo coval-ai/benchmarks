@@ -29,6 +29,7 @@ used with ``--disable-socket --allow-unix-socket`` in CI to enforce this.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -117,6 +118,28 @@ class AsyncFakeWebSocketIter:
 # ---------------------------------------------------------------------------
 # Pytest fixtures
 # ---------------------------------------------------------------------------
+
+_REAL_SLEEP = asyncio.sleep
+
+# Final/flush waits the FakeWebSocket never releases.
+_WAIT_PATCHES = (
+    "coval_bench.providers.stt.assemblyai._FINAL_WAIT_S",
+    "coval_bench.providers.stt.deepgram._FINAL_WAIT_S",
+    "coval_bench.providers.stt.xai._FINAL_WAIT_S",
+    "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
+)
+
+
+@pytest.fixture(autouse=True)
+def _fast_streaming(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Zero out pacing sleeps and final-event waits; sleeps still yield to the loop."""
+
+    async def _instant(_delay: float, result: Any = None) -> Any:
+        return await _REAL_SLEEP(0, result)
+
+    monkeypatch.setattr(asyncio, "sleep", _instant)
+    for target in _WAIT_PATCHES:
+        monkeypatch.setattr(target, 0.05)
 
 
 @pytest.fixture

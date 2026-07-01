@@ -4,8 +4,7 @@
 """Tests for coval_bench.db.arena_store.
 
 Uses ``pytest-postgresql`` (embedded ``pg_ctl``, no Docker) to spin up a real
-Postgres. No remote DB is ever contacted. A separate session server (random
-port) keeps these independent of the db-writer tests.
+Postgres. No remote DB is ever contacted.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ import pytest
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from psycopg_pool import AsyncConnectionPool
-from pytest_postgresql.factories import postgresql, postgresql_proc
+from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import (
@@ -33,10 +32,7 @@ from coval_bench.db.models import (
     VoterType,
 )
 
-# Separate embedded server (random free port) so we don't collide with the
-# db-writer tests' ``pg_proc`` fixture.
-arena_pg_proc = postgresql_proc(port=None)
-arena_pg = postgresql("arena_pg_proc")
+arena_pg = postgresql("pg_proc")  # shared server from conftest, own per-test DB
 
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
 

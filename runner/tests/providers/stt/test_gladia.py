@@ -11,7 +11,6 @@ in-order join of every final.
 
 from __future__ import annotations
 
-from asyncio import sleep as _real_sleep
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -48,16 +47,6 @@ def _fake_http_client(response: httpx.Response) -> Any:
 
 def _init_ok() -> httpx.Response:
     return httpx.Response(200, json={"id": "test-session", "url": _WS_URL})
-
-
-@pytest.fixture(autouse=True)
-def _no_realtime_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Drop the real-time pacing sleep so streaming tests run instantly."""
-
-    async def _noop(_seconds: float) -> None:
-        return None
-
-    monkeypatch.setattr("coval_bench.providers.stt.gladia.asyncio.sleep", _noop)
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +211,9 @@ async def test_gladia_error_event(fake_api_key: SecretStr, audio_pcm_bytes: byte
 
 @pytest.mark.asyncio
 async def test_gladia_cancels_sender_when_receiver_errors(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes, monkeypatch: pytest.MonkeyPatch
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
     """A receiver error cancels the still-streaming sender instead of draining it."""
-    # Real yielding sleep (overriding the autouse no-op) so the sender is mid-stream.
-    monkeypatch.setattr("coval_bench.providers.stt.gladia.asyncio.sleep", lambda _s: _real_sleep(0))
     sent: list[Any] = []
     ws = FakeWebSocket(load_fixture_events("gladia", "events-error"), on_send=sent.append)
     cm = MagicMock()

@@ -26,17 +26,16 @@ import pytest
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from psycopg_pool import AsyncConnectionPool
-from pytest_postgresql.factories import postgresql, postgresql_proc
+from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.conn import get_pool
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.db.writer import RunWriter
 
 # ---------------------------------------------------------------------------
-# pytest-postgresql fixtures
+# pytest-postgresql fixtures — server shared via conftest ``pg_proc``
 # ---------------------------------------------------------------------------
 
-pg_proc = postgresql_proc()  # session-scoped Postgres server
 pg_conn = postgresql("pg_proc")  # function-scoped clean DB per test
 
 
