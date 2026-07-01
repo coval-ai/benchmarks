@@ -278,7 +278,7 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
             )
         )
         sys.exit(1)
-    ok = result.error is None and result.complete_transcript is not None
+    ok = result.error is None and bool(result.complete_transcript)
 
     click.echo(
         json.dumps(
