@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.providers.stt import deepgram as deepgram_mod
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events  # noqa: E402
 
@@ -185,12 +186,13 @@ async def test_flux_does_not_send_finalize(fake_api_key: SecretStr) -> None:
     assert any(isinstance(m, bytes) and set(m) == {0} for m in sent)
 
 
-class _EndOfTurnOnSilenceWS:
-    """Fake WS that emits EndOfTurn only once trailing silence starts arriving."""
+class _TurnEventWS:
+    """Fake WS that emits an EndOfTurn keyed to how many audio bytes have arrived."""
 
-    def __init__(self, audio_len: int) -> None:
+    def __init__(self, audio_len: int, eot_after: int) -> None:
         self.sent: list[Any] = []
         self._audio_len = audio_len
+        self._eot_after = eot_after
         self._bytes_seen = 0
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -202,13 +204,13 @@ class _EndOfTurnOnSilenceWS:
             if before < self._audio_len <= self._bytes_seen:
                 turn = {"type": "TurnInfo", "event": "Update", "turn_index": 0}
                 self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
-            elif before >= self._audio_len:
+            if before < self._eot_after <= self._bytes_seen:
                 turn = {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 0}
                 self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
         elif isinstance(msg, str) and "CloseStream" in msg:
             self._queue.put_nowait(None)
 
-    def __aiter__(self) -> _EndOfTurnOnSilenceWS:
+    def __aiter__(self) -> _TurnEventWS:
         return self
 
     async def __anext__(self) -> str:
@@ -225,7 +227,7 @@ async def test_flux_stops_silence_on_end_of_turn(
     """flux: trailing silence stops at EndOfTurn instead of running out the cap."""
     monkeypatch.setattr("coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S", 5.0)
     audio = b"\x01" * 640
-    ws = _EndOfTurnOnSilenceWS(audio_len=len(audio))
+    ws = _TurnEventWS(audio_len=len(audio), eot_after=len(audio) + 1)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -245,6 +247,33 @@ async def test_flux_stops_silence_on_end_of_turn(
     assert result.complete_transcript == "hello world"
     silence_bytes = sum(len(m) for m in ws.sent if isinstance(m, bytes)) - len(audio)
     assert 0 < silence_bytes < 16000
+    assert isinstance(ws.sent[-1], str) and "CloseStream" in ws.sent[-1]
+
+
+@pytest.mark.asyncio
+async def test_flux_mid_clip_end_of_turn_does_not_cut_silence_short(
+    fake_api_key: SecretStr,
+) -> None:
+    """flux: an EndOfTurn during the audio must not skip the trailing silence."""
+    audio = b"\x01" * 640
+    ws = _TurnEventWS(audio_len=len(audio), eot_after=1)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    silence_bytes = sum(len(m) for m in ws.sent if isinstance(m, bytes)) - len(audio)
+    assert silence_bytes == int(32000 * deepgram_mod._FLUX_EOT_SILENCE_S)
+    assert result.audio_to_final_seconds is not None
     assert isinstance(ws.sent[-1], str) and "CloseStream" in ws.sent[-1]
 
 
