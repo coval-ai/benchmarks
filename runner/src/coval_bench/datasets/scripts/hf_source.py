@@ -1,0 +1,314 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+"""Turn a Hugging Face dataset path into builder ``Clip``s.
+
+A source for the shared builder: it converts a dataset into ``Clip``s so the shared
+build (clean → balance → transcode → manifest) is written once, never per dataset.
+Other sources plug in the same way.
+
+Reading:
+    Uses the Hugging Face datasets-server REST API — rows come back as JSON with a
+    downloadable audio URL — so there is no parquet reader / ``datasets`` dependency
+    (``urllib`` + ``json`` only). Build-time module; the runtime loader never imports it.
+
+Cost control (metadata-first):
+    When the dataset has a duration column, only row *metadata* (transcript,
+    duration, audio URL) is paged to run clean + balance; audio is downloaded for
+    the *selected* clips alone — the whole dataset's audio is never pulled. With no
+    duration column, it falls back to downloading all audio and reading each file's
+    duration from its header.
+
+Resolution outcomes (what can go wrong picking a dataset apart):
+    HFNeedsChoice  — readable, but you must pick a config/split.
+    HFAmbiguous    — readable, but you must name the audio/transcript column.
+    HFUnsupported  — not readable at all (gated / not converted).
+    The CLI turns the last two into a scaffolded handwritten adapter.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import soundfile as sf
+import structlog
+
+from coval_bench.datasets.scripts.framework import Clip
+
+logger = structlog.get_logger(__name__)
+
+_SERVER = "https://datasets-server.huggingface.co"
+_PAGE = 100  # datasets-server hard cap on rows per /rows request
+_STANDARD_SPLITS = frozenset({"train", "validation", "valid", "dev", "test"})
+_TEXT_PRIORITY = ("transcript", "transcription", "text", "sentence", "normalized_text")
+_DURATION_COLS = ("duration", "length", "duration_sec")
+_UA = {"User-Agent": "coval-bench/build-dataset"}
+_RETRIES = 6  # transient (429 / 5xx / timeout) attempts before giving up
+_PAGE_PAUSE = 0.3  # seconds between pages, to stay under the rate limit
+_SCAN_CAP_PER_SPLIT = 100  # cap rows scanned per split — full-split paging trips HF rate limits
+
+
+class HFUnsupported(Exception):
+    """datasets-server can't serve rows (gated / not converted / no splits / API error)."""
+
+
+class HFNeedsChoice(Exception):
+    """Readable, but the caller must pick a config/split (more than one available)."""
+
+
+class HFAmbiguous(Exception):
+    """Readable, but can't pin exactly one audio + one transcript column."""
+
+
+def _api_get(endpoint: str, **params: object) -> Any:  # noqa: ANN401 (JSON payload is dynamic)
+    url = f"{_SERVER}/{endpoint}?{urllib.parse.urlencode(params)}"
+    last: Exception | None = None
+    for attempt in range(_RETRIES):
+        req = urllib.request.Request(url, headers=_UA)  # noqa: S310 (audited: hardcoded https HF URL)
+        wait = 2 * (attempt + 1)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code != 429 and exc.code < 500:  # 4xx (not rate-limit) = permanent
+                raise HFUnsupported(f"{endpoint}: HTTP {exc.code}") from exc
+            last = exc  # 429 rate-limit / 5xx = transient
+            retry_after = exc.headers.get("Retry-After")
+            if retry_after and retry_after.isdigit():
+                wait = int(retry_after)
+        except OSError as exc:  # URLError, timeouts, connection resets — transient
+            last = exc
+        if attempt < _RETRIES - 1:
+            time.sleep(wait)
+    raise HFUnsupported(f"datasets-server unavailable for {endpoint}: {last}")
+
+
+def _fetch_file(src: str, dest: Path) -> None:
+    req = urllib.request.Request(src, headers=_UA)  # noqa: S310 (audited: HF cached-assets URL)
+    with urllib.request.urlopen(req, timeout=120) as resp, dest.open("wb") as out:  # noqa: S310
+        out.write(resp.read())
+
+
+def resolve_splits(hf_path: str, *, config: str | None, split: str | None) -> tuple[str, list[str]]:
+    """Pick ``(config, [splits])`` for *hf_path*.
+
+    Algorithm (no silent first-pick):
+    - >1 config and none given → :class:`HFNeedsChoice` (caller must ``--config``).
+    - standard partitions (train/validation/test) → use ``test`` (benchmarks are
+      held-out); if no ``test``, the first standard split.
+    - non-standard split names are *facets* (e.g. robustness conditions) → use ALL.
+    - an explicit *split* always wins.
+    """
+    pairs = [
+        (s["config"], s["split"]) for s in _api_get("splits", dataset=hf_path).get("splits", [])
+    ]
+    if not pairs:
+        raise HFUnsupported(f"{hf_path}: datasets-server lists no splits")
+    configs = sorted({c for c, _ in pairs})
+    if config is None:
+        if len(configs) > 1:
+            raise HFNeedsChoice(f"{hf_path}: {len(configs)} configs {configs} — pass --config")
+        config = configs[0]
+    elif config not in configs:
+        raise HFNeedsChoice(f"{hf_path}: config '{config}' not in {configs}")
+    cfg_splits = [sp for c, sp in pairs if c == config]
+    if split is not None:
+        if split not in cfg_splits:
+            raise HFNeedsChoice(f"{hf_path}: split '{split}' not in {cfg_splits}")
+        return config, [split]
+    standard = [sp for sp in cfg_splits if sp in _STANDARD_SPLITS]
+    if standard:
+        return config, ["test" if "test" in cfg_splits else standard[0]]
+    return config, cfg_splits
+
+
+def detect_columns(
+    hf_path: str, config: str, split: str, *, audio_col: str | None, text_col: str | None
+) -> tuple[str, str, str | None]:
+    """Return ``(audio_col, transcript_col, duration_col | None)``, honoring overrides.
+
+    Auto: audio = the single ``Audio``-typed column; transcript = the first string
+    column in :data:`_TEXT_PRIORITY` (or the sole string column). Raises
+    :class:`HFAmbiguous` when it can't pin exactly one of each.
+    """
+    feats = _api_get("rows", dataset=hf_path, config=config, split=split, offset=0, length=1).get(
+        "features", []
+    )
+    names = {f["name"] for f in feats}
+    audios = [f["name"] for f in feats if f["type"].get("_type") == "Audio"]
+    strings = [f["name"] for f in feats if f["type"].get("dtype") == "string"]
+    audio = audio_col or (audios[0] if len(audios) == 1 else None)
+    text = text_col or next((n for n in _TEXT_PRIORITY if n in strings), None)
+    if text is None and text_col is None and len(strings) == 1:
+        text = strings[0]
+    if audio is None or text is None or audio not in names or text not in names:
+        raise HFAmbiguous(
+            f"{hf_path}: audio={audios} strings={strings} — use --audio-col/--text-col"
+        )
+    duration = next((c for c in _DURATION_COLS if c in names), None)
+    return audio, text, duration
+
+
+def make_source(
+    hf_path: str,
+    config: str,
+    splits: list[str],
+    audio_col: str,
+    text_col: str,
+    duration_col: str | None,
+) -> tuple[
+    Callable[[Path], Path], Callable[[Path], list[Clip]], Callable[[list[Clip]], None] | None
+]:
+    """Build the ``(download, parse, fetch)`` framework hooks for this HF dataset.
+
+    Metadata-first when *duration_col* is set (download indexes metadata only, fetch
+    grabs audio for the selected clips); otherwise bulk (download grabs all audio,
+    duration is read from each file, no fetch).
+    """
+
+    def _scan_split(
+        split: str, audio_dir: Path, rows: list[dict[str, object]], *, with_audio: bool
+    ) -> None:
+        offset = 0
+        got = 0
+        while True:
+            page = _api_get(
+                "rows", dataset=hf_path, config=config, split=split, offset=offset, length=_PAGE
+            )
+            batch = page.get("rows", [])
+            if not batch:
+                break
+            for entry in batch:
+                got += 1
+                row = entry["row"]
+                cell = row[audio_col]
+                src = (cell[0] if isinstance(cell, list) else cell)["src"]
+                name = f"{split}-{entry['row_idx']}.wav"
+                if with_audio and not (audio_dir / name).exists():
+                    _fetch_file(src, audio_dir / name)
+                meta = {
+                    k: v
+                    for k, v in row.items()
+                    if k not in (audio_col, text_col) and isinstance(v, (str, int, float, bool))
+                }
+                meta["_split"] = split
+                meta["_audio_src"] = src
+                rows.append(
+                    {
+                        "audio": name,
+                        "transcript": str(row[text_col] or ""),
+                        "duration": float(row[duration_col]) if duration_col else 0.0,
+                        "meta": meta,
+                    }
+                )
+            offset += _PAGE
+            total = int(page.get("num_rows_total", 0))
+            if got >= _SCAN_CAP_PER_SPLIT and got < total:
+                logger.info("hf_scan_capped", split=split, scanned=got, total=total)
+                break
+            if offset >= total:
+                break
+            time.sleep(_PAGE_PAUSE)  # stay polite under the rate limit
+
+    def _index(cache_root: Path, *, with_audio: bool) -> Path:
+        audio_dir = cache_root / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        rows: list[dict[str, object]] = []
+        for split in splits:
+            try:
+                _scan_split(split, audio_dir, rows, with_audio=with_audio)
+            except HFUnsupported as exc:  # one upstream-broken split shouldn't abort the build
+                logger.warning("hf_split_skipped", split=split, error=str(exc))
+        if not rows:
+            raise HFUnsupported(f"{hf_path}: no rows loaded from any split")
+        (cache_root / "index.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8"
+        )
+        return cache_root
+
+    def download(cache_root: Path) -> Path:  # index metadata (+ audio only in bulk mode)
+        return _index(cache_root, with_audio=duration_col is None)
+
+    def parse(source: Path) -> list[Clip]:  # index → clips
+        audio_dir = source / "audio"
+        clips: list[Clip] = []
+        for line in (source / "index.jsonl").read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            record: Any = json.loads(line)
+            path = audio_dir / str(record["audio"])
+            # duration: use the dataset's duration column if it has one; otherwise
+            # read it from the (bulk-downloaded) file header.
+            if duration_col:
+                duration = float(record["duration"])
+            else:
+                duration = float(sf.info(str(path)).duration)
+            clips.append(
+                Clip(
+                    audio_path=path,
+                    transcript=str(record["transcript"]),
+                    duration_sec=duration,
+                    meta=record["meta"],
+                )
+            )
+        return clips
+
+    def fetch(selected: list[Clip]) -> None:  # download audio for the selected clips only
+        for clip in selected:
+            if not clip.audio_path.exists():
+                _fetch_file(str(clip.meta["_audio_src"]), clip.audio_path)
+
+    return download, parse, (None if duration_col is None else fetch)
+
+
+def scaffold_adapter(hf_path: str, dest: Path, *, detected: str) -> None:
+    """Write a starter handwritten adapter (like SLURP) to complete by hand."""
+    slug = hf_path.split("/")[-1].lower()
+    dest.write_text(
+        f'''# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+"""Handwritten adapter for {hf_path} — auto-ingest could not resolve it.
+
+Reason: {detected}
+Fill in download()/parse(), then run:  coval-build-dataset {slug}
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from coval_bench.datasets.scripts.framework import Clip, DatasetSpec
+
+
+def download(cache_root: Path) -> Path:
+    raise NotImplementedError  # TODO: fetch the source into cache_root, return it
+
+
+def parse(source: Path) -> list[Clip]:
+    raise NotImplementedError  # TODO: source -> Clips (audio_path, transcript, duration_sec, meta)
+
+
+SPEC = DatasetSpec(
+    dataset_id="{slug}",
+    cache_name="{slug}",
+    download=download,
+    parse=parse,
+    dur_min=2.0,
+    dur_max=10.0,
+    min_words=3,
+    num=50,
+    dedup_key=lambda clip: clip.audio_path.name,
+    balance_dims=(),  # TODO: add balance columns if wanted
+    license="TODO",
+    source="{hf_path}",
+    needs_vad_offset=False,
+)
+''',
+        encoding="utf-8",
+    )

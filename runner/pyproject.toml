@@ -49,6 +49,7 @@ hume-tts = ["hume>=0.7"]
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"
+coval-build-dataset = "coval_bench.datasets.scripts.build:build"
 
 [dependency-groups]
 dev = [
