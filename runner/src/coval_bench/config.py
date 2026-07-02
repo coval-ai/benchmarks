@@ -12,10 +12,17 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr
+from pydantic import BeforeValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _strip_whitespace(value: object) -> object:
+    return value.strip() if isinstance(value, str) else value
+
+
+StrippedSecretStr = Annotated[SecretStr, BeforeValidator(_strip_whitespace)]
 
 
 class Settings(BaseSettings):
@@ -60,23 +67,23 @@ class Settings(BaseSettings):
     schedule_period_seconds: int = Field(default=1800, gt=0)
 
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
-    openai_api_key: SecretStr | None = None
-    elevenlabs_api_key: SecretStr | None = None
-    cartesia_api_key: SecretStr | None = None
-    deepgram_api_key: SecretStr | None = None
-    assemblyai_api_key: SecretStr | None = None
-    speechmatics_api_key: SecretStr | None = None
-    hume_api_key: SecretStr | None = None
-    rime_api_key: SecretStr | None = None
-    gladia_api_key: SecretStr | None = None
-    gradium_api_key: SecretStr | None = None
-    gradium_tts_api_key: SecretStr | None = None
-    xai_api_key: SecretStr | None = None
-    groq_api_key: SecretStr | None = None
-    smallest_api_key: SecretStr | None = None
-    inworld_api_key: SecretStr | None = None
-    soniox_api_key: SecretStr | None = None
-    baseten_api_key: SecretStr | None = None
+    openai_api_key: StrippedSecretStr | None = None
+    elevenlabs_api_key: StrippedSecretStr | None = None
+    cartesia_api_key: StrippedSecretStr | None = None
+    deepgram_api_key: StrippedSecretStr | None = None
+    assemblyai_api_key: StrippedSecretStr | None = None
+    speechmatics_api_key: StrippedSecretStr | None = None
+    hume_api_key: StrippedSecretStr | None = None
+    rime_api_key: StrippedSecretStr | None = None
+    gladia_api_key: StrippedSecretStr | None = None
+    gradium_api_key: StrippedSecretStr | None = None
+    gradium_tts_api_key: StrippedSecretStr | None = None
+    xai_api_key: StrippedSecretStr | None = None
+    groq_api_key: StrippedSecretStr | None = None
+    smallest_api_key: StrippedSecretStr | None = None
+    inworld_api_key: StrippedSecretStr | None = None
+    soniox_api_key: StrippedSecretStr | None = None
+    baseten_api_key: StrippedSecretStr | None = None
 
     # Baseten dedicated-endpoint WebSocket URLs. The hostnames embed private,
     # pre-launch model ids, so they live in config (``.env`` locally, Secret
@@ -113,7 +120,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
 
     # --- Arena ---
-    arena_labeler_key: SecretStr | None = None
+    arena_labeler_key: StrippedSecretStr | None = None
     arena_audio_dir: Path = Path("arena-audio")
     arena_audio_base_url: str = ""
     arena_gcs_bucket: str = ""
