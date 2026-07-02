@@ -153,6 +153,7 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretS
 
     url = mock_connect.call_args.args[0]
     assert "speech_model=universal-3-5-pro" in url
+    assert "end_of_turn_confidence_threshold=1.0" in url
 
 
 @pytest.mark.asyncio
@@ -177,6 +178,9 @@ async def test_universal_3_pro_url_uses_api_speech_model(fake_api_key: SecretStr
 
     url = mock_connect.call_args.args[0]
     assert "speech_model=u3-rt-pro" in url
+    # u3-rt-pro uses punctuation/silence turn detection; the legacy confidence
+    # param does not exist on it and must not be sent.
+    assert "end_of_turn_confidence_threshold" not in url
 
 
 @pytest.mark.asyncio

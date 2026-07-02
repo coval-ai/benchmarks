@@ -41,7 +41,11 @@ _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
 # semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
 # value could let a confident short utterance auto-finalize before our signal.
+# universal-3-pro (u3-rt-pro) has no such param — it uses punctuation/silence
+# turn detection (min_turn_silence/max_turn_silence); we keep its defaults and
+# rely on ForceEndpoint, which is supported across all models.
 _END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
+_NO_EOT_THRESHOLD_MODELS = frozenset({"universal-3-pro"})
 
 # After ForceEndpoint, wait this long for the forced final before sending Terminate,
 # so the close never races the final (the WS close-gate bug class). Falls through on
@@ -87,10 +91,9 @@ class AssemblyAIProvider(STTProvider):
 
         try:
             speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = (
-                f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
-                f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
-            )
+            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+            if self._model not in _NO_EOT_THRESHOLD_MODELS:
+                url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
             headers = {"Authorization": self._api_key.get_secret_value()}
             final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
