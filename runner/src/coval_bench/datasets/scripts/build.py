@@ -62,6 +62,54 @@ def _load_adapter_spec(name: str) -> DatasetSpec | None:
     return cast(DatasetSpec, module.SPEC)
 
 
+_HookTriple = tuple[
+    Callable[[Path], Path], Callable[[Path], list[Clip]], Callable[[list[Clip]], None] | None
+]
+
+
+def _scaffold_and_exit(hf_path: str, ds_id: str, reason: str) -> None:
+    """Write a starter adapter and abort with instructions (unresolvable dataset)."""
+    _ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _ADAPTERS_DIR / f"{ds_id}.py"
+    hf_source.scaffold_adapter(hf_path, dest, detected=reason)
+    raise click.UsageError(
+        f"{reason}\nScaffolded {dest} — complete it, then run: coval-build-dataset {ds_id}"
+    )
+
+
+def _resolve_hooks(
+    hf_path: str,
+    ds_id: str,
+    *,
+    config: str | None,
+    split: str | None,
+    audio_col: str | None,
+    text_col: str | None,
+) -> _HookTriple:
+    """(download, parse, fetch) via the REST API, falling back to repo parquet."""
+    try:
+        config, splits = hf_source.resolve_splits(hf_path, config=config, split=split)
+        acol, tcol, dcol = hf_source.detect_columns(
+            hf_path, config, splits[0], audio_col=audio_col, text_col=text_col
+        )
+        return hf_source.make_source(hf_path, config, splits, acol, tcol, dcol)
+    except hf_source.HFNeedsChoice as exc:
+        raise click.UsageError(str(exc)) from exc
+    except hf_source.HFUnsupported as rest_exc:
+        # REST can't serve it — try reading the repo's parquet directly.
+        if config is None:
+            _scaffold_and_exit(
+                hf_path, ds_id, f"{rest_exc} (pass --config to read parquet directly)"
+            )
+        try:
+            return hf_source.make_parquet_source(hf_path, config, audio_col, text_col)  # type: ignore[arg-type]
+        except (hf_source.HFUnsupported, hf_source.HFAmbiguous) as pq_exc:
+            _scaffold_and_exit(hf_path, ds_id, f"REST: {rest_exc}; parquet: {pq_exc}")
+    except hf_source.HFAmbiguous as exc:
+        _scaffold_and_exit(hf_path, ds_id, str(exc))
+    raise AssertionError("unreachable")  # _scaffold_and_exit always raises
+
+
 def _hf_spec(
     hf_path: str,
     *,
@@ -75,24 +123,15 @@ def _hf_spec(
     dur_max: float,
     dataset_id: str | None,
 ) -> DatasetSpec:
-    """Resolve *hf_path* into a DatasetSpec; scaffold an adapter if it can't be read."""
+    """Resolve *hf_path* into a DatasetSpec.
+
+    Tries the datasets-server REST API first; if it can't serve the dataset
+    (unconverted), falls back to reading the repo's parquet directly. Scaffolds a
+    handwritten adapter only when neither can resolve it.
+    """
     ds_id = dataset_id or f"{hf_path.split('/')[-1].lower()}-v1"
-    try:
-        config, splits = hf_source.resolve_splits(hf_path, config=config, split=split)
-        audio_col, text_col, duration_col = hf_source.detect_columns(
-            hf_path, config, splits[0], audio_col=audio_col, text_col=text_col
-        )
-    except hf_source.HFNeedsChoice as exc:
-        raise click.UsageError(str(exc)) from exc
-    except (hf_source.HFUnsupported, hf_source.HFAmbiguous) as exc:
-        _ADAPTERS_DIR.mkdir(parents=True, exist_ok=True)
-        dest = _ADAPTERS_DIR / f"{ds_id}.py"
-        hf_source.scaffold_adapter(hf_path, dest, detected=str(exc))
-        raise click.UsageError(
-            f"{exc}\nScaffolded {dest} — complete it, then run: coval-build-dataset {ds_id}"
-        ) from exc
-    download, parse, fetch = hf_source.make_source(
-        hf_path, config, splits, audio_col, text_col, duration_col
+    download, parse, fetch = _resolve_hooks(
+        hf_path, ds_id, config=config, split=split, audio_col=audio_col, text_col=text_col
     )
     return DatasetSpec(
         dataset_id=ds_id,

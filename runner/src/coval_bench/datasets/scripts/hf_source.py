@@ -267,6 +267,131 @@ def make_source(
     return download, parse, (None if duration_col is None else fetch)
 
 
+# --- parquet fallback: read the repo's parquet directly when the REST API can't ---
+# Used when datasets-server is unavailable (unconverted dataset). Needs pyarrow
+# (optional dep, build-time). Downloads the config's shard(s); metadata columns are
+# read cheaply and audio bytes are extracted for the selected clips only.
+
+_HF_API = "https://huggingface.co/api/datasets"
+_HF_RESOLVE = "https://huggingface.co/datasets/{repo}/resolve/main/{path}"
+
+
+def _list_parquet_files(hf_path: str, config: str) -> list[str]:
+    """Repo-relative parquet paths that belong to *config* (e.g. data/<config>/*.parquet)."""
+    req = urllib.request.Request(f"{_HF_API}/{hf_path}", headers=_UA)  # noqa: S310 (audited: HF API)
+    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+        data = json.loads(resp.read())
+    files = [str(s["rfilename"]) for s in data.get("siblings", [])]
+    return sorted(f for f in files if f.endswith(".parquet") and f"/{config}/" in f)
+
+
+def _detect_parquet_columns(
+    schema: Any,  # noqa: ANN401 (pyarrow schema)
+    audio_col: str | None,
+    text_col: str | None,
+) -> tuple[str, str, str | None]:
+    """Pick (audio, transcript, duration|None) from a parquet schema; raise HFAmbiguous."""
+    import pyarrow as pa
+
+    names = list(schema.names)
+    audios = [
+        f.name for f in schema if pa.types.is_struct(f.type) and "bytes" in [c.name for c in f.type]
+    ]
+    strings = [f.name for f in schema if pa.types.is_string(f.type)]
+    audio = audio_col or (audios[0] if len(audios) == 1 else None)
+    text = text_col or next((n for n in _TEXT_PRIORITY if n in strings), None)
+    if text is None and text_col is None and len(strings) == 1:
+        text = strings[0]
+    if audio is None or text is None:
+        raise HFAmbiguous(f"parquet audio={audios} strings={strings} — use --audio-col/--text-col")
+    duration = next((c for c in _DURATION_COLS if c in names), None)
+    return audio, text, duration
+
+
+def make_parquet_source(
+    hf_path: str,
+    config: str,
+    audio_col: str | None,
+    text_col: str | None,
+) -> tuple[Callable[[Path], Path], Callable[[Path], list[Clip]], Callable[[list[Clip]], None]]:
+    """Build (download, parse, fetch) hooks that read the repo's parquet directly.
+
+    ``download`` pulls the config's shard(s); ``parse`` reads only metadata columns
+    (transcript, duration, meta) — cheap — and requires a duration column so clean
+    can run without decoding audio; ``fetch`` extracts audio bytes for the selected
+    clips. Raises :class:`HFUnsupported` if pyarrow is missing or no shard exists.
+    """
+    try:
+        import pyarrow  # noqa: F401
+    except ImportError as exc:
+        raise HFUnsupported("parquet fallback needs pyarrow (pip install pyarrow)") from exc
+    files = _list_parquet_files(hf_path, config)
+    if not files:
+        raise HFUnsupported(f"{hf_path}: no parquet files for config '{config}'")
+    detected: dict[str, str | None] = {}
+
+    def _local(cache_root: Path, rel: str) -> Path:
+        return cache_root / "parquet" / rel.replace("/", "__")
+
+    def download(cache_root: Path) -> Path:
+        (cache_root / "parquet").mkdir(parents=True, exist_ok=True)
+        for rel in files:
+            dest = _local(cache_root, rel)
+            if not dest.exists():
+                logger.info("hf_parquet_download", file=rel)
+                _fetch_file(_HF_RESOLVE.format(repo=hf_path, path=rel), dest)
+        return cache_root
+
+    def parse(source: Path) -> list[Clip]:
+        import pyarrow.parquet as pq
+
+        audio_dir = source / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        clips: list[Clip] = []
+        for rel in files:
+            local = _local(source, rel)
+            a, t, d = _detect_parquet_columns(pq.read_schema(local), audio_col, text_col)
+            if d is None:
+                raise HFUnsupported(
+                    f"{hf_path}: parquet has no duration column — can't clean without audio"
+                )
+            detected.update(audio=a, text=t, duration=d)
+            keep = [t, d, *(c for c in pq.read_schema(local).names if c not in (a, t, d))]
+            for i, row in enumerate(pq.read_table(local, columns=keep).to_pylist()):
+                meta: dict[str, object] = {
+                    str(k): v
+                    for k, v in row.items()
+                    if k not in (t, d) and isinstance(v, (str, int, float, bool))
+                }
+                meta["_pq"] = str(local)
+                meta["_row"] = i
+                clips.append(
+                    Clip(
+                        audio_path=audio_dir / f"{local.stem}-{i}.wav",
+                        transcript=str(row[t] or ""),
+                        duration_sec=float(row[d]),
+                        meta=meta,
+                    )
+                )
+        return clips
+
+    def fetch(selected: list[Clip]) -> None:
+        import pyarrow.parquet as pq
+
+        by_file: dict[str, list[Clip]] = {}
+        for clip in selected:
+            by_file.setdefault(str(clip.meta["_pq"]), []).append(clip)
+        audio = detected["audio"]
+        for pq_file, clips in by_file.items():
+            column = pq.read_table(pq_file, columns=[audio])[audio].to_pylist()
+            for clip in clips:
+                cell = column[int(clip.meta["_row"])]  # type: ignore[call-overload]
+                data = cell["bytes"] if isinstance(cell, dict) else cell
+                clip.audio_path.write_bytes(data)
+
+    return download, parse, fetch
+
+
 def scaffold_adapter(hf_path: str, dest: Path, *, detected: str) -> None:
     """Write a starter handwritten adapter (like SLURP) to complete by hand."""
     slug = hf_path.split("/")[-1].lower()
