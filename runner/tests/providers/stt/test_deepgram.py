@@ -8,6 +8,8 @@ All tests use FakeWebSocket — no live network calls are made.
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -158,17 +160,19 @@ async def test_nova_sends_finalize_before_close(fake_api_key: SecretStr) -> None
 
 
 @pytest.mark.asyncio
-async def test_flux_does_not_send_finalize(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_flux_does_not_send_finalize(fake_api_key: SecretStr) -> None:
+    """flux: no Finalize; with no EndOfTurn, silence streams to the cap, then close."""
     sent: list[Any] = []
     ws = FakeWebSocket([], on_send=sent.append)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
     provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+    audio = b"\x01" * 640
 
     with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
         await provider.measure_ttft(
-            audio_data=audio_pcm_bytes,
+            audio_data=audio,
             channels=1,
             sample_width=2,
             sample_rate=16000,
@@ -178,6 +182,70 @@ async def test_flux_does_not_send_finalize(fake_api_key: SecretStr, audio_pcm_by
     text = [m for m in sent if isinstance(m, str)]
     assert not any("Finalize" in m for m in text)
     assert '"CloseStream"' in text[-1]
+    assert any(isinstance(m, bytes) and set(m) == {0} for m in sent)
+
+
+class _EndOfTurnOnSilenceWS:
+    """Fake WS that emits EndOfTurn only once trailing silence starts arriving."""
+
+    def __init__(self, audio_len: int) -> None:
+        self.sent: list[Any] = []
+        self._audio_len = audio_len
+        self._bytes_seen = 0
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def send(self, msg: Any) -> None:
+        self.sent.append(msg)
+        if isinstance(msg, bytes):
+            before = self._bytes_seen
+            self._bytes_seen += len(msg)
+            if before < self._audio_len <= self._bytes_seen:
+                turn = {"type": "TurnInfo", "event": "Update", "turn_index": 0}
+                self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
+            elif before >= self._audio_len:
+                turn = {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 0}
+                self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
+        elif isinstance(msg, str) and "CloseStream" in msg:
+            self._queue.put_nowait(None)
+
+    def __aiter__(self) -> _EndOfTurnOnSilenceWS:
+        return self
+
+    async def __anext__(self) -> str:
+        item = await self._queue.get()
+        if item is None:
+            raise StopAsyncIteration
+        return item
+
+
+@pytest.mark.asyncio
+async def test_flux_stops_silence_on_end_of_turn(
+    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """flux: trailing silence stops at EndOfTurn instead of running out the cap."""
+    monkeypatch.setattr("coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S", 5.0)
+    audio = b"\x01" * 640
+    ws = _EndOfTurnOnSilenceWS(audio_len=len(audio))
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    assert result.error is None
+    assert result.audio_to_final_seconds is not None
+    assert result.complete_transcript == "hello world"
+    silence_bytes = sum(len(m) for m in ws.sent if isinstance(m, bytes)) - len(audio)
+    assert 0 < silence_bytes < 16000
+    assert isinstance(ws.sent[-1], str) and "CloseStream" in ws.sent[-1]
 
 
 def test_build_websocket_url_flux_rejects_non_mono() -> None:

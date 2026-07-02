@@ -33,6 +33,9 @@ logger = structlog.get_logger(__name__)
 # timeout — the outer per-item timeout still bounds the run.
 _FINAL_WAIT_S = 5.0
 
+# Cap on trailing silence fed to Flux while waiting for EndOfTurn.
+_FLUX_EOT_SILENCE_S = 5.0
+
 
 class DeepgramProvider(STTProvider):
     """Deepgram streaming STT provider."""
@@ -170,10 +173,17 @@ class DeepgramProvider(STTProvider):
             async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
                 result.audio_start_time = start
                 await ws.send(chunk)
-            # nova finalizes on our signal (endpointing disabled): send Finalize, then
-            # wait for the forced final before closing so the close can't race it. Flux
-            # has no Finalize and can't be forced, so it's left on its native EOT.
-            if not self._model.startswith("flux-"):
+            if self._model.startswith("flux-"):
+                # Clear so a mid-clip EndOfTurn can't cut the silence short.
+                final_event.clear()
+                silence = bytes(int(byte_rate * _FLUX_EOT_SILENCE_S))
+                async for chunk, _ in paced_chunks(silence, chunk_size, byte_rate):
+                    if final_event.is_set():
+                        break
+                    await ws.send(chunk)
+            else:
+                # nova finalizes on our signal (endpointing disabled): send Finalize, then
+                # wait for the forced final before closing so the close can't race it.
                 # Clear first: nova can emit an is_final segment mid-stream, which would
                 # leave the latch set and make the wait a no-op.
                 final_event.clear()
@@ -248,6 +258,7 @@ class DeepgramProvider(STTProvider):
                     # EndOfTurn is the confirmed turn-final; Start/Update are partials.
                     if msg.get("event") == "EndOfTurn":
                         last_final_time = now
+                        final_event.set()
                     continue
 
                 transcript = self._extract_transcript(msg)
