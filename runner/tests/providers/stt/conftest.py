@@ -125,6 +125,7 @@ _REAL_SLEEP = asyncio.sleep
 _WAIT_PATCHES = (
     "coval_bench.providers.stt.assemblyai._FINAL_WAIT_S",
     "coval_bench.providers.stt.deepgram._FINAL_WAIT_S",
+    "coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S",
     "coval_bench.providers.stt.xai._FINAL_WAIT_S",
     "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
 )
