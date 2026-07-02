@@ -160,6 +160,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_STT,
         provider="assemblyai",
+        model="universal-3-pro",
+        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="assemblyai",
         model="universal-3.5-pro",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         self_hostable=True,
