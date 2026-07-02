@@ -121,6 +121,11 @@ def test_provider_name_universal_3_5_pro() -> None:
     assert p.name == "assemblyai-universal-3.5-pro"
 
 
+def test_provider_name_universal_3_pro() -> None:
+    p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-3-pro")
+    assert p.name == "assemblyai-universal-3-pro"
+
+
 def test_provider_name_universal_streaming_multilingual() -> None:
     p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-streaming-multilingual")
     assert p.name == "assemblyai-universal-streaming-multilingual"
@@ -148,6 +153,30 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretS
 
     url = mock_connect.call_args.args[0]
     assert "speech_model=universal-3-5-pro" in url
+
+
+@pytest.mark.asyncio
+async def test_universal_3_pro_url_uses_api_speech_model(fake_api_key: SecretStr) -> None:
+    """universal-3-pro maps to the API's u3-rt-pro speech_model value."""
+    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3-pro")
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "speech_model=u3-rt-pro" in url
 
 
 @pytest.mark.asyncio
