@@ -55,7 +55,11 @@ _SCAN_CAP_PER_SPLIT = 100  # cap rows scanned per split — full-split paging tr
 
 
 class HFUnsupported(Exception):
-    """datasets-server can't serve rows (gated / not converted / no splits / API error)."""
+    """datasets-server can't serve this dataset (gated / not converted / no rows)."""
+
+
+class HFNetworkError(Exception):
+    """A transient connection failure (timeout / reset / DNS) — safe to just retry."""
 
 
 class HFNeedsChoice(Exception):
@@ -86,13 +90,33 @@ def _api_get(endpoint: str, **params: object) -> Any:  # noqa: ANN401 (JSON payl
             last = exc
         if attempt < _RETRIES - 1:
             time.sleep(wait)
-    raise HFUnsupported(f"datasets-server unavailable for {endpoint}: {last}")
+    # HTTP status exhausted → dataset-level (may be unconverted → parquet fallback);
+    # a bare connection error → network problem the caller should just retry.
+    if isinstance(last, urllib.error.HTTPError):
+        raise HFUnsupported(f"datasets-server error for {endpoint}: HTTP {last.code}")
+    raise HFNetworkError(f"datasets-server unreachable for {endpoint}: {last}")
 
 
 def _fetch_file(src: str, dest: Path) -> None:
+    """Stream *src* to *dest* atomically (chunked, so a huge file isn't held in RAM)."""
+    tmp = dest.with_suffix(dest.suffix + ".part")
     req = urllib.request.Request(src, headers=_UA)  # noqa: S310 (audited: HF cached-assets URL)
-    with urllib.request.urlopen(req, timeout=120) as resp, dest.open("wb") as out:  # noqa: S310
-        out.write(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp, tmp.open("wb") as out:  # noqa: S310
+            while chunk := resp.read(1 << 20):  # 1 MiB
+                out.write(chunk)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)  # never leave a partial file behind
+        raise HFNetworkError(f"download failed for {src}: {exc}") from exc
+    tmp.replace(dest)
+
+
+def _as_duration(value: object) -> float:
+    """Coerce a duration cell to float; null/blank/non-numeric → 0.0 (then _clean drops it)."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def resolve_splits(hf_path: str, *, config: str | None, split: str | None) -> tuple[str, list[str]]:
@@ -203,7 +227,7 @@ def make_source(
                     {
                         "audio": name,
                         "transcript": str(row[text_col] or ""),
-                        "duration": float(row[duration_col]) if duration_col else 0.0,
+                        "duration": _as_duration(row.get(duration_col)) if duration_col else 0.0,
                         "meta": meta,
                     }
                 )
@@ -279,8 +303,13 @@ _HF_RESOLVE = "https://huggingface.co/datasets/{repo}/resolve/main/{path}"
 def _list_parquet_files(hf_path: str, config: str) -> list[str]:
     """Repo-relative parquet paths that belong to *config* (e.g. data/<config>/*.parquet)."""
     req = urllib.request.Request(f"{_HF_API}/{hf_path}", headers=_UA)  # noqa: S310 (audited: HF API)
-    with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
-        data = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as exc:
+        raise HFUnsupported(f"{hf_path}: repo listing HTTP {exc.code}") from exc
+    except OSError as exc:
+        raise HFNetworkError(f"{hf_path}: repo listing unreachable: {exc}") from exc
     files = [str(s["rfilename"]) for s in data.get("siblings", [])]
     return sorted(f for f in files if f.endswith(".parquet") and f"/{config}/" in f)
 
@@ -369,7 +398,7 @@ def make_parquet_source(
                     Clip(
                         audio_path=audio_dir / f"{local.stem}-{i}.wav",
                         transcript=str(row[t] or ""),
-                        duration_sec=float(row[d]),
+                        duration_sec=_as_duration(row[d]),
                         meta=meta,
                     )
                 )
@@ -393,8 +422,12 @@ def make_parquet_source(
 
 
 def scaffold_adapter(hf_path: str, dest: Path, *, detected: str) -> None:
-    """Write a starter handwritten adapter (like SLURP) to complete by hand."""
-    slug = hf_path.split("/")[-1].lower()
+    """Write a starter handwritten adapter (like SLURP) to complete by hand.
+
+    The dataset id/slug is taken from *dest* (the file the CLI created) so the run
+    instruction and ``SPEC.dataset_id`` match the file name exactly.
+    """
+    slug = dest.stem
     dest.write_text(
         f'''# Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0

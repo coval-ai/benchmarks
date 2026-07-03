@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import re
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -45,8 +47,18 @@ def _configure_logging() -> None:
 
 
 def _meta_dim(col: str) -> Callable[[Clip], object]:
-    """A balance-dimension accessor for meta column *col* (None when absent/empty)."""
-    return lambda clip: clip.meta.get(col) or None
+    """Balance-dimension accessor for meta column *col*.
+
+    Only genuinely missing/blank values count as untagged (``None``). ``False`` and
+    ``0`` are real values and are kept, so balancing on a boolean/numeric column
+    doesn't silently drop every ``False``/``0`` clip.
+    """
+
+    def dim(clip: Clip) -> object:
+        value = clip.meta.get(col)
+        return None if value is None or value == "" else value
+
+    return dim
 
 
 def _load_adapter_spec(name: str) -> DatasetSpec | None:
@@ -130,6 +142,8 @@ def _hf_spec(
     handwritten adapter only when neither can resolve it.
     """
     ds_id = dataset_id or f"{hf_path.split('/')[-1].lower()}-v1"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", ds_id):
+        raise click.UsageError(f"invalid dataset id {ds_id!r}: use letters, digits, '.', '_', '-'")
     download, parse, fetch = _resolve_hooks(
         hf_path, ds_id, config=config, split=split, audio_col=audio_col, text_col=text_col
     )
@@ -177,6 +191,12 @@ def _hf_spec(
     default=False,
     help="Overwrite existing GCS objects / manifest (off by default — v1 freeze).",
 )
+@click.option(
+    "--keep-cache/--no-keep-cache",
+    default=False,
+    show_default=True,
+    help="Keep the downloaded source after building; default deletes it to reclaim disk.",
+)
 def build(
     dataset: str | None,
     hf_path: str | None,
@@ -192,37 +212,45 @@ def build(
     dry_run: bool,
     bucket: str,
     overwrite: bool,
+    keep_cache: bool,
 ) -> None:
     """Build a dataset through the standardized framework and write its manifest."""
     _configure_logging()
-    if hf_path:
-        spec = _hf_spec(
-            hf_path,
-            config=config,
-            split=split,
-            audio_col=audio_col,
-            text_col=text_col,
-            balance_cols=balance_cols,
-            num=num,
-            dur_min=dur_min,
-            dur_max=dur_max,
-            dataset_id=dataset_id,
-        )
-    elif dataset and dataset in _SPECS:
-        spec = _SPECS[dataset]
-    elif dataset and (adapter := _load_adapter_spec(dataset)) is not None:
-        spec = adapter
-    else:
-        raise click.UsageError(
-            f"pass --hf <path>, a registered dataset {sorted(_SPECS)}, or a scaffolded adapter name"
-        )
-    run_build(
-        spec,
-        bucket=bucket,
-        dry_run=dry_run,
-        overwrite=overwrite,
-        cache_root=_CACHE_ROOT / spec.cache_name,
-    )
+    try:
+        if hf_path:
+            spec = _hf_spec(
+                hf_path,
+                config=config,
+                split=split,
+                audio_col=audio_col,
+                text_col=text_col,
+                balance_cols=balance_cols,
+                num=num,
+                dur_min=dur_min,
+                dur_max=dur_max,
+                dataset_id=dataset_id,
+            )
+        elif dataset and dataset in _SPECS:
+            spec = _SPECS[dataset]
+        elif dataset and (adapter := _load_adapter_spec(dataset)) is not None:
+            spec = adapter
+        else:
+            raise click.UsageError(
+                f"pass --hf <path>, a registered dataset {sorted(_SPECS)}, or an adapter name"
+            )
+        cache_root = _CACHE_ROOT / spec.cache_name
+        try:
+            run_build(
+                spec, bucket=bucket, dry_run=dry_run, overwrite=overwrite, cache_root=cache_root
+            )
+        finally:
+            if not keep_cache:
+                shutil.rmtree(cache_root, ignore_errors=True)  # reclaim the downloaded gigabytes
+    except hf_source.HFNetworkError as exc:
+        raise click.ClickException(
+            f"Network error: {exc}\nCheck your connection and re-run:\n"
+            f"  coval-build-dataset {' '.join(sys.argv[1:])}"
+        ) from exc
 
 
 if __name__ == "__main__":

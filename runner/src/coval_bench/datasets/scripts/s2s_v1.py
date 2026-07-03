@@ -42,7 +42,8 @@ def download_slurp(cache_root: Path) -> Path:
         req = urllib.request.Request(  # noqa: S310 (audited: hardcoded https SLURP URL)
             f"{_META_BASE}/{name}", headers={"User-Agent": "coval-bench/build-dataset"}
         )
-        with urllib.request.urlopen(req) as response:  # noqa: S310
+        # timeout = idle/stall limit (not a total deadline); a slow large transfer is fine.
+        with urllib.request.urlopen(req, timeout=120) as response:  # noqa: S310
             dest.write_bytes(response.read())
 
     audio_dir = cache_root / "slurp_real"
@@ -53,11 +54,22 @@ def download_slurp(cache_root: Path) -> Path:
         req = urllib.request.Request(  # noqa: S310 (audited: hardcoded https Zenodo URL)
             _AUDIO_URL, headers={"User-Agent": "coval-bench/build-dataset"}
         )
-        with urllib.request.urlopen(req) as response, tar_path.open("wb") as out:  # noqa: S310
-            while chunk := response.read(_CHUNK):
-                out.write(chunk)
+        # Download to a .part file and rename on success so an interrupted run never
+        # leaves a truncated archive that the tar_path.exists() check would trust.
+        part = tar_path.with_suffix(".tar.gz.part")
+        try:
+            with (
+                urllib.request.urlopen(req, timeout=120) as response,  # noqa: S310
+                part.open("wb") as out,
+            ):
+                while chunk := response.read(_CHUNK):
+                    out.write(chunk)
+        except OSError:
+            part.unlink(missing_ok=True)
+            raise
+        part.replace(tar_path)
     with tarfile.open(tar_path, "r:gz") as tf:
-        tf.extractall(cache_root)  # noqa: S202
+        tf.extractall(cache_root, filter="data")  # noqa: S202 (filter blocks path traversal)
     return cache_root
 
 

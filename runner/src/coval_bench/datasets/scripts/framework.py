@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import importlib.resources as impres
 import json
+import re
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -36,6 +37,11 @@ _TARGET_SR = 16_000
 _BUCKET_DEFAULT = "coval-benchmarks-datasets"
 _TAG_WARN = 0.95  # per-dim coverage below this → warn + flag (still builds)
 _TAG_FLOOR = 0.50  # per-dim coverage below this → abort (metadata too sparse)
+# Framework owns these manifest fields; a same-named dataset meta column must not
+# overwrite them (path/sha256 are assigned here, duration/vad-offset are computed).
+_RESERVED_ITEM_KEYS = frozenset(
+    {"path", "sha256", "transcript", "duration_sec", "speech_end_offset_ms"}
+)
 
 
 @dataclass
@@ -183,6 +189,15 @@ def _transcode_and_hash(clips: list[Clip], work_dir: Path) -> None:
         clip.sha256 = _hash_file(clip.wav_path)
 
 
+def _public_meta(meta: dict[str, object]) -> dict[str, object]:
+    """Meta emitted into a manifest item: drop build-internal (_) and reserved keys.
+
+    Reserved keys are framework-owned; keeping a dataset's same-named column out of
+    the spread stops it silently overwriting the computed path/sha256/duration/etc.
+    """
+    return {k: v for k, v in meta.items() if not k.startswith("_") and k not in _RESERVED_ITEM_KEYS}
+
+
 def _render_manifest(spec: DatasetSpec, clips: list[Clip]) -> str:
     """Render the manifest JSON (shared schema + per-dataset ``meta``)."""
     manifest = {
@@ -198,7 +213,7 @@ def _render_manifest(spec: DatasetSpec, clips: list[Clip]) -> str:
                 "transcript": c.transcript,
                 "duration_sec": round(c.duration_sec, 6),
                 "speech_end_offset_ms": None,
-                **{k: v for k, v in c.meta.items() if not k.startswith("_")},
+                **_public_meta(c.meta),
             }
             for c in clips
         ],
@@ -238,6 +253,7 @@ def _upload_clips(
         try:
             blob.download_to_filename(str(tmp_path))
             if _hash_file(tmp_path) != clip.sha256:
+                blob.delete()  # remove the corrupt object so a re-run isn't blocked
                 raise RuntimeError(f"upload integrity failure for {blob_name}")
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -245,6 +261,8 @@ def _upload_clips(
 
 def _write_manifest(json_text: str, dataset_id: str) -> Path:
     """Write the manifest to the packaged ``<dataset_id>.json``."""
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", dataset_id):
+        raise ValueError(f"invalid dataset_id {dataset_id!r}: use letters, digits, '.', '_', '-'")
     pkg = impres.files("coval_bench.datasets.manifests")
     dest = Path(str(pkg.joinpath(f"{dataset_id}.json")))
     dest.write_text(json_text, encoding="utf-8")

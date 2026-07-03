@@ -14,7 +14,13 @@ from typing import cast
 
 import pytest
 
-from coval_bench.datasets.scripts.framework import Clip, _clean, balanced_sample
+from coval_bench.datasets.scripts.framework import (
+    Clip,
+    _clean,
+    _public_meta,
+    _write_manifest,
+    balanced_sample,
+)
 
 
 def _clip(
@@ -110,3 +116,20 @@ def test_clean_filters_duration_band_and_word_floor() -> None:
     ]
     out = _clean(clips, dur_min=2.0, dur_max=10.0, min_words=3)
     assert [_sid(c) for c in out] == [2]
+
+
+def test_public_meta_drops_internal_and_reserved_keys() -> None:
+    """Reserved manifest keys and _-prefixed internals never reach a manifest item."""
+    meta = {
+        "gender": "F",
+        "sha256": "attacker",  # reserved — must be dropped
+        "duration_sec": 999,  # reserved — must be dropped
+        "_row": 3,  # build-internal — must be dropped
+    }
+    assert _public_meta(meta) == {"gender": "F"}
+
+
+def test_write_manifest_rejects_path_escape() -> None:
+    """A dataset_id with path separators can't redirect the manifest write."""
+    with pytest.raises(ValueError, match="invalid dataset_id"):
+        _write_manifest("{}", "../evil")
