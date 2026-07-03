@@ -412,6 +412,10 @@ def make_parquet_source(
             by_file.setdefault(str(clip.meta["_pq"]), []).append(clip)
         audio = detected["audio"]
         for pq_file, clips in by_file.items():
+            # NOTE (deferred): this materializes the whole audio column per shard, so a
+            # sparse fetch from a huge single-row-group file peaks at that file's size in
+            # RAM. Acceptable for now — cache is deleted after the build and most shards
+            # have many row groups. Proper fix = read only the selected rows' row groups.
             column = pq.read_table(pq_file, columns=[audio])[audio].to_pylist()
             for clip in clips:
                 cell = column[int(clip.meta["_row"])]  # type: ignore[call-overload]

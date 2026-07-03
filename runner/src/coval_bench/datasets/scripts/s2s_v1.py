@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import tarfile
 import urllib.request
 from pathlib import Path
@@ -68,8 +69,18 @@ def download_slurp(cache_root: Path) -> Path:
             part.unlink(missing_ok=True)
             raise
         part.replace(tar_path)
+    # Extract into a staging dir and rename on success, so a failed extraction never
+    # leaves a partial slurp_real/ that the audio_dir.exists() check above would trust.
+    staging = cache_root / "slurp_real.extracting"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
     with tarfile.open(tar_path, "r:gz") as tf:
-        tf.extractall(cache_root, filter="data")  # noqa: S202 (filter blocks path traversal)
+        tf.extractall(staging, filter="data")  # noqa: S202 (filter blocks path traversal)
+    extracted = staging / "slurp_real"
+    (extracted if extracted.exists() else staging).replace(audio_dir)
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
     return cache_root
 
 

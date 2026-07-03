@@ -243,6 +243,12 @@ def build(
             run_build(
                 spec, bucket=bucket, dry_run=dry_run, overwrite=overwrite, cache_root=cache_root
             )
+        except (hf_source.HFUnsupported, hf_source.HFAmbiguous) as exc:
+            # The parquet source detects columns / duration inside parse(), i.e. during
+            # run_build; scaffold a handwritten adapter just as the resolve path does.
+            if hf_path:
+                _scaffold_and_exit(hf_path, spec.dataset_id, str(exc))
+            raise
         finally:
             if not keep_cache:
                 shutil.rmtree(cache_root, ignore_errors=True)  # reclaim the downloaded gigabytes
