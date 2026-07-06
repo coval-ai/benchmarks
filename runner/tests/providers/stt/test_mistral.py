@@ -138,6 +138,84 @@ async def test_mistral_empty_deltas_ignored_for_ttft(
 
 
 @pytest.mark.asyncio
+async def test_mistral_partial_transcripts_accumulate(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """Each non-empty delta is recorded in partial_transcripts in arrival order."""
+    events = load_fixture_events("mistral", "events-success")
+    provider = MistralSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.mistral.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.partial_transcripts == ["hello", " world", " how are you"]
+
+
+@pytest.mark.asyncio
+async def test_mistral_first_done_wins(
+    fake_api_key: SecretStr,
+    audio_pcm_bytes: bytes,
+) -> None:
+    """A rogue early transcription.done ends the session; later events are ignored.
+
+    transcription.done is session-terminal in the protocol (the vendor SDK also
+    stops on the first one), so a mid-utterance done must not be double-counted
+    or merged with anything the server sends afterwards.
+    """
+    events: list[Any] = [
+        {
+            "type": "session.created",
+            "session": {"request_id": "r4", "audio_format": None},
+        },
+        {"type": "transcription.text.delta", "text": "hello world"},
+        {
+            "type": "transcription.done",
+            "model": "voxtral-mini-transcribe-realtime-2602",
+            "text": "hello world",
+            "language": "en",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2},
+        },
+        {"type": "transcription.text.delta", "text": " how are you"},
+        {
+            "type": "transcription.done",
+            "model": "voxtral-mini-transcribe-realtime-2602",
+            "text": "hello world how are you",
+            "language": "en",
+            "usage": {"prompt_tokens": 0, "completion_tokens": 5, "total_tokens": 5},
+        },
+    ]
+    provider = MistralSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.mistral.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.partial_transcripts == ["hello world"]
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
 async def test_mistral_websocket_connect_setup(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
