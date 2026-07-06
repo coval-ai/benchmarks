@@ -109,6 +109,7 @@ export function normalizeModelName(modelKey: string): string {
     "grok-tts": "Grok TTS",
     "inworld-tts-1.5-max": "TTS 1.5 Max",
     "inworld-tts-1.5-mini": "TTS 1.5 Mini",
+    "tts-rt-v1": "TTS RT v1",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -124,6 +125,8 @@ export function normalizeModelName(modelKey: string): string {
     "universal-3-pro": "Universal 3 Pro",
     "universal-3.5-pro": "Universal 3.5 Pro",
     "ink-2": "Ink 2",
+    "stt-rt-v4": "STT RT v4",
+    "stt-rt-v5": "STT RT v5",
     "inworld-stt-1": "STT 1",
     default: "Default",
     enhanced: "Enhanced"
@@ -171,6 +174,7 @@ export function normalizeSTTProviderName(providerName: string): string {
     inworld: "Inworld AI",
     openai: "OpenAI",
     rime: "Rime",
+    soniox: "Soniox",
     speechmatics: "Speechmatics",
     xai: "xAI"
   };
@@ -189,6 +193,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     inworld: "Inworld AI",
     openai: "OpenAI",
     rime: "Rime",
+    soniox: "Soniox",
     xai: "xAI",
   };
 
