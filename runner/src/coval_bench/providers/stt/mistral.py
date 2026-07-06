@@ -3,7 +3,6 @@
 
 """Mistral real-time STT provider (Voxtral realtime transcription).
 
-Models: voxtral-mini-transcribe-realtime-2602
 Wire protocol: WebSocket, wss://api.mistral.ai/v1/audio/transcriptions/realtime
 Auth: Authorization: Bearer <key>
 Close: {"type": "input_audio.flush"} + {"type": "input_audio.end"}, server
