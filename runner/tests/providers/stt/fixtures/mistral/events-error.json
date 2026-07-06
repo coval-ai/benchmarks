@@ -1,0 +1,11 @@
+[
+  {
+    "type": "session.created",
+    "session": {
+      "request_id": "mistral-session-err",
+      "model": "voxtral-mini-transcribe-realtime-2602",
+      "audio_format": {"encoding": "pcm_s16le", "sample_rate": 16000}
+    }
+  },
+  {"type": "error", "error": {"code": "invalid_request", "message": "invalid api key"}}
+]

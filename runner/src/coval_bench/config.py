@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     gladia_api_key: SecretStr | None = None
     gradium_api_key: SecretStr | None = None
     gradium_tts_api_key: SecretStr | None = None
+    mistral_api_key: SecretStr | None = None
     xai_api_key: SecretStr | None = None
     groq_api_key: SecretStr | None = None
     smallest_api_key: SecretStr | None = None

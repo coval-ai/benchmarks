@@ -1,0 +1,29 @@
+[
+  {
+    "type": "session.created",
+    "session": {
+      "request_id": "mistral-session-001",
+      "model": "voxtral-mini-transcribe-realtime-2602",
+      "audio_format": {"encoding": "pcm_s16le", "sample_rate": 16000}
+    }
+  },
+  {
+    "type": "session.updated",
+    "session": {
+      "request_id": "mistral-session-001",
+      "model": "voxtral-mini-transcribe-realtime-2602",
+      "audio_format": {"encoding": "pcm_s16le", "sample_rate": 16000}
+    }
+  },
+  {"type": "transcription.language", "language": "en"},
+  {"type": "transcription.text.delta", "text": "hello"},
+  {"type": "transcription.text.delta", "text": " world"},
+  {"type": "transcription.text.delta", "text": " how are you"},
+  {
+    "type": "transcription.done",
+    "model": "voxtral-mini-transcribe-realtime-2602",
+    "text": "hello world how are you",
+    "language": "en",
+    "usage": {"prompt_tokens": 0, "completion_tokens": 12, "total_tokens": 12}
+  }
+]
