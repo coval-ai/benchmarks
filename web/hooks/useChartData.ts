@@ -317,18 +317,28 @@ export function useChartData({
 
         if (!latencyStat || !werStat) return;
 
+        const latency = {
+          p0: toDisplayUnits(latencyStat.min_value),
+          p25: toDisplayUnits(latencyStat.p25),
+          p50: toDisplayUnits(latencyStat.p50),
+          p75: toDisplayUnits(latencyStat.p75),
+          p90: toDisplayUnits(latencyStat.p90),
+          p95: toDisplayUnits(latencyStat.p95),
+          p99: toDisplayUnits(latencyStat.p99),
+          p100: toDisplayUnits(latencyStat.max_value)
+        };
+        // The schema types every stat as a number, but guard against a
+        // response with missing/non-finite fields leaking NaN into the table.
+        if (
+          ![...Object.values(latency), werStat.avg_value, werStat.stddev_value]
+            .every(Number.isFinite)
+        ) {
+          return;
+        }
+
         heatmapData.push({
           model,
-          latency: {
-            p0: toDisplayUnits(latencyStat.min_value),
-            p25: toDisplayUnits(latencyStat.p25),
-            p50: toDisplayUnits(latencyStat.p50),
-            p75: toDisplayUnits(latencyStat.p75),
-            p90: toDisplayUnits(latencyStat.p90),
-            p95: toDisplayUnits(latencyStat.p95),
-            p99: toDisplayUnits(latencyStat.p99),
-            p100: toDisplayUnits(latencyStat.max_value)
-          },
+          latency,
           avgWER: werStat.avg_value,
           werStdDev: werStat.stddev_value,
           sampleCount: latencyStat.sample_count
