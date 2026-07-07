@@ -330,8 +330,12 @@ export function useChartData({
         // The schema types every stat as a number, but guard against a
         // response with missing/non-finite fields leaking NaN into the table.
         if (
-          ![...Object.values(latency), werStat.avg_value, werStat.stddev_value]
-            .every(Number.isFinite)
+          ![
+            ...Object.values(latency),
+            werStat.avg_value,
+            werStat.stddev_value,
+            latencyStat.sample_count
+          ].every(Number.isFinite)
         ) {
           return;
         }
