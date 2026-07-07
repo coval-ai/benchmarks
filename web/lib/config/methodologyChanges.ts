@@ -39,4 +39,11 @@ export const methodologyChanges: MethodologyChange[] = [
     detail:
       "Gradium STT now waits for an explicit finalization event instead of a fixed timeout, so its time-to-final-segment reflects true engine speed. Gradium TTFS values shift at this point.",
   },
+  {
+    date: "2026-07-07",
+    metrics: ["ttfs"],
+    title: "AssemblyAI universal-streaming models no longer report TTFS",
+    detail:
+      "universal-streaming and universal-streaming-multilingual acknowledge the end-of-speech signal without finalizing: the reply arrives in one network round-trip and can omit the last words of the clip. Their TTFS measured connectivity rather than finalization speed, so it is no longer reported, matching how Deepgram Flux is handled. The pro models and all other metrics are unaffected.",
+  },
 ];

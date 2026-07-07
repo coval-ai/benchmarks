@@ -80,6 +80,18 @@ _TTFT_NOT_COMPARABLE: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+# STT models that don't finalize on our end-of-speech signal, so TTFS reflects a network
+# round-trip, not finalization — omit it. Flux has no client finalize; AssemblyAI
+# universal-streaming acks ForceEndpoint without flushing the tail.
+_TTFS_NOT_COMPARABLE: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("deepgram", "flux-general-en"),
+        ("deepgram", "flux-general-multi"),
+        ("assemblyai", "universal-streaming"),
+        ("assemblyai", "universal-streaming-multilingual"),
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Public result type
@@ -394,9 +406,7 @@ async def _run_stt_item(
         ttfs_status, ttfs_error = _metric_outcome(
             ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
-        # Flux can't finalize on our signal (no Finalize, EOT can't be disabled), so it's
-        # outside the TTFS parity cohort. Other metrics still run; only the TTFS row is omitted.
-        ttfs_excluded = entry.provider == "deepgram" and entry.model.startswith("flux-")
+        ttfs_excluded = (entry.provider, entry.model) in _TTFS_NOT_COMPARABLE
         if not ttfs_excluded:
             results.append(
                 Result(
