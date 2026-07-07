@@ -139,11 +139,12 @@ class InworldSTTProvider(STTProvider):
         done_event: asyncio.Event,
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
+        min_chunk_bytes = bytes_per_second * _MIN_CHUNK_MS // 1000
         chunk_size = int(bytes_per_second * realtime_resolution)
-        min_tail_bytes = bytes_per_second * _MIN_CHUNK_MS // 1000
+        chunk_size = min(max(chunk_size, min_chunk_bytes), bytes_per_second)
         try:
             async for chunk, start in paced_chunks(
-                audio_data, chunk_size, bytes_per_second, min_tail_bytes=min_tail_bytes
+                audio_data, chunk_size, bytes_per_second, min_tail_bytes=min_chunk_bytes
             ):
                 # Stop early if _receive already recorded a protocol/auth error;
                 # the server closes the socket on its error path.

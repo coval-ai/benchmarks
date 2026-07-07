@@ -2,5 +2,6 @@
   {"result": {"transcription": {"transcript": "hello", "isFinal": false}}},
   {"result": {"transcription": {"transcript": "hello world", "isFinal": true}}},
   {"result": {"transcription": {"transcript": "how", "isFinal": false}}},
-  {"result": {"transcription": {"transcript": "how are you", "isFinal": true}}}
+  {"result": {"transcription": {"transcript": "how are you", "isFinal": true}}},
+  {"usage": {"durationSeconds": 3}}
 ]
