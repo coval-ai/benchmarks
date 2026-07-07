@@ -317,21 +317,19 @@ export function useChartData({
 
         if (!latencyStat || !werStat) return;
 
-        const latency = {
-          p0: toDisplayUnits(latencyStat.min_value),
-          p25: toDisplayUnits(latencyStat.p25),
-          p50: toDisplayUnits(latencyStat.p50),
-          p75: toDisplayUnits(latencyStat.p75),
-          p90: toDisplayUnits(latencyStat.p90),
-          p95: toDisplayUnits(latencyStat.p95),
-          p99: toDisplayUnits(latencyStat.p99),
-          p100: toDisplayUnits(latencyStat.max_value)
-        };
-        // The schema types every stat as a number, but guard against a
-        // response with missing/non-finite fields leaking NaN into the table.
+        // The schema types every stat as a number, but guard the raw fields
+        // (before unit conversion, which would coerce null to 0) against a
+        // response with missing/non-finite values leaking into the table.
         if (
           ![
-            ...Object.values(latency),
+            latencyStat.min_value,
+            latencyStat.p25,
+            latencyStat.p50,
+            latencyStat.p75,
+            latencyStat.p90,
+            latencyStat.p95,
+            latencyStat.p99,
+            latencyStat.max_value,
             werStat.avg_value,
             werStat.stddev_value,
             latencyStat.sample_count
@@ -342,7 +340,16 @@ export function useChartData({
 
         heatmapData.push({
           model,
-          latency,
+          latency: {
+            p0: toDisplayUnits(latencyStat.min_value),
+            p25: toDisplayUnits(latencyStat.p25),
+            p50: toDisplayUnits(latencyStat.p50),
+            p75: toDisplayUnits(latencyStat.p75),
+            p90: toDisplayUnits(latencyStat.p90),
+            p95: toDisplayUnits(latencyStat.p95),
+            p99: toDisplayUnits(latencyStat.p99),
+            p100: toDisplayUnits(latencyStat.max_value)
+          },
           avgWER: werStat.avg_value,
           werStdDev: werStat.stddev_value,
           sampleCount: latencyStat.sample_count
