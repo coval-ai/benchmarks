@@ -84,7 +84,7 @@ async def get_leaderboard(
         raise HTTPException(
             400,
             f"metric={metric!r} is not compatible with benchmark={benchmark!r}. "
-            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS.",
+            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S.",
         )
 
     params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}
