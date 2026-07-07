@@ -53,20 +53,6 @@ _NO_EOT_THRESHOLD_MODELS = frozenset({"universal-3-pro"})
 # timeout — the outer per-item timeout still bounds the run.
 _FINAL_WAIT_S = 5.0
 
-# Proper nouns (plus one rare word) from the pinned stt-v1 LibriSpeech sample that
-# universal-3.5-pro spells phonetically without vocabulary hints. NOTE: these are
-# derived from the benchmark dataset itself — see the PR discussion on whether
-# keyterm biasing belongs in a cross-provider benchmark config at all.
-_U35_KEYTERMS: tuple[str, ...] = (
-    "Mainhall",
-    "Harald",
-    "Astor",
-    "Silvia",
-    "Adona",
-    "Tintoret",
-    "harangue",
-)
-
 # Vendor-recommended voice-agent configuration, applied per model on top of the
 # base connection params. mode=min_latency is the documented accuracy/latency
 # preset for voice agents (sets interruption_delay, turn-silence windows,
