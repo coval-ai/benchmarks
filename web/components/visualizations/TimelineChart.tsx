@@ -430,14 +430,19 @@ const TimelineChart: React.FC = () => {
             );
             const applyX = start.armX && Math.abs(x - start.x) > 8;
             const applyY = start.armY && Math.abs(y - start.y) > 8;
-            const hi = yDomain[1];
+            // Invert pixels through recharts' own y-scale so this works even
+            // on the automatic domain, where yDomain[1] is still "dataMax".
+            const yScale = (
+              chartInstRef.current?.state.yAxisMap &&
+              (Object.values(chartInstRef.current.state.yAxisMap)[0] as {
+                scale?: { invert?: (n: number) => number };
+              })
+            )?.scale;
             let yRange = zoom?.y;
-            if (applyY && typeof hi === "number") {
-              const toY = (py: number) =>
-                hi - ((py - box.top) / box.height) * (hi - yDomain[0]);
+            if (applyY && yScale?.invert) {
               yRange = [
-                Math.max(0, toY(Math.max(start.y, y))),
-                toY(Math.min(start.y, y)),
+                Math.max(0, yScale.invert(Math.max(start.y, y))),
+                yScale.invert(Math.min(start.y, y)),
               ];
             }
             if (!applyX && yRange === zoom?.y) return;
