@@ -21,6 +21,7 @@ def test_metric_values_match_stored_strings() -> None:
         "TTFA",
         "RTF",
         "AudioToFinal",
+        "V2V",
     }
 
 
@@ -33,6 +34,7 @@ def test_units_match_stored_strings() -> None:
         Metric.TTFA: "milliseconds",
         Metric.RTF: "ratio",
         Metric.AUDIO_TO_FINAL: "seconds",
+        Metric.V2V: "milliseconds",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
