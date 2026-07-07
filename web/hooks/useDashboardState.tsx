@@ -5,7 +5,6 @@
 
 import {
   useState,
-  useEffect,
   useMemo,
   useCallback,
   useDeferredValue,
@@ -150,64 +149,6 @@ export function useDashboardState(page: "tts" | "stt") {
     modelsByProvider,
     timeWindow: dataTimeWindow,
   });
-
-  // Heatmap scaling for mobile. Skipped while loading (only the skeleton is
-  // in the DOM); re-runs when loading completes so the first paint of the
-  // heatmap gets scaled without waiting for a resize event.
-  useEffect(() => {
-    if (loading) return;
-
-    const scaleHeatmapForMobile = () => {
-      const mobile = window.innerWidth < 768;
-
-      if (mobile) {
-        setTimeout(() => {
-          const heatmapContainer = document.querySelector(
-            ".heatmap-container"
-          ) as HTMLElement;
-          const heatmapSvg = document.querySelector(
-            ".heatmap-container svg"
-          ) as SVGElement;
-
-          if (heatmapContainer && heatmapSvg) {
-            // Reset any prior scaling so measurements reflect natural layout
-            heatmapContainer.style.transform = "";
-            heatmapContainer.style.width = "";
-            heatmapContainer.style.height = "";
-            const availableWidth =
-              heatmapContainer.getBoundingClientRect().width;
-            const heatmapWidth = heatmapSvg.getBoundingClientRect().width;
-            const heatmapHeight = heatmapSvg.getBoundingClientRect().height;
-            const scaleFactor = availableWidth / heatmapWidth;
-
-            if (scaleFactor < 1) {
-              heatmapContainer.style.transform = `scale(${scaleFactor})`;
-              heatmapContainer.style.transformOrigin = "top left";
-              heatmapContainer.style.width = `${100 / scaleFactor}%`;
-              // A scaled element keeps its natural layout height, leaving
-              // white space below. Collapse the layout box to the scaled
-              // height so standard card padding applies beneath the map.
-              heatmapContainer.style.height = `${heatmapHeight * scaleFactor}px`;
-            }
-          }
-        }, 100);
-      } else {
-        const heatmapContainer = document.querySelector(
-          ".heatmap-container"
-        ) as HTMLElement;
-        if (heatmapContainer) {
-          heatmapContainer.style.transform = "";
-          heatmapContainer.style.transformOrigin = "";
-          heatmapContainer.style.width = "";
-          heatmapContainer.style.height = "";
-        }
-      }
-    };
-
-    scaleHeatmapForMobile();
-    window.addEventListener("resize", scaleHeatmapForMobile);
-    return () => window.removeEventListener("resize", scaleHeatmapForMobile);
-  }, [page, loading]);
 
   // Calculate metrics
   const { getStat, getHeatmapData } = chartData;

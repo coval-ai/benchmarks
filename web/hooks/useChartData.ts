@@ -302,8 +302,8 @@ export function useChartData({
     [scatterByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
   );
 
-  // Heatmap rows for a given latency metric: absolute latency percentiles
-  // straight from the SQL stats (like the box plot), plus avg WER.
+  // Comparison rows for a given latency metric: the full latency percentile
+  // ladder straight from the SQL stats, plus avg WER and sample counts.
   const getHeatmapData = useCallback(
     (metric: string): ModelHeatmapData[] => {
       const selectedModels =
@@ -317,16 +317,42 @@ export function useChartData({
 
         if (!latencyStat || !werStat) return;
 
-        const p25 = toDisplayUnits(latencyStat.p25);
-        const p75 = toDisplayUnits(latencyStat.p75);
+        // The schema types every stat as a number, but guard the raw fields
+        // (before unit conversion, which would coerce null to 0) against a
+        // response with missing/non-finite values leaking into the table.
+        if (
+          ![
+            latencyStat.min_value,
+            latencyStat.p25,
+            latencyStat.p50,
+            latencyStat.p75,
+            latencyStat.p90,
+            latencyStat.p95,
+            latencyStat.p99,
+            latencyStat.max_value,
+            werStat.avg_value,
+            werStat.stddev_value,
+            latencyStat.sample_count
+          ].every(Number.isFinite)
+        ) {
+          return;
+        }
+
         heatmapData.push({
           model,
-          latencyP25: p25,
-          latencyP50: toDisplayUnits(latencyStat.p50),
-          latencyP75: p75,
-          latencyIQR: p75 - p25,
+          latency: {
+            p0: toDisplayUnits(latencyStat.min_value),
+            p25: toDisplayUnits(latencyStat.p25),
+            p50: toDisplayUnits(latencyStat.p50),
+            p75: toDisplayUnits(latencyStat.p75),
+            p90: toDisplayUnits(latencyStat.p90),
+            p95: toDisplayUnits(latencyStat.p95),
+            p99: toDisplayUnits(latencyStat.p99),
+            p100: toDisplayUnits(latencyStat.max_value)
+          },
           avgWER: werStat.avg_value,
-          werStdDev: werStat.stddev_value
+          werStdDev: werStat.stddev_value,
+          sampleCount: latencyStat.sample_count
         });
       });
 

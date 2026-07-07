@@ -1,21 +1,7 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import { ModelHeatmapData, ScatterDataPoint, BoxPlotData } from './benchmark.types';
-
-export interface HeatmapProps {
-  data: ModelHeatmapData[];
-  width?: number;
-  height?: number;
-  formatChartLabel: (model: string, provider: string) => string;
-  getProviderForModel: (model: string) => string;
-  isMobile?: boolean;
-}
-
-export interface SortConfig {
-  key: keyof ModelHeatmapData | null;
-  direction: "asc" | "desc";
-}
+import { ScatterDataPoint, BoxPlotData } from './benchmark.types';
 
 export interface BoxPlotProps {
   data: BoxPlotData;

@@ -22,14 +22,22 @@ export interface ScatterDataPoint {
   count: number;
 }
 
+export type LatencyPercentile =
+  | "p0"
+  | "p25"
+  | "p50"
+  | "p75"
+  | "p90"
+  | "p95"
+  | "p99"
+  | "p100";
+
 export interface ModelHeatmapData {
   model: string;
-  latencyP25: number;
-  latencyP50: number;
-  latencyP75: number;
-  latencyIQR: number;
+  latency: Record<LatencyPercentile, number>;
   avgWER: number;
   werStdDev: number;
+  sampleCount: number;
 }
 
 export interface BarDataPoint {
