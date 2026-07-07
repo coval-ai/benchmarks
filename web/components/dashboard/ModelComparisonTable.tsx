@@ -38,14 +38,6 @@ const COLUMNS: {
   { key: "sampleCount", label: "Samples", bestDirection: "desc" }
 ];
 
-// Relative position of a value across the models shown, 1 = best, 0 = worst.
-const relativize = (v: number, values: number[], lowerIsBetter: boolean) => {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  if (min === max) return 1;
-  return lowerIsBetter ? (max - v) / (max - min) : (v - min) / (max - min);
-};
-
 const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel
@@ -58,20 +50,44 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
 
   const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[2])!;
 
-  const value = useCallback(
-    (row: ModelHeatmapData, key: ColumnKey): number =>
-      key === "latency" ? row.latency[percentile.key] : row[key],
-    [percentile.key]
-  );
+  // One pass per (data, percentile, sort) change: pull the selected latency
+  // percentile, precompute the relative bar fractions, sort, and note the best
+  // value per column.
+  const { rows, best } = useMemo(() => {
+    const span = (values: number[]): [number, number] => {
+      const min = Math.min(...values);
+      return [min, Math.max(...values) - min];
+    };
+    const [latencyMin, latencySpan] = span(
+      data.map((d) => d.latency[percentile.key])
+    );
+    const [werMin, werSpan] = span(data.map((d) => d.avgWER));
+    const rel = (v: number, min: number, s: number) =>
+      s === 0 ? 1 : (min + s - v) / s;
 
-  const rows = useMemo(
-    () =>
-      [...data].sort((a, b) => {
-        const delta = value(a, sort.key) - value(b, sort.key);
+    const rows = data
+      .map((d) => ({
+        ...d,
+        latency: d.latency[percentile.key],
+        latencyRel: rel(d.latency[percentile.key], latencyMin, latencySpan),
+        werRel: rel(d.avgWER, werMin, werSpan)
+      }))
+      .sort((a, b) => {
+        const delta = a[sort.key] - b[sort.key];
         return sort.direction === "asc" ? delta : -delta;
-      }),
-    [data, sort, value]
-  );
+      });
+
+    return {
+      rows,
+      best: {
+        latency: latencyMin,
+        avgWER: werMin,
+        sampleCount: Math.max(...data.map((d) => d.sampleCount))
+      }
+    };
+  }, [data, percentile.key, sort]);
+
+  type Row = (typeof rows)[number];
 
   const handleSort = useCallback(
     (column: (typeof COLUMNS)[number]) => {
@@ -100,14 +116,6 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     );
   }
 
-  const columnValues = (key: ColumnKey) => rows.map((r) => value(r, key));
-  const best = Object.fromEntries(
-    COLUMNS.map((c) => [
-      c.key,
-      (c.bestDirection === "asc" ? Math.min : Math.max)(...columnValues(c.key))
-    ])
-  );
-
   const bar = (fraction: number) => (
     <div className="mt-1.5 h-1 w-full min-w-16 rounded-full bg-surface-secondary">
       <div
@@ -117,10 +125,10 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     </div>
   );
 
-  const cell = (row: ModelHeatmapData, key: ColumnKey, content: React.ReactNode) => (
+  const cell = (row: Row, key: ColumnKey, content: React.ReactNode) => (
     <td
       className={`py-3 pl-6 text-right align-top tabular-nums ${
-        value(row, key) === best[key]
+        row[key] === best[key]
           ? "font-semibold text-text-primary"
           : "text-text-secondary"
       }`}
@@ -213,15 +221,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                   row,
                   "latency",
                   <>
-                    {Math.round(row.latency[percentile.key])}
+                    {Math.round(row.latency)}
                     <span className="text-xs text-text-tertiary"> ms</span>
-                    {bar(
-                      relativize(
-                        row.latency[percentile.key],
-                        columnValues("latency"),
-                        true
-                      )
-                    )}
+                    {bar(row.latencyRel)}
                   </>
                 )}
                 {cell(
@@ -232,7 +234,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     <span className="text-xs text-text-tertiary">
                       % ± {row.werStdDev.toFixed(1)}
                     </span>
-                    {bar(relativize(row.avgWER, columnValues("avgWER"), true))}
+                    {bar(row.werRel)}
                   </>
                 )}
                 {cell(
@@ -249,4 +251,4 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   );
 };
 
-export default ModelComparisonTable;
+export default React.memo(ModelComparisonTable);
