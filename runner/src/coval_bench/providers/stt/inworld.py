@@ -145,9 +145,10 @@ class InworldSTTProvider(STTProvider):
             async for chunk, start in paced_chunks(
                 audio_data, chunk_size, bytes_per_second, min_tail_bytes=min_tail_bytes
             ):
-                # Stop early if _receive already recorded a protocol/auth error.
+                # Stop early if _receive already recorded a protocol/auth error;
+                # the server closes the socket on its error path.
                 if result.error is not None:
-                    break
+                    return
                 result.audio_start_time = start
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
