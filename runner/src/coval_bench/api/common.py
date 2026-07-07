@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-BenchmarkLiteral = Literal["STT", "TTS"]
+BenchmarkLiteral = Literal["STT", "TTS", "S2S"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 
 # Fixed interval strings — looked up by Python, never user-interpolated into

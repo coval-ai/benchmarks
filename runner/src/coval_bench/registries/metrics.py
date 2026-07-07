@@ -26,6 +26,7 @@ class Metric(StrEnum):
     TTFA = "TTFA"
     RTF = "RTF"
     AUDIO_TO_FINAL = "AudioToFinal"
+    V2V = "V2V"
 
 
 class MetricDirection(StrEnum):
@@ -89,6 +90,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=2,
         benchmarks=frozenset({Benchmark.STT}),
+    ),
+    Metric.V2V: MetricSpec(
+        display_name="Voice-to-Voice Latency",
+        units="milliseconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.S2S}),
     ),
 }
 

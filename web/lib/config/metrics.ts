@@ -21,5 +21,10 @@ export const metricDescriptions = {
     short: "Word Error Rate (%)",
     detailed:
       "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users. Click a bar to highlight it for comparison."
+  },
+  v2v: {
+    short: "Voice-to-Voice Latency",
+    detailed:
+      "V2V latency measures the time from the end of the user's speech (the end of the last transcribed word) to the first frame of the agent's audio response, measured directly from the conversation audio on native single-turn interactions. Because it is derived from the recorded audio rather than internal events, it reflects the full response time a caller actually experiences — including any pipeline overhead — which makes it a fair cross-model comparison of conversational responsiveness."
   }
 };
