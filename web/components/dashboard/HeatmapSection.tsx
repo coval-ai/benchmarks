@@ -4,7 +4,7 @@
 "use client";
 
 import React from "react";
-import HeatmapPlot from "@/components/charts/d3/HeatmapPlot";
+import ModelComparisonTable from "@/components/dashboard/ModelComparisonTable";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
@@ -12,35 +12,25 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const HeatmapSection: React.FC = () => {
-  const { heatmapDisplayData: data, formatChartLabel, getProviderForModel, isMobile } =
-    useDashboard();
+  const { heatmapDisplayData: data, getProviderForModel } = useDashboard();
   const trackChartHover = useChartHoverTracking("heatmap");
 
   return (
     <div className="mb-4">
       <Card padding="p-5 lg:p-8" onMouseEnter={trackChartHover}>
         <SectionHeader
-          label="Model Performance Heatmap"
+          label="Model Comparison"
           description={{
-            short: "Comprehensive model performance comparison",
-            detailed: "Click column headers to sort by metric",
+            short: "How the models stack up",
+            detailed:
+              "Latency percentiles come straight from the measured runs — drag the slider to move from the fastest run (p0) through the median to the slowest (p100). Click a column to sort.",
           }}
           expandable={false}
         />
 
         <MetricToggle />
 
-        {/* The mobile scale transform (useDashboardState) targets
-            .heatmap-container, so only the plot lives inside it — keeping the
-            header at full size. */}
-        <div className="heatmap-container">
-          <HeatmapPlot
-            data={data}
-            formatChartLabel={formatChartLabel}
-            getProviderForModel={getProviderForModel}
-            isMobile={isMobile}
-          />
-        </div>
+        <ModelComparisonTable data={data} getProviderForModel={getProviderForModel} />
       </Card>
     </div>
   );
