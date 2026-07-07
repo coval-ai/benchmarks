@@ -15,9 +15,13 @@ interface TimelineTooltipProps {
   label?: string | number;
   getProviderForModel: (model: string) => string;
   showDate?: boolean;
+  /** Visible Y range when zoomed; models outside it (clipped off-chart) dim. */
+  highlightRange?: [number, number];
+  /** Hover mode: only the fastest model plus a pin hint, so the chart stays visible. */
+  compact?: boolean;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, highlightRange, compact }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -27,6 +31,8 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
 
   if (validData.length === 0) return null;
 
+  const rows = compact ? validData.slice(0, 1) : validData;
+
   return (
     <div
       style={{
@@ -35,7 +41,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
         borderRadius: "8px",
         color: "var(--color-text-on-tooltip)",
         padding: "12px",
-        minWidth: "250px"
+        minWidth: compact ? "180px" : "250px"
       }}
     >
       <p
@@ -47,12 +53,20 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       </p>
       <div
         className="tooltip-scroll"
-        style={{ fontSize: "11px", maxHeight: "300px", overflowY: "scroll", paddingRight: "8px" }}
+        style={
+          compact
+            ? { fontSize: "11px" }
+            : { fontSize: "11px", maxHeight: "300px", overflowY: "scroll", paddingRight: "8px" }
+        }
       >
-        {validData.map((item, index) => {
+        {rows.map((item, index) => {
           // Extract model name from dataKey (remove '_value' suffix)
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
+          const inView =
+            !highlightRange ||
+            (item.value >= highlightRange[0] &&
+              item.value <= highlightRange[1]);
 
           return (
             <div
@@ -61,7 +75,8 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 margin: "6px 0",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between"
+                justifyContent: "space-between",
+                opacity: inView ? 1 : 0.35
               }}
             >
               <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -109,6 +124,17 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           );
         })}
       </div>
+      {compact && validData.length > 1 && (
+        <p
+          style={{
+            margin: "8px 0 0",
+            fontSize: "10px",
+            color: "var(--color-text-on-tooltip-secondary)"
+          }}
+        >
+          +{validData.length - 1} more · click to pin
+        </p>
+      )}
     </div>
   );
 };
