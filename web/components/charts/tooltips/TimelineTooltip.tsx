@@ -31,7 +31,17 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
 
   if (validData.length === 0) return null;
 
-  const rows = compact ? validData.slice(0, 1) : validData;
+  const inRange = (value: number) =>
+    !highlightRange ||
+    (value >= highlightRange[0] && value <= highlightRange[1]);
+
+  // Compact hover shows one row: the fastest model that's actually in view,
+  // so a Y-zoom past the global leader still surfaces a visible model.
+  const rows = compact
+    ? [validData.find((item) => inRange(item.value)) ?? validData[0]].filter(
+        (item): item is (typeof validData)[number] => item != null
+      )
+    : validData;
 
   return (
     <div
@@ -63,10 +73,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           // Extract model name from dataKey (remove '_value' suffix)
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
-          const inView =
-            !highlightRange ||
-            (item.value >= highlightRange[0] &&
-              item.value <= highlightRange[1]);
+          const inView = inRange(item.value);
 
           return (
             <div
