@@ -3,8 +3,7 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Models: universal-streaming, universal-streaming-multilingual, universal-3-pro,
-universal-3.5-pro
+Models: universal-streaming, universal-streaming-multilingual, universal-3.5-pro
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -34,7 +33,6 @@ logger = structlog.get_logger(__name__)
 _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
     "universal-streaming-multilingual": "universal-streaming-multilingual",
-    "universal-3-pro": "u3-rt-pro",
     "universal-3.5-pro": "universal-3-5-pro",
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
@@ -42,11 +40,7 @@ _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
 # semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
 # value could let a confident short utterance auto-finalize before our signal.
-# universal-3-pro (u3-rt-pro) has no such param — it uses punctuation/silence
-# turn detection (min_turn_silence/max_turn_silence); we keep its defaults and
-# rely on ForceEndpoint, which is supported across all models.
 _END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
-_NO_EOT_THRESHOLD_MODELS = frozenset({"universal-3-pro"})
 
 # After ForceEndpoint, wait this long for the forced final before sending Terminate,
 # so the close never races the final (the WS close-gate bug class). Falls through on
@@ -56,8 +50,7 @@ _FINAL_WAIT_S = 5.0
 # Vendor-recommended voice-agent configuration, applied per model on top of the
 # base connection params. mode=min_latency is the documented accuracy/latency
 # preset for voice agents (sets interruption_delay, turn-silence windows,
-# continuous_partials, vad_threshold as a bundle); keyterms_prompt biases
-# recognition of the terms above. Both are u3-family connection params:
+# continuous_partials, vad_threshold as a bundle):
 # https://www.assemblyai.com/docs/streaming/prompting-and-keyterms
 _MODEL_EXTRA_PARAMS: dict[str, dict[str, str]] = {
     "universal-3.5-pro": {
@@ -104,9 +97,10 @@ class AssemblyAIProvider(STTProvider):
 
         try:
             speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
-            if self._model not in _NO_EOT_THRESHOLD_MODELS:
-                url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            url = (
+                f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+                f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            )
             extra_params = _MODEL_EXTRA_PARAMS.get(self._model)
             if extra_params:
                 url += "&" + urlencode(extra_params)

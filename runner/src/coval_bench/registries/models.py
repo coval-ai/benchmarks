@@ -157,13 +157,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_ACTIVE,
     ),
+    # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
+    # universal-3.5-pro.
     RegisteredModel(
         benchmark=_STT,
         provider="assemblyai",
         model="universal-3-pro",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         self_hostable=True,
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_STT,
