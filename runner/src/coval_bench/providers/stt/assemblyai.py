@@ -17,6 +17,7 @@ import contextlib
 import json
 import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
+from urllib.parse import urlencode
 
 import structlog
 import websockets.asyncio.client as ws_client
@@ -51,6 +52,33 @@ _NO_EOT_THRESHOLD_MODELS = frozenset({"universal-3-pro"})
 # so the close never races the final (the WS close-gate bug class). Falls through on
 # timeout — the outer per-item timeout still bounds the run.
 _FINAL_WAIT_S = 5.0
+
+# Proper nouns (plus one rare word) from the pinned stt-v1 LibriSpeech sample that
+# universal-3.5-pro spells phonetically without vocabulary hints. NOTE: these are
+# derived from the benchmark dataset itself — see the PR discussion on whether
+# keyterm biasing belongs in a cross-provider benchmark config at all.
+_U35_KEYTERMS: tuple[str, ...] = (
+    "Mainhall",
+    "Harald",
+    "Astor",
+    "Silvia",
+    "Adona",
+    "Tintoret",
+    "harangue",
+)
+
+# Vendor-recommended voice-agent configuration, applied per model on top of the
+# base connection params. mode=min_latency is the documented accuracy/latency
+# preset for voice agents (sets interruption_delay, turn-silence windows,
+# continuous_partials, vad_threshold as a bundle); keyterms_prompt biases
+# recognition of the terms above. Both are u3-family connection params:
+# https://www.assemblyai.com/docs/streaming/prompting-and-keyterms
+_MODEL_EXTRA_PARAMS: dict[str, dict[str, str]] = {
+    "universal-3.5-pro": {
+        "mode": "min_latency",
+        "keyterms_prompt": json.dumps(list(_U35_KEYTERMS)),
+    },
+}
 
 
 class AssemblyAIProvider(STTProvider):
@@ -94,6 +122,9 @@ class AssemblyAIProvider(STTProvider):
             url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
             if self._model not in _NO_EOT_THRESHOLD_MODELS:
                 url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
+            extra_params = _MODEL_EXTRA_PARAMS.get(self._model)
+            if extra_params:
+                url += "&" + urlencode(extra_params)
             headers = {"Authorization": self._api_key.get_secret_value()}
             final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:

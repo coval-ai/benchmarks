@@ -157,6 +157,36 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretS
 
 
 @pytest.mark.asyncio
+async def test_universal_3_5_pro_url_has_voice_agent_config(fake_api_key: SecretStr) -> None:
+    """universal-3.5-pro connects with mode=min_latency and the keyterms list."""
+    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.5-pro")
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "mode=min_latency" in url
+    assert "keyterms_prompt=" in url
+
+    # Other models keep the stock configuration
+    from coval_bench.providers.stt.assemblyai import _MODEL_EXTRA_PARAMS
+
+    assert set(_MODEL_EXTRA_PARAMS) == {"universal-3.5-pro"}
+
+
+@pytest.mark.asyncio
 async def test_universal_3_pro_url_uses_api_speech_model(fake_api_key: SecretStr) -> None:
     """universal-3-pro maps to the API's u3-rt-pro speech_model value."""
     ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
