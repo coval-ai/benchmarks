@@ -104,8 +104,6 @@ async def get_results_aggregates(
             stat_rows = await (await conn.execute(stats_sql, {"benchmark": benchmark})).fetchall()
             series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
 
-        # Hide rows for models excluded from a metric (historical rows predate
-        # the orchestrator's write-side skip).
         return AggregatesResponse(
             benchmark=benchmark,
             window=window,

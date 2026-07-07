@@ -95,8 +95,6 @@ async def get_leaderboard(
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
 
-    # Hide rows for models excluded from a metric (historical rows predate
-    # the orchestrator's write-side skip).
     entries = [
         LeaderboardEntry.model_validate(r)
         for r in entry_rows
