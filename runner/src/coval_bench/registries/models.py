@@ -245,6 +245,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _VAD),
         status=_ACTIVE,
     ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="mistral",
+        model="voxtral-mini-transcribe-realtime-2602",
+        tags=(_REALTIME, _MULTI),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
     # Baseten dedicated endpoints (Whisper Large V3). PENDING: implemented and
     # hidden while Baseten tunes the setup — kept off the scheduled runner and
     # the public site, run manually during the daily test window.

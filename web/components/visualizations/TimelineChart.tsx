@@ -165,16 +165,19 @@ const TimelineChart: React.FC = () => {
   const modelsWithData = getModelsWithTimelineData(metric);
   const windowedTimelineData = getWindowedTimelineData(metric);
   const activeMetricKey = metric.toLowerCase() as MethodologyMetricKey;
-  // Anchor date-only strings at UTC noon so the marker lands on the intended
-  // calendar day in every inhabited timezone (UTC midnight would shift to the
-  // previous day for the Americas).
+  // With an explicit time (an offset-qualified "HH:MM:SS±hh:mm") pin the marker
+  // to that exact instant; otherwise anchor date-only strings at UTC noon so the
+  // marker lands on the intended calendar day in every inhabited timezone (UTC
+  // midnight would shift to the previous day for the Americas).
   const methodologyMarkers = useMemo(
     () =>
       methodologyChanges
         .filter((c) => !c.metrics || c.metrics.includes(activeMetricKey))
         .map((c) => ({
           change: c,
-          ts: new Date(`${c.date}T12:00:00Z`).getTime(),
+          ts: new Date(
+            c.time ? `${c.date}T${c.time}` : `${c.date}T12:00:00Z`
+          ).getTime(),
         }))
         .filter((m) => m.ts >= windowStart && m.ts <= windowEnd),
     [activeMetricKey, windowStart, windowEnd]

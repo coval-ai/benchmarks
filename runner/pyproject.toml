@@ -46,9 +46,11 @@ dependencies = [
 [project.optional-dependencies]
 google-stt = ["google-cloud-speech>=2.27"]
 hume-tts = ["hume>=0.7"]
+hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"
+coval-build-dataset = "coval_bench.datasets.scripts.build:build"
 
 [dependency-groups]
 dev = [
@@ -109,6 +111,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "scipy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pyarrow.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

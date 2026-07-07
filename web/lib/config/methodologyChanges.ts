@@ -5,6 +5,7 @@ export type MethodologyMetricKey = "ttfa" | "ttft" | "ttfs" | "wer";
 
 export interface MethodologyChange {
   date: string;
+  time?: string;
   metrics?: MethodologyMetricKey[];
   title: string;
   detail: string;
@@ -38,6 +39,14 @@ export const methodologyChanges: MethodologyChange[] = [
     title: "Gradium finalization made event-driven",
     detail:
       "Gradium STT now waits for an explicit finalization event instead of a fixed timeout, so its time-to-final-segment reflects true engine speed. Gradium TTFS values shift at this point.",
+  },
+  {
+    date: "2026-07-01",
+    time: "14:00:00-07:00",
+    metrics: ["ttft", "ttfs"],
+    title: "STT streaming latency corrected for pacing drift",
+    detail:
+      "Streaming STT audio was fed with a fixed per-chunk sleep, so send-loop drift accumulated and inflated latency. Audio is now paced against an absolute deadline, so latency reflects true engine speed. STT latency drops after this date; values before and after are not comparable.",
   },
   {
     date: "2026-07-07",
