@@ -139,7 +139,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
             color: "var(--color-text-on-tooltip-secondary)"
           }}
         >
-          +{validData.length - 1} more · click to pin
+          +{validData.length - 1} more · click to pin · drag to zoom
         </p>
       )}
     </div>
