@@ -38,14 +38,27 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   useEffect(() => {
     if (window.location.hash !== `#${anchorId}`) return;
     window.scrollTo(0, 0);
-    const t = setTimeout(
-      () =>
-        document
-          .getElementById(anchorId)
-          ?.scrollIntoView({ behavior: "smooth" }),
-      300
-    );
-    return () => clearTimeout(t);
+    let stop = false;
+    const cancel = () => {
+      stop = true;
+    };
+    window.addEventListener("wheel", cancel, { passive: true });
+    window.addEventListener("touchstart", cancel, { passive: true });
+    const t0 = performance.now();
+    const step = (now: number) => {
+      if (stop || now - t0 > 2500) return;
+      const delta =
+        (document.getElementById(anchorId)?.getBoundingClientRect().top ?? 96) -
+        96;
+      if (Math.abs(delta) > 0.5) window.scrollTo(0, window.scrollY + delta * 0.15);
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    return () => {
+      stop = true;
+      window.removeEventListener("wheel", cancel);
+      window.removeEventListener("touchstart", cancel);
+    };
   }, [anchorId]);
 
   const copyLink = () => {
@@ -70,8 +83,8 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
             type="button"
             onClick={copyLink}
             aria-label="Copy link to this chart"
-            title="Copy link to this chart"
-            className="text-text-tertiary hover:text-text-primary transition-colors"
+            title="Copy link"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-border-secondary bg-white text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary"
           >
             {copied ? <Check size={14} /> : <Link2 size={14} />}
           </button>
