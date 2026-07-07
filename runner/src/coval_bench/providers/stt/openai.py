@@ -16,7 +16,7 @@ its TTFT is comparable to streaming ASR; it also rejects ``turn_detection: serve
 outright, leaving manual-commit the only option (verified 2026-06). ``gpt-4o-transcribe``
 and ``gpt-4o-mini-transcribe`` only transcribe a finalized segment — no partials
 mid-utterance, even with server VAD — so their TTFT is excluded upstream (see
-``_TTFT_NOT_COMPARABLE``).
+``METRIC_EXCLUSIONS`` in the metrics registry).
 """
 
 from __future__ import annotations

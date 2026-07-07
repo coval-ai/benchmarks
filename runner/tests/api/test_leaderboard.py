@@ -123,3 +123,34 @@ async def test_30d_window(client: AsyncClient, postgresql: Any) -> None:
     )
     assert response.status_code == 200
     assert len(response.json()["entries"]) == 1
+
+
+async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:
+    """Historical rows for METRIC_EXCLUSIONS pairs are hidden from the leaderboard."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="TTFS",
+        metric_value=0.4,
+        benchmark="STT",
+    )
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="deepgram",
+        model="nova-3",
+        metric_type="TTFS",
+        metric_value=0.6,
+        benchmark="STT",
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get(
+        "/v1/leaderboard", params={"metric": "TTFS", "benchmark": "STT", "window": "24h"}
+    )
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+    assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]

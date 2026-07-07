@@ -28,6 +28,7 @@ from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
+from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -94,7 +95,13 @@ async def get_leaderboard(
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
 
-    entries = [LeaderboardEntry.model_validate(r) for r in entry_rows]
+    # Hide rows for models excluded from a metric (historical rows predate
+    # the orchestrator's write-side skip).
+    entries = [
+        LeaderboardEntry.model_validate(r)
+        for r in entry_rows
+        if not is_metric_excluded(r["provider"], r["model"], metric)
+    ]
     capture_api_event(
         posthog_client,
         "leaderboard_queried",

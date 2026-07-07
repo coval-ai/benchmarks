@@ -48,6 +48,7 @@ from coval_bench.api.deps import (
 )
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
+from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -103,11 +104,21 @@ async def get_results_aggregates(
             stat_rows = await (await conn.execute(stats_sql, {"benchmark": benchmark})).fetchall()
             series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
 
+        # Hide rows for models excluded from a metric (historical rows predate
+        # the orchestrator's write-side skip).
         return AggregatesResponse(
             benchmark=benchmark,
             window=window,
-            model_stats=[ModelStatEntry.model_validate(r) for r in stat_rows],
-            series=[SeriesPoint.model_validate(r) for r in series_rows],
+            model_stats=[
+                ModelStatEntry.model_validate(r)
+                for r in stat_rows
+                if not is_metric_excluded(r["provider"], r["model"], r["metric_type"])
+            ],
+            series=[
+                SeriesPoint.model_validate(r)
+                for r in series_rows
+                if not is_metric_excluded(r["provider"], r["model"], r["metric_type"])
+            ],
         )
 
     cache_key = ("aggregates", benchmark, window)

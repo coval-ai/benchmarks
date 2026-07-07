@@ -298,3 +298,35 @@ async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -
         ("deepgram", "nova-3", "TTFT"),
         ("deepgram", "nova-3", "WER"),
     ]
+
+
+async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:
+    """METRIC_EXCLUSIONS pairs are hidden from stats and series for the excluded
+    metric only — other metrics for the same model still show."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="TTFS",
+        metric_value=0.4,
+    )
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="WER",
+        metric_value=5.0,
+    )
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    body = response.json()
+    stat_keys = [(s["provider"], s["model"], s["metric_type"]) for s in body["model_stats"]]
+    assert stat_keys == [("assemblyai", "universal-streaming", "WER")]
+    series_keys = {(p["provider"], p["model"], p["metric_type"]) for p in body["series"]}
+    assert series_keys == {("assemblyai", "universal-streaming", "WER")}

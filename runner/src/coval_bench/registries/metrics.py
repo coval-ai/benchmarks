@@ -95,3 +95,47 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
 if METRIC_SPECS.keys() != set(Metric):
     _missing = ", ".join(sorted(set(Metric) - METRIC_SPECS.keys()))
     raise RuntimeError(f"METRIC_SPECS is missing specs for: {_missing}")
+
+
+# (provider, model) pairs whose metric is not comparable with the rest of the
+# cohort. The orchestrator skips writing these rows; the API hides any
+# historical rows from aggregate views.
+#
+# TTFT: first token can't precede end-of-speech, so TTFT reflects a buffering
+# gate, not engine speed. xai/grok-stt gates on min audio; the openai
+# transcribe models finalize per-segment (no partials mid-utterance).
+#
+# TTFS: the model doesn't finalize on our end-of-speech signal, so TTFS
+# reflects a network round-trip, not finalization. Flux has no client
+# finalize; AssemblyAI universal-streaming acks ForceEndpoint without
+# flushing the tail.
+METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
+    Metric.TTFT: frozenset(
+        {
+            ("xai", "grok-stt"),
+            ("openai", "gpt-4o-transcribe"),
+            ("openai", "gpt-4o-mini-transcribe"),
+        }
+    ),
+    Metric.TTFS: frozenset(
+        {
+            ("deepgram", "flux-general-en"),
+            ("deepgram", "flux-general-multi"),
+            ("assemblyai", "universal-streaming"),
+            ("assemblyai", "universal-streaming-multilingual"),
+        }
+    ),
+}
+
+
+def is_metric_excluded(provider: str, model: str, metric: str) -> bool:
+    """True if this (provider, model) pair is excluded from ``metric``.
+
+    Accepts the metric as a plain string (as stored in
+    ``results.metric_type``); unknown metric strings are never excluded.
+    """
+    try:
+        pairs = METRIC_EXCLUSIONS.get(Metric(metric))
+    except ValueError:
+        return False
+    return pairs is not None and (provider, model) in pairs
