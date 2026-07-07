@@ -48,11 +48,4 @@ export const methodologyChanges: MethodologyChange[] = [
     detail:
       "Streaming STT audio was fed with a fixed per-chunk sleep, so send-loop drift accumulated and inflated latency. Audio is now paced against an absolute deadline, so latency reflects true engine speed. STT latency drops after this date; values before and after are not comparable.",
   },
-  {
-    date: "2026-07-07",
-    metrics: ["ttfs"],
-    title: "AssemblyAI universal-streaming models no longer report TTFS",
-    detail:
-      "universal-streaming and universal-streaming-multilingual acknowledge the end-of-speech signal without finalizing: the reply arrives in one network round-trip and can omit the last words of the clip. Their TTFS measured connectivity rather than finalization speed, so it is no longer reported, matching how Deepgram Flux is handled. The pro models and all other metrics are unaffected.",
-  },
 ];
