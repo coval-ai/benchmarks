@@ -453,14 +453,29 @@ async def test_refresh_series_bucket_never_raises(
 
 
 @pytest.mark.asyncio
-async def test_flux_excluded_from_ttfs(audio_file: Path, settings: Settings) -> None:
-    """Deepgram Flux is outside the TTFS parity cohort → no TTFS row, other metrics stay."""
+@pytest.mark.parametrize(
+    ("provider_name", "model"),
+    [
+        ("deepgram", "flux-general-en"),
+        ("deepgram", "flux-general-multi"),
+        ("assemblyai", "universal-streaming"),
+        ("assemblyai", "universal-streaming-multilingual"),
+    ],
+)
+async def test_non_finalizing_models_excluded_from_ttfs(
+    provider_name: str, model: str, audio_file: Path, settings: Settings
+) -> None:
+    """Models that don't finalize on our end-of-speech signal get no TTFS row.
+
+    Flux has no client finalize; the AssemblyAI universal-streaming models ack
+    ForceEndpoint without flushing the tail. The other metrics still run.
+    """
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
-    stt_providers = {"deepgram": MagicMock(return_value=provider)}
+    stt_providers = {provider_name: MagicMock(return_value=provider)}
     matrix = [
         *_paused_registry(Benchmark.STT),
-        _stt_entry("deepgram", "flux-general-en"),
+        _stt_entry(provider_name, model),
     ]
 
     run = _make_run()
