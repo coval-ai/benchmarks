@@ -8,10 +8,12 @@ and the orchestrator without pulling in metric-computation dependencies.
 
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.metrics import (
+    METRIC_EXCLUSIONS,
     METRIC_SPECS,
     Metric,
     MetricDirection,
     MetricSpec,
+    is_metric_excluded,
 )
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
@@ -31,6 +33,7 @@ from coval_bench.registries.tags import (
 
 __all__ = [
     "Benchmark",
+    "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
     "MODEL_REGISTRY",
     "Metric",
@@ -45,5 +48,6 @@ __all__ = [
     "TAG_CATEGORIES",
     "ModelTag",
     "TagCategory",
+    "is_metric_excluded",
     "tag_value_label",
 ]

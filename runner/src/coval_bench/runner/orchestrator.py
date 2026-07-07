@@ -49,6 +49,7 @@ from pydantic import BaseModel
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
 from coval_bench.registries import (
+    METRIC_EXCLUSIONS,
     METRIC_SPECS,
     MODEL_REGISTRY,
     Benchmark,
@@ -68,29 +69,6 @@ _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
 # but huge stack traces choke log pipelines)
-
-# STT models whose first token can't precede end-of-speech, so TTFT reflects a buffering
-# gate, not engine speed — omit it and rely on TTFS. xai/grok-stt gates on min audio; the
-# openai transcribe models finalize per-segment (no partials mid-utterance, even with VAD).
-_TTFT_NOT_COMPARABLE: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("xai", "grok-stt"),
-        ("openai", "gpt-4o-transcribe"),
-        ("openai", "gpt-4o-mini-transcribe"),
-    }
-)
-
-# STT models that don't finalize on our end-of-speech signal, so TTFS reflects a network
-# round-trip, not finalization — omit it. Flux has no client finalize; AssemblyAI
-# universal-streaming acks ForceEndpoint without flushing the tail.
-_TTFS_NOT_COMPARABLE: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("deepgram", "flux-general-en"),
-        ("deepgram", "flux-general-multi"),
-        ("assemblyai", "universal-streaming"),
-        ("assemblyai", "universal-streaming-multilingual"),
-    }
-)
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +311,7 @@ async def _run_stt_item(
         ttft_status, ttft_error = _metric_outcome(
             ttft_seconds, item_error, Metric.TTFT, ResultStatus
         )
-        ttft_excluded = (entry.provider, entry.model) in _TTFT_NOT_COMPARABLE
+        ttft_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFT]
         if not ttft_excluded:
             results.append(
                 Result(
@@ -406,7 +384,7 @@ async def _run_stt_item(
         ttfs_status, ttfs_error = _metric_outcome(
             ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
-        ttfs_excluded = (entry.provider, entry.model) in _TTFS_NOT_COMPARABLE
+        ttfs_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFS]
         if not ttfs_excluded:
             results.append(
                 Result(
