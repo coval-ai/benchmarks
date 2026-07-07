@@ -62,7 +62,6 @@ _FINAL_WAIT_S = 5.0
 _MODEL_EXTRA_PARAMS: dict[str, dict[str, str]] = {
     "universal-3.5-pro": {
         "mode": "min_latency",
-        "keyterms_prompt": json.dumps(list(_U35_KEYTERMS)),
     },
 }
 
