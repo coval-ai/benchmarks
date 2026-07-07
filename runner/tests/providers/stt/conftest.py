@@ -55,27 +55,32 @@ class FakeWebSocket:
     """Async context-manager WebSocket fake that replays JSON events from a list.
 
     Each entry in *events* is either a ``dict`` (serialised to JSON) or a
-    ``str`` (sent verbatim).  ``bytes`` entries are forwarded as-is.
+    ``str`` (sent verbatim).  ``bytes`` entries are forwarded as-is. With
+    ``server_closes=False`` the receive iterator blocks until the client closes,
+    modelling a server (e.g. Inworld) that keeps the socket open.
     """
 
     def __init__(
         self,
         events: list[dict[str, Any] | str | bytes],
         on_send: Callable[[Any], None] | None = None,
+        *,
+        server_closes: bool = True,
     ) -> None:
         self._events: list[dict[str, Any] | str | bytes] = list(events)
         self._on_send = on_send
-        self._closed = False
+        self._server_closes = server_closes
+        self._closed = asyncio.Event()
         self._sent: list[Any] = []
 
     async def __aenter__(self) -> FakeWebSocket:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        self._closed = True
+        self._closed.set()
 
     async def close(self) -> None:
-        self._closed = True
+        self._closed.set()
         self._events.clear()
 
     async def send(self, msg: bytes | str) -> None:
@@ -92,21 +97,30 @@ class FakeWebSocket:
         return evt
 
     def __aiter__(self) -> AsyncFakeWebSocketIter:
-        return AsyncFakeWebSocketIter(self._events)
+        return AsyncFakeWebSocketIter(self._events, self._closed, self._server_closes)
 
 
 class AsyncFakeWebSocketIter:
     """Async iterator over the remaining events list."""
 
-    def __init__(self, events: list[dict[str, Any] | str | bytes]) -> None:
+    def __init__(
+        self,
+        events: list[dict[str, Any] | str | bytes],
+        closed: asyncio.Event,
+        server_closes: bool,
+    ) -> None:
         self._events = events
+        self._closed = closed
+        self._server_closes = server_closes
 
     def __aiter__(self) -> AsyncFakeWebSocketIter:
         return self
 
     async def __anext__(self) -> str | bytes:
-        if not self._events:
-            raise StopAsyncIteration
+        while not self._events:
+            if self._server_closes or self._closed.is_set():
+                raise StopAsyncIteration
+            await self._closed.wait()
         evt = self._events.pop(0)
         if isinstance(evt, dict):
             return json.dumps(evt)
@@ -128,6 +142,7 @@ _WAIT_PATCHES = (
     "coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S",
     "coval_bench.providers.stt.xai._FINAL_WAIT_S",
     "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
+    "coval_bench.providers.stt.inworld._CLOSE_WAIT_S",
 )
 
 

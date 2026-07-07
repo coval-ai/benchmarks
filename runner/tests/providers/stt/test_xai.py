@@ -492,7 +492,7 @@ async def test_xai_force_finalize_closes_socket(
 
     assert result.error is None
     assert result.audio_to_final_seconds is not None
-    assert captured["ws"]._closed is True
+    assert captured["ws"]._closed.is_set()
 
 
 def test_xai_provider_name() -> None:

@@ -11,6 +11,8 @@ Final segments are whole phrases, so the transcript joins them with spaces.
 
 from __future__ import annotations
 
+import base64
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +29,7 @@ def make_provider() -> InworldSTTProvider:
 
 
 def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
+    ws = FakeWebSocket(events, server_closes=False)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -99,6 +101,91 @@ async def test_inworld_excludes_interim_segments(
     assert result.error is None
     assert result.complete_transcript == "hello world"
     assert result.word_count == 2
+
+
+@pytest.mark.asyncio
+async def test_inworld_completes_when_server_keeps_stream_open(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    events: list[Any] = [
+        {"result": {"transcription": {"transcript": "hello world", "isFinal": False}}},
+        {"result": {"transcription": {"transcript": "hello world", "isFinal": True}}},
+        {"result": {"transcription": {"transcript": "how are you", "isFinal": True}}},
+        {"usage": {"durationSeconds": 3}},
+    ]
+    provider = InworldSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.inworld.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolution", [0.005, 2.0])
+async def test_inworld_clamps_chunk_duration(fake_api_key: SecretStr, resolution: float) -> None:
+    audio = b"\x00" * 64000
+    ws = FakeWebSocket([], server_closes=False)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    provider = InworldSTTProvider(api_key=fake_api_key)
+    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+        await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=resolution,
+        )
+
+    chunk_byte_lengths = [
+        len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
+        for msg in ws._sent
+        if isinstance(msg, str) and "audioChunk" in msg
+    ]
+    assert sum(chunk_byte_lengths) == len(audio)
+    # 20-1000 ms at 16 kHz mono PCM.
+    assert all(640 <= n <= 32000 for n in chunk_byte_lengths)
+
+
+@pytest.mark.asyncio
+async def test_inworld_rebalances_sub_20ms_tail_chunk(fake_api_key: SecretStr) -> None:
+    audio = b"\x00" * (16000 * 2 + 320)  # two 16000 B chunks + a 320 B (10 ms) tail
+    ws = FakeWebSocket([], server_closes=False)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+
+    provider = InworldSTTProvider(api_key=fake_api_key)
+    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+        await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    chunk_byte_lengths = [
+        len(base64.b64decode(json.loads(msg)["audioChunk"]["content"]))
+        for msg in ws._sent
+        if isinstance(msg, str) and "audioChunk" in msg
+    ]
+    assert chunk_byte_lengths == [16000, 8160, 8160]
+    assert min(chunk_byte_lengths) >= 640
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +352,7 @@ async def test_inworld_surfaces_send_failure(
         if isinstance(msg, str) and "audioChunk" in msg:
             raise RuntimeError("send boom")
 
-    ws = FakeWebSocket([], on_send=_raise_on_audio)
+    ws = FakeWebSocket([], on_send=_raise_on_audio, server_closes=False)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
