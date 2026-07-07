@@ -54,7 +54,7 @@ async def test_paces_every_chunk_including_last(monkeypatch: pytest.MonkeyPatch)
     assert yielded[-1][1] == 1000.0
 
 
-async def test_min_tail_bytes_merges_short_final(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_min_tail_bytes_rebalances_short_tail(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_sleep(delay: float) -> None:
         pass
 
@@ -63,6 +63,22 @@ async def test_min_tail_bytes_merges_short_final(monkeypatch: pytest.MonkeyPatch
 
     audio = b"\x00" * 1000
     chunks = [c async for c, _ in _pacing.paced_chunks(audio, 300, _BYTE_RATE, min_tail_bytes=150)]
+    assert b"".join(chunks) == audio
+    # The last two chunks split evenly, so no chunk ever exceeds chunk_size.
+    assert [len(c) for c in chunks] == [300, 300, 200, 200]
+
+
+async def test_min_tail_bytes_folds_when_halves_too_small(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_sleep(delay: float) -> None:
+        pass
+
+    monkeypatch.setattr(time, "monotonic", lambda: 0.0)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    audio = b"\x00" * 1000
+    chunks = [c async for c, _ in _pacing.paced_chunks(audio, 300, _BYTE_RATE, min_tail_bytes=250)]
     assert b"".join(chunks) == audio
     assert [len(c) for c in chunks] == [300, 300, 400]
 
@@ -91,14 +107,14 @@ async def test_min_tail_bytes_single_chunk_untouched(monkeypatch: pytest.MonkeyP
     assert [len(c) for c in chunks] == [50]
 
 
-def test_sync_min_tail_bytes_merges_short_final(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_min_tail_bytes_rebalances_short_tail(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(time, "sleep", lambda delay: None)
 
     chunks = [
-        c for c, _ in _pacing.paced_chunks_sync(b"\x00" * 500, 200, _BYTE_RATE, min_tail_bytes=150)
+        c for c, _ in _pacing.paced_chunks_sync(b"\x00" * 500, 200, _BYTE_RATE, min_tail_bytes=120)
     ]
-    assert [len(c) for c in chunks] == [200, 300]
+    assert [len(c) for c in chunks] == [200, 150, 150]
 
 
 async def test_chunk_size_floored_to_one(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -110,6 +110,7 @@ async def test_inworld_completes_when_server_keeps_stream_open(
     events: list[Any] = [
         {"result": {"transcription": {"transcript": "hello world", "isFinal": False}}},
         {"result": {"transcription": {"transcript": "hello world", "isFinal": True}}},
+        {"result": {"transcription": {"transcript": "how are you", "isFinal": True}}},
         {"usage": {"durationSeconds": 3}},
     ]
     provider = InworldSTTProvider(api_key=fake_api_key)
@@ -127,12 +128,12 @@ async def test_inworld_completes_when_server_keeps_stream_open(
         )
 
     assert result.error is None
-    assert result.complete_transcript == "hello world"
+    assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
 
 
 @pytest.mark.asyncio
-async def test_inworld_merges_sub_20ms_tail_chunk(fake_api_key: SecretStr) -> None:
+async def test_inworld_rebalances_sub_20ms_tail_chunk(fake_api_key: SecretStr) -> None:
     audio = b"\x00" * (16000 * 2 + 320)  # two 16000 B chunks + a 320 B (10 ms) tail
     ws = FakeWebSocket([], server_closes=False)
     cm = MagicMock()
@@ -154,7 +155,7 @@ async def test_inworld_merges_sub_20ms_tail_chunk(fake_api_key: SecretStr) -> No
         for msg in ws._sent
         if isinstance(msg, str) and "audioChunk" in msg
     ]
-    assert chunk_byte_lengths == [16000, 16320]
+    assert chunk_byte_lengths == [16000, 8160, 8160]
     assert min(chunk_byte_lengths) >= 640
 
 

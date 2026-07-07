@@ -29,8 +29,15 @@ def _chunk_spans(total: int, chunk_size: int, min_tail_bytes: int) -> list[tuple
     if min_tail_bytes and len(spans) >= 2:
         last_lo, last_hi = spans[-1]
         if last_hi - last_lo < min_tail_bytes:
-            prev_lo, _ = spans.pop(-2)
-            spans[-1] = (prev_lo, last_hi)
+            lo = spans[-2][0]
+            mid = lo + (last_hi - lo) // 2
+            del spans[-2:]
+            # Splitting evenly keeps both chunks under chunk_size; fold instead
+            # if a half would still be under the floor.
+            if mid - lo >= min_tail_bytes:
+                spans += [(lo, mid), (mid, last_hi)]
+            else:
+                spans.append((lo, last_hi))
     return spans
 
 
@@ -45,8 +52,8 @@ async def paced_chunks(
     """Yield ``(chunk, start)`` pacing each chunk to real time, the last included.
 
     ``start`` defaults to the monotonic clock at the first chunk; pass it to
-    anchor pacing to a timestamp captured earlier. ``min_tail_bytes`` folds a
-    sub-threshold final chunk into its predecessor.
+    anchor pacing to a timestamp captured earlier. ``min_tail_bytes`` rebalances
+    a sub-threshold final chunk with its predecessor.
     """
     chunk_size = max(1, chunk_size)
     if start is None:

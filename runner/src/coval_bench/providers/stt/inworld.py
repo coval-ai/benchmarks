@@ -30,8 +30,9 @@ _WS_URL = "wss://api.inworld.ai/stt/v1/transcribe:streamBidirectional"
 # Inworld rejects chunks outside 20-1000 ms with "invalid audio chunk duration".
 _MIN_CHUNK_MS = 20
 
-# The server never closes after closeStream; the sender closes client-side.
-_FINAL_WAIT_S = 5.0
+# The server never closes after closeStream; the sender closes client-side once
+# the trailing usage frame (sent after all finals) arrives, or after this wait.
+_CLOSE_WAIT_S = 5.0
 
 
 class InworldSTTProvider(STTProvider):
@@ -96,13 +97,13 @@ class InworldSTTProvider(STTProvider):
                     )
                 )
 
-                final_event = asyncio.Event()
+                done_event = asyncio.Event()
                 send_task = asyncio.create_task(
                     self._send_audio(
-                        ws, audio_data, sample_rate, result, realtime_resolution, final_event
+                        ws, audio_data, sample_rate, result, realtime_resolution, done_event
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
+                recv_task = asyncio.create_task(self._receive(ws, result, done_event))
                 tasks = (send_task, recv_task)
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
                 if any(not task.cancelled() and task.exception() is not None for task in done):
@@ -135,7 +136,7 @@ class InworldSTTProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
-        final_event: asyncio.Event,
+        done_event: asyncio.Event,
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
@@ -151,11 +152,10 @@ class InworldSTTProvider(STTProvider):
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
                 )
-            final_event.clear()
             await ws.send(json.dumps({"endTurn": {}}))
             await ws.send(json.dumps({"closeStream": {}}))
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
+                await asyncio.wait_for(done_event.wait(), timeout=_CLOSE_WAIT_S)
             await ws.close()
         except Exception as exc:
             logger.warning(
@@ -164,7 +164,7 @@ class InworldSTTProvider(STTProvider):
             raise
 
     async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+        self, ws: Any, result: TranscriptionResult, done_event: asyncio.Event
     ) -> None:
         final_parts: list[str] = []
 
@@ -181,6 +181,9 @@ class InworldSTTProvider(STTProvider):
                     logger.warning(
                         "inworld_stt_error", provider="inworld", model=self._model, msg=msg
                     )
+                    break
+
+                if "usage" in msg:
                     break
 
                 transcription = msg.get("result", {}).get("transcription")
@@ -202,7 +205,6 @@ class InworldSTTProvider(STTProvider):
                     final_parts.append(text.strip())
                     if result.audio_start_time is not None:
                         result.audio_to_final_seconds = now - result.audio_start_time
-                    final_event.set()
                 else:
                     result.partial_transcripts.append(text.strip())
 
@@ -212,6 +214,8 @@ class InworldSTTProvider(STTProvider):
             )
             if result.error is None and result.audio_to_final_seconds is None:
                 result.error = str(exc)
+
+        done_event.set()
 
         if final_parts:
             # Inworld emits whole-phrase final segments; join with spaces.
