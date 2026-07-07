@@ -60,6 +60,7 @@ class RegisteredModel(BaseModel, frozen=True):
 
 _STT = Benchmark.STT
 _TTS = Benchmark.TTS
+_S2S = Benchmark.S2S
 _ACTIVE = ModelStatus.ACTIVE
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
@@ -519,6 +520,25 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="sonic",
         tags=(_REALTIME, _MULTI),
         status=_RETIRED,
+    ),
+    #######
+    # S2S #
+    #######
+    # S2S realtime models. Numbers are fetched daily from Coval (no local
+    # provider client). PENDING until the first run lands data.
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="openai",
+        model="gpt-realtime",
+        tags=(_REALTIME, _MULTI),
+        status=_PENDING,
+    ),
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="google",
+        model="gemini-live",
+        tags=(_REALTIME, _MULTI),
+        status=_PENDING,
     ),
 ]
 

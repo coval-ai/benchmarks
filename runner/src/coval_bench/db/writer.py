@@ -235,6 +235,26 @@ class RunWriter:
                 await cur.execute(sql, (status, error, run_id))
             await conn.commit()
 
+    async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
+        """True if any S2S row already references this Coval run.
+
+        S2S rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
+        fetch job skip a re-pulled run so a retry or stale re-pull doesn't
+        double-write the day's bucket.
+        """
+        sql = """
+            SELECT 1
+            FROM benchmarks_v2.results
+            WHERE provider = %s
+              AND benchmark = 'S2S'
+              AND split_part(audio_filename, '/', 1) = %s
+            LIMIT 1
+        """
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(sql, (provider, coval_run_id))
+            row = await cur.fetchone()
+        return row is not None
+
     async def refresh_stats_matviews(self) -> None:
         """Concurrently refresh the per-window stats materialized views.
 
