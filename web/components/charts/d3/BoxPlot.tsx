@@ -167,7 +167,10 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        const maxCharsPerLine = 8;
+        const maxCharsPerLine = Math.max(
+          8,
+          Math.floor(labelMaxWidth / (modelFontSize * 0.66))
+        );
         const modelWords = normalizedModel.split(/[-_\s]/);
         const modelLines: string[] = [];
         let currentLine = "";
