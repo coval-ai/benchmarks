@@ -35,8 +35,8 @@ logger = structlog.get_logger(__name__)
 
 _TARGET_SR = 16_000
 _BUCKET_DEFAULT = "coval-benchmarks-datasets"
-_NORM_TARGET_RMS_DBFS = -20.0  # loudness target when a spec opts into normalization
-_NORM_PEAK_CEILING = 0.985  # cap gain so peaks stay ~-0.13 dBFS (no clipping)
+_NORM_TARGET_RMS_DBFS = -20.0
+_NORM_PEAK_CEILING = 0.985  # gain cap: peaks stay below full scale
 _TAG_WARN = 0.95  # per-dim coverage below this → warn + flag (still builds)
 _TAG_FLOOR = 0.50  # per-dim coverage below this → abort (metadata too sparse)
 # Framework owns these manifest fields; a same-named dataset meta column must not
@@ -173,12 +173,7 @@ def balanced_sample(
 
 
 def _loudness_gain(data: object) -> float:
-    """Gain to hit the RMS loudness target, capped so peaks don't clip.
-
-    Silent clips (zero RMS/peak) get unity gain. Sources published at very low
-    levels otherwise trip provider VAD/endpointing; normalizing gives every
-    engine the same clean-speech signal.
-    """
+    """Gain to reach the RMS target, peak-capped; silent clips pass through unchanged."""
     rms = float((data**2).mean()) ** 0.5  # type: ignore[operator]
     peak = float(abs(data).max())  # type: ignore[arg-type]
     if rms <= 0.0 or peak <= 0.0:

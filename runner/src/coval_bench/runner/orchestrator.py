@@ -261,8 +261,7 @@ async def _run_stt_item(
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
         duration_sec: float = item.duration_sec
-        # Frames only: sending the WAV header as PCM injects a click that can
-        # derail provider VAD on quiet clips.
+        # Frames only: a WAV header sent as PCM reads as a click that can derail provider VAD.
         with wave.open(str(audio_path), "rb") as wav_file:
             fmt = (wav_file.getframerate(), wav_file.getnchannels(), wav_file.getsampwidth())
             if fmt != (16000, 1, 2):
