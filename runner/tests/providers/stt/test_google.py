@@ -190,10 +190,10 @@ def test_chirp2_uses_us_central1() -> None:
     assert "us-central1" in p._get_recognizer_name()
 
 
-def test_chirp3_uses_global() -> None:
+def test_chirp3_uses_us() -> None:
     p = _make_provider("chirp_3")
-    assert p._location == "global"
-    assert "locations/global/" in p._get_recognizer_name()
+    assert p._location == "us"
+    assert "locations/us/" in p._get_recognizer_name()
 
 
 # ---------------------------------------------------------------------------

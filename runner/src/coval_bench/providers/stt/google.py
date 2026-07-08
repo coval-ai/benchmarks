@@ -7,9 +7,8 @@ This provider is gated on the optional extra ``google-stt``:
 
     uv sync --extra google-stt
 
-Auth: GOOGLE_APPLICATION_CREDENTIALS env var (path to service-account JSON
-      mounted as a Secret-as-volume in Cloud Run).
-Models: chirp_2 (default), chirp_3.
+Auth: Application Default Credentials (the runner-rt service account in Cloud Run).
+Models: chirp_2 (default, us-central1), chirp_3 (us).
 """
 
 from __future__ import annotations
@@ -44,15 +43,9 @@ if TYPE_CHECKING:
 
 _RECOGNIZER_PATTERN = "projects/{project}/locations/{location}/recognizers/_"
 
-# chirp_3 isn't served in us-central1; it streams from global.
-_MODEL_LOCATIONS = {"chirp_3": "global"}
+# chirp_3 isn't served in us-central1; it lives in the us multi-region.
+_MODEL_LOCATIONS = {"chirp_3": "us"}
 _DEFAULT_LOCATION = "us-central1"
-
-
-def _endpoint_for_location(location: str) -> str:
-    if location == "global":
-        return "speech.googleapis.com"
-    return f"{location}-speech.googleapis.com"
 
 
 class GoogleSTTProvider(STTProvider):
@@ -82,13 +75,13 @@ class GoogleSTTProvider(STTProvider):
             raise ValueError(
                 "GoogleSTTProvider requires project_id (set Settings.google_project_id)"
             )
-        # api_key is unused for Google; auth is via GOOGLE_APPLICATION_CREDENTIALS
+        # api_key is unused for Google; auth is via ADC
         _ = api_key
         self._model = model
         self._project_id = project_id
         self._location = _MODEL_LOCATIONS.get(self._get_model_name(), _DEFAULT_LOCATION)
         self._client: Any = SpeechClient(
-            client_options=ClientOptions(api_endpoint=_endpoint_for_location(self._location))
+            client_options=ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
         )
 
     @property
