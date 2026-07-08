@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   BarChart,
   Bar,
@@ -70,7 +70,7 @@ const AccuracyBarSection: React.FC = () => {
   // Bar-top value labels are ~28px wide, so on narrow charts they collide.
   // When a bar is too thin, keep the label only on selected bars; the axis
   // and tooltip still carry the values for the rest.
-  const barLabel = ({
+  const barLabel = useCallback(({
     x = 0,
     y = 0,
     width = 0,
@@ -97,7 +97,7 @@ const AccuracyBarSection: React.FC = () => {
         {`${Number(value).toFixed(1)}%`}
       </text>
     );
-  };
+  }, [werBarDataWithColors, clickedWERBars, themeColors.label]);
 
   return (
     <div className="mb-4">
@@ -145,7 +145,7 @@ const AccuracyBarSection: React.FC = () => {
             <button
               type="button"
               onClick={clearWERBars}
-              className="px-1 text-xs text-text-tertiary transition-colors hover:text-text-primary"
+              className="px-1 text-xs text-text-tertiary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
             >
               Clear
             </button>
