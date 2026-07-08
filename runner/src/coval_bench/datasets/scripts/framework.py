@@ -35,6 +35,8 @@ logger = structlog.get_logger(__name__)
 
 _TARGET_SR = 16_000
 _BUCKET_DEFAULT = "coval-benchmarks-datasets"
+_NORM_TARGET_RMS_DBFS = -20.0  # loudness target when a spec opts into normalization
+_NORM_PEAK_CEILING = 0.985  # cap gain so peaks stay ~-0.13 dBFS (no clipping)
 _TAG_WARN = 0.95  # per-dim coverage below this → warn + flag (still builds)
 _TAG_FLOOR = 0.50  # per-dim coverage below this → abort (metadata too sparse)
 # Framework owns these manifest fields; a same-named dataset meta column must not
@@ -81,6 +83,7 @@ class DatasetSpec:
     source: str
     needs_vad_offset: bool  # run precompute_vad_offsets.py after the build?
     fetch: Callable[[list[Clip]], None] | None = None  # pull audio for selected clips only
+    normalize_audio: bool = False  # loudness-normalize each clip during transcode
 
 
 # --- shared build helpers ---------------------------------------------------
@@ -169,11 +172,27 @@ def balanced_sample(
     return selected
 
 
-def _transcode_and_hash(clips: list[Clip], work_dir: Path) -> None:
+def _loudness_gain(data: object) -> float:
+    """Gain to hit the RMS loudness target, capped so peaks don't clip.
+
+    Silent clips (zero RMS/peak) get unity gain. Sources published at very low
+    levels otherwise trip provider VAD/endpointing; normalizing gives every
+    engine the same clean-speech signal.
+    """
+    rms = float((data**2).mean()) ** 0.5  # type: ignore[operator]
+    peak = float(abs(data).max())  # type: ignore[arg-type]
+    if rms <= 0.0 or peak <= 0.0:
+        return 1.0
+    target_rms = float(10 ** (_NORM_TARGET_RMS_DBFS / 20.0))
+    return float(min(target_rms / rms, _NORM_PEAK_CEILING / peak))
+
+
+def _transcode_and_hash(clips: list[Clip], work_dir: Path, *, normalize: bool = False) -> None:
     """Transcode each clip to 16 kHz mono PCM_16 WAV; fill filename/wav_path/sha256.
 
     Reads float32, downmixes multi-channel to mono, and resamples off-rate sources
-    to 16 kHz so any dataset's audio normalizes identically.
+    to 16 kHz so any dataset's audio normalizes identically. When *normalize* is set,
+    each clip is loudness-normalized (RMS target with a peak guard) before writing.
     """
     for index, clip in enumerate(clips, start=1):
         clip.filename = f"{index:04d}.wav"
@@ -185,6 +204,8 @@ def _transcode_and_hash(clips: list[Clip], work_dir: Path) -> None:
             from scipy.signal import resample_poly
 
             data = resample_poly(data, _TARGET_SR, samplerate)
+        if normalize:
+            data = data * _loudness_gain(data)
         sf.write(str(clip.wav_path), data, _TARGET_SR, subtype="PCM_16")
         clip.sha256 = _hash_file(clip.wav_path)
 
@@ -294,7 +315,7 @@ def run_build(
     if spec.fetch is not None:
         spec.fetch(selected)  # fetch audio for the selected clips only
     with tempfile.TemporaryDirectory(prefix="coval-bench-build-") as work_dir:
-        _transcode_and_hash(selected, Path(work_dir))  # transcode + hash
+        _transcode_and_hash(selected, Path(work_dir), normalize=spec.normalize_audio)  # transcode
         manifest_json = _render_manifest(spec, selected)  # render manifest
         if dry_run:
             print(manifest_json, end="")  # noqa: T201 (dry-run: emit manifest for inspection)

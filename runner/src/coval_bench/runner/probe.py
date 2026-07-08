@@ -118,7 +118,7 @@ async def run_probe(
 
     if stt_models:
         ds = load_stt_dataset(
-            "stt-v1",
+            settings.dataset_id,
             settings=settings,
             sample_size=sample_size,
             rng=random.Random(_SEED),  # noqa: S311

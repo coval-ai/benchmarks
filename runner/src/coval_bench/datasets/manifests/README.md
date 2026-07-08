@@ -7,7 +7,62 @@ the recorded hash before use.
 
 ## How each manifest is produced
 
+### `stt-v2.json`
+
+**What we benchmark.** STT providers are scored against a frozen 50-utterance
+sample of the `environment_degradation__en__fleurs_clean_en` split of
+[bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR) — the clean
+(undegraded) English baseline of WildASR's environment-degradation suite,
+derived from [FLEURS](https://huggingface.co/datasets/google/fleurs). The
+WildASR repo is `Apache-2.0`; the underlying FLEURS audio is `CC-BY-4.0` —
+both redistributable, so the audio is mirrored to the public GCS bucket and
+the OSS reproducibility contract holds.
+
+**Sample composition (fleurs_clean_en, the source pool):**
+
+- **Language:** English; read speech, clean recording conditions.
+- **Recording level:** the source audio is published very quiet (~73% of clips
+  peak below −26 dBFS, median peak ≈ −41 dBFS), quiet enough that some
+  providers' VAD/endpointing fails to detect speech at all. The build
+  loudness-normalizes each clip (RMS target −20 dBFS, peak-guarded) so the
+  benchmark measures transcription quality on clean speech rather than
+  low-level-input robustness. Pass `--normalize` to `coval-build-dataset`.
+- **Speaker metadata:** WildASR publishes no per-clip speaker identity for
+  this subset (`speaker_id=spk0`, `gender=unknown` on every row), so the
+  sample is not speaker-balanced.
+- **Our 50-utterance window:** the builder scans the split's first 100 rows
+  (its per-split scan cap), keeps clips of **2.0–15.0 s** with ≥ 3 words,
+  dedups, and takes the lexicographically-first 50 by source row — fully
+  deterministic from the frozen split.
+- **Total audio per benchmark run:** 50 utterances × ~9 s avg ≈ 7.5 minutes.
+
+**What we measure on it.** WER (primary correctness metric), TTFT, audio→final
+latency, TTFS, RTF. Transcripts are lowercase with punctuation; the WER
+normalization pipeline (lowercase, NFKC, punctuation stripping) applies
+identically to reference and hypothesis.
+
+To rebuild (reads the split live via the datasets-server API, downloads and
+transcodes the selected clips, uploads, writes the manifest):
+
+```bash
+uv run coval-build-dataset --hf bosonai/WildASR \
+    --split environment_degradation__en__fleurs_clean_en \
+    --dataset-id stt-v2 --dur-max 15 --normalize \
+    --license "Apache-2.0 (WildASR; audio derived from FLEURS, CC-BY-4.0)" \
+    --source "bosonai/WildASR environment_degradation__en__fleurs_clean_en"
+```
+
+Then fill `speech_end_offset_ms` (the TTFS anchor) with
+`scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
+
+**Never overwrite v2.** Future expansions go in `stt-v3`.
+
+License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
+
 ### `stt-v1.json`
+
+**Superseded by `stt-v2`** — retained for historical reproducibility of runs
+recorded against it. Never overwrite.
 
 **What we benchmark.** STT providers are scored against a frozen 50-utterance
 sample of [LibriSpeech `test-clean`](https://www.openslr.org/12/) (OpenSLR-12).
@@ -56,7 +111,7 @@ This script:
 5. Uploads to `gs://coval-benchmarks-datasets/stt-v1/audio/`.
 6. Writes the updated `stt-v1.json` (commit the result).
 
-**Never overwrite v1.** Future expansions go in `stt/v2/`.
+**Never overwrite v1.**
 
 License: `CC-BY-4.0` (LibriSpeech `test-clean` is explicitly redistributable).
 

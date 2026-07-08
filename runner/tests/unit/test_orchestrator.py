@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tempfile
+import wave
 from collections.abc import AsyncIterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -251,9 +252,13 @@ async def _orchestrator_env(  # noqa: ANN202
 
 @pytest.fixture
 def audio_file(tmp_path: Path) -> Path:
-    """Tiny placeholder file (enough for read_bytes())."""
+    """Tiny valid 16 kHz mono PCM16 WAV."""
     f = tmp_path / "0001.wav"
-    f.write_bytes(b"\x00" * 1024)
+    with wave.open(str(f), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00" * 1024)
     return f
 
 
