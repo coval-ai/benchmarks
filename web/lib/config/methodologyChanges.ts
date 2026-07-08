@@ -55,4 +55,11 @@ export const methodologyChanges: MethodologyChange[] = [
     detail:
       "Transcripts were previously normalized with a hand-rolled pipeline that corrupted many number forms (“thirty six” became 3006), putting a WER floor under providers that transcribe numbers as digits. Both reference and hypothesis now go through OpenAI’s Whisper English text normalizer, the standard used for published WER. Affected providers’ WER drops after this date; values before and after are not comparable.",
   },
+  {
+    date: "2026-07-07",
+    metrics: ["wer", "ttft", "ttfs"],
+    title: "STT dataset replaced with WildASR fleurs_clean_en",
+    detail:
+      "The STT benchmark corpus moved from LibriSpeech test-clean to the clean English FLEURS subset of WildASR (stt-v2), loudness-normalized to a −20 dBFS RMS target. LibriSpeech is heavily represented in provider training data, which compressed WER differences between engines. WER values before and after are not comparable; latency metrics shift with the new clip mix. The runner also now streams exact PCM frames to STT providers (previously the WAV container header was included at stream start).",
+  },
 ];

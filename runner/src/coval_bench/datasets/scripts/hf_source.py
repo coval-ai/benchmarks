@@ -219,7 +219,8 @@ def make_source(
                 meta = {
                     k: v
                     for k, v in row.items()
-                    if k not in (audio_col, text_col) and isinstance(v, (str, int, float, bool))
+                    if k not in (audio_col, text_col, duration_col)
+                    and isinstance(v, (str, int, float, bool))
                 }
                 meta["_split"] = split
                 meta["_audio_src"] = src

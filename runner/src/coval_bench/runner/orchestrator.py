@@ -38,6 +38,7 @@ import contextlib
 import hashlib
 import importlib
 import signal
+import wave
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -260,7 +261,12 @@ async def _run_stt_item(
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
         duration_sec: float = item.duration_sec
-        audio_bytes = audio_path.read_bytes()
+        # Frames only: a WAV header sent as PCM reads as a click that can derail provider VAD.
+        with wave.open(str(audio_path), "rb") as wav_file:
+            fmt = (wav_file.getframerate(), wav_file.getnchannels(), wav_file.getsampwidth())
+            if fmt != (16000, 1, 2):
+                raise ValueError(f"{audio_path.name}: expected 16 kHz mono PCM16, got {fmt}")
+            audio_bytes = wav_file.readframes(wav_file.getnframes())
 
         speech_end_offset_ms = item.speech_end_offset_ms
         if isinstance(speech_end_offset_ms, (int, float)):
@@ -862,7 +868,7 @@ async def run_benchmarks(
             import importlib.resources as _importlib_resources
 
             manifest_ref = _importlib_resources.files("coval_bench.datasets.manifests").joinpath(
-                "stt-v1.json"
+                f"{settings.dataset_id}.json"
             )
             manifest_bytes = manifest_ref.read_bytes()
             dataset_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
@@ -954,7 +960,7 @@ async def run_benchmarks(
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
                 stt_dataset = load_dataset(
-                    "stt-v1",
+                    settings.dataset_id,
                     settings=settings,
                     sample_size=None if smoke else settings.dataset_sample_size,
                 )

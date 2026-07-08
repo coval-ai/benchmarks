@@ -83,7 +83,7 @@ def main() -> None:
         print(f"{rel:48s}  end_ms={end_str}  clip_ms={dur_ms:8.1f}  trailing_ms={trailing}")
 
     if args.write:
-        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
+        args.manifest.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
         print(f"\nWrote speech_end_offset_ms into {args.manifest}")
     else:
         print("\n(dry run — pass --write to patch the manifest)")

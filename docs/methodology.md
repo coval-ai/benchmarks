@@ -6,13 +6,19 @@ four. This document describes each one and where it lives.
 
 ## 1. Dataset
 
-**STT benchmark.** A 50-utterance subset of
-[LibriSpeech `test-clean`](https://www.openslr.org/12/) (OpenSLR-12,
-`CC-BY-4.0`). Selection rule: utterances filtered to the 2.0–15.0 s duration
-range, then round-robin by speaker in lexicographic order — all 40 speakers
-(20 F / 20 M) contribute, with the lex-first 10 providing 2 utterances each.
-The selection is deterministic and reproducible from the raw `test-clean`
-download.
+**STT benchmark.** A 50-utterance subset of the
+`environment_degradation__en__fleurs_clean_en` split of
+[bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR)
+(`Apache-2.0`; audio derived from FLEURS, `CC-BY-4.0`). Selection rule: the
+builder scans the split's first 100 rows, keeps clips of 2.0–15.0 s with at
+least 3 words, dedups by transcript (the source publishes some recordings
+under several row indices), and takes the lexicographically-first 50 by
+transcript. Each clip is loudness-normalized (RMS target −20 dBFS,
+peak-guarded); the source audio is published quiet enough to defeat some
+providers' speech detection.
+The selection is deterministic and reproducible from the frozen split. Runs
+recorded before the swap used `stt-v1` (LibriSpeech `test-clean`; see
+`runner/src/coval_bench/datasets/manifests/README.md`).
 
 **TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
 rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
@@ -26,22 +32,24 @@ across runs, so the full manifest is covered over time. The manifests still
 carry the complete 50 / 30 items — sampling only controls how many run each
 cycle. Set `DATASET_SAMPLE_SIZE` ≥ the manifest size to run everything.
 
-**SHA pinning.** Every audio file referenced by `stt-v1.json` carries a
+**SHA pinning.** Every audio file referenced by `stt-v2.json` carries a
 `sha256` field. The runner verifies the SHA after fetching from GCS and raises
 `DatasetIntegrityError` on mismatch (see `runner/src/coval_bench/datasets/loader.py`).
 TTS items are text-only and have no SHA.
 
 **Versioning.** Dataset manifests live at
-`runner/src/coval_bench/datasets/manifests/{stt-v1,tts-v1}.json` and carry a
-`version` field. Bumping the dataset re-pins by minting a new manifest
-(`stt-v2.json` etc.); the old manifest stays for historical reproducibility.
+`runner/src/coval_bench/datasets/manifests/{stt-v2,tts-v1}.json` and carry a
+`version` field. Bumping the dataset re-pins by minting a new manifest;
+old manifests (`stt-v1.json`) stay for historical reproducibility.
 
-**Rebuilding from scratch.** `runner/scripts/build_dataset.py` downloads the
-LibriSpeech archive, applies the selection rule, transcodes to the canonical
-audio format, uploads to GCS, and writes the manifest with fresh SHAs. See
-`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure.
+**Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR
+--normalize` applies the selection rule, transcodes to the canonical audio
+format, uploads to GCS, and writes the manifest with fresh SHAs. See
+`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure
+and exact flags.
 
-**Selection rationale.** See [ADR-020](#adr-references) below.
+**Selection rationale.** See [ADR-022](#adr-references) below (ADR-020 for
+the retired `stt-v1` rule).
 
 ## 2. Provider model versions
 
@@ -199,16 +207,17 @@ metrics in particular are session-dependent).
 - ADR-020 — Dataset selection rule (round-robin by speaker, 2.0–15.0 s window).
 - ADR-021 — WER text normalization delegated to `whisper_normalizer`'s
   `EnglishTextNormalizer`.
+- ADR-022 — STT dataset swap to WildASR `fleurs_clean_en` (`stt-v2`); LibriSpeech
+  `test-clean` (`stt-v1`) retained for historical reproducibility.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.
 
 ## Caveats
 
-- Absolute WER on LibriSpeech `test-clean` is artificially low for most
-  providers because the corpus is widely included in training data.
-  Latency and per-provider drift over time are the more informative
-  signals.
+- The STT corpus is public and FLEURS-derived; providers may include it in
+  training data, which skews absolute WER low. Latency and per-provider
+  drift over time are the more informative signals.
 - This is a research benchmark. Results reflect a specific dataset and
   methodology and may not generalize to production workloads. See the
   Apache-2.0 `LICENSE` for the warranty disclaimer.

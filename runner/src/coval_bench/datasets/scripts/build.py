@@ -134,6 +134,9 @@ def _hf_spec(
     dur_min: float,
     dur_max: float,
     dataset_id: str | None,
+    license_id: str | None,
+    source_label: str | None,
+    normalize: bool,
 ) -> DatasetSpec:
     """Resolve *hf_path* into a DatasetSpec.
 
@@ -156,12 +159,13 @@ def _hf_spec(
         dur_max=dur_max,
         min_words=3,
         num=num,
-        dedup_key=lambda clip: clip.audio_path.name,
+        dedup_key=lambda clip: clip.transcript,
         balance_dims=tuple(_meta_dim(col) for col in balance_cols),
-        license="see-source",
-        source=hf_path,
+        license=license_id or "see-source",
+        source=source_label or hf_path,
         needs_vad_offset=False,
         fetch=fetch,
+        normalize_audio=normalize,
     )
 
 
@@ -179,6 +183,18 @@ def _hf_spec(
 @click.option("--dur-min", type=float, default=2.0, show_default=True, help="Min clip seconds.")
 @click.option("--dur-max", type=float, default=10.0, show_default=True, help="Max clip seconds.")
 @click.option("--dataset-id", default=None, help="Manifest id (default derived from --hf).")
+@click.option(
+    "--license", "license_id", default=None, help="Manifest license (default: see-source)."
+)
+@click.option(
+    "--source", "source_label", default=None, help="Manifest source (default: the --hf path)."
+)
+@click.option(
+    "--normalize",
+    is_flag=True,
+    default=False,
+    help="Loudness-normalize each clip during transcode (RMS target with a peak guard).",
+)
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Build + print manifest; no GCS writes."
 )
@@ -209,6 +225,9 @@ def build(
     dur_min: float,
     dur_max: float,
     dataset_id: str | None,
+    license_id: str | None,
+    source_label: str | None,
+    normalize: bool,
     dry_run: bool,
     bucket: str,
     overwrite: bool,
@@ -229,6 +248,9 @@ def build(
                 dur_min=dur_min,
                 dur_max=dur_max,
                 dataset_id=dataset_id,
+                license_id=license_id,
+                source_label=source_label,
+                normalize=normalize,
             )
         elif dataset and dataset in _SPECS:
             spec = _SPECS[dataset]
