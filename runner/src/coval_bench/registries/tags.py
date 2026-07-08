@@ -40,6 +40,7 @@ class ModelTag(StrEnum):
     VOICE_CLONING = "voice-cloning"
     EMOTION_CONTROL = "emotion-control"
     STREAMING_INPUT = "streaming-input"
+    CONVERSATIONAL_CONTEXT = "conversational-context"
 
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
@@ -54,6 +55,7 @@ TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.VOICE_CLONING: TagCategory.FEATURES,
     ModelTag.EMOTION_CONTROL: TagCategory.FEATURES,
     ModelTag.STREAMING_INPUT: TagCategory.FEATURES,
+    ModelTag.CONVERSATIONAL_CONTEXT: TagCategory.FEATURES,
 }
 
 if TAG_CATEGORIES.keys() != set(ModelTag):
@@ -89,6 +91,7 @@ _VALUE_LABELS: dict[str, str] = {
     ModelTag.VOICE_CLONING.value: "Voice cloning",
     ModelTag.EMOTION_CONTROL.value: "Emotion control",
     ModelTag.STREAMING_INPUT.value: "Streaming input",
+    ModelTag.CONVERSATIONAL_CONTEXT.value: "Conversational context",
 }
 
 

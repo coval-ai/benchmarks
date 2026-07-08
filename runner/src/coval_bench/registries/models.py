@@ -74,6 +74,7 @@ _KEYTERM = ModelTag.KEYTERM_BIASING
 _CLONE = ModelTag.VOICE_CLONING
 _EMOTION = ModelTag.EMOTION_CONTROL
 _STREAM = ModelTag.STREAMING_INPUT
+_CONVCTX = ModelTag.CONVERSATIONAL_CONTEXT
 _OPEN = Licensing.OPEN_WEIGHT
 
 # Per-benchmark order is the model order /v1/providers returns.
@@ -171,7 +172,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_STT,
         provider="assemblyai",
         model="universal-3.5-pro",
-        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
+        tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM, _CONVCTX),
         self_hostable=True,
         status=_ACTIVE,
     ),
