@@ -39,6 +39,20 @@ const BoxPlotSection: React.FC = () => {
         <SectionHeader
           label="Latency Variation"
           description={description}
+          exportRows={() =>
+            boxPlotData.data.map(({ model, provider, quartiles, stats }) => ({
+              model,
+              provider,
+              metric: activeMetric,
+              whisker_low_ms: quartiles.min,
+              q1_ms: quartiles.q1,
+              median_ms: quartiles.median,
+              q3_ms: quartiles.q3,
+              whisker_high_ms: quartiles.max,
+              mean_ms: stats.mean,
+              runs: stats.count,
+            }))
+          }
           stat={{
             label: (
               <MetricInfo metric={activeMetric} align="right">{`Average ${latencyLabel}`}</MetricInfo>

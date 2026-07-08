@@ -3,8 +3,11 @@
 
 "use client";
 
-import React from "react";
-import ModelComparisonTable from "@/components/dashboard/ModelComparisonTable";
+import React, { useState } from "react";
+import ModelComparisonTable, {
+  DEFAULT_PERCENTILE_IDX,
+  PERCENTILES,
+} from "@/components/dashboard/ModelComparisonTable";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
@@ -12,8 +15,14 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
 const HeatmapSection: React.FC = () => {
-  const { heatmapDisplayData: data, getProviderForModel } = useDashboard();
+  const {
+    heatmapDisplayData: data,
+    getProviderForModel,
+    activeMetric,
+  } = useDashboard();
   const trackChartHover = useChartHoverTracking("heatmap");
+  const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
+  const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[DEFAULT_PERCENTILE_IDX])!.key;
 
   return (
     <div className="mb-4">
@@ -26,11 +35,28 @@ const HeatmapSection: React.FC = () => {
               "Latency percentiles come straight from the measured runs — drag the slider to move from the fastest run (p0) through the median to the slowest (p100). Click a column to sort.",
           }}
           expandable={false}
+          exportRows={() =>
+            data.map(({ model, latency, avgWER, werStdDev, sampleCount }) => ({
+              model,
+              provider: getProviderForModel(model),
+              metric: activeMetric,
+              [`latency_${percentile}_ms`]: latency[percentile],
+              avg_wer_percent: avgWER,
+              wer_std_dev: werStdDev,
+              runs: sampleCount,
+            }))
+          }
+          exportImage={false}
         />
 
         <MetricToggle />
 
-        <ModelComparisonTable data={data} getProviderForModel={getProviderForModel} />
+        <ModelComparisonTable
+          data={data}
+          getProviderForModel={getProviderForModel}
+          percentileIdx={percentileIdx}
+          onPercentileChange={setPercentileIdx}
+        />
       </Card>
     </div>
   );

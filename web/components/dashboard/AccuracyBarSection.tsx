@@ -106,6 +106,14 @@ const AccuracyBarSection: React.FC = () => {
           label="Accuracy by Model"
           description={description}
           hint="Click bar to compare models"
+          exportXLabel="Model"
+          exportRows={() =>
+            werBarDataWithColors.map(({ model, averageWER }) => ({
+              model,
+              provider: getProviderForModel(model),
+              avg_wer_percent: averageWER,
+            }))
+          }
           stat={{
             label:
               selectedBars.length > 0

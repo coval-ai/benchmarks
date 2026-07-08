@@ -42,21 +42,34 @@ interface LegendEntry {
 // Custom legend: names are rendered in black (recharts colors them per-series
 // by default), and items fill top-to-bottom within each column so the list
 // reads alphabetically down each column rather than across rows.
-const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
+const TimelineLegend: React.FC<{
+  payload?: LegendEntry[];
+  dimmedKeys?: Set<string>;
+}> = ({ payload, dimmedKeys }) => (
   <ul className="columns-2 gap-x-4 px-2 pt-5 sm:columns-3 sm:gap-x-6 lg:columns-4">
-    {payload?.map((entry) => (
-      <li
-        key={entry.dataKey ?? entry.value}
-        className="mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid"
-      >
-        <span
-          className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
-          style={{ backgroundColor: entry.color }}
-          aria-hidden="true"
-        />
-        <span>{entry.value}</span>
-      </li>
-    ))}
+    {[...(payload ?? [])]
+      .sort(
+        (a, b) =>
+          Number(dimmedKeys?.has(a.dataKey ?? "") ?? 0) -
+          Number(dimmedKeys?.has(b.dataKey ?? "") ?? 0)
+      )
+      .map((entry) => {
+        const dimmed = dimmedKeys?.has(entry.dataKey ?? "");
+        return (
+          <li
+            key={entry.dataKey ?? entry.value}
+            data-dimmed={dimmed || undefined}
+            className={`mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid${dimmed ? " opacity-35" : ""}`}
+          >
+            <span
+              className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: entry.color }}
+              aria-hidden="true"
+            />
+            <span>{entry.value}</span>
+          </li>
+        );
+      })}
   </ul>
 );
 
@@ -206,6 +219,48 @@ const TimelineChart: React.FC = () => {
   );
   const tzAbbr = getLocalTimeZoneAbbr();
   const zoomX = zoom?.x;
+  const zoomY = zoom?.y;
+
+  // A series dims when the current crop clips it fully off-chart — mirroring
+  // the tooltip's highlight behavior. A line is visible not only when a point
+  // lands inside the Y range but also when a segment between two consecutive
+  // points crosses it (e.g. a spike whose peak sits above the crop).
+  const dimmedLegendKeys = useMemo(() => {
+    const dimmed = new Set<string>();
+    if (!zoomY) return dimmed;
+    for (const model of modelsWithData) {
+      let prev: number | null = null;
+      let visible = false;
+      for (const point of windowedTimelineData) {
+        if (
+          zoomX &&
+          (point.timestamp < zoomX[0] || point.timestamp > zoomX[1])
+        ) {
+          prev = null;
+          continue;
+        }
+        const value = (point as Record<string, number | undefined>)[
+          `${model}_value`
+        ];
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          prev = null;
+          continue;
+        }
+        if (
+          prev === null
+            ? value >= zoomY[0] && value <= zoomY[1]
+            : Math.min(prev, value) <= zoomY[1] &&
+              Math.max(prev, value) >= zoomY[0]
+        ) {
+          visible = true;
+          break;
+        }
+        prev = value;
+      }
+      if (!visible) dimmed.add(`${model}_value`);
+    }
+    return dimmed;
+  }, [zoomY, zoomX, windowedTimelineData, modelsWithData]);
   const xDomain = zoomX ?? currentTimeWindow;
   const zoomTicks = useMemo(
     () =>
@@ -314,6 +369,17 @@ const TimelineChart: React.FC = () => {
               : "Performance Consistency"
           }
           description={description}
+          exportRows={() =>
+            windowedTimelineData.map((point) => ({
+              time: point.timestampLabel,
+              ...Object.fromEntries(
+                modelsWithData.map((model) => [
+                  `${model}_${metric}_ms`,
+                  point[`${model}_value`],
+                ])
+              ),
+            }))
+          }
           stat={{
             label: (
               <MetricInfo metric={metric} align="right">{`Average ${metricLabel}`}</MetricInfo>
@@ -550,7 +616,9 @@ const TimelineChart: React.FC = () => {
                 cursor={!dragging && !hoveredMarker}
               />
               {modelsWithData.length > 1 && (
-                <Legend content={<TimelineLegend />} />
+                <Legend
+                  content={<TimelineLegend dimmedKeys={dimmedLegendKeys} />}
+                />
               )}
               {modelsWithData.map((model) => (
                 <Line
