@@ -546,8 +546,8 @@ const TimelineChart: React.FC = () => {
                     compact
                   />
                 }
-                active={pinned || dragging ? false : undefined}
-                cursor={!dragging}
+                active={pinned || dragging || hoveredMarker ? false : undefined}
+                cursor={!dragging && !hoveredMarker}
               />
               {modelsWithData.length > 1 && (
                 <Legend content={<TimelineLegend />} />
@@ -638,60 +638,22 @@ const TimelineChart: React.FC = () => {
           {hoveredMarker &&
             (() => {
               const width = chartRef.current?.clientWidth ?? 0;
-              const pad = 120;
+              const pad = 132;
               const left =
                 width > pad * 2
                   ? Math.min(Math.max(hoveredMarker.x, pad), width - pad)
                   : hoveredMarker.x;
               return (
                 <div
-                  style={{
-                    position: "absolute",
-                    left,
-                    top: 26,
-                    transform: "translateX(-50%)",
-                    zIndex: 25,
-                    pointerEvents: "none",
-                    maxWidth: 240,
-                  }}
+                  role="tooltip"
+                  className="pointer-events-none absolute z-30 w-64 -translate-x-1/2 rounded-lg border border-border-secondary bg-surface-tooltip px-3 py-2 text-left text-xs font-normal leading-snug text-[var(--color-text-on-tooltip)] shadow-md"
+                  style={{ left, top: 26 }}
                 >
-                  <div
-                    style={{
-                      backgroundColor: "var(--color-surface-tooltip)",
-                      border: "1px solid var(--color-border-secondary)",
-                      borderRadius: "8px",
-                      color: "var(--color-text-on-tooltip)",
-                      padding: "12px",
-                    }}
-                  >
-                    <p
-                      style={{
-                        margin: 0,
-                        fontWeight: "bold",
-                        fontSize: "12px",
-                      }}
-                    >
-                      {hoveredMarker.change.title}
-                    </p>
-                    <p
-                      style={{
-                        margin: "4px 0 0",
-                        fontSize: "10px",
-                        color: "var(--color-text-on-tooltip-secondary)",
-                      }}
-                    >
-                      Methodology change · {formatDate(hoveredMarker.ts)}
-                    </p>
-                    <p
-                      style={{
-                        margin: "8px 0 0",
-                        fontSize: "11px",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {hoveredMarker.change.detail}
-                    </p>
-                  </div>
+                  <p className="font-semibold">{hoveredMarker.change.title}</p>
+                  <p className="mt-0.5 text-[10px] text-[var(--color-text-on-tooltip-secondary)]">
+                    Methodology change · {formatDate(hoveredMarker.ts)}
+                  </p>
+                  <p className="mt-1.5">{hoveredMarker.change.detail}</p>
                 </div>
               );
             })()}
