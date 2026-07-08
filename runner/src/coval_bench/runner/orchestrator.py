@@ -264,6 +264,9 @@ async def _run_stt_item(
         # Frames only: sending the WAV header as PCM injects a click that can
         # derail provider VAD on quiet clips.
         with wave.open(str(audio_path), "rb") as wav_file:
+            fmt = (wav_file.getframerate(), wav_file.getnchannels(), wav_file.getsampwidth())
+            if fmt != (16000, 1, 2):
+                raise ValueError(f"{audio_path.name}: expected 16 kHz mono PCM16, got {fmt}")
             audio_bytes = wav_file.readframes(wav_file.getnframes())
 
         speech_end_offset_ms = item.speech_end_offset_ms

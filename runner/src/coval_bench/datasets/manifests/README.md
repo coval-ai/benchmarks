@@ -32,8 +32,9 @@ the OSS reproducibility contract holds.
   sample is not speaker-balanced.
 - **Our 50-utterance window:** the builder scans the split's first 100 rows
   (its per-split scan cap), keeps clips of **2.0–15.0 s** with ≥ 3 words,
-  dedups, and takes the lexicographically-first 50 by source row — fully
-  deterministic from the frozen split.
+  dedups by transcript (the source repeats some recordings under different
+  row indices), and takes the lexicographically-first 50 by transcript —
+  fully deterministic from the frozen split.
 - **Total audio per benchmark run:** 50 utterances × ~9 s avg ≈ 7.5 minutes.
 
 **What we measure on it.** WER (primary correctness metric), TTFT, audio→final

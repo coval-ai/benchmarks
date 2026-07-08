@@ -11,9 +11,11 @@ four. This document describes each one and where it lives.
 [bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR)
 (`Apache-2.0`; audio derived from FLEURS, `CC-BY-4.0`). Selection rule: the
 builder scans the split's first 100 rows, keeps clips of 2.0–15.0 s with at
-least 3 words, and takes the lexicographically-first 50 by source row. Each
-clip is loudness-normalized (RMS target −20 dBFS, peak-guarded); the source
-audio is published quiet enough to defeat some providers' speech detection.
+least 3 words, dedups by transcript (the source publishes some recordings
+under several row indices), and takes the lexicographically-first 50 by
+transcript. Each clip is loudness-normalized (RMS target −20 dBFS,
+peak-guarded); the source audio is published quiet enough to defeat some
+providers' speech detection.
 The selection is deterministic and reproducible from the frozen split. Runs
 recorded before the swap used `stt-v1` (LibriSpeech `test-clean`; see
 `runner/src/coval_bench/datasets/manifests/README.md`).
@@ -40,10 +42,11 @@ TTS items are text-only and have no SHA.
 `version` field. Bumping the dataset re-pins by minting a new manifest;
 old manifests (`stt-v1.json`) stay for historical reproducibility.
 
-**Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR`
-applies the selection rule, transcodes to the canonical audio format, uploads
-to GCS, and writes the manifest with fresh SHAs. See
-`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure.
+**Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR
+--normalize` applies the selection rule, transcodes to the canonical audio
+format, uploads to GCS, and writes the manifest with fresh SHAs. See
+`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure
+and exact flags.
 
 **Selection rationale.** See [ADR-022](#adr-references) below (ADR-020 for
 the retired `stt-v1` rule).

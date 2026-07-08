@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
-from coval_bench.datasets.scripts.build import _meta_dim
+from coval_bench.datasets.scripts.build import _hf_spec, _meta_dim
 from coval_bench.datasets.scripts.framework import Clip
 from coval_bench.datasets.scripts.hf_source import _as_duration
 
@@ -22,6 +23,30 @@ def test_as_duration_coerces_null_and_junk() -> None:
     assert _as_duration(None) == 0.0
     assert _as_duration("") == 0.0
     assert _as_duration("n/a") == 0.0
+
+
+def test_hf_spec_dedups_by_transcript() -> None:
+    """Same recording published under two row indices collapses to one clip."""
+    hooks = (lambda root: root, lambda src: [], None)
+    with patch("coval_bench.datasets.scripts.build._resolve_hooks", return_value=hooks):
+        spec = _hf_spec(
+            "org/ds",
+            config=None,
+            split=None,
+            audio_col=None,
+            text_col=None,
+            balance_cols=(),
+            num=50,
+            dur_min=2.0,
+            dur_max=10.0,
+            dataset_id=None,
+            license_id=None,
+            source_label=None,
+            normalize=False,
+        )
+    first = Clip(audio_path=Path("/split-0.wav"), transcript="same words here", meta={})
+    dupe = Clip(audio_path=Path("/split-9.wav"), transcript="same words here", meta={})
+    assert spec.dedup_key(first) == spec.dedup_key(dupe)
 
 
 def test_meta_dim_keeps_false_and_zero() -> None:

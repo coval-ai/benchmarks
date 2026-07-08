@@ -159,7 +159,9 @@ def _hf_spec(
         dur_max=dur_max,
         min_words=3,
         num=num,
-        dedup_key=lambda clip: clip.audio_path.name,
+        # Dedup by transcript, not filename: sources can publish the same recording
+        # under several row indices, and a filename key lets those duplicates through.
+        dedup_key=lambda clip: clip.transcript,
         balance_dims=tuple(_meta_dim(col) for col in balance_cols),
         license=license_id or "see-source",
         source=source_label or hf_path,
