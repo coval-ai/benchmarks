@@ -34,7 +34,7 @@ logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["leaderboard"])
 
-MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS"]
+MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
 
 # Valid (metric, benchmark) combinations — lower is better for all.
 _VALID_COMBOS: set[tuple[str, str]] = {
@@ -42,6 +42,7 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFT", "STT"),
     ("TTFS", "STT"),
     ("TTFA", "TTS"),
+    ("V2V", "S2S"),
 }
 
 _MV_SQL_TEMPLATE = """
@@ -84,7 +85,7 @@ async def get_leaderboard(
         raise HTTPException(
             400,
             f"metric={metric!r} is not compatible with benchmark={benchmark!r}. "
-            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS.",
+            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S.",
         )
 
     params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}

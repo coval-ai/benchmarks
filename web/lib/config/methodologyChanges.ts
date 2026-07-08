@@ -50,6 +50,13 @@ export const methodologyChanges: MethodologyChange[] = [
   },
   {
     date: "2026-07-07",
+    metrics: ["wer"],
+    title: "WER normalization switched to the Whisper text normalizer",
+    detail:
+      "Transcripts were previously normalized with a hand-rolled pipeline that corrupted many number forms (“thirty six” became 3006), putting a WER floor under providers that transcribe numbers as digits. Both reference and hypothesis now go through OpenAI’s Whisper English text normalizer, the standard used for published WER. Affected providers’ WER drops after this date; values before and after are not comparable.",
+  },
+  {
+    date: "2026-07-07",
     metrics: ["wer", "ttft", "ttfs"],
     title: "STT dataset replaced with WildASR fleurs_clean_en",
     detail:
