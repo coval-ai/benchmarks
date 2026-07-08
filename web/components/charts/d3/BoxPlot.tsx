@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as d3 from "d3";
 import { BoxPlotProps } from "@/types/chart.types";
+import { BoxPlotDataPoint } from "@/types/benchmark.types";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
 // Match the text sizes on the timeline chart above: 14px axis labels, 12px
@@ -31,7 +32,25 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     width: width || 800,
     height
   });
+  const [tip, setTip] = useState<{
+    point: BoxPlotDataPoint;
+    x: number;
+    yTop: number;
+    pinned: boolean;
+  } | null>(null);
   const themeColors = useThemeColors();
+
+  useEffect(() => {
+    if (!tip?.pinned) return;
+    const onClick = () => setTip(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setTip(null);
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [tip]);
 
   // Handle responsive sizing — always fit the card's content box.
   useEffect(() => {
@@ -60,6 +79,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
+
+    setTip(null);
 
     const margin = { top: 20, right: 8, bottom: 80, left: 40 };
     const chartWidth = dimensions.width - margin.left - margin.right;
@@ -303,7 +324,15 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         .attr("stroke", color)
         .attr("stroke-width", 1.5);
 
-      // Add interactive hover effects
+      // Hover shows a compact name + median tooltip above the whiskers;
+      // clicking pins that same tooltip and populates it with the full
+      // stats so it never chases the cursor or blocks neighboring boxes.
+      const anchor = {
+        point: modelData,
+        x: margin.left + centerX,
+        yTop: margin.top + yScale(max),
+      };
+
       boxGroup
         .style("cursor", "pointer")
         .on("mouseenter", function () {
@@ -311,120 +340,35 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .select("rect")
             .attr("fill-opacity", 0.5);
 
-          const tooltip = g.append("g").attr("class", "box-tooltip");
-
-          const tooltipRect = tooltip
-            .append("rect")
-            .attr("x", 0)
-            .attr("y", -40)
-            .attr("height", 80)
-            .attr("fill", themeColors.tooltipBg)
-            .attr("stroke", color)
-            .attr("stroke-width", 1)
-            .attr("rx", 6)
-            .attr("opacity", 0.95);
-
-          const tooltipLines = [
-            {
-              text: modelData.model,
-              y: -25,
-              size: "12px",
-              weight: "bold",
-              fill: themeColors.tooltipText,
-            },
-            {
-              text: `Count: ${modelData.stats.count}`,
-              y: -8,
-              size: "10px",
-              weight: "normal",
-              fill: themeColors.tooltipSecondary,
-            },
-            {
-              text: `Mean: ${modelData.stats.mean.toFixed(0)}ms`,
-              y: 6,
-              size: "10px",
-              weight: "normal",
-              fill: themeColors.tooltipSecondary,
-            },
-            {
-              text: `Median: ${modelData.quartiles.median.toFixed(0)}ms`,
-              y: 20,
-              size: "10px",
-              weight: "normal",
-              fill: themeColors.tooltipSecondary,
-            },
-            {
-              text: `Std: ${modelData.stats.std.toFixed(0)}ms`,
-              y: 34,
-              size: "10px",
-              weight: "normal",
-              fill: themeColors.tooltipSecondary,
-            },
-          ];
-
-          const tooltipNodes = tooltipLines.map((line) => {
-            const node = tooltip
-              .append("text")
-              .attr("x", 8)
-              .attr("y", line.y)
-              .attr("fill", line.fill)
-              .attr("font-size", line.size)
-              .attr("font-weight", line.weight)
-              .text(line.text);
-            return {
-              node,
-              width: node.node()?.getComputedTextLength() ?? 0,
-              size: line.size,
-            };
-          });
-
-          const tooltipTextWidth = tooltipNodes.reduce(
-            (max, n) => Math.max(max, n.width),
-            0
-          );
-          const tooltipWidth = Math.min(
-            chartWidth,
-            Math.max(140, tooltipTextWidth + 16)
-          );
-          tooltipRect.attr("width", tooltipWidth);
-
-          const innerWidth = tooltipWidth - 16;
-          tooltipNodes.forEach(({ node, width, size }) => {
-            if (width > innerWidth && width > 0) {
-              const baseSize = parseFloat(size);
-              node.attr("font-size", `${baseSize * (innerWidth / width)}px`);
-            }
-          });
-
-          const tooltipX = Math.max(
-            0,
-            Math.min(
-              centerX + 30 + tooltipWidth > chartWidth
-                ? centerX - 30 - tooltipWidth
-                : centerX + 30,
-              chartWidth - tooltipWidth
-            )
-          );
-          tooltip.attr(
-            "transform",
-            `translate(${tooltipX}, ${yScale(median)})`
+          setTip((t) =>
+            t?.pinned && t.point.model === modelData.model
+              ? t
+              : { ...anchor, pinned: false }
           );
         })
         .on("mouseleave", function () {
           d3.select(this)
             .select("rect")
             .attr("fill-opacity", 0.3);
-
-          g.select(".box-tooltip").remove();
+        })
+        .on("click", (event: MouseEvent) => {
+          event.stopPropagation();
+          setTip((t) =>
+            t?.pinned && t.point.model === modelData.model
+              ? null
+              : { ...anchor, pinned: true }
+          );
         });
     });
+
+    svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
   }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
   // dimensions at their initial value once data arrives.
   return (
-    <div ref={containerRef} className="w-full">
+    <div ref={containerRef} className="relative w-full">
       {data.data.length === 0 ? (
         <div className="h-64 flex items-center justify-center text-text-secondary">
           <p>No data available for box plot</p>
@@ -437,6 +381,77 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           className="overflow-visible"
           style={{ background: "transparent" }}
         />
+      )}
+      {tip && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute z-10 whitespace-nowrap text-xs"
+          style={{
+            left: Math.min(Math.max(tip.x, 90), dimensions.width - 90),
+            top: tip.yTop,
+            transform: "translate(-50%, calc(-100% - 8px))",
+            transition: "left 150ms ease-out, top 150ms ease-out",
+            pointerEvents: tip.pinned ? "auto" : "none",
+            backgroundColor: "var(--color-surface-tooltip)",
+            border: `1px solid ${getModelColor(tip.point.model)}`,
+            borderRadius: "8px",
+            padding: tip.pinned ? "6px 24px 6px 10px" : "6px 10px",
+            boxShadow: "0 2px 8px rgba(10, 10, 10, 0.08)"
+          }}
+        >
+          {tip.pinned && (
+            <button
+              aria-label="Close"
+              onClick={() => setTip(null)}
+              style={{
+                position: "absolute",
+                top: "4px",
+                right: "6px",
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                lineHeight: 1,
+                color: "var(--color-text-on-tooltip-secondary)"
+              }}
+            >
+              ✕
+            </button>
+          )}
+          <p
+            style={{
+              margin: 0,
+              fontWeight: "bold",
+              color: "var(--color-text-on-tooltip)"
+            }}
+          >
+            {tip.point.model}
+          </p>
+          {(tip.pinned
+            ? [
+                ["Count", `${tip.point.stats.count}`],
+                ["Mean", `${tip.point.stats.mean.toFixed(0)}ms`],
+                ["Median", `${tip.point.quartiles.median.toFixed(0)}ms`],
+                ["Std", `${tip.point.stats.std.toFixed(0)}ms`]
+              ]
+            : [
+                [
+                  "Median",
+                  `${tip.point.quartiles.median.toFixed(0)}ms · click for details`
+                ]
+              ]
+          ).map(([label, value]) => (
+            <p
+              key={label}
+              style={{
+                margin: 0,
+                color: "var(--color-text-on-tooltip-secondary)"
+              }}
+            >
+              {label}: {value}
+            </p>
+          ))}
+        </div>
       )}
     </div>
   );
