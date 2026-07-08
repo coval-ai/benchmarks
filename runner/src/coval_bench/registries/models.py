@@ -64,7 +64,6 @@ _ACTIVE = ModelStatus.ACTIVE
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
 _REALTIME = ModelTag.REALTIME
-_BATCH = ModelTag.BATCH
 _MULTI = ModelTag.MULTILINGUAL
 _VAD = ModelTag.VAD
 _DIAR = ModelTag.DIARIZATION
@@ -274,30 +273,16 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_STT,
         provider="google",
-        model="short",
-        tags=(_BATCH, _MULTI),
-        status=_RETIRED,
-    ),
-    RegisteredModel(
-        benchmark=_STT,
-        provider="google",
-        model="long",
-        tags=(_BATCH, _MULTI),
-        status=_RETIRED,
-    ),
-    RegisteredModel(
-        benchmark=_STT,
-        provider="google",
-        model="telephony",
-        tags=(_REALTIME, _MULTI, _VAD),
-        status=_RETIRED,
-    ),
-    RegisteredModel(
-        benchmark=_STT,
-        provider="google",
         model="chirp_2",
         tags=(_REALTIME, _MULTI, _VAD),
-        status=_RETIRED,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="google",
+        model="chirp_3",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
     ),
     #######
     # TTS #
