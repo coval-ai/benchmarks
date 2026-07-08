@@ -236,18 +236,21 @@ class RunWriter:
             await conn.commit()
 
     async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
-        """True if any S2S row already references this Coval run.
+        """True if a succeeded or partial run already holds rows for this Coval run.
 
         S2S rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
         fetch job skip a re-pulled run so a retry or stale re-pull doesn't
-        double-write the day's bucket.
+        double-write the day's bucket. Rows from failed runs don't count: they
+        never reach the bucket, so a retry must stay free to re-ingest the run.
         """
         sql = """
             SELECT 1
-            FROM benchmarks_v2.results
-            WHERE provider = %s
-              AND benchmark = 'S2S'
-              AND split_part(audio_filename, '/', 1) = %s
+            FROM benchmarks_v2.results r
+            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+            WHERE r.provider = %s
+              AND r.benchmark = 'S2S'
+              AND split_part(r.audio_filename, '/', 1) = %s
+              AND rn.status IN ('succeeded', 'partial')
             LIMIT 1
         """
         async with self._pool.connection() as conn:

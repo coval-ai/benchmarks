@@ -216,7 +216,12 @@ async def _fetch_one_provider(
         return status
     except Exception as exc:
         if run_pk is not None:
-            await writer.finish_run(run_pk, status=RunStatus.FAILED, error=str(exc))
+            try:
+                await writer.finish_run(run_pk, status=RunStatus.FAILED, error=str(exc))
+            except Exception:
+                logger.warning(
+                    "finish_run_failed", provider=spec.provider, run_id=run_pk, exc_info=True
+                )
         logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
         return RunStatus.FAILED
 
