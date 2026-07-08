@@ -2,11 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const modelColors: Record<string, string> = {
-  // OpenAI — red family (#E74C3C). Both TTS and STT use the same red range.
+  // OpenAI — red family (#E74C3C). TTS, STT, and S2S all use the same red range.
   "gpt-4o-mini-tts": "#C0392B",
   "gpt-realtime-whisper": "#E74C3C",
   "gpt-4o-transcribe": "#CD6155",
   "gpt-4o-mini-transcribe": "#922B21",
+  "gpt-realtime": "#EC7063", // S2S
+
+  // Google — blue family (#4285F4). Gemini realtime (S2S).
+  "gemini-live": "#4285F4",
 
   // ElevenLabs — orange family (#F39C12). TTS + STT scribe all span light→dark orange.
   eleven_multilingual_v2: "#F5B041",
@@ -77,5 +81,6 @@ export const providerColors: Record<string, string> = {
   Hume: "#A855F7",
   "Inworld AI": "#6366F1",
   xAI: "#EC4899",
-  Soniox: "#C9A227"
+  Soniox: "#C9A227",
+  Google: "#4285F4"
 };

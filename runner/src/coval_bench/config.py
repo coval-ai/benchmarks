@@ -92,6 +92,15 @@ class Settings(BaseSettings):
     # the Google STT provider is enabled (optional `google-stt` extra).
     google_project_id: str | None = None
 
+    # --- Coval API (S2S fetch job) ---
+    # X-API-Key for the Coval API. SecretStr so it never lands in a log.
+    coval_api_key: SecretStr | None = None
+    coval_api_base: str = "https://api.coval.dev/v1"
+    # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
+    coval_s2s_latency_metric_id: str | None = None
+    coval_s2s_openai_agent_id: str | None = None
+    coval_s2s_gemini_agent_id: str | None = None
+
     # --- Analytics ---
     posthog_project_token: str = ""
     posthog_host: str = "https://us.i.posthog.com"
