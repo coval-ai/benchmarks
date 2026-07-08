@@ -66,7 +66,7 @@ def _stub_writer() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_per_clip_rows_maps_values() -> None:
-    values = [
+    values: list[dict[str, Any]] = [
         {"simulation_output_id": "s1", "value": 0.842},
         {"simulation_output_id": "s2", "value": None},
         {"value": 0.5},  # missing sim id -> index fallback in the clip key
@@ -121,7 +121,7 @@ async def test_fetch_one_provider_succeeded() -> None:
 @pytest.mark.asyncio
 async def test_fetch_one_provider_partial() -> None:
     writer = _stub_writer()
-    values = [
+    values: list[dict[str, Any]] = [
         {"simulation_output_id": "s1", "value": 0.5},
         {"simulation_output_id": "s2", "value": None},
     ]
