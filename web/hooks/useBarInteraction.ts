@@ -29,8 +29,11 @@ export const useBarInteraction = () => {
     });
   }, []);
 
+  const clearWERBars = useCallback(() => setClickedWERBars(new Set()), []);
+
   return {
     clickedWERBars,
-    handleWERBarClick
+    handleWERBarClick,
+    clearWERBars
   };
 };

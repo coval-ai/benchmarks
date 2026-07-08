@@ -133,7 +133,7 @@ export function useDashboardState(page: "tts" | "stt") {
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
 
   const isMobile = useMobileDetection();
-  const { clickedWERBars, handleWERBarClick } =
+  const { clickedWERBars, handleWERBarClick, clearWERBars } =
     useBarInteraction();
 
   const deferredSelectedModels = useDeferredValue(selectedModels);
@@ -224,7 +224,7 @@ export function useDashboardState(page: "tts" | "stt") {
   const werBarData = chartData.getWERBarData();
 
   const werBarDataWithColors = useMemo(() => {
-    const hasSelection = clickedWERBars.size > 0;
+    const hasSelection = werBarData.some((item) => clickedWERBars.has(item.model));
     return werBarData.map((item) => ({
       ...item,
       fill: getModelColor(item.model),
@@ -375,6 +375,8 @@ export function useDashboardState(page: "tts" | "stt") {
     werBarDataWithColors,
 
     // Bar interaction
+    clickedWERBars,
     handleWERBarClick,
+    clearWERBars,
   };
 }
