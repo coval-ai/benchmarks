@@ -9,7 +9,7 @@ This provider is gated on the optional extra ``google-stt``:
 
 Auth: GOOGLE_APPLICATION_CREDENTIALS env var (path to service-account JSON
       mounted as a Secret-as-volume in Cloud Run).
-Models: short, long, telephony, chirp_2 (default).
+Models: chirp_2 (default), chirp_3.
 """
 
 from __future__ import annotations
@@ -42,8 +42,17 @@ if TYPE_CHECKING:
     # These type stubs may not be present; used only for static analysis.
     pass
 
-_RECOGNIZER_PATTERN = "projects/{project}/locations/us-central1/recognizers/_"
-_API_ENDPOINT = "us-central1-speech.googleapis.com"
+_RECOGNIZER_PATTERN = "projects/{project}/locations/{location}/recognizers/_"
+
+# chirp_3 isn't served in us-central1; it streams from global.
+_MODEL_LOCATIONS = {"chirp_3": "global"}
+_DEFAULT_LOCATION = "us-central1"
+
+
+def _endpoint_for_location(location: str) -> str:
+    if location == "global":
+        return "speech.googleapis.com"
+    return f"{location}-speech.googleapis.com"
 
 
 class GoogleSTTProvider(STTProvider):
@@ -53,7 +62,7 @@ class GoogleSTTProvider(STTProvider):
     Requires:      GOOGLE_APPLICATION_CREDENTIALS pointing to a service-account JSON.
     """
 
-    _VALID_MODELS = frozenset({"default", "short", "long", "telephony", "chirp_2"})
+    _VALID_MODELS = frozenset({"default", "chirp_2", "chirp_3"})
 
     def __init__(
         self,
@@ -77,7 +86,10 @@ class GoogleSTTProvider(STTProvider):
         _ = api_key
         self._model = model
         self._project_id = project_id
-        self._client: Any = SpeechClient(client_options=ClientOptions(api_endpoint=_API_ENDPOINT))
+        self._location = _MODEL_LOCATIONS.get(self._get_model_name(), _DEFAULT_LOCATION)
+        self._client: Any = SpeechClient(
+            client_options=ClientOptions(api_endpoint=_endpoint_for_location(self._location))
+        )
 
     @property
     def name(self) -> str:
@@ -94,7 +106,7 @@ class GoogleSTTProvider(STTProvider):
         return "chirp_2" if self._model == "default" else self._model
 
     def _get_recognizer_name(self) -> str:
-        return _RECOGNIZER_PATTERN.format(project=self._project_id)
+        return _RECOGNIZER_PATTERN.format(project=self._project_id, location=self._location)
 
     async def measure_ttft(
         self,

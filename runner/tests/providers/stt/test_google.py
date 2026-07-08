@@ -159,6 +159,11 @@ def test_provider_name_chirp2() -> None:
     assert p.name == "google-chirp_2"
 
 
+def test_provider_name_chirp3() -> None:
+    p = _make_provider("chirp_3")
+    assert p.name == "google-chirp_3"
+
+
 # ---------------------------------------------------------------------------
 # get_model_name mapping
 # ---------------------------------------------------------------------------
@@ -169,9 +174,26 @@ def test_get_model_name_default() -> None:
     assert p._get_model_name() == "chirp_2"
 
 
-def test_get_model_name_long() -> None:
-    p = _make_provider("long")
-    assert p._get_model_name() == "long"
+def test_get_model_name_chirp3() -> None:
+    p = _make_provider("chirp_3")
+    assert p._get_model_name() == "chirp_3"
+
+
+# ---------------------------------------------------------------------------
+# Region routing
+# ---------------------------------------------------------------------------
+
+
+def test_chirp2_uses_us_central1() -> None:
+    p = _make_provider("chirp_2")
+    assert p._location == "us-central1"
+    assert "us-central1" in p._get_recognizer_name()
+
+
+def test_chirp3_uses_global() -> None:
+    p = _make_provider("chirp_3")
+    assert p._location == "global"
+    assert "locations/global/" in p._get_recognizer_name()
 
 
 # ---------------------------------------------------------------------------

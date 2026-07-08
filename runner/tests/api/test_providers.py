@@ -44,10 +44,11 @@ async def test_disabled_flag_exposed(client: AsyncClient) -> None:
     response = await client.get("/v1/providers")
     data = response.json()
 
-    # google STT models (chirp_2, long, telephony, short) are all disabled in the matrix
+    # google STT chirp models are active — must be disabled=False
     google_entry = next(e for e in data["stt"] if e["provider"] == "google")
-    chirp_2 = next(m for m in google_entry["models"] if m["model"] == "chirp_2")
-    assert chirp_2["disabled"] is True
+    for active in ("chirp_2", "chirp_3"):
+        model = next(m for m in google_entry["models"] if m["model"] == active)
+        assert model["disabled"] is False, f"{active} must be disabled=False"
 
     # deepgram nova-3 is an active model — must be disabled=False
     deepgram_entry = next(e for e in data["stt"] if e["provider"] == "deepgram")
