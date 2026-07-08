@@ -63,10 +63,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# XDG_CACHE_HOME: nonroot has no home (--no-create-home), so the dataset cache lands in /tmp.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    XDG_CACHE_HOME=/tmp
 
 COPY --from=build --chown=65532:65532 /app /app
 

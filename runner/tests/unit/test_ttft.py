@@ -60,9 +60,10 @@ def test_ttfs_zero() -> None:
     assert compute_ttfs(5.0, 5.0) == pytest.approx(0.0)
 
 
-def test_ttfs_raises_on_negative() -> None:
-    with pytest.raises(ValueError, match="ttfs must be >= 0"):
-        compute_ttfs(4.9, 5.0)
+def test_ttfs_clamps_early_final_to_zero() -> None:
+    """A final ahead of the end-of-speech anchor clamps to the 0.0 floor, not an error."""
+    assert compute_ttfs(4.9, 5.0) == pytest.approx(0.0)
+    assert compute_ttfs(3.0, 5.0) == pytest.approx(0.0)
 
 
 def test_ttfs_returns_float() -> None:

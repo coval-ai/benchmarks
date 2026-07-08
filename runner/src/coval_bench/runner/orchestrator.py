@@ -369,9 +369,8 @@ async def _run_stt_item(
                 audio_to_final_seconds=audio_to_final,
             )
 
-        # 2b. TTFS — time-to-final from VAD end-of-speech (primary headline metric). Status
-        # tracks ttfs_value (not audio_to_final): a missing offset or a failed calculation
-        # fails the row instead of passing as a null-valued success, and calc errors surface.
+        # 2b. TTFS — time-to-final from VAD end-of-speech (primary headline metric). A missing
+        # offset fails the row; an early final (ahead of the anchor) clamps to 0 in compute_ttfs.
         ttfs_value: float | None = None
         ttfs_calc_error: str | None = None
         if audio_to_final is not None and isinstance(speech_end_offset_ms, (int, float)):
@@ -607,19 +606,17 @@ async def _run_tts_item(
             )
             ttfa_value = ttfa_ms
 
-            # Transport-contamination gate: a clean measurement taken over HTTP/1.1 or a cold
-            # socket is not comparable to the WebSocket cohort. Override only a would-be
-            # SUCCESS — a real provider error or empty result keeps its own message.
+            # Transport-contamination gate: a measurement over HTTP/1.1 or a cold socket is not
+            # comparable to the warm-pool cohort, so its value is dropped to a null-valued success
+            # (excluded from aggregation, not a failure). Override only a would-be SUCCESS.
             if ttfa_status is ResultStatus.SUCCESS and tts_result is not None:
                 if tts_result.http_version is not None and tts_result.http_version != "HTTP/2":
-                    ttfa_status = ResultStatus.FAILED
                     ttfa_error = _truncate(
                         f"TTFA measured over {tts_result.http_version}; not comparable "
                         "(no HTTP/2 multiplexing, TTFA reabsorbs TCP+TLS)"
                     )
                     ttfa_value = None
                 elif tts_result.connection_reused is False:
-                    ttfa_status = ResultStatus.FAILED
                     ttfa_error = _truncate(
                         "TTFA measured over a cold connection; not comparable "
                         "(TTFA reabsorbs TCP+TLS)"

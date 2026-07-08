@@ -41,12 +41,6 @@ def compute_ttfs(audio_to_final_seconds: float, speech_end_offset_seconds: float
         speech_end_offset_seconds: VAD end-of-speech offset for the clip.
 
     Returns:
-        Elapsed time in seconds (float).
-
-    Raises:
-        ValueError: If the result would be negative.
+        Elapsed time in seconds, clamped at 0.0 for finals ahead of the anchor.
     """
-    ttfs = audio_to_final_seconds - speech_end_offset_seconds
-    if ttfs < 0:
-        raise ValueError("ttfs must be >= 0 (speech_end_offset exceeds audio_to_final)")
-    return ttfs
+    return max(0.0, audio_to_final_seconds - speech_end_offset_seconds)
