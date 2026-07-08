@@ -19,6 +19,7 @@ import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
+import MetricInfo from "@/components/shared/MetricInfo";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -92,7 +93,9 @@ const LatencyAccuracySection: React.FC = () => {
           label="Latency vs Accuracy"
           description={description}
           stat={{
-            label: `Avg ${latencyLabel}`,
+            label: (
+              <MetricInfo metric={metric} align="right">{`Avg ${latencyLabel}`}</MetricInfo>
+            ),
             value: `${avgLatency.toFixed(0)} ms`,
           }}
         />
@@ -102,7 +105,7 @@ const LatencyAccuracySection: React.FC = () => {
         <div className="h-64" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart
-              margin={{ top: 10, right: 8, left: 0, bottom: 20 }}
+              margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
             >
               <CartesianGrid
                 stroke={themeColors.grid}
@@ -118,16 +121,6 @@ const LatencyAccuracySection: React.FC = () => {
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${parseFloat((Number(value) / 1000).toFixed(2))}s`}
-                label={{
-                  value: latencyLabel,
-                  position: "insideBottom",
-                  offset: -20,
-                  style: {
-                    textAnchor: "middle",
-                    fill: themeColors.axisText,
-                    fontSize: "14px",
-                  },
-                }}
               />
               <YAxis
                 dataKey="y"
@@ -163,6 +156,12 @@ const LatencyAccuracySection: React.FC = () => {
               ))}
             </ScatterChart>
           </ResponsiveContainer>
+        </div>
+        <div
+          className="mt-1 text-center text-sm"
+          style={{ color: themeColors.axisText }}
+        >
+          <MetricInfo metric={metric}>{latencyLabel}</MetricInfo>
         </div>
       </Card>
     </div>

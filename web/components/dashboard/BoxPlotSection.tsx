@@ -9,6 +9,7 @@ import { normalizeModelName } from "@/lib/utils/formatters";
 import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricInfo from "@/components/shared/MetricInfo";
 import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
@@ -39,7 +40,9 @@ const BoxPlotSection: React.FC = () => {
           label="Latency Variation"
           description={description}
           stat={{
-            label: `Average ${latencyLabel}`,
+            label: (
+              <MetricInfo metric={activeMetric} align="right">{`Average ${latencyLabel}`}</MetricInfo>
+            ),
             value: `${avgLatency.toFixed(0)} ms`,
           }}
         />

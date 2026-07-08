@@ -26,6 +26,7 @@ import {
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MetricInfo from "@/components/shared/MetricInfo";
 import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
@@ -314,7 +315,9 @@ const TimelineChart: React.FC = () => {
           }
           description={description}
           stat={{
-            label: `Average ${metricLabel}`,
+            label: (
+              <MetricInfo metric={metric} align="right">{`Average ${metricLabel}`}</MetricInfo>
+            ),
             value: `${avgValue.toFixed(0)} ms`,
           }}
         />

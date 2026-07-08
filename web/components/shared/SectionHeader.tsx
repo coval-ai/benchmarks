@@ -12,7 +12,7 @@ interface SectionHeaderProps {
     detailed: string;
   };
   stat?: {
-    label: string;
+    label: React.ReactNode;
     value: string;
   };
   /** Optional hint shown after the "About this benchmark" link, separated by an interpunct. */
