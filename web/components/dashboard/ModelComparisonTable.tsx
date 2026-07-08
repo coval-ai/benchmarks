@@ -28,6 +28,9 @@ const PERCENTILES: { key: LatencyPercentile; hint?: string }[] = [
   { key: "p100", hint: "slowest run" }
 ];
 
+// p95: the tail latency real-time voice users actually feel.
+const DEFAULT_PERCENTILE_IDX = 5;
+
 const COLUMNS: {
   key: ColumnKey;
   label: string;
@@ -43,12 +46,12 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   getProviderForModel
 }) => {
   const activeTab = useActiveTab();
-  const [percentileIdx, setPercentileIdx] = useState(2);
+  const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
 
-  const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[2])!;
+  const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[DEFAULT_PERCENTILE_IDX])!;
 
   // One pass per (data, percentile, sort) change: pull the selected latency
   // percentile, precompute the relative bar fractions, sort, and note the best
