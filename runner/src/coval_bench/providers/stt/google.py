@@ -52,7 +52,7 @@ class GoogleSTTProvider(STTProvider):
     """Google Cloud Speech-to-Text v2 streaming provider.
 
     Install with:  uv sync --extra google-stt
-    Requires:      GOOGLE_APPLICATION_CREDENTIALS pointing to a service-account JSON.
+    Requires:      Application Default Credentials (the runner service account in Cloud Run).
     """
 
     _VALID_MODELS = frozenset({"default", "chirp_2", "chirp_3"})
