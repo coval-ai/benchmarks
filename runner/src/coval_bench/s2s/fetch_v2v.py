@@ -74,6 +74,7 @@ def _dataset_sha256() -> str:
         )
         return hashlib.sha256(ref.read_bytes()).hexdigest()
     except Exception:
+        logger.warning("dataset_sha256_failed", dataset_id=DATASET_ID, exc_info=True)
         return "unknown"
 
 
@@ -173,24 +174,27 @@ async def _fetch_one_provider(
     Skips (no write) if this Coval run was already ingested, so a retry or a
     re-pulled stale run doesn't double-count and the last good data stays.
     """
-    coval_run_id = await latest_completed_run_id(client, agent_id)
-    if coval_run_id is None:
-        logger.warning("no_completed_run", provider=spec.provider, agent_attr=spec.agent_id_attr)
-        return RunStatus.FAILED
-    if await writer.coval_run_ingested(provider=spec.provider, coval_run_id=coval_run_id):
-        logger.info("run_already_ingested", provider=spec.provider, coval_run_id=coval_run_id)
-        return RunStatus.SUCCEEDED
-
-    run = await writer.start_run(
-        runner_sha=runner_sha,
-        dataset_id=DATASET_ID,
-        dataset_sha256=_dataset_sha256(),
-        scheduled_at=scheduled_at,
-    )
-    if run.id is None:  # pragma: no cover -- start_run always returns an id
-        raise RuntimeError("start_run returned a run with no id")
-    run_pk = run.id
+    run_pk: int | None = None
     try:
+        coval_run_id = await latest_completed_run_id(client, agent_id)
+        if coval_run_id is None:
+            logger.warning(
+                "no_completed_run", provider=spec.provider, agent_attr=spec.agent_id_attr
+            )
+            return RunStatus.FAILED
+        if await writer.coval_run_ingested(provider=spec.provider, coval_run_id=coval_run_id):
+            logger.info("run_already_ingested", provider=spec.provider, coval_run_id=coval_run_id)
+            return RunStatus.SUCCEEDED
+
+        run = await writer.start_run(
+            runner_sha=runner_sha,
+            dataset_id=DATASET_ID,
+            dataset_sha256=_dataset_sha256(),
+            scheduled_at=scheduled_at,
+        )
+        if run.id is None:  # pragma: no cover -- start_run always returns an id
+            raise RuntimeError("start_run returned a run with no id")
+        run_pk = run.id
         rows = await per_clip_rows(
             client, run_pk=run_pk, coval_run_id=coval_run_id, metric_id=metric_id, spec=spec
         )
@@ -211,7 +215,8 @@ async def _fetch_one_provider(
                 logger.warning("refresh_bucket_failed", provider=spec.provider, exc_info=True)
         return status
     except Exception as exc:
-        await writer.finish_run(run_pk, status=RunStatus.FAILED, error=str(exc))
+        if run_pk is not None:
+            await writer.finish_run(run_pk, status=RunStatus.FAILED, error=str(exc))
         logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
         return RunStatus.FAILED
 

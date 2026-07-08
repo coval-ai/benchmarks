@@ -250,9 +250,11 @@ class RunWriter:
               AND split_part(audio_filename, '/', 1) = %s
             LIMIT 1
         """
-        async with self._pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(sql, (provider, coval_run_id))
-            row = await cur.fetchone()
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, (provider, coval_run_id))
+                row = await cur.fetchone()
+            await conn.commit()
         return row is not None
 
     async def refresh_stats_matviews(self) -> None:
