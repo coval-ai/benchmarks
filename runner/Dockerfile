@@ -30,8 +30,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 # at metadata-validation time when uv builds the editable wheel for this package.
 COPY pyproject.toml uv.lock README.md ./
 
-# Install production dependencies (no dev, no extras) into /app/.venv
-RUN uv sync --frozen --no-dev
+# Install production dependencies (no dev) into /app/.venv
+RUN uv sync --frozen --no-dev --extra google-stt
 
 # Copy source tree + alembic config (db/cli.py reads /app/alembic.ini)
 COPY src/ ./src/
