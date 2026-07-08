@@ -37,6 +37,8 @@ _SPEECH_MODEL_MAP: dict[str, str] = {
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 
+_FORCE_ENDPOINT_MODELS = frozenset({"universal-3.5-pro"})
+
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
 # semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
 # value could let a confident short utterance auto-finalize before our signal.
@@ -97,10 +99,9 @@ class AssemblyAIProvider(STTProvider):
 
         try:
             speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = (
-                f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
-                f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
-            )
+            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
+            if self._model in _FORCE_ENDPOINT_MODELS:
+                url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
             extra_params = _MODEL_EXTRA_PARAMS.get(self._model)
             if extra_params:
                 url += "&" + urlencode(extra_params)
@@ -161,13 +162,11 @@ class AssemblyAIProvider(STTProvider):
             async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
                 result.audio_start_time = start
                 await ws.send(chunk)
-            # Force finalization at speech-end (TTFS parity), then wait for the final
-            # before terminating so the close can't race it. Clear first: the event may
-            # already be set by an earlier final, which would make the wait a no-op.
-            final_event.clear()
-            await ws.send(json.dumps({"type": "ForceEndpoint"}))
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
+            if self._model in _FORCE_ENDPOINT_MODELS:
+                final_event.clear()
+                await ws.send(json.dumps({"type": "ForceEndpoint"}))
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
             await ws.send(json.dumps({"type": "Terminate"}))
         except Exception as exc:
             logger.warning(
