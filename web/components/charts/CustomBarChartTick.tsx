@@ -13,17 +13,38 @@ const mobileFontSize = "12px";
 const CustomBarChartTick: React.FC<{
   x?: number;
   y?: number;
+  width?: number;
+  visibleTicksCount?: number;
   payload?: { value: string };
   getProviderForModel: (model: string) => string;
   isMobile?: boolean;
-}> = ({ x = 0, y = 0, payload, getProviderForModel, isMobile = false }) => {
+}> = ({
+  x = 0,
+  y = 0,
+  width = 0,
+  visibleTicksCount = 1,
+  payload,
+  getProviderForModel,
+  isMobile = false,
+}) => {
   const themeColors = useThemeColors();
 
   if (!payload) return null;
 
   const model = payload.value;
-  const normalizedModel = normalizeModelName(model);
+  const fullName = normalizeModelName(model);
   const provider = getProviderForModel(model);
+
+  // Labels sit on a 45° diagonal, so adjacent labels are slot·sin(45°) apart
+  // perpendicular to the text. Two 12px lines need ~40px of slot; below that
+  // the provider line collides with the neighbour's model line, so drop it
+  // and shorten the name (the tooltip and <title> still carry the full info).
+  const slot = visibleTicksCount > 0 ? width / visibleTicksCount : width;
+  const showProvider = slot >= 40;
+  const maxChars = !showProvider ? 12 : isMobile ? 14 : 18;
+  const normalizedModel =
+    fullName.length > maxChars ? `${fullName.slice(0, maxChars - 1)}…` : fullName;
+  const showTitle = !showProvider || normalizedModel !== fullName;
 
   // Render every label on a single 45° diagonal so they don't collide when many
   // models are shown: model name (bold) on the first line, provider below it,
@@ -42,18 +63,21 @@ const CustomBarChartTick: React.FC<{
           fontSize={fontSize}
           fontWeight="bold"
         >
+          {showTitle && <title>{`${provider} ${fullName}`}</title>}
           {normalizedModel}
         </text>
-        <text
-          x={0}
-          y={0}
-          dy={28}
-          textAnchor="end"
-          fill={themeColors.axisText}
-          fontSize={providerFontSize}
-        >
-          {provider}
-        </text>
+        {showProvider && (
+          <text
+            x={0}
+            y={0}
+            dy={28}
+            textAnchor="end"
+            fill={themeColors.axisText}
+            fontSize={providerFontSize}
+          >
+            {provider}
+          </text>
+        )}
       </g>
     </g>
   );
