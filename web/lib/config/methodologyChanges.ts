@@ -11,6 +11,16 @@ export interface MethodologyChange {
   detail: string;
 }
 
+// With an explicit time (an offset-qualified "HH:MM:SS±hh:mm") the marker pins
+// to that exact instant; date-only entries anchor at UTC noon so the marker
+// lands on the intended calendar day in every inhabited timezone (UTC midnight
+// would shift to the previous day for the Americas).
+export function methodologyChangeTs(change: MethodologyChange): number {
+  return new Date(
+    change.time ? `${change.date}T${change.time}` : `${change.date}T12:00:00Z`
+  ).getTime();
+}
+
 export const methodologyChanges: MethodologyChange[] = [
   {
     date: "2026-06-01",
@@ -50,6 +60,7 @@ export const methodologyChanges: MethodologyChange[] = [
   },
   {
     date: "2026-07-07",
+    time: "18:00:00-07:00",
     metrics: ["wer"],
     title: "WER normalization switched to the Whisper text normalizer",
     detail:

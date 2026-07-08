@@ -18,6 +18,7 @@ import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import CustomBarChartTick from "@/components/charts/CustomBarChartTick";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import MethodologyNote from "@/components/dashboard/MethodologyNote";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -69,6 +70,7 @@ const AccuracyBarSection: React.FC = () => {
           hint="Click bar to compare models"
           stat={{ label: "Avg WER", value: `${avgWER.toFixed(1)}%` }}
         />
+        <MethodologyNote metric="wer" />
         <div className="h-96" onMouseEnter={trackChartHover}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
