@@ -40,13 +40,16 @@ def compute_ttfs(audio_to_final_seconds: float, speech_end_offset_seconds: float
         audio_to_final_seconds: Wall-clock seconds from audio send to final transcript.
         speech_end_offset_seconds: VAD end-of-speech offset for the clip.
 
-    Returns:
-        Elapsed time in seconds (float).
+    A provider whose endpointing fires before the shared anchor produces a
+    final ahead of it, which would make the raw difference negative. Such a
+    provider finalized at or before end-of-speech, so its finalization latency
+    is clamped to the metric floor of ``0.0`` rather than treated as an error.
 
-    Raises:
-        ValueError: If the result would be negative.
+    Args:
+        audio_to_final_seconds: Wall-clock seconds from audio send to final transcript.
+        speech_end_offset_seconds: VAD end-of-speech offset for the clip.
+
+    Returns:
+        Elapsed time in seconds (float), never negative.
     """
-    ttfs = audio_to_final_seconds - speech_end_offset_seconds
-    if ttfs < 0:
-        raise ValueError("ttfs must be >= 0 (speech_end_offset exceeds audio_to_final)")
-    return ttfs
+    return max(0.0, audio_to_final_seconds - speech_end_offset_seconds)

@@ -825,8 +825,9 @@ async def test_audio_file_cleanup(settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tts_http1_downgrade_fails_ttfa_row(settings: Settings) -> None:
-    """An HTTP/1.1 TTFA row is marked FAILED; WER stays SUCCESS; run is PARTIAL."""
+async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
+    """An HTTP/1.1 TTFA row is a null-valued success (excluded, not a failure); WER stays
+    SUCCESS; run stays SUCCEEDED rather than being dragged to PARTIAL."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
@@ -913,7 +914,7 @@ async def test_tts_http1_downgrade_fails_ttfa_row(settings: Settings) -> None:
         wer_rows = [r for r in recorded if r.metric_type == "WER"]
 
         assert len(ttfa_rows) == 1
-        assert ttfa_rows[0].status == ResultStatus.FAILED
+        assert ttfa_rows[0].status == ResultStatus.SUCCESS
         assert ttfa_rows[0].metric_value is None
         assert "HTTP/1.1" in ttfa_rows[0].error
         assert ttfa_rows[0].http_version == "HTTP/1.1"
@@ -921,12 +922,13 @@ async def test_tts_http1_downgrade_fails_ttfa_row(settings: Settings) -> None:
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
 
-        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.PARTIAL
+        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio
-async def test_tts_cold_connection_fails_ttfa_row(settings: Settings) -> None:
-    """A warm-h2 row that opened a cold connection is failed, not averaged in."""
+async def test_tts_cold_connection_nulls_ttfa_row(settings: Settings) -> None:
+    """A warm-h2 row that opened a cold connection is a null-valued success: kept out of
+    the average (null metric_value) but not a failure that drags the run to PARTIAL."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
@@ -1014,7 +1016,7 @@ async def test_tts_cold_connection_fails_ttfa_row(settings: Settings) -> None:
         wer_rows = [r for r in recorded if r.metric_type == "WER"]
 
         assert len(ttfa_rows) == 1
-        assert ttfa_rows[0].status == ResultStatus.FAILED
+        assert ttfa_rows[0].status == ResultStatus.SUCCESS
         assert ttfa_rows[0].metric_value is None
         assert "cold connection" in ttfa_rows[0].error
         assert ttfa_rows[0].http_version == "HTTP/2"
@@ -1022,7 +1024,7 @@ async def test_tts_cold_connection_fails_ttfa_row(settings: Settings) -> None:
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
 
-        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.PARTIAL
+        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
 
 
 # ---------------------------------------------------------------------------
@@ -1602,6 +1604,34 @@ async def test_stt_ttfs_status_tracks_value(audio_file: Path, settings: Settings
 
 
 @pytest.mark.asyncio
+async def test_stt_ttfs_early_final_clamps_to_zero(audio_file: Path, settings: Settings) -> None:
+    """A provider that finalizes before the end-of-speech anchor yields a 0.0-valued TTFS
+    success, not a failure that would drag the run to PARTIAL."""
+    early_item = _make_dataset_item(audio_file)
+    early_item.speech_end_offset_ms = 2000.0  # exceeds audio_to_final (0.85 s) → early final
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[early_item],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+        )
+    ttfs = {r.metric_type: r for r in _recorded_rows(writer)}["TTFS"]
+    assert ttfs.status == ResultStatus.SUCCESS
+    assert ttfs.metric_value == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
 async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings) -> None:
     """TTS synth returns (no raise) with no ttfa/audio → TTFA FAILED, no WER row, run FAILED."""
     hume_entry = _registry_entry(Benchmark.TTS, "hume")
@@ -2052,8 +2082,8 @@ async def test_stt_ttfs_crash_not_double_logged(audio_file: Path, settings: Sett
 
 
 @pytest.mark.asyncio
-async def test_tts_transport_gate_logs_item_failure(settings: Settings) -> None:
-    """An HTTP/1.1 contamination failure is surfaced in the per-item summary."""
+async def test_tts_transport_gate_nulls_without_failing(settings: Settings) -> None:
+    """An HTTP/1.1 contaminated TTFA is a null-valued success, not a logged item failure."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
@@ -2102,11 +2132,12 @@ async def test_tts_transport_gate_logs_item_failure(settings: Settings) -> None:
                     matrix_overrides=matrix,
                 )
 
-    failures = _events(captured, "tts_item_failed")
-    assert len(failures) == 1
-    event = failures[0]
-    assert event["item"] == "tts-0001"
-    assert "HTTP/1.1" in event["reasons"]["TTFA"]
+    assert _events(captured, "tts_item_failed") == []
+
+    ttfa = {r.metric_type: r for r in _recorded_rows(writer)}["TTFA"]
+    assert ttfa.status == ResultStatus.SUCCESS
+    assert ttfa.metric_value is None
+    assert "HTTP/1.1" in (ttfa.error or "")
 
 
 # ---------------------------------------------------------------------------
