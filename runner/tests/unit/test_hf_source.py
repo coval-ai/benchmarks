@@ -25,9 +25,17 @@ def test_as_duration_coerces_null_and_junk() -> None:
     assert _as_duration("n/a") == 0.0
 
 
+def _download(root: Path) -> Path:
+    return root
+
+
+def _parse(_source: Path) -> list[Clip]:
+    return []
+
+
 def test_hf_spec_dedups_by_transcript() -> None:
     """Same recording published under two row indices collapses to one clip."""
-    hooks = (lambda root: root, lambda src: [], None)
+    hooks = (_download, _parse, None)
     with patch("coval_bench.datasets.scripts.build._resolve_hooks", return_value=hooks):
         spec = _hf_spec(
             "org/ds",
