@@ -23,9 +23,10 @@ export const POSTHOG_EVENTS = {
 export type PostHogSurface =
   | "tts_dashboard"
   | "stt_dashboard"
+  | "s2s_dashboard"
   | "playground"
   | "overview";
-export type PostHogMode = "tts" | "stt";
+export type PostHogMode = "tts" | "stt" | "s2s";
 export type DashboardChartId =
   | "timeline"
   | "scatter"

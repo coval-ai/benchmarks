@@ -104,10 +104,12 @@ def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
 def _describe() -> ProvidersResponse:
     stt_map = _build_provider_map(Benchmark.STT)
     tts_map = _build_provider_map(Benchmark.TTS)
+    s2s_map = _build_provider_map(Benchmark.S2S)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
         tts=[ProviderInfo(provider=p, models=m) for p, m in sorted(tts_map.items())],
+        s2s=[ProviderInfo(provider=p, models=m) for p, m in sorted(s2s_map.items())],
         tag_categories=_tag_categories(),
     )
 

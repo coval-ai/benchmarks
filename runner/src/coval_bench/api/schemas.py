@@ -49,7 +49,7 @@ class ResultOut(BaseModel):
     provider: str
     model: str
     voice: str | None
-    benchmark: Literal["STT", "TTS"]
+    benchmark: Literal["STT", "TTS", "S2S"]
     metric_type: str
     metric_value: float | None
     metric_units: str | None
@@ -110,7 +110,8 @@ class ProvidersResponse(BaseModel):
 
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
-    # Facet vocabulary in display order, shared across STT and TTS.
+    s2s: list[ProviderInfo]
+    # Facet vocabulary in display order, shared across STT, TTS, and S2S.
     tag_categories: list[TagCategoryOut]
 
 
@@ -184,7 +185,7 @@ class RunsResponse(BaseModel):
 class LeaderboardResponse(BaseModel):
     """Response schema for GET /v1/leaderboard."""
 
-    metric: Literal["WER", "TTFA", "TTFT", "TTFS"]
+    metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
 
