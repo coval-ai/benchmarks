@@ -826,8 +826,7 @@ async def test_audio_file_cleanup(settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
-    """An HTTP/1.1 TTFA row is a null-valued success (excluded, not a failure); WER stays
-    SUCCESS; run stays SUCCEEDED rather than being dragged to PARTIAL."""
+    """HTTP/1.1 TTFA is a null-valued success; WER stays SUCCESS; run stays SUCCEEDED."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
@@ -927,8 +926,7 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
 
 @pytest.mark.asyncio
 async def test_tts_cold_connection_nulls_ttfa_row(settings: Settings) -> None:
-    """A warm-h2 row that opened a cold connection is a null-valued success: kept out of
-    the average (null metric_value) but not a failure that drags the run to PARTIAL."""
+    """A cold-connection TTFA is a null-valued success, not a PARTIAL-forcing failure."""
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
@@ -1605,10 +1603,9 @@ async def test_stt_ttfs_status_tracks_value(audio_file: Path, settings: Settings
 
 @pytest.mark.asyncio
 async def test_stt_ttfs_early_final_clamps_to_zero(audio_file: Path, settings: Settings) -> None:
-    """A provider that finalizes before the end-of-speech anchor yields a 0.0-valued TTFS
-    success, not a failure that would drag the run to PARTIAL."""
+    """A final ahead of the end-of-speech anchor yields a 0.0-valued TTFS success, not a failure."""
     early_item = _make_dataset_item(audio_file)
-    early_item.speech_end_offset_ms = 2000.0  # exceeds audio_to_final (0.85 s) → early final
+    early_item.speech_end_offset_ms = 2000.0  # exceeds audio_to_final (0.85 s)
     provider_inst = MagicMock()
     provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
     run = _make_run()

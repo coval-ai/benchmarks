@@ -40,16 +40,7 @@ def compute_ttfs(audio_to_final_seconds: float, speech_end_offset_seconds: float
         audio_to_final_seconds: Wall-clock seconds from audio send to final transcript.
         speech_end_offset_seconds: VAD end-of-speech offset for the clip.
 
-    A provider whose endpointing fires before the shared anchor produces a
-    final ahead of it, which would make the raw difference negative. Such a
-    provider finalized at or before end-of-speech, so its finalization latency
-    is clamped to the metric floor of ``0.0`` rather than treated as an error.
-
-    Args:
-        audio_to_final_seconds: Wall-clock seconds from audio send to final transcript.
-        speech_end_offset_seconds: VAD end-of-speech offset for the clip.
-
     Returns:
-        Elapsed time in seconds (float), never negative.
+        Elapsed time in seconds, clamped at 0.0 for finals ahead of the anchor.
     """
     return max(0.0, audio_to_final_seconds - speech_end_offset_seconds)

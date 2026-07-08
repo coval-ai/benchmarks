@@ -63,9 +63,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# The nonroot user has no home (--no-create-home), so the dataset loader's default
-# ~/.cache is unwritable. Point XDG_CACHE_HOME at /tmp so the primary cache path
-# resolves instead of falling back with a warning on every run.
+# XDG_CACHE_HOME: nonroot has no home (--no-create-home), so the dataset cache lands in /tmp.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
