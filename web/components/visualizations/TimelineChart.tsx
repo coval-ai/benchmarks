@@ -622,6 +622,14 @@ const TimelineChart: React.FC = () => {
     setMobileScrub(null);
   };
 
+  // The browser hijacking the touch into a native scroll fires pointercancel
+  // with no horizontal travel — that must not read as a tap, so drop the
+  // gesture without toggling the pin.
+  const cancelAxisScrub = () => {
+    axisScrubRef.current = null;
+    setMobileScrub(null);
+  };
+
   // Whether a data value sits inside the visible (possibly zoomed) Y range.
   // Recharts doesn't clip active dots, so out-of-view dots must not render.
   const inYView = (v?: number) =>
@@ -950,7 +958,7 @@ const TimelineChart: React.FC = () => {
                 }}
                 onPointerCancel={(e) => {
                   e.stopPropagation();
-                  endAxisScrub();
+                  cancelAxisScrub();
                 }}
               >
               </div>

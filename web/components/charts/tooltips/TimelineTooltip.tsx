@@ -83,7 +83,15 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
         style={
           compact
             ? { fontSize: "11px" }
-            : { fontSize: "11px", maxHeight: `${maxHeight ?? 300}px`, overflowY: "scroll", paddingRight: "8px" }
+            : {
+                fontSize: "11px",
+                maxHeight: `${maxHeight ?? 300}px`,
+                overflowY: "scroll",
+                paddingRight: "8px",
+                touchAction: "pan-y",
+                overscrollBehavior: "contain",
+                WebkitOverflowScrolling: "touch",
+              }
         }
       >
         {rows.map((item) => {
