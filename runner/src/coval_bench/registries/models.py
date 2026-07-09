@@ -493,6 +493,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _EMOTION, _STREAM),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -502,6 +503,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
