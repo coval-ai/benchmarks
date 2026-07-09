@@ -5,8 +5,8 @@
  * Color utility functions for benchmark visualizations
  */
 
-import { modelColors, providerColors } from '@/lib/config/colors';
-import { parseModelKey } from '@/lib/utils/formatters';
+import { modelColors, providerColors } from '../config/colors';
+import { parseModelKey } from './formatters';
 
 /**
  * Fallback colors for models/providers not in the predefined color maps
@@ -91,4 +91,18 @@ export function getProviderColor(provider: string): string {
 
   const hash = hashCode(provider);
   return fallbackProviderColors[Math.abs(hash) % fallbackProviderColors.length] ?? "#8BC34A";
+}
+
+/**
+ * Pick a light or dark foreground for a solid hex fill so text stays WCAG-AA
+ * legible, using the relative-luminance crossover between black and white.
+ */
+export function getReadableTextColor(hex: string): string {
+  const h = hex.replace("#", "");
+  const channel = (i: number) => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  return luminance > 0.179 ? "#0a0a0a" : "#ffffff";
 }

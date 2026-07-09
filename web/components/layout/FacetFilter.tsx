@@ -5,6 +5,7 @@
 
 import React from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { getReadableTextColor } from "@/lib/utils/colors";
 
 const FacetFilter: React.FC = () => {
   const { facetGroups, toggleFacet, clearFacets, hasActiveFacets } = useDashboard();
@@ -40,28 +41,50 @@ const FacetFilter: React.FC = () => {
             {group.label}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {group.options.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                aria-pressed={option.active}
-                onClick={() => toggleFacet(group.category, option.value)}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
-                  option.active
-                    ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
-                    : "border-border-primary text-text-secondary hover:border-text-tertiary/50 hover:text-text-primary"
-                }`}
-              >
-                <span>{option.label}</span>
-                <span
-                  className={
-                    option.active ? "text-text-on-toggle-active/70" : "text-text-tertiary"
+            {group.options.map((option) => {
+              const fill = option.color ?? null;
+              const fg = fill ? getReadableTextColor(fill) : null;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-pressed={option.active}
+                  onClick={() => toggleFacet(group.category, option.value)}
+                  style={
+                    fill
+                      ? {
+                          backgroundColor: fill,
+                          color: fg!,
+                          borderColor: "transparent",
+                          boxShadow: option.active
+                            ? "0 0 0 2px var(--color-surface-primary), 0 0 0 3.5px var(--color-text-primary)"
+                            : undefined,
+                        }
+                      : undefined
                   }
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
+                    fill
+                      ? ""
+                      : option.active
+                        ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
+                        : "border-border-primary text-text-secondary hover:border-text-tertiary/50 hover:text-text-primary"
+                  }`}
                 >
-                  {option.count}
-                </span>
-              </button>
-            ))}
+                  <span>{option.label}</span>
+                  <span
+                    className={
+                      fill
+                        ? "opacity-70"
+                        : option.active
+                          ? "text-text-on-toggle-active/70"
+                          : "text-text-tertiary"
+                    }
+                  >
+                    {option.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       ))}
