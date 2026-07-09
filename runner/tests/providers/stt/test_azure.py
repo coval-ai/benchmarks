@@ -9,14 +9,17 @@ built with the Azure header-block framing (``Path:...\\r\\n...\\r\\n\\r\\n<json>
 
 from __future__ import annotations
 
+import asyncio
 import json
 import struct
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import SecretStr
 
+from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt.azure import (
     AzureSTTProvider,
     _audio_message,
@@ -165,6 +168,35 @@ async def test_azure_empty_stream(audio_pcm_bytes: bytes) -> None:
     result = await _run(make_provider(), [], audio_pcm_bytes)
     assert result.complete_transcript is None
     assert result.ttft_seconds is None
+
+
+class _CancelAfterEvents:
+    """Async-iterable WS fake that replays events, then raises CancelledError."""
+
+    def __init__(self, events: list[str]) -> None:
+        self._events = list(events)
+
+    def __aiter__(self) -> _CancelAfterEvents:
+        return self
+
+    async def __anext__(self) -> str:
+        if self._events:
+            return self._events.pop(0)
+        raise asyncio.CancelledError
+
+
+@pytest.mark.asyncio
+async def test_azure_receive_commits_finals_on_cancellation() -> None:
+    """A cancellation after a final still commits the transcript (finally block)."""
+    result = TranscriptionResult(provider="azure")
+    result.audio_start_time = time.monotonic()
+    ws = _CancelAfterEvents([_frame("speech.phrase", _phrase("hello world"))])
+
+    with pytest.raises(asyncio.CancelledError):
+        await make_provider()._receive(ws, result)
+
+    assert result.complete_transcript == "hello world"
+    assert result.audio_to_final_seconds is not None
 
 
 # ---------------------------------------------------------------------------

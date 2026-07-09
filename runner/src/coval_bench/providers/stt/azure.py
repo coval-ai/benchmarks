@@ -207,16 +207,18 @@ class AzureSTTProvider(STTProvider):
             logger.warning("azure_receive_error", provider="azure", model=self._model, exc_info=exc)
             if result.error is None and last_final_time is None:
                 result.error = str(exc)
+        finally:
+            # In `finally` so a cancellation (BaseException, not caught above) when
+            # send fails still commits any finals already received.
+            if last_final_time is not None and result.audio_start_time is not None:
+                result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
-        if last_final_time is not None and result.audio_start_time is not None:
-            result.audio_to_final_seconds = last_final_time - result.audio_start_time
-
-        # Only finalized phrases are scored; unfinalized hypotheses stay out.
-        if final_segments:
-            result.complete_transcript = " ".join(final_segments).strip() or None
-        if result.complete_transcript:
-            result.transcript_length = len(result.complete_transcript)
-            result.word_count = len(result.complete_transcript.split())
+            # Only finalized phrases are scored; unfinalized hypotheses stay out.
+            if final_segments:
+                result.complete_transcript = " ".join(final_segments).strip() or None
+            if result.complete_transcript:
+                result.transcript_length = len(result.complete_transcript)
+                result.word_count = len(result.complete_transcript.split())
 
 
 # ---------------------------------------------------------------------------
