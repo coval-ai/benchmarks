@@ -1,86 +1,95 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Series colors are drawn from the Coval brand families (blue / green /
+// red-orange / purple), expanded into legible mid-tones for the light surface
+// and validated for colorblind separation. Each vendor owns a hue family; its
+// models step through shades of that family. Where a modality packs more
+// vendors than the four families allow, two vendors share a family but sit in
+// opposite shade ranges (legend, tooltips, and export labels disambiguate).
+
 export const modelColors: Record<string, string> = {
-  // OpenAI — red family (#E74C3C). TTS, STT, and S2S all use the same red range.
-  "gpt-4o-mini-tts": "#C0392B",
-  "gpt-realtime-whisper": "#E74C3C",
-  "gpt-4o-transcribe": "#CD6155",
-  "gpt-4o-mini-transcribe": "#922B21",
-  "gpt-realtime": "#EC7063", // S2S
+  // OpenAI — red family. TTS, STT, and S2S span the red range.
+  "gpt-4o-mini-tts": "#93342a",
+  "gpt-realtime-whisper": "#b23a2e",
+  "gpt-4o-transcribe": "#cf6357",
+  "gpt-4o-mini-transcribe": "#7e271f",
+  "gpt-realtime": "#c04d40", // S2S
 
-  // Google — blue family (#4285F4). Gemini realtime (S2S).
-  "gemini-live": "#4285F4",
+  // Google — blue family. Gemini realtime (S2S).
+  "gemini-live": "#3f7fbf",
 
-  // ElevenLabs — orange family (#F39C12). TTS + STT scribe all span light→dark orange.
-  eleven_multilingual_v2: "#F5B041",
-  eleven_flash_v2_5: "#F39C12",
-  eleven_turbo_v2_5: "#E67E22",
-  scribe_v2_realtime: "#CA6F1E",
+  // ElevenLabs — red-orange family. TTS + STT scribe span light→dark orange.
+  eleven_multilingual_v2: "#d68a66",
+  eleven_flash_v2_5: "#c15c3c",
+  eleven_turbo_v2_5: "#a54c31",
+  scribe_v2_realtime: "#8f3f26",
 
-  // xAI — pink family (#EC4899).
-  "grok-tts": "#F472B6",
-  "grok-stt": "#BE185D",
+  // xAI — magenta (purple family).
+  "grok-tts": "#cb7397",
+  "grok-stt": "#7e3251",
 
-  // Cartesia — blue family (#3498DB).
-  "sonic-3": "#85C1E9",
-  "sonic-3.5": "#3498DB",
-  "ink-2": "#1A5276",
+  // Cartesia — blue family (TTS).
+  "sonic-3": "#5b92cd",
+  "sonic-3.5": "#2f6db0",
+  "ink-2": "#1e4b7e",
 
-  // Rime — green family (#27AE60).
-  arcana: "#82E0AA",
-  coda: "#27AE60",
-  mistv3: "#1A7A40",
+  // Rime — green family.
+  arcana: "#85ac56",
+  coda: "#5e8a2e",
+  mistv3: "#43631f",
 
-  // Hume — violet family (#A855F7).
-  "octave-2": "#C084FC",
-  "octave-tts": "#7C3AED",
+  // Hume — purple family (TTS). Sits in the light/mid purple range so it stays
+  // clear of Inworld's dark purples when both appear.
+  "octave-2": "#9376c4",
+  "octave-tts": "#6e51a6",
 
-  // Inworld AI — indigo family (#6366F1).
-  "inworld-tts-1.5-mini": "#818CF8",
-  "inworld-tts-1.5-max": "#4F46E5",
-  "inworld-stt-1": "#6366F1",
+  // Inworld AI — purple family, dark range (separates from Hume in TTS and
+  // AssemblyAI in STT).
+  "inworld-tts-1.5-mini": "#5a417f",
+  "inworld-tts-1.5-max": "#4b356f",
+  "inworld-stt-1": "#3c2b5c",
 
-  // Deepgram — teal family (#16A085). TTS aura anchors the dark end; STT models
-  // span up to light teal. All shades are visibly teal (none near-black).
-  "aura-2-thalia-en": "#0C6654",
-  "nova-2": "#0E8A76",
-  "flux-general-en": "#16A085",
-  "flux-general-multi": "#1EC4A3",
-  "nova-3": "#45D4B5",
+  // Deepgram — green family, teal end. Aura anchors the dark end; STT models
+  // span up to light teal.
+  "aura-2-thalia-en": "#136452",
+  "nova-2": "#17705c",
+  "flux-general-en": "#1f937c",
+  "flux-general-multi": "#2ca386",
+  "nova-3": "#46b39a",
 
-  // AssemblyAI — amethyst family (#8E44AD).
-  "universal-streaming": "#8E44AD",
-  "universal-streaming-multilingual": "#A569BD",
-  "universal-3.5-pro": "#6C3483",
+  // AssemblyAI — purple family (STT), light/mid range.
+  "universal-streaming": "#8168b8",
+  "universal-streaming-multilingual": "#9376c4",
+  "universal-3.5-pro": "#6e51a6",
 
-  // Speechmatics — navy family (#21618C).
-  enhanced: "#2E86C1",
-  default: "#21618C",
+  // Speechmatics — blue family (STT).
+  enhanced: "#3f7fbf",
+  default: "#24598f",
 
-  // Soniox — gold family. The chart's only gold; sits yellower than the
-  // ElevenLabs oranges and dark enough to read on the cream background.
-  "tts-rt-v1": "#C9A227",
-  "stt-rt-v4": "#B8860B",
-  "stt-rt-v5": "#9C7400",
+  // Soniox — gold (red-orange family, yellow end). Reads distinctly warmer than
+  // the ElevenLabs oranges and dark enough for the light surface.
+  "tts-rt-v1": "#c0a03f",
+  "stt-rt-v4": "#9e7b1c",
+  "stt-rt-v5": "#6f5611",
 
   // Composite keys for models whose slug is shared across providers
-  "speechmatics:default": "#21618C",
-  "gradium:default": "#1ABC9C"
+  "speechmatics:default": "#24598f",
+  "gradium:default": "#2ca386"
 };
 
 export const providerColors: Record<string, string> = {
-  OpenAI: "#E74C3C",
-  ElevenLabs: "#F39C12",
-  Cartesia: "#3498DB",
-  Deepgram: "#16A085",
-  AssemblyAI: "#8E44AD",
-  Speechmatics: "#21618C",
-  Rime: "#27AE60",
-  Gradium: "#1ABC9C",
-  Hume: "#A855F7",
-  "Inworld AI": "#6366F1",
-  xAI: "#EC4899",
-  Soniox: "#C9A227",
-  Google: "#4285F4"
+  OpenAI: "#b23a2e",
+  ElevenLabs: "#c15c3c",
+  Cartesia: "#2f6db0",
+  Deepgram: "#1f937c",
+  AssemblyAI: "#6e51a6",
+  Speechmatics: "#24598f",
+  Rime: "#5e8a2e",
+  Gradium: "#2ca386",
+  Hume: "#8168b8",
+  "Inworld AI": "#4b356f",
+  xAI: "#b14a72",
+  Soniox: "#9e7b1c",
+  Google: "#3f7fbf"
 };

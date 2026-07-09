@@ -125,7 +125,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   const bar = (fraction: number) => (
     <div className="mt-1.5 h-1 w-full min-w-16 rounded-full bg-surface-secondary">
       <div
-        className="h-full rounded-full bg-accent-teal"
+        className="h-full rounded-full bg-accent-blue"
         style={{ width: `${Math.max(2, fraction * 100)}%` }}
       />
     </div>
@@ -157,7 +157,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           step={1}
           value={percentileIdx}
           onChange={(e) => onPercentileChange(Number(e.target.value))}
-          className="w-44 accent-accent-teal"
+          className="w-44 accent-accent-blue"
           aria-valuetext={percentile.key}
         />
         <span className="tabular-nums font-medium text-text-primary">
