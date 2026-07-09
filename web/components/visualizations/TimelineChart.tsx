@@ -504,7 +504,9 @@ const TimelineChart: React.FC = () => {
               box.top + box.height
             );
             start.armX = start.armX || Math.abs(x - start.x) > 12;
-            start.armY = start.armY || Math.abs(y - start.y) > 12;
+            start.armY =
+              start.armY ||
+              (e.pointerType === "mouse" && Math.abs(y - start.y) > 12);
             if (!start.armX && !start.armY) {
               el.style.display = "none";
               return;
