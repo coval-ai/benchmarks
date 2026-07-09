@@ -496,7 +496,6 @@ const TimelineChart: React.FC = () => {
             )
               return;
             dragRef.current = { x, y, armX: false, armY: false };
-            if (e.pointerType !== "mouse") setDragging(true);
           }}
           onPointerMove={(e) => {
             const start = dragRef.current;
@@ -512,10 +511,15 @@ const TimelineChart: React.FC = () => {
               Math.max(e.clientY - rect.top, box.top),
               box.top + box.height
             );
-            start.armX = start.armX || Math.abs(x - start.x) > 12;
-            start.armY =
-              start.armY ||
-              (e.pointerType === "mouse" && Math.abs(y - start.y) > 12);
+            const dx = Math.abs(e.clientX - rect.left - start.x);
+            const dy = Math.abs(e.clientY - rect.top - start.y);
+            if (e.pointerType === "mouse") {
+              start.armX = start.armX || dx > 12;
+              start.armY = start.armY || dy > 12;
+            } else if (dx > 12 && dy > 20) {
+              start.armX = true;
+              start.armY = true;
+            }
             if (!start.armX && !start.armY) {
               el.style.display = "none";
               return;
