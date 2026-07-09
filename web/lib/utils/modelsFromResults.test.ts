@@ -56,6 +56,24 @@ describe("buildModelsByProvider", () => {
     ]);
   });
 
+  it("reads the s2s catalogue for the S2S benchmark", () => {
+    const catalogue = {
+      stt: [],
+      tts: [],
+      s2s: [
+        { provider: "openai", models: [{ model: "gpt-realtime", disabled: false }] },
+        { provider: "google", models: [{ model: "gemini-live", disabled: false }] },
+      ],
+    };
+    const out = buildModelsByProvider(
+      [entry("openai", "gpt-realtime")],
+      "S2S",
+      catalogue as never
+    );
+    expect(out.openai).toEqual(["openai:gpt-realtime"]);
+    expect(out.google).toEqual(["google:gemini-live"]);
+  });
+
   it("works when catalogue is undefined", () => {
     const out = buildModelsByProvider([entry("hume", "octave-2")], "TTS");
     expect(out.hume).toEqual(["hume:octave-2"]);
