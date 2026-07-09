@@ -6,6 +6,8 @@
 TTFA is measured from the first request byte to the first PCM chunk. The
 shared client is pre-warmed by ``warmup`` before the dataset loop, so the
 measurement excludes TCP+TLS setup.
+
+eleven_v3 has no realtime WebSocket; all models use the chunked HTTP stream.
 """
 
 from __future__ import annotations
@@ -34,7 +36,9 @@ _OUTPUT_FORMAT = "pcm_24000"
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over the REST streaming endpoint."""
 
-    _VALID_MODELS = frozenset({"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5"})
+    _VALID_MODELS = frozenset(
+        {"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5", "eleven_v3"}
+    )
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if model not in self._VALID_MODELS:

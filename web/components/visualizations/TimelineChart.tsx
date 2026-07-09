@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -31,6 +31,7 @@ import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
+import { useMobileDetection } from "@/hooks/useMobileDetection";
 
 interface LegendEntry {
   value: string;
@@ -124,6 +125,13 @@ interface PinnedTooltip {
   flip: boolean;
 }
 
+interface PlotBox {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 const Y_MAX_PRESETS = [500, 1000, 1500, 2000, 3000, 5000];
 
 // Liang–Barsky: does the segment (x0,y0)->(x1,y1) touch the axis-aligned
@@ -166,6 +174,7 @@ function segmentIntersectsRect(
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
+  const isMobile = useMobileDetection();
   const {
     getModelsWithTimelineData,
     getWindowedTimelineData,
@@ -184,11 +193,14 @@ const TimelineChart: React.FC = () => {
   const chartInstRef = useRef<React.ElementRef<typeof LineChart>>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
+  const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
+  const [interactionBox, setInteractionBox] = useState<PlotBox | null>(null);
   const [zoom, setZoom] = useState<{
     x?: [number, number];
     y?: [number, number];
   } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  const axisScrubRef = useRef(false);
   const dragRef = useRef<{
     x: number;
     y: number;
@@ -219,6 +231,12 @@ const TimelineChart: React.FC = () => {
   useEffect(() => {
     setPinned(null);
   }, [zoom, metric, windowStart, windowEnd]);
+
+  // A mobile chart has separate touch targets for the plot and the date axis.
+  // A pin from a desktop-sized layout would otherwise sit over those targets.
+  useEffect(() => {
+    if (isMobile) setPinned(null);
+  }, [isMobile]);
 
   useEffect(() => {
     if (pinned === null) return;
@@ -370,7 +388,7 @@ const TimelineChart: React.FC = () => {
 
   // Plot-area box in container pixels, read off the chart instance (recharts
   // keeps it in state; mouse-event payloads omit it).
-  const plotBox = () => {
+  const plotBox = useCallback((): PlotBox | null => {
     const offset = chartInstRef.current?.state.offset;
     if (!offset?.width || !offset.height) return null;
     return {
@@ -379,12 +397,190 @@ const TimelineChart: React.FC = () => {
       width: offset.width,
       height: offset.height,
     };
-  };
+  }, []);
+
+  // Recharts owns the exact plot offset (including the Y axis). Mirror it so
+  // the mobile touch overlays line up with the visible plot and date axis.
+  const syncInteractionBox = useCallback(() => {
+    const next = plotBox();
+    if (!next) return;
+    setInteractionBox((current) =>
+      current &&
+      current.left === next.left &&
+      current.top === next.top &&
+      current.width === next.width &&
+      current.height === next.height
+        ? current
+        : next
+    );
+  }, [plotBox]);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    const frame = requestAnimationFrame(syncInteractionBox);
+    return () => cancelAnimationFrame(frame);
+  }, [isMobile, syncInteractionBox, windowedTimelineData, zoom, yAxisMax]);
 
   const endDrag = () => {
     dragRef.current = null;
     setDragging(false);
     if (boxRef.current) boxRef.current.style.display = "none";
+  };
+
+  const startDrag = (
+    e: React.PointerEvent<HTMLDivElement>,
+    captureImmediately = false
+  ) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    const box = interactionBox ?? plotBox();
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (!box || !rect) return;
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (
+      x < box.left ||
+      x > box.left + box.width ||
+      y < box.top ||
+      y > box.top + box.height
+    )
+      return;
+    dragRef.current = { x, y, armX: false, armY: false };
+    if (captureImmediately) e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const moveDrag = (
+    e: React.PointerEvent<HTMLDivElement>,
+    mobilePlot = false
+  ) => {
+    const start = dragRef.current;
+    const box = plotBox();
+    const rect = chartRef.current?.getBoundingClientRect();
+    const el = boxRef.current;
+    if (!start || !box || !rect || !el) return;
+    const rawX = e.clientX - rect.left;
+    const rawY = e.clientY - rect.top;
+    const x = Math.min(Math.max(rawX, box.left), box.left + box.width);
+    const y = Math.min(Math.max(rawY, box.top), box.top + box.height);
+    const dx = Math.abs(rawX - start.x);
+    const dy = Math.abs(rawY - start.y);
+    if (mobilePlot) {
+      // The plot is exclusively the crop zone on mobile. Once the finger has
+      // moved, any direction selects its corresponding X/Y range.
+      start.armX = start.armX || dx > 8;
+      start.armY = start.armY || dy > 8;
+    } else {
+      start.armX = start.armX || dx > 12;
+      start.armY = start.armY || dy > 12;
+    }
+    if (!start.armX && !start.armY) {
+      el.style.display = "none";
+      return;
+    }
+    // Desktop waits for a real drag so a click can still pin its tooltip. The
+    // mobile plot overlay never pins, so it safely captures from touch-down.
+    if (!mobilePlot) chartRef.current?.setPointerCapture(e.pointerId);
+    if (!dragging) setDragging(true);
+    el.style.display = "block";
+    el.style.left = `${start.armX ? Math.min(start.x, x) : box.left}px`;
+    el.style.width = `${start.armX ? Math.abs(x - start.x) : box.width}px`;
+    el.style.top = `${start.armY ? Math.min(start.y, y) : box.top}px`;
+    el.style.height = `${start.armY ? Math.abs(y - start.y) : box.height}px`;
+  };
+
+  const finishDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragRef.current;
+    const box = plotBox();
+    const rect = chartRef.current?.getBoundingClientRect();
+    endDrag();
+    if (!start || !box || !rect || (!start.armX && !start.armY)) return;
+    dragEndAtRef.current = Date.now();
+    const x = Math.min(
+      Math.max(e.clientX - rect.left, box.left),
+      box.left + box.width
+    );
+    const y = Math.min(
+      Math.max(e.clientY - rect.top, box.top),
+      box.top + box.height
+    );
+    const applyX = start.armX && Math.abs(x - start.x) > 8;
+    const applyY = start.armY && Math.abs(y - start.y) > 8;
+    const yScale = (
+      chartInstRef.current?.state.yAxisMap &&
+      (Object.values(chartInstRef.current.state.yAxisMap)[0] as {
+        scale?: { invert?: (n: number) => number };
+      })
+    )?.scale;
+    let yRange = zoom?.y;
+    if (applyY && yScale?.invert) {
+      yRange = [
+        Math.max(0, yScale.invert(Math.max(start.y, y))),
+        yScale.invert(Math.min(start.y, y)),
+      ];
+    }
+    if (!applyX && yRange === zoom?.y) return;
+    const toX = (px: number) =>
+      xDomain[0] + ((px - box.left) / box.width) * (xDomain[1] - xDomain[0]);
+    setZoom({
+      x: applyX
+        ? [toX(Math.min(start.x, x)), toX(Math.max(start.x, x))]
+        : zoom?.x,
+      y: yRange,
+    });
+  };
+
+  const scrubDateAxis = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = interactionBox ?? plotBox();
+    const rect = chartRef.current?.getBoundingClientRect();
+    if (!box || !rect || windowedTimelineData.length === 0) return;
+    const x = Math.min(
+      Math.max(e.clientX - rect.left, box.left),
+      box.left + box.width
+    );
+    const timestamp =
+      xDomain[0] + ((x - box.left) / box.width) * (xDomain[1] - xDomain[0]);
+    const point = windowedTimelineData.reduce((nearest, candidate) =>
+      Math.abs(candidate.timestamp - timestamp) <
+      Math.abs(nearest.timestamp - timestamp)
+        ? candidate
+        : nearest
+    );
+    const payload = modelsWithData.flatMap((model) => {
+      const value = point[`${model}_value`];
+      return typeof value === "number"
+        ? [{
+            dataKey: `${model}_value`,
+            value,
+            name: formatChartLabel(model, getProviderForModel(model)),
+            color: getModelColor(model),
+          }]
+        : [];
+    });
+    if (payload.length === 0) {
+      setMobileScrub(null);
+      return;
+    }
+    setMobileScrub({
+      label: String(point.timestamp),
+      payload,
+      x,
+      y: box.top + 12,
+      flip: x > (chartRef.current?.clientWidth ?? 0) / 2,
+    });
+  };
+
+  const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    axisScrubRef.current = true;
+    scrubDateAxis(e);
+  };
+
+  const moveAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!axisScrubRef.current) return;
+    scrubDateAxis(e);
+  };
+
+  const endAxisScrub = () => {
+    axisScrubRef.current = false;
+    setMobileScrub(null);
   };
 
   // Whether a data value sits inside the visible (possibly zoomed) Y range.
@@ -414,6 +610,11 @@ const TimelineChart: React.FC = () => {
               : "Performance Consistency"
           }
           description={description}
+          hint={
+            isMobile
+              ? "Drag chart to zoom · swipe axis for values"
+              : undefined
+          }
           exportRows={() =>
             windowedTimelineData.map((point) => ({
               time: point.timestampLabel,
@@ -482,104 +683,24 @@ const TimelineChart: React.FC = () => {
             if (Date.now() - dragEndAtRef.current > 400) setZoom(null);
           }}
           onPointerDown={(e) => {
-            if (e.button !== 0) return;
-            const box = plotBox();
-            const rect = chartRef.current?.getBoundingClientRect();
-            if (!box || !rect) return;
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            if (
-              x < box.left ||
-              x > box.left + box.width ||
-              y < box.top ||
-              y > box.top + box.height
-            )
-              return;
-            dragRef.current = { x, y, armX: false, armY: false };
+            if (e.pointerType !== "mouse") return;
+            startDrag(e);
           }}
           onPointerMove={(e) => {
-            const start = dragRef.current;
-            const box = plotBox();
-            const rect = chartRef.current?.getBoundingClientRect();
-            const el = boxRef.current;
-            if (!start || !box || !rect || !el) return;
-            const x = Math.min(
-              Math.max(e.clientX - rect.left, box.left),
-              box.left + box.width
-            );
-            const y = Math.min(
-              Math.max(e.clientY - rect.top, box.top),
-              box.top + box.height
-            );
-            const dx = Math.abs(e.clientX - rect.left - start.x);
-            const dy = Math.abs(e.clientY - rect.top - start.y);
-            if (e.pointerType === "mouse") {
-              start.armX = start.armX || dx > 12;
-              start.armY = start.armY || dy > 12;
-            } else if (dx > 12 && dy > 20) {
-              start.armX = true;
-              start.armY = true;
-            }
-            if (!start.armX && !start.armY) {
-              el.style.display = "none";
-              return;
-            }
-            // Capture only once a real drag is in progress — capturing on
-            // pointerdown would swallow the click recharts needs for pinning.
-            chartRef.current?.setPointerCapture(e.pointerId);
-            if (!dragging) setDragging(true);
-            el.style.display = "block";
-            el.style.left = `${start.armX ? Math.min(start.x, x) : box.left}px`;
-            el.style.width = `${start.armX ? Math.abs(x - start.x) : box.width}px`;
-            el.style.top = `${start.armY ? Math.min(start.y, y) : box.top}px`;
-            el.style.height = `${start.armY ? Math.abs(y - start.y) : box.height}px`;
+            if (e.pointerType !== "mouse") return;
+            moveDrag(e);
           }}
           onPointerUp={(e) => {
-            const start = dragRef.current;
-            const box = plotBox();
-            const rect = chartRef.current?.getBoundingClientRect();
-            endDrag();
-            if (!start || !box || !rect || (!start.armX && !start.armY)) return;
-            dragEndAtRef.current = Date.now();
-            const x = Math.min(
-              Math.max(e.clientX - rect.left, box.left),
-              box.left + box.width
-            );
-            const y = Math.min(
-              Math.max(e.clientY - rect.top, box.top),
-              box.top + box.height
-            );
-            const applyX = start.armX && Math.abs(x - start.x) > 8;
-            const applyY = start.armY && Math.abs(y - start.y) > 8;
-            // Invert pixels through recharts' own y-scale so this works even
-            // on the automatic domain, where yDomain[1] is still "dataMax".
-            const yScale = (
-              chartInstRef.current?.state.yAxisMap &&
-              (Object.values(chartInstRef.current.state.yAxisMap)[0] as {
-                scale?: { invert?: (n: number) => number };
-              })
-            )?.scale;
-            let yRange = zoom?.y;
-            if (applyY && yScale?.invert) {
-              yRange = [
-                Math.max(0, yScale.invert(Math.max(start.y, y))),
-                yScale.invert(Math.min(start.y, y)),
-              ];
-            }
-            if (!applyX && yRange === zoom?.y) return;
-            const toX = (px: number) =>
-              xDomain[0] +
-              ((px - box.left) / box.width) * (xDomain[1] - xDomain[0]);
-            setZoom({
-              x: applyX
-                ? [toX(Math.min(start.x, x)), toX(Math.max(start.x, x))]
-                : zoom?.x,
-              y: yRange,
-            });
+            if (e.pointerType !== "mouse") return;
+            finishDrag(e);
           }}
           onPointerCancel={endDrag}
         >
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            onResize={() => requestAnimationFrame(syncInteractionBox)}
+          >
             <LineChart
               ref={chartInstRef}
               data={windowedTimelineData}
@@ -664,8 +785,8 @@ const TimelineChart: React.FC = () => {
                     compact
                   />
                 }
-                active={pinned || dragging || hoveredMarker ? false : undefined}
-                cursor={!dragging && !hoveredMarker}
+                active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
+                cursor={!dragging && !hoveredMarker && !isMobile}
               />
               {modelsWithData.map((model) => (
                 <Line
@@ -719,6 +840,90 @@ const TimelineChart: React.FC = () => {
             ref={boxRef}
             className="pointer-events-none absolute z-10 hidden rounded-sm border border-dashed border-text-secondary/50 bg-text-secondary/10"
           />
+          {interactionBox && (
+            <>
+              {/* Mobile interaction is deliberately partitioned: dragging the
+                  plot selects a crop, while the axis alone scrubs values. */}
+              <div
+                className="absolute z-[15] touch-none md:hidden"
+                style={{
+                  left: interactionBox.left,
+                  top: interactionBox.top,
+                  width: interactionBox.width,
+                  height: interactionBox.height,
+                }}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setMobileScrub(null);
+                  startDrag(e, true);
+                }}
+                onPointerMove={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  moveDrag(e, true);
+                }}
+                onPointerUp={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  finishDrag(e);
+                }}
+                onPointerCancel={(e) => {
+                  e.stopPropagation();
+                  endDrag();
+                }}
+              />
+              <div
+                className="absolute z-[15] border-t border-dashed border-text-secondary/40 bg-surface-toggle-inactive/35 touch-pan-y md:hidden"
+                style={{
+                  left: interactionBox.left,
+                  top: interactionBox.top + interactionBox.height,
+                  width: interactionBox.width,
+                  bottom: 0,
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  startAxisScrub(e);
+                }}
+                onPointerMove={(e) => {
+                  e.stopPropagation();
+                  moveAxisScrub(e);
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                  endAxisScrub();
+                }}
+                onPointerCancel={(e) => {
+                  e.stopPropagation();
+                  endAxisScrub();
+                }}
+              >
+              </div>
+            </>
+          )}
+          {mobileScrub && (
+            <div
+              className="pointer-events-none absolute z-20 shadow-lg md:hidden"
+              style={{
+                left: mobileScrub.x,
+                top: mobileScrub.y,
+                transform: mobileScrub.flip
+                  ? "translate(calc(-100% - 12px), 0)"
+                  : "translate(12px, 0)",
+              }}
+            >
+              <CustomTimelineTooltip
+                active
+                payload={mobileScrub.payload}
+                label={mobileScrub.label}
+                getProviderForModel={getProviderForModel}
+                showDate={dateScale}
+                dimmedKeys={dimmedLegendKeys}
+                compact
+                interactionHint="drag chart area to zoom"
+              />
+            </div>
+          )}
           {pinned && (
             <div
               ref={pinnedRef}

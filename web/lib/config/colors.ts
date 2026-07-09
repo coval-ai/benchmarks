@@ -29,6 +29,7 @@ export const modelColors: Record<string, string> = {
   eleven_multilingual_v2: "#fb9167",
   eleven_flash_v2_5: "#d87248",
   eleven_turbo_v2_5: "#bd592f",
+  eleven_v3: "#b04d20",
   scribe_v2_realtime: "#e67e54",
 
   // xAI — purple.

@@ -333,6 +333,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="elevenlabs",
+        model="eleven_v3",
+        voice="IKne3meq5aSn9XLyUdCD",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="openai",
         model="gpt-4o-mini-tts",
         voice="alloy",
@@ -494,6 +502,26 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_PENDING,
         arena_enabled=False,
     ),
+    # Google TTS: Gemini buffers input until half-close, hence no streaming-input
+    # tag. Arena-disabled: auth is ADC, not a mountable API-key env var.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="google",
+        model="chirp-3-hd",
+        voice="en-US-Chirp3-HD-Kore",
+        tags=(_REALTIME, _MULTI, _STREAM),
+        status=_PENDING,
+        arena_enabled=False,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="google",
+        model="gemini-2.5-flash-tts",
+        voice="Kore",
+        tags=(_REALTIME, _MULTI),
+        status=_PENDING,
+        arena_enabled=False,
+    ),
     # Baseten dedicated endpoints (Qwen3-TTS 1.7B). PENDING for the same reason
     # as the Whisper STT entry above — implemented, hidden, run manually.
     RegisteredModel(
@@ -516,6 +544,25 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
         arena_enabled=False,
+    ),
+    # Fish Audio. PENDING: no billing on the account yet — the WS handshake
+    # 402s on paid models. Voice is "Energetic Male", the reference_id Fish
+    # Audio's own docs use in examples.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s1",
+        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_PENDING,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s2.1-pro",
+        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_PENDING,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
