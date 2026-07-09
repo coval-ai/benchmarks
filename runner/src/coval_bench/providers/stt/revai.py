@@ -198,7 +198,9 @@ class RevAISTTProvider(STTProvider):
                     pending_partial = ""
                     last_final_time = now
                     final_event.set()
-                elif len(transcript) > len(pending_partial):
+                else:
+                    # Partials are cumulative per segment, so keep the latest — a
+                    # downward revision must win over a stale, longer earlier guess.
                     pending_partial = transcript
 
         except Exception as exc:

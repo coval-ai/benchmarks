@@ -128,6 +128,38 @@ async def test_revai_excludes_partials_from_transcript(
 
 
 @pytest.mark.asyncio
+async def test_revai_tail_partial_uses_latest_not_longest(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A downward-revised trailing partial (no final) recovers the latest guess.
+
+    Rev's partials are cumulative per segment, so a walked-back hypothesis
+    ("hello world foo" -> "hello world") must win over the stale longer one.
+    """
+    events: list[Any] = [
+        {"type": "connected"},
+        {"type": "partial", "elements": [{"type": "text", "value": "hello world foo"}]},
+        {"type": "partial", "elements": [{"type": "text", "value": "hello world"}]},
+    ]
+    provider = RevAISTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.revai.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+
+
+@pytest.mark.asyncio
 async def test_revai_sends_eos_sentinel(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
     """End-of-audio is signalled with an ``EOS`` text frame after the PCM chunks."""
     ws = FakeWebSocket([{"type": "connected"}])
