@@ -36,6 +36,12 @@ except ImportError:
     HumeTTSProvider = None  # type: ignore[assignment,misc]
     HUME_AVAILABLE = False
 
+try:
+    from coval_bench.providers.tts.google import GOOGLE_TTS_AVAILABLE, GoogleTTSProvider
+except ImportError:
+    GoogleTTSProvider = None  # type: ignore[assignment,misc]
+    GOOGLE_TTS_AVAILABLE = False
+
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
     "cartesia": CartesiaTTSProvider,
@@ -54,9 +60,13 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
 if HumeTTSProvider is not None:
     TTS_PROVIDERS["hume"] = HumeTTSProvider
 
+if GoogleTTSProvider is not None and GOOGLE_TTS_AVAILABLE:
+    TTS_PROVIDERS["google"] = GoogleTTSProvider
+
 __all__ = [
     "TTS_PROVIDERS",
     "HUME_AVAILABLE",
+    "GOOGLE_TTS_AVAILABLE",
     "BasetenTTSProvider",
     "GradiumTTSProvider",
     "SmallestTTSProvider",
