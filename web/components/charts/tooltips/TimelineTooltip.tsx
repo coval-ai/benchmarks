@@ -26,9 +26,11 @@ interface TimelineTooltipProps {
   compact?: boolean;
   /** Optional replacement for the compact hover interaction hint. */
   interactionHint?: string | false;
+  /** Caps the scroll area (px); keeps the pinned list from covering the chart on mobile. */
+  maxHeight?: number;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -81,7 +83,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
         style={
           compact
             ? { fontSize: "11px" }
-            : { fontSize: "11px", maxHeight: "300px", overflowY: "scroll", paddingRight: "8px" }
+            : { fontSize: "11px", maxHeight: `${maxHeight ?? 300}px`, overflowY: "scroll", paddingRight: "8px" }
         }
       >
         {rows.map((item) => {
