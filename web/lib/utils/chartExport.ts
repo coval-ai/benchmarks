@@ -1,6 +1,17 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+import { LIGHT_CHART_COLORS, type ThemeColors } from "@/hooks/useThemeColors";
+
+// The export mirrors the on-screen theme. Chrome colours come from the same
+// chart-* palette the charts render with; the shared light palette is the
+// default used when a caller doesn't pass one.
+const isDarkBg = (hex: string) => {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
+  const n = parseInt(hex.slice(1), 16);
+  return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.5;
+};
+
 const triggerDownload = (href: string, filename: string) => {
   const a = document.createElement("a");
   a.href = href;
@@ -119,18 +130,18 @@ function wrapText(
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-// Label text takes its dot's color so stacked labels stay attributable, but
-// light series colors get darkened to keep the text readable on white.
-const labelColor = (hex?: string) => {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return "#3d3d3d";
+// Label text takes its dot's color so stacked labels stay attributable, then is
+// nudged for legibility on the export surface: bright colors darken on the light
+// canvas, dark colors lighten on the dark canvas.
+const labelColor = (hex?: string, dark = false) => {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return dark ? "#c7c2bc" : "#3d3d3d";
   const n = parseInt(hex.slice(1), 16);
   let [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
-  if ((0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.6) {
-    [r, g, b] = [r, g, b].map((c) => Math.round(c * 0.65)) as [
-      number,
-      number,
-      number,
-    ];
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  if (!dark && lum > 0.6) {
+    [r, g, b] = [r, g, b].map((c) => Math.round(c * 0.65)) as [number, number, number];
+  } else if (dark && lum < 0.5) {
+    [r, g, b] = [r, g, b].map((c) => Math.round(c + (255 - c) * 0.5)) as [number, number, number];
   }
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
 };
@@ -143,8 +154,10 @@ const labelColor = (hex?: string) => {
  */
 export function labelScatterDots(
   clone: SVGSVGElement,
-  points: { x: number; y: number; label: string; color?: string }[]
+  points: { x: number; y: number; label: string; color?: string }[],
+  colors: ThemeColors = LIGHT_CHART_COLORS
 ) {
+  const dark = isDarkBg(colors.tooltipBg);
   const pos = (el: Element, attr: string) => Number(el.getAttribute(attr));
   const circles = Array.from(clone.querySelectorAll('circle[r="6"]')).sort(
     (a, b) => pos(a, "cx") - pos(b, "cx") || pos(a, "cy") - pos(b, "cy")
@@ -199,7 +212,7 @@ export function labelScatterDots(
         leader.setAttribute("y1", `${cy + 7}`);
         leader.setAttribute("x2", `${cx}`);
         leader.setAttribute("y2", `${placement[1] - 9}`);
-        leader.setAttribute("stroke", "#c8c6c2");
+        leader.setAttribute("stroke", colors.barStroke);
         leader.setAttribute("stroke-width", "1");
         clone.appendChild(leader);
       }
@@ -224,7 +237,7 @@ export function labelScatterDots(
     text.setAttribute("font-size", "11");
     text.setAttribute("font-family", FONT);
     text.setAttribute("font-weight", "500");
-    text.setAttribute("fill", labelColor(point.color));
+    text.setAttribute("fill", labelColor(point.color, dark));
     text.textContent = point.label;
     clone.appendChild(text);
   });
@@ -236,8 +249,10 @@ export function labelScatterDots(
 export async function downloadChartPNG(
   svg: SVGSVGElement,
   filename: string,
-  header: ChartPNGHeader = {}
+  header: ChartPNGHeader = {},
+  colors: ThemeColors = LIGHT_CHART_COLORS
 ): Promise<boolean> {
+  const dark = isDarkBg(colors.tooltipBg);
   const svgRect = svg.getBoundingClientRect();
   const { width, height } = svgRect;
   // The rendered SVG often reserves empty space below its content (e.g. room
@@ -320,31 +335,31 @@ export async function downloadChartPNG(
   const ctx = canvas.getContext("2d");
   if (!ctx) return false;
   ctx.scale(2, 2);
-  ctx.fillStyle = "#f9faf8";
+  ctx.fillStyle = colors.tooltipBg;
   ctx.fillRect(0, 0, totalWidth, totalHeight);
-  ctx.strokeStyle = "#dbdbd3";
+  ctx.strokeStyle = colors.grid;
   ctx.lineWidth = 1;
   ctx.strokeRect(0.5, 0.5, totalWidth - 1, totalHeight - 1);
   let y = MARGIN;
   if (header.stat && statFitsBeside) {
     ctx.textAlign = "right";
     ctx.font = `13px ${FONT}`;
-    ctx.fillStyle = "#515151";
+    ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.stat.label, totalWidth - MARGIN, y + 13);
     ctx.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    ctx.fillStyle = "#0f0c0a";
+    ctx.fillStyle = colors.textPrimary;
     ctx.fillText(header.stat.value, totalWidth - MARGIN, y + 44);
     ctx.textAlign = "left";
   }
   if (header.label) {
     ctx.font = `13px ${FONT}`;
-    ctx.fillStyle = "#515151";
+    ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.label, MARGIN, y + 13);
     y += 20;
   }
   if (titleLines.length) {
     ctx.font = `600 20px ${FONT}`;
-    ctx.fillStyle = "#0f0c0a";
+    ctx.fillStyle = colors.textPrimary;
     for (const line of titleLines) {
       ctx.fillText(line, MARGIN, y + 20);
       y += TITLE_LINE_HEIGHT;
@@ -352,10 +367,10 @@ export async function downloadChartPNG(
   }
   if (header.stat && !statFitsBeside) {
     ctx.font = `13px ${FONT}`;
-    ctx.fillStyle = "#515151";
+    ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.stat.label, MARGIN, y + 13);
     ctx.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    ctx.fillStyle = "#0f0c0a";
+    ctx.fillStyle = colors.textPrimary;
     ctx.fillText(header.stat.value, MARGIN, y + 40);
     y += 50;
   }
@@ -366,7 +381,7 @@ export async function downloadChartPNG(
       ctx.globalAlpha = item.dimmed ? 0.35 : 1;
       ctx.fillStyle = item.color;
       ctx.fillRect(MARGIN + item.x, y + 5, 12, 12);
-      ctx.fillStyle = "#0f0c0a";
+      ctx.fillStyle = colors.textPrimary;
       ctx.fillText(item.label, MARGIN + item.x + 18, y + 15);
     }
     y += LEGEND_ROW_HEIGHT;
@@ -386,12 +401,15 @@ export async function downloadChartPNG(
   );
   if (header.xLabel) {
     ctx.font = `12px ${FONT}`;
-    ctx.fillStyle = "#515151";
+    ctx.fillStyle = colors.textSecondary;
     ctx.textAlign = "center";
     ctx.fillText(header.xLabel, totalWidth / 2, chartY + contentHeight + 16);
     ctx.textAlign = "left";
   }
   ctx.globalAlpha = 0.45;
+  // The logo art is ink; the brand rule allows ink or white only, so flip it to
+  // white on the dark canvas to keep the watermark readable.
+  if (dark) ctx.filter = "brightness(0) invert(1)";
   ctx.drawImage(
     logo,
     totalWidth - MARGIN - logoWidth,
@@ -399,6 +417,7 @@ export async function downloadChartPNG(
     logoWidth,
     logoHeight
   );
+  ctx.filter = "none";
   canvas.toBlob((blob) => {
     if (blob) triggerDownload(URL.createObjectURL(blob), filename);
   });
