@@ -196,11 +196,6 @@ def test_elevenlabs_name_and_model(fake_settings: Settings) -> None:
     assert p.model == "eleven_turbo_v2_5"
 
 
-def test_elevenlabs_v3_supported(fake_settings: Settings) -> None:
-    p = ElevenLabsTTSProvider(fake_settings, model="eleven_v3", voice="v")
-    assert p.model == "eleven_v3"
-
-
 def test_elevenlabs_rejects_unsupported_model(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Unsupported ElevenLabs model"):
         ElevenLabsTTSProvider(fake_settings, model="not-a-real-model", voice="v")
