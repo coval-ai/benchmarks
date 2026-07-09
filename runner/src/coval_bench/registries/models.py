@@ -514,7 +514,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="qwen3-tts-flash-realtime",
         voice="Cherry",
         tags=(_REALTIME, _MULTI, _STREAM),
-        status=_PENDING,
+        status=_ACTIVE,
+        arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
