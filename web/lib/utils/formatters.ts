@@ -188,6 +188,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     cartesia: "Cartesia",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
+    fishaudio: "Fish Audio",
     gradium: "Gradium",
     hume: "Hume",
     inworld: "Inworld AI",
