@@ -64,6 +64,9 @@ export const modelColors: Record<string, string> = {
   "stt-rt-v4": "#B8860B",
   "stt-rt-v5": "#9C7400",
 
+  // Azure — azure-blue (#0078D4). Sits between the Google and Cartesia blues.
+  "azure:default": "#0078D4",
+
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#21618C",
   "gradium:default": "#1ABC9C"
@@ -82,5 +85,6 @@ export const providerColors: Record<string, string> = {
   "Inworld AI": "#6366F1",
   xAI: "#EC4899",
   Soniox: "#C9A227",
-  Google: "#4285F4"
+  Google: "#4285F4",
+  Azure: "#0078D4"
 };

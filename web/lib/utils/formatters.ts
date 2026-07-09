@@ -166,6 +166,7 @@ function capitalizeProviderSlug(providerName: string): string {
 export function normalizeSTTProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     assemblyai: "AssemblyAI",
+    azure: "Azure",
     cartesia: "Cartesia",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",

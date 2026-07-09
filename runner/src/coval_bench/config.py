@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     inworld_api_key: SecretStr | None = None
     soniox_api_key: SecretStr | None = None
     baseten_api_key: SecretStr | None = None
+    azure_api_key: SecretStr | None = None
+
+    # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
+    # region-scoped WebSocket host; required only when the Azure STT provider runs.
+    azure_region: str | None = None
 
     # Baseten dedicated-endpoint WebSocket URLs. The hostnames embed private,
     # pre-launch model ids, so they live in config (``.env`` locally, Secret

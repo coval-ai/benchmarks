@@ -271,6 +271,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_PENDING,
     ),
+    # Azure AI Speech real-time (raw WebSocket, conversation mode).
+    RegisteredModel(
+        benchmark=_STT,
+        provider="azure",
+        model="default",
+        creator="microsoft",
+        tags=(_REALTIME, _MULTI, _VAD),
+        status=_ACTIVE,
+    ),
     RegisteredModel(
         benchmark=_STT,
         provider="google",
