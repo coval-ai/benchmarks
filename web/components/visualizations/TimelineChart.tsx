@@ -110,6 +110,22 @@ const MethodologyMarkerLabel: React.FC<MarkerLabelProps> = ({
   );
 };
 
+// Scrubber playhead knob: a dot at the top of the reference line so the
+// scrubbed instant reads at a glance on mobile, where there is no hover cursor.
+const ScrubMarkerDot: React.FC<{
+  viewBox?: { x?: number; y?: number };
+  color: string;
+}> = ({ viewBox, color }) => (
+  <circle
+    cx={viewBox?.x ?? 0}
+    cy={viewBox?.y ?? 0}
+    r={4}
+    fill={color}
+    stroke="var(--color-surface-primary)"
+    strokeWidth={1.5}
+  />
+);
+
 interface TooltipPayloadItem {
   dataKey: string;
   value: number;
@@ -200,7 +216,11 @@ const TimelineChart: React.FC = () => {
     y?: [number, number];
   } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const axisScrubRef = useRef(false);
+  const axisScrubRef = useRef<{
+    x: number;
+    moved: boolean;
+    wasPinned: boolean;
+  } | null>(null);
   const dragRef = useRef<{
     x: number;
     y: number;
@@ -569,17 +589,44 @@ const TimelineChart: React.FC = () => {
   };
 
   const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    axisScrubRef.current = true;
+    axisScrubRef.current = { x: e.clientX, moved: false, wasPinned: pinned != null };
     scrubDateAxis(e);
   };
 
   const moveAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!axisScrubRef.current) return;
+    const scrub = axisScrubRef.current;
+    if (!scrub) return;
+    if (Math.abs(e.clientX - scrub.x) > 8) scrub.moved = true;
     scrubDateAxis(e);
   };
 
+  // A drag scrubs (compact readout only); a tap toggles the full ranked list
+  // at that timestamp, reusing the pinned tooltip. wasPinned is captured at
+  // tap-start so the toggle survives the outside-tap dismiss handler.
   const endAxisScrub = () => {
-    axisScrubRef.current = false;
+    const scrub = axisScrubRef.current;
+    const tapped = scrub != null && !scrub.moved;
+    axisScrubRef.current = null;
+    if (tapped) {
+      if (scrub!.wasPinned) {
+        setPinned(null);
+      } else if (mobileScrub) {
+        const box = interactionBox ?? plotBox();
+        setPinned(
+          box
+            ? { ...mobileScrub, x: box.left, y: box.top, flip: false }
+            : mobileScrub
+        );
+      }
+    }
+    setMobileScrub(null);
+  };
+
+  // The browser hijacking the touch into a native scroll fires pointercancel
+  // with no horizontal travel — that must not read as a tap, so drop the
+  // gesture without toggling the pin.
+  const cancelAxisScrub = () => {
+    axisScrubRef.current = null;
     setMobileScrub(null);
   };
 
@@ -599,6 +646,13 @@ const TimelineChart: React.FC = () => {
     color: getModelColor(model),
     dataKey: `${model}_value`,
   }));
+
+  // Mobile has no hover cursor, so a vertical playhead marks the instant being
+  // scrubbed or pinned — the timestamp both the compact readout and the pinned
+  // list are reading from.
+  const scrubMarkerTs = isMobile
+    ? Number(mobileScrub?.label ?? pinned?.label ?? NaN)
+    : NaN;
 
   return (
     <div className="mb-4">
@@ -834,6 +888,15 @@ const TimelineChart: React.FC = () => {
                   }
                 />
               ))}
+              {Number.isFinite(scrubMarkerTs) && (
+                <ReferenceLine
+                  x={scrubMarkerTs}
+                  stroke={themeColors.label}
+                  strokeWidth={1.5}
+                  strokeOpacity={0.65}
+                  label={<ScrubMarkerDot color={themeColors.label} />}
+                />
+              )}
             </LineChart>
           </ResponsiveContainer>
           <div
@@ -895,7 +958,7 @@ const TimelineChart: React.FC = () => {
                 }}
                 onPointerCancel={(e) => {
                   e.stopPropagation();
-                  endAxisScrub();
+                  cancelAxisScrub();
                 }}
               >
               </div>
@@ -920,7 +983,7 @@ const TimelineChart: React.FC = () => {
                 showDate={dateScale}
                 dimmedKeys={dimmedLegendKeys}
                 compact
-                interactionHint="drag chart area to zoom"
+                interactionHint="tap axis to see all"
               />
             </div>
           )}
@@ -931,9 +994,11 @@ const TimelineChart: React.FC = () => {
               style={{
                 left: pinned.x,
                 top: pinned.y,
-                transform: pinned.flip
-                  ? "translate(calc(-100% - 12px), -50%)"
-                  : "translate(12px, -50%)",
+                transform: isMobile
+                  ? "translate(12px, 0)"
+                  : pinned.flip
+                    ? "translate(calc(-100% - 12px), -50%)"
+                    : "translate(12px, -50%)",
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
@@ -952,6 +1017,7 @@ const TimelineChart: React.FC = () => {
                 getProviderForModel={getProviderForModel}
                 showDate={dateScale}
                 dimmedKeys={dimmedLegendKeys}
+                maxHeight={isMobile ? 106 : undefined}
               />
             </div>
           )}
