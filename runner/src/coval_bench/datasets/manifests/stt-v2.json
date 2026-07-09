@@ -8,7 +8,7 @@
     {
       "path": "audio/0001.wav",
       "sha256": "05732fceb374c4ec798d45384f3ea207cd1442c2cee7dd845f97ea012fc87df7",
-      "transcript": "\"he [wales] basically lied to us from the start. first by acting as if this was for legal reasons. second by pretending he was listening to us right up to his art deletion.",
+      "transcript": "he wales basically lied to us from the start. first by acting as if this was for legal reasons. second by pretending he was listening to us right up to his art deletion.",
       "duration_sec": 12.36,
       "speech_end_offset_ms": 11428.0,
       "audio_hash_id": "d30b5a16002a1d728405d60e13634fb8729f6ad3abc5e8db6c654a1b583110bc",
@@ -34,7 +34,7 @@
     {
       "path": "audio/0003.wav",
       "sha256": "d27418959c91f4d0116c5c03d824ef04e6c3cbc160a94feac7929caa0a6f913c",
-      "transcript": "a civilization is a singular culture shared by a significant large group of people who live and work co-operatively a society",
+      "transcript": "a civilization is a singular culture shared by a significant large group of people who live and work cooperatively a society",
       "duration_sec": 8.88,
       "speech_end_offset_ms": 7780.0,
       "audio_hash_id": "16f693826a522f88c633463a97a156a0d4865d7b4c0a0785859d75d22fe8193c",
@@ -164,7 +164,7 @@
     {
       "path": "audio/0013.wav",
       "sha256": "4fcede0093f6f6a69e37d69a31e11c95b247ae7dcf285293b472b41e82487902",
-      "transcript": "asus eee pc earlier launched world-wide for cost-saving and functionality factors became a hot topic in 2007 taipei it month",
+      "transcript": "asus eee pc earlier launched worldwide for cost-saving functionality factors became a hot topic in 2007 taipei it month",
       "duration_sec": 10.74,
       "speech_end_offset_ms": 9380.0,
       "audio_hash_id": "5a8631916ff3b89c4d466d0a70ea1abf4d888b739e799303ad0f2f4cf1ed448f",
@@ -190,7 +190,7 @@
     {
       "path": "audio/0015.wav",
       "sha256": "4201ce2d826e25b6de7ed228155cba9f3f0107795b9a666bdce6b7eb4eda61e7",
-      "transcript": "but after losing the captain's wicket india only made 36 runs loosing 7 wickets to end the innings",
+      "transcript": "but after losing the captain's wicket india only made 36 runs losing 7 wickets to end the innings",
       "duration_sec": 8.52,
       "speech_end_offset_ms": 7364.0,
       "audio_hash_id": "d76bd6a5e3d4d089758c5d57379f18090fce56888223fd039b7530d8ff7ea1a6",
@@ -372,7 +372,7 @@
     {
       "path": "audio/0029.wav",
       "sha256": "932d5e7d7280de3c91cec01e9ee6916cab353966c4f26ed94a998c10bfcf3ca5",
-      "transcript": "he was reportedly aged in his 20s. in a statement bieber said [w]hile i was not present nor directly involved with this tragic accident my thoughts and prayers are with the family of the victim.",
+      "transcript": "he was reportedly aged in his 20s. in a statement bieber said while i was not present nor directly involved with this tragic accident my thoughts and prayers are with the family of the victim.",
       "duration_sec": 10.56,
       "speech_end_offset_ms": 9604.0,
       "audio_hash_id": "f3e03d991c0fd665f76635f8bb7a102a965b208c88e7f7bcc2c53de7d9bd661b",
@@ -528,7 +528,7 @@
     {
       "path": "audio/0041.wav",
       "sha256": "8852ce984f6d7ff899a5921cabb05cf68ca50d1332160d7d2db9c041c105c966",
-      "transcript": "mass car ownership also leads to a higher incidence of accidents on the roads which leads to the invention of new techniques in healthcare for repairing damaged bodies",
+      "transcript": "mass car ownership also leads to a higher incidence of accidents on the road which leads to the invention of new techniques in healthcare for repairing damaged bodies",
       "duration_sec": 9.48,
       "speech_end_offset_ms": 9060.0,
       "audio_hash_id": "5bc370be9a54edc10afd6de8f274797b7ea731fc1c13ed46d4908752f895a287",
