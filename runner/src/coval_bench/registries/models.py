@@ -508,6 +508,25 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_PENDING,
     ),
+    # Fish Audio. PENDING: no billing on the account yet — the WS handshake
+    # 402s on paid models. Voice is "Energetic Male", the reference_id Fish
+    # Audio's own docs use in examples.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s1",
+        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_PENDING,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s2.1-pro",
+        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_PENDING,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
