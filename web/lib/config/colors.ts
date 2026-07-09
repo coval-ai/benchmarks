@@ -91,6 +91,8 @@ export const modelColors: Record<string, string> = {
   // Azure — blue, dark (STT; separates from Cartesia's sonic/ink and Gladia).
   "azure:default": "#3d7fd1",
 
+  "qwen3-tts-flash-realtime": "#9c6c03",
+
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#a24112",
   "gradium:default": "#74c16c"
@@ -113,5 +115,6 @@ export const providerColors: Record<string, string> = {
   Gladia: "#6a9fee",
   Mistral: "#835a01",
   Smallest: "#d7a03d",
-  Azure: "#3d7fd1"
+  Azure: "#3d7fd1",
+  Alibaba: "#9c6c03"
 };
