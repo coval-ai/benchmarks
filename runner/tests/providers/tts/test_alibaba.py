@@ -127,6 +127,30 @@ async def test_alibaba_tts_url_override(alibaba_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
+async def test_alibaba_tts_url_override_with_query_string(alibaba_settings: Settings) -> None:
+    ws = FakeWebSocket(_session_events([make_pcm_bytes(240)]))
+    captured: dict[str, object] = {}
+
+    def connect_side_effect(url: str, **kwargs: object) -> FakeWebSocket:
+        captured["url"] = url
+        return ws
+
+    override = "wss://gateway.example.com/api-ws/v1/realtime?token=abc"
+    provider = AlibabaTTSProvider(_settings(alibaba_tts_url=override), model=_MODEL, voice="Cherry")
+
+    with patch(
+        "coval_bench.providers.tts.alibaba.ws_client.connect",
+        side_effect=connect_side_effect,
+    ):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is None
+    assert captured["url"] == f"{override}&model={_MODEL}"
+    if result.audio_path is not None:
+        result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
 async def test_alibaba_tts_sends_update_append_commit_finish(
     alibaba_settings: Settings,
 ) -> None:
@@ -157,8 +181,7 @@ async def test_alibaba_tts_error_event(alibaba_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.alibaba.ws_client.connect", return_value=ws):
         result = await provider.synthesize("Hello")
 
-    assert result.error is not None
-    assert "bad request" in result.error
+    assert result.error == "bad request"
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

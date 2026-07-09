@@ -43,7 +43,8 @@ class AlibabaTTSProvider(TTSProvider):
         self._api_key = api_key_secret.get_secret_value()
 
         base_url = settings.alibaba_tts_url or _DEFAULT_WS_URL
-        self._ws_url = f"{base_url}?model={model}"
+        separator = "&" if "?" in base_url else "?"
+        self._ws_url = f"{base_url}{separator}model={model}"
 
     @property
     def name(self) -> str:
@@ -95,7 +96,9 @@ class AlibabaTTSProvider(TTSProvider):
                     elif event_type == "session.finished":
                         break
                     elif event_type == "error":
-                        raise RuntimeError(str(data.get("error", data)))
+                        err = data.get("error", data)
+                        msg = err.get("message") if isinstance(err, dict) else None
+                        raise RuntimeError(str(msg or err))
 
         except Exception as exc:
             logger.warning("alibaba_tts_error", provider="alibaba", model=self._model, exc_info=exc)
