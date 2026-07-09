@@ -47,6 +47,7 @@ dependencies = [
 
 [project.optional-dependencies]
 google-stt = ["google-cloud-speech>=2.27"]
+google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS streaming
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
 

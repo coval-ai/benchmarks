@@ -31,7 +31,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock README.md ./
 
 # Install production dependencies (no dev) into /app/.venv
-RUN uv sync --frozen --no-dev --extra google-stt
+RUN uv sync --frozen --no-dev --extra google-stt --extra google-tts
 
 # Copy source tree + alembic config (db/cli.py reads /app/alembic.ini)
 COPY src/ ./src/
