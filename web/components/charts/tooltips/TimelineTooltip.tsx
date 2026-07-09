@@ -15,13 +15,18 @@ interface TimelineTooltipProps {
   label?: string | number;
   getProviderForModel: (model: string) => string;
   showDate?: boolean;
-  /** Visible Y range when zoomed; models outside it (clipped off-chart) dim. */
-  highlightRange?: [number, number];
+  /**
+   * dataKeys whose line is fully clipped out of the current zoom crop. A model
+   * counts as "in view" if any part of its curve is visible in the crop — not
+   * just its value at the hovered timestamp — so the tooltip surfaces the
+   * series the viewer can actually see, matching the legend.
+   */
+  dimmedKeys?: Set<string>;
   /** Hover mode: only the fastest model plus a pin hint, so the chart stays visible. */
   compact?: boolean;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, highlightRange, compact }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -31,17 +36,25 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
 
   if (validData.length === 0) return null;
 
-  const inRange = (value: number) =>
-    !highlightRange ||
-    (value >= highlightRange[0] && value <= highlightRange[1]);
+  // Ranks come from the overall speed order; in-view models then float above
+  // the dimmed ones so the visible series always read first.
+  const ranked = validData.map((item, index) => ({
+    ...item,
+    rank: index + 1,
+    inView: !dimmedKeys?.has(item.dataKey),
+  }));
 
-  // Compact hover shows one row: the fastest model that's actually in view,
-  // so a Y-zoom past the global leader still surfaces a visible model.
+  // Compact hover shows one row: the fastest model whose line is in the crop,
+  // so a zoom past the global leader still surfaces a visible series.
   const rows = compact
-    ? [validData.find((item) => inRange(item.value)) ?? validData[0]].filter(
-        (item): item is (typeof validData)[number] => item != null
+    ? [ranked.find((item) => item.inView) ?? ranked[0]].filter(
+        (item): item is (typeof ranked)[number] => item != null
       )
-    : validData;
+    : [...ranked].sort((a, b) => Number(b.inView) - Number(a.inView));
+
+  // Emphasize the first row shown — the fastest in-view model — rather than the
+  // global #1, which a Y-zoom can push into the dimmed group at the bottom.
+  const leaderKey = rows[0]?.dataKey;
 
   return (
     <div
@@ -69,11 +82,11 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
             : { fontSize: "11px", maxHeight: "300px", overflowY: "scroll", paddingRight: "8px" }
         }
       >
-        {rows.map((item, index) => {
+        {rows.map((item) => {
           // Extract model name from dataKey (remove '_value' suffix)
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
-          const inView = inRange(item.value);
+          const isLeader = item.dataKey === leaderKey;
 
           return (
             <div
@@ -83,7 +96,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                opacity: inView ? 1 : 0.35
+                opacity: item.inView ? 1 : 0.35
               }}
             >
               <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -100,11 +113,11 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
-                      color: index === 0 ? "#10B981" : "var(--color-text-on-tooltip)",
-                      fontWeight: index === 0 ? "bold" : "normal"
+                      color: isLeader ? "#10B981" : "var(--color-text-on-tooltip)",
+                      fontWeight: isLeader ? "bold" : "normal"
                     }}
                   >
-                    #{index + 1} {normalizeModelName(modelName)}
+                    #{item.rank} {normalizeModelName(modelName)}
                   </div>
                   <div
                     style={{
@@ -121,7 +134,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 style={{
                   color: "var(--color-text-on-tooltip-secondary)",
                   marginLeft: "12px",
-                  fontWeight: index === 0 ? "bold" : "normal",
+                  fontWeight: isLeader ? "bold" : "normal",
                   flexShrink: 0
                 }}
               >

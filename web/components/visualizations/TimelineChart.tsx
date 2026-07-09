@@ -42,21 +42,34 @@ interface LegendEntry {
 // Custom legend: names are rendered in black (recharts colors them per-series
 // by default), and items fill top-to-bottom within each column so the list
 // reads alphabetically down each column rather than across rows.
-const TimelineLegend: React.FC<{ payload?: LegendEntry[] }> = ({ payload }) => (
+const TimelineLegend: React.FC<{
+  payload?: LegendEntry[];
+  dimmedKeys?: Set<string>;
+}> = ({ payload, dimmedKeys }) => (
   <ul className="columns-2 gap-x-4 px-2 pt-5 sm:columns-3 sm:gap-x-6 lg:columns-4">
-    {payload?.map((entry) => (
-      <li
-        key={entry.dataKey ?? entry.value}
-        className="mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid"
-      >
-        <span
-          className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
-          style={{ backgroundColor: entry.color }}
-          aria-hidden="true"
-        />
-        <span>{entry.value}</span>
-      </li>
-    ))}
+    {[...(payload ?? [])]
+      .sort(
+        (a, b) =>
+          Number(dimmedKeys?.has(a.dataKey ?? "") ?? 0) -
+          Number(dimmedKeys?.has(b.dataKey ?? "") ?? 0)
+      )
+      .map((entry) => {
+        const dimmed = dimmedKeys?.has(entry.dataKey ?? "");
+        return (
+          <li
+            key={entry.dataKey ?? entry.value}
+            data-dimmed={dimmed || undefined}
+            className={`mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid${dimmed ? " opacity-35" : ""}`}
+          >
+            <span
+              className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
+              style={{ backgroundColor: entry.color }}
+              aria-hidden="true"
+            />
+            <span>{entry.value}</span>
+          </li>
+        );
+      })}
   </ul>
 );
 
@@ -113,6 +126,44 @@ interface PinnedTooltip {
 }
 
 const Y_MAX_PRESETS = [500, 1000, 1500, 2000, 3000, 5000];
+
+// Liang–Barsky: does the segment (x0,y0)->(x1,y1) touch the axis-aligned
+// rectangle [xMin,xMax]x[yMin,yMax]? Used to tell whether any part of a series
+// line falls inside the zoom crop, so the legend dims only fully-clipped ones.
+function segmentIntersectsRect(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  xMin: number,
+  yMin: number,
+  xMax: number,
+  yMax: number
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const clip = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0; // parallel to this edge; inside iff q >= 0
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-dx, x0 - xMin) &&
+    clip(dx, xMax - x0) &&
+    clip(-dy, y0 - yMin) &&
+    clip(dy, yMax - y0) &&
+    t0 <= t1
+  );
+}
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
@@ -206,6 +257,46 @@ const TimelineChart: React.FC = () => {
   );
   const tzAbbr = getLocalTimeZoneAbbr();
   const zoomX = zoom?.x;
+  const zoomY = zoom?.y;
+
+  // A series dims only when the crop clips it fully off-chart. Recharts clips
+  // the polyline to the X and Y domain together, so a series is visible if any
+  // segment between consecutive points passes through the crop rectangle —
+  // even when both endpoints sit outside it (e.g. a spike crossing the top, or
+  // a line entering only at the left/right edge). Test each segment against the
+  // rectangle with Liang–Barsky rather than checking points in isolation.
+  const dimmedLegendKeys = useMemo(() => {
+    const dimmed = new Set<string>();
+    if (!zoomY) return dimmed;
+    const [xLo, xHi] = zoomX ?? [windowStart, windowEnd];
+    const [yLo, yHi] = zoomY;
+    for (const model of modelsWithData) {
+      const key = `${model}_value`;
+      let prevT: number | null = null;
+      let prevV = 0;
+      let visible = false;
+      for (const point of windowedTimelineData) {
+        const value = (point as Record<string, number | undefined>)[key];
+        if (typeof value !== "number" || Number.isNaN(value)) {
+          prevT = null;
+          continue;
+        }
+        const t = point.timestamp;
+        if (
+          prevT === null
+            ? t >= xLo && t <= xHi && value >= yLo && value <= yHi
+            : segmentIntersectsRect(prevT, prevV, t, value, xLo, yLo, xHi, yHi)
+        ) {
+          visible = true;
+          break;
+        }
+        prevT = t;
+        prevV = value;
+      }
+      if (!visible) dimmed.add(key);
+    }
+    return dimmed;
+  }, [zoomY, zoomX, windowStart, windowEnd, windowedTimelineData, modelsWithData]);
   const xDomain = zoomX ?? currentTimeWindow;
   const zoomTicks = useMemo(
     () =>
@@ -314,6 +405,17 @@ const TimelineChart: React.FC = () => {
               : "Performance Consistency"
           }
           description={description}
+          exportRows={() =>
+            windowedTimelineData.map((point) => ({
+              time: point.timestampLabel,
+              ...Object.fromEntries(
+                modelsWithData.map((model) => [
+                  `${model}_${metric}_ms`,
+                  point[`${model}_value`],
+                ])
+              ),
+            }))
+          }
           stat={{
             label: (
               <MetricInfo metric={metric} align="right">{`Average ${metricLabel}`}</MetricInfo>
@@ -542,7 +644,7 @@ const TimelineChart: React.FC = () => {
                   <CustomTimelineTooltip
                     getProviderForModel={getProviderForModel}
                     showDate={dateScale}
-                    highlightRange={zoom?.y}
+                    dimmedKeys={dimmedLegendKeys}
                     compact
                   />
                 }
@@ -550,7 +652,9 @@ const TimelineChart: React.FC = () => {
                 cursor={!dragging && !hoveredMarker}
               />
               {modelsWithData.length > 1 && (
-                <Legend content={<TimelineLegend />} />
+                <Legend
+                  content={<TimelineLegend dimmedKeys={dimmedLegendKeys} />}
+                />
               )}
               {modelsWithData.map((model) => (
                 <Line
@@ -631,7 +735,7 @@ const TimelineChart: React.FC = () => {
                 label={pinned.label}
                 getProviderForModel={getProviderForModel}
                 showDate={dateScale}
-                highlightRange={zoom?.y}
+                dimmedKeys={dimmedLegendKeys}
               />
             </div>
           )}

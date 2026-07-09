@@ -15,6 +15,8 @@ import {
 } from "recharts";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
+import { normalizeModelName } from "@/lib/utils/formatters";
+import { labelScatterDots } from "@/lib/utils/chartExport";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -92,6 +94,39 @@ const LatencyAccuracySection: React.FC = () => {
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}
+          exportXLabel={`Average ${latencyLabel}`}
+          exportAnnotate={(clone) => {
+            const nameCounts = new Map<string, number>();
+            for (const { model } of scatterData) {
+              const name = normalizeModelName(model);
+              nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+            }
+            labelScatterDots(
+              clone,
+              scatterData.map(({ model, provider, x, y }) => {
+                const name = normalizeModelName(model);
+                return {
+                  x,
+                  y,
+                  color: getModelColor(model),
+                  label:
+                    (nameCounts.get(name) ?? 0) > 1
+                      ? `${name} (${provider})`
+                      : name,
+                };
+              })
+            );
+          }}
+          exportRows={() =>
+            scatterData.map(({ model, provider, benchmark, x, y, count }) => ({
+              model,
+              provider,
+              benchmark,
+              [`avg_${metric}_ms`]: x,
+              avg_wer_percent: y,
+              runs: count,
+            }))
+          }
           stat={{
             label: (
               <MetricInfo metric={metric} align="right">{`Avg ${latencyLabel}`}</MetricInfo>

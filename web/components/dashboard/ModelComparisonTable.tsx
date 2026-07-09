@@ -13,11 +13,13 @@ import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 interface ModelComparisonTableProps {
   data: ModelHeatmapData[];
   getProviderForModel: (model: string) => string;
+  percentileIdx: number;
+  onPercentileChange: (idx: number) => void;
 }
 
 type ColumnKey = "latency" | "avgWER" | "sampleCount";
 
-const PERCENTILES: { key: LatencyPercentile; hint?: string }[] = [
+export const PERCENTILES: { key: LatencyPercentile; hint?: string }[] = [
   { key: "p0", hint: "fastest run" },
   { key: "p25" },
   { key: "p50", hint: "median" },
@@ -29,7 +31,7 @@ const PERCENTILES: { key: LatencyPercentile; hint?: string }[] = [
 ];
 
 // p95: the tail latency real-time voice users actually feel.
-const DEFAULT_PERCENTILE_IDX = 5;
+export const DEFAULT_PERCENTILE_IDX = 5;
 
 const COLUMNS: {
   key: ColumnKey;
@@ -43,10 +45,11 @@ const COLUMNS: {
 
 const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
-  getProviderForModel
+  getProviderForModel,
+  percentileIdx,
+  onPercentileChange
 }) => {
   const activeTab = useActiveTab();
-  const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
@@ -153,7 +156,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           max={PERCENTILES.length - 1}
           step={1}
           value={percentileIdx}
-          onChange={(e) => setPercentileIdx(Number(e.target.value))}
+          onChange={(e) => onPercentileChange(Number(e.target.value))}
           className="w-44 accent-accent-teal"
           aria-valuetext={percentile.key}
         />
