@@ -490,6 +490,29 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
     ),
+    # Azure AI Speech real-time (raw WebSocket). "neural" is the standard
+    # neural-voice family; "dragon-hd-latest" pins the auto-updating
+    # :DragonHDLatestNeural HD variant. The voice name selects the served model.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="azure",
+        model="neural",
+        voice="en-US-AvaNeural",
+        creator="microsoft",
+        tags=(_REALTIME, _MULTI, _EMOTION, _STREAM),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="azure",
+        model="dragon-hd-latest",
+        voice="en-US-Ava:DragonHDLatestNeural",
+        creator="microsoft",
+        tags=(_REALTIME, _MULTI, _STREAM),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
     RegisteredModel(
         benchmark=_TTS,
         provider="groq",

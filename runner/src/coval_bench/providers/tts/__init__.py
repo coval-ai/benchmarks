@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from coval_bench.providers.base import TTSProvider
 from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
+from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
@@ -57,6 +58,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "groq": GroqTTSProvider,
     "soniox": SonioxTTSProvider,
     "baseten": BasetenTTSProvider,
+    "azure": AzureTTSProvider,
     "fishaudio": FishAudioTTSProvider,
     "alibaba": AlibabaTTSProvider,
 }
@@ -72,6 +74,7 @@ __all__ = [
     "HUME_AVAILABLE",
     "GOOGLE_TTS_AVAILABLE",
     "AlibabaTTSProvider",
+    "AzureTTSProvider",
     "BasetenTTSProvider",
     "FishAudioTTSProvider",
     "GradiumTTSProvider",

@@ -111,6 +111,8 @@ export function normalizeModelName(modelKey: string): string {
     "inworld-tts-1.5-max": "TTS 1.5 Max",
     "inworld-tts-1.5-mini": "TTS 1.5 Mini",
     "tts-rt-v1": "TTS RT v1",
+    neural: "Neural", // azure
+    "dragon-hd-latest": "Dragon HD Latest", // azure
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -187,6 +189,7 @@ export function normalizeSTTProviderName(providerName: string): string {
 export function normalizeTTSProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     alibaba: "Alibaba",
+    azure: "Azure",
     cartesia: "Cartesia",
     deepgram: "Deepgram",
     elevenlabs: "ElevenLabs",
