@@ -129,7 +129,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       },
       annotate: exportAnnotate,
       legend: Array.from(
-        card.querySelectorAll(".recharts-legend-wrapper li")
+        card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
       ).map((li) => ({
         label: li.textContent?.trim() ?? "",
         color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",

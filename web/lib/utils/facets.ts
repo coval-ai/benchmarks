@@ -133,7 +133,11 @@ export function buildFacetGroups(
           const repKey = visibleKeys.find((key) =>
             (tagIndex.get(key) ?? []).some((t) => t.category === category && t.value === value)
           );
-          color = providerColors[label] ?? (repKey ? getModelColor(repKey) : undefined);
+          // Chip follows the chart: derive the host chip from the color of one
+          // of its visible models so the sidebar can never drift from the
+          // series colors. providerColors is only a fallback when no model of
+          // the host is currently visible.
+          color = (repKey ? getModelColor(repKey) : undefined) ?? providerColors[label];
         }
         return {
           value,

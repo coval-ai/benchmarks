@@ -90,6 +90,33 @@ function legendRows(
   return rows;
 }
 
+/** Height of one wrapped title line (600 20px). */
+const TITLE_LINE_HEIGHT = 28;
+
+// Greedily wrap `text` into lines that fit `maxWidth` under the caller's current
+// ctx.font. A single word wider than maxWidth stays on its own line (it can't be
+// broken), so callers keep some headroom. Falls back to the whole string.
+function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(candidate).width > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [text];
+}
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Label text takes its dot's color so stacked labels stay attributable, but
@@ -177,7 +204,18 @@ export function labelScatterDots(
         clone.appendChild(leader);
       }
     }
-    const [x, y, anchor] = placement ?? candidates[0]!;
+    // Last-resort fallback: no collision-free slot exists, so accept overlap
+    // but keep the label horizontally in-bounds (never clipped at the edge).
+    // Prefer the side with room; else clamp a centered label into the canvas.
+    let fallback: [number, number, string];
+    if (cx + 10 + w <= width - 2) fallback = [cx + 10, cy + 4, "start"];
+    else if (cx - 10 - w >= 2) fallback = [cx - 10, cy + 4, "end"];
+    else if (w >= width - 4)
+      // Label is wider than the plot itself; anchor at the left edge so at least
+      // its start is readable rather than clipping both ends.
+      fallback = [2, cy + 4, "start"];
+    else fallback = [Math.min(Math.max(cx, 2 + w / 2), width - 2 - w / 2), cy + 4, "middle"];
+    const [x, y, anchor] = placement ?? fallback;
     boxes.push(box(x, y, anchor));
     const text = document.createElementNS(SVG_NS, "text");
     text.setAttribute("x", `${x}`);
@@ -243,23 +281,27 @@ export async function downloadChartPNG(
   const measure = canvas.getContext("2d");
   if (!measure) return false;
   const rows = legendRows(measure, header.legend ?? [], width);
-  const titleTextBlock = (header.label ? 20 : 0) + (header.title ? 30 : 0);
-  // On a narrow (mobile) export the left title and right-aligned stat collide,
-  // so stack the stat under the title when they don't fit side by side.
-  let statFitsBeside = true;
+  // Measure the headline stat first so we know how much width it claims.
+  let statW = 0;
   if (header.stat) {
-    measure.font = `600 20px ${FONT}`;
-    const titleW = header.title ? measure.measureText(header.title).width : 0;
     measure.font = `13px ${FONT}`;
-    const leftW = Math.max(
-      titleW,
-      header.label ? measure.measureText(header.label).width : 0
-    );
     const statLabelW = measure.measureText(header.stat.label).width;
     measure.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    const statW = Math.max(statLabelW, measure.measureText(header.stat.value).width);
-    statFitsBeside = leftW + 16 + statW <= width;
+    statW = Math.max(statLabelW, measure.measureText(header.stat.value).width);
   }
+  // On a narrow (mobile) export the left title and right-aligned stat collide,
+  // so stack the stat under the title when a legible title strip (≥140px) can't
+  // sit beside it. Either way the title WRAPS into the width actually available,
+  // so a long multi-word title wraps instead of running off the canvas edge.
+  const statFitsBeside = header.stat ? statW + 16 + 140 <= width : false;
+  const availableTitleWidth =
+    width - (header.stat && statFitsBeside ? statW + 16 : 0);
+  measure.font = `600 20px ${FONT}`;
+  const titleLines = header.title
+    ? wrapText(measure, header.title, availableTitleWidth)
+    : [];
+  const titleTextBlock =
+    (header.label ? 20 : 0) + titleLines.length * TITLE_LINE_HEIGHT;
   const titleBlock = header.stat
     ? statFitsBeside
       ? Math.max(titleTextBlock, 50)
@@ -300,11 +342,13 @@ export async function downloadChartPNG(
     ctx.fillText(header.label, MARGIN, y + 13);
     y += 20;
   }
-  if (header.title) {
+  if (titleLines.length) {
     ctx.font = `600 20px ${FONT}`;
     ctx.fillStyle = "#0f0c0a";
-    ctx.fillText(header.title, MARGIN, y + 20);
-    y += 30;
+    for (const line of titleLines) {
+      ctx.fillText(line, MARGIN, y + 20);
+      y += TITLE_LINE_HEIGHT;
+    }
   }
   if (header.stat && !statFitsBeside) {
     ctx.font = `13px ${FONT}`;

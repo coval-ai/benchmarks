@@ -11,7 +11,6 @@ import {
   YAxis,
   CartesianGrid,
   ResponsiveContainer,
-  Legend,
   Tooltip,
   ReferenceLine
 } from "recharts";
@@ -395,6 +394,16 @@ const TimelineChart: React.FC = () => {
     (typeof yDomain[1] !== "number" ||
       (v >= yDomain[0] && v <= yDomain[1]));
 
+  // The legend is rendered as a sibling BELOW the chart (not a recharts
+  // <Legend>), so the plot keeps the full card height instead of being
+  // squeezed — a 20-series legend inside the chart left only ~40px to plot on
+  // mobile. Build the payload the custom legend expects from the plotted models.
+  const legendPayload: LegendEntry[] = modelsWithData.map((model) => ({
+    value: formatChartLabel(model, getProviderForModel(model)),
+    color: getModelColor(model),
+    dataKey: `${model}_value`,
+  }));
+
   return (
     <div className="mb-4">
       <Card padding="p-5 lg:p-8">
@@ -651,11 +660,6 @@ const TimelineChart: React.FC = () => {
                 active={pinned || dragging || hoveredMarker ? false : undefined}
                 cursor={!dragging && !hoveredMarker}
               />
-              {modelsWithData.length > 1 && (
-                <Legend
-                  content={<TimelineLegend dimmedKeys={dimmedLegendKeys} />}
-                />
-              )}
               {modelsWithData.map((model) => (
                 <Line
                   key={model}
@@ -762,6 +766,14 @@ const TimelineChart: React.FC = () => {
               );
             })()}
         </div>
+        {modelsWithData.length > 1 && (
+          <div data-chart-legend>
+            <TimelineLegend
+              payload={legendPayload}
+              dimmedKeys={dimmedLegendKeys}
+            />
+          </div>
+        )}
       </Card>
     </div>
   );
