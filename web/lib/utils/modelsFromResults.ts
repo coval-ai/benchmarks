@@ -20,11 +20,11 @@ function modelIsEnabled(
   if (!providers) return true;
 
   const catalogue =
-    benchmark === "STT"
+    (benchmark === "STT"
       ? providers.stt
       : benchmark === "S2S"
         ? providers.s2s
-        : providers.tts;
+        : providers.tts) ?? [];
   const providerInfo = catalogue.find((item) => item.provider === provider);
   if (!providerInfo) return true;
 
@@ -53,11 +53,11 @@ function buildModelsByProviderFromCatalogue(
   if (!providers) return modelsByProvider;
 
   const catalogue =
-    benchmark === "STT"
+    (benchmark === "STT"
       ? providers.stt
       : benchmark === "S2S"
         ? providers.s2s
-        : providers.tts;
+        : providers.tts) ?? [];
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
       if (modelInfo.disabled) continue;

@@ -34,11 +34,11 @@ export function buildTagIndex(
   const index = new Map<string, ModelTagOut[]>();
   if (!providers) return index;
   const catalogue =
-    benchmark === "STT"
+    (benchmark === "STT"
       ? providers.stt
       : benchmark === "S2S"
         ? providers.s2s
-        : providers.tts;
+        : providers.tts) ?? [];
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
       index.set(toModelKey(providerInfo.provider, modelInfo.model), modelInfo.tags ?? []);
