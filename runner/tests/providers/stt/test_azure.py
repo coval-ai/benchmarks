@@ -256,3 +256,8 @@ def test_invalid_model_raises() -> None:
 def test_missing_region_raises() -> None:
     with pytest.raises(ValueError, match="requires region"):
         AzureSTTProvider(api_key=SecretStr("k"))
+
+
+def test_missing_api_key_raises() -> None:
+    with pytest.raises(ValueError, match="requires api_key"):
+        AzureSTTProvider(api_key=None, region=REGION)  # type: ignore[arg-type]

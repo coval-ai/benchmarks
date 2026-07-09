@@ -63,6 +63,8 @@ class AzureSTTProvider(STTProvider):
             raise ValueError(f"Invalid Azure model {model!r}. Valid: {sorted(self._VALID_MODELS)}")
         if region is None:
             raise ValueError("AzureSTTProvider requires region (set Settings.azure_region)")
+        if api_key is None:
+            raise ValueError("AzureSTTProvider requires api_key (set Settings.azure_api_key)")
         self._api_key = api_key
         self._model = model
         self._region = region
@@ -152,7 +154,8 @@ class AzureSTTProvider(STTProvider):
         chunk_size = int(byte_rate * realtime_resolution)
         try:
             async for chunk, start in paced_chunks(stream, chunk_size, byte_rate):
-                result.audio_start_time = start
+                if result.audio_start_time is None:
+                    result.audio_start_time = start
                 await ws.send(_audio_message(request_id, chunk))
             await ws.send(_audio_message(request_id, b""))  # empty payload = end of stream
         except Exception as exc:
