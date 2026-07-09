@@ -193,7 +193,8 @@ export function normalizeS2SProviderName(providerName: string): string {
     xai: "xAI",
   };
 
-  return mappings[providerName] ?? capitalizeProviderSlug(providerName);
+  const lower = providerName.toLowerCase();
+  return mappings[lower] ?? capitalizeProviderSlug(providerName);
 }
 
 /** Pick the provider-name normalizer that matches the active dashboard tab. */
