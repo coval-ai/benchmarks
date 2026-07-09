@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     soniox_api_key: SecretStr | None = None
     revai_api_key: SecretStr | None = None
     baseten_api_key: SecretStr | None = None
+    fishaudio_api_key: SecretStr | None = None
     azure_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the

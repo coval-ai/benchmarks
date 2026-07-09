@@ -20,6 +20,7 @@ from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
+from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
 from coval_bench.providers.tts.gradium import GradiumTTSProvider
 from coval_bench.providers.tts.groq import GroqTTSProvider
 from coval_bench.providers.tts.inworld import InworldTTSProvider
@@ -37,6 +38,12 @@ except ImportError:
     HumeTTSProvider = None  # type: ignore[assignment,misc]
     HUME_AVAILABLE = False
 
+try:
+    from coval_bench.providers.tts.google import GOOGLE_TTS_AVAILABLE, GoogleTTSProvider
+except ImportError:
+    GoogleTTSProvider = None  # type: ignore[assignment,misc]
+    GOOGLE_TTS_AVAILABLE = False
+
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
     "cartesia": CartesiaTTSProvider,
@@ -51,16 +58,22 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "soniox": SonioxTTSProvider,
     "baseten": BasetenTTSProvider,
     "azure": AzureTTSProvider,
+    "fishaudio": FishAudioTTSProvider,
 }
 
 if HumeTTSProvider is not None:
     TTS_PROVIDERS["hume"] = HumeTTSProvider
 
+if GoogleTTSProvider is not None and GOOGLE_TTS_AVAILABLE:
+    TTS_PROVIDERS["google"] = GoogleTTSProvider
+
 __all__ = [
     "TTS_PROVIDERS",
     "HUME_AVAILABLE",
+    "GOOGLE_TTS_AVAILABLE",
     "AzureTTSProvider",
     "BasetenTTSProvider",
+    "FishAudioTTSProvider",
     "GradiumTTSProvider",
     "SmallestTTSProvider",
     "XaiTTSProvider",
