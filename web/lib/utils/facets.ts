@@ -130,13 +130,18 @@ export function buildFacetGroups(
         const label = provider_valued ? normalizeProvider(value) : valueLabel;
         let color: string | undefined;
         if (provider_valued) {
-          const repKey = visibleKeys.find((key) =>
-            (tagIndex.get(key) ?? []).some((t) => t.category === category && t.value === value)
-          );
           // Chip follows the chart: derive the host chip from the color of one
           // of its visible models so the sidebar can never drift from the
-          // series colors. providerColors is only a fallback when no model of
-          // the host is currently visible.
+          // series colors. Match the same predicate as `count` (including the
+          // other active facets) so the representative model is one that's
+          // actually visible. providerColors is only a fallback when none is.
+          const repKey = visibleKeys.find((key) => {
+            const tags = tagIndex.get(key) ?? [];
+            return (
+              tags.some((t) => t.category === category && t.value === value) &&
+              matchesSelection(tags, others)
+            );
+          });
           color = (repKey ? getModelColor(repKey) : undefined) ?? providerColors[label];
         }
         return {

@@ -82,6 +82,17 @@ function shiftLightness(hex: string, amt: number): string {
   return `#${ch(0)}${ch(2)}${ch(4)}`;
 }
 
+// Bare slugs that appear under more than one provider (via "provider:model"
+// composite keys in modelColors), e.g. "default" for both Speechmatics and
+// Gradium. For these the bare-slug entry belongs to one specific provider, so a
+// composite key for a DIFFERENT provider must not borrow it — it should fall
+// through to that provider's hue family instead.
+const sharedSlugs = new Set(
+  Object.keys(modelColors)
+    .filter((key) => key.includes(":"))
+    .map((key) => key.slice(key.indexOf(":") + 1))
+);
+
 /**
  * Get color for a model. Accepts both bare slugs ("default") and composite
  * "provider:model" keys ("speechmatics:default"). Composite keys are tried
@@ -97,7 +108,10 @@ function shiftLightness(hex: string, amt: number): string {
 export function getModelColor(modelKey: string): string {
   if (modelColors[modelKey]) return modelColors[modelKey];
   const { provider, model } = parseModelKey(modelKey);
-  if (modelColors[model]) return modelColors[model];
+  // Skip the bare-slug entry for a composite key whose slug is shared across
+  // providers — it belongs to another provider; use the hue family below.
+  if (modelColors[model] && !(provider && sharedSlugs.has(model)))
+    return modelColors[model];
 
   if (provider) {
     const base = providerColors[providerDisplayFromId(provider)];
