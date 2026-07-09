@@ -256,6 +256,8 @@ async def _run_stt_item(
             kwargs["project_id"] = settings.google_project_id
         elif entry.provider == "baseten":
             kwargs["ws_url"] = settings.baseten_whisper_url
+        elif entry.provider == "azure":
+            kwargs["region"] = settings.azure_region
         provider = provider_cls(**kwargs)
 
         audio_path: Path = item.path

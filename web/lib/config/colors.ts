@@ -87,6 +87,9 @@ export const modelColors: Record<string, string> = {
   // Mistral — amber, dark (STT; separates from Smallest's pulse).
   "voxtral-mini-transcribe-realtime-2602": "#835a01",
 
+  // Azure — blue, dark (STT; separates from Cartesia's sonic/ink and Gladia).
+  "azure:default": "#3d7fd1",
+
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#a24112",
   "gradium:default": "#74c16c"
@@ -108,5 +111,6 @@ export const providerColors: Record<string, string> = {
   Google: "#53b0de",
   Gladia: "#6a9fee",
   Mistral: "#835a01",
-  Smallest: "#d7a03d"
+  Smallest: "#d7a03d",
+  Azure: "#3d7fd1"
 };

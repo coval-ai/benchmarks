@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from coval_bench.providers.base import STTProvider
 from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
+from coval_bench.providers.stt.azure import AzureSTTProvider
 from coval_bench.providers.stt.baseten import BasetenSTTProvider
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
@@ -43,6 +44,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "deepgram": DeepgramProvider,
     "cartesia": CartesiaSTTProvider,
     "assemblyai": AssemblyAIProvider,
+    "azure": AzureSTTProvider,
     "baseten": BasetenSTTProvider,
     "elevenlabs": ElevenLabsSTTProvider,
     "gladia": GladiaSTTProvider,
@@ -65,6 +67,7 @@ __all__ = [
     "DeepgramProvider",
     "CartesiaSTTProvider",
     "AssemblyAIProvider",
+    "AzureSTTProvider",
     "BasetenSTTProvider",
     "ElevenLabsSTTProvider",
     "GladiaSTTProvider",

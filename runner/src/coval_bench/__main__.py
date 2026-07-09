@@ -254,6 +254,8 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
         kwargs["project_id"] = settings.google_project_id
     elif provider == "baseten":
         kwargs["ws_url"] = settings.baseten_whisper_url
+    elif provider == "azure":
+        kwargs["region"] = settings.azure_region
     instance = provider_cls(**kwargs)
 
     with wave.open(wav, "rb") as w:
