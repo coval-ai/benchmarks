@@ -111,8 +111,8 @@ export function normalizeModelName(modelKey: string): string {
     "inworld-tts-1.5-max": "TTS 1.5 Max",
     "inworld-tts-1.5-mini": "TTS 1.5 Mini",
     "tts-rt-v1": "TTS RT v1",
-    neural: "Neural",
-    "dragon-hd-latest": "Dragon HD Latest",
+    neural: "Neural", // azure
+    "dragon-hd-latest": "Dragon HD Latest", // azure
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
