@@ -3,6 +3,8 @@
 
 "use client";
 
+import { useTheme } from "next-themes";
+
 export interface ThemeColors {
   grid: string;
   axisText: string;
@@ -17,9 +19,9 @@ export interface ThemeColors {
   textSecondary: string;
 }
 
-// Single light theme tuned for the coval.ai cream palette. These mirror the
-// chart-* CSS variables in globals.css (charts read them via JS, not CSS).
-const colors: ThemeColors = {
+// Charts read these via JS (recharts/d3 fills), not CSS, so they must mirror the
+// chart-* CSS variables in globals.css for each theme.
+const light: ThemeColors = {
   grid: "#dbdbd3",
   axisText: "#515151",
   label: "#0f0c0a",
@@ -33,6 +35,21 @@ const colors: ThemeColors = {
   textSecondary: "#515151",
 };
 
+const dark: ThemeColors = {
+  grid: "#2e2823",
+  axisText: "#c7c2bc",
+  label: "#f9faf8",
+  median: "#f9faf8",
+  boxFill: "rgba(249, 250, 248, 0.08)",
+  barStroke: "#3a332d",
+  tooltipBg: "#1c1611",
+  tooltipText: "#f9faf8",
+  tooltipSecondary: "#c7c2bc",
+  textPrimary: "#f9faf8",
+  textSecondary: "#c7c2bc",
+};
+
 export function useThemeColors(): ThemeColors {
-  return colors;
+  const { resolvedTheme } = useTheme();
+  return resolvedTheme === "dark" ? dark : light;
 }

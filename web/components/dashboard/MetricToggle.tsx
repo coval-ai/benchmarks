@@ -17,7 +17,7 @@ const MetricToggle: React.FC = () => {
   if (activeTab !== "stt") return null;
 
   return (
-    <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-gray-100 p-0.5">
+    <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-surface-toggle-inactive p-0.5">
       {(["TTFS", "TTFT"] as const).map((m) => (
         <MetricInfo key={m} metric={m} align="left">
           <button
@@ -26,8 +26,8 @@ const MetricToggle: React.FC = () => {
             className={
               "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
               (sttMetric === m
-                ? "bg-white text-text-primary shadow-sm"
-                : "text-gray-500 hover:text-text-primary")
+                ? "bg-surface-primary text-text-primary shadow-sm"
+                : "text-text-secondary hover:text-text-primary")
             }
           >
             {m}

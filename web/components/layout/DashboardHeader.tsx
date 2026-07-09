@@ -7,6 +7,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React from "react";
+import ThemeSwitch from "@/components/layout/ThemeSwitch";
 
 // Benchmark sections, shown as tabs in the upper right of the top nav bar.
 const SECTIONS = [
@@ -33,7 +34,7 @@ const DashboardHeader: React.FC = () => {
   }, [pathname]);
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-white">
+    <header className="fixed inset-x-0 top-0 z-50 h-[60px] border-b border-border-primary bg-surface-primary">
       <div className="relative flex h-full items-center px-4 md:px-6">
         {/* Brand — "Voice Model Benchmarks" wordmark over a "By Coval" lockup */}
         <div className="flex flex-col justify-center leading-none">
@@ -58,7 +59,7 @@ const DashboardHeader: React.FC = () => {
               width={99}
               height={22}
               priority
-              className="h-2 w-auto"
+              className="coval-logo h-2 w-auto"
             />
           </a>
         </div>
@@ -94,16 +95,19 @@ const DashboardHeader: React.FC = () => {
           })}
         </nav>
 
-        {/* GitHub — links to the public repo (desktop only) */}
-        <a
-          href="https://github.com/coval-ai/benchmarks"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="View source on GitHub"
-          className="ml-auto hidden items-center text-text-secondary transition-colors hover:text-text-primary md:flex"
-        >
-          <GithubIcon />
-        </a>
+        {/* Theme toggle + GitHub link (desktop only) */}
+        <div className="ml-auto hidden items-center gap-4 md:flex">
+          <ThemeSwitch />
+          <a
+            href="https://github.com/coval-ai/benchmarks"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="View source on GitHub"
+            className="flex items-center text-text-secondary transition-colors hover:text-text-primary"
+          >
+            <GithubIcon />
+          </a>
+        </div>
 
         {/* Hamburger — opens the mobile menu (two-bar icon, mobile only) */}
         <button
@@ -132,7 +136,7 @@ const DashboardHeader: React.FC = () => {
         id="mobile-menu"
         aria-label="Global navigation"
         aria-hidden={!menuOpen}
-        className={`fixed inset-x-0 top-[60px] bottom-0 flex flex-col gap-2 bg-white px-4 py-6 transition-all duration-300 ease-out md:hidden ${
+        className={`fixed inset-x-0 top-[60px] bottom-0 flex flex-col gap-2 bg-surface-primary px-4 py-6 transition-all duration-300 ease-out md:hidden ${
           menuOpen
             ? "translate-y-0 opacity-100 pointer-events-auto"
             : "-translate-y-2 opacity-0 pointer-events-none"

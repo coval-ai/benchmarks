@@ -6,11 +6,12 @@
 import React, { useEffect, useState } from "react";
 import { Check, ImageDown, Link2, Table } from "lucide-react";
 import { downloadCSV, downloadChartPNG } from "@/lib/utils/chartExport";
+import { useThemeColors } from "@/hooks/useThemeColors";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const iconButtonClass =
-  "flex h-7 w-7 items-center justify-center rounded-lg border border-border-secondary bg-white text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary";
+  "flex h-7 w-7 items-center justify-center rounded-lg border border-border-secondary bg-surface-primary text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary";
 
 interface SectionHeaderProps {
   label: string;
@@ -49,6 +50,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
 }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
+  const themeColors = useThemeColors();
   const anchorId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
   useEffect(() => {
@@ -135,7 +137,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
         dimmed: li.hasAttribute("data-dimmed"),
       })),
-    }).catch(() => false);
+    }, themeColors).catch(() => false);
     if (ok) trackShare("png");
   };
 

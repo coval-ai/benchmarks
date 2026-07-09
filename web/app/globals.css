@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /* Keep the .dark variant scoped to a .dark ancestor (which no longer exists)
-   so the stray `dark:` utilities left in components never activate via the OS
-   prefers-color-scheme fallback. The dashboard is light-only (coval.ai cream). */
+   so the stray `dark:` utilities left in the playground never activate via the
+   OS prefers-color-scheme fallback. Benchmarking pages theme instead by
+   overriding the tokens below under `.bench-theme` (see the media query). */
 @custom-variant dark (&:is(.dark *));
 
 /* coval.ai cream palette — single light theme. */
@@ -69,6 +70,65 @@
 
   /* Film grain (coval.ai). Tiled fractal-noise SVG; layered via overlays. */
   --noise-bg: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='5' seed='23' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Dark theme — coval.ai Ink base. Gated on `[data-theme="dark"]`, which
+   next-themes sets on <html> from the toggle or the OS preference (defaultTheme
+   "system"). Using the data attribute rather than a `.dark` class keeps the
+   playground's dormant `dark:` utilities gated. Only the token values flip; the
+   whole app (dashboard + playground) reads from these, so surfaces, charts and
+   tables restyle for free. Series accents keep their light-family hues, which
+   stay legible on Ink. */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+    --color-surface-primary: #0f0c0a;
+    --color-surface-secondary: #17120f;
+    --color-surface-elevated: #1c1611;
+    --color-surface-tooltip: #1c1611;
+    --color-surface-backdrop: rgba(0, 0, 0, 0.6);
+    --color-surface-overlay: rgba(15, 12, 10, 0.85);
+
+    --color-text-primary: #f9faf8;
+    --color-text-secondary: #c7c2bc;
+    /* Graphite, lightened from brand #7f7a76 so muted text still clears WCAG AA
+       (4.5:1) on the lightest elevated surface, not just the Ink base. */
+    --color-text-tertiary: #8b8681;
+    --color-text-on-tooltip: #f9faf8;
+    --color-text-on-tooltip-secondary: #c7c2bc;
+
+    --color-border-primary: #2e2823;
+    --color-border-secondary: #241f1b;
+
+    --color-chart-grid: #2e2823;
+    --color-chart-axis-text: #c7c2bc;
+    --color-chart-label: #f9faf8;
+    --color-chart-median: #f9faf8;
+    --color-chart-box-fill: rgba(249, 250, 248, 0.08);
+    --color-chart-bar-stroke: #3a332d;
+
+    --color-hover-bg: rgba(249, 250, 248, 0.06);
+    --color-selected-bg: rgba(249, 250, 248, 0.1);
+    --color-selected-border: rgba(249, 250, 248, 0.2);
+
+    --color-surface-toggle-active: #f9faf8;
+    --color-text-on-toggle-active: #0f0c0a;
+    --color-surface-toggle-inactive: #241f1b;
+    --color-text-on-toggle-inactive: #c7c2bc;
+
+    --color-spinner-track: rgba(249, 250, 248, 0.15);
+    --color-spinner-head: #f9faf8;
+
+    --color-screen-glow: rgba(249, 250, 248, 0.15);
+
+    --background: #0f0c0a;
+    --foreground: #f9faf8;
+}
+
+/* Brand rule: the Coval logo is ink or white only. On Ink the ink wordmark
+   disappears, so flip it to solid white in dark mode. */
+[data-theme="dark"] .coval-logo {
+  filter: brightness(0) invert(1);
 }
 
 @theme inline {
