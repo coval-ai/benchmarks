@@ -24,9 +24,11 @@ interface TimelineTooltipProps {
   dimmedKeys?: Set<string>;
   /** Hover mode: only the fastest model plus a pin hint, so the chart stays visible. */
   compact?: boolean;
+  /** Optional replacement for the compact hover interaction hint. */
+  interactionHint?: string | false;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -144,7 +146,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           );
         })}
       </div>
-      {compact && validData.length > 1 && (
+      {compact && validData.length > 1 && interactionHint !== false && (
         <p
           style={{
             margin: "8px 0 0",
@@ -152,7 +154,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
             color: "var(--color-text-on-tooltip-secondary)"
           }}
         >
-          +{validData.length - 1} more · click to pin · drag to zoom
+          +{validData.length - 1} more · {interactionHint ?? "click to pin · drag to zoom"}
         </p>
       )}
     </div>
