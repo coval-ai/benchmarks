@@ -63,6 +63,8 @@ def fake_settings(tmp_path: Path) -> Settings:
         smallest_api_key=SecretStr("test-smallest-key"),
         inworld_api_key=SecretStr("test-inworld-key"),
         soniox_api_key=SecretStr("test-soniox-key"),
+        azure_api_key=SecretStr("test-azure-key"),
+        azure_region="eastus",
     )
 
 
