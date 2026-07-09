@@ -20,8 +20,9 @@ export interface ThemeColors {
 }
 
 // Charts read these via JS (recharts/d3 fills), not CSS, so they must mirror the
-// chart-* CSS variables in globals.css for each theme.
-const light: ThemeColors = {
+// chart-* CSS variables in globals.css for each theme. Exported so the PNG
+// export (which can't call the hook) shares the same source of truth.
+export const LIGHT_CHART_COLORS: ThemeColors = {
   grid: "#dbdbd3",
   axisText: "#515151",
   label: "#0f0c0a",
@@ -35,7 +36,7 @@ const light: ThemeColors = {
   textSecondary: "#515151",
 };
 
-const dark: ThemeColors = {
+export const DARK_CHART_COLORS: ThemeColors = {
   grid: "#2e2823",
   axisText: "#c7c2bc",
   label: "#f9faf8",
@@ -51,5 +52,5 @@ const dark: ThemeColors = {
 
 export function useThemeColors(): ThemeColors {
   const { resolvedTheme } = useTheme();
-  return resolvedTheme === "dark" ? dark : light;
+  return resolvedTheme === "dark" ? DARK_CHART_COLORS : LIGHT_CHART_COLORS;
 }

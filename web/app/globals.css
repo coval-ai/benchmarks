@@ -228,6 +228,13 @@ body {
   mix-blend-mode: multiply;
 }
 
+/* Multiply vanishes on Ink, so screen-blend the grain (like the footer) and
+   lift the opacity to keep the texture visible in dark mode. */
+[data-theme="dark"] .noise-overlay {
+  opacity: 0.06;
+  mix-blend-mode: screen;
+}
+
 /* Footer grain — coval.ai's `.footer-noise`: screen-blended, fading in toward
    the bottom of the dark band. */
 .footer-noise {

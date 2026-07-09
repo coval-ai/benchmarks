@@ -1,25 +1,11 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ThemeColors } from "@/hooks/useThemeColors";
+import { LIGHT_CHART_COLORS, type ThemeColors } from "@/hooks/useThemeColors";
 
 // The export mirrors the on-screen theme. Chrome colours come from the same
-// chart-* palette the charts render with; this is the light default used when a
-// caller doesn't pass one.
-const LIGHT_COLORS: ThemeColors = {
-  grid: "#dbdbd3",
-  axisText: "#515151",
-  label: "#0f0c0a",
-  median: "#0f0c0a",
-  boxFill: "rgba(15, 12, 10, 0.08)",
-  barStroke: "#c8c6c2",
-  tooltipBg: "#f9faf8",
-  tooltipText: "#0f0c0a",
-  tooltipSecondary: "#515151",
-  textPrimary: "#0f0c0a",
-  textSecondary: "#515151",
-};
-
+// chart-* palette the charts render with; the shared light palette is the
+// default used when a caller doesn't pass one.
 const isDarkBg = (hex: string) => {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) return false;
   const n = parseInt(hex.slice(1), 16);
@@ -169,7 +155,7 @@ const labelColor = (hex?: string, dark = false) => {
 export function labelScatterDots(
   clone: SVGSVGElement,
   points: { x: number; y: number; label: string; color?: string }[],
-  colors: ThemeColors = LIGHT_COLORS
+  colors: ThemeColors = LIGHT_CHART_COLORS
 ) {
   const dark = isDarkBg(colors.tooltipBg);
   const pos = (el: Element, attr: string) => Number(el.getAttribute(attr));
@@ -264,7 +250,7 @@ export async function downloadChartPNG(
   svg: SVGSVGElement,
   filename: string,
   header: ChartPNGHeader = {},
-  colors: ThemeColors = LIGHT_COLORS
+  colors: ThemeColors = LIGHT_CHART_COLORS
 ): Promise<boolean> {
   const dark = isDarkBg(colors.tooltipBg);
   const svgRect = svg.getBoundingClientRect();

@@ -161,13 +161,17 @@ const DashboardHeader: React.FC = () => {
             </Link>
           );
         })}
+        <div className="mt-auto flex items-center justify-between rounded-xl px-4 py-3">
+          <span className="text-2xl tracking-wide text-text-secondary">Theme</span>
+          <ThemeSwitch />
+        </div>
         <a
           href="https://github.com/coval-ai/benchmarks"
           target="_blank"
           rel="noopener noreferrer"
           tabIndex={menuOpen ? undefined : -1}
           onClick={() => setMenuOpen(false)}
-          className="mt-auto flex items-center gap-3 rounded-xl px-4 py-4 text-2xl tracking-wide text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary"
+          className="flex items-center gap-3 rounded-xl px-4 py-4 text-2xl tracking-wide text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary"
         >
           <GithubIcon />
           GitHub
