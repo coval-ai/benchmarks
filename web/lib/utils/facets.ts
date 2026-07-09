@@ -4,6 +4,8 @@
 import type { ModelTagOut, ProvidersApiResponse, TagCategoryOut } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import { toModelKey } from "./formatters";
+import { providerColors } from "../config/colors";
+import { getModelColor } from "./colors";
 
 /** category -> selected values. Within a category values OR; across categories they AND. */
 export type FacetSelection = Record<string, string[]>;
@@ -13,6 +15,7 @@ export interface FacetOption {
   label: string;
   count: number;
   active: boolean;
+  color?: string;
 }
 
 export interface FacetGroup {
@@ -124,11 +127,20 @@ export function buildFacetGroups(
             matchesSelection(tags, others)
           );
         }).length;
+        const label = provider_valued ? normalizeProvider(value) : valueLabel;
+        let color: string | undefined;
+        if (provider_valued) {
+          const repKey = visibleKeys.find((key) =>
+            (tagIndex.get(key) ?? []).some((t) => t.category === category && t.value === value)
+          );
+          color = providerColors[label] ?? (repKey ? getModelColor(repKey) : undefined);
+        }
         return {
           value,
-          label: provider_valued ? normalizeProvider(value) : valueLabel,
+          label,
           count,
           active: (selected[category] ?? []).includes(value),
+          color,
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));
