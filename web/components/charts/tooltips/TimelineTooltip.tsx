@@ -51,6 +51,10 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       )
     : [...ranked].sort((a, b) => Number(b.inView) - Number(a.inView));
 
+  // Emphasize the first row shown — the fastest in-view model — rather than the
+  // global #1, which a Y-zoom can push into the dimmed group at the bottom.
+  const leaderKey = rows[0]?.dataKey;
+
   return (
     <div
       style={{
@@ -81,6 +85,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           // Extract model name from dataKey (remove '_value' suffix)
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
+          const isLeader = item.dataKey === leaderKey;
 
           return (
             <div
@@ -107,8 +112,8 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 <div style={{ flex: 1 }}>
                   <div
                     style={{
-                      color: item.rank === 1 ? "#10B981" : "var(--color-text-on-tooltip)",
-                      fontWeight: item.rank === 1 ? "bold" : "normal"
+                      color: isLeader ? "#10B981" : "var(--color-text-on-tooltip)",
+                      fontWeight: isLeader ? "bold" : "normal"
                     }}
                   >
                     #{item.rank} {normalizeModelName(modelName)}
@@ -128,7 +133,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 style={{
                   color: "var(--color-text-on-tooltip-secondary)",
                   marginLeft: "12px",
-                  fontWeight: item.rank === 1 ? "bold" : "normal",
+                  fontWeight: isLeader ? "bold" : "normal",
                   flexShrink: 0
                 }}
               >

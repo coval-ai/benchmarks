@@ -40,9 +40,9 @@ const BoxPlotSection: React.FC = () => {
           label="Latency Variation"
           description={description}
           exportRows={() =>
-            boxPlotData.data.map(({ model, provider, quartiles, stats }) => ({
+            boxPlotData.data.map(({ model, quartiles, stats }) => ({
               model,
-              provider,
+              provider: getProviderForModel(model),
               metric: activeMetric,
               whisker_low_ms: quartiles.min,
               q1_ms: quartiles.q1,

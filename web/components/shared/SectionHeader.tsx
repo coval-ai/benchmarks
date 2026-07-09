@@ -94,14 +94,20 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     trackShare("link");
   };
 
-  const downloadImage = () => {
+  const downloadImage = async () => {
     const root = document.getElementById(anchorId);
     const card = root?.parentElement;
+    // The chart is the largest SVG in the card; icon SVGs and a chart still
+    // sizing to zero during layout are excluded so we never export those.
     const svg =
       card &&
-      Array.from(card.querySelectorAll("svg")).sort(
-        (a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
-      )[0];
+      Array.from(card.querySelectorAll("svg"))
+        .filter((el) => el.clientWidth > 100 && el.clientHeight > 100)
+        .sort(
+          (a, b) =>
+            b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
+        )[0];
+    if (!svg) return;
     // The stat label can be a ReactNode (MetricInfo), so its text comes from
     // the DOM — minus the hidden tooltip MetricInfo keeps mounted.
     const statLabel = root?.querySelector("[data-stat-label]")?.cloneNode(true);
@@ -110,33 +116,33 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         .querySelectorAll('[role="tooltip"]')
         .forEach((el) => el.remove());
     }
-    if (card && svg)
-      downloadChartPNG(svg, `${anchorId}.png`, {
-        label,
-        title: description.short,
-        xLabel: exportXLabel,
-        stat: stat && {
-          label:
-            statLabel instanceof HTMLElement
-              ? (statLabel.textContent?.trim() ?? "")
-              : "",
-          value: stat.value,
-        },
-        annotate: exportAnnotate,
-        legend: Array.from(
-          card.querySelectorAll(".recharts-legend-wrapper li")
-        ).map((li) => ({
-          label: li.textContent?.trim() ?? "",
-          color:
-            li.querySelector("span")?.style.backgroundColor ?? "#0a0a0a",
-          dimmed: li.hasAttribute("data-dimmed"),
-        })),
-      });
-    trackShare("png");
+    const ok = await downloadChartPNG(svg, `${anchorId}.png`, {
+      label,
+      title: description.short,
+      xLabel: exportXLabel,
+      stat: stat && {
+        label:
+          statLabel instanceof HTMLElement
+            ? (statLabel.textContent?.trim() ?? "")
+            : "",
+        value: stat.value,
+      },
+      annotate: exportAnnotate,
+      legend: Array.from(
+        card.querySelectorAll(".recharts-legend-wrapper li")
+      ).map((li) => ({
+        label: li.textContent?.trim() ?? "",
+        color: li.querySelector("span")?.style.backgroundColor ?? "#0a0a0a",
+        dimmed: li.hasAttribute("data-dimmed"),
+      })),
+    }).catch(() => false);
+    if (ok) trackShare("png");
   };
 
   const downloadData = () => {
-    downloadCSV(exportRows?.() ?? [], `${anchorId}.csv`);
+    const rows = exportRows?.() ?? [];
+    if (rows.length === 0) return;
+    downloadCSV(rows, `${anchorId}.csv`);
     trackShare("csv");
   };
 
@@ -157,7 +163,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           {exportRows && exportImage && (
             <button
               type="button"
-              onClick={downloadImage}
+              onClick={() => void downloadImage()}
               aria-label="Download chart as image"
               title="Download image"
               className={iconButtonClass}

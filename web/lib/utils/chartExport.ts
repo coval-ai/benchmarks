@@ -6,7 +6,9 @@ const triggerDownload = (href: string, filename: string) => {
   a.href = href;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(href);
+  // Browsers may read the blob URL after the click returns; revoking in the
+  // same tick can abort the download.
+  window.setTimeout(() => URL.revokeObjectURL(href), 1000);
 };
 
 const loadImage = (src: string) =>
@@ -188,13 +190,16 @@ export function labelScatterDots(
     text.textContent = point.label;
     clone.appendChild(text);
   });
+  // Record how far down the labels reached so the export crop keeps them.
+  const bottom = boxes.reduce((max, b) => Math.max(max, b.y2), 0);
+  clone.setAttribute("data-annotation-bottom", `${bottom}`);
 }
 
 export async function downloadChartPNG(
   svg: SVGSVGElement,
   filename: string,
   header: ChartPNGHeader = {}
-) {
+): Promise<boolean> {
   const svgRect = svg.getBoundingClientRect();
   const { width, height } = svgRect;
   // The rendered SVG often reserves empty space below its content (e.g. room
@@ -206,23 +211,37 @@ export async function downloadChartPNG(
   svg.querySelectorAll("text").forEach((text) => {
     textBottom = Math.max(textBottom, text.getBoundingClientRect().bottom);
   });
-  const contentHeight =
-    textBottom > svgRect.top
-      ? Math.min(height, Math.max(1, textBottom - svgRect.top + 6))
-      : height;
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute("width", `${width}`);
   clone.setAttribute("height", `${height}`);
   header.annotate?.(clone);
-  const chart = await loadImage(
-    `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`
+  // Annotations may land below the chart's own text (labelScatterDots records
+  // how far down it drew); they must survive the crop too.
+  const annotationBottom =
+    Number(clone.getAttribute("data-annotation-bottom") ?? 0) + 4;
+  const contentHeight = Math.min(
+    height,
+    Math.max(
+      1,
+      textBottom > svgRect.top ? textBottom - svgRect.top + 6 : height,
+      annotationBottom
+    )
   );
-  const logo = await loadImage("/coval-logo.svg");
+  let chart: HTMLImageElement;
+  let logo: HTMLImageElement;
+  try {
+    chart = await loadImage(
+      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`
+    );
+    logo = await loadImage("/coval-logo.svg");
+  } catch {
+    return false;
+  }
   const logoWidth = 72;
   const logoHeight = (logo.height / logo.width) * logoWidth;
   const canvas = document.createElement("canvas");
   const measure = canvas.getContext("2d");
-  if (!measure) return;
+  if (!measure) return false;
   const rows = legendRows(measure, header.legend ?? [], width);
   const titleBlock = Math.max(
     (header.label ? 20 : 0) + (header.title ? 30 : 0),
@@ -239,7 +258,7 @@ export async function downloadChartPNG(
   canvas.width = totalWidth * 2;
   canvas.height = totalHeight * 2;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return;
+  if (!ctx) return false;
   ctx.scale(2, 2);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, totalWidth, totalHeight);
@@ -312,4 +331,5 @@ export async function downloadChartPNG(
   canvas.toBlob((blob) => {
     if (blob) triggerDownload(URL.createObjectURL(blob), filename);
   });
+  return true;
 }
