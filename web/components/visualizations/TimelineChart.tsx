@@ -476,13 +476,13 @@ const TimelineChart: React.FC = () => {
 
         <div
           ref={chartRef}
-          className="relative h-96 cursor-crosshair select-none"
+          className="relative h-96 cursor-crosshair select-none touch-pan-y"
           onMouseEnter={trackChartHover}
           onDoubleClick={() => {
             if (Date.now() - dragEndAtRef.current > 400) setZoom(null);
           }}
           onPointerDown={(e) => {
-            if (e.pointerType !== "mouse" || e.button !== 0) return;
+            if (e.button !== 0) return;
             const box = plotBox();
             const rect = chartRef.current?.getBoundingClientRect();
             if (!box || !rect) return;
@@ -496,6 +496,7 @@ const TimelineChart: React.FC = () => {
             )
               return;
             dragRef.current = { x, y, armX: false, armY: false };
+            if (e.pointerType !== "mouse") setDragging(true);
           }}
           onPointerMove={(e) => {
             const start = dragRef.current;
@@ -512,7 +513,9 @@ const TimelineChart: React.FC = () => {
               box.top + box.height
             );
             start.armX = start.armX || Math.abs(x - start.x) > 12;
-            start.armY = start.armY || Math.abs(y - start.y) > 12;
+            start.armY =
+              start.armY ||
+              (e.pointerType === "mouse" && Math.abs(y - start.y) > 12);
             if (!start.armX && !start.armY) {
               el.style.display = "none";
               return;
