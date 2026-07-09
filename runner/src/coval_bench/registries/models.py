@@ -559,6 +559,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_PENDING,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="alibaba",
+        model="qwen3-tts-flash-realtime",
+        voice="Cherry",
+        tags=(_REALTIME, _MULTI, _STREAM),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
     # Fish Audio. PENDING: no billing on the account yet — the WS handshake
     # 402s on paid models. Voice is "Energetic Male", the reference_id Fish
     # Audio's own docs use in examples.

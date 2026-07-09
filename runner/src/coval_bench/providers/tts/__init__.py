@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 from coval_bench.providers.base import TTSProvider
+from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
@@ -59,6 +60,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "baseten": BasetenTTSProvider,
     "azure": AzureTTSProvider,
     "fishaudio": FishAudioTTSProvider,
+    "alibaba": AlibabaTTSProvider,
 }
 
 if HumeTTSProvider is not None:
@@ -71,6 +73,7 @@ __all__ = [
     "TTS_PROVIDERS",
     "HUME_AVAILABLE",
     "GOOGLE_TTS_AVAILABLE",
+    "AlibabaTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
     "FishAudioTTSProvider",

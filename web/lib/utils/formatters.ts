@@ -188,6 +188,7 @@ export function normalizeSTTProviderName(providerName: string): string {
 
 export function normalizeTTSProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
+    alibaba: "Alibaba",
     azure: "Azure",
     cartesia: "Cartesia",
     deepgram: "Deepgram",

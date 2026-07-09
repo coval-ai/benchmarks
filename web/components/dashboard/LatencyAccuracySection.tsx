@@ -114,7 +114,8 @@ const LatencyAccuracySection: React.FC = () => {
                       ? `${name} (${provider})`
                       : name,
                 };
-              })
+              }),
+              themeColors
             );
           }}
           exportRows={() =>
