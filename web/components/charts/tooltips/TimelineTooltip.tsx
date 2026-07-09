@@ -15,13 +15,18 @@ interface TimelineTooltipProps {
   label?: string | number;
   getProviderForModel: (model: string) => string;
   showDate?: boolean;
-  /** Visible Y range when zoomed; models outside it (clipped off-chart) dim. */
-  highlightRange?: [number, number];
+  /**
+   * dataKeys whose line is fully clipped out of the current zoom crop. A model
+   * counts as "in view" if any part of its curve is visible in the crop — not
+   * just its value at the hovered timestamp — so the tooltip surfaces the
+   * series the viewer can actually see, matching the legend.
+   */
+  dimmedKeys?: Set<string>;
   /** Hover mode: only the fastest model plus a pin hint, so the chart stays visible. */
   compact?: boolean;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, highlightRange, compact }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -31,20 +36,16 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
 
   if (validData.length === 0) return null;
 
-  const inRange = (value: number) =>
-    !highlightRange ||
-    (value >= highlightRange[0] && value <= highlightRange[1]);
-
   // Ranks come from the overall speed order; in-view models then float above
   // the dimmed ones so the visible series always read first.
   const ranked = validData.map((item, index) => ({
     ...item,
     rank: index + 1,
-    inView: inRange(item.value),
+    inView: !dimmedKeys?.has(item.dataKey),
   }));
 
-  // Compact hover shows one row: the fastest model that's actually in view,
-  // so a Y-zoom past the global leader still surfaces a visible model.
+  // Compact hover shows one row: the fastest model whose line is in the crop,
+  // so a zoom past the global leader still surfaces a visible series.
   const rows = compact
     ? [ranked.find((item) => item.inView) ?? ranked[0]].filter(
         (item): item is (typeof ranked)[number] => item != null

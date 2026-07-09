@@ -127,6 +127,44 @@ interface PinnedTooltip {
 
 const Y_MAX_PRESETS = [500, 1000, 1500, 2000, 3000, 5000];
 
+// Liang–Barsky: does the segment (x0,y0)->(x1,y1) touch the axis-aligned
+// rectangle [xMin,xMax]x[yMin,yMax]? Used to tell whether any part of a series
+// line falls inside the zoom crop, so the legend dims only fully-clipped ones.
+function segmentIntersectsRect(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  xMin: number,
+  yMin: number,
+  xMax: number,
+  yMax: number
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const clip = (p: number, q: number): boolean => {
+    if (p === 0) return q >= 0; // parallel to this edge; inside iff q >= 0
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return false;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return false;
+      if (r < t1) t1 = r;
+    }
+    return true;
+  };
+  return (
+    clip(-dx, x0 - xMin) &&
+    clip(dx, xMax - x0) &&
+    clip(-dy, y0 - yMin) &&
+    clip(dy, yMax - y0) &&
+    t0 <= t1
+  );
+}
+
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
   const {
@@ -221,46 +259,44 @@ const TimelineChart: React.FC = () => {
   const zoomX = zoom?.x;
   const zoomY = zoom?.y;
 
-  // A series dims when the current crop clips it fully off-chart — mirroring
-  // the tooltip's highlight behavior. A line is visible not only when a point
-  // lands inside the Y range but also when a segment between two consecutive
-  // points crosses it (e.g. a spike whose peak sits above the crop).
+  // A series dims only when the crop clips it fully off-chart. Recharts clips
+  // the polyline to the X and Y domain together, so a series is visible if any
+  // segment between consecutive points passes through the crop rectangle —
+  // even when both endpoints sit outside it (e.g. a spike crossing the top, or
+  // a line entering only at the left/right edge). Test each segment against the
+  // rectangle with Liang–Barsky rather than checking points in isolation.
   const dimmedLegendKeys = useMemo(() => {
     const dimmed = new Set<string>();
     if (!zoomY) return dimmed;
+    const [xLo, xHi] = zoomX ?? [windowStart, windowEnd];
+    const [yLo, yHi] = zoomY;
     for (const model of modelsWithData) {
-      let prev: number | null = null;
+      const key = `${model}_value`;
+      let prevT: number | null = null;
+      let prevV = 0;
       let visible = false;
       for (const point of windowedTimelineData) {
-        if (
-          zoomX &&
-          (point.timestamp < zoomX[0] || point.timestamp > zoomX[1])
-        ) {
-          prev = null;
-          continue;
-        }
-        const value = (point as Record<string, number | undefined>)[
-          `${model}_value`
-        ];
+        const value = (point as Record<string, number | undefined>)[key];
         if (typeof value !== "number" || Number.isNaN(value)) {
-          prev = null;
+          prevT = null;
           continue;
         }
+        const t = point.timestamp;
         if (
-          prev === null
-            ? value >= zoomY[0] && value <= zoomY[1]
-            : Math.min(prev, value) <= zoomY[1] &&
-              Math.max(prev, value) >= zoomY[0]
+          prevT === null
+            ? t >= xLo && t <= xHi && value >= yLo && value <= yHi
+            : segmentIntersectsRect(prevT, prevV, t, value, xLo, yLo, xHi, yHi)
         ) {
           visible = true;
           break;
         }
-        prev = value;
+        prevT = t;
+        prevV = value;
       }
-      if (!visible) dimmed.add(`${model}_value`);
+      if (!visible) dimmed.add(key);
     }
     return dimmed;
-  }, [zoomY, zoomX, windowedTimelineData, modelsWithData]);
+  }, [zoomY, zoomX, windowStart, windowEnd, windowedTimelineData, modelsWithData]);
   const xDomain = zoomX ?? currentTimeWindow;
   const zoomTicks = useMemo(
     () =>
@@ -608,7 +644,7 @@ const TimelineChart: React.FC = () => {
                   <CustomTimelineTooltip
                     getProviderForModel={getProviderForModel}
                     showDate={dateScale}
-                    highlightRange={zoom?.y}
+                    dimmedKeys={dimmedLegendKeys}
                     compact
                   />
                 }
@@ -699,7 +735,7 @@ const TimelineChart: React.FC = () => {
                 label={pinned.label}
                 getProviderForModel={getProviderForModel}
                 showDate={dateScale}
-                highlightRange={zoom?.y}
+                dimmedKeys={dimmedLegendKeys}
               />
             </div>
           )}
