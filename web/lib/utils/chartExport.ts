@@ -3,12 +3,12 @@
 
 const triggerDownload = (href: string, filename: string) => {
   const a = document.createElement("a");
+const triggerDownload = (href: string, filename: string) => {
+  const a = document.createElement("a");
   a.href = href;
   a.download = filename;
   a.click();
-  // Browsers may read the blob URL after the click returns; revoking in the
-  // same tick can abort the download.
-  window.setTimeout(() => URL.revokeObjectURL(href), 1000);
+  window.setTimeout(() => URL.revokeObjectURL(href), 0);
 };
 
 const loadImage = (src: string) =>
