@@ -39,17 +39,11 @@ from coval_bench.providers.stt._transcript_utils import (
 logger = structlog.get_logger(__name__)
 
 _WS_BASE = "wss://api.rev.ai/speechtotext/v1/stream"
-
-# machine_v2 forces the Reverb ASR model on the streaming endpoint.
 _TRANSCRIBER_FOR_MODEL: dict[str, str] = {"reverb": "machine_v2"}
-
-# End-of-audio sentinel: a text frame the server consumes to end the session.
 _EOS = "EOS"
 
-# Rev AI has no force-finalize control: EOS both finalizes and closes, and it
-# discards the un-endpointed tail. So after speech we feed trailing silence to
-# let Reverb's endpointer fire on the last segment, breaking early once that
-# final lands. Cap bounds the wait when the tail already finalized mid-stream.
+# Rev has no force-finalize: EOS discards the un-endpointed tail, so we feed
+# trailing silence to make Reverb endpoint the last segment (cap; breaks early).
 _EOT_SILENCE_S = 2.0
 
 
@@ -158,18 +152,14 @@ class RevAISTTProvider(STTProvider):
             async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
                 result.audio_start_time = start
                 await ws.send(chunk)
-            # Feed trailing silence so Reverb endpoints the last segment, stopping as
-            # soon as that final lands. Clear first: a mid-stream final would otherwise
-            # leave the latch set and skip the drain. Silence chunks must not touch
-            # audio_start_time — audio_to_final is measured from the first speech chunk.
+            # Clear first: a mid-stream final would leave the latch set and skip the
+            # drain. Silence never sets audio_start_time (audio_to_final is from speech).
             final_event.clear()
             silence = bytes(int(byte_rate * _EOT_SILENCE_S))
             async for chunk, _ in paced_chunks(silence, chunk_size, byte_rate):
                 if final_event.is_set():
                     break
                 await ws.send(chunk)
-            # EOS is a text frame; a zero-length binary frame would be ignored and the
-            # server would stall to its idle timeout without flushing the final.
             await ws.send(_EOS)
         except Exception as exc:
             logger.warning("revai_send_error", provider="revai", model=self._model, exc_info=exc)
@@ -179,9 +169,7 @@ class RevAISTTProvider(STTProvider):
         self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
     ) -> None:
         final_segments: list[str] = []
-        # Longest partial of the current (not-yet-finalized) segment. Rev AI resets
-        # partials per segment after each final, so a partial left standing when EOS
-        # closes the socket is the un-finalized tail — recover it or its words are lost.
+        # A partial left standing at close is the un-finalized tail; recover it.
         pending_partial: str = ""
         last_final_time: float | None = None
 
