@@ -533,7 +533,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="chirp-3-hd",
         voice="en-US-Chirp3-HD-Kore",
         tags=(_REALTIME, _MULTI, _STREAM),
-        status=_PENDING,
+        status=_ACTIVE,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -568,16 +568,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
         arena_enabled=False,
     ),
-    # Fish Audio. PENDING: no billing on the account yet — the WS handshake
-    # 402s on paid models. Voice is "Energetic Male", the reference_id Fish
-    # Audio's own docs use in examples.
+    # Fish Audio. Voice is "Energetic Male", the reference_id Fish Audio's own
+    # docs use in examples.
     RegisteredModel(
         benchmark=_TTS,
         provider="fishaudio",
         model="s1",
         voice="802e3bc2b27e49c2995d23ef70e6ac89",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -585,7 +584,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="s2.1-pro",
         voice="802e3bc2b27e49c2995d23ef70e6ac89",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
