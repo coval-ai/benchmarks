@@ -294,6 +294,19 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _VAD),
         status=_ACTIVE,
     ),
+    # Rev AI streaming (Reverb ASR, transcriber=machine_v2). PENDING: implemented
+    # and hidden until an API key is provisioned in benchmark-infra. Reverb weights
+    # are openly released (github.com/revdotcom/reverb), hence open-weight.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="revai",
+        model="reverb",
+        creator="rev",
+        tags=(_REALTIME, _MULTI, _VAD, _KEYTERM),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_PENDING,
+    ),
     #######
     # TTS #
     #######

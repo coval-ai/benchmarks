@@ -123,6 +123,10 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             ("deepgram", "flux-general-multi"),
             ("assemblyai", "universal-streaming"),
             ("assemblyai", "universal-streaming-multilingual"),
+            # Rev AI has no force-finalize; the tail final only lands after Reverb's
+            # endpointer fires on trailing silence, so TTFS bundles endpoint-detection
+            # latency and isn't comparable to force-endpoint providers.
+            ("revai", "reverb"),
         }
     ),
 }
