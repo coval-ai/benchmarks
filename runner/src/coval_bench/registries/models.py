@@ -508,6 +508,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_PENDING,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="alibaba",
+        model="qwen3-tts-flash-realtime",
+        voice="Cherry",
+        tags=(_REALTIME, _MULTI, _STREAM),
+        status=_PENDING,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept

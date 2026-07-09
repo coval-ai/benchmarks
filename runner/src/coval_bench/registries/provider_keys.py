@@ -32,4 +32,5 @@ PROVIDER_ENV: dict[str, str] = {
     "inworld": "INWORLD_API_KEY",
     "groq": "GROQ_API_KEY",
     "baseten": "BASETEN_API_KEY",
+    "alibaba": "ALIBABA_API_KEY",
 }

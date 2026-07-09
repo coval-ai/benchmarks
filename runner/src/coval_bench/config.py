@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     revai_api_key: SecretStr | None = None
     baseten_api_key: SecretStr | None = None
     azure_api_key: SecretStr | None = None
+    alibaba_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
@@ -90,6 +91,8 @@ class Settings(BaseSettings):
     # Manager in prod) rather than hardcoded in the provider modules.
     baseten_whisper_url: str | None = None  # STT (Whisper Large V3)
     baseten_qwen_url: str | None = None  # TTS (Qwen3-TTS)
+
+    alibaba_tts_url: str | None = None
 
     # Path to a Google service-account JSON file mounted as a Secret-as-volume.
     google_application_credentials: Path | None = None
