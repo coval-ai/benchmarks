@@ -129,10 +129,10 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       },
       annotate: exportAnnotate,
       legend: Array.from(
-        card.querySelectorAll(".recharts-legend-wrapper li")
+        card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
       ).map((li) => ({
         label: li.textContent?.trim() ?? "",
-        color: li.querySelector("span")?.style.backgroundColor ?? "#0a0a0a",
+        color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
         dimmed: li.hasAttribute("data-dimmed"),
       })),
     }).catch(() => false);
@@ -147,8 +147,8 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   };
 
   return (
-    <div id={anchorId} className="flex justify-between items-start gap-8 mb-4 scroll-mt-24">
-      <div className="w-3/4 min-w-0">
+    <div id={anchorId} className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 sm:gap-8 mb-4 scroll-mt-24">
+      <div className="w-full sm:w-3/4 min-w-0">
         <h2 className="flex items-center gap-2 text-[0.9rem] font-light text-text-secondary mb-2">
           {label}
           <button
@@ -212,7 +212,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         )}
       </div>
       {stat && (
-        <div className="text-right min-w-0">
+        <div className="text-left sm:text-right min-w-0">
           <div
             data-stat-label
             className="text-[0.9rem] font-light text-text-secondary mb-2"

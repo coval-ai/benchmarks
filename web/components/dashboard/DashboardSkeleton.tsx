@@ -43,8 +43,8 @@ export const ChartSkeleton: React.FC = () => (
   <div className="mb-4">
     <Card>
       {/* SectionHeader mirror */}
-      <div className="flex justify-between items-start gap-8 mb-4">
-        <div className="w-3/4 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 sm:gap-8 mb-4">
+        <div className="w-full sm:w-3/4 min-w-0">
           <div className="text-[0.72rem] font-light text-text-secondary mb-2">
             <Bar className="h-[0.7em] w-28" />
           </div>
@@ -56,11 +56,11 @@ export const ChartSkeleton: React.FC = () => (
             <Bar className="mt-1 h-[0.7em] w-2/3" />
           </div>
         </div>
-        <div className="text-right min-w-0">
+        <div className="text-left sm:text-right min-w-0">
           <div className="text-[0.72rem] font-light text-text-secondary mb-2">
             <Bar className="h-[0.7em] w-16" />
           </div>
-          <div className="font-mono text-[2.4rem] font-bold break-words">
+          <div className="font-mono text-3xl sm:text-[2.4rem] font-bold break-words">
             <Bar className="h-[0.7em] w-24" />
           </div>
         </div>

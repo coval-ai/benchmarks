@@ -20,16 +20,16 @@ export interface ThemeColors {
 // Single light theme tuned for the coval.ai cream palette. These mirror the
 // chart-* CSS variables in globals.css (charts read them via JS, not CSS).
 const colors: ThemeColors = {
-  grid: "#dddbd4",
+  grid: "#dbdbd3",
   axisText: "#515151",
-  label: "#0a0a0a",
-  median: "#0a0a0a",
-  boxFill: "rgba(10, 10, 10, 0.08)",
+  label: "#0f0c0a",
+  median: "#0f0c0a",
+  boxFill: "rgba(15, 12, 10, 0.08)",
   barStroke: "#c8c6c2",
-  tooltipBg: "#fdfcf8",
-  tooltipText: "#0a0a0a",
+  tooltipBg: "#f9faf8",
+  tooltipText: "#0f0c0a",
   tooltipSecondary: "#515151",
-  textPrimary: "#0a0a0a",
+  textPrimary: "#0f0c0a",
   textSecondary: "#515151",
 };
 

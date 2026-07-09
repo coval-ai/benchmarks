@@ -28,7 +28,7 @@ export function ModelPill({
     fullWidth
       ? "flex w-full max-w-full min-w-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-colors"
       : "inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-    selected ? "bg-surface-primary text-text-primary" : "bg-transparent text-zinc-500 dark:text-zinc-500",
+    selected ? "bg-surface-primary text-text-primary" : "bg-transparent text-text-tertiary",
     disabled ? "cursor-not-allowed opacity-50" : ""
   ].join(" ");
 
