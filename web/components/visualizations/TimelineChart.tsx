@@ -573,25 +573,13 @@ const TimelineChart: React.FC = () => {
   };
 
   const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    axisScrubRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      direction: "pending",
-    };
+    axisScrubRef.current = { x: e.clientX, y: e.clientY, direction: "scrub" };
+    scrubDateAxis(e);
   };
 
   const moveAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    const gesture = axisScrubRef.current;
-    if (!gesture) return;
-    if (gesture.direction === "pending") {
-      const dx = Math.abs(e.clientX - gesture.x);
-      const dy = Math.abs(e.clientY - gesture.y);
-      if (Math.max(dx, dy) <= 8) return;
-      // Resolve a diagonal gesture once. Vertical-leaning gestures retain
-      // natural page scroll; only a clearly horizontal axis swipe scrubs.
-      gesture.direction = dx > dy ? "scrub" : "scroll";
-    }
-    if (gesture.direction === "scrub") scrubDateAxis(e);
+    if (!axisScrubRef.current) return;
+    scrubDateAxis(e);
   };
 
   const endAxisScrub = () => {
@@ -626,6 +614,11 @@ const TimelineChart: React.FC = () => {
               : "Performance Consistency"
           }
           description={description}
+          hint={
+            isMobile
+              ? "Drag chart to zoom · swipe axis for values"
+              : undefined
+          }
           exportRows={() =>
             windowedTimelineData.map((point) => ({
               time: point.timestampLabel,
@@ -684,17 +677,6 @@ const TimelineChart: React.FC = () => {
               </select>
             </label>
           </div>
-        </div>
-
-        <div className="mb-2 grid grid-cols-2 gap-2 md:hidden">
-          <p className="rounded-md border border-border-secondary bg-surface-toggle-inactive/60 px-2 py-1.5 text-[11px] leading-tight text-text-secondary">
-            <span className="block font-semibold text-text-primary">Chart area</span>
-            Drag to select a zoom range
-          </p>
-          <p className="rounded-md border border-border-secondary bg-surface-toggle-inactive/60 px-2 py-1.5 text-[11px] leading-tight text-text-secondary">
-            <span className="block font-semibold text-text-primary">Date axis</span>
-            Swipe sideways for values
-          </p>
         </div>
 
         <div
@@ -921,16 +903,7 @@ const TimelineChart: React.FC = () => {
                   endAxisScrub();
                 }}
               >
-                <span className="pointer-events-none absolute inset-x-0 bottom-0 text-center text-[10px] font-medium tracking-wide text-text-secondary">
-                  Swipe x-axis for values
-                </span>
               </div>
-              <span
-                className="pointer-events-none absolute z-[16] rounded bg-surface-primary/85 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-text-secondary md:hidden"
-                style={{ left: interactionBox.left + 6, top: interactionBox.top + 6 }}
-              >
-                Drag to select zoom
-              </span>
             </>
           )}
           {mobileScrub && (
