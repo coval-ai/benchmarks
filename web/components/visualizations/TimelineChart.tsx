@@ -511,8 +511,8 @@ const TimelineChart: React.FC = () => {
               Math.max(e.clientY - rect.top, box.top),
               box.top + box.height
             );
-            const dx = Math.abs(x - start.x);
-            const dy = Math.abs(y - start.y);
+            const dx = Math.abs(e.clientX - rect.left - start.x);
+            const dy = Math.abs(e.clientY - rect.top - start.y);
             if (e.pointerType === "mouse") {
               start.armX = start.armX || dx > 12;
               start.armY = start.armY || dy > 12;
