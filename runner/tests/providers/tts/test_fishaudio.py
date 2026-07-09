@@ -142,6 +142,26 @@ async def test_fishaudio_tts_skips_non_audio_events(fishaudio_settings: Settings
 
 
 @pytest.mark.asyncio
+async def test_fishaudio_tts_skips_empty_audio_payloads(fishaudio_settings: Settings) -> None:
+    events: list[bytes | str] = [
+        ormsgpack.packb({"event": "audio", "audio": None}),
+        ormsgpack.packb({"event": "audio"}),
+        ormsgpack.packb({"event": "audio", "audio": b""}),
+    ]
+    events.extend(_finish_events([make_pcm_bytes(240)]))
+    ws = FakeWebSocket(events)
+    provider = FishAudioTTSProvider(fishaudio_settings, model="s1", voice=_VOICE)
+
+    with patch("coval_bench.providers.tts.fishaudio.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is None
+    assert result.ttfa_ms is not None
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
 async def test_fishaudio_tts_ttfa_on_first_chunk(fishaudio_settings: Settings) -> None:
     chunks = [make_pcm_bytes(240), make_pcm_bytes(240), make_pcm_bytes(240)]
     ws = FakeWebSocket(_finish_events(chunks))

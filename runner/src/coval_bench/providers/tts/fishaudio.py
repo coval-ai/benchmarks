@@ -23,7 +23,9 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("s1", "s2-pro", "s2.1-pro", "s2.1-pro-free")
+# s2.1-pro-free is unregistered: same engine as s2.1-pro at $0, kept for smoke
+# tests while the account has no billing.
+_VALID_MODELS = ("s1", "s2.1-pro", "s2.1-pro-free")
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
 _SAMPLE_RATE = 44100
 _MAX_WS_SIZE = 16 * 1024 * 1024
@@ -92,9 +94,11 @@ class FishAudioTTSProvider(TTSProvider):
                     data: dict[str, Any] = ormsgpack.unpackb(bytes(message))
                     event = data.get("event")
                     if event == "audio":
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(data["audio"])
+                        chunk = data.get("audio")
+                        if chunk:
+                            if first_chunk_at is None:
+                                first_chunk_at = time.monotonic()
+                            audio_chunks.append(chunk)
                     elif event == "finish":
                         if data.get("reason") == "error":
                             raise RuntimeError(str(data.get("message", "finish reason=error")))
