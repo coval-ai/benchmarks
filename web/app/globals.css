@@ -8,63 +8,64 @@
 /* coval.ai cream palette — single light theme. */
 :root {
   /* Surfaces */
-  --color-surface-primary: #fdfcf8;
+  --color-surface-primary: #f9faf8;
   --color-surface-secondary: #f2f1ee;
   --color-surface-elevated: #f5f4f0;
-  --color-surface-tooltip: #fdfcf8;
-  --color-surface-backdrop: rgba(10, 10, 10, 0.5);
+  --color-surface-tooltip: #f9faf8;
+  --color-surface-backdrop: rgba(15, 12, 10, 0.5);
   --color-surface-overlay: rgba(242, 241, 238, 0.85);
 
   /* Text */
-  --color-text-primary: #0a0a0a;
+  --color-text-primary: #0f0c0a;
   --color-text-secondary: #515151;
-  --color-text-tertiary: #8a8780;
-  --color-text-on-tooltip: #0a0a0a;
+  --color-text-tertiary: #7f7a76;
+  --color-text-on-tooltip: #0f0c0a;
   --color-text-on-tooltip-secondary: #515151;
 
   /* Borders */
-  --color-border-primary: #dddbd4;
+  --color-border-primary: #dbdbd3;
   --color-border-secondary: #e8e6e0;
 
   /* Charts */
-  --color-chart-grid: #dddbd4;
+  --color-chart-grid: #dbdbd3;
   --color-chart-axis-text: #515151;
-  --color-chart-label: #0a0a0a;
-  --color-chart-median: #0a0a0a;
-  --color-chart-box-fill: rgba(10, 10, 10, 0.08);
+  --color-chart-label: #0f0c0a;
+  --color-chart-median: #0f0c0a;
+  --color-chart-box-fill: rgba(15, 12, 10, 0.08);
   --color-chart-bar-stroke: #c8c6c2;
 
   /* Interactive */
-  --color-hover-bg: rgba(10, 10, 10, 0.05);
-  --color-selected-bg: rgba(10, 10, 10, 0.08);
-  --color-selected-border: rgba(10, 10, 10, 0.15);
+  --color-hover-bg: rgba(15, 12, 10, 0.05);
+  --color-selected-bg: rgba(15, 12, 10, 0.08);
+  --color-selected-border: rgba(15, 12, 10, 0.15);
 
   /* Toggle */
-  --color-surface-toggle-active: #0a0a0a;
-  --color-text-on-toggle-active: #fdfcf8;
+  --color-surface-toggle-active: #0f0c0a;
+  --color-text-on-toggle-active: #f9faf8;
   --color-surface-toggle-inactive: #e8e6e0;
   --color-text-on-toggle-inactive: #515151;
 
   /* Spinner */
-  --color-spinner-track: rgba(10, 10, 10, 0.15);
-  --color-spinner-head: #0a0a0a;
+  --color-spinner-track: rgba(15, 12, 10, 0.15);
+  --color-spinner-head: #0f0c0a;
 
   /* Screen glow */
-  --color-screen-glow: rgba(10, 10, 10, 0.15);
+  --color-screen-glow: rgba(15, 12, 10, 0.15);
 
-  /* Brand accents (coval.ai) */
-  --color-accent-rust: #c0401e;
-  --color-accent-teal: #5cb8bf;
-  --color-accent-terracotta: #c06a60;
-  --color-accent-pink: #e8789a;
-  --color-accent-orange: #efa875;
-  --color-accent-sage: #b5c4a8;
-  --color-accent-blue: #a8b8c8;
-  --color-accent-lavender: #a8a0c0;
+  /* Brand accents — anchored on the Coval palette's blue/green/red-orange/purple
+     families, tuned to mid-tones that stay legible on the light surface. */
+  --color-accent-rust: #b23a2e;
+  --color-accent-teal: #1f937c;
+  --color-accent-terracotta: #c15c3c;
+  --color-accent-pink: #b14a72;
+  --color-accent-orange: #d68a66;
+  --color-accent-sage: #5e8a2e;
+  --color-accent-blue: #2f6db0;
+  --color-accent-lavender: #6e51a6;
 
   /* Base */
   --background: #f2f1ee;
-  --foreground: #0a0a0a;
+  --foreground: #0f0c0a;
 
   /* Film grain (coval.ai). Tiled fractal-noise SVG; layered via overlays. */
   --noise-bg: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='5' seed='23' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");

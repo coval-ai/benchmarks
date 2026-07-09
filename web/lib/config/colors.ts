@@ -1,90 +1,116 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Series colors are a soft, pastel-leaning categorical palette drawn in the
+// spirit of the Coval brand families (blue / green / red-orange / purple),
+// extended with on-vibe intermediate hues (teal, amber, indigo, rose, sky,
+// lime) so the ~16 vendors stay distinguishable. Values are placed in OKLCH at
+// the softest lightness that still clears the dataviz validator's categorical
+// band (L 0.43–0.77, chroma ≥ 0.10) so they read as gentle pastels while
+// surviving as thin line strokes on the near-white surface. Each vendor owns a
+// hue family; its models step through shades of that family. Where a modality
+// packs more vendors than hues, two vendors share a family but sit in opposite
+// shade ranges (legend, tooltips, and export labels disambiguate). Generated
+// from OKLCH anchors — see the brand guide color families.
+
 export const modelColors: Record<string, string> = {
-  // OpenAI — red family (#E74C3C). TTS, STT, and S2S all use the same red range.
-  "gpt-4o-mini-tts": "#C0392B",
-  "gpt-realtime-whisper": "#E74C3C",
-  "gpt-4o-transcribe": "#CD6155",
-  "gpt-4o-mini-transcribe": "#922B21",
-  "gpt-realtime": "#EC7063", // S2S
+  // OpenAI — rose. TTS, STT, and S2S span the rose range.
+  "gpt-4o-mini-tts": "#de6d9b",
+  "gpt-4o-transcribe": "#f782b1",
+  "gpt-4o-mini-transcribe": "#d1608f",
+  "gpt-realtime-whisper": "#b24574",
+  "gpt-realtime": "#c35483", // S2S
 
-  // Google — blue family (#4285F4). Gemini realtime (S2S).
-  "gemini-live": "#4285F4",
+  // Google — sky (light blue). Chirp STT + Gemini realtime.
+  chirp_2: "#53b0de",
+  chirp_3: "#1d85b0",
 
-  // ElevenLabs — orange family (#F39C12). TTS + STT scribe all span light→dark orange.
-  eleven_multilingual_v2: "#F5B041",
-  eleven_flash_v2_5: "#F39C12",
-  eleven_turbo_v2_5: "#E67E22",
-  scribe_v2_realtime: "#CA6F1E",
+  // ElevenLabs — peach (red-orange). TTS + STT scribe span light→dark peach.
+  eleven_multilingual_v2: "#fb9167",
+  eleven_flash_v2_5: "#d87248",
+  eleven_turbo_v2_5: "#bd592f",
+  scribe_v2_realtime: "#e67e54",
 
-  // xAI — pink family (#EC4899).
-  "grok-tts": "#F472B6",
-  "grok-stt": "#BE185D",
+  // xAI — purple.
+  "grok-tts": "#c890ea",
+  "grok-stt": "#844da2",
 
-  // Cartesia — blue family (#3498DB).
-  "sonic-3": "#85C1E9",
-  "sonic-3.5": "#3498DB",
-  "ink-2": "#1A5276",
+  // Cartesia — blue (TTS sonic + STT ink).
+  "sonic-3": "#80b3fe",
+  "sonic-3.5": "#5e93e1",
+  "ink-2": "#3b6eb9",
 
-  // Rime — green family (#27AE60).
-  arcana: "#82E0AA",
-  coda: "#27AE60",
-  mistv3: "#1A7A40",
+  // Rime — green, dark range (separates from Gradium in TTS).
+  arcana: "#55a14e",
+  coda: "#3c8836",
+  mistv3: "#22701c",
 
-  // Hume — violet family (#A855F7).
-  "octave-2": "#C084FC",
-  "octave-tts": "#7C3AED",
+  // Hume — sky (TTS). Sits alongside Google, which is STT-only, so they never
+  // co-occur in one chart.
+  "octave-2": "#59b7e4",
+  "octave-tts": "#268bb6",
 
-  // Inworld AI — indigo family (#6366F1).
-  "inworld-tts-1.5-mini": "#818CF8",
-  "inworld-tts-1.5-max": "#4F46E5",
-  "inworld-stt-1": "#6366F1",
+  // Inworld AI — indigo.
+  "inworld-tts-1.5-mini": "#a9a5ff",
+  "inworld-tts-1.5-max": "#8b85de",
+  "inworld-stt-1": "#736dc3",
 
-  // Deepgram — teal family (#16A085). TTS aura anchors the dark end; STT models
-  // span up to light teal. All shades are visibly teal (none near-black).
-  "aura-2-thalia-en": "#0C6654",
-  "nova-2": "#0E8A76",
-  "flux-general-en": "#16A085",
-  "flux-general-multi": "#1EC4A3",
-  "nova-3": "#45D4B5",
+  // Deepgram — teal. Aura anchors TTS; STT models span light→dark teal.
+  "aura-2-thalia-en": "#29b69e",
+  "nova-2": "#49cdb4",
+  "nova-3": "#1db098",
+  "flux-general-en": "#039580",
+  "flux-general-multi": "#007b69",
 
-  // AssemblyAI — amethyst family (#8E44AD).
-  "universal-streaming": "#8E44AD",
-  "universal-streaming-multilingual": "#A569BD",
-  "universal-3.5-pro": "#6C3483",
+  // AssemblyAI — purple (STT), light range (separates from xAI's dark grok-stt).
+  "universal-streaming-multilingual": "#d299f5",
+  "universal-3.5-pro": "#bf86e0",
+  "universal-3-pro": "#a871c9",
+  "universal-streaming": "#965fb6",
 
-  // Speechmatics — navy family (#21618C).
-  enhanced: "#2E86C1",
-  default: "#21618C",
+  // Speechmatics — peach, dark range (STT; separates from ElevenLabs scribe).
+  enhanced: "#c35f36",
+  default: "#a24112",
 
-  // Soniox — gold family. The chart's only gold; sits yellower than the
-  // ElevenLabs oranges and dark enough to read on the cream background.
-  "tts-rt-v1": "#C9A227",
-  "stt-rt-v4": "#B8860B",
-  "stt-rt-v5": "#9C7400",
+  // Soniox — lime (green-gold).
+  "tts-rt-v1": "#9db030",
+  "stt-rt-v4": "#859704",
+  "stt-rt-v5": "#697800",
 
-  // Azure — azure-blue (#0078D4). Sits between the Google and Cartesia blues.
-  "azure:default": "#0078D4",
+  // Smallest — amber.
+  "lightning_v3.1_pro": "#d7a03d",
+  pulse: "#b07b05",
+
+  // Gladia — blue, mid (STT; sits between Cartesia's light sonic and dark ink).
+  "solaria-1": "#6a9fee",
+
+  // Mistral — amber, dark (STT; separates from Smallest's pulse).
+  "voxtral-mini-transcribe-realtime-2602": "#835a01",
+
+  // Azure — blue, dark (STT; separates from Cartesia's sonic/ink and Gladia).
+  "azure:default": "#3d7fd1",
 
   // Composite keys for models whose slug is shared across providers
-  "speechmatics:default": "#21618C",
-  "gradium:default": "#1ABC9C"
+  "speechmatics:default": "#a24112",
+  "gradium:default": "#74c16c"
 };
 
 export const providerColors: Record<string, string> = {
-  OpenAI: "#E74C3C",
-  ElevenLabs: "#F39C12",
-  Cartesia: "#3498DB",
-  Deepgram: "#16A085",
-  AssemblyAI: "#8E44AD",
-  Speechmatics: "#21618C",
-  Rime: "#27AE60",
-  Gradium: "#1ABC9C",
-  Hume: "#A855F7",
-  "Inworld AI": "#6366F1",
-  xAI: "#EC4899",
-  Soniox: "#C9A227",
-  Google: "#4285F4",
-  Azure: "#0078D4"
+  OpenAI: "#d1608f",
+  ElevenLabs: "#e67e54",
+  Cartesia: "#5e93e1",
+  Deepgram: "#1db098",
+  AssemblyAI: "#bf86e0",
+  Speechmatics: "#c35f36",
+  Rime: "#3c8836",
+  Gradium: "#74c16c",
+  Hume: "#59b7e4",
+  "Inworld AI": "#8b85de",
+  xAI: "#c890ea",
+  Soniox: "#859704",
+  Google: "#53b0de",
+  Gladia: "#6a9fee",
+  Mistral: "#835a01",
+  Smallest: "#d7a03d",
+  Azure: "#3d7fd1"
 };

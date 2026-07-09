@@ -717,7 +717,7 @@ export function STTPlaygroundPanel({
           >
             {phase === "recording" ? (
               <span className="relative flex size-2.5 shrink-0 items-center justify-center">
-                <span className="absolute size-2.5 animate-pulse rounded-full bg-red-500" />
+                <span className="absolute size-2.5 animate-pulse rounded-full bg-accent-rust" />
               </span>
             ) : (
               <Mic className="size-4 shrink-0 text-text-secondary" aria-hidden />
@@ -799,7 +799,7 @@ export function STTPlaygroundPanel({
                         {row.pending ? (
                           <p className="text-right text-xs text-text-tertiary">Transcribing…</p>
                         ) : row.error ? (
-                          <p className="max-w-[12rem] text-right text-xs text-red-400">{row.error}</p>
+                          <p className="max-w-[12rem] text-right text-xs text-accent-rust">{row.error}</p>
                         ) : (
                           visibleMetricKeys.map((k) => renderMetricCell(k, row))
                         )}
