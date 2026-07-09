@@ -200,11 +200,7 @@ const TimelineChart: React.FC = () => {
     y?: [number, number];
   } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  const axisScrubRef = useRef<{
-    x: number;
-    y: number;
-    direction: "pending" | "scrub" | "scroll";
-  } | null>(null);
+  const axisScrubRef = useRef(false);
   const dragRef = useRef<{
     x: number;
     y: number;
@@ -436,7 +432,7 @@ const TimelineChart: React.FC = () => {
     captureImmediately = false
   ) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
-    const box = plotBox();
+    const box = interactionBox ?? plotBox();
     const rect = chartRef.current?.getBoundingClientRect();
     if (!box || !rect) return;
     const x = e.clientX - rect.left;
@@ -573,7 +569,7 @@ const TimelineChart: React.FC = () => {
   };
 
   const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    axisScrubRef.current = { x: e.clientX, y: e.clientY, direction: "scrub" };
+    axisScrubRef.current = true;
     scrubDateAxis(e);
   };
 
@@ -583,7 +579,7 @@ const TimelineChart: React.FC = () => {
   };
 
   const endAxisScrub = () => {
-    axisScrubRef.current = null;
+    axisScrubRef.current = false;
     setMobileScrub(null);
   };
 
@@ -887,7 +883,6 @@ const TimelineChart: React.FC = () => {
                 }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
-                  e.currentTarget.setPointerCapture(e.pointerId);
                   startAxisScrub(e);
                 }}
                 onPointerMove={(e) => {
