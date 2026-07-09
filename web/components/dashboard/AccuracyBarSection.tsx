@@ -99,6 +99,9 @@ const AccuracyBarSection: React.FC = () => {
     );
   }, [werBarDataWithColors, clickedWERBars, themeColors.label]);
 
+  // WER-based: never rendered on S2S (no WER metric).
+  if (mode === "s2s") return null;
+
   return (
     <div className="mb-4">
       <Card padding="p-5 lg:p-8">

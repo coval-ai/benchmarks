@@ -28,12 +28,17 @@ export function getTagCategories(providers?: ProvidersApiResponse): TagCategoryO
 
 /** Map every catalogue model's composite key to its tags. */
 export function buildTagIndex(
-  benchmark: "STT" | "TTS",
+  benchmark: "STT" | "TTS" | "S2S",
   providers?: ProvidersApiResponse
 ): Map<string, ModelTagOut[]> {
   const index = new Map<string, ModelTagOut[]>();
   if (!providers) return index;
-  const catalogue = benchmark === "STT" ? providers.stt : providers.tts;
+  const catalogue =
+    benchmark === "STT"
+      ? providers.stt
+      : benchmark === "S2S"
+        ? providers.s2s
+        : providers.tts;
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
       index.set(toModelKey(providerInfo.provider, modelInfo.model), modelInfo.tags ?? []);

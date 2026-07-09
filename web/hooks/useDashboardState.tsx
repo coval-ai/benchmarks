@@ -12,7 +12,7 @@ import {
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
 import { useBarInteraction } from "@/hooks/useBarInteraction";
-import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, parseModelKey, toModelKey } from "@/lib/utils/formatters";
+import { latencyToMs, normalizeModelName, normalizeProviderNameForTab, parseModelKey, toModelKey } from "@/lib/utils/formatters";
 import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
@@ -33,18 +33,20 @@ import { useTimeWindow } from "@/hooks/useTimeWindow";
 import type { ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 
-export function useDashboardState(page: "tts" | "stt") {
+export function useDashboardState(page: "tts" | "stt" | "s2s") {
   // STT shows a TTFS / TTFT toggle that drives every latency surface (headline,
   // timeline, box plot, scatter, heatmap) in sync. TTS is single-metric (TTFA),
   // so the toggle is hidden there and the metric stays TTFA.
   const [sttMetric, setSttMetric] = useState<"TTFS" | "TTFT">("TTFS");
-  const activeMetric = page === "tts" ? "TTFA" : sttMetric;
+  const activeMetric =
+    page === "s2s" ? "V2V" : page === "tts" ? "TTFA" : sttMetric;
   const { timeWindow, changeTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
   );
 
-  const benchmarkParam = page === "tts" ? "TTS" : "STT";
+  const benchmarkParam =
+    page === "s2s" ? "S2S" : page === "tts" ? "TTS" : "STT";
 
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
@@ -146,6 +148,7 @@ export function useDashboardState(page: "tts" | "stt") {
     series,
     selectedTTSModels: page === "tts" ? deferredSelectedModels : [],
     selectedSTTModels: page === "stt" ? deferredSelectedModels : [],
+    selectedS2SModels: page === "s2s" ? deferredSelectedModels : [],
     modelsByProvider,
     timeWindow: dataTimeWindow,
   });
@@ -234,20 +237,17 @@ export function useDashboardState(page: "tts" | "stt") {
 
   // Derived display values
   const latencyLabel = activeMetric;
-  const pageTitle = page === "tts" ? "Text to Speech Model Comparisons" : "Speech to Text Model Comparisons";
-  const pageSubtitle = page === "tts"
-    ? "Compare performance metrics between different Text-to-Speech models for voice agent applications."
-    : "Compare performance metrics between different Speech-to-Text models for voice agent applications.";
+  const modalityName = { stt: "Speech-to-Text", tts: "Text-to-Speech", s2s: "Speech-to-Speech" }[page];
+  const modalitySpaced = { stt: "Speech to Text", tts: "Text to Speech", s2s: "Speech to Speech" }[page];
+  const pageTitle = `${modalitySpaced} Model Comparisons`;
+  const pageSubtitle = `Compare performance metrics between different ${modalityName} models for voice agent applications.`;
   const sidebarTitle = "Models to Compare";
-  const benchmarkTitle = page === "tts"
-    ? "Text to Speech Voice AI Benchmarks"
-    : "Speech to Text Voice AI Benchmarks";
-  const mobileSheetTitle = page === "tts"
-    ? "Text-to-Speech Models"
-    : "Speech-to-Text Models";
-  const normalizeProviderName = page === "stt"
-    ? normalizeSTTProviderName
-    : normalizeTTSProviderName;
+  const benchmarkTitle = `${modalitySpaced} Voice AI Benchmarks`;
+  const mobileSheetTitle = `${modalityName} Models`;
+  const normalizeProviderName = useCallback(
+    (providerName: string) => normalizeProviderNameForTab(providerName, page),
+    [page]
+  );
 
   const facetGroups = useMemo(
     () =>
@@ -297,18 +297,22 @@ export function useDashboardState(page: "tts" | "stt") {
       : undefined,
   };
 
-  const secondaryKeyMetric = {
-    label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
-    displayValue: `${avgSecondary.toFixed(1)}%`,
-    subtitle: lowestWERModel
-      ? {
-          name: normalizeModelName(lowestWERModel),
-          detail: lowestWERProvider
-            ? normalizeProviderName(lowestWERProvider)
+  // S2S has no WER, so it renders a single KeyMetric tile (no secondary).
+  const secondaryKeyMetric =
+    page === "s2s"
+      ? undefined
+      : {
+          label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
+          displayValue: `${avgSecondary.toFixed(1)}%`,
+          subtitle: lowestWERModel
+            ? {
+                name: normalizeModelName(lowestWERModel),
+                detail: lowestWERProvider
+                  ? normalizeProviderName(lowestWERProvider)
+                  : undefined,
+              }
             : undefined,
-        }
-      : undefined,
-  };
+        };
 
   return {
     // Page identity

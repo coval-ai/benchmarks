@@ -14,7 +14,7 @@ export function DashboardProvider({
   page,
   children,
 }: {
-  page: "tts" | "stt";
+  page: "tts" | "stt" | "s2s";
   children: React.ReactNode;
 }) {
   const state = useDashboardState(page);

@@ -60,7 +60,7 @@ export function getLocalTimeZoneAbbr(): string {
  * Convert a latency metric value to display milliseconds.
  * STT latency metrics (TTFT) are stored in seconds; TTS (TTFA) already in ms.
  */
-export function latencyToMs(value: number, benchmark: "tts" | "stt"): number {
+export function latencyToMs(value: number, benchmark: "tts" | "stt" | "s2s"): number {
   return benchmark === "stt" ? value * 1000 : value;
 }
 
@@ -127,6 +127,10 @@ export function normalizeModelName(modelKey: string): string {
     "stt-rt-v4": "STT RT v4",
     "stt-rt-v5": "STT RT v5",
     "inworld-stt-1": "STT 1",
+    // S2S
+    "gpt-realtime": "GPT Realtime 2",
+    "gemini-live": "Gemini 3.1 Flash Live (Preview)",
+    "grok-realtime": "Grok Realtime",
     default: "Default",
     enhanced: "Enhanced"
   };
@@ -180,6 +184,26 @@ export function normalizeSTTProviderName(providerName: string): string {
 
   const lower = providerName.toLowerCase();
   return mappings[lower] ?? capitalizeProviderSlug(providerName);
+}
+
+export function normalizeS2SProviderName(providerName: string): string {
+  const mappings: Record<string, string> = {
+    google: "Google",
+    openai: "OpenAI",
+    xai: "xAI",
+  };
+
+  return mappings[providerName] ?? capitalizeProviderSlug(providerName);
+}
+
+/** Pick the provider-name normalizer that matches the active dashboard tab. */
+export function normalizeProviderNameForTab(
+  providerName: string,
+  tab: "tts" | "stt" | "s2s"
+): string {
+  if (tab === "stt") return normalizeSTTProviderName(providerName);
+  if (tab === "s2s") return normalizeS2SProviderName(providerName);
+  return normalizeTTSProviderName(providerName);
 }
 
 export function normalizeTTSProviderName(providerName: string): string {
