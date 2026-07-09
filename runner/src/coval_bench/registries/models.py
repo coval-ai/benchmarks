@@ -333,6 +333,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="elevenlabs",
+        model="eleven_v3",
+        voice="IKne3meq5aSn9XLyUdCD",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="openai",
         model="gpt-4o-mini-tts",
         voice="alloy",
