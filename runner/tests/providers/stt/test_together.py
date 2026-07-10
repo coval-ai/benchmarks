@@ -130,6 +130,85 @@ async def test_together_deltas_only_falls_back_to_latest_per_item(
     assert result.audio_to_final_seconds is None
 
 
+@pytest.mark.asyncio
+async def test_together_empty_final_salvages_item_deltas(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """An empty final counts as a finalization, using the item's latest delta as its text."""
+    events: list[Any] = [
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_1",
+            "delta": "hello",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "item_1",
+            "transcript": "hello world",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_2",
+            "delta": "how are",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_2",
+            "delta": "how are you",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "item_2",
+            "transcript": "",
+        },
+    ]
+    ws = FakeWebSocket(events, server_closes=False)
+    provider = TogetherSTTProvider(api_key=fake_api_key, model="parakeet-tdt-0.6b-v3")
+
+    result = await _run(provider, ws, audio_pcm_bytes)
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
+async def test_together_punctuation_only_final_not_salvaged(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A final whose item deltas hold no words stays dropped."""
+    events: list[Any] = [
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_1",
+            "delta": "hello world",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "item_1",
+            "transcript": "hello world",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_2",
+            "delta": ". ",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "item_2",
+            "transcript": " ",
+        },
+    ]
+    ws = FakeWebSocket(events, server_closes=False)
+    provider = TogetherSTTProvider(api_key=fake_api_key, model="parakeet-tdt-0.6b-v3")
+
+    result = await _run(provider, ws, audio_pcm_bytes)
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.word_count == 2
+
+
 def test_provider_name() -> None:
     provider = TogetherSTTProvider(api_key=SecretStr("k"), model="parakeet-tdt-0.6b-v3")
     assert provider.name == "together-parakeet-tdt-0.6b-v3"

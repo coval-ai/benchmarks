@@ -17,6 +17,11 @@ truncating the tail. Trailing silence is paced in before the commit to flush
 the lookahead (Flux/Rev AI pattern); their TTFS is excluded in
 ``registries/metrics.py`` since the final's timing then tracks the client's
 silence length, not the engine.
+
+Parakeet's endpointer can close a segment with an empty ``completed`` even
+though the segment's deltas carried the text; such finals count as real
+finalizations, with the item's latest delta salvaged as the segment text
+(punctuation-only remnants excepted).
 """
 
 from __future__ import annotations
@@ -231,6 +236,10 @@ class TogetherSTTProvider(STTProvider):
 
                 if msg_type.endswith("input_audio_transcription.completed"):
                     transcript = str(msg.get("transcript", "")).strip()
+                    if not transcript:
+                        salvaged = item_deltas.get(str(msg.get("item_id", "")), "").strip()
+                        if any(ch.isalnum() for ch in salvaged):
+                            transcript = salvaged
                     if transcript:
                         final_segments.append(transcript)
                         last_final_time = now
