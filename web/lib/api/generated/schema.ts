@@ -32,7 +32,7 @@ export interface components {
       model_stats: components["schemas"]["ModelStatEntry"][];
       series: components["schemas"]["SeriesPoint"][];
     };
-    BenchmarkLiteral: "STT" | "TTS";
+    BenchmarkLiteral: "STT" | "TTS" | "S2S";
     LeaderboardEntry: {
       provider: string;
       model: string;
@@ -42,7 +42,7 @@ export interface components {
       n: number;
     };
     LeaderboardResponse: {
-      metric: "WER" | "TTFA" | "TTFT" | "TTFS";
+      metric: "WER" | "TTFA" | "TTFT" | "TTFS" | "V2V";
       window: components["schemas"]["WindowLiteral"];
       entries: components["schemas"]["LeaderboardEntry"][];
     };
@@ -80,6 +80,7 @@ export interface components {
     ProvidersResponse: {
       stt: components["schemas"]["ProviderInfo"][];
       tts: components["schemas"]["ProviderInfo"][];
+      s2s: components["schemas"]["ProviderInfo"][];
       tag_categories: components["schemas"]["TagCategoryOut"][];
     };
     RunOut: {

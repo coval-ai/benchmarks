@@ -22,10 +22,13 @@ const KeyMetrics: React.FC = () => {
     secondaryKeyMetric: secondary,
   } = useDashboard();
 
-  const metrics: KeyMetricData[] = [primary, secondary];
+  // S2S has no secondary (WER) tile, so it renders a single full-width tile.
+  const metrics: KeyMetricData[] = secondary ? [primary, secondary] : [primary];
 
   return (
-    <div className="grid grid-cols-2 gap-[0.8rem] mb-[0.8rem] w-full">
+    <div
+      className={`grid ${metrics.length > 1 ? "grid-cols-2" : "grid-cols-1"} gap-[0.8rem] mb-[0.8rem] w-full`}
+    >
       {metrics.map((metric) => (
         <Card key={metric.label} className="text-left min-w-0" padding="p-5 lg:p-8">
 
