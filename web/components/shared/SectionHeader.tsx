@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import { Check, ImageDown, Link2, Table } from "lucide-react";
 import { downloadCSV, downloadChartPNG } from "@/lib/utils/chartExport";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { setExportStaged } from "@/hooks/useMobileDetection";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
@@ -120,15 +121,22 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     )?.parentElement;
     const priorWidth = card.style.width;
     const priorHeight = wrapper?.style.height ?? "";
-    card.style.width = "880px";
+    card.style.width = "1000px";
     if (wrapper) wrapper.style.height = "420px";
+    setExportStaged(true);
+    // Mobile charts render slot-scrolled SVGs wider than the stage; settling
+    // also requires the SVG to fit it, so the capture waits out the desktop
+    // re-render instead of grabbing the still-mobile layout.
     const settled = () => {
       const el = findSvg();
       return (
-        !!el && el.clientWidth >= 640 && (!wrapper || el.clientHeight >= 416)
+        !!el &&
+        el.clientWidth >= 640 &&
+        el.clientWidth <= 1000 &&
+        (!wrapper || el.clientHeight >= 416)
       );
     };
-    for (let i = 0; i < 30 && !settled(); i++) {
+    for (let i = 0; i < 60 && !settled(); i++) {
       await new Promise(requestAnimationFrame);
     }
     svg = findSvg() ?? svg;
@@ -167,6 +175,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // downloadChartPNG measures and clones the SVG synchronously before its
     // first await, so the stage can be struck as soon as it returns — the
     // layout is never left widened if rasterizing stalls or rejects.
+    setExportStaged(false);
     card.style.width = priorWidth;
     if (wrapper) wrapper.style.height = priorHeight;
     const ok = await capture.catch(() => false);
