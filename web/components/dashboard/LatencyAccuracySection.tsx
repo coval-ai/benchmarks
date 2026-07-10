@@ -88,6 +88,9 @@ const LatencyAccuracySection: React.FC = () => {
     return { xMax: max, xTicks: ticks };
   }, [scatterData]);
 
+  // WER-based: never rendered on S2S (no WER metric).
+  if (activeTab === "s2s") return null;
+
   return (
     <div className="mb-4">
       <Card padding="p-5 lg:p-8">

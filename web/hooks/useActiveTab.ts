@@ -5,7 +5,9 @@
 
 import { usePathname } from "next/navigation";
 
-export function useActiveTab(): "tts" | "stt" {
+export function useActiveTab(): "tts" | "stt" | "s2s" {
   const pathname = usePathname();
-  return pathname === "/stt" ? "stt" : "tts";
+  if (pathname === "/stt") return "stt";
+  if (pathname === "/s2s") return "s2s";
+  return "tts";
 }

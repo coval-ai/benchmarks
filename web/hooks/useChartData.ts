@@ -15,15 +15,21 @@ import type {
   BarDataPoint
 } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
-import { latencyToMs, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName, toModelKey, parseModelKey } from "@/lib/utils/formatters";
+import { latencyToMs, normalizeModelName, normalizeProviderNameForTab, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { WINDOW_MS, type TimeWindow } from "@/lib/config/timeWindows";
 
+// Latency metrics share every chart's number machinery (box plot, scatter,
+// comparison table). Membership gates the builders so a new one (V2V for S2S)
+// is never silently skipped.
+const LATENCY_METRICS: readonly string[] = ["TTFS", "TTFT", "TTFA", "V2V"];
+
 interface UseChartDataParams {
-  activeTab: "tts" | "stt";
+  activeTab: "tts" | "stt" | "s2s";
   modelStats: ModelStats[];
   series: SeriesPoint[];
   selectedTTSModels: string[];
   selectedSTTModels: string[];
+  selectedS2SModels: string[];
   modelsByProvider: ModelsByProvider;
   timeWindow: TimeWindow;
 }
@@ -34,9 +40,18 @@ export function useChartData({
   series,
   selectedTTSModels,
   selectedSTTModels,
+  selectedS2SModels,
   modelsByProvider,
   timeWindow
 }: UseChartDataParams) {
+  // The active tab's selected models, resolved once so the builders below don't
+  // each re-derive the tab→list mapping.
+  const selectedModels =
+    activeTab === "tts"
+      ? selectedTTSModels
+      : activeTab === "s2s"
+        ? selectedS2SModels
+        : selectedSTTModels;
   const toDisplayUnits = useCallback(
     (value: number): number => latencyToMs(value, activeTab),
     [activeTab]
@@ -71,9 +86,7 @@ export function useChartData({
     (modelKey: string): string => {
       const { provider, model } = parseModelKey(modelKey);
       if (provider) {
-        return activeTab === "stt"
-          ? normalizeSTTProviderName(provider)
-          : normalizeTTSProviderName(provider);
+        return normalizeProviderNameForTab(provider, activeTab);
       }
       // Fallback for bare slugs: search modelStats, then providers config
       const rawProvider =
@@ -82,9 +95,7 @@ export function useChartData({
           models.includes(modelKey)
         )?.[0] ??
         "Unknown";
-      return activeTab === "stt"
-        ? normalizeSTTProviderName(rawProvider)
-        : normalizeTTSProviderName(rawProvider);
+      return normalizeProviderNameForTab(rawProvider, activeTab);
     },
     [modelStats, activeTab, modelsByProvider]
   );
@@ -161,17 +172,12 @@ export function useChartData({
   // for TTFS/TTFT, TTS models for TTFA).
   const getTimelineData = useCallback(
     (metric: string): TimelineDataPoint[] => {
-      const models =
-        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-      return buildTimelineRows(timelineByMetricModel[metric] ?? {}, models);
+      return buildTimelineRows(
+        timelineByMetricModel[metric] ?? {},
+        selectedModels
+      );
     },
-    [
-      buildTimelineRows,
-      timelineByMetricModel,
-      activeTab,
-      selectedTTSModels,
-      selectedSTTModels
-    ]
+    [buildTimelineRows, timelineByMetricModel, selectedModels]
   );
 
   // Per-metric, per-model box-plot pieces from the SQL stats, built in one pass
@@ -183,11 +189,7 @@ export function useChartData({
   >(() => {
     const out: Record<string, Record<string, BoxPlotDataPoint>> = {};
     modelStats.forEach((stat) => {
-      if (
-        stat.metric_type !== "TTFS" &&
-        stat.metric_type !== "TTFT" &&
-        stat.metric_type !== "TTFA"
-      ) {
+      if (!LATENCY_METRICS.includes(stat.metric_type)) {
         return;
       }
 
@@ -222,8 +224,6 @@ export function useChartData({
   // median, with the pooled axis bounds.
   const getBoxPlotData = useCallback(
     (metric: string): BoxPlotData => {
-      const selectedModels =
-        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
       const byModel = boxByMetricModel[metric] ?? {};
 
       const data: BoxPlotDataPoint[] = [];
@@ -252,7 +252,7 @@ export function useChartData({
         metricType: metric
       };
     },
-    [boxByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
+    [boxByMetricModel, selectedModels]
   );
 
   // Per-metric, per-model scatter point (avg latency, avg WER) built in one
@@ -264,11 +264,7 @@ export function useChartData({
     const out: Record<string, Record<string, ScatterDataPoint>> = {};
     modelStats.forEach((stat) => {
       // Only latency metrics belong on the scatter's x-axis; skip WER/RTF/etc.
-      if (
-        stat.metric_type !== "TTFS" &&
-        stat.metric_type !== "TTFT" &&
-        stat.metric_type !== "TTFA"
-      ) {
+      if (!LATENCY_METRICS.includes(stat.metric_type)) {
         return;
       }
       const modelKey = toModelKey(stat.provider, stat.model);
@@ -280,10 +276,7 @@ export function useChartData({
         y: werStat.avg_value,
         model: modelKey,
         benchmark: activeTab === "tts" ? "TTS" : "STT",
-        provider:
-          activeTab === "stt"
-            ? normalizeSTTProviderName(stat.provider)
-            : normalizeTTSProviderName(stat.provider),
+        provider: normalizeProviderNameForTab(stat.provider, activeTab),
         count: stat.sample_count
       };
     });
@@ -292,23 +285,18 @@ export function useChartData({
 
   const getScatterData = useCallback(
     (metric: string): ScatterDataPoint[] => {
-      const selectedModels =
-        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
       const byModel = scatterByMetricModel[metric] ?? {};
       return selectedModels
         .map((model) => byModel[model])
         .filter((point): point is ScatterDataPoint => point !== undefined);
     },
-    [scatterByMetricModel, activeTab, selectedTTSModels, selectedSTTModels]
+    [scatterByMetricModel, selectedModels]
   );
 
   // Comparison rows for a given latency metric: the full latency percentile
   // ladder straight from the SQL stats, plus avg WER and sample counts.
   const getHeatmapData = useCallback(
     (metric: string): ModelHeatmapData[] => {
-      const selectedModels =
-        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-
       const heatmapData: ModelHeatmapData[] = [];
 
       selectedModels.forEach((model) => {
@@ -363,13 +351,10 @@ export function useChartData({
           ) || a.model.localeCompare(b.model)
       );
     },
-    [activeTab, selectedTTSModels, selectedSTTModels, getStat, toDisplayUnits]
+    [selectedModels, getStat, toDisplayUnits]
   );
 
   const werBarDataMemo = useMemo<BarDataPoint[]>(() => {
-    const selectedModels =
-      activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
-
     if (selectedModels.length === 0) {
       return [];
     }
@@ -387,7 +372,7 @@ export function useChartData({
       })
       .filter((item): item is BarDataPoint => item !== null)
       .sort((a, b) => a.averageWER - b.averageWER);
-  }, [activeTab, selectedTTSModels, selectedSTTModels, getStat]);
+  }, [selectedModels, getStat]);
 
   const getWERBarData = useCallback(
     (): BarDataPoint[] => werBarDataMemo,
@@ -457,8 +442,6 @@ export function useChartData({
   /** Models that have at least one plotted point in the current timeline window. */
   const getModelsWithTimelineData = useCallback(
     (metric: string): string[] => {
-      const selectedModels =
-        activeTab === "tts" ? selectedTTSModels : selectedSTTModels;
       const [windowStart, windowEnd] = getCurrentTimeWindow();
       const windowed = getTimelineData(metric).filter(
         (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
@@ -471,13 +454,7 @@ export function useChartData({
         )
       );
     },
-    [
-      activeTab,
-      selectedTTSModels,
-      selectedSTTModels,
-      getCurrentTimeWindow,
-      getTimelineData
-    ]
+    [selectedModels, getCurrentTimeWindow, getTimelineData]
   );
 
   return {

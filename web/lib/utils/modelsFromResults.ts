@@ -13,13 +13,18 @@ export interface ProviderModelRef {
 
 function modelIsEnabled(
   providers: ProvidersApiResponse | undefined,
-  benchmark: "STT" | "TTS",
+  benchmark: "STT" | "TTS" | "S2S",
   provider: string,
   model: string
 ): boolean {
   if (!providers) return true;
 
-  const catalogue = benchmark === "STT" ? providers.stt : providers.tts;
+  const catalogue =
+    (benchmark === "STT"
+      ? providers.stt
+      : benchmark === "S2S"
+        ? providers.s2s
+        : providers.tts) ?? [];
   const providerInfo = catalogue.find((item) => item.provider === provider);
   if (!providerInfo) return true;
 
@@ -41,13 +46,18 @@ function addModel(
 }
 
 function buildModelsByProviderFromCatalogue(
-  benchmark: "STT" | "TTS",
+  benchmark: "STT" | "TTS" | "S2S",
   providers?: ProvidersApiResponse
 ): ModelsByProvider {
   const modelsByProvider: ModelsByProvider = {};
   if (!providers) return modelsByProvider;
 
-  const catalogue = benchmark === "STT" ? providers.stt : providers.tts;
+  const catalogue =
+    (benchmark === "STT"
+      ? providers.stt
+      : benchmark === "S2S"
+        ? providers.s2s
+        : providers.tts) ?? [];
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
       if (modelInfo.disabled) continue;
@@ -65,7 +75,7 @@ function buildModelsByProviderFromCatalogue(
  */
 export function buildModelsByProvider(
   entries: readonly ProviderModelRef[],
-  benchmark: "STT" | "TTS",
+  benchmark: "STT" | "TTS" | "S2S",
   providers?: ProvidersApiResponse
 ): ModelsByProvider {
   const modelsByProvider = buildModelsByProviderFromCatalogue(benchmark, providers);
