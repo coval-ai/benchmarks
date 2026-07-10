@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import * as d3 from "d3";
 import { BoxPlotProps } from "@/types/chart.types";
 import { BoxPlotDataPoint } from "@/types/benchmark.types";
@@ -91,7 +91,10 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       )
     : dimensions.width;
 
-  useEffect(() => {
+  // Layout effect so the d3 content redraws in the same frame the <svg>
+  // resizes — the PNG export clones the SVG as soon as its width settles, and
+  // a post-paint redraw would let it capture stale content in a resized box.
+  useLayoutEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
 
     setTip(null);

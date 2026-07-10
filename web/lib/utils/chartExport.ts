@@ -180,6 +180,14 @@ export function labelScatterDots(
     boxes.some(
       (b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1
     );
+  // Stacked dots hide each other completely on screen; a rim in the canvas
+  // color splits them into visible crescents so every label has a referent.
+  circles.forEach((circle) => {
+    if (!circle.getAttribute("stroke")) {
+      circle.setAttribute("stroke", colors.tooltipBg);
+      circle.setAttribute("stroke-width", "1.5");
+    }
+  });
   circles.forEach((circle, index) => {
     const point = sorted[index];
     if (!point) return;
@@ -200,23 +208,21 @@ export function labelScatterDots(
       [cx - 10, cy - 7, "end"],
       [cx - 10, cy + 15, "end"],
     ];
-    let placement = candidates.find(([x, y, a]) => !blocked(box(x, y, a)));
-    if (!placement) {
-      for (let step = 2; step < 10 && !placement; step++) {
-        const y = cy + 5 + step * 13;
-        if (!blocked(box(cx, y, "middle"))) placement = [cx, y, "middle"];
-      }
-      if (placement) {
-        const leader = document.createElementNS(SVG_NS, "line");
-        leader.setAttribute("x1", `${cx}`);
-        leader.setAttribute("y1", `${cy + 7}`);
-        leader.setAttribute("x2", `${cx}`);
-        leader.setAttribute("y2", `${placement[1] - 9}`);
-        leader.setAttribute("stroke", colors.barStroke);
-        leader.setAttribute("stroke-width", "1");
-        clone.appendChild(leader);
+    // In dense clusters, spiral outward in small rings so a squeezed-out label
+    // still sits near its dot (its color keeps it attributable) rather than at
+    // the end of a hard-to-follow leader line.
+    for (let r = 22; r <= 58; r += 12) {
+      for (let deg = 0; deg < 360; deg += 30) {
+        const dx = Math.cos((deg * Math.PI) / 180);
+        const dy = Math.sin((deg * Math.PI) / 180);
+        candidates.push([
+          cx + r * dx,
+          cy + r * dy + 4,
+          Math.abs(dx) < 0.4 ? "middle" : dx > 0 ? "start" : "end",
+        ]);
       }
     }
+    const placement = candidates.find(([x, y, a]) => !blocked(box(x, y, a)));
     // Last-resort fallback: no collision-free slot exists, so accept overlap
     // but keep the label horizontally in-bounds (never clipped at the edge).
     // Prefer the side with room; else clamp a centered label into the canvas.
@@ -229,7 +235,25 @@ export function labelScatterDots(
       fallback = [2, cy + 4, "start"];
     else fallback = [Math.min(Math.max(cx, 2 + w / 2), width - 2 - w / 2), cy + 4, "middle"];
     const [x, y, anchor] = placement ?? fallback;
-    boxes.push(box(x, y, anchor));
+    const placed = box(x, y, anchor);
+    boxes.push(placed);
+    // A label pushed off its dot gets a short connector in the dot's own
+    // color — grey lines are untrackable and were rejected in review.
+    const tx = Math.min(Math.max(cx, placed.x1), placed.x2);
+    const ty = Math.min(Math.max(cy, placed.y1), placed.y2);
+    const dist = Math.hypot(tx - cx, ty - cy);
+    if (dist > 16) {
+      const [ux, uy] = [(tx - cx) / dist, (ty - cy) / dist];
+      const tick = document.createElementNS(SVG_NS, "line");
+      tick.setAttribute("x1", `${cx + ux * 8}`);
+      tick.setAttribute("y1", `${cy + uy * 8}`);
+      tick.setAttribute("x2", `${tx - ux * 2}`);
+      tick.setAttribute("y2", `${ty - uy * 2}`);
+      tick.setAttribute("stroke", labelColor(point.color, dark));
+      tick.setAttribute("stroke-width", "1.5");
+      tick.setAttribute("stroke-linecap", "round");
+      clone.appendChild(tick);
+    }
     const text = document.createElementNS(SVG_NS, "text");
     text.setAttribute("x", `${x}`);
     text.setAttribute("y", `${y}`);
@@ -408,16 +432,29 @@ export async function downloadChartPNG(
   }
   ctx.globalAlpha = 0.45;
   // The logo art is ink; the brand rule allows ink or white only, so flip it to
-  // white on the dark canvas to keep the watermark readable.
-  if (dark) ctx.filter = "brightness(0) invert(1)";
+  // white on the dark canvas to keep the watermark readable. Tinted with a
+  // composite pass rather than ctx.filter, which Safari doesn't implement.
+  let mark: HTMLImageElement | HTMLCanvasElement = logo;
+  if (dark) {
+    const tint = document.createElement("canvas");
+    tint.width = logoWidth * 2;
+    tint.height = Math.ceil(logoHeight * 2);
+    const tctx = tint.getContext("2d");
+    if (tctx) {
+      tctx.drawImage(logo, 0, 0, tint.width, tint.height);
+      tctx.globalCompositeOperation = "source-in";
+      tctx.fillStyle = "#ffffff";
+      tctx.fillRect(0, 0, tint.width, tint.height);
+      mark = tint;
+    }
+  }
   ctx.drawImage(
-    logo,
+    mark,
     totalWidth - MARGIN - logoWidth,
     totalHeight - logoHeight - 8,
     logoWidth,
     logoHeight
   );
-  ctx.filter = "none";
   canvas.toBlob((blob) => {
     if (blob) triggerDownload(URL.createObjectURL(blob), filename);
   });

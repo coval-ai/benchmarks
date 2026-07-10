@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import { Check, ImageDown, Link2, Table } from "lucide-react";
 import { downloadCSV, downloadChartPNG } from "@/lib/utils/chartExport";
 import { useThemeColors } from "@/hooks/useThemeColors";
+import { setExportStaged } from "@/hooks/useMobileDetection";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
@@ -99,17 +100,49 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   const downloadImage = async () => {
     const root = document.getElementById(anchorId);
     const card = root?.parentElement;
+    if (!card) return;
     // The chart is the largest SVG in the card; icon SVGs and a chart still
     // sizing to zero during layout are excluded so we never export those.
-    const svg =
-      card &&
+    const findSvg = () =>
       Array.from(card.querySelectorAll("svg"))
         .filter((el) => el.clientWidth > 100 && el.clientHeight > 100)
         .sort(
           (a, b) =>
             b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
         )[0];
-    if (!svg) return;
+    let svg = findSvg();
+    // The exporting flag rejects overlapping clicks on the same card, which
+    // would otherwise read the temporary stage size as the layout to restore.
+    if (!svg || card.dataset.exporting) return;
+    card.dataset.exporting = "1";
+    // Exports render on a fixed desktop-sized stage so every device produces
+    // the same image, taller than the on-screen chart so dense charts have
+    // room to place labels. The charts re-render on container resize, which
+    // can replace the SVG node, hence the re-query once the stage settles.
+    const wrapper = svg.closest<HTMLElement>(
+      ".recharts-responsive-container"
+    )?.parentElement;
+    const priorWidth = card.style.width;
+    const priorHeight = wrapper?.style.height ?? "";
+    card.style.width = "1000px";
+    if (wrapper) wrapper.style.height = "420px";
+    setExportStaged(true);
+    // Mobile charts render slot-scrolled SVGs wider than the stage; settling
+    // also requires the SVG to fit it, so the capture waits out the desktop
+    // re-render instead of grabbing the still-mobile layout.
+    const settled = () => {
+      const el = findSvg();
+      return (
+        !!el &&
+        el.clientWidth >= 640 &&
+        el.clientWidth <= 1000 &&
+        (!wrapper || el.clientHeight >= 416)
+      );
+    };
+    for (let i = 0; i < 60 && !settled(); i++) {
+      await new Promise(requestAnimationFrame);
+    }
+    svg = findSvg() ?? svg;
     // The stat label can be a ReactNode (MetricInfo), so its text comes from
     // the DOM — minus the hidden tooltip MetricInfo keeps mounted.
     const statLabel = root?.querySelector("[data-stat-label]")?.cloneNode(true);
@@ -118,7 +151,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         .querySelectorAll('[role="tooltip"]')
         .forEach((el) => el.remove());
     }
-    const ok = await downloadChartPNG(svg, `${anchorId}.png`, {
+    const capture = downloadChartPNG(svg, `${anchorId}.png`, {
       label,
       title: description.short,
       xLabel: exportXLabel,
@@ -132,12 +165,24 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       annotate: exportAnnotate,
       legend: Array.from(
         card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
-      ).map((li) => ({
-        label: li.textContent?.trim() ?? "",
-        color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
-        dimmed: li.hasAttribute("data-dimmed"),
-      })),
-    }, themeColors).catch(() => false);
+      ).map((li) => {
+        const entry = li.cloneNode(true) as HTMLElement;
+        entry.querySelectorAll('[role="tooltip"]').forEach((el) => el.remove());
+        return {
+          label: entry.textContent?.trim() ?? "",
+          color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
+          dimmed: li.hasAttribute("data-dimmed"),
+        };
+      }),
+    }, themeColors);
+    // downloadChartPNG measures and clones the SVG synchronously before its
+    // first await, so the stage can be struck as soon as it returns — the
+    // layout is never left widened if rasterizing stalls or rejects.
+    setExportStaged(false);
+    card.style.width = priorWidth;
+    if (wrapper) wrapper.style.height = priorHeight;
+    delete card.dataset.exporting;
+    const ok = await capture.catch(() => false);
     if (ok) trackShare("png");
   };
 
