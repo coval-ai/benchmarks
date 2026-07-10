@@ -171,7 +171,11 @@ const LatencyAccuracySection: React.FC = () => {
           className="relative h-64 select-none"
           onMouseEnter={trackChartHover}
           onPointerDown={isMobile ? scrub : undefined}
-          onPointerMove={isMobile ? (e) => e.buttons > 0 && scrub(e) : undefined}
+          onPointerMove={
+            isMobile
+              ? (e) => (e.pointerType === "touch" || e.buttons > 0) && scrub(e)
+              : undefined
+          }
           onPointerUp={isMobile ? () => setActiveIdx(-1) : undefined}
           onPointerCancel={isMobile ? () => setActiveIdx(-1) : undefined}
           style={isMobile ? { touchAction: "pan-y" } : undefined}
