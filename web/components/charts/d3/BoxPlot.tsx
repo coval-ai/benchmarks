@@ -16,6 +16,8 @@ const providerFontSize = 12;
 const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
+const margin = { top: 20, right: 8, bottom: 80, left: 40 };
+const mobileSlotWidth = 48;
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -38,6 +40,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     yTop: number;
     pinned: boolean;
   } | null>(null);
+  const [scrollX, setScrollX] = useState(0);
   const themeColors = useThemeColors();
 
   useEffect(() => {
@@ -77,13 +80,23 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     };
   }, [height]);
 
+  // On mobile every model gets a guaranteed slot and the chart scrolls
+  // horizontally (same pattern as the WER bar chart) — wide enough slots
+  // re-enable the desktop axis labels and make each column a real touch
+  // target.
+  const svgWidth = isMobile
+    ? Math.max(
+        dimensions.width,
+        data.data.length * mobileSlotWidth + margin.left + margin.right
+      )
+    : dimensions.width;
+
   useEffect(() => {
     if (!svgRef.current || data.data.length === 0) return;
 
     setTip(null);
 
-    const margin = { top: 20, right: 8, bottom: 80, left: 40 };
-    const chartWidth = dimensions.width - margin.left - margin.right;
+    const chartWidth = svgWidth - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
 
     const svg = d3.select(svgRef.current);
@@ -154,8 +167,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     xAxisGroup.select(".domain").remove();
     xAxisGroup.selectAll("text").remove();
 
-    // Create custom wrapped text with model first (desktop only)
-    if (!isMobile) {
+    // Create custom wrapped text with model first
+    {
       const labelMaxWidth = xScale.step() * 0.96;
       const minModelFont = 8;
 
@@ -324,33 +337,51 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         .attr("stroke", color)
         .attr("stroke-width", 1.5);
 
+      // Full-height invisible hit area so a finger can land anywhere in the
+      // model's column, not just on the thin strokes.
+      if (isMobile) {
+        boxGroup
+          .append("rect")
+          .attr("x", centerX - xScale.step() / 2)
+          .attr("y", 0)
+          .attr("width", xScale.step())
+          .attr("height", chartHeight)
+          .attr("fill", "transparent");
+      }
+
       // Hover shows a compact name + median tooltip above the whiskers;
       // clicking pins that same tooltip and populates it with the full
       // stats so it never chases the cursor or blocks neighboring boxes.
+      // On mobile there is no hover: a tap pins the full stats directly.
       const anchor = {
         point: modelData,
         x: margin.left + centerX,
         yTop: margin.top + yScale(max),
       };
 
-      boxGroup
-        .style("cursor", "pointer")
-        .on("mouseenter", function () {
-          d3.select(this)
-            .select("rect")
-            .attr("fill-opacity", 0.5);
+      boxGroup.style("cursor", "pointer");
 
-          setTip((t) =>
-            t?.pinned && t.point.model === modelData.model
-              ? t
-              : { ...anchor, pinned: false }
-          );
-        })
-        .on("mouseleave", function () {
-          d3.select(this)
-            .select("rect")
-            .attr("fill-opacity", 0.3);
-        })
+      if (!isMobile) {
+        boxGroup
+          .on("mouseenter", function () {
+            d3.select(this)
+              .select("rect")
+              .attr("fill-opacity", 0.5);
+
+            setTip((t) =>
+              t?.pinned && t.point.model === modelData.model
+                ? t
+                : { ...anchor, pinned: false }
+            );
+          })
+          .on("mouseleave", function () {
+            d3.select(this)
+              .select("rect")
+              .attr("fill-opacity", 0.3);
+          });
+      }
+
+      boxGroup
         .on("click", (event: MouseEvent) => {
           event.stopPropagation();
           setTip((t) =>
@@ -362,7 +393,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
+  }, [data, dimensions, svgWidth, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -374,22 +405,35 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           <p>No data available for box plot</p>
         </div>
       ) : (
-        <svg
-          ref={svgRef}
-          width={dimensions.width}
-          height={dimensions.height}
-          className="overflow-visible"
-          style={{ background: "transparent" }}
-        />
+        <div
+          className="overflow-x-auto touch-manipulation select-none"
+          onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
+        >
+          <svg
+            ref={svgRef}
+            width={svgWidth}
+            height={dimensions.height}
+            className="overflow-visible"
+            style={{ background: "transparent" }}
+          />
+        </div>
       )}
       {tip && (
         <div
           onClick={(e) => e.stopPropagation()}
           className="absolute z-10 whitespace-nowrap text-xs"
           style={{
-            left: Math.min(Math.max(tip.x, 90), dimensions.width - 90),
-            top: tip.yTop,
-            transform: "translate(-50%, calc(-100% - 8px))",
+            // On mobile the panel sits above the plot and tracks its column
+            // as the chart scrolls, so it never covers the box being
+            // inspected and follows the finger while swiping.
+            left: Math.min(
+              Math.max(isMobile ? tip.x - scrollX : tip.x, 90),
+              dimensions.width - 90
+            ),
+            top: isMobile ? margin.top : tip.yTop,
+            transform: isMobile
+              ? "translate(-50%, -100%)"
+              : "translate(-50%, calc(-100% - 8px))",
             transition: "left 150ms ease-out, top 150ms ease-out",
             pointerEvents: tip.pinned ? "auto" : "none",
             backgroundColor: "var(--color-surface-tooltip)",
