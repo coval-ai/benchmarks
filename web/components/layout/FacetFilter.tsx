@@ -72,13 +72,14 @@ const FacetFilter: React.FC = () => {
                 >
                   <span>{option.label}</span>
                   <span
-                    className={
+                    style={{ minWidth: `${String(option.maxCount).length}ch` }}
+                    className={`inline-block text-center tabular-nums ${
                       fill
                         ? "opacity-70"
                         : option.active
                           ? "text-text-on-toggle-active/70"
                           : "text-text-tertiary"
-                    }
+                    }`}
                   >
                     {option.count}
                   </span>

@@ -102,6 +102,14 @@ describe("buildFacetGroups", () => {
     expect(byValue).toEqual({ deepgram: 1, openai: 1, cartesia: 0 });
   });
 
+  it("keeps labels, order, and colors stable while other categories filter", () => {
+    const snapshot = (selected: Parameters<typeof buildFacetGroups>[2]) =>
+      buildFacetGroups(ALL, index(), selected, cats(), id)
+        .find((g) => g.category === "host")!
+        .options.map(({ value, label, color, maxCount }) => ({ value, label, color, maxCount }));
+    expect(snapshot({ features: ["multilingual"] })).toEqual(snapshot({}));
+  });
+
   it("uses the API-supplied label and marks active options", () => {
     const groups = buildFacetGroups(ALL, index(), { features: ["vad"] }, cats(), id);
     const features = groups.find((g) => g.category === "features")!;

@@ -14,6 +14,7 @@ export interface FacetOption {
   value: string;
   label: string;
   count: number;
+  maxCount: number;
   active: boolean;
   color?: string;
 }
@@ -101,7 +102,8 @@ export function filterModelsByFacets(
  * Build the chip groups, in the API's category order. A category is shown only
  * when the visible models hold at least two distinct values for it. Each
  * option's count is how many models would remain if it were selected, honoring
- * the other categories' selection.
+ * the other categories' selection; labels and colors ignore the selection so
+ * chips never rename or recolor while filtering.
  */
 export function buildFacetGroups(
   modelsByProvider: ModelsByProvider,
@@ -125,34 +127,24 @@ export function buildFacetGroups(
     const others: FacetSelection = { ...selected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]
       .map(([value, valueLabel]) => {
-        const count = visibleKeys.filter((key) => {
-          const tags = tagIndex.get(key) ?? [];
-          return (
-            tags.some((t) => t.category === category && t.value === value) &&
-            matchesSelection(tags, others)
-          );
-        }).length;
+        const matching = visibleKeys.filter((key) =>
+          (tagIndex.get(key) ?? []).some((t) => t.category === category && t.value === value)
+        );
+        const count = matching.filter((key) =>
+          matchesSelection(tagIndex.get(key) ?? [], others)
+        ).length;
         const label = provider_valued ? normalizeProvider(value) : valueLabel;
         let color: string | undefined;
         if (provider_valued) {
-          // Chip follows the chart: derive the host chip from the color of one
-          // of its visible models so the sidebar can never drift from the
-          // series colors. Match the same predicate as `count` (including the
-          // other active facets) so the representative model is one that's
-          // actually visible. providerColors is only a fallback when none is.
-          const repKey = visibleKeys.find((key) => {
-            const tags = tagIndex.get(key) ?? [];
-            return (
-              tags.some((t) => t.category === category && t.value === value) &&
-              matchesSelection(tags, others)
-            );
-          });
-          color = (repKey ? getModelColor(repKey) : undefined) ?? providerColors[label];
+          // Chip follows the chart: derive the chip from the color of one of
+          // its models so the sidebar can never drift from the series colors.
+          color = (matching[0] ? getModelColor(matching[0]) : undefined) ?? providerColors[label];
         }
         return {
           value,
           label,
           count,
+          maxCount: matching.length,
           active: (selected[category] ?? []).includes(value),
           color,
         };
