@@ -34,9 +34,9 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 // ASR benchmarks doc); the band's ceiling puts human-level-or-better inside
 // the zone. Y axis is whole percent.
 const HUMAN_WER_CEILING = 4;
-// Median human conversational turn-taking gap. X axis is ms.
-// TODO(bench-405): confirm the canonical figure with product before merge;
-// TTFT reuses the TTFS bound until a human TTFT reference is defined.
+// Median human conversational turn-taking gap. X axis is ms. Only meaningful
+// against TTFS — humans have no token-streaming analogue, so the zone hides
+// on TTFT. TODO(bench-405): confirm the canonical figure with product.
 const HUMAN_LATENCY_MS = 200;
 
 const LatencyAccuracySection: React.FC = () => {
@@ -177,7 +177,7 @@ const LatencyAccuracySection: React.FC = () => {
 
         <div className="flex flex-wrap items-center">
           <MetricToggle />
-          {activeTab === "stt" && (
+          {activeTab === "stt" && metric === "TTFS" && (
             <ul data-chart-legend className="mb-4 ml-auto">
               <li
                 className="flex items-center gap-1.5 font-mono text-xs"
@@ -231,7 +231,7 @@ const LatencyAccuracySection: React.FC = () => {
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
               />
-              {activeTab === "stt" && (
+              {activeTab === "stt" && metric === "TTFS" && (
                 <ReferenceArea
                   x1={0}
                   x2={HUMAN_LATENCY_MS}
