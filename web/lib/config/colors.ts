@@ -98,7 +98,7 @@ export const modelColors: Record<string, string> = {
   "nemotron-3-asr-streaming-0.6b": "#62ab5b",
   "nemotron-3.5-asr-streaming-0.6b": "#4a9243",
   "parakeet-tdt-0.6b-v3": "#33792c",
-  "whisper-large-v3": "#1c6016",
+  "together:whisper-large-v3": "#1c6016",
 
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#a24112",
