@@ -154,6 +154,7 @@ export function normalizeModelName(modelKey: string): string {
     .replace(/\b\w+/g, (word) => {
       // Capitalize first letter of each word, except version numbers
       if (/^v\d+/.test(word)) return word;
+      if (/^(tts|stt|s2s|hd|asr|api)$/i.test(word)) return word.toUpperCase();
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     });
 }

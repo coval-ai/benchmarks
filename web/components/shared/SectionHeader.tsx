@@ -99,17 +99,39 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   const downloadImage = async () => {
     const root = document.getElementById(anchorId);
     const card = root?.parentElement;
+    if (!card) return;
     // The chart is the largest SVG in the card; icon SVGs and a chart still
     // sizing to zero during layout are excluded so we never export those.
-    const svg =
-      card &&
+    const findSvg = () =>
       Array.from(card.querySelectorAll("svg"))
         .filter((el) => el.clientWidth > 100 && el.clientHeight > 100)
         .sort(
           (a, b) =>
             b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
         )[0];
+    let svg = findSvg();
     if (!svg) return;
+    // Exports render on a fixed desktop-sized stage so every device produces
+    // the same image, taller than the on-screen chart so dense charts have
+    // room to place labels. The charts re-render on container resize, which
+    // can replace the SVG node, hence the re-query once the stage settles.
+    const wrapper = svg.closest<HTMLElement>(
+      ".recharts-responsive-container"
+    )?.parentElement;
+    const priorWidth = card.style.width;
+    const priorHeight = wrapper?.style.height ?? "";
+    card.style.width = "880px";
+    if (wrapper) wrapper.style.height = "420px";
+    const settled = () => {
+      const el = findSvg();
+      return (
+        !!el && el.clientWidth >= 640 && (!wrapper || el.clientHeight >= 416)
+      );
+    };
+    for (let i = 0; i < 30 && !settled(); i++) {
+      await new Promise(requestAnimationFrame);
+    }
+    svg = findSvg() ?? svg;
     // The stat label can be a ReactNode (MetricInfo), so its text comes from
     // the DOM — minus the hidden tooltip MetricInfo keeps mounted.
     const statLabel = root?.querySelector("[data-stat-label]")?.cloneNode(true);
@@ -138,6 +160,8 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         dimmed: li.hasAttribute("data-dimmed"),
       })),
     }, themeColors).catch(() => false);
+    card.style.width = priorWidth;
+    if (wrapper) wrapper.style.height = priorHeight;
     if (ok) trackShare("png");
   };
 
