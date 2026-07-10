@@ -140,7 +140,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         .querySelectorAll('[role="tooltip"]')
         .forEach((el) => el.remove());
     }
-    const ok = await downloadChartPNG(svg, `${anchorId}.png`, {
+    const capture = downloadChartPNG(svg, `${anchorId}.png`, {
       label,
       title: description.short,
       xLabel: exportXLabel,
@@ -159,9 +159,13 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
         dimmed: li.hasAttribute("data-dimmed"),
       })),
-    }, themeColors).catch(() => false);
+    }, themeColors);
+    // downloadChartPNG measures and clones the SVG synchronously before its
+    // first await, so the stage can be struck as soon as it returns — the
+    // layout is never left widened if rasterizing stalls or rejects.
     card.style.width = priorWidth;
     if (wrapper) wrapper.style.height = priorHeight;
+    const ok = await capture.catch(() => false);
     if (ok) trackShare("png");
   };
 
