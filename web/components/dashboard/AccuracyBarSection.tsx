@@ -162,8 +162,12 @@ const AccuracyBarSection: React.FC = () => {
             </button>
           </div>
         )}
-        <div className="h-96" onMouseEnter={trackChartHover}>
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-96 overflow-x-auto" onMouseEnter={trackChartHover}>
+          <ResponsiveContainer
+            width="100%"
+            height="100%"
+            minWidth={isMobile ? werBarDataWithColors.length * 48 : 0}
+          >
             <BarChart
               data={werBarDataWithColors}
               margin={{
@@ -206,7 +210,11 @@ const AccuracyBarSection: React.FC = () => {
                   style: { textAnchor: "middle" },
                 }}
               />
-              <Tooltip content={<CustomBarTooltip getProviderForModel={getProviderForModel} />} cursor={false} />
+              <Tooltip
+                content={<CustomBarTooltip getProviderForModel={getProviderForModel} />}
+                cursor={false}
+                active={isMobile ? false : undefined}
+              />
               <Bar
                 dataKey="averageWER"
                 radius={[4, 4, 0, 0]}
