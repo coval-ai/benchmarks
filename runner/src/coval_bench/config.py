@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     arena_audio_base_url: str = ""
     arena_gcs_bucket: str = ""
     # Must match the GCS bucket's object-deletion lifecycle (set in benchmark-infra).
-    arena_clip_retention_days: int = 7
+    arena_clip_retention_days: int = 30
     arena_daily_battle_cap: int = 500
 
 

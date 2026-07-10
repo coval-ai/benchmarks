@@ -200,7 +200,7 @@ async def test_get_battle_excludes_expired_clips(
     aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
     try:
         await aconn.execute(
-            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            "UPDATE arena.battles SET created_at = now() - interval '31 days' WHERE id = %(id)s",
             {"id": battle_id},
         )
     finally:
@@ -230,7 +230,7 @@ async def test_get_battle_by_id_excludes_expired_clip(
     aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
     try:
         await aconn.execute(
-            "UPDATE arena.battles SET created_at = now() - interval '8 days' WHERE id = %(id)s",
+            "UPDATE arena.battles SET created_at = now() - interval '31 days' WHERE id = %(id)s",
             {"id": battle_id},
         )
     finally:
