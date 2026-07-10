@@ -1,0 +1,4 @@
+[
+  { "type": "session.created" },
+  { "type": "error", "error": { "message": "Invalid API key" } }
+]

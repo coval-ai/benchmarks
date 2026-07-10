@@ -93,6 +93,13 @@ export const modelColors: Record<string, string> = {
 
   "qwen3-tts-flash-realtime": "#9c6c03",
 
+  // Together AI — green, dark range (STT; Rime's greens are TTS-only and
+  // Gradium's STT default sits in the light range, so they stay apart).
+  "nemotron-3-asr-streaming-0.6b": "#62ab5b",
+  "nemotron-3.5-asr-streaming-0.6b": "#4a9243",
+  "parakeet-tdt-0.6b-v3": "#33792c",
+  "whisper-large-v3": "#1c6016",
+
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#a24112",
   "gradium:default": "#74c16c"
@@ -116,5 +123,6 @@ export const providerColors: Record<string, string> = {
   Mistral: "#835a01",
   Smallest: "#d7a03d",
   Azure: "#3d7fd1",
-  Alibaba: "#9c6c03"
+  Alibaba: "#9c6c03",
+  "Together AI": "#4a9243"
 };

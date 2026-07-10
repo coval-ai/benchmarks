@@ -127,6 +127,11 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # endpointer fires on trailing silence, so TTFS bundles endpoint-detection
             # latency and isn't comparable to force-endpoint providers.
             ("revai", "reverb"),
+            # Together's commit drops Nemotron's encoder lookahead, so the client
+            # pads trailing silence before committing; the final's timing then
+            # tracks the pad length, not the engine.
+            ("together", "nemotron-3-asr-streaming-0.6b"),
+            ("together", "nemotron-3.5-asr-streaming-0.6b"),
         }
     ),
 }
