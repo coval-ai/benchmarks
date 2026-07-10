@@ -664,6 +664,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI),
         status=_PENDING,
     ),
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="xai",
+        model="grok-realtime",
+        tags=(_REALTIME, _MULTI),
+        status=_PENDING,
+    ),
 ]
 
 _key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)

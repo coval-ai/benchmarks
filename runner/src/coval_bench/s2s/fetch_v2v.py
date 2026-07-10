@@ -31,9 +31,6 @@ from coval_bench.registries.benchmarks import Benchmark
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
-# Daily job: floor scheduled_at to the day so a run's clip rows share one bucket.
-DAILY_PERIOD_SECONDS = 86_400
-
 # The dataset the S2S sims run against (matches the packaged manifest name).
 DATASET_ID = "s2s-v1"
 
@@ -51,6 +48,7 @@ class AgentSpec:
 AGENTS: tuple[AgentSpec, ...] = (
     AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
     AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
+    AgentSpec(agent_id_attr="coval_s2s_xai_agent_id", provider="xai", model="grok-realtime"),
 )
 
 
@@ -166,6 +164,7 @@ async def _fetch_one_provider(
     metric_id: str,
     runner_sha: str,
     scheduled_at: datetime,
+    period_seconds: int,
 ) -> RunStatus:
     """Fetch one provider's latest run into its own run row; return its status.
 
@@ -210,7 +209,7 @@ async def _fetch_one_provider(
         await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
             try:
-                await writer.refresh_bucket(run_pk, period_seconds=DAILY_PERIOD_SECONDS)
+                await writer.refresh_bucket(run_pk, period_seconds=period_seconds)
             except Exception:
                 logger.warning("refresh_bucket_failed", provider=spec.provider, exc_info=True)
         return status
@@ -240,7 +239,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
 
     epoch = int(datetime.now(tz=UTC).timestamp())
-    scheduled_at = datetime.fromtimestamp(epoch - epoch % DAILY_PERIOD_SECONDS, tz=UTC)
+    scheduled_at = datetime.fromtimestamp(epoch - epoch % settings.s2s_fetch_period_seconds, tz=UTC)
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
@@ -258,6 +257,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 metric_id=metric_id,
                 runner_sha=settings.runner_sha,
                 scheduled_at=scheduled_at,
+                period_seconds=settings.s2s_fetch_period_seconds,
             )
 
         if any(s in (RunStatus.SUCCEEDED, RunStatus.PARTIAL) for s in statuses.values()):
@@ -271,12 +271,26 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
 
 @click.command(name="fetch-s2s")
 def fetch_s2s() -> None:
-    """Fetch S2S latency from Coval and write per-clip rows (daily Cloud Run Job)."""
-    from coval_bench.logging import configure_logging
+    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job)."""
+    from coval_bench.logging import configure_logging, log_run_failed
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
-    statuses = asyncio.run(fetch_and_write_v2v(settings))
+    # A setup crash fails the whole job.
+    try:
+        statuses = asyncio.run(fetch_and_write_v2v(settings))
+    except Exception as exc:
+        log_run_failed(str(exc), exc)
+        raise
+
+    # Alert if any provider returned no data (a silently-missing provider). The
+    # succeeding providers' rows are already committed, so a partial run still
+    # exits 0 — only a total loss fails the job (non-zero exit).
+    failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
+    if not statuses:
+        log_run_failed("s2s fetch ran no providers (none configured)")
+    elif failed:
+        log_run_failed(f"s2s fetch got no data from: {', '.join(failed)}")
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
         raise click.ClickException("s2s fetch failed for all providers")
 

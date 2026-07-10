@@ -47,6 +47,7 @@ import structlog
 from posthog import Posthog
 from pydantic import BaseModel
 
+from coval_bench.logging import log_run_failed
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
 from coval_bench.registries import (
@@ -1163,17 +1164,10 @@ async def run_benchmarks(
             )
 
         except Exception as exc:
-            # Unrecoverable error — log RUN_FAILED (triggers Cloud Logging metric),
-            # update run row, then re-raise so Cloud Run Job exits non-zero.
+            # Unrecoverable error — emit RUN_FAILED (triggers the Cloud Logging
+            # metric), update run row, then re-raise so the job exits non-zero.
             err_msg = _truncate(str(exc))
-            # The literal event="RUN_FAILED" in this log line triggers the
-            # Cloud Logging log-based metric (see ARCHITECTURE.md § Logging + Alerting).
-            # structlog uses the first positional arg as the ``event`` key.
-            logger.error(
-                "RUN_FAILED",
-                error=err_msg,
-                exc_info=exc,
-            )
+            log_run_failed(err_msg, exc)
             try:
                 await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
             except Exception as write_exc:

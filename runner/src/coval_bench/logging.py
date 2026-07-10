@@ -70,6 +70,21 @@ def configure_logging(
         logging.getLogger(noisy).setLevel(max(log_level, logging.WARNING))
 
 
+_run_logger = structlog.get_logger("coval_bench.run")
+
+
+def log_run_failed(error: str, exc: BaseException | None = None) -> None:
+    """Emit the single log line the infra alert metric greps for.
+
+    The literal ``event="RUN_FAILED"`` triggers the ``benchmark_run_failure``
+    Cloud Logging metric in benchmark-infra. Centralized here so every
+    entrypoint (the STT/TTS orchestrator, the S2S fetch job) emits the identical
+    contract string and they can't drift. structlog uses the first positional
+    arg as the ``event`` key.
+    """
+    _run_logger.error("RUN_FAILED", error=error, exc_info=exc)
+
+
 def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:
     """Return a uvicorn ``log_config`` that renders uvicorn's logs as JSON.
 

@@ -111,6 +111,10 @@ class Settings(BaseSettings):
     coval_s2s_latency_metric_id: str | None = None
     coval_s2s_openai_agent_id: str | None = None
     coval_s2s_gemini_agent_id: str | None = None
+    coval_s2s_xai_agent_id: str | None = None
+    # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
+    # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
+    s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)
 
     # --- Analytics ---
     posthog_project_token: str = ""
