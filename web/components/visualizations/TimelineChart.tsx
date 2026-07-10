@@ -210,18 +210,15 @@ const TimelineChart: React.FC = () => {
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
   const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
-  // Synchronous mirror of mobileScrub for the gesture handlers: pointerdown
-  // and pointerup are separate browser events, so a fresh tap's pointerup
-  // must not depend on React having committed the pointerdown's state update
-  // before it can see the measurement it just took.
+  // Synchronous mirror for the gesture handlers: a tap's pointerup must not
+  // depend on the pointerdown's state update having committed.
   const mobileScrubRef = useRef<PinnedTooltip | null>(null);
   const updateMobileScrub = useCallback((next: PinnedTooltip | null) => {
     mobileScrubRef.current = next;
     setMobileScrub(next);
   }, []);
-  // Whether a finger is actively scrubbing the axis. The compact readout only
-  // shows during the live gesture; after lift-off the measurement persists as
-  // just the playhead line.
+  // Finger actively on the axis — the compact readout only shows live;
+  // after lift-off the measurement persists as just the playhead line.
   const [axisScrubLive, setAxisScrubLive] = useState(false);
   const [interactionBox, setInteractionBox] = useState<PlotBox | null>(null);
   const [zoom, setZoom] = useState<{
@@ -260,9 +257,8 @@ const TimelineChart: React.FC = () => {
     setZoom(null);
   }, [metric, windowStart, windowEnd]);
 
-  // The pin and the persisted measurement are anchored in pixel space, so a
-  // zoom change (drag, Y-max select, reset) moves the ground under them —
-  // drop both rather than mislabel a point.
+  // Pin and measurement are pixel-anchored; a zoom change moves the ground
+  // under them — drop both rather than mislabel a point.
   useEffect(() => {
     setPinned(null);
     updateMobileScrub(null);
@@ -279,9 +275,8 @@ const TimelineChart: React.FC = () => {
     const onDocMouseDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (pinnedRef.current?.contains(target)) return;
-      // The mobile overlays own in-chart dismissal at pointerdown; the
-      // synthesized mousedown a tap fires afterwards must not kill the pin
-      // that same tap just placed.
+      // A tap's synthesized mousedown must not kill the pin it just placed;
+      // the mobile overlays own in-chart dismissal.
       if (isMobile && chartRef.current?.contains(target)) return;
       const surface = chartRef.current?.querySelector(".recharts-surface");
       if (surface?.contains(target)) return;
@@ -291,12 +286,9 @@ const TimelineChart: React.FC = () => {
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [pinned, isMobile]);
 
-  // Touching or scrolling away from the chart dismisses both the persisted
-  // measurement and the open list. Touch scrolling rarely synthesizes mouse
-  // events, so the mousedown dismiss above never sees a scroll-away; the
-  // scroll listener is capture-phase to catch scrolls in nested containers,
-  // and scrolling the pinned list itself is the one scroll that means "keep
-  // it open". In-chart touches are exempt — the overlays own those gestures.
+  // Touching or scrolling away dismisses the measurement and the open list.
+  // Touch scrolls rarely synthesize mouse events, so listen to capture-phase
+  // scroll + pointerdown; scrolling the pinned list itself keeps it open.
   const hasMobileMeasurement = mobileScrub !== null || pinned !== null;
   useEffect(() => {
     if (!isMobile || !hasMobileMeasurement) return;
@@ -637,9 +629,8 @@ const TimelineChart: React.FC = () => {
     });
   };
 
-  // Scrubbing sets a measurement that persists after the finger lifts; a tap
-  // then toggles the full ranked list for that persisted spot. So a touch-down
-  // must not move an existing measurement — only real horizontal travel does.
+  // A touch-down must not move an existing measurement — only real travel
+  // does, so a tap can inspect the persisted spot wherever it lands.
   const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
     const fresh = pinned == null && mobileScrubRef.current == null;
     axisScrubRef.current = {
@@ -660,18 +651,15 @@ const TimelineChart: React.FC = () => {
     if (!scrub.moved && Math.abs(e.clientX - scrub.x) > 8) {
       scrub.moved = true;
       scrub.following = true;
-      // A real scrub takes over: the open list drops so the live readout
-      // tracks the finger instead of hiding behind the old panel.
+      // a real scrub takes over from the open list
       setPinned(null);
       setAxisScrubLive(true);
     }
     if (scrub.following) scrubDateAxis(e);
   };
 
-  // Lift after a scrub keeps only the playhead line — the measured position
-  // persists without the readout covering the chart. Lift after a tap toggles
-  // the full ranked list for the persisted spot, no matter where on the axis
-  // the tap landed.
+  // Scrub lift keeps only the playhead; a tap toggles the full ranked list
+  // for the persisted spot.
   const endAxisScrub = () => {
     const scrub = axisScrubRef.current;
     axisScrubRef.current = null;
@@ -681,8 +669,7 @@ const TimelineChart: React.FC = () => {
     if (scrub.hadPin) {
       setPinned(null);
     } else if (measurement) {
-      // Anchor the list to the half of the plot the playhead is NOT in, so it
-      // never covers the measured spot or the data band around it.
+      // anchor the list to the half of the plot the playhead is not in
       const box = interactionBox ?? plotBox();
       const onLeft = box
         ? measurement.x < box.left + box.width / 2
@@ -700,9 +687,8 @@ const TimelineChart: React.FC = () => {
     }
   };
 
-  // The browser hijacking the touch into a native scroll fires pointercancel
-  // with no horizontal travel — that must not read as a tap and toggle the
-  // list. Scrolling away dismisses the measurement instead.
+  // A touch hijacked into a native scroll fires pointercancel with no travel;
+  // that must not read as a tap — scrolling away dismisses instead.
   const cancelAxisScrub = () => {
     axisScrubRef.current = null;
     setAxisScrubLive(false);
@@ -1044,9 +1030,6 @@ const TimelineChart: React.FC = () => {
               </div>
             </>
           )}
-          {/* The readout only shows during a live scrub; the persisted
-              measurement (state kept for the tap-to-open payload) renders as
-              just the playhead line once the finger lifts. */}
           {mobileScrub && axisScrubLive && !pinned && (
             <div
               className="pointer-events-none absolute z-20 shadow-lg md:hidden"
