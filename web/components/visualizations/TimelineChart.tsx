@@ -210,6 +210,15 @@ const TimelineChart: React.FC = () => {
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
   const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
+  // Synchronous mirror of mobileScrub for the gesture handlers: pointerdown
+  // and pointerup are separate browser events, so a fresh tap's pointerup
+  // must not depend on React having committed the pointerdown's state update
+  // before it can see the measurement it just took.
+  const mobileScrubRef = useRef<PinnedTooltip | null>(null);
+  const updateMobileScrub = useCallback((next: PinnedTooltip | null) => {
+    mobileScrubRef.current = next;
+    setMobileScrub(next);
+  }, []);
   // Whether a finger is actively scrubbing the axis. The compact readout only
   // shows during the live gesture; after lift-off the measurement persists as
   // just the playhead line.
@@ -256,8 +265,8 @@ const TimelineChart: React.FC = () => {
   // drop both rather than mislabel a point.
   useEffect(() => {
     setPinned(null);
-    setMobileScrub(null);
-  }, [zoom, metric, windowStart, windowEnd]);
+    updateMobileScrub(null);
+  }, [zoom, metric, windowStart, windowEnd, updateMobileScrub]);
 
   // A mobile chart has separate touch targets for the plot and the date axis.
   // A pin from a desktop-sized layout would otherwise sit over those targets.
@@ -296,12 +305,12 @@ const TimelineChart: React.FC = () => {
       if (pinnedRef.current?.contains(target)) return;
       if (chartRef.current?.contains(target)) return;
       setPinned(null);
-      setMobileScrub(null);
+      updateMobileScrub(null);
     };
     const onScroll = (e: Event) => {
       if (pinnedRef.current?.contains(e.target as Node)) return;
       setPinned(null);
-      setMobileScrub(null);
+      updateMobileScrub(null);
     };
     document.addEventListener("pointerdown", onDocPointerDown);
     window.addEventListener("scroll", onScroll, { capture: true, passive: true });
@@ -309,7 +318,7 @@ const TimelineChart: React.FC = () => {
       document.removeEventListener("pointerdown", onDocPointerDown);
       window.removeEventListener("scroll", onScroll, { capture: true });
     };
-  }, [isMobile, hasMobileMeasurement]);
+  }, [isMobile, hasMobileMeasurement, updateMobileScrub]);
 
   const themeColors = useThemeColors();
   const modelsWithData = getModelsWithTimelineData(metric);
@@ -616,10 +625,10 @@ const TimelineChart: React.FC = () => {
         : [];
     });
     if (payload.length === 0) {
-      setMobileScrub(null);
+      updateMobileScrub(null);
       return;
     }
-    setMobileScrub({
+    updateMobileScrub({
       label: String(point.timestamp),
       payload,
       x,
@@ -632,7 +641,7 @@ const TimelineChart: React.FC = () => {
   // then toggles the full ranked list for that persisted spot. So a touch-down
   // must not move an existing measurement — only real horizontal travel does.
   const startAxisScrub = (e: React.PointerEvent<HTMLDivElement>) => {
-    const fresh = pinned == null && mobileScrub == null;
+    const fresh = pinned == null && mobileScrubRef.current == null;
     axisScrubRef.current = {
       x: e.clientX,
       moved: false,
@@ -668,24 +677,25 @@ const TimelineChart: React.FC = () => {
     axisScrubRef.current = null;
     setAxisScrubLive(false);
     if (!scrub || scrub.moved) return;
+    const measurement = mobileScrubRef.current;
     if (scrub.hadPin) {
       setPinned(null);
-    } else if (mobileScrub) {
+    } else if (measurement) {
       // Anchor the list to the half of the plot the playhead is NOT in, so it
       // never covers the measured spot or the data band around it.
       const box = interactionBox ?? plotBox();
       const onLeft = box
-        ? mobileScrub.x < box.left + box.width / 2
+        ? measurement.x < box.left + box.width / 2
         : false;
       setPinned(
         box
           ? {
-              ...mobileScrub,
+              ...measurement,
               x: onLeft ? box.left + box.width : box.left,
               y: box.top,
               flip: onLeft,
             }
-          : mobileScrub
+          : measurement
       );
     }
   };
@@ -696,7 +706,7 @@ const TimelineChart: React.FC = () => {
   const cancelAxisScrub = () => {
     axisScrubRef.current = null;
     setAxisScrubLive(false);
-    setMobileScrub(null);
+    updateMobileScrub(null);
   };
 
   // Whether a data value sits inside the visible (possibly zoomed) Y range.
@@ -988,7 +998,7 @@ const TimelineChart: React.FC = () => {
                   e.preventDefault();
                   e.stopPropagation();
                   setPinned(null);
-                  setMobileScrub(null);
+                  updateMobileScrub(null);
                   startDrag(e, true);
                 }}
                 onPointerMove={(e) => {
