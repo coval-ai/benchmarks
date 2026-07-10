@@ -399,14 +399,14 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
   // dimensions at their initial value once data arrives.
   return (
-    <div ref={containerRef} className="relative w-full select-none">
+    <div ref={containerRef} className="relative w-full">
       {data.data.length === 0 ? (
         <div className="h-64 flex items-center justify-center text-text-secondary">
           <p>No data available for box plot</p>
         </div>
       ) : (
         <div
-          className="overflow-x-auto touch-manipulation"
+          className="overflow-x-auto touch-manipulation select-none"
           onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
         >
           <svg
