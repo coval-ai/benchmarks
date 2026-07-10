@@ -110,7 +110,10 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
             b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
         )[0];
     let svg = findSvg();
-    if (!svg) return;
+    // The exporting flag rejects overlapping clicks on the same card, which
+    // would otherwise read the temporary stage size as the layout to restore.
+    if (!svg || card.dataset.exporting) return;
+    card.dataset.exporting = "1";
     // Exports render on a fixed desktop-sized stage so every device produces
     // the same image, taller than the on-screen chart so dense charts have
     // room to place labels. The charts re-render on container resize, which
@@ -165,6 +168,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // layout is never left widened if rasterizing stalls or rejects.
     card.style.width = priorWidth;
     if (wrapper) wrapper.style.height = priorHeight;
+    delete card.dataset.exporting;
     const ok = await capture.catch(() => false);
     if (ok) trackShare("png");
   };
