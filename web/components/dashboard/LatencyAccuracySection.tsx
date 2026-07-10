@@ -3,13 +3,14 @@
 
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ScatterChart,
   Scatter,
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
@@ -26,6 +27,7 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
+import { useMobileDetection } from "@/hooks/useMobileDetection";
 
 const LatencyAccuracySection: React.FC = () => {
   const { selectedModels, getScatterData, activeMetric: metric } = useDashboard();
@@ -39,6 +41,15 @@ const LatencyAccuracySection: React.FC = () => {
     () => getScatterData(metric),
     [getScatterData, metric]
   );
+
+  const isMobile = useMobileDetection();
+  const sortedData = useMemo(
+    () => [...scatterData].sort((a, b) => a.x - b.x),
+    [scatterData]
+  );
+  const [activeIdx, setActiveIdx] = useState(-1);
+  useEffect(() => setActiveIdx(-1), [sortedData]);
+  const activePoint = isMobile ? sortedData[activeIdx] : undefined;
 
   const description = {
     short: `Average ${latencyLabel} and WER per model`,
@@ -87,6 +98,21 @@ const LatencyAccuracySection: React.FC = () => {
     for (let t = 0; t <= max; t += step) ticks.push(t);
     return { xMax: max, xTicks: ticks };
   }, [scatterData]);
+
+  const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!sortedData.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const xValue = ((e.clientX - rect.left - 40) / (rect.width - 48)) * xMax;
+    setActiveIdx(
+      sortedData.reduce(
+        (best, p, i) =>
+          Math.abs(p.x - xValue) < Math.abs((sortedData[best] ?? p).x - xValue)
+            ? i
+            : best,
+        0
+      )
+    );
+  };
 
   // WER-based: never rendered on S2S (no WER metric).
   if (activeTab === "s2s") return null;
@@ -141,7 +167,33 @@ const LatencyAccuracySection: React.FC = () => {
 
         <MetricToggle />
 
-        <div className="h-64" onMouseEnter={trackChartHover}>
+        <div
+          className="relative h-64 select-none"
+          onMouseEnter={trackChartHover}
+          onPointerDown={isMobile ? scrub : undefined}
+          onPointerMove={
+            isMobile
+              ? (e) => (e.pointerType === "touch" || e.buttons > 0) && scrub(e)
+              : undefined
+          }
+          onPointerUp={isMobile ? () => setActiveIdx(-1) : undefined}
+          onPointerCancel={isMobile ? () => setActiveIdx(-1) : undefined}
+          style={isMobile ? { touchAction: "pan-y" } : undefined}
+        >
+          {activePoint && (
+            <div
+              className={`pointer-events-none absolute top-2 z-10 max-w-[40%] text-xs ${
+                activePoint.x > xMax / 2 ? "left-12" : "right-2"
+              }`}
+            >
+              <CustomScatterTooltip
+                active
+                payload={[{ payload: activePoint, name: activePoint.model, value: activePoint.x }]}
+                activeTab={activeTab}
+                metric={metric}
+              />
+            </div>
+          )}
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart
               margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
@@ -173,7 +225,15 @@ const LatencyAccuracySection: React.FC = () => {
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) => `${value}%`}
               />
-              <Tooltip content={<CustomScatterTooltip activeTab={activeTab} metric={metric} />} />
+              {!isMobile && (
+                <Tooltip content={<CustomScatterTooltip activeTab={activeTab} metric={metric} />} />
+              )}
+              {activePoint && (
+                <ReferenceLine x={activePoint.x} stroke={themeColors.axisText} strokeDasharray="3 3" />
+              )}
+              {activePoint && (
+                <ReferenceLine y={activePoint.y} stroke={themeColors.axisText} strokeDasharray="3 3" />
+              )}
               {selectedModels.map((model: string) => (
                 <Scatter
                   key={model}
@@ -183,12 +243,15 @@ const LatencyAccuracySection: React.FC = () => {
                   fill={getModelColor(model)}
                   name={model}
                   isAnimationActive={false}
-                  shape={(props: { cx?: number; cy?: number; fill?: string }) => (
+                  shape={(props: { cx?: number; cy?: number; fill?: string; payload?: ScatterDataPoint }) => (
                     <circle
                       cx={props.cx}
                       cy={props.cy}
-                      r={6}
+                      r={props.payload === activePoint ? 8 : 6}
                       fill={props.fill}
+                      fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
+                      stroke={props.payload === activePoint ? themeColors.axisText : undefined}
+                      strokeWidth={2}
                     />
                   )}
                 />
