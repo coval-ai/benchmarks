@@ -154,11 +154,15 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       annotate: exportAnnotate,
       legend: Array.from(
         card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
-      ).map((li) => ({
-        label: li.textContent?.trim() ?? "",
-        color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
-        dimmed: li.hasAttribute("data-dimmed"),
-      })),
+      ).map((li) => {
+        const entry = li.cloneNode(true) as HTMLElement;
+        entry.querySelectorAll('[role="tooltip"]').forEach((el) => el.remove());
+        return {
+          label: entry.textContent?.trim() ?? "",
+          color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
+          dimmed: li.hasAttribute("data-dimmed"),
+        };
+      }),
     }, themeColors);
     // downloadChartPNG measures and clones the SVG synchronously before its
     // first await, so the stage can be struck as soon as it returns — the

@@ -17,6 +17,8 @@ export interface ThemeColors {
   tooltipSecondary: string;
   textPrimary: string;
   textSecondary: string;
+  zoneFill: string;
+  zoneStroke: string;
 }
 
 // Charts read these via JS (recharts/d3 fills), not CSS, so they must mirror the
@@ -34,6 +36,8 @@ export const LIGHT_CHART_COLORS: ThemeColors = {
   tooltipSecondary: "#515151",
   textPrimary: "#0f0c0a",
   textSecondary: "#515151",
+  zoneFill: "rgba(198, 220, 250, 0.45)",
+  zoneStroke: "rgba(26, 44, 54, 0.2)",
 };
 
 export const DARK_CHART_COLORS: ThemeColors = {
@@ -48,6 +52,8 @@ export const DARK_CHART_COLORS: ThemeColors = {
   tooltipSecondary: "#c7c2bc",
   textPrimary: "#f9faf8",
   textSecondary: "#c7c2bc",
+  zoneFill: "rgba(150, 190, 250, 0.18)",
+  zoneStroke: "rgba(198, 220, 250, 0.45)",
 };
 
 export function useThemeColors(): ThemeColors {
