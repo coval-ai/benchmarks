@@ -130,6 +130,10 @@ export function normalizeModelName(modelKey: string): string {
     "stt-rt-v4": "STT RT v4",
     "stt-rt-v5": "STT RT v5",
     "inworld-stt-1": "STT 1",
+    "nemotron-3-asr-streaming-0.6b": "Nemotron 3 ASR Streaming",
+    "nemotron-3.5-asr-streaming-0.6b": "Nemotron 3.5 ASR Streaming",
+    "parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3",
+    "whisper-large-v3": "Whisper Large v3",
     // S2S
     "gpt-realtime": "GPT Realtime 2",
     "gemini-live": "Gemini 3.1 Flash Live (Preview)",
@@ -183,6 +187,7 @@ export function normalizeSTTProviderName(providerName: string): string {
     rime: "Rime",
     soniox: "Soniox",
     speechmatics: "Speechmatics",
+    together: "Together AI",
     xai: "xAI"
   };
 

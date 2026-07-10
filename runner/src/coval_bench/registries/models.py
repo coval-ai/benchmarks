@@ -304,6 +304,47 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         self_hostable=True,
         status=_ACTIVE,
     ),
+    # Together AI serverless realtime endpoints (open-weight models).
+    RegisteredModel(
+        benchmark=_STT,
+        provider="together",
+        model="nemotron-3-asr-streaming-0.6b",
+        creator="nvidia",
+        tags=(_REALTIME,),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="together",
+        model="nemotron-3.5-asr-streaming-0.6b",
+        creator="nvidia",
+        tags=(_REALTIME, _MULTI),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="together",
+        model="parakeet-tdt-0.6b-v3",
+        creator="nvidia",
+        tags=(_REALTIME, _MULTI),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="together",
+        model="whisper-large-v3",
+        creator="openai",
+        tags=(_REALTIME, _MULTI),
+        licensing=_OPEN,
+        self_hostable=True,
+        status=_ACTIVE,
+    ),
     #######
     # TTS #
     #######
