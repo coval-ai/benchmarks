@@ -189,7 +189,9 @@ class TogetherSTTProvider(STTProvider):
         self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
     ) -> None:
         final_segments: list[str] = []
-        delta_fragments: list[str] = []
+        # Deltas are cumulative running transcripts revised in place, keyed by
+        # conversation item — keep only each item's latest.
+        item_deltas: dict[str, str] = {}
         last_final_time: float | None = None
 
         try:
@@ -224,7 +226,7 @@ class TogetherSTTProvider(STTProvider):
                             snippet[:30] + "..." if len(snippet) > 30 else snippet
                         )
                     result.partial_transcripts.append(delta.strip())
-                    delta_fragments.append(delta)
+                    item_deltas[str(msg.get("item_id", ""))] = delta
                     continue
 
                 if msg_type.endswith("input_audio_transcription.completed"):
@@ -246,10 +248,10 @@ class TogetherSTTProvider(STTProvider):
 
         if final_segments:
             result.complete_transcript = " ".join(final_segments).strip() or None
-        elif delta_fragments:
-            # Deltas are incremental fragments; concatenation reconstructs the
-            # not-yet-finalized transcript.
-            result.complete_transcript = "".join(delta_fragments).strip() or None
+        elif item_deltas:
+            result.complete_transcript = (
+                " ".join(d.strip() for d in item_deltas.values()).strip() or None
+            )
 
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)

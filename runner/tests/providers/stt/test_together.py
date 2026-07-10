@@ -98,13 +98,26 @@ async def test_together_nemotron_pads_tail_silence(
 
 
 @pytest.mark.asyncio
-async def test_together_deltas_only_falls_back_to_concatenation(
+async def test_together_deltas_only_falls_back_to_latest_per_item(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
-    """With no final, the concatenated deltas are salvaged as the transcript."""
+    """With no final, each item's latest cumulative delta is salvaged."""
     events: list[Any] = [
-        {"type": "conversation.item.input_audio_transcription.delta", "delta": "hello"},
-        {"type": "conversation.item.input_audio_transcription.delta", "delta": " world"},
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_1",
+            "delta": "hello",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_1",
+            "delta": "hello world",
+        },
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "item_id": "item_2",
+            "delta": "how are you",
+        },
     ]
     ws = FakeWebSocket(events, server_closes=False)
     provider = TogetherSTTProvider(api_key=fake_api_key)
@@ -113,7 +126,7 @@ async def test_together_deltas_only_falls_back_to_concatenation(
 
     assert result.error is None
     assert result.ttft_seconds is not None
-    assert result.complete_transcript == "hello world"
+    assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is None
 
 
