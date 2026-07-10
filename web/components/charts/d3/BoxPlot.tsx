@@ -423,7 +423,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           onClick={(e) => e.stopPropagation()}
           className="absolute z-10 whitespace-nowrap text-xs"
           style={{
-            // On mobile the panel sits above the plot and tracks its column
+            // On mobile the panel hangs from the top of the plot — inside
+            // the card, clear of the heading above — and tracks its column
             // as the chart scrolls, so it never covers the box being
             // inspected and follows the finger while swiping.
             left: Math.min(
@@ -432,7 +433,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             ),
             top: isMobile ? margin.top : tip.yTop,
             transform: isMobile
-              ? "translate(-50%, -100%)"
+              ? "translate(-50%, 0)"
               : "translate(-50%, calc(-100% - 8px))",
             transition: "left 150ms ease-out, top 150ms ease-out",
             pointerEvents: tip.pinned ? "auto" : "none",
