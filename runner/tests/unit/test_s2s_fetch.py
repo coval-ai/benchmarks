@@ -111,6 +111,7 @@ async def test_fetch_one_provider_succeeded() -> None:
             metric_id="MID",
             runner_sha="test",
             scheduled_at=SLOT,
+            period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
     writer.record_results.assert_awaited_once()
@@ -134,6 +135,7 @@ async def test_fetch_one_provider_partial() -> None:
             metric_id="MID",
             runner_sha="test",
             scheduled_at=SLOT,
+            period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
 
@@ -150,6 +152,7 @@ async def test_fetch_one_provider_no_run_failed() -> None:
             metric_id="MID",
             runner_sha="test",
             scheduled_at=SLOT,
+            period_seconds=10_800,
         )
     assert status is RunStatus.FAILED
     writer.record_results.assert_not_awaited()
@@ -169,6 +172,7 @@ async def test_fetch_one_provider_skips_already_ingested_run() -> None:
             metric_id="MID",
             runner_sha="test",
             scheduled_at=SLOT,
+            period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED  # no-op: last good data left in place
     writer.start_run.assert_not_awaited()
