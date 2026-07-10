@@ -10,6 +10,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -28,6 +29,15 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
+
+// Human transcription accuracy is 2–4% WER under optimal conditions (per our
+// ASR benchmarks doc); the band's ceiling puts human-level-or-better inside
+// the zone. Y axis is whole percent.
+const HUMAN_WER_CEILING = 4;
+// Median human conversational turn-taking gap. X axis is ms.
+// TODO(bench-405): confirm the canonical figure with product before merge;
+// TTFT reuses the TTFS bound until a human TTFT reference is defined.
+const HUMAN_LATENCY_MS = 200;
 
 const LatencyAccuracySection: React.FC = () => {
   const { selectedModels, getScatterData, activeMetric: metric } = useDashboard();
@@ -165,7 +175,24 @@ const LatencyAccuracySection: React.FC = () => {
           }}
         />
 
-        <MetricToggle />
+        <div className="flex flex-wrap items-center">
+          <MetricToggle />
+          <ul data-chart-legend className="mb-4 ml-auto">
+            <li
+              className="flex items-center gap-1.5 font-mono text-xs"
+              style={{ color: themeColors.textSecondary }}
+            >
+              <span
+                className="inline-block h-3 w-3 rounded-[2px]"
+                style={{ backgroundColor: themeColors.zoneStroke }}
+                aria-hidden="true"
+              />
+              <MetricInfo metric="human-parity" align="right">
+                Human-parity zone
+              </MetricInfo>
+            </li>
+          </ul>
+        </div>
 
         <div
           className="relative h-64 select-none"
@@ -201,6 +228,17 @@ const LatencyAccuracySection: React.FC = () => {
               <CartesianGrid
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
+              />
+              <ReferenceArea
+                x1={0}
+                x2={HUMAN_LATENCY_MS}
+                y1={0}
+                y2={HUMAN_WER_CEILING}
+                fill={themeColors.zoneFill}
+                fillOpacity={1}
+                stroke={themeColors.zoneStroke}
+                strokeWidth={1}
+                ifOverflow="hidden"
               />
               <XAxis
                 dataKey="x"
