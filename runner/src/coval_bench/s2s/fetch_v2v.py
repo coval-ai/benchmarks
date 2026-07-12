@@ -3,10 +3,14 @@
 
 """Fetch S2S (voice-to-voice) latency from the Coval API and write per-clip rows.
 
-For each provider, find its newest completed Coval run, read the per-clip
-latency values (seconds), convert to milliseconds, and write one results row
-per clip via ``RunWriter``; the existing matviews aggregate. Agent ids, the
-metric id, and the API key are read from the environment, never committed.
+Each tick scans a window of recent completed Coval runs per provider and
+ingests every clean run not yet in the DB, one results row per clip via
+``RunWriter``; the existing matviews aggregate. A run's slot is its Coval
+``create_time`` floored to the fetch grid, so data lands in the bucket it was
+measured in and a late-resolved run backfills its own slot. Runs finalized
+with an ``error_status`` (pipeline faults, not provider faults) are never
+ingested. Agent ids, the metric id, and the API key are read from the
+environment, never committed.
 """
 
 from __future__ import annotations
@@ -34,6 +38,12 @@ logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 # The dataset the S2S sims run against (matches the packaged manifest name).
 DATASET_ID = "s2s-v1"
 
+# Ingest window: how far back one tick looks for not-yet-ingested runs, and
+# how many list results that scan reads. Wide enough that a run resolving
+# late (the >180min reconciler sweep) is still picked up.
+WINDOW_SECONDS = 86_400
+WINDOW_PAGE_SIZE = 10
+
 
 @dataclass(frozen=True)
 class AgentSpec:
@@ -42,6 +52,15 @@ class AgentSpec:
     agent_id_attr: str
     provider: str
     model: str
+
+
+@dataclass(frozen=True)
+class CovalRun:
+    """One completed Coval run from the list endpoint's summary view."""
+
+    run_id: str
+    create_time: datetime | None
+    error_status: str | None
 
 
 # Agent ids resolved from Settings; model strings are display labels.
@@ -76,31 +95,57 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
-async def latest_completed_run_id(client: httpx.AsyncClient, agent_id: str) -> str | None:
-    """Newest completed Coval run for one agent.
+def _parse_time(raw: object) -> datetime | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _bucket_start(at: datetime, period_seconds: int) -> datetime:
+    """Floor a timestamp to the epoch-anchored fetch grid."""
+    epoch = int(at.timestamp())
+    return datetime.fromtimestamp(epoch - epoch % period_seconds, tz=UTC)
+
+
+async def recent_completed_runs(client: httpx.AsyncClient, agent_id: str) -> list[CovalRun]:
+    """Completed Coval runs for one agent within the ingest window, newest first.
 
     List returns the summary view newest-first; filter by agent_id + status
-    (tags are not filterable).
+    (tags are not filterable). Runs without a parseable create_time are kept:
+    better to ingest with a fetch-time slot than to drop data.
     """
     resp = await client.get(
         "/runs",
         params={
             "filter": f'status="COMPLETED" AND agent_id="{agent_id}"',
             "order_by": "-create_time",
-            "page_size": 1,
+            "page_size": WINDOW_PAGE_SIZE,
         },
     )
     resp.raise_for_status()
-    runs = cast("list[dict[str, Any]]", resp.json().get("runs", []))
-    return cast("str | None", runs[0]["run_id"]) if runs else None
+    raw = cast("list[dict[str, Any]]", resp.json().get("runs", []))
+    now = datetime.now(tz=UTC)
+    runs: list[CovalRun] = []
+    for r in raw:
+        run = CovalRun(
+            run_id=cast("str", r["run_id"]),
+            create_time=_parse_time(r.get("create_time")),
+            error_status=cast("str | None", r.get("error_status")) or None,
+        )
+        if run.create_time is not None and (now - run.create_time).total_seconds() > WINDOW_SECONDS:
+            continue
+        runs.append(run)
+    return runs
 
 
-async def per_clip_rows(
-    client: httpx.AsyncClient,
+def _result_rows(
+    values: list[dict[str, Any]],
     *,
     run_pk: int,
     coval_run_id: str,
-    metric_id: str,
     spec: AgentSpec,
 ) -> list[Result]:
     """Map a Coval run's per-clip values to Result rows.
@@ -108,18 +153,6 @@ async def per_clip_rows(
     Values are seconds; convert to ms. A clip with no numeric value becomes a
     FAILED row, so reliability = success/total.
     """
-    resp = await client.get(f"/runs/{coval_run_id}")
-    resp.raise_for_status()
-    run = cast("dict[str, Any]", resp.json()["run"])
-    metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
-    metric = metrics.get(metric_id)
-    if metric is None:
-        logger.warning(
-            "metric_absent", provider=spec.provider, run_id=coval_run_id, metric_id=metric_id
-        )
-        return []
-
-    values = cast("list[dict[str, Any]]", metric.get("values", []))
     rows: list[Result] = []
     for i, v in enumerate(values):
         raw = v.get("value")
@@ -144,61 +177,75 @@ async def per_clip_rows(
                 status=status,
             )
         )
-
-    logger.info(
-        "fetched_clips",
-        provider=spec.provider,
-        run_id=coval_run_id,
-        clips=len(rows),
-        success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
-    )
     return rows
 
 
-async def _fetch_one_provider(
+async def _ingest_run(
     client: httpx.AsyncClient,
     writer: RunWriter,
     *,
     spec: AgentSpec,
-    agent_id: str,
+    coval_run: CovalRun,
     metric_id: str,
     runner_sha: str,
-    scheduled_at: datetime,
     period_seconds: int,
-) -> RunStatus:
-    """Fetch one provider's latest run into its own run row; return its status.
+) -> RunStatus | None:
+    """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
-    SUCCEEDED = all clips numeric, PARTIAL = some clips failed, FAILED = no
-    clips or all failed. Errors are caught here so one provider can't abort others.
-    Skips (no write) if this Coval run was already ingested, so a retry or a
-    re-pulled stale run doesn't double-count and the last good data stays.
+    Skips (before any DB write) runs finalized with an error_status — the
+    reconciler flips wrapup-race casualties to COMPLETED+EXECUTION_FAILURE and
+    those are pipeline faults that must not dent provider reliability — and
+    runs missing the metric. Otherwise SUCCEEDED = all clips numeric, PARTIAL =
+    some failed, FAILED = all failed.
     """
     run_pk: int | None = None
     try:
-        coval_run_id = await latest_completed_run_id(client, agent_id)
-        if coval_run_id is None:
+        resp = await client.get(f"/runs/{coval_run.run_id}")
+        resp.raise_for_status()
+        run = cast("dict[str, Any]", resp.json()["run"])
+        error_status = run.get("error_status")
+        if error_status:
             logger.warning(
-                "no_completed_run", provider=spec.provider, agent_attr=spec.agent_id_attr
+                "errored_run_skipped",
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                error_status=error_status,
             )
-            return RunStatus.FAILED
-        if await writer.coval_run_ingested(provider=spec.provider, coval_run_id=coval_run_id):
-            logger.info("run_already_ingested", provider=spec.provider, coval_run_id=coval_run_id)
-            return RunStatus.SUCCEEDED
+            return None
+        metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
+        metric = metrics.get(metric_id)
+        if metric is None:
+            logger.warning(
+                "metric_absent",
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                metric_id=metric_id,
+            )
+            return None
+        values = cast("list[dict[str, Any]]", metric.get("values", []))
 
-        run = await writer.start_run(
+        scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
+        run_row = await writer.start_run(
             runner_sha=runner_sha,
             dataset_id=DATASET_ID,
             dataset_sha256=_dataset_sha256(),
             scheduled_at=scheduled_at,
         )
-        if run.id is None:  # pragma: no cover -- start_run always returns an id
+        if run_row.id is None:  # pragma: no cover -- start_run always returns an id
             raise RuntimeError("start_run returned a run with no id")
-        run_pk = run.id
-        rows = await per_clip_rows(
-            client, run_pk=run_pk, coval_run_id=coval_run_id, metric_id=metric_id, spec=spec
-        )
+        run_pk = run_row.id
+
+        rows = _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
         if rows:
             await writer.record_results(rows)
+        logger.info(
+            "fetched_clips",
+            provider=spec.provider,
+            coval_run_id=coval_run.run_id,
+            slot=str(scheduled_at),
+            clips=len(rows),
+            success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
+        )
         failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
         if not rows or failed == len(rows):
             status = RunStatus.FAILED
@@ -221,16 +268,109 @@ async def _fetch_one_provider(
                 logger.warning(
                     "finish_run_failed", provider=spec.provider, run_id=run_pk, exc_info=True
                 )
-        logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
+        logger.warning(
+            "run_ingest_failed",
+            provider=spec.provider,
+            coval_run_id=coval_run.run_id,
+            error=str(exc),
+        )
         return RunStatus.FAILED
 
 
-async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, RunStatus]:
-    """Fetch each provider's latest run into its own run row; return per-provider status.
+async def _fetch_one_provider(
+    client: httpx.AsyncClient,
+    writer: RunWriter,
+    *,
+    spec: AgentSpec,
+    agent_id: str,
+    metric_id: str,
+    runner_sha: str,
+    period_seconds: int,
+    stale_grace_seconds: int,
+) -> tuple[RunStatus, int]:
+    """Scan the window and ingest every clean, not-yet-ingested run.
 
-    Mirrors the STT/TTS orchestrator: per-provider ``finish_run``, then a best-effort
-    bucket/matview refresh that never fails the job. No cross-run dedup -- a same-day
-    retry re-aggregates the slot, matching the orchestrator's behaviour.
+    Returns (provider status, runs ingested this tick). A tick with nothing
+    new is a healthy no-op (SUCCEEDED) while the newest usable run is younger
+    than period + grace; past that it logs "provider_stale" and returns FAILED,
+    so a stuck sim, a paused schedule, or a Coval outage is always loud.
+    Errors are caught here so one provider can't abort others.
+    """
+    statuses: list[RunStatus] = []
+    try:
+        runs = await recent_completed_runs(client, agent_id)
+
+        data_seen = False
+        newest_data_at: datetime | None = None
+        for coval_run in runs:
+            if coval_run.error_status:
+                logger.warning(
+                    "errored_run_skipped",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    error_status=coval_run.error_status,
+                )
+                continue
+            if await writer.coval_run_ingested(
+                provider=spec.provider, coval_run_id=coval_run.run_id
+            ):
+                logger.info(
+                    "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
+                )
+                if not data_seen:
+                    data_seen, newest_data_at = True, coval_run.create_time
+                continue
+            status = await _ingest_run(
+                client,
+                writer,
+                spec=spec,
+                coval_run=coval_run,
+                metric_id=metric_id,
+                runner_sha=runner_sha,
+                period_seconds=period_seconds,
+            )
+            if status is None:
+                continue
+            statuses.append(status)
+            if not data_seen:
+                data_seen, newest_data_at = True, coval_run.create_time
+
+        threshold = period_seconds + stale_grace_seconds
+        age = (
+            None
+            if newest_data_at is None
+            else (datetime.now(tz=UTC) - newest_data_at).total_seconds()
+        )
+        stale = not data_seen or (age is not None and age > threshold)
+        if stale:
+            logger.warning(
+                "provider_stale",
+                provider=spec.provider,
+                newest_data_at=str(newest_data_at),
+                threshold_seconds=threshold,
+            )
+
+        if statuses:
+            if all(s is RunStatus.FAILED for s in statuses):
+                aggregate = RunStatus.FAILED
+            elif all(s is RunStatus.SUCCEEDED for s in statuses):
+                aggregate = RunStatus.SUCCEEDED
+            else:
+                aggregate = RunStatus.PARTIAL
+            return aggregate, len(statuses)
+        return (RunStatus.FAILED if stale else RunStatus.SUCCEEDED), 0
+    except Exception as exc:
+        logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
+        return RunStatus.FAILED, len(statuses)
+
+
+async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, RunStatus]:
+    """Ingest every provider's recent runs; return per-provider status.
+
+    Each ingested Coval run gets its own run row slotted by its create_time,
+    and ``coval_run_ingested`` makes re-scans no-ops, so ticks are idempotent
+    and the fetch cadence only affects how soon data appears — the cron may
+    run more often than the sims.
     """
     settings = settings or get_settings()
 
@@ -238,34 +378,37 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     if not metric_id:
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
 
-    epoch = int(datetime.now(tz=UTC).timestamp())
-    scheduled_at = datetime.fromtimestamp(epoch - epoch % settings.s2s_fetch_period_seconds, tz=UTC)
-
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
+        total_ingested = 0
         for spec in AGENTS:
             agent_id = getattr(settings, spec.agent_id_attr)
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
                 continue
-            statuses[spec.provider] = await _fetch_one_provider(
+            statuses[spec.provider], ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=spec,
                 agent_id=agent_id,
                 metric_id=metric_id,
                 runner_sha=settings.runner_sha,
-                scheduled_at=scheduled_at,
                 period_seconds=settings.s2s_fetch_period_seconds,
+                stale_grace_seconds=settings.s2s_stale_grace_seconds,
             )
+            total_ingested += ingested
 
-        if any(s in (RunStatus.SUCCEEDED, RunStatus.PARTIAL) for s in statuses.values()):
+        if total_ingested:
             try:
                 await writer.refresh_stats_matviews()
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
-        logger.info("s2s_fetch_done", statuses={p: str(s) for p, s in statuses.items()})
+        logger.info(
+            "s2s_fetch_done",
+            statuses={p: str(s) for p, s in statuses.items()},
+            ingested=total_ingested,
+        )
         return statuses
 
 
@@ -283,14 +426,14 @@ def fetch_s2s() -> None:
         log_run_failed(str(exc), exc)
         raise
 
-    # Alert if any provider returned no data (a silently-missing provider). The
-    # succeeding providers' rows are already committed, so a partial run still
-    # exits 0 — only a total loss fails the job (non-zero exit).
+    # Alert if any provider has no fresh data. The succeeding providers' rows
+    # are already committed, so a partial run still exits 0 — only a total
+    # loss fails the job (non-zero exit).
     failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
     if not statuses:
         log_run_failed("s2s fetch ran no providers (none configured)")
     elif failed:
-        log_run_failed(f"s2s fetch got no data from: {', '.join(failed)}")
+        log_run_failed(f"s2s fetch has no fresh data from: {', '.join(failed)}")
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
         raise click.ClickException("s2s fetch failed for all providers")
 
