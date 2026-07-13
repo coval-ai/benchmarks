@@ -1,4 +1,4 @@
-export type AudioCaptureHandle = { stop: () => void };
+export type AudioCaptureHandle = { stop: () => void; analyser: AnalyserNode };
 
 function resampleLinear(src: Float32Array, ratio: number): Float32Array {
   const dstLen = Math.round(src.length * ratio);
@@ -43,7 +43,13 @@ export async function startAudioCapture(
   processor.connect(sink);
   sink.connect(ctx.destination);
 
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.82;
+  source.connect(analyser);
+
   return {
+    analyser,
     stop: () => {
       processor.disconnect();
       sink.disconnect();
