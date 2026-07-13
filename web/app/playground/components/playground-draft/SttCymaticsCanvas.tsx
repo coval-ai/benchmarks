@@ -7,9 +7,8 @@ const PARTICLE_COUNT = 3600;
 const PITCH_MIN = 70;
 const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
-const M_FREQUENCY = 10;
-const N_FREQUENCY = 1;
 const VIBRATION = 0.02;
+const N_FREQUENCY = 1;
 
 type Props = {
   className?: string;
@@ -25,20 +24,20 @@ type Particle = {
 
 function createParticle(): Particle {
   const angle = Math.random() * Math.PI * 2;
-  const radius = Math.sqrt(Math.random()) * 0.965;
+  const radius = Math.sqrt(Math.random());
   return {
     x: Math.cos(angle) * radius,
     y: Math.sin(angle) * radius
   };
 }
 
-function chladniValue(x: number, y: number, m: number, n: number) {
+function chladniValue(x: number, y: number, m: number) {
   const pi = Math.PI;
   const nx = (x + 1) * 0.5;
   const ny = (y + 1) * 0.5;
   return (
-    Math.sin(pi * n * nx) * Math.sin(pi * m * ny) +
-    Math.sin(pi * m * nx) * Math.sin(pi * n * ny)
+    Math.sin(pi * N_FREQUENCY * nx) * Math.sin(pi * m * ny) +
+    Math.sin(pi * m * nx) * Math.sin(pi * N_FREQUENCY * ny)
   );
 }
 
@@ -76,6 +75,9 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
+    let mFrequency = 5;
+    let candidateFrequency = mFrequency;
+    let candidateFrames = 0;
     let boundsW = 0;
     let boundsH = 0;
     let frame = 0;
@@ -134,6 +136,18 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
           const nextPitch = sampleRate / bestLag;
           pitchHz = pitchHz ? pitchHz + (nextPitch - pitchHz) * 0.18 : nextPitch;
           pitchAge = 0;
+          const pitchPosition = Math.min(
+            1,
+            Math.max(0, Math.log(pitchHz / PITCH_MIN) / Math.log(PITCH_MAX / PITCH_MIN))
+          );
+          const nextFrequency = 1 + Math.round(pitchPosition * 9);
+          if (nextFrequency === candidateFrequency) {
+            candidateFrames++;
+          } else {
+            candidateFrequency = nextFrequency;
+            candidateFrames = 1;
+          }
+          if (candidateFrames >= 6) mFrequency = candidateFrequency;
         } else {
           pitchAge++;
         }
@@ -145,7 +159,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     const advanceParticles = (steps = 1) => {
       for (let step = 0; step < steps; step++) {
         for (const particle of particles) {
-          const value = chladniValue(particle.x, particle.y, M_FREQUENCY, N_FREQUENCY);
+          const value = chladniValue(particle.x, particle.y, mFrequency);
           const amplitude = Math.max(0.002, VIBRATION * Math.abs(value));
           particle.x += (Math.random() * 2 - 1) * amplitude * 2;
           particle.y += (Math.random() * 2 - 1) * amplitude * 2;
@@ -215,8 +229,6 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       paint();
       updateReadout();
     };
-
-    for (let i = 0; i < 150; i++) advanceParticles();
 
     const scheduleLoop = () => {
       if (cancelled || reduceMotion || loopRunning) return;
