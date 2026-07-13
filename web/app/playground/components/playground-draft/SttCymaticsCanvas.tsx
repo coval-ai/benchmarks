@@ -9,6 +9,7 @@ const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
 const VIBRATION = 0.02;
 const N_FREQUENCY = 1;
+const DEFAULT_M_FREQUENCY = 10;
 
 type Props = {
   className?: string;
@@ -75,7 +76,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
-    let mFrequency = 5;
+    let mFrequency = DEFAULT_M_FREQUENCY;
     let candidateFrequency = mFrequency;
     let candidateFrames = 0;
     let boundsW = 0;
@@ -96,6 +97,9 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         envelope += (0 - envelope) * 0.08;
         pitchHz = 0;
         pitchAge = 99;
+        mFrequency = DEFAULT_M_FREQUENCY;
+        candidateFrequency = DEFAULT_M_FREQUENCY;
+        candidateFrames = 0;
         return;
       }
 
