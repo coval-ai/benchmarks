@@ -50,6 +50,7 @@ class ResultOut(BaseModel):
     model: str
     voice: str | None
     benchmark: Literal["STT", "TTS", "S2S"]
+    dataset_id: str
     metric_type: str
     metric_value: float | None
     metric_units: str | None
@@ -122,13 +123,14 @@ class ResultsResponse(BaseModel):
 
 
 class ModelStatEntry(BaseModel):
-    """Per-(provider, model, metric_type) aggregate stats.
+    """Per-(provider, model, dataset_id, metric_type) aggregate stats.
 
     Lets us compute the stats server-side and just send the summaries.
     """
 
     provider: str
     model: str
+    dataset_id: str
     metric_type: str
     avg_value: float
     stddev_value: float
@@ -144,13 +146,15 @@ class ModelStatEntry(BaseModel):
 
 
 class SeriesPoint(BaseModel):
-    """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
+    """Per-(provider, model, dataset_id, metric_type) distribution for one
+    scheduled_at bucket.
 
     Latency timelines render p50; WER renders value_sum / sample_count.
     """
 
     provider: str
     model: str
+    dataset_id: str
     metric_type: str
     scheduled_at: datetime
     min_value: float

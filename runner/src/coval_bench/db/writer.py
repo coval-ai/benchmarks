@@ -182,12 +182,17 @@ class RunWriter:
                 # Bucket membership: scheduled_at matches exactly, or a legacy
                 # null-scheduled row whose created_at falls in
                 # [bucket_at, bucket_at + period).
+                # dataset_id mirrors migration 20260713_0010: a result's dataset
+                # comes from its parent run, except TTS which is always tts-v1.
                 await cur.execute(
                     """
                     INSERT INTO benchmarks_v2.results_by_bucket
-                        (provider, model, benchmark, metric_type, bucket_at,
+                        (provider, model, benchmark, dataset_id, metric_type, bucket_at,
                          min_value, p25, p50, p75, max_value, value_sum, sample_count)
-                    SELECT r.provider, r.model, r.benchmark, r.metric_type, %(bucket)s,
+                    SELECT r.provider, r.model, r.benchmark,
+                           CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1'
+                                ELSE rn.dataset_id END,
+                           r.metric_type, %(bucket)s,
                            MIN(r.metric_value)::float8,
                            PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
                            PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
@@ -209,7 +214,10 @@ class RunWriter:
                                   + (%(period)s::double precision) * INTERVAL '1 second'
                           )
                       )
-                    GROUP BY r.provider, r.model, r.benchmark, r.metric_type
+                    GROUP BY r.provider, r.model, r.benchmark,
+                             CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1'
+                                  ELSE rn.dataset_id END,
+                             r.metric_type
                     """,
                     params,
                 )

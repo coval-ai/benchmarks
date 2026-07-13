@@ -42,6 +42,14 @@ TTS items are text-only and have no SHA.
 `version` field. Bumping the dataset re-pins by minting a new manifest;
 old manifests (`stt-v1.json`) stay for historical reproducibility.
 
+**Multiple STT datasets.** Additional frozen STT manifests (`stt-v1`
+LibriSpeech, `stt-v3` pipecat conversational speech) can run alongside the
+default: each dataset runs as its own run (one `DATASET_ID` per execution),
+and a result's dataset is derived from its parent run. Aggregates
+(`/v1/results/aggregates`, `/v1/leaderboard`) are keyed per dataset and take
+an optional `dataset` filter; the dashboard isolates one dataset at a time.
+See ADR-023.
+
 **Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR
 --normalize` applies the selection rule, transcodes to the canonical audio
 format, uploads to GCS, and writes the manifest with fresh SHAs. See
@@ -209,6 +217,9 @@ metrics in particular are session-dependent).
   `EnglishTextNormalizer`.
 - ADR-022 — STT dataset swap to WildASR `fleurs_clean_en` (`stt-v2`); LibriSpeech
   `test-clean` (`stt-v1`) retained for historical reproducibility.
+- ADR-023 — Multi-dataset benchmarking: one run per dataset, dataset identity
+  derived from the parent run (no dataset column on `results`); aggregation
+  layers keyed per dataset.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.

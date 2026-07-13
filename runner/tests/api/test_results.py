@@ -381,3 +381,18 @@ async def test_scheduled_at_uses_stamped_value(
     results = response.json()["results"]
     assert len(results) == 1
     assert datetime.fromisoformat(results[0]["scheduled_at"]) == stamped
+
+
+async def test_dataset_id_exposed_and_filterable(client: AsyncClient, postgresql: Any) -> None:
+    """Rows carry the parent run's dataset (TTS pinned to tts-v1); ?dataset filters."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v3")
+    await _insert_result(postgresql, run_id)
+    await _insert_result(postgresql, run_id, benchmark="TTS", metric_type="TTFA")
+
+    response = await client.get("/v1/results")
+    by_benchmark = {r["benchmark"]: r["dataset_id"] for r in response.json()["results"]}
+    assert by_benchmark == {"STT": "stt-v3", "TTS": "tts-v1"}
+
+    filtered = await client.get("/v1/results", params={"dataset": "tts-v1"})
+    results = filtered.json()["results"]
+    assert [(r["benchmark"], r["dataset_id"]) for r in results] == [("TTS", "tts-v1")]

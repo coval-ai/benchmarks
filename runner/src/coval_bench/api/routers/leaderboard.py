@@ -53,9 +53,11 @@ _MV_SQL_TEMPLATE = """
            sample_count AS n
     FROM {view}
     WHERE metric_type = %(metric)s
-      AND benchmark = %(benchmark)s
+      AND benchmark = %(benchmark)s{dataset_clause}
     ORDER BY avg_value ASC
 """
+
+_DATASET_CLAUSE = "\n      AND dataset_id = %(dataset)s"
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -65,15 +67,21 @@ async def get_leaderboard(
     metric: MetricLiteral = Query(...),
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
+    dataset: str | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
+    The matviews aggregate per dataset, so when several datasets of one
+    benchmark ran inside the window, a model appears once per dataset unless
+    ``dataset`` narrows the board to one.
+
     Args:
         metric: One of WER, TTFA, TTFT, TTFS.
         benchmark: One of STT, TTS.
         window: Time window — each is served by its materialized view.
+        dataset: Optional dataset id (e.g. stt-v2) to filter on.
 
     Returns:
         ``{"metric": ..., "window": ..., "entries": [LeaderboardEntry, ...]}``
@@ -89,7 +97,11 @@ async def get_leaderboard(
         )
 
     params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}
-    sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+    dataset_clause = ""
+    if dataset is not None:
+        dataset_clause = _DATASET_CLAUSE
+        params["dataset"] = dataset
+    sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window], dataset_clause=dataset_clause)
 
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
@@ -108,6 +120,7 @@ async def get_leaderboard(
             "metric": metric,
             "benchmark": benchmark,
             "window": window,
+            "dataset": dataset,
             "entry_count": len(entries),
             "$process_person_profile": False,
         },

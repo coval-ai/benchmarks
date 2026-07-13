@@ -10,6 +10,7 @@ export interface paths {
         query: {
           benchmark: components["schemas"]["BenchmarkLiteral"];
           window?: components["schemas"]["WindowLiteral"];
+          dataset?: string | null;
           schedule_period?: number;
         };
       };
@@ -54,6 +55,7 @@ export interface components {
     ModelStatEntry: {
       provider: string;
       model: string;
+      dataset_id: string;
       metric_type: string;
       avg_value: number;
       stddev_value: number;
@@ -100,6 +102,7 @@ export interface components {
     SeriesPoint: {
       provider: string;
       model: string;
+      dataset_id: string;
       metric_type: string;
       scheduled_at: string;
       min_value: number;

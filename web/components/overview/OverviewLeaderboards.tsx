@@ -13,6 +13,7 @@ import {
 } from "@/lib/utils/formatters";
 import type { ModelStatEntry } from "@/lib/api/client";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
+import { DEFAULT_STT_DATASET } from "@/lib/config/datasets";
 import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
@@ -45,9 +46,14 @@ const OverviewLeaderboards: React.FC = () => {
   const { timeWindow, changeTimeWindow } = useTimeWindow("overview");
 
   // Params match what /tts and /stt send, so React Query shares a cache
-  // entry with the dashboards whenever the selected windows coincide.
+  // entry with the dashboards whenever the selected windows coincide. The
+  // overview pins the STT default dataset — aggregates are keyed per dataset.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
-  const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  const sttQuery = useAggregatesQuery({
+    benchmark: "STT",
+    window: timeWindow,
+    dataset: DEFAULT_STT_DATASET,
+  });
 
   const ttsRows = useMemo(
     () =>

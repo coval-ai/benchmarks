@@ -7,6 +7,62 @@ the recorded hash before use.
 
 ## How each manifest is produced
 
+### `stt-v3.json`
+
+**What it is.** A frozen 50-utterance sample of
+[pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data),
+the corpus behind pipecat's [stt-benchmark](https://github.com/pipecat-ai/stt-benchmark)
+project. **Not the leaderboard default** (`stt-v2` is); the runner selects it
+via `DATASET_ID=stt-v3`.
+
+**Sample composition (stt-benchmark-data, the source pool):**
+
+- **Language:** English; conversational voice-agent utterances (commands and
+  questions a user says to an assistant), 1,000 rows of 16 kHz audio. The audio
+  is drawn from `pipecat-ai/smart-turn-data-v3.1-train`, pipecat's
+  community/partner-contributed turn-detection recordings. Human speech only:
+  the source corpus also contains TTS-generated samples, but pipecat's set
+  keeps only rows with `synthetic == False` (and `language == "eng"`).
+- **Reference transcripts are model-generated.** pipecat produces ground truth
+  with Gemini (see their README's `stt-benchmark ground-truth` step), not human
+  transcription — so WER against this set measures agreement with a strong
+  machine baseline, and absolute WER should be read with that in mind.
+- **Our 50-utterance window:** the builder reads the full 1,000-row pool from
+  the repo's parquet, keeps clips of **2.0–15.0 s** with ≥ 3 words, dedups by
+  transcript, and takes the lexicographically-first 50 by transcript —
+  deterministic from the frozen source. (This build used the parquet source
+  directly, which reads the whole pool; the datasets-server REST path scans
+  only a split's first 100 rows and would select a different 50.)
+- **Recording level:** each clip is loudness-normalized (RMS target −20 dBFS,
+  peak-guarded), same as `stt-v2`. Pass `--normalize`.
+- **Durations:** 2.1–14.7 s, median ≈ 10.6 s; ~7.4 minutes total per full pass.
+- Items carry pipecat's `sample_id` for provenance back to the source rows.
+
+**What we measure on it.** Same as `stt-v2`: WER, TTFT, audio→final latency,
+TTFS, RTF.
+
+To rebuild (downloads the repo parquet, transcodes and uploads the selected
+clips, writes the manifest):
+
+```bash
+uv run --extra hf-parquet coval-build-dataset --hf pipecat-ai/stt-benchmark-data \
+    --config default --split train \
+    --dataset-id stt-v3 --dur-max 15 --normalize \
+    --license "unspecified (no data license published by pipecat-ai)" \
+    --source "pipecat-ai/stt-benchmark-data train"
+```
+
+Then fill `speech_end_offset_ms` (the TTFS anchor) with
+`scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
+
+**Never overwrite v3.** Future expansions go in `stt-v4`.
+
+License: **unspecified** — the HF dataset card carries no license tag and the
+`stt-benchmark` repo has no license file (pipecat's `smart-turn` BSD-2-Clause
+covers the model code, not the audio). The audio is mirrored to the public GCS
+bucket on the same basis as pipecat's own public redistribution; if pipecat
+publishes a data license, record it here and in the manifest.
+
 ### `stt-v2.json`
 
 **What we benchmark.** STT providers are scored against a frozen 50-utterance
@@ -56,7 +112,8 @@ uv run coval-build-dataset --hf bosonai/WildASR \
 Then fill `speech_end_offset_ms` (the TTFS anchor) with
 `scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
 
-**Never overwrite v2.** Future expansions go in `stt-v3`.
+**Never overwrite v2.** Future expansions go in `stt-v4` (`stt-v3` is taken by
+the pipecat set above).
 
 License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
 

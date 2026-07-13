@@ -48,12 +48,15 @@ def _make_db_url(postgresql: Any) -> str:
     return f"postgresql://{info.user}:{info.password or ''}@{info.host}:{info.port}/{info.dbname}"
 
 
-# Mirrors the per-window matview migration (20260611_0005).
+# Mirrors the per-window matview migration (20260713_0010).
 _MV_WINDOWS: dict[str, str] = {
     "results_24h": "24 hours",
     "results_7d": "7 days",
     "results_30d": "30 days",
 }
+
+# Dataset attribution shared by both aggregation layers (20260713_0010).
+_DATASET_ID_SQL = "CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END"
 
 
 def _load_schema(**connect_kwargs: Any) -> None:
@@ -103,13 +106,15 @@ def _load_schema(**connect_kwargs: Any) -> None:
         for name, interval in _MV_WINDOWS.items():
             conn.execute(f"""
                 CREATE MATERIALIZED VIEW IF NOT EXISTS benchmarks_v2.{name} AS
-                SELECT provider, model, benchmark, metric_type,
+                SELECT provider, model, benchmark, dataset_id, metric_type,
                        avg_value, stddev_value, min_value,
                        pct[1] AS p25, pct[2] AS p50, pct[3] AS p75,
                        pct[4] AS p90, pct[5] AS p95, pct[6] AS p99,
                        max_value, sample_count
                 FROM (
-                    SELECT r.provider, r.model, r.benchmark, r.metric_type,
+                    SELECT r.provider, r.model, r.benchmark,
+                           {_DATASET_ID_SQL} AS dataset_id,
+                           r.metric_type,
                            AVG(r.metric_value)::float8 AS avg_value,
                            COALESCE(STDDEV_SAMP(r.metric_value), 0)::float8 AS stddev_value,
                            MIN(r.metric_value)::float8 AS min_value,
@@ -123,15 +128,17 @@ def _load_schema(**connect_kwargs: Any) -> None:
                       AND rn.status IN ('succeeded', 'partial')
                       AND r.metric_value IS NOT NULL
                       AND r.created_at >= now() - INTERVAL '{interval}'
-                    GROUP BY r.provider, r.model, r.benchmark, r.metric_type
+                    GROUP BY r.provider, r.model, r.benchmark, {_DATASET_ID_SQL},
+                             r.metric_type
                 ) stats
             """)  # noqa: S608
-        # Series rollup table (mirrors migration 20260611_0006).
+        # Series rollup table (mirrors migration 20260713_0010).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
                 provider      text NOT NULL,
                 model         text NOT NULL,
                 benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS')),
+                dataset_id    text NOT NULL DEFAULT 'unknown',
                 metric_type   text NOT NULL,
                 bucket_at     timestamptz NOT NULL,
                 min_value     double precision NOT NULL,
@@ -141,7 +148,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 max_value     double precision NOT NULL,
                 value_sum     double precision NOT NULL,
                 sample_count  integer NOT NULL,
-                PRIMARY KEY (provider, model, benchmark, metric_type, bucket_at)
+                PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, bucket_at)
             )
         """)
 
@@ -357,9 +364,10 @@ async def _fill_buckets(postgresql: Any) -> None:
         await aconn.execute("TRUNCATE benchmarks_v2.results_by_bucket")
         await aconn.execute(f"""
             INSERT INTO benchmarks_v2.results_by_bucket
-                (provider, model, benchmark, metric_type, bucket_at,
+                (provider, model, benchmark, dataset_id, metric_type, bucket_at,
                  min_value, p25, p50, p75, max_value, value_sum, sample_count)
-            SELECT r.provider, r.model, r.benchmark, r.metric_type, {bucket_sql},
+            SELECT r.provider, r.model, r.benchmark, {_DATASET_ID_SQL}, r.metric_type,
+                   {bucket_sql},
                    MIN(r.metric_value)::float8,
                    PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
                    PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
@@ -372,7 +380,8 @@ async def _fill_buckets(postgresql: Any) -> None:
             WHERE r.status = 'success'
               AND rn.status IN ('succeeded', 'partial')
               AND r.metric_value IS NOT NULL
-            GROUP BY r.provider, r.model, r.benchmark, r.metric_type, {bucket_sql}
+            GROUP BY r.provider, r.model, r.benchmark, {_DATASET_ID_SQL}, r.metric_type,
+                     {bucket_sql}
         """)  # noqa: S608
     finally:
         await aconn.close()

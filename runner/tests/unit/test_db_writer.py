@@ -684,6 +684,48 @@ def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
     assert float(row["p50"]) == pytest.approx(3.0)
 
 
+def test_refresh_bucket_splits_datasets(pg_conn: psycopg.Connection[Any]) -> None:
+    """Runs against different datasets sharing a scheduled_at slot keep
+    separate rollup rows, keyed by the parent run's dataset_id."""
+    _apply_migrations(pg_conn)
+    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            for dataset_id, value in (("stt-v1", 2.0), ("stt-v3", 8.0)):
+                run = await writer.start_run(
+                    runner_sha="abc123",
+                    dataset_id=dataset_id,
+                    dataset_sha256="deadbeef",
+                    scheduled_at=scheduled,
+                )
+                assert run.id is not None
+                await writer.record_results([_wer_result(run.id, value)])
+                await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+                await writer.refresh_bucket(run.id, period_seconds=1800)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT dataset_id, value_sum, sample_count "
+            "FROM benchmarks_v2.results_by_bucket "
+            "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER' "
+            "ORDER BY dataset_id"
+        )
+        rows = cur.fetchall()
+
+    assert [(r["dataset_id"], float(r["value_sum"]), r["sample_count"]) for r in rows] == [
+        ("stt-v1", 2.0, 1),
+        ("stt-v3", 8.0, 1),
+    ]
+
+
 def test_refresh_bucket_excludes_failed_run(pg_conn: psycopg.Connection[Any]) -> None:
     """A failed run never seeds a bucket — the recompute drops failed parent
     runs."""
