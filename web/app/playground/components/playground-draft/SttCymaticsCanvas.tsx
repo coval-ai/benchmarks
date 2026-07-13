@@ -79,6 +79,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let level = 0;
     let noiseFloor = 0.012;
     let envelope = 0;
+    let presence = 0;
+    let silenceRun = 99;
     let pitchHz = 0;
     let pitchAge = 99;
     let frame = 0;
@@ -171,6 +173,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       if (!node) {
         level = 0;
         envelope += (0 - envelope) * 0.08;
+        presence += (0 - presence) * 0.1;
+        silenceRun = 99;
         pitchHz = 0;
         pitchAge = 99;
         pitchHistLen = 0;
@@ -201,6 +205,13 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const audible = Math.max(0, level - noiseFloor - 0.008);
       const targetEnvelope = Math.min(1, audible * 9);
       envelope += (targetEnvelope - envelope) * (targetEnvelope > envelope ? 0.22 : 0.06);
+      if (targetEnvelope > 0.08) {
+        silenceRun = 0;
+        presence += (1 - presence) * 0.12;
+      } else {
+        silenceRun++;
+        if (silenceRun > 45) presence += (0 - presence) * 0.03;
+      }
 
       if (wave && frame % 3 === 0 && envelope > 0.06) {
         const sampleRate = node.context.sampleRate;
@@ -285,12 +296,14 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       if (!diskColor || !particleColor) resolveColors();
       ctx.fillStyle = diskColor;
       ctx.fillRect(0, 0, width, height);
-      const step =
-        recordingRef.current && analyserRef.current ? stepVibration : stepRest;
+      const vibing = recordingRef.current && analyserRef.current;
       ctx.fillStyle = particleColor;
       ctx.beginPath();
       for (const particle of particles) {
-        if (animate) step(particle);
+        if (animate) {
+          if (vibing && Math.random() < presence) stepVibration(particle);
+          else stepRest(particle);
+        }
         ctx.moveTo(particle.x + dotRadius, particle.y);
         ctx.arc(particle.x, particle.y, dotRadius, 0, Math.PI * 2);
       }
