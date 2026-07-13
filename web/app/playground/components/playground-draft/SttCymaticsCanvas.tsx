@@ -180,23 +180,28 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
         ampTarget = Math.min(1, voiced * 7);
-        // Voice-activity hysteresis: real speech wakes the plate, a beat of quiet calms it
-        // back to the idle drift and arms the next design swap — background noise does neither.
-        if (ampTarget > 0.2) {
+        // Voice-activity hysteresis: real speech wakes the plate; silence only counts against
+        // the SMOOTHED envelope, so consonants and word gaps never read as "stopped talking" —
+        // it takes a genuine sentence pause to calm down and arm the next design swap.
+        if (ampTarget > 0.15) {
           speechFrames++;
           silenceFrames = 0;
-          if (speechFrames > 9) voiceActive = true;
-        } else {
+          if (speechFrames > 6) voiceActive = true;
+        } else if (amp < 0.06) {
           speechFrames = 0;
           silenceFrames++;
-          if (silenceFrames === 30) resumePending = true;
-          if (silenceFrames > 35) voiceActive = false;
+          if (silenceFrames === 40) resumePending = true;
+          if (silenceFrames > 50) voiceActive = false;
+        } else {
+          speechFrames = 0;
         }
         if (!voiceActive) ampTarget = 0;
-        if (ampTarget > 0.08 && wave) {
-          unvoicedFrames = 0;
+        let pitchConfident = false;
+        if ((voiceActive || ampTarget > 0.08) && wave) {
           // Autocorrelation pitch (F0) — tracks the actual voice fundamental, so a low chest
           // voice and a high girly voice read ~110 Hz vs ~250 Hz (a spectral centroid doesn't).
+          // Runs whenever active; the confidence check below holds the last pitch through
+          // consonants and gaps instead of dropping it.
           const sr = an.context.sampleRate;
           const lagMin = Math.floor(sr / PITCH_MAX);
           const lagMax = Math.min(Math.ceil(sr / PITCH_MIN), wave.length - PITCH_WIN);
@@ -213,12 +218,12 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
             }
           }
           if (bestLag > 0 && best > norm0 * 0.3) {
+            pitchConfident = true;
             const hz = sr / bestLag;
             pitchHz = pitchHz === 0 ? hz : pitchHz + (hz - pitchHz) * 0.2;
           }
-        } else {
-          unvoicedFrames++;
         }
+        unvoicedFrames = pitchConfident ? 0 : unvoicedFrames + 1;
         // Sentence sequencer: the only trigger is resuming speech after a beat of silence —
         // no timers, no per-word switching; mid-sentence and silence both hold the design.
         if (voiceActive && resumePending && pitchHz > 0) {
@@ -406,7 +411,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       if (!el || frame % 9 !== 0) return;
       if (recordingRef.current && analyserRef.current) {
         const db = level > 0 ? Math.max(-60, Math.round(20 * Math.log10(level))) : -60;
-        const speaking = pitchHz > 0 && unvoicedFrames < 40;
+        const speaking = pitchHz > 0 && (voiceActive || unvoicedFrames < 40);
         el.textContent = `${db} dB · ${speaking ? Math.round(pitchHz / 5) * 5 : "—"} Hz`;
       } else {
         el.textContent = "— dB · — Hz";
