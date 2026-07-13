@@ -18,7 +18,7 @@ import {
 } from "@/lib/playground/provider-styles";
 import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
-import { SttCymaticsCanvas, cymaticsFamilyFromHex } from "./SttCymaticsCanvas";
+import { SttCymaticsCanvas } from "./SttCymaticsCanvas";
 import { useSTTBenchmark, type STTBenchmarkCompletionSummary } from "@/app/playground/hooks/useSTTBenchmark";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
@@ -183,13 +183,6 @@ export function STTPlaygroundPanel({
     () => visibleModels.filter((m) => selectedMap[m.id] !== false),
     [visibleModels, selectedMap]
   );
-
-  const vizFamily = useMemo(() => {
-    const families = new Set(
-      activeModels.map((m) => cymaticsFamilyFromHex(getPlaygroundModelVisual(m).dot))
-    );
-    return families.size === 1 ? [...families][0]! : "neutral";
-  }, [activeModels]);
 
   const vizReadoutRef = useRef<HTMLSpanElement>(null);
 
@@ -546,7 +539,6 @@ export function STTPlaygroundPanel({
             <SttCymaticsCanvas
               recording={phase === "recording"}
               analyser={analyser}
-              family={vizFamily}
               readoutRef={vizReadoutRef}
               className="pointer-events-none absolute inset-0 size-full rounded-full"
             />
