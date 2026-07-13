@@ -2,33 +2,22 @@
 
 import { type RefObject, useEffect, useRef } from "react";
 
-const W = 280;
-const PARTICLE_COUNT = 3600;
+const MODES = [
+  [3, 1],
+  [5, 1],
+  [5, 2],
+  [7, 2],
+  [8, 3],
+  [9, 4],
+  [10, 4]
+] as const;
+const DEFAULT_MODE = 1;
 const PITCH_MIN = 70;
 const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
-const VIBRATION = 0.02;
-
-type CymaticMode = {
-  family: "cos" | "sin";
-  m: number;
-  n: number;
-  sign: -1 | 1;
-};
-
-const VOICE_MODES: CymaticMode[] = [
-  { family: "cos", m: 3, n: 8, sign: -1 },
-  { family: "cos", m: 5, n: 8, sign: -1 },
-  { family: "cos", m: 7, n: 8, sign: -1 },
-  { family: "sin", m: 2, n: 5, sign: -1 },
-  { family: "sin", m: 3, n: 7, sign: -1 },
-  { family: "sin", m: 4, n: 7, sign: 1 },
-  { family: "sin", m: 5, n: 9, sign: -1 },
-  { family: "sin", m: 6, n: 9, sign: 1 },
-  { family: "sin", m: 7, n: 10, sign: -1 },
-  { family: "sin", m: 8, n: 11, sign: 1 }
-];
-const DEFAULT_MODE_INDEX = 9;
+const TONE_LO = 90;
+const TONE_HI = 320;
+const REST_VSTR = 0.02;
 
 type Props = {
   className?: string;
@@ -41,32 +30,6 @@ type Particle = {
   x: number;
   y: number;
 };
-
-function createParticle(): Particle {
-  const angle = Math.random() * Math.PI * 2;
-  const radius = Math.sqrt(Math.random());
-  return {
-    x: Math.cos(angle) * radius,
-    y: Math.sin(angle) * radius
-  };
-}
-
-function chladniValue(x: number, y: number, mode: CymaticMode) {
-  const pi = Math.PI;
-  const nx = (x + 1) * 0.5;
-  const ny = (y + 1) * 0.5;
-  const { family, m, n, sign } = mode;
-  if (family === "cos") {
-    return (
-      Math.cos(pi * n * nx) * Math.cos(pi * m * ny) -
-      Math.cos(pi * m * nx) * Math.cos(pi * n * ny)
-    );
-  }
-  return (
-    Math.sin(pi * n * nx) * Math.sin(pi * m * ny) +
-    sign * Math.sin(pi * m * nx) * Math.sin(pi * n * ny)
-  );
-}
 
 export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,21 +55,31 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       "position:absolute;width:0;height:0;opacity:0;pointer-events:none;color:var(--color-text-secondary)";
     parent.prepend(diskProbe, particleProbe);
 
-    const particles = Array.from({ length: PARTICLE_COUNT }, createParticle);
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduceMotion = motionQuery.matches;
+    const particles: Particle[] = [];
+    let width = 0;
+    let height = 0;
+    let cx = 0;
+    let cy = 0;
+    let radius = 0;
+    let dotRadius = 1;
+    let vStr = REST_VSTR;
+    let kick = 0;
+    let modeIndex = DEFAULT_MODE;
     let timeData: Uint8Array<ArrayBuffer> | null = null;
     let wave: Float32Array | null = null;
+    const lagScores = new Float32Array(512);
+    const pitchHist = new Float32Array(5);
+    let pitchHistLen = 0;
+    let pendingIdx = -1;
+    let pendingCount = 0;
+    let swapCooldown = 0;
     let level = 0;
     let noiseFloor = 0.012;
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
-    let modeIndex = DEFAULT_MODE_INDEX;
-    let candidateModeIndex = modeIndex;
-    let candidateFrames = 0;
-    let boundsW = 0;
-    let boundsH = 0;
     let frame = 0;
     let rafId = 0;
     let readoutTimer = 0;
@@ -116,6 +89,82 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let diskColor = "";
     let particleColor = "";
 
+    const spawnParticle = (particle: Particle, atCenter = false) => {
+      const angle = Math.random() * Math.PI * 2;
+      const spread = atCenter ? Math.random() * radius * 0.08 : Math.sqrt(Math.random()) * radius;
+      particle.x = cx + Math.cos(angle) * spread;
+      particle.y = cy + Math.sin(angle) * spread;
+    };
+
+    const isOutsidePlate = (particle: Particle, inset = 1) => {
+      return Math.hypot(particle.x - cx, particle.y - cy) > radius * inset;
+    };
+
+    const clampToPlate = (particle: Particle) => {
+      const dx = particle.x - cx;
+      const dy = particle.y - cy;
+      const distance = Math.hypot(dx, dy);
+      if (distance > radius) {
+        const scale = radius / distance;
+        particle.x = cx + dx * scale;
+        particle.y = cy + dy * scale;
+      }
+    };
+
+    const stepRest = (particle: Particle) => {
+      const dx = particle.x - cx;
+      const dy = particle.y - cy;
+      const distance = Math.hypot(dx, dy) || 0.0001;
+      const ux = dx / distance;
+      const uy = dy / distance;
+      const strength = REST_VSTR * 20;
+      const flow = 0.18 * (0.4 + strength);
+      const wobble = 0.35 * strength + 0.05;
+      particle.x += ux * flow + (Math.random() - 0.5) * wobble;
+      particle.y += uy * flow + (Math.random() - 0.5) * wobble;
+      if (isOutsidePlate(particle, 0.985)) spawnParticle(particle, true);
+    };
+
+    const stepVibration = (particle: Particle) => {
+      const span = 2 * radius;
+      const nx = (particle.x - (cx - radius)) / span;
+      const ny = (particle.y - (cy - radius)) / span;
+      const mode = MODES[modeIndex]!;
+      const m = mode[0];
+      const n = mode[1];
+      const pi = Math.PI;
+      const snx = Math.sin(pi * n * nx);
+      const cnx = Math.cos(pi * n * nx);
+      const smx = Math.sin(pi * m * nx);
+      const cmx = Math.cos(pi * m * nx);
+      const sny = Math.sin(pi * n * ny);
+      const cny = Math.cos(pi * n * ny);
+      const smy = Math.sin(pi * m * ny);
+      const cmy = Math.cos(pi * m * ny);
+      const value = snx * smy + smx * sny;
+      const dfdx = pi * (n * cnx * smy + m * cmx * sny);
+      const dfdy = pi * (m * snx * cmy + n * smx * cny);
+      const amplitude = Math.max(0.002, vStr * Math.abs(value));
+      const drive = Math.min(1.6, vStr * 50);
+      const driftScale = Math.min(0.006, 0.00016 * drive * Math.abs(value) * Math.hypot(dfdx, dfdy));
+      const gradMag = Math.hypot(dfdx, dfdy) || 1;
+      const sign = value > 0 ? 1 : -1;
+      particle.x += (Math.random() * 2 - 1) * amplitude * span - (sign * dfdx / gradMag) * driftScale * span;
+      particle.y += (Math.random() * 2 - 1) * amplitude * span - (sign * dfdy / gradMag) * driftScale * span;
+      clampToPlate(particle);
+    };
+
+    const rebuildParticles = () => {
+      const side = Math.min(width, height);
+      const count = Math.min(4200, Math.max(1200, Math.round(3600 * (side / 560) ** 2)));
+      while (particles.length < count) {
+        const particle = { x: 0, y: 0 };
+        spawnParticle(particle);
+        particles.push(particle);
+      }
+      if (particles.length > count) particles.length = count;
+    };
+
     const readAudio = () => {
       const node = recordingRef.current ? analyserRef.current : null;
       if (!node) {
@@ -123,9 +172,13 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         envelope += (0 - envelope) * 0.08;
         pitchHz = 0;
         pitchAge = 99;
-        modeIndex = DEFAULT_MODE_INDEX;
-        candidateModeIndex = DEFAULT_MODE_INDEX;
-        candidateFrames = 0;
+        pitchHistLen = 0;
+        pendingIdx = -1;
+        pendingCount = 0;
+        swapCooldown = 0;
+        modeIndex = DEFAULT_MODE;
+        kick = 0;
+        vStr = REST_VSTR;
         return;
       }
 
@@ -141,7 +194,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         sum += sample * sample;
       }
       level = Math.sqrt(sum / timeData.length);
-      noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.2 : 0.002);
+      const rise = envelope > 0.15 ? 0.0002 : 0.002;
+      noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.2 : rise);
       const audible = Math.max(0, level - noiseFloor - 0.008);
       const targetEnvelope = Math.min(1, audible * 9);
       envelope += (targetEnvelope - envelope) * (targetEnvelope > envelope ? 0.22 : 0.06);
@@ -153,53 +207,63 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         let baseEnergy = 0;
         for (let i = 0; i < PITCH_WINDOW; i += 2) baseEnergy += wave[i]! * wave[i]!;
         let bestScore = 0;
-        let bestLag = 0;
         for (let lag = lagMin; lag <= lagMax; lag += 2) {
           let score = 0;
           for (let i = 0; i < PITCH_WINDOW; i += 2) score += wave[i]! * wave[i + lag]!;
-          if (score > bestScore) {
-            bestScore = score;
-            bestLag = lag;
+          lagScores[(lag - lagMin) >> 1] = score;
+          if (score > bestScore) bestScore = score;
+        }
+        let chosenLag = 0;
+        if (bestScore > baseEnergy * 0.3) {
+          const cutoff = bestScore * 0.9;
+          for (let lag = lagMin; lag <= lagMax; lag += 2) {
+            if (lagScores[(lag - lagMin) >> 1]! >= cutoff) {
+              chosenLag = lag;
+              break;
+            }
           }
         }
-        if (bestLag && bestScore > baseEnergy * 0.3) {
-          const nextPitch = sampleRate / bestLag;
-          pitchHz = pitchHz ? pitchHz + (nextPitch - pitchHz) * 0.18 : nextPitch;
-          pitchAge = 0;
-          const pitchPosition = Math.min(
-            1,
-            Math.max(0, Math.log(pitchHz / PITCH_MIN) / Math.log(PITCH_MAX / PITCH_MIN))
+        if (chosenLag) {
+          pitchHist[pitchHistLen % 5] = sampleRate / chosenLag;
+          pitchHistLen++;
+          const window = Array.from(pitchHist.slice(0, Math.min(pitchHistLen, 5))).sort(
+            (a, b) => a - b
           );
-          const nextModeIndex = Math.round(pitchPosition * (VOICE_MODES.length - 1));
-          if (nextModeIndex === candidateModeIndex) {
-            candidateFrames++;
+          const median = window[window.length >> 1]!;
+          pitchHz = pitchHz ? pitchHz + (median - pitchHz) * 0.15 : median;
+          pitchAge = 0;
+          const t = Math.min(
+            1,
+            Math.max(0, Math.log(pitchHz / TONE_LO) / Math.log(TONE_HI / TONE_LO))
+          );
+          const target = t * (MODES.length - 1);
+          const idx = Math.round(target);
+          if (idx === pendingIdx) {
+            pendingCount++;
           } else {
-            candidateModeIndex = nextModeIndex;
-            candidateFrames = 1;
+            pendingIdx = idx;
+            pendingCount = 0;
           }
-          if (candidateFrames >= 18) modeIndex = candidateModeIndex;
+          if (swapCooldown > 0) swapCooldown--;
+          if (
+            pendingIdx !== modeIndex &&
+            pendingCount >= 12 &&
+            swapCooldown === 0 &&
+            Math.abs(target - modeIndex) > 0.75
+          ) {
+            modeIndex = pendingIdx;
+            kick = 0.012;
+            swapCooldown = 20;
+          }
         } else {
           pitchAge++;
         }
       } else {
         pitchAge++;
       }
-    };
 
-    const advanceParticles = (steps = 1) => {
-      for (let step = 0; step < steps; step++) {
-        for (const particle of particles) {
-          const value = chladniValue(particle.x, particle.y, VOICE_MODES[modeIndex]!);
-          const amplitude = Math.max(0.002, VIBRATION * Math.abs(value));
-          particle.x += (Math.random() * 2 - 1) * amplitude * 2;
-          particle.y += (Math.random() * 2 - 1) * amplitude * 2;
-          const radius = Math.hypot(particle.x, particle.y);
-          if (radius > 1) {
-            particle.x /= radius;
-            particle.y /= radius;
-          }
-        }
-      }
+      kick *= 0.95;
+      vStr = 0.006 + envelope * 0.022 + kick;
     };
 
     const resolveColors = () => {
@@ -209,36 +273,41 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       particleColor = ink || "rgb(15, 12, 10)";
     };
 
-    const paint = () => {
-      if (!boundsW || !boundsH) {
-        const rect = parent.getBoundingClientRect();
-        boundsW = rect.width;
-        boundsH = rect.height;
-      }
-      const side = Math.max(1, Math.min(boundsW, boundsH));
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const pixels = Math.max(1, Math.round(side * dpr));
-      if (canvas.width !== pixels || canvas.height !== pixels) {
-        canvas.width = pixels;
-        canvas.height = pixels;
-      }
+    const paint = (animate: boolean) => {
+      if (!width || !height) return;
       if (!diskColor || !particleColor) resolveColors();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, side, side);
       ctx.fillStyle = diskColor;
-      ctx.fillRect(0, 0, side, side);
-      const center = side / 2;
-      const radius = side * 0.488;
-      const particleRadius = 1;
+      ctx.fillRect(0, 0, width, height);
+      const step =
+        recordingRef.current && analyserRef.current ? stepVibration : stepRest;
       ctx.fillStyle = particleColor;
       ctx.beginPath();
       for (const particle of particles) {
-        const x = center + particle.x * radius;
-        const y = center + particle.y * radius;
-        ctx.moveTo(x + particleRadius, y);
-        ctx.arc(x, y, particleRadius, 0, Math.PI * 2);
+        if (animate) step(particle);
+        ctx.moveTo(particle.x + dotRadius, particle.y);
+        ctx.arc(particle.x, particle.y, dotRadius, 0, Math.PI * 2);
       }
       ctx.fill();
+    };
+
+    const resize = () => {
+      const rect = parent.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = Math.max(1, rect.width);
+      height = Math.max(1, rect.height);
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cx = width / 2;
+      cy = height / 2;
+      radius = Math.min(width, height) * 0.488;
+      dotRadius = Math.min(1.6, Math.max(0.9, Math.min(width, height) * 0.0035));
+      particles.length = 0;
+      rebuildParticles();
+      if (reduceMotion) {
+        for (let i = 0; i < 90; i++) particles.forEach(stepVibration);
+      }
+      paint(false);
     };
 
     const updateReadout = (force = false) => {
@@ -255,12 +324,9 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     const drawFrame = () => {
       frame++;
       readAudio();
-      advanceParticles();
-      paint();
+      paint(true);
       updateReadout();
     };
-
-    advanceParticles(150);
 
     const scheduleLoop = () => {
       if (cancelled || reduceMotion || loopRunning) return;
@@ -280,7 +346,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const shouldRun = reduceMotion && recordingRef.current && analyserRef.current;
       if (shouldRun && !readoutTimer) {
         readoutTimer = window.setInterval(() => {
-          frame++;
+          frame += 3;
           readAudio();
           updateReadout(true);
         }, 400);
@@ -296,7 +362,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       if (reduceMotion) {
         cancelAnimationFrame(rafId);
         loopRunning = false;
-        paint();
+        paint(false);
       } else {
         scheduleLoop();
       }
@@ -306,7 +372,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
 
     const syncTheme = () => {
       resolveColors();
-      paint();
+      paint(false);
     };
     const themeObserver = new MutationObserver(syncTheme);
     themeObserver.observe(document.documentElement, {
@@ -314,13 +380,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       attributeFilter: ["data-theme"]
     });
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      const rect = entries.at(-1)?.contentRect;
-      if (rect?.width) {
-        boundsW = rect.width;
-        boundsH = rect.height;
-      }
-      paint();
+    const resizeObserver = new ResizeObserver(() => {
+      resize();
     });
     resizeObserver.observe(parent);
 
@@ -329,9 +390,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     });
     intersectionObserver.observe(parent);
 
+    resize();
+
     kickLoopRef.current = () => {
       if (reduceMotion) {
-        paint();
+        paint(false);
         syncReadoutTimer();
       } else {
         scheduleLoop();
@@ -359,5 +422,5 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     kickLoopRef.current?.();
   }, [recording, analyser]);
 
-  return <canvas ref={canvasRef} className={className} width={W} height={W} aria-hidden />;
+  return <canvas ref={canvasRef} className={className} aria-hidden />;
 }
