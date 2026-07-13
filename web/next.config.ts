@@ -12,6 +12,8 @@ const allowedDevOrigins = (process.env.NEXT_ALLOWED_DEV_ORIGINS ?? "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const proxyApiTarget = process.env.BENCH_PROXY_API?.replace(/\/$/, "");
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // Without this, Next 16 blocks /_next/* dev resources cross-origin, so the page
@@ -21,6 +23,13 @@ const nextConfig: NextConfig = {
   // No rewrites needed — FastAPI allows CORS from the browser.
   // Playground routes go through Next.js route handlers (web/app/api/**) so provider
   // API keys stay server-side and never reach the browser.
+  ...(proxyApiTarget
+    ? {
+        async rewrites() {
+          return [{ source: "/proxy-api/:path*", destination: `${proxyApiTarget}/:path*` }];
+        },
+      }
+    : {}),
 };
 
 export default nextConfig;
