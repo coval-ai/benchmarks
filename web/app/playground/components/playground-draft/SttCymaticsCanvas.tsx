@@ -507,7 +507,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       if (cancelled || reduceMotion || loopRunning) return;
       loopRunning = true;
       const step = () => {
-        if (cancelled) {
+        if (cancelled || reduceMotion) {
           loopRunning = false;
           return;
         }
