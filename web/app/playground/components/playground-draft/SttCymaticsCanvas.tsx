@@ -29,8 +29,7 @@ const MODES = [
   [4, 8],
   [4, 9]
 ] as const;
-const IDLE_MODES = [3, 0, 2, 5, 7, 10, 13, 16, 19] as const;
-const IDLE_MODE_FRAMES = 720;
+const DEFAULT_MODE = 3;
 
 type Props = {
   className?: string;
@@ -42,9 +41,6 @@ type Props = {
 type Particle = {
   x: number;
   y: number;
-  vx: number;
-  vy: number;
-  phase: number;
 };
 
 function seededRandom(seed: number) {
@@ -60,27 +56,18 @@ function createParticle(random: () => number): Particle {
   const radius = Math.sqrt(random()) * 0.965;
   return {
     x: Math.cos(angle) * radius,
-    y: Math.sin(angle) * radius,
-    vx: 0,
-    vy: 0,
-    phase: random() * Math.PI * 2
+    y: Math.sin(angle) * radius
   };
 }
 
-function chladniForce(x: number, y: number, m: number, n: number) {
+function chladniValue(x: number, y: number, m: number, n: number) {
   const pi = Math.PI;
-  const mx = m * pi * x;
-  const my = m * pi * y;
-  const nx = n * pi * x;
-  const ny = n * pi * y;
-  const cmx = Math.cos(mx);
-  const cmy = Math.cos(my);
-  const cnx = Math.cos(nx);
-  const cny = Math.cos(ny);
-  const field = cnx * cmy - cmx * cny;
-  const dx = -n * pi * Math.sin(nx) * cmy + m * pi * Math.sin(mx) * cny;
-  const dy = -m * pi * cnx * Math.sin(my) + n * pi * cmx * Math.sin(ny);
-  return { x: -field * dx, y: -field * dy };
+  const nx = (x + 1) * 0.5;
+  const ny = (y + 1) * 0.5;
+  return (
+    Math.sin(pi * n * nx) * Math.sin(pi * m * ny) +
+    Math.sin(pi * m * nx) * Math.sin(pi * n * ny)
+  );
 }
 
 export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }: Props) {
@@ -118,8 +105,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
-    let modeIndex: number = IDLE_MODES[0];
-    let idleModeIndex = 0;
+    let modeIndex = DEFAULT_MODE;
     let candidateMode: number = modeIndex;
     let candidateFrames = 0;
     let boundsW = 0;
@@ -204,37 +190,19 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
 
     const advanceParticles = (steps = 1) => {
       const active = recordingRef.current && analyserRef.current;
-      if (!active && frame > 0 && frame % IDLE_MODE_FRAMES === 0) {
-        idleModeIndex = (idleModeIndex + 1) % IDLE_MODES.length;
-        modeIndex = IDLE_MODES[idleModeIndex]!;
-      }
       const [modeM, modeN] = MODES[modeIndex]!;
-      const vibration = active ? 0.00035 + envelope * 0.0024 : 0.0002;
-      const modeScale = Math.min(1.4, 5 / modeN);
-      const attraction = (active ? 0.0002 + envelope * 0.00016 : 0.00022) * modeScale;
-      const damping = active ? 0.91 : 0.9;
+      const vibration = active ? 0.008 + envelope * 0.024 : 0.02;
 
       for (let step = 0; step < steps; step++) {
         for (const particle of particles) {
-          const force = chladniForce(particle.x, particle.y, modeM, modeN);
-          const pulse = Math.sin(frame * 0.035 + particle.phase);
-          particle.vx =
-            particle.vx * damping + force.x * attraction + (random() - 0.5) * vibration * (1 + pulse * 0.25);
-          particle.vy =
-            particle.vy * damping + force.y * attraction + (random() - 0.5) * vibration * (1 + pulse * 0.25);
-          particle.x += particle.vx;
-          particle.y += particle.vy;
+          const value = chladniValue(particle.x, particle.y, modeM, modeN);
+          const amplitude = Math.max(0.002, vibration * Math.abs(value));
+          particle.x += (random() * 2 - 1) * amplitude * 2;
+          particle.y += (random() * 2 - 1) * amplitude * 2;
           const radius = Math.hypot(particle.x, particle.y);
-          if (radius > 0.978) {
-            const nx = particle.x / radius;
-            const ny = particle.y / radius;
-            particle.x = nx * 0.976;
-            particle.y = ny * 0.976;
-            const outward = particle.vx * nx + particle.vy * ny;
-            if (outward > 0) {
-              particle.vx -= nx * outward * 1.8;
-              particle.vy -= ny * outward * 1.8;
-            }
+          if (radius > 1) {
+            particle.x /= radius;
+            particle.y /= radius;
           }
         }
       }
@@ -267,14 +235,17 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       ctx.fillRect(0, 0, side, side);
       const center = side / 2;
       const radius = side * 0.488;
-      const size = Math.max(0.8, side / 225);
+      const particleRadius = Math.max(0.55, side / 300);
       ctx.fillStyle = particleColor;
       ctx.globalAlpha = 0.62 + envelope * 0.2;
+      ctx.beginPath();
       for (const particle of particles) {
         const x = center + particle.x * radius;
         const y = center + particle.y * radius;
-        ctx.fillRect(x - size / 2, y - size / 2, size, size);
+        ctx.moveTo(x + particleRadius, y);
+        ctx.arc(x, y, particleRadius, 0, Math.PI * 2);
       }
+      ctx.fill();
       ctx.globalAlpha = 1;
     };
 
