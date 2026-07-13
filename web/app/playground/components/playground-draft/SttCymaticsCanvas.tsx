@@ -414,9 +414,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       const el = readoutRef?.current;
       if (!el || frame % 9 !== 0) return;
       if (recordingRef.current && analyserRef.current) {
-        const db = level > 0 ? Math.max(-60, Math.round(20 * Math.log10(level))) : -60;
+        // dB above the adaptive room noise floor — silence reads 0, voice reads positive.
+        const db = Math.max(0, Math.round(20 * Math.log10(level / Math.max(noiseFloor, 1e-4))));
         const speaking = pitchHz > 0 && (voiceActive || unvoicedFrames < 40);
-        el.textContent = `${db} dB · ${speaking ? Math.round(pitchHz / 5) * 5 : "—"} Hz`;
+        el.textContent = `+${db} dB · ${speaking ? Math.round(pitchHz / 5) * 5 : "—"} Hz`;
       } else {
         el.textContent = "— dB · — Hz";
       }
