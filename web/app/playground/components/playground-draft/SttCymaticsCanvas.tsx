@@ -30,6 +30,9 @@ const MODES = [
   [4, 9]
 ] as const;
 const DEFAULT_MODE = 3;
+const VOICE_MODES = [3, 7, 11, 13, 16, 19, 8, 14, 5, 10] as const;
+const MODE_HOLD_FRAMES = 90;
+const MODE_ADVANCE_FRAMES = 180;
 
 type Props = {
   className?: string;
@@ -108,6 +111,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let modeIndex = DEFAULT_MODE;
     let candidateMode: number = modeIndex;
     let candidateFrames = 0;
+    let pitchTone = 0;
+    let modeOffset = 0;
+    let lastModeChangeFrame = -MODE_ADVANCE_FRAMES;
+    let settleBoost = 0;
     let boundsW = 0;
     let boundsH = 0;
     let frame = 0;
@@ -118,6 +125,18 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let inView = true;
     let diskColor = "";
     let particleColor = "";
+
+    const voiceMode = () => {
+      const pitchBand = Math.round(pitchTone * (VOICE_MODES.length - 1));
+      return VOICE_MODES[(pitchBand + modeOffset) % VOICE_MODES.length]!;
+    };
+
+    const setMode = (nextMode: number) => {
+      if (nextMode === modeIndex) return;
+      modeIndex = nextMode;
+      lastModeChangeFrame = frame;
+      settleBoost = 18;
+    };
 
     const readAudio = () => {
       const node = recordingRef.current ? analyserRef.current : null;
@@ -172,26 +191,36 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
             1,
             Math.max(0, Math.log(pitchHz / 90) / Math.log(320 / 90))
           );
-          const nextMode = Math.round(tone * (MODES.length - 1));
+          pitchTone += (tone - pitchTone) * 0.25;
+          const nextMode = voiceMode();
           if (candidateMode === nextMode) {
             candidateFrames++;
           } else {
             candidateMode = nextMode;
             candidateFrames = 1;
           }
-          if (candidateFrames >= 4) modeIndex = candidateMode;
+          if (candidateFrames >= 4 && frame - lastModeChangeFrame >= MODE_HOLD_FRAMES) {
+            setMode(candidateMode);
+          }
         } else {
           pitchAge++;
         }
       } else {
         pitchAge++;
       }
+
+      if (envelope > 0.08 && frame - lastModeChangeFrame >= MODE_ADVANCE_FRAMES) {
+        modeOffset = (modeOffset + 1) % VOICE_MODES.length;
+        candidateMode = voiceMode();
+        candidateFrames = 0;
+        setMode(candidateMode);
+      }
     };
 
     const advanceParticles = (steps = 1) => {
       const active = recordingRef.current && analyserRef.current;
       const [modeM, modeN] = MODES[modeIndex]!;
-      const vibration = active ? 0.008 + envelope * 0.024 : 0.02;
+      const vibration = active ? 0.014 + envelope * 0.008 : 0.02;
 
       for (let step = 0; step < steps; step++) {
         for (const particle of particles) {
@@ -237,7 +266,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const radius = side * 0.488;
       const particleRadius = Math.max(0.55, side / 300);
       ctx.fillStyle = particleColor;
-      ctx.globalAlpha = 0.62 + envelope * 0.2;
+      ctx.globalAlpha = 0.72 + envelope * 0.2;
       ctx.beginPath();
       for (const particle of particles) {
         const x = center + particle.x * radius;
@@ -263,7 +292,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     const drawFrame = () => {
       frame++;
       readAudio();
-      advanceParticles();
+      advanceParticles(settleBoost > 0 ? 6 : 1);
+      if (settleBoost > 0) settleBoost--;
       paint();
       updateReadout();
     };
