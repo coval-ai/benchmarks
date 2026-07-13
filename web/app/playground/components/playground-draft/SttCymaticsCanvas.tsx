@@ -66,15 +66,14 @@ const WEIGHT_LERP_REC = 0.085;
 const WEIGHT_LERP_IDLE = 0.045;
 const LEVELS = [0, 0.24, -0.24, 0.52, -0.52];
 const LEVEL_ALPHA = [0.8, 0.38, 0.38, 0.18, 0.18];
-/** Level band skips the lowest bins (wind/rumble) and caps at speech energy. */
+/** Centroid band skips the lowest bins (wind/rumble). */
 const BAND_LO = 120;
-const BAND_HI = 4000;
 /** Spectral-centroid range mapped across the mode table — low voice → low modes, high → high. */
 const TONE_LO = 160;
 const TONE_HI = 900;
 const CENTROID_BAND_HI = 2000;
-/** Voice gate above the adaptive noise floor — ambient noise below this never drives the plate. */
-const GATE = 0.06;
+/** Voice gate (signal RMS) above the adaptive noise floor — ambient noise never drives the plate. */
+const GATE = 0.02;
 
 function resolvedDiskRgb(diskProbe: HTMLElement): string {
   const rgb = getComputedStyle(diskProbe).backgroundColor;
@@ -135,6 +134,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     const cosA = new Float32Array(P);
     const cosB = new Float32Array(P);
     let freqData: Uint8Array<ArrayBuffer> | null = null;
+    let timeData: Uint8Array<ArrayBuffer> | null = null;
     let amp = 0;
     let ripplePhase = 0;
     let centroid = 0;
@@ -165,26 +165,32 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           freqData = new Uint8Array(an.frequencyBinCount);
         }
         an.getByteFrequencyData(freqData);
+        if (!timeData || timeData.length !== an.fftSize) {
+          timeData = new Uint8Array(an.fftSize);
+        }
+        an.getByteTimeDomainData(timeData);
+        // True signal RMS — honest loudness for the dB readout and the voice gate; the FFT
+        // band-average reads far too low (speech spread across bins) to gate against.
+        let sq = 0;
+        for (let i = 0; i < timeData.length; i++) {
+          const v = (timeData[i]! - 128) / 128;
+          sq += v * v;
+        }
+        level = Math.sqrt(sq / timeData.length);
         const binHz = an.context.sampleRate / an.fftSize;
         const lo = Math.max(1, Math.ceil(BAND_LO / binHz));
-        const hi = Math.min(freqData.length - 1, Math.floor(BAND_HI / binHz));
-        const cHi = Math.min(hi, Math.floor(CENTROID_BAND_HI / binHz));
-        let sum = 0;
+        const cHi = Math.min(freqData.length - 1, Math.floor(CENTROID_BAND_HI / binHz));
         let eSum = 0;
         let fSum = 0;
-        for (let i = lo; i <= hi; i++) {
+        for (let i = lo; i <= cHi; i++) {
           const v = freqData[i]!;
-          sum += v;
-          if (i <= cHi) {
-            eSum += v;
-            fSum += v * i * binHz;
-          }
+          eSum += v;
+          fSum += v * i * binHz;
         }
-        level = sum / (hi - lo + 1) / 255;
         // Adaptive noise floor: falls fast, creeps up slowly — steady wind/room tone gets absorbed.
         noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
-        ampTarget = Math.min(1, voiced * 6);
+        ampTarget = Math.min(1, voiced * 7);
         // Voice-activity hysteresis: real speech wakes the plate, a beat of quiet calms it
         // back to the idle drift and arms the next design swap — background noise does neither.
         if (ampTarget > 0.2) {
