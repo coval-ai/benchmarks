@@ -64,4 +64,12 @@ export const methodologyChanges: MethodologyChange[] = [
     detail:
       "The STT benchmark corpus moved from LibriSpeech test-clean to the clean English FLEURS subset of WildASR (stt-v2), loudness-normalized to a −20 dBFS RMS target. LibriSpeech is heavily represented in provider training data, which compressed WER differences between engines. WER values before and after are not comparable; latency metrics shift with the new clip mix. The runner also now streams exact PCM frames to STT providers (previously the WAV container header was included at stream start).",
   },
+  {
+    date: "2026-07-13",
+    time: "16:00:00-07:00",
+    metrics: ["wer", "ttft", "ttfs"],
+    title: "STT benchmark now runs two datasets: easy and hard",
+    detail:
+      "Each cycle now benchmarks two STT datasets as separate runs, 10 clips sampled from each: LibriSpeech test-clean (stt-v1, studio-read speech) and a new conversational set built from pipecat's stt-benchmark data (stt-v3, 897 spontaneous voice-agent clips with model-generated reference transcripts). Headline stats pool both, so average WER becomes the blend of an easy and a hard set; the WildASR clean set (stt-v2) is retired from the schedule. WER values before and after are not comparable; latency metrics shift with the new clip mix.",
+  },
 ];

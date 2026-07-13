@@ -66,7 +66,10 @@ publishes a data license, record it here and in the manifest.
 
 ### `stt-v2.json`
 
-**What we benchmark.** STT providers are scored against a frozen 50-utterance
+**Retired from the scheduled mix** (replaced by the `stt-v1` + `stt-v3` pair);
+retained for reproducibility of runs recorded against it. Never overwrite.
+
+**What we benchmark.** STT providers were scored against a frozen 50-utterance
 sample of the `environment_degradation__en__fleurs_clean_en` split of
 [bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR) — the clean
 (undegraded) English baseline of WildASR's environment-degradation suite,
@@ -120,8 +123,8 @@ License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
 
 ### `stt-v1.json`
 
-**Superseded by `stt-v2`** — retained for historical reproducibility of runs
-recorded against it. Never overwrite.
+**In the scheduled mix** as the easy set alongside `stt-v3` (it was retired in
+favor of `stt-v2` from 2026-07-08 to 2026-07-13). Never overwrite.
 
 **What we benchmark.** STT providers are scored against a frozen 50-utterance
 sample of [LibriSpeech `test-clean`](https://www.openslr.org/12/) (OpenSLR-12).
