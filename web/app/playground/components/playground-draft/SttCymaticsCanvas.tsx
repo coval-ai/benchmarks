@@ -2,16 +2,43 @@
 
 import { type RefObject, useEffect, useRef } from "react";
 
-const MODES = [
-  [3, 1],
-  [5, 1],
-  [5, 2],
-  [7, 2],
-  [8, 3],
-  [9, 4],
-  [10, 4]
+const FAMILIES = [
+  [
+    [2, 1, 0],
+    [3, 1, 0]
+  ],
+  [
+    [3, 2, 0],
+    [4, 1, 0]
+  ],
+  [
+    [4, 3, 0],
+    [5, 2, 0],
+    [5, 2, 1]
+  ],
+  [
+    [5, 3, 0],
+    [5, 4, 0]
+  ],
+  [
+    [7, 3, 1],
+    [7, 2, 0],
+    [6, 5, 0]
+  ],
+  [
+    [7, 4, 1],
+    [8, 5, 0],
+    [8, 3, 0]
+  ],
+  [
+    [9, 5, 1],
+    [9, 6, 1],
+    [8, 7, 0],
+    [10, 7, 1],
+    [11, 8, 1]
+  ]
 ] as const;
-const DEFAULT_MODE = 1;
+const DEFAULT_SLOT = 2;
 const PITCH_MIN = 70;
 const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
@@ -67,7 +94,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let dotRadius = 1;
     let vStr = REST_VSTR;
     let kick = 0;
-    let modeIndex = DEFAULT_MODE;
+    let slotIndex = DEFAULT_SLOT;
+    const variantSteps = new Uint8Array(FAMILIES.length);
+    let curM: number = FAMILIES[DEFAULT_SLOT][0][0];
+    let curN: number = FAMILIES[DEFAULT_SLOT][0][1];
+    let curKind: number = FAMILIES[DEFAULT_SLOT][0][2];
     let timeData: Uint8Array<ArrayBuffer> | null = null;
     let wave: Float32Array | null = null;
     const lagScores = new Float32Array(512);
@@ -123,9 +154,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const span = 2 * radius;
       const nx = (particle.x - (cx - radius)) / span;
       const ny = (particle.y - (cy - radius)) / span;
-      const mode = MODES[modeIndex]!;
-      const m = mode[0];
-      const n = mode[1];
+      const m = curM;
+      const n = curN;
       const pi = Math.PI;
       const snx = Math.sin(pi * n * nx);
       const cnx = Math.cos(pi * n * nx);
@@ -135,9 +165,18 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const cny = Math.cos(pi * n * ny);
       const smy = Math.sin(pi * m * ny);
       const cmy = Math.cos(pi * m * ny);
-      const value = snx * smy + smx * sny;
-      const dfdx = pi * (n * cnx * smy + m * cmx * sny);
-      const dfdy = pi * (m * snx * cmy + n * smx * cny);
+      let value: number;
+      let dfdx: number;
+      let dfdy: number;
+      if (curKind === 0) {
+        value = cnx * cmy - cmx * cny;
+        dfdx = pi * (m * smx * cny - n * snx * cmy);
+        dfdy = pi * (n * cmx * sny - m * cnx * smy);
+      } else {
+        value = snx * smy + smx * sny;
+        dfdx = pi * (n * cnx * smy + m * cmx * sny);
+        dfdy = pi * (m * snx * cmy + n * smx * cny);
+      }
       const amplitude = Math.max(0.002, vStr * Math.abs(value));
       const drive = Math.min(1.6, vStr * 50);
       const driftScale = Math.min(0.006, 0.00016 * drive * Math.abs(value) * Math.hypot(dfdx, dfdy));
@@ -173,7 +212,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         pendingCount = 0;
         swapCooldown = 0;
         settleFrames = 0;
-        modeIndex = DEFAULT_MODE;
+        slotIndex = DEFAULT_SLOT;
+        curM = FAMILIES[DEFAULT_SLOT][0][0];
+        curN = FAMILIES[DEFAULT_SLOT][0][1];
+        curKind = FAMILIES[DEFAULT_SLOT][0][2];
         kick = 0;
         vStr = REST_VSTR;
         return;
@@ -240,7 +282,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
             1,
             Math.max(0, Math.log(pitchHz / TONE_LO) / Math.log(TONE_HI / TONE_LO))
           );
-          const target = t * (MODES.length - 1);
+          const target = t * (FAMILIES.length - 1);
           const idx = Math.round(target);
           if (idx === pendingIdx) {
             pendingCount++;
@@ -250,12 +292,18 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
           }
           if (swapCooldown > 0) swapCooldown--;
           if (
-            pendingIdx !== modeIndex &&
+            pendingIdx !== slotIndex &&
             pendingCount >= 12 &&
             swapCooldown === 0 &&
-            Math.abs(target - modeIndex) > 0.75
+            Math.abs(target - slotIndex) > 0.75
           ) {
-            modeIndex = pendingIdx;
+            slotIndex = pendingIdx;
+            const family = FAMILIES[slotIndex]!;
+            const variant = family[variantSteps[slotIndex]! % family.length]!;
+            variantSteps[slotIndex] = (variantSteps[slotIndex]! + 1) % family.length;
+            curM = variant[0];
+            curN = variant[1];
+            curKind = variant[2];
             kick = 0.02;
             swapCooldown = 20;
             settleFrames = 110;
