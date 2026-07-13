@@ -123,6 +123,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let readoutTimer = 0;
     let cancelled = false;
     let loopRunning = false;
+    let loopGen = 0;
     let inView = true;
     let diskColor = "";
     let particleColor = "";
@@ -393,9 +394,12 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     const scheduleLoop = () => {
       if (cancelled || reduceMotion || loopRunning) return;
       loopRunning = true;
+      const gen = ++loopGen;
       const step = () => {
+        if (gen !== loopGen) return;
         if (cancelled || reduceMotion) {
           loopRunning = false;
+          loopGen++;
           return;
         }
         if (inView) drawFrame();
@@ -424,6 +428,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       if (reduceMotion) {
         cancelAnimationFrame(rafId);
         loopRunning = false;
+        loopGen++;
         paint(false);
       } else {
         scheduleLoop();
