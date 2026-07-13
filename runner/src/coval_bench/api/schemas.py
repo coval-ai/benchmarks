@@ -50,6 +50,7 @@ class ResultOut(BaseModel):
     model: str
     voice: str | None
     benchmark: Literal["STT", "TTS", "S2S"]
+    dataset_id: str
     metric_type: str
     metric_value: float | None
     metric_units: str | None

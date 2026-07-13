@@ -55,11 +55,15 @@ router = APIRouter(tags=["results"])
 # The canonical FE-facing param is ``metric_type`` (plain ``str``).
 MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS", "RTF", "AUDIO_TO_FINAL", "V2V"]
 
+# TTS results are always tts-v1; a 'both' run's row records only the STT dataset id.
+_DATASET_ID_SQL = "CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END"
+
 # Base SELECT used by all three query paths.
-# S608 false-positive: the interpolated fragment is a fixed constant; user
+# S608 false-positive: the interpolated fragments are fixed constants; user
 # values only ever bind through %(param)s placeholders.
 _SELECT = (
     "SELECT r.id, r.run_id, r.provider, r.model, r.voice, r.benchmark,"  # noqa: S608
+    f" {_DATASET_ID_SQL} AS dataset_id,"
     " r.metric_type, r.metric_value, r.metric_units, r.audio_filename,"
     " r.created_at,"
     f" {SCHEDULED_AT_BUCKET_SQL} AS scheduled_at,"
@@ -88,6 +92,10 @@ async def list_results(
         description="Filter on metric_type (e.g. WER, TTFA, TTFT, RTF). Canonical FE-facing name.",
     ),
     benchmark: BenchmarkLiteral | None = Query(default=None),
+    dataset: str | None = Query(
+        default=None,
+        description="Filter on the dataset id the result was measured against (e.g. stt-v2).",
+    ),
     window: WindowLiteral | None = Query(
         default=None,
         description=(
@@ -184,6 +192,9 @@ async def list_results(
     if benchmark is not None:
         conditions.append("r.benchmark = %(benchmark)s")
         params["benchmark"] = benchmark
+    if dataset is not None:
+        conditions.append(f"{_DATASET_ID_SQL} = %(dataset)s")
+        params["dataset"] = dataset
 
     # -- Run-status filter (include_failed controls PARTIAL/FAILED run inclusion)
     if not include_failed:
@@ -221,6 +232,7 @@ async def list_results(
         {
             "provider": provider,
             "benchmark": benchmark,
+            "dataset": dataset,
             "metric_type": resolved_metric,
             "window": window,
             "has_since_filter": since is not None,
