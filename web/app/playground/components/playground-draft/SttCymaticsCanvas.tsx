@@ -77,9 +77,10 @@ const TONE_HI = 320;
 /** Voice gate (signal RMS) above the adaptive noise floor — ambient noise never drives the plate. */
 const GATE = 0.02;
 /**
- * Coval symbol — verbatim path from the brand site's coval-symbol.svg (482×482 viewBox).
- * Rasterized once into a signed-distance field so the contour renderer draws the mark itself:
- * silence resolves the plate into the logo, speech dissolves it back into Chladni designs.
+ * Coval symbol — verbatim path from public/coval-symbol.svg (482×482 viewBox), inlined so it
+ * rasterizes synchronously into a Path2D. Keep in sync with that asset, which is the in-repo
+ * source of truth for the mark. The signed-distance field built from it lets the contour
+ * renderer draw the mark itself: silence resolves the plate into the logo, speech dissolves it.
  */
 const LOGO_PATH =
   "M118.185 7.71157C199.45 -2.57057 281.688 -2.57048 362.953 7.71157C420.672 15.0146 466.124 60.4662 473.427 118.185C483.709 199.45 483.709 281.688 473.427 362.953C466.123 420.671 420.671 466.124 362.953 473.427C281.688 483.709 199.45 483.709 118.185 473.427C60.4672 466.124 15.0153 420.671 7.71147 362.953C-2.57058 281.688 -2.5704 199.45 7.71147 118.185C15.0144 60.4667 60.4668 15.0151 118.185 7.71157ZM240.572 404.537C236.053 404.537 232.708 405.538 229.701 406.789C229.339 406.944 228.973 407.102 228.603 407.265C227.722 407.655 226.855 408.043 225.994 408.442C222.067 410.263 217.719 412.454 213.068 414.944C200.691 421.572 187.442 429.488 175.276 436.591L173.182 437.813C172.203 438.383 171.241 438.961 170.279 439.517C169.857 439.76 169.421 439.989 168.988 440.235L155.055 448.277C211.95 453.442 269.194 453.442 326.089 448.277L312.348 440.343C311.85 440.06 311.349 439.796 310.865 439.517C309.732 438.862 308.592 438.187 307.436 437.513L305.857 436.591C293.692 429.489 280.444 421.571 268.07 414.944C263.341 412.412 258.925 410.19 254.946 408.351C254.17 407.991 253.385 407.646 252.592 407.293C252.197 407.119 251.806 406.949 251.421 406.784C248.419 405.536 245.081 404.537 240.572 404.537ZM108.169 281.256C104.361 276.724 97.2366 277.241 94.1223 282.275L83.5509 299.343C78.0887 308.827 72.5221 318.189 67.971 326.072C60.7477 338.583 53.737 353.487 52.1647 368.669C50.6801 383.013 53.9485 398.047 68.5199 412.618C83.0912 427.189 98.1206 430.458 112.464 428.974C127.647 427.402 142.554 420.391 155.067 413.167C162.963 408.608 172.345 403.031 181.846 397.559L181.761 397.565L198.841 386.999C203.874 383.886 204.394 376.762 199.865 372.953L189.367 364.13C162.76 342.607 138.501 318.341 116.98 291.732L108.169 281.256ZM386.982 282.275C383.868 277.241 376.744 276.724 372.936 281.256L364.86 290.86C342.961 318.065 318.198 342.832 291.001 364.741L281.239 372.953C276.708 376.761 277.224 383.885 282.258 386.999L299.286 397.559C308.791 403.032 318.179 408.607 326.077 413.167C338.589 420.391 353.492 427.402 368.674 428.974C383.018 430.458 398.052 427.19 412.624 412.618C427.195 398.047 430.458 383.012 428.973 368.669C427.401 353.487 420.396 338.583 413.173 326.072C408.607 318.164 403.021 308.767 397.542 299.253L386.982 282.275ZM265.263 134.807C250.73 123.54 230.408 123.539 215.875 134.807C185.557 158.315 158.32 185.551 134.812 215.869C123.544 230.403 123.545 250.724 134.812 265.258C158.32 295.576 185.557 322.813 215.875 346.32C230.409 357.59 250.729 357.589 265.263 346.32C295.582 322.812 322.818 295.576 346.326 265.258C357.594 250.724 357.595 230.403 346.326 215.869C322.818 185.552 295.581 158.314 265.263 134.807ZM32.8554 154.97C27.6819 211.913 27.6826 269.208 32.8554 326.151L39.3692 314.872C40.1347 313.487 40.8805 312.143 41.6216 310.86C49.4015 297.385 58.6446 282.167 66.194 268.07C69.7696 261.393 72.7369 255.343 74.847 250.255C75.8718 247.545 76.6464 244.502 76.6466 240.561C76.6466 236.694 75.9043 233.69 74.9092 231.019C72.7959 225.902 69.8031 219.802 66.194 213.063C58.6444 198.965 49.4015 183.748 41.6216 170.273C40.8164 168.878 39.9987 167.418 39.1655 165.904L32.8554 154.97ZM436.602 175.344C429.496 187.516 421.577 200.678 414.944 213.063C412.873 216.93 411.006 220.589 409.387 223.968C407.304 228.828 404.548 233.099 404.548 240.606C404.548 245.084 405.537 248.407 406.772 251.392C406.959 251.829 407.146 252.274 407.344 252.722C407.654 253.418 407.961 254.106 408.278 254.788C410.13 258.808 412.378 263.279 414.944 268.07C422.494 282.168 431.737 297.384 439.517 310.86C439.924 311.566 440.317 312.301 440.733 313.039L448.277 326.1C453.442 269.216 453.443 211.984 448.283 155.101L436.602 175.344ZM112.464 52.1592C98.1207 50.6751 83.0912 53.9435 68.5199 68.5144C53.949 83.0853 50.681 98.1152 52.1647 112.458C53.7362 127.642 60.7471 142.549 67.971 155.061C72.5227 162.945 78.0881 172.294 83.5509 181.778L94.1223 198.858C97.2364 203.892 104.36 204.409 108.169 199.876L116.98 189.401C138.502 162.79 162.769 138.521 189.379 116.997L199.865 108.186C204.397 104.377 203.875 97.2477 198.841 94.1337L181.761 83.5679C172.261 78.0984 162.963 72.5242 155.067 67.9654C142.554 60.7414 127.647 53.7306 112.464 52.1592ZM412.624 68.5144C398.052 53.943 383.018 50.6747 368.674 52.1592C353.492 53.7308 338.589 60.742 326.077 67.9654C318.182 72.5237 308.798 78.0976 299.298 83.5679L282.258 94.1337C277.224 97.2478 276.707 104.378 281.239 108.186L291.018 116.397C318.191 138.288 342.93 163.038 364.815 190.216L372.936 199.876C376.744 204.409 383.868 203.892 386.982 198.858L397.548 181.778C403.026 172.264 408.608 162.968 413.173 155.061C420.396 142.549 427.402 127.641 428.973 112.458C430.457 98.1155 427.194 83.0849 412.624 68.5144ZM326.19 32.8555C269.253 27.6811 211.964 27.6744 155.027 32.8442L168.179 40.4389C168.89 40.8406 169.597 41.2222 170.279 41.616C171.785 42.486 173.305 43.3908 174.851 44.2929L175.344 44.5758C187.492 51.6687 200.713 59.572 213.068 66.1884C218.135 68.9018 222.839 71.269 227.035 73.1776C227.275 73.2888 227.518 73.3953 227.759 73.5058C228.611 73.8877 229.448 74.2346 230.255 74.5754C233.133 75.7285 236.349 76.6354 240.617 76.6354C244.347 76.6352 247.275 75.9473 249.876 75.0055C255.042 72.8877 261.225 69.854 268.07 66.1884C282.168 58.6387 297.389 49.3963 310.865 41.616C312.572 40.6307 314.369 39.6122 316.253 38.5883L326.19 32.8555Z";
@@ -153,9 +154,13 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     weights[IDLE_DESIGN] = targets[IDLE_DESIGN] = 1;
     const field = new Float32Array(P * P);
     const radius = new Float32Array(P * P);
+    const cos4t = new Float32Array(P * P);
     for (let y = 0; y < P; y++) {
       for (let x = 0; x < P; x++) {
-        radius[y * P + x] = Math.hypot((x / GRID) * 2 - 1, (y / GRID) * 2 - 1);
+        const px = (x / GRID) * 2 - 1;
+        const py = (y / GRID) * 2 - 1;
+        radius[y * P + x] = Math.hypot(px, py);
+        cos4t[y * P + x] = Math.cos(4 * Math.atan2(py, px));
       }
     }
     // Rasterize the mark once, then chamfer-transform into a signed distance field whose zero
@@ -265,8 +270,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           sq += v * v;
         }
         level = Math.sqrt(sq / timeData.length);
-        // Adaptive noise floor: falls fast, creeps up slowly — steady wind/room tone gets absorbed.
-        noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
+        // Adaptive noise floor: falls fast, creeps up slowly — steady wind/room tone gets
+        // absorbed, but the rise all but freezes while voice is active so a held vowel or
+        // sung note is never mistaken for room noise mid-utterance.
+        noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : voiceActive ? 0.0008 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
         ampTarget = Math.min(1, voiced * 7);
         // Voice-activity hysteresis on a RAW envelope (never gated, unlike `amp`), so waking
@@ -286,9 +293,13 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
             if (silenceFrames > 50) voiceActive = false;
           }
         }
+        const onsetAmp = ampTarget;
         if (!voiceActive) ampTarget = 0;
         let pitchConfident = false;
-        if ((voiceActive || ampTarget > 0.08) && wave) {
+        // Pre-gate amplitude keeps pitch tracking alive during the wake window, so the first
+        // design swap after activation already knows the register. Scanning at half rate is
+        // plenty for vocal pitch and halves the autocorrelation cost.
+        if ((voiceActive || onsetAmp > 0.08) && wave && frame % 2 === 0) {
           // Autocorrelation pitch (F0) — tracks the actual voice fundamental, so a low chest
           // voice and a high girly voice read ~110 Hz vs ~250 Hz (a spectral centroid doesn't).
           // Runs whenever active; the confidence check below holds the last pitch through
@@ -399,16 +410,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         sumW += w;
         const [n, m, sign, radial] = DESIGNS[k]!;
         if (radial) {
-          for (let y = 0; y < P; y++) {
-            const py = (y / GRID) * 2 - 1;
-            const row = y * P;
-            for (let x = 0; x < P; x++) {
-              const px = (x / GRID) * 2 - 1;
-              const r = radius[row + x]!;
-              const theta = Math.atan2(py, px);
-              field[row + x]! +=
-                w * Math.cos(Math.PI * (m * r + sign * 0.42 * Math.cos(4 * theta)));
-            }
+          for (let i = 0; i < P * P; i++) {
+            field[i]! += w * Math.cos(Math.PI * (m * radius[i]! + sign * 0.42 * cos4t[i]!));
           }
           continue;
         }
@@ -439,9 +442,18 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       }
     };
 
+    // Layout and theme reads are cached — the ResizeObserver and the prop/theme kick refresh
+    // them — so the per-frame paint never forces a reflow or style recalc.
+    let boundsW = 0;
+    let boundsH = 0;
+    let diskRgb = "";
     const paint = () => {
-      const rect = parent.getBoundingClientRect();
-      const side = Math.max(1, Math.min(rect.width, rect.height));
+      if (boundsW === 0) {
+        const rect = parent.getBoundingClientRect();
+        boundsW = rect.width;
+        boundsH = rect.height;
+      }
+      const side = Math.max(1, Math.min(boundsW, boundsH));
       const dpr = Math.min(window.devicePixelRatio ?? 1, 2);
       const bw = Math.floor(side * dpr);
       if (canvas.width !== bw || canvas.height !== bw) {
@@ -451,10 +463,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const s = side / W;
       ctx.save();
-      ctx.translate((rect.width - side) / 2, (rect.height - side) / 2);
+      ctx.translate((boundsW - side) / 2, (boundsH - side) / 2);
       ctx.scale(s, s);
 
-      ctx.fillStyle = resolvedDiskRgb(diskProbe);
+      if (!diskRgb) diskRgb = resolvedDiskRgb(diskProbe);
+      ctx.fillStyle = diskRgb;
       ctx.fillRect(0, 0, W, W);
 
       const rgb = LINE_RGB[familyRef.current][darkRef.current ? "dark" : "light"];
@@ -467,6 +480,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       ctx.translate(-c, -c);
       ctx.lineWidth = 1.1 / s;
       ctx.lineJoin = "round";
+      const seg = (ax: number, ay: number, sx: number, sy: number) => {
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(sx, sy);
+      };
       for (let li = 0; li < LEVELS.length; li++) {
         const L = LEVELS[li]!;
         ctx.strokeStyle = `rgba(${rgb}, ${LEVEL_ALPHA[li]! * env})`;
@@ -483,46 +500,42 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
             if (idx === 0 || idx === 15) continue;
             const x0 = x * cell;
             const y0 = y * cell;
-            const top: [number, number] = [x0 + (a / (a - b)) * cell, y0];
-            const right: [number, number] = [x0 + cell, y0 + (b / (b - cc)) * cell];
-            const bottom: [number, number] = [x0 + (d / (d - cc)) * cell, y0 + cell];
-            const left: [number, number] = [x0, y0 + (a / (a - d)) * cell];
-            const seg = (p1: [number, number], p2: [number, number]) => {
-              ctx.moveTo(p1[0], p1[1]);
-              ctx.lineTo(p2[0], p2[1]);
-            };
+            const topX = x0 + (a / (a - b)) * cell;
+            const rightY = y0 + (b / (b - cc)) * cell;
+            const bottomX = x0 + (d / (d - cc)) * cell;
+            const leftY = y0 + (a / (a - d)) * cell;
             switch (idx) {
               case 1:
               case 14:
-                seg(left, bottom);
+                seg(x0, leftY, bottomX, y0 + cell);
                 break;
               case 2:
               case 13:
-                seg(bottom, right);
+                seg(bottomX, y0 + cell, x0 + cell, rightY);
                 break;
               case 3:
               case 12:
-                seg(left, right);
+                seg(x0, leftY, x0 + cell, rightY);
                 break;
               case 4:
               case 11:
-                seg(top, right);
+                seg(topX, y0, x0 + cell, rightY);
                 break;
               case 5:
-                seg(top, right);
-                seg(left, bottom);
+                seg(topX, y0, x0 + cell, rightY);
+                seg(x0, leftY, bottomX, y0 + cell);
                 break;
               case 6:
               case 9:
-                seg(top, bottom);
+                seg(topX, y0, bottomX, y0 + cell);
                 break;
               case 7:
               case 8:
-                seg(left, top);
+                seg(x0, leftY, topX, y0);
                 break;
               case 10:
-                seg(left, top);
-                seg(bottom, right);
+                seg(x0, leftY, topX, y0);
+                seg(bottomX, y0 + cell, x0 + cell, rightY);
                 break;
             }
           }
@@ -532,9 +545,9 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       ctx.restore();
     };
 
-    const updateReadout = () => {
+    const updateReadout = (force = false) => {
       const el = readoutRef?.current;
-      if (!el || frame % 9 !== 0) return;
+      if (!el || (!force && frame % 9 !== 0)) return;
       if (recordingRef.current && analyserRef.current) {
         // dB above the adaptive room noise floor — silence reads 0, voice reads positive.
         const db = Math.max(0, Math.round(20 * Math.log10(level / Math.max(noiseFloor, 1e-4))));
@@ -553,6 +566,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       updateReadout();
     };
 
+    let inView = true;
     const scheduleLoop = () => {
       if (cancelled || reduceMotion || loopRunning) return;
       loopRunning = true;
@@ -561,30 +575,64 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           loopRunning = false;
           return;
         }
-        // Idle runs at half rate — the low-energy drift doesn't need 60fps.
-        if (recordingRef.current || frame % 2 === 0) drawFrame();
+        // Idle runs at half rate, and a scrolled-away plate skips the work entirely —
+        // the low-energy drift doesn't need 60fps and an invisible one needs none.
+        if (inView && (recordingRef.current || frame % 2 === 0)) drawFrame();
         else frame++;
         rafId = requestAnimationFrame(step);
       };
       rafId = requestAnimationFrame(step);
     };
 
+    // Reduced motion keeps the plate static but the dB/Hz text is data, not motion — a slow
+    // timer keeps it live while recording.
+    let readoutTimer = 0;
+    const syncReadoutTimer = () => {
+      const shouldRun = reduceMotion && recordingRef.current && analyserRef.current;
+      if (shouldRun && !readoutTimer) {
+        readoutTimer = window.setInterval(() => {
+          readAudio();
+          updateReadout(true);
+        }, 400);
+      } else if (!shouldRun && readoutTimer) {
+        window.clearInterval(readoutTimer);
+        readoutTimer = 0;
+        updateReadout(true);
+      }
+    };
+
     kickLoopRef.current = () => {
-      if (reduceMotion) drawFrame();
-      else scheduleLoop();
+      diskRgb = resolvedDiskRgb(diskProbe);
+      if (reduceMotion) {
+        drawFrame();
+        syncReadoutTimer();
+      } else {
+        scheduleLoop();
+      }
     };
     kickLoopRef.current();
 
-    const ro = new ResizeObserver(() => {
+    const ro = new ResizeObserver((entries) => {
+      const rect = entries[entries.length - 1]?.contentRect;
+      if (rect && rect.width > 0) {
+        boundsW = rect.width;
+        boundsH = rect.height;
+      }
       if (!cancelled) paint();
     });
     ro.observe(parent);
+    const io = new IntersectionObserver((entries) => {
+      inView = entries[entries.length - 1]?.isIntersecting ?? true;
+    });
+    io.observe(parent);
 
     return () => {
       cancelled = true;
       kickLoopRef.current = null;
       cancelAnimationFrame(rafId);
+      if (readoutTimer) window.clearInterval(readoutTimer);
       ro.disconnect();
+      io.disconnect();
       diskProbe.remove();
       loopRunning = false;
     };
