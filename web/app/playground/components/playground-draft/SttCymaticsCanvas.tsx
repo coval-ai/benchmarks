@@ -75,6 +75,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let pendingIdx = -1;
     let pendingCount = 0;
     let swapCooldown = 0;
+    let settleFrames = 0;
     let level = 0;
     let noiseFloor = 0.012;
     let envelope = 0;
@@ -176,6 +177,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         pendingIdx = -1;
         pendingCount = 0;
         swapCooldown = 0;
+        settleFrames = 0;
         modeIndex = DEFAULT_MODE;
         kick = 0;
         vStr = REST_VSTR;
@@ -252,8 +254,9 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
             Math.abs(target - modeIndex) > 0.75
           ) {
             modeIndex = pendingIdx;
-            kick = 0.012;
+            kick = 0.02;
             swapCooldown = 20;
+            settleFrames = 110;
           }
         } else {
           pitchAge++;
@@ -264,6 +267,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
 
       kick *= 0.95;
       vStr = 0.006 + envelope * 0.022 + kick;
+      if (settleFrames > 0) {
+        settleFrames--;
+        vStr = Math.max(vStr, 0.022);
+      }
     };
 
     const resolveColors = () => {
