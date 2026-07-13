@@ -627,6 +627,25 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
+    # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="minimax",
+        model="speech-2.8-hd",
+        voice="English_expressive_narrator",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="minimax",
+        model="speech-2.8-turbo",
+        voice="English_expressive_narrator",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
