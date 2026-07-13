@@ -83,8 +83,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       "position:absolute;width:0;height:0;opacity:0;pointer-events:none;color:var(--color-text-secondary)";
     parent.prepend(diskProbe, particleProbe);
 
-    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let reduceMotion = motionQuery.matches;
+    const motionQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+    let reduceMotion = motionQuery?.matches ?? false;
     const particles: Particle[] = [];
     let width = 0;
     let height = 0;
@@ -427,27 +430,40 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       }
       syncReadoutTimer();
     };
-    motionQuery.addEventListener("change", handleMotionPreference);
+    if (motionQuery) {
+      if (typeof motionQuery.addEventListener === "function") {
+        motionQuery.addEventListener("change", handleMotionPreference);
+      } else {
+        motionQuery.addListener(handleMotionPreference);
+      }
+    }
 
     const syncTheme = () => {
       resolveColors();
       paint(false);
     };
-    const themeObserver = new MutationObserver(syncTheme);
-    themeObserver.observe(document.documentElement, {
+    const themeObserver = typeof MutationObserver === "function" ? new MutationObserver(syncTheme) : null;
+    themeObserver?.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["data-theme"]
     });
 
-    const resizeObserver = new ResizeObserver(() => {
-      resize();
-    });
-    resizeObserver.observe(parent);
+    const resizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(() => {
+            resize();
+          })
+        : null;
+    if (resizeObserver) resizeObserver.observe(parent);
+    else window.addEventListener("resize", resize);
 
-    const intersectionObserver = new IntersectionObserver((entries) => {
-      inView = entries.at(-1)?.isIntersecting ?? true;
-    });
-    intersectionObserver.observe(parent);
+    const intersectionObserver =
+      typeof IntersectionObserver === "function"
+        ? new IntersectionObserver((entries) => {
+            inView = entries.at(-1)?.isIntersecting ?? true;
+          })
+        : null;
+    intersectionObserver?.observe(parent);
 
     resize();
 
@@ -467,10 +483,17 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       kickLoopRef.current = null;
       cancelAnimationFrame(rafId);
       if (readoutTimer) window.clearInterval(readoutTimer);
-      motionQuery.removeEventListener("change", handleMotionPreference);
-      themeObserver.disconnect();
-      resizeObserver.disconnect();
-      intersectionObserver.disconnect();
+      if (motionQuery) {
+        if (typeof motionQuery.removeEventListener === "function") {
+          motionQuery.removeEventListener("change", handleMotionPreference);
+        } else {
+          motionQuery.removeListener(handleMotionPreference);
+        }
+      }
+      themeObserver?.disconnect();
+      if (resizeObserver) resizeObserver.disconnect();
+      else window.removeEventListener("resize", resize);
+      intersectionObserver?.disconnect();
       diskProbe.remove();
       particleProbe.remove();
       loopRunning = false;
