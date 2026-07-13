@@ -79,7 +79,7 @@ class RequestLoggingMiddleware:
                 emit = (
                     logger.error
                     if status >= 500
-                    else logger.warning
+                    else logger.info
                     if status >= 400
                     else logger.debug
                 )
