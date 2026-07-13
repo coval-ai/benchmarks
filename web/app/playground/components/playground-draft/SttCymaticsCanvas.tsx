@@ -66,12 +66,14 @@ const WEIGHT_LERP_REC = 0.085;
 const WEIGHT_LERP_IDLE = 0.045;
 const LEVELS = [0, 0.24, -0.24, 0.52, -0.52];
 const LEVEL_ALPHA = [0.8, 0.38, 0.38, 0.18, 0.18];
-/** Centroid band skips the lowest bins (wind/rumble). */
-const BAND_LO = 120;
-/** Spectral-centroid range mapped across the mode table — low voice → low modes, high → high. */
-const TONE_LO = 160;
-const TONE_HI = 900;
-const CENTROID_BAND_HI = 2000;
+/** Pitch (F0) search range for autocorrelation — covers low male through high female voice. */
+const PITCH_MIN = 70;
+const PITCH_MAX = 400;
+/** Autocorrelation window (samples). */
+const PITCH_WIN = 1024;
+/** Pitch range mapped across the design library — low voice → coarse plates, high → fine. */
+const TONE_LO = 90;
+const TONE_HI = 320;
 /** Voice gate (signal RMS) above the adaptive noise floor — ambient noise never drives the plate. */
 const GATE = 0.02;
 
@@ -133,11 +135,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     }
     const cosA = new Float32Array(P);
     const cosB = new Float32Array(P);
-    let freqData: Uint8Array<ArrayBuffer> | null = null;
     let timeData: Uint8Array<ArrayBuffer> | null = null;
+    let wave: Float32Array | null = null;
     let amp = 0;
     let ripplePhase = 0;
-    let centroid = 0;
+    let pitchHz = 0;
     let noiseFloor = 0.02;
     let level = 0;
     let designIdx = IDLE_DESIGN;
@@ -161,32 +163,19 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       const an = recordingRef.current ? analyserRef.current : null;
       let ampTarget = 0;
       if (an) {
-        if (!freqData || freqData.length !== an.frequencyBinCount) {
-          freqData = new Uint8Array(an.frequencyBinCount);
-        }
-        an.getByteFrequencyData(freqData);
         if (!timeData || timeData.length !== an.fftSize) {
           timeData = new Uint8Array(an.fftSize);
+          wave = new Float32Array(an.fftSize);
         }
         an.getByteTimeDomainData(timeData);
-        // True signal RMS — honest loudness for the dB readout and the voice gate; the FFT
-        // band-average reads far too low (speech spread across bins) to gate against.
+        // True signal RMS — honest loudness for the dB readout and the voice gate.
         let sq = 0;
         for (let i = 0; i < timeData.length; i++) {
           const v = (timeData[i]! - 128) / 128;
+          wave![i] = v;
           sq += v * v;
         }
         level = Math.sqrt(sq / timeData.length);
-        const binHz = an.context.sampleRate / an.fftSize;
-        const lo = Math.max(1, Math.ceil(BAND_LO / binHz));
-        const cHi = Math.min(freqData.length - 1, Math.floor(CENTROID_BAND_HI / binHz));
-        let eSum = 0;
-        let fSum = 0;
-        for (let i = lo; i <= cHi; i++) {
-          const v = freqData[i]!;
-          eSum += v;
-          fSum += v * i * binHz;
-        }
         // Adaptive noise floor: falls fast, creeps up slowly — steady wind/room tone gets absorbed.
         noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
@@ -204,18 +193,37 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           if (silenceFrames > 35) voiceActive = false;
         }
         if (!voiceActive) ampTarget = 0;
-        if (ampTarget > 0.08 && eSum > 0) {
+        if (ampTarget > 0.08 && wave) {
           unvoicedFrames = 0;
-          const centroidNow = fSum / eSum;
-          centroid = centroid === 0 ? centroidNow : centroid + (centroidNow - centroid) * 0.08;
+          // Autocorrelation pitch (F0) — tracks the actual voice fundamental, so a low chest
+          // voice and a high girly voice read ~110 Hz vs ~250 Hz (a spectral centroid doesn't).
+          const sr = an.context.sampleRate;
+          const lagMin = Math.floor(sr / PITCH_MAX);
+          const lagMax = Math.min(Math.ceil(sr / PITCH_MIN), wave.length - PITCH_WIN);
+          let norm0 = 0;
+          for (let i = 0; i < PITCH_WIN; i += 2) norm0 += wave[i]! * wave[i]!;
+          let best = 0;
+          let bestLag = 0;
+          for (let lag = lagMin; lag <= lagMax; lag += 2) {
+            let s = 0;
+            for (let i = 0; i < PITCH_WIN; i += 2) s += wave[i]! * wave[i + lag]!;
+            if (s > best) {
+              best = s;
+              bestLag = lag;
+            }
+          }
+          if (bestLag > 0 && best > norm0 * 0.3) {
+            const hz = sr / bestLag;
+            pitchHz = pitchHz === 0 ? hz : pitchHz + (hz - pitchHz) * 0.2;
+          }
         } else {
           unvoicedFrames++;
         }
         // Sentence sequencer: the only trigger is resuming speech after a beat of silence —
         // no timers, no per-word switching; mid-sentence and silence both hold the design.
-        if (voiceActive && resumePending && centroid > 0) {
+        if (voiceActive && resumePending && pitchHz > 0) {
           resumePending = false;
-          const t = Math.min(1, Math.max(0, Math.log(centroid / TONE_LO) / Math.log(TONE_HI / TONE_LO)));
+          const t = Math.min(1, Math.max(0, Math.log(pitchHz / TONE_LO) / Math.log(TONE_HI / TONE_LO)));
           const anchor = t * (DESIGNS.length - 1);
           seqK++;
           let next = Math.round(
@@ -238,7 +246,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         speechFrames = 0;
         silenceFrames = 99;
         voiceActive = false;
-        centroid = 0;
+        pitchHz = 0;
         level = 0;
       }
       amp += (ampTarget - amp) * (ampTarget > amp ? 0.14 : 0.05);
@@ -395,8 +403,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       if (!el || frame % 9 !== 0) return;
       if (recordingRef.current && analyserRef.current) {
         const db = level > 0 ? Math.max(-60, Math.round(20 * Math.log10(level))) : -60;
-        const speaking = centroid > 0 && unvoicedFrames < 40;
-        el.textContent = `${db} dB · ${speaking ? Math.round(centroid / 10) * 10 : "—"} Hz`;
+        const speaking = pitchHz > 0 && unvoicedFrames < 40;
+        el.textContent = `${db} dB · ${speaking ? Math.round(pitchHz / 5) * 5 : "—"} Hz`;
       } else {
         el.textContent = "— dB · — Hz";
       }
