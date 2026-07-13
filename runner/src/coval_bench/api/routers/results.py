@@ -55,9 +55,7 @@ router = APIRouter(tags=["results"])
 # The canonical FE-facing param is ``metric_type`` (plain ``str``).
 MetricLiteral = Literal["WER", "TTFA", "TTFT", "TTFS", "RTF", "AUDIO_TO_FINAL", "V2V"]
 
-# A result's dataset comes from its parent run, except TTS which is always
-# tts-v1 (a 'both' run's row records the STT dataset id). Mirrors the
-# aggregation layers (migration 20260713_0010).
+# TTS results are always tts-v1; a 'both' run's row records only the STT dataset id.
 _DATASET_ID_SQL = "CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END"
 
 # Base SELECT used by all three query paths.
