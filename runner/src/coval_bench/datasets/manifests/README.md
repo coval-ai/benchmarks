@@ -9,11 +9,11 @@ the recorded hash before use.
 
 ### `stt-v3.json`
 
-**What it is.** A frozen 50-utterance sample of
+**What it is.** A frozen 897-clip set — the full usable pool of
 [pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data),
 the corpus behind pipecat's [stt-benchmark](https://github.com/pipecat-ai/stt-benchmark)
-project. **Not the leaderboard default** (`stt-v2` is); the runner selects it
-via `DATASET_ID=stt-v3`.
+project. The runner selects it via `DATASET_ID=stt-v3` and samples
+`DATASET_SAMPLE_SIZE` clips per run as usual.
 
 **Sample composition (stt-benchmark-data, the source pool):**
 
@@ -27,15 +27,16 @@ via `DATASET_ID=stt-v3`.
   with Gemini (see their README's `stt-benchmark ground-truth` step), not human
   transcription — so WER against this set measures agreement with a strong
   machine baseline, and absolute WER should be read with that in mind.
-- **Our 50-utterance window:** the builder reads the full 1,000-row pool from
-  the repo's parquet, keeps clips of **2.0–15.0 s** with ≥ 3 words, dedups by
-  transcript, and takes the lexicographically-first 50 by transcript —
-  deterministic from the frozen source. (This build used the parquet source
-  directly, which reads the whole pool; the datasets-server REST path scans
-  only a split's first 100 rows and would select a different 50.)
+- **Our 897-clip pool:** the builder reads the full 1,000-row pool from the
+  repo's parquet, keeps clips of **2.0–15.0 s** with ≥ 3 words, and dedups by
+  transcript — every survivor is included (897), deterministic from the
+  frozen source. (The build requires the parquet source, which reads the
+  whole pool; the datasets-server REST path caps its scan at a split's first
+  100 rows and fails loudly at selection.)
 - **Recording level:** each clip is loudness-normalized (RMS target −20 dBFS,
   peak-guarded), same as `stt-v2`. Pass `--normalize`.
-- **Durations:** 2.1–14.7 s, median ≈ 10.6 s; ~7.4 minutes total per full pass.
+- **Durations:** 2.1–15.0 s, median ≈ 10.5 s; ~2.3 hours total. Per-run cost
+  is unchanged — runs draw `DATASET_SAMPLE_SIZE` (default 10) clips.
 - Items carry pipecat's `sample_id` for provenance back to the source rows.
 
 **What we measure on it.** Same as `stt-v2`: WER, TTFT, audio→final latency,
@@ -47,7 +48,7 @@ clips, writes the manifest):
 ```bash
 uv run --extra hf-parquet coval-build-dataset --hf pipecat-ai/stt-benchmark-data \
     --config default --split train \
-    --dataset-id stt-v3 --dur-max 15 --normalize \
+    --dataset-id stt-v3 --num 897 --dur-max 15 --normalize \
     --license "unspecified (no data license published by pipecat-ai)" \
     --source "pipecat-ai/stt-benchmark-data train"
 ```
