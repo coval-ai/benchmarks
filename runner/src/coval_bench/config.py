@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     fishaudio_api_key: SecretStr | None = None
     azure_api_key: SecretStr | None = None
     alibaba_api_key: SecretStr | None = None
+    minimax_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
