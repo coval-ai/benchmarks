@@ -174,7 +174,11 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       const span = P * LOGO_SPAN;
       const sc = span / LOGO_VIEW;
       octx.setTransform(sc, 0, 0, sc, (P - span) / 2, (P - span) / 2);
-      octx.fill(new Path2D(LOGO_PATH), "evenodd");
+      try {
+        octx.fill(new Path2D(LOGO_PATH), "evenodd");
+      } catch {
+        return null;
+      }
       const img = octx.getImageData(0, 0, P, P).data;
       const dOut = new Float32Array(P * P);
       const dIn = new Float32Array(P * P);
@@ -251,7 +255,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     let cancelled = false;
     let loopRunning = false;
 
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let reduceMotion = motionQuery.matches;
 
     const readAudio = () => {
       const an = recordingRef.current ? analyserRef.current : null;
@@ -601,6 +606,19 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       }
     };
 
+    const handleMotionPreference = (event: MediaQueryListEvent) => {
+      reduceMotion = event.matches;
+      if (reduceMotion) {
+        cancelAnimationFrame(rafId);
+        loopRunning = false;
+        drawFrame();
+      } else {
+        scheduleLoop();
+      }
+      syncReadoutTimer();
+    };
+    motionQuery.addEventListener("change", handleMotionPreference);
+
     kickLoopRef.current = () => {
       diskRgb = resolvedDiskRgb(diskProbe);
       if (reduceMotion) {
@@ -631,6 +649,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       kickLoopRef.current = null;
       cancelAnimationFrame(rafId);
       if (readoutTimer) window.clearInterval(readoutTimer);
+      motionQuery.removeEventListener("change", handleMotionPreference);
       ro.disconnect();
       io.disconnect();
       diskProbe.remove();
