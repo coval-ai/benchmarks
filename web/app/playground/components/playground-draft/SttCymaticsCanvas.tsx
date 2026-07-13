@@ -38,23 +38,23 @@ const GRID = 80;
 const P = GRID + 1;
 
 /**
- * Curated plate designs [n, m, sign] — same-parity modes keep full symmetry; sign −1 adds the
- * diagonal nodal lines seen in the brand plates. Ordered coarse → fine.
+ * Curated plate designs [n, m, sign, radial] — Chladni plates (radial=0, all sign +1 so no hard
+ * diagonal frames) alternating with wavy radial rings (radial=1). Ordered coarse → fine.
  */
 const DESIGNS = [
   [1, 3, 1, 0],
   [0, 3, 1, 1],
   [1, 5, 1, 0],
   [0, 4, -1, 1],
-  [1, 7, -1, 0],
+  [3, 5, 1, 0],
   [0, 5, 1, 1],
   [1, 7, 1, 0],
   [0, 6, -1, 1],
   [2, 8, 1, 0],
   [0, 7, 1, 1],
-  [1, 9, -1, 0],
+  [1, 9, 1, 0],
   [0, 8, -1, 1],
-  [3, 9, -1, 0],
+  [3, 9, 1, 0],
   [0, 9, 1, 1],
   [5, 9, 1, 0],
   [0, 10, -1, 1]
@@ -142,9 +142,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     let level = 0;
     let designIdx = IDLE_DESIGN;
     let seqK = 0;
-    let envFast = 0;
-    let envSlow = 0;
-    let sinceSwitch = 99;
+    let resumePending = true;
     let unvoicedFrames = 99;
     let speechFrames = 0;
     let silenceFrames = 99;
@@ -187,11 +185,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
         ampTarget = Math.min(1, voiced * 6);
-        envFast += (ampTarget - envFast) * 0.4;
-        envSlow += (ampTarget - envSlow) * 0.05;
-        sinceSwitch++;
-        // Voice-activity hysteresis: a few frames of real speech wakes the plate, ~¾s of
-        // quiet calms it back to the idle drift — background noise never keeps it dancing.
+        // Voice-activity hysteresis: real speech wakes the plate, a beat of quiet calms it
+        // back to the idle drift and arms the next design swap — background noise does neither.
         if (ampTarget > 0.2) {
           speechFrames++;
           silenceFrames = 0;
@@ -199,6 +194,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         } else {
           speechFrames = 0;
           silenceFrames++;
+          if (silenceFrames === 30) resumePending = true;
           if (silenceFrames > 35) voiceActive = false;
         }
         if (!voiceActive) ampTarget = 0;
@@ -209,13 +205,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         } else {
           unvoicedFrames++;
         }
-        // Word-onset sequencer: each fresh energy burst (≈ every word) commits a new design —
-        // a big jump across the library pulled toward the pitch anchor, so different words land
-        // on visibly different plates while silence leaves the pattern alone.
-        const onset =
-          voiceActive && envFast > envSlow * 1.5 + 0.03 && ampTarget > 0.18 && sinceSwitch > 16;
-        const sustained = voiceActive && ampTarget > 0.12 && sinceSwitch > 80;
-        if ((onset || sustained) && centroid > 0) {
+        // Sentence sequencer: the only trigger is resuming speech after a beat of silence —
+        // no timers, no per-word switching; mid-sentence and silence both hold the design.
+        if (voiceActive && resumePending && centroid > 0) {
+          resumePending = false;
           const t = Math.min(1, Math.max(0, Math.log(centroid / TONE_LO) / Math.log(TONE_HI / TONE_LO)));
           const anchor = t * (DESIGNS.length - 1);
           seqK++;
@@ -225,7 +218,6 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           next = Math.max(0, Math.min(DESIGNS.length - 1, next));
           if (next === designIdx) next = (designIdx + 5) % DESIGNS.length;
           designIdx = next;
-          sinceSwitch = 0;
           targets.fill(0);
           targets[designIdx] = 1;
         }
@@ -235,8 +227,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         targets[IDLE_DESIGN] = 1;
         targets[IDLE_DESIGN + 2] = 0.05 + 0.03 * Math.sin(frame * 0.004);
         designIdx = IDLE_DESIGN;
-        envFast = envSlow = 0;
-        sinceSwitch = 99;
+        resumePending = true;
         unvoicedFrames = 99;
         speechFrames = 0;
         silenceFrames = 99;
@@ -245,7 +236,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         level = 0;
       }
       amp += (ampTarget - amp) * (ampTarget > amp ? 0.14 : 0.05);
-      activity += ((voiceActive ? 1 : 0) - activity) * 0.06;
+      activity += ((voiceActive ? 1 : 0) - activity) * (voiceActive ? 0.06 : 0.12);
       ripplePhase += 0.012 + activity * (0.05 + amp * 0.12);
       rotSpeed += (0.00015 + activity * (0.00165 + amp * 0.005) - rotSpeed) * 0.05;
       rot += rotSpeed;
