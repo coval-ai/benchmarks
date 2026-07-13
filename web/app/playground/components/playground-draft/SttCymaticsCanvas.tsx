@@ -3,10 +3,34 @@
 import { type RefObject, useEffect, useRef } from "react";
 
 const W = 280;
-const PARTICLE_COUNT = 2400;
+const PARTICLE_COUNT = 3600;
 const PITCH_MIN = 70;
 const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
+const MODES = [
+  [1, 2],
+  [1, 3],
+  [1, 4],
+  [1, 5],
+  [1, 6],
+  [2, 3],
+  [2, 4],
+  [2, 5],
+  [2, 6],
+  [2, 7],
+  [3, 4],
+  [3, 5],
+  [3, 6],
+  [3, 7],
+  [3, 8],
+  [4, 5],
+  [4, 6],
+  [4, 7],
+  [4, 8],
+  [4, 9]
+] as const;
+const IDLE_MODES = [3, 0, 2, 5, 7, 10, 13, 16, 19] as const;
+const IDLE_MODE_FRAMES = 720;
 
 type Props = {
   className?: string;
@@ -94,10 +118,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
-    let modeM = 1;
-    let modeN = 5;
-    let targetM = 1;
-    let targetN = 5;
+    let modeIndex: number = IDLE_MODES[0];
+    let idleModeIndex = 0;
+    let candidateMode: number = modeIndex;
+    let candidateFrames = 0;
     let boundsW = 0;
     let boundsH = 0;
     let frame = 0;
@@ -116,8 +140,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         envelope += (0 - envelope) * 0.08;
         pitchHz = 0;
         pitchAge = 99;
-        targetM = 1;
-        targetN = 5;
+        candidateMode = modeIndex;
+        candidateFrames = 0;
         return;
       }
 
@@ -162,8 +186,14 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
             1,
             Math.max(0, Math.log(pitchHz / 90) / Math.log(320 / 90))
           );
-          targetN = 3 + Math.round(tone * 5);
-          targetM = targetN >= 7 ? 2 : 1;
+          const nextMode = Math.round(tone * (MODES.length - 1));
+          if (candidateMode === nextMode) {
+            candidateFrames++;
+          } else {
+            candidateMode = nextMode;
+            candidateFrames = 1;
+          }
+          if (candidateFrames >= 4) modeIndex = candidateMode;
         } else {
           pitchAge++;
         }
@@ -173,11 +203,15 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     };
 
     const advanceParticles = (steps = 1) => {
-      modeM += (targetM - modeM) * 0.035;
-      modeN += (targetN - modeN) * 0.035;
       const active = recordingRef.current && analyserRef.current;
+      if (!active && frame > 0 && frame % IDLE_MODE_FRAMES === 0) {
+        idleModeIndex = (idleModeIndex + 1) % IDLE_MODES.length;
+        modeIndex = IDLE_MODES[idleModeIndex]!;
+      }
+      const [modeM, modeN] = MODES[modeIndex]!;
       const vibration = active ? 0.00035 + envelope * 0.0024 : 0.0002;
-      const attraction = active ? 0.0002 + envelope * 0.00016 : 0.00022;
+      const modeScale = Math.min(1.4, 5 / modeN);
+      const attraction = (active ? 0.0002 + envelope * 0.00016 : 0.00022) * modeScale;
       const damping = active ? 0.91 : 0.9;
 
       for (let step = 0; step < steps; step++) {
@@ -233,7 +267,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       ctx.fillRect(0, 0, side, side);
       const center = side / 2;
       const radius = side * 0.488;
-      const size = Math.max(0.7, side / 255);
+      const size = Math.max(0.8, side / 225);
       ctx.fillStyle = particleColor;
       ctx.globalAlpha = 0.62 + envelope * 0.2;
       for (const particle of particles) {
