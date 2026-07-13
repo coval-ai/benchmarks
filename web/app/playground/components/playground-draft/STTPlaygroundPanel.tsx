@@ -184,7 +184,6 @@ export function STTPlaygroundPanel({
     [visibleModels, selectedMap]
   );
 
-  /** Single brand family tints the cymatics; mixed families stay neutral ink (no mixing rule). */
   const vizFamily = useMemo(() => {
     const families = new Set(
       activeModels.map((m) => cymaticsFamilyFromHex(getPlaygroundModelVisual(m).dot))
