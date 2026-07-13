@@ -18,7 +18,7 @@ import {
 } from "@/lib/playground/provider-styles";
 import { isTypingInteractionTarget } from "@/lib/playground/hotkeys";
 import { ModelPill } from "./ModelPill";
-import { SttTrianglePulseCanvas } from "./SttTrianglePulseCanvas";
+import { SttCymaticsCanvas, cymaticsFamilyFromHex } from "./SttCymaticsCanvas";
 import { useSTTBenchmark, type STTBenchmarkCompletionSummary } from "@/app/playground/hooks/useSTTBenchmark";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
@@ -134,7 +134,7 @@ export function STTPlaygroundPanel({
       is_comparison: summary.modelIds.length >= 2
     });
   }, []);
-  const { phase, results, errors, sessionError, start, stop, reset } = useSTTBenchmark({
+  const { phase, analyser, results, errors, sessionError, start, stop, reset } = useSTTBenchmark({
     onComplete: handleBenchmarkComplete
   });
   /**
@@ -183,6 +183,16 @@ export function STTPlaygroundPanel({
     () => visibleModels.filter((m) => selectedMap[m.id] !== false),
     [visibleModels, selectedMap]
   );
+
+  /** Single brand family tints the cymatics; mixed families stay neutral ink (no mixing rule). */
+  const vizFamily = useMemo(() => {
+    const families = new Set(
+      activeModels.map((m) => cymaticsFamilyFromHex(getPlaygroundModelVisual(m).dot))
+    );
+    return families.size === 1 ? [...families][0]! : "neutral";
+  }, [activeModels]);
+
+  const vizReadoutRef = useRef<HTMLSpanElement>(null);
 
   const carouselViewportRef = useRef<HTMLDivElement>(null);
   const carouselTrackRef = useRef<HTMLDivElement>(null);
@@ -534,16 +544,24 @@ export function STTPlaygroundPanel({
       <div className="flex flex-col gap-8 md:flex-row md:items-start md:justify-between">
         <div className="flex min-w-0 flex-1 flex-col items-center space-y-4">
           <div className="playground-viz-ring">
-            <SttTrianglePulseCanvas
+            <SttCymaticsCanvas
               recording={phase === "recording"}
+              analyser={analyser}
+              family={vizFamily}
+              readoutRef={vizReadoutRef}
               className="pointer-events-none absolute inset-0 size-full rounded-full"
             />
           </div>
-          <p className="text-center text-sm text-text-secondary">{statusLabel}</p>
+          <div className="space-y-1 text-center">
+            <p className="font-mono text-xs text-text-secondary">{statusLabel}</p>
+            <p className="font-mono text-[10px] tabular-nums tracking-[0.14em] text-text-tertiary" aria-hidden>
+              <span ref={vizReadoutRef}>— dB · — Hz</span>
+            </p>
+          </div>
         </div>
 
         <div className="w-full min-w-0 shrink-0 space-y-3 md:w-[360px] md:pt-2">
-          <p className="font-sans text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
             Models
           </p>
           <div className="flex flex-wrap gap-2">
@@ -667,7 +685,7 @@ export function STTPlaygroundPanel({
 
       <div className="flex flex-col gap-4 border-t border-border-primary pt-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">
-          <p className="font-sans text-[10px] font-medium uppercase tracking-[0.2em] text-text-tertiary">
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.2em] text-text-tertiary">
             metrics
           </p>
           <div className="flex flex-wrap gap-2" aria-label="Metrics included in results">

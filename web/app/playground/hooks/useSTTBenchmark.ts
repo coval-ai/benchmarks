@@ -15,6 +15,7 @@ export type ModelResult = {
 
 export type STTBenchmarkSession = {
   phase: BenchmarkPhase;
+  analyser: AnalyserNode | null;
   audioDurationMs: number | null;
   results: Map<string, ModelResult>;
   errors: Map<string, string>;
@@ -59,6 +60,7 @@ export function useSTTBenchmark(options?: {
 }): STTBenchmarkSession {
   const onComplete = options?.onComplete;
   const [phase, setPhase] = useState<BenchmarkPhase>("idle");
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [audioDurationMs, setAudioDurationMs] = useState<number | null>(null);
   const [results, setResults] = useState<Map<string, ModelResult>>(new Map());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
@@ -238,6 +240,7 @@ export function useSTTBenchmark(options?: {
     stopRequestedRef.current = false;
     captureRef.current.stop();
     captureRef.current = null;
+    setAnalyser(null);
     void submitPcm(chunksRef.current);
   }, [submitPcm]);
 
@@ -274,6 +277,7 @@ export function useSTTBenchmark(options?: {
     }
     captureRef.current = handle;
     startingRef.current = false;
+    setAnalyser(handle.analyser);
 
     // Hard cap — stop automatically at MAX_DURATION_MS
     autoStopRef.current = setTimeout(stop, MAX_DURATION_MS);
@@ -292,6 +296,7 @@ export function useSTTBenchmark(options?: {
     captureRef.current = null;
     chunksRef.current = [];
     modelIdsRef.current = [];
+    setAnalyser(null);
     setPhase("idle");
     setResults(new Map());
     setErrors(new Map());
@@ -299,5 +304,5 @@ export function useSTTBenchmark(options?: {
     setAudioDurationMs(null);
   }, []);
 
-  return { phase, audioDurationMs, results, errors, sessionError, start, stop, reset };
+  return { phase, analyser, audioDurationMs, results, errors, sessionError, start, stop, reset };
 }
