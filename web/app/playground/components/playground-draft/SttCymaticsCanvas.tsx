@@ -1,7 +1,6 @@
 "use client";
 
 import { type RefObject, useEffect, useRef } from "react";
-import { useTheme } from "next-themes";
 
 export type CymaticsFamily = "neutral" | "blue" | "purple" | "green" | "redOrange";
 
@@ -96,9 +95,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
   analyserRef.current = analyser;
   const familyRef = useRef(family);
   familyRef.current = family;
-  const { resolvedTheme } = useTheme();
-  const darkRef = useRef(resolvedTheme === "dark");
-  darkRef.current = resolvedTheme === "dark";
+  const darkRef = useRef(false);
 
   const kickLoopRef = useRef<(() => void) | null>(null);
 
@@ -546,8 +543,19 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     };
     motionQuery.addEventListener("change", handleMotionPreference);
 
-    kickLoopRef.current = () => {
+    const syncTheme = () => {
+      darkRef.current = document.documentElement.getAttribute("data-theme") === "dark";
       diskRgb = resolvedDiskRgb(diskProbe);
+      paint();
+    };
+    const themeObserver = new MutationObserver(syncTheme);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"]
+    });
+    syncTheme();
+
+    kickLoopRef.current = () => {
       if (reduceMotion) {
         drawFrame();
         syncReadoutTimer();
@@ -577,6 +585,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
       cancelAnimationFrame(rafId);
       if (readoutTimer) window.clearInterval(readoutTimer);
       motionQuery.removeEventListener("change", handleMotionPreference);
+      themeObserver.disconnect();
       ro.disconnect();
       io.disconnect();
       diskProbe.remove();
@@ -586,7 +595,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
 
   useEffect(() => {
     kickLoopRef.current?.();
-  }, [recording, analyser, family, resolvedTheme]);
+  }, [recording, analyser, family]);
 
   return <canvas ref={canvasRef} className={className} width={W} height={W} aria-hidden />;
 }
