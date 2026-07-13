@@ -300,62 +300,6 @@ async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -
     ]
 
 
-async def test_stats_split_by_dataset(client: AsyncClient, postgresql: Any) -> None:
-    """Runs against different datasets aggregate separately; ?dataset narrows."""
-    run_a = await _insert_run(postgresql, dataset_id="stt-v1")
-    run_b = await _insert_run(postgresql, dataset_id="stt-v3")
-    await _insert_result(postgresql, run_a, metric_value=1.0)
-    await _insert_result(postgresql, run_b, metric_value=3.0)
-    await _refresh_mv(postgresql)
-
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    stats = response.json()["model_stats"]
-    assert [(s["dataset_id"], s["avg_value"], s["sample_count"]) for s in stats] == [
-        ("stt-v1", 1.0, 1),
-        ("stt-v3", 3.0, 1),
-    ]
-
-    filtered = await client.get(
-        "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v1"}
-    )
-    stats = filtered.json()["model_stats"]
-    assert [(s["dataset_id"], s["avg_value"]) for s in stats] == [("stt-v1", 1.0)]
-
-
-async def test_tts_rows_attributed_to_tts_v1(client: AsyncClient, postgresql: Any) -> None:
-    """TTS results always belong to tts-v1 — the run row records the STT dataset."""
-    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_result(postgresql, run_id, benchmark="TTS", metric_type="TTFA", metric_value=0.3)
-    await _refresh_mv(postgresql)
-
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "TTS"})
-    stats = response.json()["model_stats"]
-    assert [(s["dataset_id"], s["metric_type"]) for s in stats] == [("tts-v1", "TTFA")]
-
-
-async def test_series_split_by_dataset(client: AsyncClient, postgresql: Any) -> None:
-    """Two datasets sharing a scheduled_at slot keep separate bucket rows."""
-    scheduled = datetime.now(dt.UTC).replace(microsecond=0) - timedelta(hours=1)
-    run_a = await _insert_run(postgresql, dataset_id="stt-v1", scheduled_at=scheduled)
-    run_b = await _insert_run(postgresql, dataset_id="stt-v3", scheduled_at=scheduled)
-    await _insert_result(postgresql, run_a, metric_value=1.0)
-    await _insert_result(postgresql, run_b, metric_value=3.0)
-    await _fill_buckets(postgresql)
-
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    series = response.json()["series"]
-    assert [(p["dataset_id"], p["value_sum"]) for p in series] == [
-        ("stt-v1", 1.0),
-        ("stt-v3", 3.0),
-    ]
-
-    filtered = await client.get(
-        "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v3"}
-    )
-    series = filtered.json()["series"]
-    assert [(p["dataset_id"], p["value_sum"]) for p in series] == [("stt-v3", 3.0)]
-
-
 async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:
     """METRIC_EXCLUSIONS pairs are hidden from stats and series for the excluded
     metric only — other metrics for the same model still show."""

@@ -14,7 +14,6 @@ import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
 import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
-import DatasetToggle from "@/components/shared/DatasetToggle";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const {
@@ -24,8 +23,6 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
     timeWindow,
     changeTimeWindow,
     windowDataStale,
-    sttDataset,
-    changeSttDataset,
   } = useDashboard();
   const mode = useActiveTab();
   const firedDepthsRef = useRef<Set<number>>(new Set());
@@ -71,12 +68,11 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             <h1 className="text-2xl font-bold tracking-tight text-text-primary">
               {benchmarkTitle}
             </h1>
-            <div className="ml-auto flex flex-wrap items-center gap-2">
-              {mode === "stt" && (
-                <DatasetToggle value={sttDataset} onChange={changeSttDataset} />
-              )}
-              <TimeWindowToggle value={timeWindow} onChange={changeTimeWindow} />
-            </div>
+            <TimeWindowToggle
+              value={timeWindow}
+              onChange={changeTimeWindow}
+              className="ml-auto"
+            />
           </div>
 
           <div

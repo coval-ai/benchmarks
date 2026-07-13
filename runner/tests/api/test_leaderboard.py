@@ -154,23 +154,3 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert response.status_code == 200
     entries = response.json()["entries"]
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
-
-
-async def test_dataset_filter_narrows_board(client: AsyncClient, postgresql: Any) -> None:
-    """Per-dataset matview rows: ?dataset returns one entry per model again."""
-    run_a = await _insert_run(postgresql, dataset_id="stt-v1")
-    run_b = await _insert_run(postgresql, dataset_id="stt-v3")
-    await _insert_result(postgresql, run_a, metric_value=2.0)
-    await _insert_result(postgresql, run_b, metric_value=9.0)
-    await _refresh_mv(postgresql)
-
-    unfiltered = await client.get("/v1/leaderboard", params={"metric": "WER", "benchmark": "STT"})
-    assert len(unfiltered.json()["entries"]) == 2  # one per dataset
-
-    filtered = await client.get(
-        "/v1/leaderboard",
-        params={"metric": "WER", "benchmark": "STT", "dataset": "stt-v3"},
-    )
-    entries = filtered.json()["entries"]
-    assert len(entries) == 1
-    assert entries[0]["avg"] == 9.0

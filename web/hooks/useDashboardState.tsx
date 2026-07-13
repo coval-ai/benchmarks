@@ -30,7 +30,6 @@ import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
-import { DEFAULT_STT_DATASET } from "@/lib/config/datasets";
 import type { ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 
@@ -49,28 +48,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const benchmarkParam =
     page === "s2s" ? "S2S" : page === "tts" ? "TTS" : "STT";
 
-  // STT runs against several datasets (aggregates are keyed per dataset), so
-  // the STT dashboard isolates one at a time. TTS/S2S each have a single
-  // dataset and query unfiltered.
-  const [sttDataset, setSttDataset] = useState<string>(DEFAULT_STT_DATASET);
-  const changeSttDataset = useCallback(
-    (next: string) => {
-      if (next === sttDataset) return;
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardDatasetChanged, {
-        surface: `${page}_dashboard`,
-        mode: page,
-        from: sttDataset,
-        to: next,
-      });
-      setSttDataset(next);
-    },
-    [sttDataset, page]
-  );
-
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
-    ...(page === "stt" ? { dataset: sttDataset } : {}),
   });
   const providersQuery = useProvidersQuery();
 
@@ -379,11 +359,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     timeWindow,
     dataTimeWindow,
     windowDataStale,
-    sttDataset,
 
     // Actions
     changeTimeWindow,
-    changeSttDataset,
 
     // Chart data functions
     formatChartLabel: chartData.formatChartLabel,

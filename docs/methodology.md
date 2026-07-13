@@ -45,9 +45,10 @@ old manifests (`stt-v1.json`) stay for historical reproducibility.
 **Multiple STT datasets.** Additional frozen STT manifests (`stt-v1`
 LibriSpeech, `stt-v3` pipecat conversational speech) can run alongside the
 default: each dataset runs as its own run (one `DATASET_ID` per execution),
-and a result's dataset is derived from its parent run. Aggregates
-(`/v1/results/aggregates`, `/v1/leaderboard`) are keyed per dataset and take
-an optional `dataset` filter; the dashboard isolates one dataset at a time.
+and a result's dataset is derived from its parent run. The aggregation layer
+pools every result in the window regardless of dataset, so headline stats
+(e.g. average WER) blend all datasets that ran. `/v1/results` exposes each
+row's `dataset_id` and takes a `dataset` filter for per-dataset inspection.
 See ADR-023.
 
 **Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR
@@ -218,8 +219,8 @@ metrics in particular are session-dependent).
 - ADR-022 — STT dataset swap to WildASR `fleurs_clean_en` (`stt-v2`); LibriSpeech
   `test-clean` (`stt-v1`) retained for historical reproducibility.
 - ADR-023 — Multi-dataset benchmarking: one run per dataset, dataset identity
-  derived from the parent run (no dataset column on `results`); aggregation
-  layers keyed per dataset.
+  derived from the parent run (no dataset column on `results`); headline
+  aggregates pool across datasets.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.

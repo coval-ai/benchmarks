@@ -18,7 +18,6 @@ export const POSTHOG_EVENTS = {
   playgroundModeSwitched: "playground_mode_switched",
   playgroundResultPlayed: "playground_result_played",
   dashboardTimeWindowChanged: "dashboard_time_window_changed",
-  dashboardDatasetChanged: "dashboard_dataset_changed",
   dashboardChartShared: "dashboard_chart_shared"
 } as const;
 
