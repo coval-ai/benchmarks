@@ -15,3 +15,6 @@ async def test_robots_txt_disallows_all(client: AsyncClient) -> None:
     assert response.headers["content-type"].startswith("text/plain")
     assert "User-agent: *" in response.text
     assert "Disallow: /" in response.text
+
+    openapi = await client.get("/openapi.json")
+    assert "/robots.txt" not in openapi.json()["paths"]
