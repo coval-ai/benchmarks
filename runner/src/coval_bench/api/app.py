@@ -37,6 +37,7 @@ from coval_bench.api.routers import (
     leaderboard,
     providers,
     results,
+    robots,
     runs,
 )
 from coval_bench.config import Settings, get_settings
@@ -120,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Routers
     app.include_router(health.router)
+    app.include_router(robots.router)
     app.include_router(runs.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")
     app.include_router(aggregates.router, prefix="/v1")
