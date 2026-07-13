@@ -148,6 +148,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     let unvoicedFrames = 99;
     let speechFrames = 0;
     let silenceFrames = 99;
+    let rawEnv = 0;
     let voiceActive = false;
     let activity = 0;
     let rot = 0;
@@ -180,20 +181,22 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         noiseFloor += (level - noiseFloor) * (level < noiseFloor ? 0.3 : 0.006);
         const voiced = Math.max(0, level - noiseFloor - GATE);
         ampTarget = Math.min(1, voiced * 7);
-        // Voice-activity hysteresis: real speech wakes the plate; silence only counts against
-        // the SMOOTHED envelope, so consonants and word gaps never read as "stopped talking" —
-        // it takes a genuine sentence pause to calm down and arm the next design swap.
-        if (ampTarget > 0.15) {
+        // Voice-activity hysteresis on a RAW envelope (never gated, unlike `amp`), so waking
+        // and sleeping behave identically before and after activation. Dips between syllables
+        // decay the wake counter instead of resetting it — choppy speech still wakes the plate;
+        // only a genuine sentence pause calms it and arms the next design swap.
+        rawEnv += (ampTarget - rawEnv) * (ampTarget > rawEnv ? 0.3 : 0.08);
+        if (ampTarget > 0.12) {
           speechFrames++;
           silenceFrames = 0;
-          if (speechFrames > 6) voiceActive = true;
-        } else if (amp < 0.06) {
-          speechFrames = 0;
-          silenceFrames++;
-          if (silenceFrames === 40) resumePending = true;
-          if (silenceFrames > 50) voiceActive = false;
+          if (speechFrames > 4) voiceActive = true;
         } else {
-          speechFrames = 0;
+          speechFrames = Math.max(0, speechFrames - 1);
+          if (rawEnv < 0.06) {
+            silenceFrames++;
+            if (silenceFrames === 40) resumePending = true;
+            if (silenceFrames > 50) voiceActive = false;
+          }
         }
         if (!voiceActive) ampTarget = 0;
         let pitchConfident = false;
@@ -253,6 +256,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         unvoicedFrames = 99;
         speechFrames = 0;
         silenceFrames = 99;
+        rawEnv = 0;
         voiceActive = false;
         pitchHz = 0;
         level = 0;
