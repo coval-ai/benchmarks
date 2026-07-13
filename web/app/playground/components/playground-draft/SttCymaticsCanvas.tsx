@@ -113,15 +113,10 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     };
 
     const stepRest = (particle: Particle) => {
-      particle.h += (Math.random() - 0.5) * 0.4;
-      particle.x += Math.cos(particle.h) * 0.6;
-      particle.y += Math.sin(particle.h) * 0.6;
-      const dx = particle.x - cx;
-      const dy = particle.y - cy;
-      if (Math.hypot(dx, dy) > radius * 0.98) {
-        particle.h = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.9;
-        clampToPlate(particle);
-      }
+      const tremor = 0.85 + 0.35 * Math.sin(frame * 0.06 + particle.h);
+      particle.x += (Math.random() * 2 - 1) * tremor;
+      particle.y += (Math.random() * 2 - 1) * tremor;
+      clampToPlate(particle);
     };
 
     const stepVibration = (particle: Particle) => {
