@@ -29,6 +29,7 @@ type Props = {
 type Particle = {
   x: number;
   y: number;
+  h: number;
 };
 
 export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }: Props) {
@@ -92,15 +93,12 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let diskColor = "";
     let particleColor = "";
 
-    const spawnParticle = (particle: Particle, atCenter = false) => {
+    const spawnParticle = (particle: Particle) => {
       const angle = Math.random() * Math.PI * 2;
-      const spread = atCenter ? Math.random() * radius * 0.08 : Math.sqrt(Math.random()) * radius;
+      const spread = Math.sqrt(Math.random()) * radius;
       particle.x = cx + Math.cos(angle) * spread;
       particle.y = cy + Math.sin(angle) * spread;
-    };
-
-    const isOutsidePlate = (particle: Particle, inset = 1) => {
-      return Math.hypot(particle.x - cx, particle.y - cy) > radius * inset;
+      particle.h = Math.random() * Math.PI * 2;
     };
 
     const clampToPlate = (particle: Particle) => {
@@ -115,17 +113,15 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     };
 
     const stepRest = (particle: Particle) => {
+      particle.h += (Math.random() - 0.5) * 0.4;
+      particle.x += Math.cos(particle.h) * 0.6;
+      particle.y += Math.sin(particle.h) * 0.6;
       const dx = particle.x - cx;
       const dy = particle.y - cy;
-      const distance = Math.hypot(dx, dy) || 0.0001;
-      const ux = dx / distance;
-      const uy = dy / distance;
-      const strength = REST_VSTR * 20;
-      const flow = 0.18 * (0.4 + strength);
-      const wobble = 0.35 * strength + 0.05;
-      particle.x += ux * flow + (Math.random() - 0.5) * wobble;
-      particle.y += uy * flow + (Math.random() - 0.5) * wobble;
-      if (isOutsidePlate(particle, 0.985)) spawnParticle(particle, true);
+      if (Math.hypot(dx, dy) > radius * 0.98) {
+        particle.h = Math.atan2(-dy, -dx) + (Math.random() - 0.5) * 0.9;
+        clampToPlate(particle);
+      }
     };
 
     const stepVibration = (particle: Particle) => {
@@ -161,7 +157,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       const side = Math.min(width, height);
       const count = Math.min(4200, Math.max(1200, Math.round(3600 * (side / 560) ** 2)));
       while (particles.length < count) {
-        const particle = { x: 0, y: 0 };
+        const particle = { x: 0, y: 0, h: 0 };
         spawnParticle(particle);
         particles.push(particle);
       }
