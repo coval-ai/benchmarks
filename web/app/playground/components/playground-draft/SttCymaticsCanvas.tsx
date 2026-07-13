@@ -145,6 +145,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
     let designIdx = IDLE_DESIGN;
     let seqK = 0;
     let resumePending = true;
+    let swapAnchor = -1;
+    let shiftFrames = 0;
     let unvoicedFrames = 99;
     let speechFrames = 0;
     let silenceFrames = 99;
@@ -227,24 +229,33 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
           }
         }
         unvoicedFrames = pitchConfident ? 0 : unvoicedFrames + 1;
-        // Sentence sequencer: the only trigger is resuming speech after a beat of silence —
-        // no timers, no per-word switching; mid-sentence and silence both hold the design.
-        if (voiceActive && resumePending && pitchHz > 0) {
-          resumePending = false;
+        // Design swaps fire on (a) resuming speech after a beat of silence, or (b) a sustained
+        // pitch-register shift mid-speech. Register jumps snap EXACTLY to the pitch anchor —
+        // pitch → pattern is a pure function, so swapping girly → manly → girly returns to the
+        // same plates, like a real cymatic plate following the tone. Neighbor rotation only
+        // adds variety when resuming in the same register.
+        if (voiceActive && pitchHz > 0) {
           const t = Math.min(1, Math.max(0, Math.log(pitchHz / TONE_LO) / Math.log(TONE_HI / TONE_LO)));
-          // Real-cymatics parity: pitch picks the band (library is ordered coarse → fine, like a
-          // rising Chladni tone), swaps only rotate among that band's neighbors — a given voice
-          // always lands in the same design family.
-          const anchor = Math.round(t * (DESIGNS.length - 1));
-          seqK++;
-          const clampIdx = (i: number) => Math.max(0, Math.min(DESIGNS.length - 1, i));
-          let next = clampIdx(anchor + NEIGHBOR_STEPS[seqK % NEIGHBOR_STEPS.length]!);
-          if (next === designIdx) {
-            next = clampIdx(anchor + NEIGHBOR_STEPS[(seqK + 1) % NEIGHBOR_STEPS.length]!);
+          const curAnchor = Math.round(t * (DESIGNS.length - 1));
+          const shifted = swapAnchor >= 0 && Math.abs(curAnchor - swapAnchor) >= 2;
+          shiftFrames = shifted ? shiftFrames + 1 : 0;
+          if (resumePending || shiftFrames > 15) {
+            const clampIdx = (i: number) => Math.max(0, Math.min(DESIGNS.length - 1, i));
+            let next = curAnchor;
+            if (resumePending && curAnchor === swapAnchor) {
+              seqK++;
+              next = clampIdx(curAnchor + NEIGHBOR_STEPS[seqK % NEIGHBOR_STEPS.length]!);
+              if (next === designIdx) {
+                next = clampIdx(curAnchor + NEIGHBOR_STEPS[(seqK + 1) % NEIGHBOR_STEPS.length]!);
+              }
+            }
+            designIdx = next;
+            swapAnchor = curAnchor;
+            resumePending = false;
+            shiftFrames = 0;
+            targets.fill(0);
+            targets[designIdx] = 1;
           }
-          designIdx = next;
-          targets.fill(0);
-          targets[designIdx] = 1;
         }
       } else {
         // Idle "getting ready": breathe a whisper of the neighboring design in and out.
@@ -253,6 +264,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         targets[IDLE_DESIGN + 2] = 0.05 + 0.03 * Math.sin(frame * 0.004);
         designIdx = IDLE_DESIGN;
         resumePending = true;
+        swapAnchor = -1;
+        shiftFrames = 0;
         unvoicedFrames = 99;
         speechFrames = 0;
         silenceFrames = 99;
