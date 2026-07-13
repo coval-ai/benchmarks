@@ -8,8 +8,27 @@ const PITCH_MIN = 70;
 const PITCH_MAX = 400;
 const PITCH_WINDOW = 1024;
 const VIBRATION = 0.02;
-const N_FREQUENCY = 1;
-const DEFAULT_M_FREQUENCY = 10;
+
+type CymaticMode = {
+  family: "cos" | "sin";
+  m: number;
+  n: number;
+  sign: -1 | 1;
+};
+
+const VOICE_MODES: CymaticMode[] = [
+  { family: "cos", m: 3, n: 8, sign: -1 },
+  { family: "cos", m: 5, n: 8, sign: -1 },
+  { family: "cos", m: 7, n: 8, sign: -1 },
+  { family: "sin", m: 2, n: 5, sign: -1 },
+  { family: "sin", m: 3, n: 7, sign: -1 },
+  { family: "sin", m: 4, n: 7, sign: 1 },
+  { family: "sin", m: 5, n: 9, sign: -1 },
+  { family: "sin", m: 6, n: 9, sign: 1 },
+  { family: "sin", m: 7, n: 10, sign: -1 },
+  { family: "sin", m: 8, n: 11, sign: 1 }
+];
+const DEFAULT_MODE_INDEX = 9;
 
 type Props = {
   className?: string;
@@ -32,13 +51,20 @@ function createParticle(): Particle {
   };
 }
 
-function chladniValue(x: number, y: number, m: number) {
+function chladniValue(x: number, y: number, mode: CymaticMode) {
   const pi = Math.PI;
   const nx = (x + 1) * 0.5;
   const ny = (y + 1) * 0.5;
+  const { family, m, n, sign } = mode;
+  if (family === "cos") {
+    return (
+      Math.cos(pi * n * nx) * Math.cos(pi * m * ny) -
+      Math.cos(pi * m * nx) * Math.cos(pi * n * ny)
+    );
+  }
   return (
-    Math.sin(pi * N_FREQUENCY * nx) * Math.sin(pi * m * ny) +
-    Math.sin(pi * m * nx) * Math.sin(pi * N_FREQUENCY * ny)
+    Math.sin(pi * n * nx) * Math.sin(pi * m * ny) +
+    sign * Math.sin(pi * m * nx) * Math.sin(pi * n * ny)
   );
 }
 
@@ -76,8 +102,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     let envelope = 0;
     let pitchHz = 0;
     let pitchAge = 99;
-    let mFrequency = DEFAULT_M_FREQUENCY;
-    let candidateFrequency = mFrequency;
+    let modeIndex = DEFAULT_MODE_INDEX;
+    let candidateModeIndex = modeIndex;
     let candidateFrames = 0;
     let boundsW = 0;
     let boundsH = 0;
@@ -97,8 +123,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
         envelope += (0 - envelope) * 0.08;
         pitchHz = 0;
         pitchAge = 99;
-        mFrequency = DEFAULT_M_FREQUENCY;
-        candidateFrequency = DEFAULT_M_FREQUENCY;
+        modeIndex = DEFAULT_MODE_INDEX;
+        candidateModeIndex = DEFAULT_MODE_INDEX;
         candidateFrames = 0;
         return;
       }
@@ -144,14 +170,14 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
             1,
             Math.max(0, Math.log(pitchHz / PITCH_MIN) / Math.log(PITCH_MAX / PITCH_MIN))
           );
-          const nextFrequency = 1 + Math.round(pitchPosition * 9);
-          if (nextFrequency === candidateFrequency) {
+          const nextModeIndex = Math.round(pitchPosition * (VOICE_MODES.length - 1));
+          if (nextModeIndex === candidateModeIndex) {
             candidateFrames++;
           } else {
-            candidateFrequency = nextFrequency;
+            candidateModeIndex = nextModeIndex;
             candidateFrames = 1;
           }
-          if (candidateFrames >= 6) mFrequency = candidateFrequency;
+          if (candidateFrames >= 18) modeIndex = candidateModeIndex;
         } else {
           pitchAge++;
         }
@@ -163,7 +189,7 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
     const advanceParticles = (steps = 1) => {
       for (let step = 0; step < steps; step++) {
         for (const particle of particles) {
-          const value = chladniValue(particle.x, particle.y, mFrequency);
+          const value = chladniValue(particle.x, particle.y, VOICE_MODES[modeIndex]!);
           const amplitude = Math.max(0.002, VIBRATION * Math.abs(value));
           particle.x += (Math.random() * 2 - 1) * amplitude * 2;
           particle.y += (Math.random() * 2 - 1) * amplitude * 2;
@@ -233,6 +259,8 @@ export function SttCymaticsCanvas({ className, recording, analyser, readoutRef }
       paint();
       updateReadout();
     };
+
+    advanceParticles(150);
 
     const scheduleLoop = () => {
       if (cancelled || reduceMotion || loopRunning) return;
