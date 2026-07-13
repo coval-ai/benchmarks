@@ -60,8 +60,8 @@ const DESIGNS = [
   [0, 10, -1, 1]
 ] as const;
 const IDLE_DESIGN = 3;
-/** Big jumps across the library so consecutive designs contrast strongly. */
-const JUMPS = [5, 9, 3, 11, 7, 4];
+/** Swap rotation within the pitch band — variety without leaving the voice's design family. */
+const NEIGHBOR_STEPS = [0, 1, -1];
 const WEIGHT_LERP_REC = 0.085;
 const WEIGHT_LERP_IDLE = 0.045;
 const LEVELS = [0, 0.24, -0.24, 0.52, -0.52];
@@ -224,13 +224,16 @@ export function SttCymaticsCanvas({ className, recording, analyser, family, read
         if (voiceActive && resumePending && pitchHz > 0) {
           resumePending = false;
           const t = Math.min(1, Math.max(0, Math.log(pitchHz / TONE_LO) / Math.log(TONE_HI / TONE_LO)));
-          const anchor = t * (DESIGNS.length - 1);
+          // Real-cymatics parity: pitch picks the band (library is ordered coarse → fine, like a
+          // rising Chladni tone), swaps only rotate among that band's neighbors — a given voice
+          // always lands in the same design family.
+          const anchor = Math.round(t * (DESIGNS.length - 1));
           seqK++;
-          let next = Math.round(
-            ((designIdx + JUMPS[seqK % JUMPS.length]!) % DESIGNS.length) * 0.65 + anchor * 0.35
-          );
-          next = Math.max(0, Math.min(DESIGNS.length - 1, next));
-          if (next === designIdx) next = (designIdx + 5) % DESIGNS.length;
+          const clampIdx = (i: number) => Math.max(0, Math.min(DESIGNS.length - 1, i));
+          let next = clampIdx(anchor + NEIGHBOR_STEPS[seqK % NEIGHBOR_STEPS.length]!);
+          if (next === designIdx) {
+            next = clampIdx(anchor + NEIGHBOR_STEPS[(seqK + 1) % NEIGHBOR_STEPS.length]!);
+          }
           designIdx = next;
           targets.fill(0);
           targets[designIdx] = 1;
