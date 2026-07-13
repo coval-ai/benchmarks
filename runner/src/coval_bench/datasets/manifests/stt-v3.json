@@ -1,0 +1,409 @@
+{
+  "_license": "unspecified (no data license published by pipecat-ai)",
+  "id": "stt-v3",
+  "version": "1.0.0",
+  "license": "unspecified (no data license published by pipecat-ai)",
+  "source": "pipecat-ai/stt-benchmark-data train",
+  "items": [
+    {
+      "path": "audio/0001.wav",
+      "sha256": "8d0166c60556cc0367bb83f78237ee7a2b15cfe7b7e3c319ebbc7c0d1315bc6a",
+      "transcript": "A brand new warning light just appeared on my car's dashboard that I don't recognize. Please help me identify what the symbol means and its level of urgency for service.",
+      "duration_sec": 10.01225,
+      "speech_end_offset_ms": 9412.0,
+      "sample_id": "8f5ed6f3-28dd-ed40-5a81-fb15a4fe92fb"
+    },
+    {
+      "path": "audio/0002.wav",
+      "sha256": "56c75f0f5de645456033b4b9e44e127447535723a9cbbfc3dbab33440151dc49",
+      "transcript": "A pop-up window appeared on my computer screen claiming that my system was infected with multiple viruses and that I needed to call a specific phone number immediately for technical support.",
+      "duration_sec": 11.635625,
+      "speech_end_offset_ms": 10852.0,
+      "sample_id": "c8d3ce08-5144-73cb-763e-3b101d35e44a"
+    },
+    {
+      "path": "audio/0003.wav",
+      "sha256": "a0651ed9defebc2bd2762a5fc5fd2cba2b98debedefc77dc4df1fd1d739d8c7a",
+      "transcript": "Add a package of whole wheat tortillas and a jar of mild salsa to my list.",
+      "duration_sec": 6.407875,
+      "speech_end_offset_ms": 5764.0,
+      "sample_id": "a1de08dd-b935-2cca-f0d0-b15d1b637092"
+    },
+    {
+      "path": "audio/0004.wav",
+      "sha256": "171c4775b2a3cc0d5db60f567a1b60ca566f9221c7e6924f4eab7d478af15197",
+      "transcript": "Add bread, milk, cheese, and coffee to my shopping list.",
+      "duration_sec": 4.755,
+      "speech_end_offset_ms": 4068.0,
+      "sample_id": "4e29fdce-cc4e-9fa9-ce72-a549717594a3"
+    },
+    {
+      "path": "audio/0005.wav",
+      "sha256": "cc0ad63a8292d9aeae05cf6604149918b923ec109f61a85a11ca4a4d0e43709e",
+      "transcript": "Add check transmission fluid to my vehicle checklist.",
+      "duration_sec": 5.2765,
+      "speech_end_offset_ms": 4420.0,
+      "sample_id": "b56d79e3-f63a-47a2-2372-636b54488815"
+    },
+    {
+      "path": "audio/0006.wav",
+      "sha256": "be95922ddc8a128d7df982076faad3eb3ac4401f67e0ec0d839d47cf44e3b0ad",
+      "transcript": "Add organic bananas and a loaf of sourdough bread to my shopping list",
+      "duration_sec": 5.330875,
+      "speech_end_offset_ms": 4516.0,
+      "sample_id": "f90c183c-c448-874d-f8e3-ee40f0da93a0"
+    },
+    {
+      "path": "audio/0007.wav",
+      "sha256": "cdfbe8db4b280af88b59c2e4ff8871f1f57153ce3bfa4e121b5d4bf912f95c28",
+      "transcript": "Adjust the driver's side mirror",
+      "duration_sec": 3.016437,
+      "speech_end_offset_ms": 2500.0,
+      "sample_id": "6e517959-81f4-88aa-fb68-08df5b8b89b5"
+    },
+    {
+      "path": "audio/0008.wav",
+      "sha256": "a8b04201fed526b0fee192dabf4b7e63dc46c590c3869e36848891a2253eeb9d",
+      "transcript": "After carefully reviewing all the documentation provided with the new equipment and",
+      "duration_sec": 5.12,
+      "speech_end_offset_ms": 4868.0,
+      "sample_id": "83036a0e-a4d2-28ab-569d-606f3633233c"
+    },
+    {
+      "path": "audio/0009.wav",
+      "sha256": "faa8a3598a13978ec25601d489fc70fa957482a87c2b40d84c420ad3bc1e609d",
+      "transcript": "And a lot of is like the same artist and when I don't know",
+      "duration_sec": 3.012,
+      "speech_end_offset_ms": 3012.0,
+      "sample_id": "51269c0c-005e-acce-35d2-d0dcccf8a0ff"
+    },
+    {
+      "path": "audio/0010.wav",
+      "sha256": "5700f25f030b6b1bc6d9526e693fddaa3992c8b9ff9c8607f496de7e6e4e5e2b",
+      "transcript": "And replace windshield wipers to my car maintenance list.",
+      "duration_sec": 5.439625,
+      "speech_end_offset_ms": 4740.0,
+      "sample_id": "58b50f99-236a-e82d-71ac-68c0fb3b4a89"
+    },
+    {
+      "path": "audio/0011.wav",
+      "sha256": "798736a2075941ff1fa3da4db3800534549601060335962e3dcad8e65afb25a0",
+      "transcript": "And rumor has it that that whole experience",
+      "duration_sec": 3.711,
+      "speech_end_offset_ms": 3711.0,
+      "sample_id": "924b86d5-de68-087c-dfd0-55187760cf67"
+    },
+    {
+      "path": "audio/0012.wav",
+      "sha256": "3425fcfe003f8c2de7e45421c2540606ea0952a567ed781a6f1a5df4f388dd62",
+      "transcript": "And that happens in our society where people hit 60 70",
+      "duration_sec": 3.0,
+      "speech_end_offset_ms": 3000.0,
+      "sample_id": "9507c4b2-d195-2902-5fe4-2c661aee6c3a"
+    },
+    {
+      "path": "audio/0013.wav",
+      "sha256": "88101282f348ded695b793fbf9ca52c4582da52e6051d5bc219dcae1cfa1dc69",
+      "transcript": "Announce that dinner is ready",
+      "duration_sec": 2.519625,
+      "speech_end_offset_ms": 2276.0,
+      "sample_id": "14faa09c-975b-268f-1b3e-192cf1d74c13"
+    },
+    {
+      "path": "audio/0014.wav",
+      "sha256": "1cf7568e374c22a88d6846fdc583b67e36336e7e88fe90f1923ac5f909eb0fbc",
+      "transcript": "At a told",
+      "duration_sec": 2.654688,
+      "speech_end_offset_ms": 2084.0,
+      "sample_id": "cd03abf1-bc5d-d4a8-e524-563d35dabc09"
+    },
+    {
+      "path": "audio/0015.wav",
+      "sha256": "76e591137c910026e1d5020201e07e6540fce31595a66c10887b29e0a185e120",
+      "transcript": "Barbie is this type of toy",
+      "duration_sec": 3.081437,
+      "speech_end_offset_ms": 2404.0,
+      "sample_id": "e52eed64-182f-bdf6-617a-8548a60e97af"
+    },
+    {
+      "path": "audio/0016.wav",
+      "sha256": "74eee9cff4dd83973d62687dfe783879f0cd4070f93748840227c8fd20a90a52",
+      "transcript": "Before I donate my old laptop, I need to find a secure software program that can completely wipe the hard drive multiple times to make sure all my personal data is permanently recoverable.",
+      "duration_sec": 14.003625,
+      "speech_end_offset_ms": 12292.0,
+      "sample_id": "38e8ab03-166b-e9c7-4aaa-821ae3f26d1b"
+    },
+    {
+      "path": "audio/0017.wav",
+      "sha256": "a7fd67bb2944c9ba18ed35fe53dbda0cbdc0c0269411aaceb21283fd05d1a0df",
+      "transcript": "Before I finalize purchasing this concert ticket, can you confirm if the seat listed as section 104 row B has an obstructed view of the stage because",
+      "duration_sec": 12.124,
+      "speech_end_offset_ms": 11332.0,
+      "sample_id": "3a0d357c-6da5-3af7-acbc-42dd45d87da0"
+    },
+    {
+      "path": "audio/0018.wav",
+      "sha256": "b5c84536ef6aa27bed091e606b604e210ef9eb1bc1a629029b09b282169c89de",
+      "transcript": "Before I finalize the purchase of these concert tickets I need to understand what the service fee and facility charge specifically cover because the total seems much higher than the advertised price",
+      "duration_sec": 14.292438,
+      "speech_end_offset_ms": 13508.0,
+      "sample_id": "f41545ad-0c9e-6d17-97cf-7cdae76c2c10"
+    },
+    {
+      "path": "audio/0019.wav",
+      "sha256": "0ffbc8673f3451d16346d772a7e31ebe83071cb53be08ef98a640fe486456ef3",
+      "transcript": "Before I finalize the purchase of these concert tickets online, I just want to be absolutely sure there are no hidden fees or extra charges that will be added on the final checkout page because that happened to me last time and",
+      "duration_sec": 14.622375,
+      "speech_end_offset_ms": 13796.0,
+      "sample_id": "81575490-f4b4-1c2e-76bc-aea4be2cea8d"
+    },
+    {
+      "path": "audio/0020.wav",
+      "sha256": "797a260ebd399190d46453bbedf84ac493513893f32c3b0be89b1830794b8eea",
+      "transcript": "Before I forget I also need to",
+      "duration_sec": 4.00125,
+      "speech_end_offset_ms": 3172.0,
+      "sample_id": "20340deb-7e57-c549-1c33-6c9317825d5c"
+    },
+    {
+      "path": "audio/0021.wav",
+      "sha256": "68beb78a0c72228f3f69c7e132c94af8a77f44aaddf7d7676b1d13dd6266d110",
+      "transcript": "Before I go ahead and complete the checkout process for this order I just want to double check whether the promotional discount I entered is still valid because last time it",
+      "duration_sec": 11.83525,
+      "speech_end_offset_ms": 10852.0,
+      "sample_id": "26fc63a7-b904-e8ef-134e-e769259a053e"
+    },
+    {
+      "path": "audio/0022.wav",
+      "sha256": "3c793e35f45e24566f19cf3414a04e191de9ba09b0fe51bdce923f7c15ed06b2",
+      "transcript": "Before I go ahead and complete the checkout process for this order, I just want to double check whether the promotional discount I entered is still valid because last",
+      "duration_sec": 13.312062,
+      "speech_end_offset_ms": 11140.0,
+      "sample_id": "89dac7e7-8337-49fc-a7cb-e2450f73a0e5"
+    },
+    {
+      "path": "audio/0023.wav",
+      "sha256": "8b0bb9c25843e6b832718389201ea3879387ef6011774e96b4c2a8d4bb967d7b",
+      "transcript": "Before I go ahead and complete the checkout process for this order, I just want to double-check whether the promotional discounts I entered are still valid because last time it",
+      "duration_sec": 10.831812,
+      "speech_end_offset_ms": 9156.0,
+      "sample_id": "ba35d4c9-8a6d-6261-8d23-4edd87bcb72b"
+    },
+    {
+      "path": "audio/0024.wav",
+      "sha256": "5c42e5c45a7c734d001a114a04dc448ae93c884ed6366e41b7bb6b98abb61c02",
+      "transcript": "CAT scan scheduled for next Wednesday at 9:00 AM with fasting instruct",
+      "duration_sec": 4.896,
+      "speech_end_offset_ms": 4896.0,
+      "sample_id": "d4fceb5d-8a86-6206-966b-23c9cc674be5"
+    },
+    {
+      "path": "audio/0025.wav",
+      "sha256": "c1a28dad197978b868e373dcafc7ba4b811dfeea5bf422cccc27b30581a968f4",
+      "transcript": "Can I pay for this with my phone",
+      "duration_sec": 3.115375,
+      "speech_end_offset_ms": 2436.0,
+      "sample_id": "ed4785c8-1c50-a0be-fd34-beebf2c4cbb1"
+    },
+    {
+      "path": "audio/0026.wav",
+      "sha256": "d8aa3999bffa713fc1b705853384ff11e7feab99d32083c90cf3eb1d8045b325",
+      "transcript": "Can someone explain how to properly set up two-factor authentication please?",
+      "duration_sec": 5.78625,
+      "speech_end_offset_ms": 5508.0,
+      "sample_id": "934c2ffb-d39d-2163-5fd3-4348360314ef"
+    },
+    {
+      "path": "audio/0027.wav",
+      "sha256": "9ef7f3dd1f62ccd7ba8bb749a9a7e78749a8b3207b777f3a6fb1b48d6c4a9fe7",
+      "transcript": "Can you clear my schedule for the morning of the fifth",
+      "duration_sec": 4.189375,
+      "speech_end_offset_ms": 3332.0,
+      "sample_id": "052ba5bd-48a3-2c25-883d-e2f25a953d7e"
+    },
+    {
+      "path": "audio/0028.wav",
+      "sha256": "214e01f761aba2bff680208b5e09ca85459f2f274cf6f0e250a186715bf7191a",
+      "transcript": "Can you clearly explain the difference between sautéing, pan-frying, and deep-frying as cooking methods, focusing on the amount of oil used, the cooking temperature, and the desired texture for each?",
+      "duration_sec": 13.357875,
+      "speech_end_offset_ms": 12612.0,
+      "sample_id": "50a87d25-c3c5-d210-0e47-39c0c8c2f66f"
+    },
+    {
+      "path": "audio/0029.wav",
+      "sha256": "3fb45e9e5125c8623e9f26311eddd54ba55a474213935daa49dddb78d7e75122",
+      "transcript": "Can you confirm if the public library's main branch has extended hours on Thursdays and also if their digital archive of historical newspapers is accessible from a home computer or only in",
+      "duration_sec": 13.334687,
+      "speech_end_offset_ms": 12612.0,
+      "sample_id": "78a6b5fb-d191-1cdc-c2f0-6b637d7c8c5f"
+    },
+    {
+      "path": "audio/0030.wav",
+      "sha256": "98ae3bb86f8b333657d00c60e3c1ee5c6d2aa29199d9a83d5b026218d4e00985",
+      "transcript": "Can you create a new playlist for me that's specifically designed for a focused work session featuring instrumental electronic music but strictly avoiding anything with prominent vocals or jarring transitions between tracks",
+      "duration_sec": 13.009688,
+      "speech_end_offset_ms": 12196.0,
+      "sample_id": "d88f0953-a7f2-d2ef-399e-8ca67248e46d"
+    },
+    {
+      "path": "audio/0031.wav",
+      "sha256": "9abed4a1b5ce70671b5b2dfb615fc95c1e4ece80ddfd73bed1dffa420d28d79c",
+      "transcript": "Can you explain how the entire electromagnetic spectrum influences our daily lives well",
+      "duration_sec": 7.46625,
+      "speech_end_offset_ms": 6660.0,
+      "sample_id": "c1e40f88-e284-f3cc-e8e0-a8f0dbb52c0e"
+    },
+    {
+      "path": "audio/0032.wav",
+      "sha256": "e32f265c11f6884145524e40c058d4d79a11c6470142bc93209de918486ff07f",
+      "transcript": "Can you explain the difference between a high pressure system and a low pressure system in meteorology and how each one typically affects the weather conditions we experience on the ground",
+      "duration_sec": 12.699,
+      "speech_end_offset_ms": 11908.0,
+      "sample_id": "dc6daa22-2b3d-3f00-b546-f698f3a3b324"
+    },
+    {
+      "path": "audio/0033.wav",
+      "sha256": "69aceb07022808ddeb2dc6117d4d63d0178584daa4337c604527b81c070b4efb",
+      "transcript": "Can you explain the difference between a traditional IRA and a Roth IRA in simple terms because I'm trying to decide which type of retirement account would be better for my situation",
+      "duration_sec": 11.968,
+      "speech_end_offset_ms": 11204.0,
+      "sample_id": "ec3d261f-eb34-fb17-fb79-fdfe68489cce"
+    },
+    {
+      "path": "audio/0034.wav",
+      "sha256": "3fcd001a2a9d2b2ff36e51edb4dcab0c6e3f2eefd42c548a93fecdc6c7cc70ac",
+      "transcript": "Can you give me a brief overview of the historical event known as the Boston Tea Party explaining why it happened and what its sig s significance was in the American Revol lutionary War?",
+      "duration_sec": 11.82425,
+      "speech_end_offset_ms": 11044.0,
+      "sample_id": "5589157a-23ef-c865-ae01-a592870c4528"
+    },
+    {
+      "path": "audio/0035.wav",
+      "sha256": "ab1366b4522165c5a548d07965a165fd758eabfa313a1405bc72d68ea1233286",
+      "transcript": "Can you give me a simple easy to follow recipe for making homemade sourdough bread from scratch including instructions on how to create and maintain the necessary starter culture for the dough",
+      "duration_sec": 10.891813,
+      "speech_end_offset_ms": 10116.0,
+      "sample_id": "b134b8e1-b79b-0b14-e56c-95592bdb0361"
+    },
+    {
+      "path": "audio/0036.wav",
+      "sha256": "bff99d603498675cf8cbc94ed8c6bd57acaa546ffc33b423159fa9e853125eea",
+      "transcript": "Can you give me the step-by-step instructions for making a classic sourdough starter from scratch? I have the flour and water, but I'm unsure about the feeding schedule and",
+      "duration_sec": 12.193,
+      "speech_end_offset_ms": 10724.0,
+      "sample_id": "3081b275-4fa3-f9d4-0ca3-55f598a37fca"
+    },
+    {
+      "path": "audio/0037.wav",
+      "sha256": "6e60d107e1c82dff162d78db584da7997c9234b32599c5653e7a4e938d6e5d5a",
+      "transcript": "Can you help me brainstorm ideas for my presentation on",
+      "duration_sec": 7.14,
+      "speech_end_offset_ms": 6756.0,
+      "sample_id": "f2df60f7-c3ae-3603-910b-1092bd05aed5"
+    },
+    {
+      "path": "audio/0038.wav",
+      "sha256": "5cbc273a5a852b7290e9c3e1fc74932fbd0f38a00b9a8b6b2d220366719dd2d9",
+      "transcript": "Can you help me find a specific television series about ancient civilizations that I used to watch because I remember it featured a very tall host but I can't recall his name or",
+      "duration_sec": 12.793875,
+      "speech_end_offset_ms": 12004.0,
+      "sample_id": "8f81e391-7e84-eb12-9f73-fce5371eb15f"
+    },
+    {
+      "path": "audio/0039.wav",
+      "sha256": "efbdbea8a004feeb6037ade41d25b5b1fb36dd25598739543e3b1ec9769f1f57",
+      "transcript": "Can you help me troubleshoot my smart home thermostat which was disconnected from the Wi-Fi network and is no longer responding to any commands from its mobile application or voice controls",
+      "duration_sec": 14.361437,
+      "speech_end_offset_ms": 13636.0,
+      "sample_id": "58fac144-68f5-2aec-75f2-39337afa1447"
+    },
+    {
+      "path": "audio/0040.wav",
+      "sha256": "391bbccf0ec1593df2e5de8cdbcac50cfca1cb12d4273ab6d373b593b2cfdd18",
+      "transcript": "Can you make me laugh?",
+      "duration_sec": 2.138625,
+      "speech_end_offset_ms": 2138.6,
+      "sample_id": "6acedc7d-76ce-570b-fc28-7faa73971860"
+    },
+    {
+      "path": "audio/0041.wav",
+      "sha256": "dab728c64077dd8ed3808e613461705ee0d42df9b2018da9f4c405bb8cf95e1a",
+      "transcript": "Can you pass the Turing test?",
+      "duration_sec": 2.847938,
+      "speech_end_offset_ms": 2436.0,
+      "sample_id": "76cf8613-9476-a79a-e501-b6192750d7b4"
+    },
+    {
+      "path": "audio/0042.wav",
+      "sha256": "bafb9c522b791627331c3259b0f7ddd20b025979684d3dbe356546095937e1c9",
+      "transcript": "Can you please check the balance on my gift card with the number ending in 7810 and also see if it has an expiration date because I found it in an old",
+      "duration_sec": 13.4165,
+      "speech_end_offset_ms": 12452.0,
+      "sample_id": "5362af01-e47d-d219-6d9b-5354062585c8"
+    },
+    {
+      "path": "audio/0043.wav",
+      "sha256": "4b0f1ceab6460b9c4450396294563b453a51ea8ada021446c94084db2213fe0c",
+      "transcript": "Can you please check the warranty status on my portable space heater because I think the primary heating coil might have finally given out and",
+      "duration_sec": 10.142938,
+      "speech_end_offset_ms": 9380.0,
+      "sample_id": "ab3a98fa-d70c-db5d-e6eb-c8ec2c032db5"
+    },
+    {
+      "path": "audio/0044.wav",
+      "sha256": "56caf159338ccc19cb8a2337ac66ced5b3b7e2bc1729a5ab31d1ed455c1765f5",
+      "transcript": "Can you please confirm the gate number for my connecting fly because the information on the airport monitor seems to be different from what the airline's apps is showing",
+      "duration_sec": 12.30625,
+      "speech_end_offset_ms": 11012.0,
+      "sample_id": "fb5518d1-2c1d-c6e5-7d30-a193da004501"
+    },
+    {
+      "path": "audio/0045.wav",
+      "sha256": "bc3bc31df20cbc998e26788347a05f1671411959c88e811b8ec1602d442e4685",
+      "transcript": "Can you please give me a curated list of the top five highest rated family friendly hotels in Orlando, Florida that have a swimming pool and offer complimentary breakfast?",
+      "duration_sec": 14.712938,
+      "speech_end_offset_ms": 14084.0,
+      "sample_id": "f9579e62-7126-6971-136c-255df03ef00d"
+    },
+    {
+      "path": "audio/0046.wav",
+      "sha256": "888c8056030bf771e274d9521d02db259238d1faa2cd03852546d788abfcce49",
+      "transcript": "Can you please provide a detailed step-by-step guide on how to properly season a brand new cast iron skillet to create a non-stick surface that will last for years",
+      "duration_sec": 11.92825,
+      "speech_end_offset_ms": 10788.0,
+      "sample_id": "f00ac90e-efb9-a66a-fa69-ae9ee24e4140"
+    },
+    {
+      "path": "audio/0047.wav",
+      "sha256": "5f34ffa4d075c9320d91a50b6b8035052406ee95dbaaf585cc9217b2e385554d",
+      "transcript": "Can you please tell me what the actual capital of Australia is because I always assumed it was Sydney but my friend recently insisted that it was another city entirely so now",
+      "duration_sec": 12.769125,
+      "speech_end_offset_ms": 11972.0,
+      "sample_id": "f0912322-b45f-61dc-11fb-101e07879661"
+    },
+    {
+      "path": "audio/0048.wav",
+      "sha256": "04bf395303289f70008251a0a48d213d790bdc4217133c5927ef63aeb7dab990",
+      "transcript": "Can you provide a clear definition of blockchain technology and explain how it fundamentally differs fr from a traditional database using an analogy a non-technical person could comprehend?",
+      "duration_sec": 12.58275,
+      "speech_end_offset_ms": 11780.0,
+      "sample_id": "6d8cd94b-adba-ae15-7929-7342427b01df"
+    },
+    {
+      "path": "audio/0049.wav",
+      "sha256": "36c76f0f8a01ae353746c992969373aae54979805e3d159146be4c61ce530543",
+      "transcript": "Can you provide a detailed step-by-step process for filling a homeowner's insurance claim for water damage caused by a recently burst plumbing pipe?",
+      "duration_sec": 12.6085,
+      "speech_end_offset_ms": 11140.0,
+      "sample_id": "930905b6-467c-3098-c100-7d08467961ea"
+    },
+    {
+      "path": "audio/0050.wav",
+      "sha256": "c6997214a2449149c2559e0187dceab64a650ae4dea2bdb461052159559c9c4d",
+      "transcript": "Can you provide a summary of the main arguments for and against the adoption of nuclear energy as a primary source of combating climate change and reducing carbon emissions",
+      "duration_sec": 10.373625,
+      "speech_end_offset_ms": 9732.0,
+      "sample_id": "68b96b2b-547e-2e8c-d305-b4fc517c0b3e"
+    }
+  ]
+}
