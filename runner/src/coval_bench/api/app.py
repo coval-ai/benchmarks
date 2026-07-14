@@ -28,6 +28,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
+from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
@@ -108,6 +109,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
         max_age=600,
     )
+
+    app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips",))
 
     app.state.response_cache = new_response_cache()
     app.state.cache_locks = new_cache_locks()
