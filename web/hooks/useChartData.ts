@@ -381,11 +381,17 @@ export function useChartData({
 
   // ─── Timeline window functions ───
 
-  const getCurrentTimeWindow = useCallback((): [number, number] => {
+  const currentTimeWindow = useMemo<[number, number]>(() => {
     const windowEnd = Date.now();
     const windowStart = windowEnd - WINDOW_MS[timeWindow];
     return [windowStart, windowEnd];
-  }, [timeWindow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- series retriggers the now() snapshot on data reload
+  }, [timeWindow, series]);
+
+  const getCurrentTimeWindow = useCallback(
+    (): [number, number] => currentTimeWindow,
+    [currentTimeWindow]
+  );
 
   // Pinned ticks — Recharts' auto-picked ticks space unevenly. Wider windows
   // tick at local midnights so date labels sit on day starts in the viewer's
