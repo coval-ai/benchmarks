@@ -55,7 +55,10 @@ class PalabraTTSProvider(TTSProvider):
     async def _get_session_token(self) -> str:
         """POST /session-storage/session -> the session auth token."""
         async with httpx.AsyncClient(timeout=5.0) as client:
-            client_id, client_secret = self._api_key.split("_")
+            try:
+                client_id, client_secret = self._api_key.split("_", 1)
+            except ValueError as exc:
+                raise ValueError("palabra_api_key must be '<client_id>_<client_secret>'") from exc
             resp = await client.post(
                 _SESSION_URL,
                 headers={"ClientID": client_id, "ClientSecret": client_secret},
@@ -106,7 +109,7 @@ class PalabraTTSProvider(TTSProvider):
                         continue
                     event: dict[str, Any] = json.loads(raw)
 
-                    data: dict[str, Any] = event.get("data", {})
+                    data: dict[str, Any] = event.get("data") or {}
 
                     if event.get("message_type") == "error":
                         raise RuntimeError(f"{data.get('code')}: {data.get('desc')}")
