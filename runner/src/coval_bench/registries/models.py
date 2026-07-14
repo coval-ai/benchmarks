@@ -609,13 +609,12 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
         arena_enabled=False,
     ),
-    # Fish Audio. Voice is "Energetic Male", the reference_id Fish Audio's own
-    # docs use in examples.
+    # Fish Audio. Voice is the benchmark-selected speaker used in Fish Audio docs.
     RegisteredModel(
         benchmark=_TTS,
         provider="fishaudio",
         model="s1",
-        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        voice="9a9cf47702da476aa4629e2506d4a857",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -623,7 +622,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="fishaudio",
         model="s2.1-pro",
-        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        voice="9a9cf47702da476aa4629e2506d4a857",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s2.1-pro-free",
+        voice="9a9cf47702da476aa4629e2506d4a857",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
