@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
@@ -108,6 +109,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
         max_age=600,
     )
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     app.state.response_cache = new_response_cache()
     app.state.cache_locks = new_cache_locks()
