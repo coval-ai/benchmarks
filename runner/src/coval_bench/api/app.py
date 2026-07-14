@@ -22,13 +22,13 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
+from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
@@ -110,7 +110,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
 
-    app.add_middleware(GZipMiddleware, minimum_size=1024)
+    app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips",))
 
     app.state.response_cache = new_response_cache()
     app.state.cache_locks = new_cache_locks()

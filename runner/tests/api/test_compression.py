@@ -9,11 +9,16 @@ uncompressed, which returns a 500. GZipMiddleware keeps it well under.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
-from httpx import AsyncClient
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
+
+AppFactory = Callable[[dict[str, str] | None], Awaitable[FastAPI]]
 
 
 async def test_large_aggregates_response_is_gzipped(client: AsyncClient, postgresql: Any) -> None:
@@ -54,3 +59,31 @@ async def test_small_response_is_not_compressed(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert "content-encoding" not in response.headers
+
+
+async def test_clips_are_not_compressed(app_factory: AppFactory, tmp_path: Path) -> None:
+    """Static clip responses stay identity-encoded.
+
+    Gzipping them would return a 206 whose ``Content-Range`` describes offsets
+    in the original file while the body is compressed, and would drop
+    ``Content-Length`` from full-file responses.
+    """
+    clips_dir = tmp_path / "clips"
+    clips_dir.mkdir()
+    (clips_dir / "clip.wav").write_bytes(b"\x00" * 4096)
+    app = await app_factory({"ARENA_AUDIO_DIR": str(tmp_path)})
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        full = await c.get("/clips/clip.wav", headers={"Accept-Encoding": "gzip"})
+        assert full.status_code == 200
+        assert "content-encoding" not in full.headers
+        assert full.headers["content-length"] == "4096"
+
+        partial = await c.get(
+            "/clips/clip.wav",
+            headers={"Accept-Encoding": "gzip", "Range": "bytes=0-1499"},
+        )
+        assert partial.status_code == 206
+        assert "content-encoding" not in partial.headers
+        assert partial.headers["content-length"] == "1500"
+        assert partial.content == b"\x00" * 1500
