@@ -511,7 +511,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -521,7 +520,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -542,7 +540,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _EMOTION, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -552,7 +549,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -607,7 +603,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Cherry",
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     # Fish Audio. Voice is the benchmark-selected speaker used in Fish Audio docs.
     RegisteredModel(
@@ -642,7 +637,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="English_expressive_narrator",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -651,7 +645,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="English_expressive_narrator",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never

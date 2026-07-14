@@ -1,11 +1,15 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Assert every arena-eligible TTS provider's API key is mounted on benchmarks-api.
+"""Assert arena roster and benchmarks-api key mounts agree, in both directions.
 
 Reads the ``coval-ai/benchmark-infra`` Cloud Run service module (passed as a
 path; the CI workflow fetches it) and structurally extracts the env-var names it
 mounts from Secret Manager. Fails if any provider the arena would synthesize
-lacks its key on the service — the cross-repo parity gate.
+lacks its key on the service (the cross-repo parity gate), and also fails when
+an ACTIVE provider is opted out with ``arena_enabled=False`` even though its key
+IS mounted — a stale opt-out that silently keeps the provider off the arena.
+Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g. ADC-authenticated
+ones) are skipped: there is no key mount to check them against.
 
 Usage: python scripts/check_arena_keys.py <path-to-cloud_run_service/main.tf>
 """
@@ -17,6 +21,8 @@ import sys
 import hcl2
 
 from coval_bench.arena.pairing import active_tts_models
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -76,6 +82,25 @@ def main(tf_path: str) -> int:
             "(modules/cloud_run_service/main.tf env{} block + "
             "envs/prod/cloud_run_service.tf secret_ids + the secret_manager secret), "
             "then re-run this check."
+        )
+        return 1
+
+    stale_opt_outs = sorted(
+        {
+            m.provider
+            for m in MODEL_REGISTRY
+            if m.benchmark is Benchmark.TTS
+            and m.status is ModelStatus.ACTIVE
+            and not m.arena_enabled
+            and PROVIDER_ENV.get(m.provider) in mounted
+        }
+    )
+    if stale_opt_outs:
+        print(
+            f"ERROR: key mounted on benchmarks-api but arena_enabled=False: {stale_opt_outs}\n"
+            "The opt-out is stale — remove arena_enabled=False from these providers' "
+            "ACTIVE models in registries/models.py (or unmount the key if the "
+            "exclusion is intentional)."
         )
         return 1
 
