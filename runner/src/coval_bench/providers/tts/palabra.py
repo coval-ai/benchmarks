@@ -109,7 +109,8 @@ class PalabraTTSProvider(TTSProvider):
                         continue
                     event: dict[str, Any] = json.loads(raw)
 
-                    data: dict[str, Any] = event.get("data") or {}
+                    data_raw = event.get("data")
+                    data: dict[str, Any] = data_raw if isinstance(data_raw, dict) else {}
 
                     if event.get("message_type") == "error":
                         raise RuntimeError(f"{data.get('code')}: {data.get('desc')}")
