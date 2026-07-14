@@ -437,6 +437,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="palabra",
+        model="palabra-tts-v1",
+        voice="default_low",
+        tags=(_REALTIME, _MULTI, _CLONE, _STREAM),
+        status=_PENDING,
+    ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
     RegisteredModel(
