@@ -3,14 +3,9 @@
 
 """Fetch S2S (voice-to-voice) latency from the Coval API and write per-clip rows.
 
-Each tick scans a window of recent completed Coval runs per provider and
-ingests every clean run not yet in the DB, one results row per clip via
-``RunWriter``; the existing matviews aggregate. A run's slot is its Coval
-``create_time`` floored to the fetch grid, so data lands in the bucket it was
-measured in and a late-resolved run backfills its own slot. Runs finalized
-with an ``error_status`` (pipeline faults, not provider faults) are never
-ingested. Agent ids, the metric id, and the API key are read from the
-environment, never committed.
+Ingests each provider's recent completed runs not yet in the DB, slotted by
+run create_time, and flags providers with no fresh data. Agent ids, the
+metric id, and the API key are read from the environment, never committed.
 """
 
 from __future__ import annotations
@@ -39,9 +34,10 @@ logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 DATASET_ID = "s2s-v1"
 
 # Ingest window: how far back one tick looks for not-yet-ingested runs, and
-# how many list results that scan reads. Wide enough that a run resolving
-# late (the >180min reconciler sweep) is still picked up.
-WINDOW_SECONDS = 86_400
+# how many list results that scan reads. Two periods (with a one-day floor)
+# so the previous run stays visible while the current one is due, and a run
+# resolving late is still picked up.
+WINDOW_FLOOR_SECONDS = 86_400
 WINDOW_PAGE_SIZE = 10
 
 
@@ -110,13 +106,16 @@ def _bucket_start(at: datetime, period_seconds: int) -> datetime:
     return datetime.fromtimestamp(epoch - epoch % period_seconds, tz=UTC)
 
 
-async def recent_completed_runs(client: httpx.AsyncClient, agent_id: str) -> list[CovalRun]:
+async def recent_completed_runs(
+    client: httpx.AsyncClient, agent_id: str, *, period_seconds: int
+) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
     List returns the summary view newest-first; filter by agent_id + status
     (tags are not filterable). Runs without a parseable create_time are kept:
     better to ingest with a fetch-time slot than to drop data.
     """
+    window_seconds = max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     resp = await client.get(
         "/runs",
         params={
@@ -135,7 +134,7 @@ async def recent_completed_runs(client: httpx.AsyncClient, agent_id: str) -> lis
             create_time=_parse_time(r.get("create_time")),
             error_status=cast("str | None", r.get("error_status")) or None,
         )
-        if run.create_time is not None and (now - run.create_time).total_seconds() > WINDOW_SECONDS:
+        if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
             continue
         runs.append(run)
     return runs
@@ -192,9 +191,8 @@ async def _ingest_run(
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
-    Skips (before any DB write) runs finalized with an error_status — the
-    reconciler flips wrapup-race casualties to COMPLETED+EXECUTION_FAILURE and
-    those are pipeline faults that must not dent provider reliability — and
+    Skips (before any DB write) runs finalized with an error_status — those
+    failed upstream of the provider and must not dent its reliability — and
     runs missing the metric. Otherwise SUCCEEDED = all clips numeric, PARTIAL =
     some failed, FAILED = all failed.
     """
@@ -298,7 +296,7 @@ async def _fetch_one_provider(
     """
     statuses: list[RunStatus] = []
     try:
-        runs = await recent_completed_runs(client, agent_id)
+        runs = await recent_completed_runs(client, agent_id, period_seconds=period_seconds)
 
         data_seen = False
         newest_data_at: datetime | None = None

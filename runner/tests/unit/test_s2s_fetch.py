@@ -135,7 +135,7 @@ async def test_recent_completed_runs_window_and_parse() -> None:
         {"run_id": "R0"},  # no create_time -> kept
     )
     async with _fake_client(list_json, {}, captured) as client:
-        runs = await fetch_v2v.recent_completed_runs(client, "a1")
+        runs = await fetch_v2v.recent_completed_runs(client, "a1", period_seconds=10_800)
 
     filter_expr = captured[0].url.params["filter"]
     assert 'status="COMPLETED"' in filter_expr
@@ -146,7 +146,7 @@ async def test_recent_completed_runs_window_and_parse() -> None:
     assert runs[2].create_time is None
 
     async with _fake_client({"runs": []}, {}) as client:
-        assert await fetch_v2v.recent_completed_runs(client, "a1") == []
+        assert await fetch_v2v.recent_completed_runs(client, "a1", period_seconds=10_800) == []
 
 
 @pytest.mark.asyncio
@@ -209,7 +209,7 @@ async def test_ingest_run_partial_and_failed() -> None:
 
 @pytest.mark.asyncio
 async def test_ingest_run_skips_before_any_write() -> None:
-    # Errored detail (reconciler zombie): skipped, no run row created.
+    # Errored detail: skipped, no run row created.
     writer = _stub_writer()
     run = CovalRun(run_id="R1", create_time=None, error_status=None)
     async with _fake_client({}, _run_json([], error_status="EXECUTION_FAILURE")) as client:
