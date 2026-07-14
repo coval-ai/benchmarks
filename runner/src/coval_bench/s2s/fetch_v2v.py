@@ -288,11 +288,11 @@ async def _fetch_one_provider(
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
-    Returns (provider status, runs ingested this tick). A tick with nothing
-    new is a healthy no-op (SUCCEEDED) while the newest usable run is younger
-    than period + grace; past that it logs "provider_stale" and returns FAILED,
-    so a stuck sim, a paused schedule, or a Coval outage is always loud.
-    Errors are caught here so one provider can't abort others.
+    Returns (provider status, runs ingested this tick). Staleness wins: when
+    the newest usable run is unknown-age or older than period + grace, the
+    provider is FAILED even if old runs were backfilled this tick, so a stuck
+    sim, a paused schedule, or a Coval outage is always loud. Errors are
+    caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
     try:
@@ -339,7 +339,7 @@ async def _fetch_one_provider(
             if newest_data_at is None
             else (datetime.now(tz=UTC) - newest_data_at).total_seconds()
         )
-        stale = not data_seen or (age is not None and age > threshold)
+        stale = not data_seen or age is None or age > threshold
         if stale:
             logger.warning(
                 "provider_stale",
@@ -347,16 +347,15 @@ async def _fetch_one_provider(
                 newest_data_at=str(newest_data_at),
                 threshold_seconds=threshold,
             )
+            return RunStatus.FAILED, len(statuses)
 
         if statuses:
             if all(s is RunStatus.FAILED for s in statuses):
-                aggregate = RunStatus.FAILED
-            elif all(s is RunStatus.SUCCEEDED for s in statuses):
-                aggregate = RunStatus.SUCCEEDED
-            else:
-                aggregate = RunStatus.PARTIAL
-            return aggregate, len(statuses)
-        return (RunStatus.FAILED if stale else RunStatus.SUCCEEDED), 0
+                return RunStatus.FAILED, len(statuses)
+            if all(s is RunStatus.SUCCEEDED for s in statuses):
+                return RunStatus.SUCCEEDED, len(statuses)
+            return RunStatus.PARTIAL, len(statuses)
+        return RunStatus.SUCCEEDED, 0
     except Exception as exc:
         logger.warning("provider_fetch_failed", provider=spec.provider, error=str(exc))
         return RunStatus.FAILED, len(statuses)

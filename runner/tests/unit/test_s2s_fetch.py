@@ -303,6 +303,29 @@ async def test_fetch_one_provider_stale_fails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
+    # Only an old run ingests this tick: rows land, provider still FAILED.
+    writer = _stub_writer()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=6))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await _fetch(client, writer)
+    assert (status, ingested) == (RunStatus.FAILED, 1)
+    writer.record_results.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_one_provider_unknown_age_is_stale() -> None:
+    # A usable run without a parseable create_time is no evidence of freshness.
+    writer = _stub_writer()
+    writer.coval_run_ingested = AsyncMock(return_value=True)
+    list_json = _list_json({"run_id": "R1"})
+    async with _fake_client(list_json, {}) as client:
+        status, ingested = await _fetch(client, writer)
+    assert (status, ingested) == (RunStatus.FAILED, 0)
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_skips_errored_ingests_older_clean() -> None:
     # Newest run errored (summary view): skip it, ingest the older clean one.
     writer = _stub_writer()
