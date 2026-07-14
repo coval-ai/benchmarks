@@ -675,27 +675,27 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client). PENDING until the first run lands data.
+    # provider client).
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-realtime",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
 ]
 
