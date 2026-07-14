@@ -381,24 +381,11 @@ export function useChartData({
 
   // ─── Timeline window functions ───
 
-  // Anchor the timeline window to the latest plotted bucket, not Date.now().
-  // Charts plot scheduled_at so every result from one benchmark run shares a
-  // tick.
-  const timelineWindowEnd = useMemo<number>(() => {
-    if (series.length === 0) return Date.now();
-    let max = 0;
-    for (const point of series) {
-      const t = new Date(point.scheduled_at).getTime();
-      if (Number.isNaN(t)) continue;
-      if (t > max) max = t;
-    }
-    return max > 0 ? max : Date.now();
-  }, [series]);
-
   const getCurrentTimeWindow = useCallback((): [number, number] => {
-    const windowStart = timelineWindowEnd - WINDOW_MS[timeWindow];
-    return [windowStart, timelineWindowEnd];
-  }, [timelineWindowEnd, timeWindow]);
+    const windowEnd = Date.now();
+    const windowStart = windowEnd - WINDOW_MS[timeWindow];
+    return [windowStart, windowEnd];
+  }, [timeWindow]);
 
   // Pinned ticks — Recharts' auto-picked ticks space unevenly. Wider windows
   // tick at local midnights so date labels sit on day starts in the viewer's
