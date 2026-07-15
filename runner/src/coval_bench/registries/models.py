@@ -518,7 +518,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Ashley",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
