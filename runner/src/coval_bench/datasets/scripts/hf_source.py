@@ -440,10 +440,7 @@ def extract_parquet_audio(selected: list[Clip], audio_col: str) -> None:
     for clip in selected:
         by_file.setdefault(str(clip.meta["_pq"]), []).append(clip)
     for pq_file, clips in by_file.items():
-        # NOTE (deferred): this materializes the whole audio column per shard, so a
-        # sparse fetch from a huge single-row-group file peaks at that file's size in
-        # RAM. Acceptable for now — cache is deleted after the build and most shards
-        # have many row groups. Proper fix = read only the selected rows' row groups.
+        # materializes the shard's whole audio column: peak RAM ~ shard size
         column = pq.read_table(pq_file, columns=[audio_col])[audio_col].to_pylist()
         for clip in clips:
             cell = column[int(clip.meta["_row"])]  # type: ignore[call-overload]
