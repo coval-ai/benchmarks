@@ -658,9 +658,10 @@ async def test_create_battle_rejects_empty_prompt(client: AsyncClient, postgresq
 
 
 async def test_create_battle_rejects_bad_domain(client: AsyncClient, postgresql: Any) -> None:
-    """An unknown or reserved ('all') domain is rejected with 422."""
+    """A missing, unknown, or reserved ('all') domain is rejected with 422."""
     await _apply_arena_schema(_make_db_url(postgresql))
     for payload in (
+        {"prompt": "hello"},
         {"prompt": "hello", "domain": "banking"},
         {"prompt": "hello", "domain": "all"},
     ):

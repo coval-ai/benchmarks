@@ -214,7 +214,7 @@ class BattleCreate(BaseModel):
     """Request to generate a new battle from a user prompt."""
 
     prompt: str = Field(..., max_length=500)
-    domain: ArenaDomain | None = None
+    domain: ArenaDomain
 
 
 class LeaderboardEntryOut(BaseModel):

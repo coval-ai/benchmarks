@@ -330,12 +330,21 @@ def arena() -> None:
     help="RNG seed; keeps the bootstrap CI reproducible.",
 )
 @click.option(
+    "--domain",
+    default="all",
+    show_default=True,
+    type=click.Choice(
+        ("all", "customer-service", "healthcare", "sales", "receptionist-booking", "other")
+    ),
+    help="Domain board to compute ('all' aggregates every battle regardless of domain).",
+)
+@click.option(
     "--force",
     is_flag=True,
     default=False,
     help="Run even if another snapshot is in progress (bypass the advisory lock).",
 )
-def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -> None:
+def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, domain: str, force: bool) -> None:
     """Refit Davidson-BT ratings from all votes and persist a leaderboard board."""
     from coval_bench.arena.rating import ConvergenceError
     from coval_bench.arena.snapshot import run_snapshot
@@ -351,6 +360,7 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
                 metric_name=metric,
                 bootstrap_rounds=bootstrap_rounds,
                 seed=seed,
+                domain=domain,
                 force=force,
             )
         return None if result is None else len(result.models)
@@ -363,6 +373,7 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
                 {
                     "event": "arena_snapshot",
                     "metric": metric,
+                    "domain": domain,
                     "error": "convergence_failed",
                     "detail": str(exc),
                 }
@@ -370,9 +381,17 @@ def arena_snapshot(metric: str, bootstrap_rounds: int, seed: int, force: bool) -
         )
         sys.exit(1)
     if written is None:
-        click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "skipped": True}))
+        click.echo(
+            json.dumps(
+                {"event": "arena_snapshot", "metric": metric, "domain": domain, "skipped": True}
+            )
+        )
     else:
-        click.echo(json.dumps({"event": "arena_snapshot", "metric": metric, "models": written}))
+        click.echo(
+            json.dumps(
+                {"event": "arena_snapshot", "metric": metric, "domain": domain, "models": written}
+            )
+        )
 
 
 @arena.command(name="seed-battles")
