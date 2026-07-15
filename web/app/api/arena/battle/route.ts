@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+import { isArenaDomain } from "@/lib/arena/domains";
 import { arenaAccessOk } from "@/lib/arena/guard";
 import { arenaRunnerFetch } from "@/lib/arena/runner";
 import type { BlindBattle } from "@/lib/arena/types";
@@ -15,7 +16,7 @@ interface BattleOut {
 
 export async function POST(req: Request) {
   if (!(await arenaAccessOk())) return new Response(null, { status: 404 });
-  let body: { text?: string };
+  let body: { text?: string; domain?: string };
   try {
     body = await req.json();
   } catch {
@@ -23,10 +24,13 @@ export async function POST(req: Request) {
   }
   const text = body.text?.trim();
   if (!text) return Response.json({ error: "Prompt is empty." }, { status: 400 });
+  if (!isArenaDomain(body.domain)) {
+    return Response.json({ error: "Invalid domain." }, { status: 400 });
+  }
 
   let res: Response;
   try {
-    res = await arenaRunnerFetch("/v1/arena/battle", { prompt: text });
+    res = await arenaRunnerFetch("/v1/arena/battle", { prompt: text, domain: body.domain });
   } catch {
     return Response.json({ error: "Battle generation failed." }, { status: 502 });
   }
