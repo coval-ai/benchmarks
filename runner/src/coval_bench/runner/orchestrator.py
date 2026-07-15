@@ -1039,14 +1039,17 @@ async def run_benchmarks(
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
                 logger.info("tts_dataset_sampled", item_count=len(tts_items))
 
-                tts_pairs = [
-                    (entry, item, voice)
+                # Item-major order so the semaphore interleaves providers; a
+                # model-major order would burst one provider with concurrent
+                # requests and skew TTFA.
+                tts_voices = {
+                    (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
                     for entry in enabled_tts
-                    for item, voice in zip(
-                        tts_items,
-                        _assign_tts_voices(entry, len(tts_items), run_id),
-                        strict=True,
-                    )
+                }
+                tts_pairs = [
+                    (entry, item, tts_voices[(entry.provider, entry.model)][i])
+                    for i, item in enumerate(tts_items)
+                    for entry in enabled_tts
                 ]
                 tts_tasks = [
                     _run_tts_item(
