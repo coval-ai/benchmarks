@@ -108,6 +108,7 @@ export function normalizeModelName(modelKey: string): string {
     "octave-2": "Octave 2",
     coda: "Coda",
     "grok-tts": "Grok TTS",
+    "inworld-tts-2": "TTS 2",
     "inworld-tts-1.5-max": "TTS 1.5 Max",
     "inworld-tts-1.5-mini": "TTS 1.5 Mini",
     "tts-rt-v1": "TTS RT v1",

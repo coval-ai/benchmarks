@@ -54,6 +54,7 @@ export const modelColors: Record<string, string> = {
   // Inworld AI — indigo.
   "inworld-tts-1.5-mini": "#a9a5ff",
   "inworld-tts-1.5-max": "#8b85de",
+  "inworld-tts-2": "#5b55a9",
   "inworld-stt-1": "#736dc3",
 
   // Deepgram — teal. Aura anchors TTS; STT models span light→dark teal.
