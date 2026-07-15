@@ -111,7 +111,7 @@ def _fetch_file(src: str, dest: Path) -> None:
     tmp.replace(dest)
 
 
-def _as_duration(value: object) -> float:
+def as_duration(value: object) -> float:
     """Coerce a duration cell to float; null/blank/non-numeric → 0.0 (then _clean drops it)."""
     try:
         return float(value)  # type: ignore[arg-type]
@@ -228,7 +228,7 @@ def make_source(
                     {
                         "audio": name,
                         "transcript": str(row[text_col] or ""),
-                        "duration": _as_duration(row.get(duration_col)) if duration_col else 0.0,
+                        "duration": as_duration(row.get(duration_col)) if duration_col else 0.0,
                         "meta": meta,
                     }
                 )
@@ -310,7 +310,7 @@ def _config_parquet_files(files: list[str], config: str) -> list[str]:
     return matched
 
 
-def _list_parquet_files(hf_path: str, config: str) -> list[str]:
+def list_parquet_files(hf_path: str, config: str) -> list[str]:
     """Repo-relative parquet paths that belong to *config*."""
     req = urllib.request.Request(f"{_HF_API}/{hf_path}", headers=_UA)  # noqa: S310 (audited: HF API)
     try:
@@ -322,6 +322,11 @@ def _list_parquet_files(hf_path: str, config: str) -> list[str]:
         raise HFNetworkError(f"{hf_path}: repo listing unreachable: {exc}") from exc
     files = [str(s["rfilename"]) for s in data.get("siblings", [])]
     return _config_parquet_files(files, config)
+
+
+def download_parquet(hf_path: str, rel: str, dest: Path) -> None:
+    """Download one repo-relative parquet shard of *hf_path* to *dest* (atomic)."""
+    _fetch_file(_HF_RESOLVE.format(repo=hf_path, path=rel), dest)
 
 
 def _detect_parquet_columns(
@@ -364,7 +369,7 @@ def make_parquet_source(
         import pyarrow  # noqa: F401
     except ImportError as exc:
         raise HFUnsupported("parquet fallback needs pyarrow (pip install pyarrow)") from exc
-    files = _list_parquet_files(hf_path, config)
+    files = list_parquet_files(hf_path, config)
     if not files:
         raise HFUnsupported(f"{hf_path}: no parquet files for config '{config}'")
     detected: dict[str, str | None] = {}
@@ -378,7 +383,7 @@ def make_parquet_source(
             dest = _local(cache_root, rel)
             if not dest.exists():
                 logger.info("hf_parquet_download", file=rel)
-                _fetch_file(_HF_RESOLVE.format(repo=hf_path, path=rel), dest)
+                download_parquet(hf_path, rel, dest)
         return cache_root
 
     def parse(source: Path) -> list[Clip]:
@@ -408,31 +413,42 @@ def make_parquet_source(
                     Clip(
                         audio_path=audio_dir / f"{local.stem}-{i}.wav",
                         transcript=str(row[t] or ""),
-                        duration_sec=_as_duration(row[d]),
+                        duration_sec=as_duration(row[d]),
                         meta=meta,
                     )
                 )
         return clips
 
     def fetch(selected: list[Clip]) -> None:
-        import pyarrow.parquet as pq
-
-        by_file: dict[str, list[Clip]] = {}
-        for clip in selected:
-            by_file.setdefault(str(clip.meta["_pq"]), []).append(clip)
         audio = detected["audio"]
-        for pq_file, clips in by_file.items():
-            # NOTE (deferred): this materializes the whole audio column per shard, so a
-            # sparse fetch from a huge single-row-group file peaks at that file's size in
-            # RAM. Acceptable for now — cache is deleted after the build and most shards
-            # have many row groups. Proper fix = read only the selected rows' row groups.
-            column = pq.read_table(pq_file, columns=[audio])[audio].to_pylist()
-            for clip in clips:
-                cell = column[int(clip.meta["_row"])]  # type: ignore[call-overload]
-                data = cell["bytes"] if isinstance(cell, dict) else cell
-                clip.audio_path.write_bytes(data)
+        if audio is None:
+            raise HFUnsupported(f"{hf_path}: parquet audio column not detected")
+        extract_parquet_audio(selected, audio)
 
     return download, parse, fetch
+
+
+def extract_parquet_audio(selected: list[Clip], audio_col: str) -> None:
+    """Write each clip's audio bytes from its parquet shard to ``clip.audio_path``.
+
+    Clips carry their shard and row via the ``_pq``/``_row`` meta keys (set by any
+    parquet-backed parse).
+    """
+    import pyarrow.parquet as pq
+
+    by_file: dict[str, list[Clip]] = {}
+    for clip in selected:
+        by_file.setdefault(str(clip.meta["_pq"]), []).append(clip)
+    for pq_file, clips in by_file.items():
+        # NOTE (deferred): this materializes the whole audio column per shard, so a
+        # sparse fetch from a huge single-row-group file peaks at that file's size in
+        # RAM. Acceptable for now — cache is deleted after the build and most shards
+        # have many row groups. Proper fix = read only the selected rows' row groups.
+        column = pq.read_table(pq_file, columns=[audio_col])[audio_col].to_pylist()
+        for clip in clips:
+            cell = column[int(clip.meta["_row"])]  # type: ignore[call-overload]
+            data = cell["bytes"] if isinstance(cell, dict) else cell
+            clip.audio_path.write_bytes(data)
 
 
 def scaffold_adapter(hf_path: str, dest: Path, *, detected: str) -> None:

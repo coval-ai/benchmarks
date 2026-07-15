@@ -70,6 +70,7 @@ dev = [
     "pytest-socket>=0.7",
     "asgi-lifespan>=2.1.0",
     "pip-licenses>=5.5.5",
+    "pyarrow>=17",
 ]
 
 [build-system]
@@ -119,6 +120,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "pyarrow.*"
 ignore_missing_imports = true
+
+# pyarrow ships untyped; these build-time modules call into it.
+[[tool.mypy.overrides]]
+module = ["coval_bench.datasets.scripts.hf_source", "coval_bench.datasets.scripts.wildasr"]
+disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
 module = "websockets.*"

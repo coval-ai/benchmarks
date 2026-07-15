@@ -76,7 +76,7 @@ class DatasetSpec:
     dur_min: float  # clean: keep clips within [dur_min, dur_max]
     dur_max: float
     min_words: int  # clean: minimum transcript word count
-    num: int  # final clip count
+    num: int | None  # final clip count; None = every clip that survives selection
     dedup_key: Callable[[Clip], object]  # keep one clip per key
     balance_dims: Sequence[Callable[[Clip], object]]  # sample even across these (None = untagged)
     license: str
@@ -112,7 +112,7 @@ def _clean(clips: list[Clip], *, dur_min: float, dur_max: float, min_words: int)
 def balanced_sample(
     clips: list[Clip],
     *,
-    num: int,
+    num: int | None,
     dedup_key: Callable[[Clip], object],
     balance_dims: Sequence[Callable[[Clip], object]],
     tag_warn: float = _TAG_WARN,
@@ -120,6 +120,9 @@ def balanced_sample(
 ) -> list[Clip]:
     """Select: dedup, exclude clips untagged on any balance dim, then stratified
     round-robin to *num* so the balance dimensions are evenly represented.
+
+    ``num=None`` keeps every clip that survives dedup and the untagged exclusion,
+    still in the deterministic round-robin order.
 
     Each dim returns a value or ``None`` (untagged/unexpected). Per-dim coverage is
     logged; below *tag_warn* it warns, below *tag_floor* it aborts. Untagged clips
@@ -160,15 +163,16 @@ def balanced_sample(
         group.sort(key=lambda c: str(dedup_key(c)))
 
     keys = sorted(strata, key=lambda k: tuple(str(v) for v in k))
+    target = len(pool) if num is None else num
     selected: list[Clip] = []
     cursor = 0
-    while len(selected) < num and any(strata[k] for k in keys):
+    while len(selected) < target and any(strata[k] for k in keys):
         key = keys[cursor % len(keys)]
         if strata[key]:
             selected.append(strata[key].pop(0))
         cursor += 1
-    if len(selected) < num:
-        raise ValueError(f"balanced_sample: {len(selected)} clips after balancing, need {num}")
+    if len(selected) < target:
+        raise ValueError(f"balanced_sample: {len(selected)} clips after balancing, need {target}")
     return selected
 
 
