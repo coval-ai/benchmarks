@@ -31,6 +31,7 @@ import hashlib
 import json
 import random
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -39,8 +40,13 @@ from pydantic import ValidationError
 
 from coval_bench.config import Settings
 from coval_bench.datasets.loader import (
+    WILDASR_ENV_FAMILY,
     DatasetIntegrityError,
+    ManifestAlignmentError,
     TTSDataset,
+    _assert_family_alignment,
+    _load_manifest,
+    family_rng,
     load_stt_dataset,
     load_tts_dataset,
 )
@@ -670,3 +676,53 @@ def test_load_dataset_dispatcher_threads_sample_size(test_settings: Settings) ->
             rng=random.Random(1),
         )
     assert len(result.items) == 2
+
+
+# ---------------------------------------------------------------------------
+# WildASR family: seeded same-tick sampling + alignment guard
+# ---------------------------------------------------------------------------
+
+
+def test_family_rng_pairs_same_tick_across_family() -> None:
+    """Every family dataset on one tick draws the same sample indices."""
+    tick = datetime(2026, 7, 15, 12, 30, tzinfo=UTC)
+    draws = [
+        family_rng(dataset_id, tick).sample(range(284), 3)  # type: ignore[union-attr]
+        for dataset_id in sorted(WILDASR_ENV_FAMILY)
+    ]
+    assert all(d == draws[0] for d in draws)
+
+
+def test_family_rng_differs_across_ticks() -> None:
+    early = family_rng("stt-wildasr-clean", datetime(2026, 7, 15, 12, 0, tzinfo=UTC))
+    late = family_rng("stt-wildasr-clean", datetime(2026, 7, 15, 12, 30, tzinfo=UTC))
+    assert early is not None and late is not None
+    assert early.sample(range(284), 3) != late.sample(range(284), 3)
+
+
+def test_family_rng_none_outside_family_or_without_tick() -> None:
+    tick = datetime(2026, 7, 15, 12, 30, tzinfo=UTC)
+    assert family_rng("stt-v3", tick) is None
+    assert family_rng("stt-wildasr-accent", tick) is None
+    assert family_rng("stt-wildasr-clean", None) is None
+
+
+def test_family_alignment_passes_on_packaged_manifests() -> None:
+    """The shipped family manifests must index-align — this is the pairing contract."""
+    _assert_family_alignment("stt-wildasr-clean", _load_manifest("stt-wildasr-clean"))
+
+
+def test_family_alignment_rejects_drifted_sibling(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_load = _load_manifest
+
+    def drifted(dataset_id: str) -> Manifest:
+        manifest = real_load(dataset_id)
+        if dataset_id != "stt-wildasr-reverb":
+            return manifest
+        items = list(manifest.items)
+        items[0], items[1] = items[1], items[0]
+        return manifest.model_copy(update={"items": items})
+
+    monkeypatch.setattr("coval_bench.datasets.loader._load_manifest", drifted)
+    with pytest.raises(ManifestAlignmentError, match="stt-wildasr-reverb"):
+        _assert_family_alignment("stt-wildasr-clean", real_load("stt-wildasr-clean"))

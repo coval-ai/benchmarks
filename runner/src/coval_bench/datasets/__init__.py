@@ -21,11 +21,14 @@ Public surface::
 """
 
 from coval_bench.datasets.loader import (
+    WILDASR_ENV_FAMILY,
     Dataset,
     DatasetIntegrityError,
     DatasetItem,
+    ManifestAlignmentError,
     TTSDataset,
     TTSDatasetItem,
+    family_rng,
     load_dataset,
     load_stt_dataset,
     load_tts_dataset,
@@ -33,9 +36,12 @@ from coval_bench.datasets.loader import (
 from coval_bench.datasets.manifest import Manifest, STTManifestItem, TTSManifestItem
 
 __all__ = [
+    "WILDASR_ENV_FAMILY",
     "Dataset",
     "DatasetIntegrityError",
     "DatasetItem",
+    "ManifestAlignmentError",
+    "family_rng",
     "TTSDataset",
     "TTSDatasetItem",
     "load_dataset",

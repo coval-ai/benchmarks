@@ -38,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import os
 import random
+from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
 
@@ -55,15 +56,31 @@ from coval_bench.datasets.manifest import (
 logger = structlog.get_logger(__name__)
 
 __all__ = [
+    "WILDASR_ENV_FAMILY",
     "Dataset",
     "DatasetIntegrityError",
     "DatasetItem",
+    "ManifestAlignmentError",
     "TTSDatasetItem",
     "TTSDataset",
+    "family_rng",
     "load_dataset",
     "load_stt_dataset",
     "load_tts_dataset",
 ]
+
+# Index-aligned manifests sharing one utterance pool; same-tick runs across the
+# family must draw the same sample indices so their rows pair per utterance.
+WILDASR_ENV_FAMILY = frozenset(
+    {
+        "stt-wildasr-clean",
+        "stt-wildasr-clipping",
+        "stt-wildasr-farfield",
+        "stt-wildasr-noisegap",
+        "stt-wildasr-phonecodec",
+        "stt-wildasr-reverb",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +101,14 @@ class DatasetIntegrityError(Exception):
         self.expected = expected
         self.actual = actual
         super().__init__(f"SHA256 mismatch for '{path}': expected={expected} actual={actual}")
+
+
+class ManifestAlignmentError(Exception):
+    """Raised when a WildASR family manifest drifts out of index alignment.
+
+    Same-tick pairing joins rows across the family by filename, so a rebuilt
+    sibling with a different selection must abort the run, never run misaligned.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +185,35 @@ def _sample_items[T](items: list[T], sample_size: int | None, rng: random.Random
         return items
     sampler = rng if rng is not None else random.Random()  # noqa: S311
     return sampler.sample(items, sample_size)
+
+
+def family_rng(dataset_id: str, scheduled_at: datetime | None) -> random.Random | None:
+    """Sampler for family datasets: executions on one tick draw the same indices.
+
+    Returns ``None`` (independent random sampling) for datasets outside the
+    family or when no tick is known.
+    """
+    if scheduled_at is None or dataset_id not in WILDASR_ENV_FAMILY:
+        return None
+    return random.Random(f"wildasr-env:{int(scheduled_at.timestamp())}")  # noqa: S311
+
+
+def _assert_family_alignment(dataset_id: str, manifest: Manifest) -> None:
+    """Fail loudly if any family sibling's manifest no longer index-aligns."""
+    for sibling_id in sorted(WILDASR_ENV_FAMILY - {dataset_id}):
+        sibling = _load_manifest(sibling_id)
+        pairs = zip(manifest.items, sibling.items, strict=False)
+        if len(sibling.items) != len(manifest.items) or any(
+            not isinstance(a, STTManifestItem)
+            or not isinstance(b, STTManifestItem)
+            or a.path != b.path
+            or a.transcript != b.transcript
+            for a, b in pairs
+        ):
+            raise ManifestAlignmentError(
+                f"family manifests misaligned: '{dataset_id}' vs '{sibling_id}' — "
+                "a sibling was rebuilt with a different selection"
+            )
 
 
 def _load_manifest(dataset_id: str) -> Manifest:
@@ -273,6 +327,8 @@ def load_stt_dataset(
         Fully-verified dataset with local file paths.
     """
     manifest = _load_manifest(dataset_id)
+    if dataset_id in WILDASR_ENV_FAMILY:
+        _assert_family_alignment(dataset_id, manifest)
     resolved_cache = cache_dir if cache_dir is not None else _default_cache_dir()
     client = storage_client if storage_client is not None else _make_storage_client(settings)
 
