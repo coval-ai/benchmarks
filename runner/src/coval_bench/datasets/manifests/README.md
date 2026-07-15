@@ -95,6 +95,13 @@ inserted into the audio, so every clip runs longer than its clean sibling
 draws exceed it). Randomized, 8 distinct draws per utterance (4 where the
 source published no duplicate row).
 
+#### `stt-wildasr-phonecodec.json`
+
+The telephony-codec intervention
+(`environment_degradation__en__fleurs_phone_codec_en`). Deterministic, 2
+codec conditions per utterance, rotation split evenly across the pool;
+durations identical to clean.
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
