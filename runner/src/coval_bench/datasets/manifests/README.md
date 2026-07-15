@@ -78,6 +78,38 @@ The clipping-distortion intervention
 utterance, 1:1 with clean: identical transcripts and durations at every index,
 different audio.
 
+#### `stt-wildasr-farfield.json`
+
+The far-field / distant-mic intervention
+(`environment_degradation__en__fleurs_far_field_en`). A randomized
+degradation: 6 distinct draws per utterance (3 where the source published no
+duplicate row), one chosen by the family rotation and recorded as
+`condition_idx`/`condition_count`.
+
+#### `stt-wildasr-noisegap.json`
+
+The noise-gap intervention
+(`environment_degradation__en__fleurs_noise_gap_en`): silence/noise segments
+inserted into the audio, so every clip runs longer than its clean sibling
+(still inside the 15 s band — the family filter dropped the utterances whose
+draws exceed it). Randomized, 8 distinct draws per utterance (4 where the
+source published no duplicate row).
+
+#### `stt-wildasr-phonecodec.json`
+
+The telephony-codec intervention
+(`environment_degradation__en__fleurs_phone_codec_en`). Deterministic, 2
+codec conditions per utterance, rotation split evenly across the pool;
+durations identical to clean.
+
+#### `stt-wildasr-reverb.json`
+
+The room-reverberation intervention
+(`environment_degradation__en__fleurs_reverberation_en`). 3 RIR conditions
+per utterance; reverb tails lengthen every clip past its clean sibling, so
+the rotation advances past out-of-band draws (hence the uneven condition
+spread).
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
