@@ -6,50 +6,61 @@ four. This document describes each one and where it lives.
 
 ## 1. Dataset
 
-**STT benchmark.** A 50-utterance subset of the
-`environment_degradation__en__fleurs_clean_en` split of
-[bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR)
-(`Apache-2.0`; audio derived from FLEURS, `CC-BY-4.0`). Selection rule: the
-builder scans the split's first 100 rows, keeps clips of 2.0–15.0 s with at
-least 3 words, dedups by transcript (the source publishes some recordings
-under several row indices), and takes the lexicographically-first 50 by
-transcript. Each clip is loudness-normalized (RMS target −20 dBFS,
-peak-guarded); the source audio is published quiet enough to defeat some
-providers' speech detection.
-The selection is deterministic and reproducible from the frozen split. Runs
-recorded before the swap used `stt-v1` (LibriSpeech `test-clean`; see
-`runner/src/coval_bench/datasets/manifests/README.md`).
+**STT benchmark.** Two frozen datasets run each cycle, each as its own run:
+
+- `stt-v1` — a 50-utterance subset of
+  [LibriSpeech `test-clean`](https://www.openslr.org/12/) (`CC-BY-4.0`):
+  studio-quality read English speech, speaker-balanced per ADR-020. The easy
+  tier: most providers train on LibriSpeech, so absolute WER runs low.
+- `stt-v3` — 897 conversational clips from
+  [pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data):
+  spontaneous voice-agent speech (fragments, fillers, prompted turns) with
+  model-generated reference transcripts. The hard tier.
+
+Each clip is loudness-normalized (RMS target −20 dBFS, peak-guarded) and
+selection is deterministic from the frozen sources; per-dataset selection
+rules, provenance, and licenses are documented in
+`runner/src/coval_bench/datasets/manifests/README.md`. Runs recorded between
+2026-07-08 and 2026-07-13 used `stt-v2` (WildASR `fleurs_clean_en`), and runs
+before that used `stt-v1` alone.
 
 **TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
 rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
 
 **Per-run sampling.** Each scheduled run draws a random sample of
-`dataset_sample_size` items (default 10) from each manifest before any provider
-is called; the STT and TTS pools are sampled independently. The sample is drawn
+`dataset_sample_size` items (default 10) from its manifest before any provider
+is called; each dataset's pool is sampled independently. The sample is drawn
 once at the start of the run and shared across every model, so all models are
 scored on the identical subset within a run (parity); the draw is independent
 across runs, so the full manifest is covered over time. The manifests still
-carry the complete 50 / 30 items — sampling only controls how many run each
+carry their complete item sets — sampling only controls how many run each
 cycle. Set `DATASET_SAMPLE_SIZE` ≥ the manifest size to run everything.
 
-**SHA pinning.** Every audio file referenced by `stt-v2.json` carries a
+**SHA pinning.** Every audio file referenced by an STT manifest carries a
 `sha256` field. The runner verifies the SHA after fetching from GCS and raises
 `DatasetIntegrityError` on mismatch (see `runner/src/coval_bench/datasets/loader.py`).
 TTS items are text-only and have no SHA.
 
 **Versioning.** Dataset manifests live at
-`runner/src/coval_bench/datasets/manifests/{stt-v2,tts-v1}.json` and carry a
-`version` field. Bumping the dataset re-pins by minting a new manifest;
-old manifests (`stt-v1.json`) stay for historical reproducibility.
+`runner/src/coval_bench/datasets/manifests/{stt-v1,stt-v3,tts-v1}.json` and
+carry a `version` field. Bumping a dataset re-pins by minting a new manifest;
+retired manifests (`stt-v2.json`) stay for historical reproducibility.
 
-**Rebuilding from scratch.** `coval-build-dataset --hf bosonai/WildASR
---normalize` applies the selection rule, transcodes to the canonical audio
-format, uploads to GCS, and writes the manifest with fresh SHAs. See
-`runner/src/coval_bench/datasets/manifests/README.md` for the full procedure
+**Aggregation across datasets.** Each dataset runs as its own run (one
+`DATASET_ID` per execution), and a result's dataset is derived from its parent
+run. The aggregation layer pools every result in the window regardless of
+dataset, so headline stats (e.g. average WER) blend all datasets that ran.
+`/v1/results` exposes each row's `dataset_id` and takes a `dataset` filter for
+per-dataset inspection. See ADR-023.
+
+**Rebuilding from scratch.** `coval-build-dataset` applies each dataset's
+selection rule, transcodes to the canonical audio format, uploads to GCS, and
+writes the manifest with fresh SHAs. See
+`runner/src/coval_bench/datasets/manifests/README.md` for per-dataset commands
 and exact flags.
 
-**Selection rationale.** See [ADR-022](#adr-references) below (ADR-020 for
-the retired `stt-v1` rule).
+**Selection rationale.** See [ADR-020](#adr-references) below for the `stt-v1`
+rule, ADR-023 for the multi-dataset mix (ADR-022 for the retired `stt-v2`).
 
 ## 2. Provider model versions
 
@@ -209,15 +220,21 @@ metrics in particular are session-dependent).
   `EnglishTextNormalizer`.
 - ADR-022 — STT dataset swap to WildASR `fleurs_clean_en` (`stt-v2`); LibriSpeech
   `test-clean` (`stt-v1`) retained for historical reproducibility.
+- ADR-023 — Multi-dataset benchmarking: one run per dataset, dataset identity
+  derived from the parent run (no dataset column on `results`); headline
+  aggregates pool across datasets.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.
 
 ## Caveats
 
-- The STT corpus is public and FLEURS-derived; providers may include it in
-  training data, which skews absolute WER low. Latency and per-provider
-  drift over time are the more informative signals.
+- The STT corpora are public; LibriSpeech in particular is heavily represented
+  in provider training data, which skews `stt-v1` absolute WER low. The
+  `stt-v3` reference transcripts are model-generated rather than
+  human-verified, so its absolute WER carries a reference-error floor shared
+  by all providers. Latency and per-provider drift over time are the more
+  informative signals.
 - This is a research benchmark. Results reflect a specific dataset and
   methodology and may not generalize to production workloads. See the
   Apache-2.0 `LICENSE` for the warranty disclaimer.

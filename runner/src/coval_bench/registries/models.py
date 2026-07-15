@@ -437,6 +437,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="palabra",
+        model="palabra-tts-v1",
+        voice="default_low",
+        tags=(_REALTIME, _MULTI, _CLONE, _STREAM),
+        status=_PENDING,
+    ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
     RegisteredModel(
@@ -520,7 +528,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -530,7 +537,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         self_hostable=True,
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -551,7 +557,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _EMOTION, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -561,7 +566,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -616,15 +620,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Cherry",
         tags=(_REALTIME, _MULTI, _STREAM),
         status=_ACTIVE,
-        arena_enabled=False,
     ),
-    # Fish Audio. Voice is "Energetic Male", the reference_id Fish Audio's own
-    # docs use in examples.
+    # Fish Audio. Voice is the benchmark-selected speaker used in Fish Audio docs.
     RegisteredModel(
         benchmark=_TTS,
         provider="fishaudio",
         model="s1",
-        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        voice="9a9cf47702da476aa4629e2506d4a857",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -632,7 +634,32 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="fishaudio",
         model="s2.1-pro",
-        voice="802e3bc2b27e49c2995d23ef70e6ac89",
+        voice="9a9cf47702da476aa4629e2506d4a857",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fishaudio",
+        model="s2.1-pro-free",
+        voice="9a9cf47702da476aa4629e2506d4a857",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+    ),
+    # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="minimax",
+        model="speech-2.8-hd",
+        voice="English_expressive_narrator",
+        tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="minimax",
+        model="speech-2.8-turbo",
+        voice="English_expressive_narrator",
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -658,27 +685,27 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client). PENDING until the first run lands data.
+    # provider client).
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-realtime",
         tags=(_REALTIME, _MULTI),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
 ]
 

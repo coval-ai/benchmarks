@@ -7,14 +7,13 @@ Runner + API for Coval voice-AI benchmarks. Implements:
 
 ## What we benchmark
 
-**STT** — providers are scored against a frozen 50-utterance sample of
-[LibriSpeech `test-clean`](https://www.openslr.org/12/) (CC-BY-4.0, English read
-speech, 2.0–15.0 s utterances). Selection is round-robin by speaker in lex
-order, so all 40 source-pool speakers (20 F / 20 M) contribute, with the
-lex-first 10 providing 2 utterances each (deterministic per ADR-020). Metrics:
-WER, TTFT, audio→final latency, RTF. Total audio per run ≈ 5–6 min. Absolute
-WER is artificially low (most providers train on LibriSpeech) — the value is
-in latency and per-provider regression-over-time.
+**STT** — providers are scored against two frozen datasets, each run as its
+own execution per cycle: [LibriSpeech `test-clean`](https://www.openslr.org/12/)
+(`stt-v1`, CC-BY-4.0 read English speech, the easy set) and pipecat's
+conversational benchmark data (`stt-v3`, 897 spontaneous voice-agent clips,
+the hard set). Metrics: WER, TTFT, TTFS, audio→final latency, RTF. Headline
+stats pool both datasets; absolute WER on `stt-v1` runs low (most providers
+train on LibriSpeech) and `stt-v3` references are model-generated.
 
 **TTS** — providers are scored on 30 short English customer-service transcripts
 (order tracking, appointments, account verification, tech support; Apache-2.0).

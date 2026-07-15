@@ -47,7 +47,7 @@ _SERVER = "https://datasets-server.huggingface.co"
 _PAGE = 100  # datasets-server hard cap on rows per /rows request
 _STANDARD_SPLITS = frozenset({"train", "validation", "valid", "dev", "test"})
 _TEXT_PRIORITY = ("transcript", "transcription", "text", "sentence", "normalized_text")
-_DURATION_COLS = ("duration", "length", "duration_sec")
+_DURATION_COLS = ("duration", "length", "duration_sec", "duration_seconds")
 _UA = {"User-Agent": "coval-bench/build-dataset"}
 _RETRIES = 6  # transient (429 / 5xx / timeout) attempts before giving up
 _PAGE_PAUSE = 0.3  # seconds between pages, to stay under the rate limit
@@ -301,8 +301,17 @@ _HF_API = "https://huggingface.co/api/datasets"
 _HF_RESOLVE = "https://huggingface.co/datasets/{repo}/resolve/main/{path}"
 
 
+def _config_parquet_files(files: list[str], config: str) -> list[str]:
+    """Parquet paths for *config*: per-config dirs, else the single-config data/ layout."""
+    parquet = sorted(f for f in files if f.endswith(".parquet"))
+    matched = [f for f in parquet if f"/{config}/" in f]
+    if not matched and config == "default":
+        matched = [f for f in parquet if f.startswith("data/")]
+    return matched
+
+
 def _list_parquet_files(hf_path: str, config: str) -> list[str]:
-    """Repo-relative parquet paths that belong to *config* (e.g. data/<config>/*.parquet)."""
+    """Repo-relative parquet paths that belong to *config*."""
     req = urllib.request.Request(f"{_HF_API}/{hf_path}", headers=_UA)  # noqa: S310 (audited: HF API)
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:  # noqa: S310
@@ -312,7 +321,7 @@ def _list_parquet_files(hf_path: str, config: str) -> list[str]:
     except OSError as exc:
         raise HFNetworkError(f"{hf_path}: repo listing unreachable: {exc}") from exc
     files = [str(s["rfilename"]) for s in data.get("siblings", [])]
-    return sorted(f for f in files if f.endswith(".parquet") and f"/{config}/" in f)
+    return _config_parquet_files(files, config)
 
 
 def _detect_parquet_columns(

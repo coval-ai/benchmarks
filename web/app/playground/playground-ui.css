@@ -26,7 +26,7 @@
   --playground-stt-disk: var(--color-surface-secondary);
 }
 
-.dark .playground-viz-ring {
+[data-theme="dark"] .playground-viz-ring {
   --playground-stt-disk: var(--color-surface-primary);
 }
 

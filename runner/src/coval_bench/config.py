@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
-    dataset_id: str = "stt-v2"
+    dataset_id: str = "stt-v1"
 
     # Items drawn at random per run from each manifest, shared across all
     # models for parity. Set >= manifest size to run everything.
@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     fishaudio_api_key: SecretStr | None = None
     azure_api_key: SecretStr | None = None
     alibaba_api_key: SecretStr | None = None
+    minimax_api_key: SecretStr | None = None
+    palabra_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
@@ -115,6 +117,8 @@ class Settings(BaseSettings):
     # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
     # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)
+    # Staleness threshold = fetch period + this grace.
+    s2s_stale_grace_seconds: int = Field(default=0, ge=0)
 
     # --- Analytics ---
     posthog_project_token: str = ""

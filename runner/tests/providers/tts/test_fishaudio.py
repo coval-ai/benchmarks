@@ -16,7 +16,7 @@ from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
-_VOICE = "802e3bc2b27e49c2995d23ef70e6ac89"
+_VOICE = "9a9cf47702da476aa4629e2506d4a857"
 
 
 def _settings(**overrides: object) -> Settings:
@@ -107,6 +107,7 @@ async def test_fishaudio_tts_sends_start_text_stop(fishaudio_settings: Settings)
     assert request["sample_rate"] == 44100
     assert request["reference_id"] == _VOICE
     assert request["latency"] == "balanced"
+    assert request["features"] == ["quality-guard"]
     assert sent[1] == {"event": "text", "text": "Hello world"}
     assert sent[2] == {"event": "stop"}
     if result.audio_path is not None:

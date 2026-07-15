@@ -23,8 +23,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-# s2.1-pro-free is unregistered: same engine as s2.1-pro at $0, kept for smoke
-# tests while the account has no billing.
 _VALID_MODELS = ("s1", "s2.1-pro", "s2.1-pro-free")
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
 _SAMPLE_RATE = 44100
@@ -81,6 +79,7 @@ class FishAudioTTSProvider(TTSProvider):
                                 "sample_rate": _SAMPLE_RATE,
                                 "reference_id": self._voice,
                                 "latency": "balanced",
+                                "features": ["quality-guard"],
                             },
                         }
                     )

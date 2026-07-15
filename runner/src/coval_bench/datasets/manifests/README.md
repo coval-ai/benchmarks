@@ -7,9 +7,69 @@ the recorded hash before use.
 
 ## How each manifest is produced
 
+### `stt-v3.json`
+
+**What it is.** A frozen 897-clip set — the full usable pool of
+[pipecat-ai/stt-benchmark-data](https://huggingface.co/datasets/pipecat-ai/stt-benchmark-data),
+the corpus behind pipecat's [stt-benchmark](https://github.com/pipecat-ai/stt-benchmark)
+project. The runner selects it via `DATASET_ID=stt-v3` and samples
+`DATASET_SAMPLE_SIZE` clips per run as usual.
+
+**Sample composition (stt-benchmark-data, the source pool):**
+
+- **Language:** English; conversational voice-agent utterances (commands and
+  questions a user says to an assistant), 1,000 rows of 16 kHz audio. The audio
+  is drawn from `pipecat-ai/smart-turn-data-v3.1-train`, pipecat's
+  community/partner-contributed turn-detection recordings. Human speech only:
+  the source corpus also contains TTS-generated samples, but pipecat's set
+  keeps only rows with `synthetic == False` (and `language == "eng"`).
+- **Reference transcripts are model-generated.** pipecat produces ground truth
+  with Gemini (see their README's `stt-benchmark ground-truth` step), not human
+  transcription — so WER against this set measures agreement with a strong
+  machine baseline, and absolute WER should be read with that in mind.
+- **Our 897-clip pool:** the builder reads the full 1,000-row pool from the
+  repo's parquet, keeps clips of **2.0–15.0 s** with ≥ 3 words, and dedups by
+  transcript — every survivor is included (897), deterministic from the
+  frozen source. (The build requires the parquet source, which reads the
+  whole pool; the datasets-server REST path caps its scan at a split's first
+  100 rows and fails loudly at selection.)
+- **Recording level:** each clip is loudness-normalized (RMS target −20 dBFS,
+  peak-guarded), same as `stt-v2`. Pass `--normalize`.
+- **Durations:** 2.1–15.0 s, median ≈ 10.5 s; ~2.3 hours total. Per-run cost
+  is unchanged — runs draw `DATASET_SAMPLE_SIZE` (default 10) clips.
+- Items carry pipecat's `sample_id` for provenance back to the source rows.
+
+**What we measure on it.** Same as `stt-v2`: WER, TTFT, audio→final latency,
+TTFS, RTF.
+
+To rebuild (downloads the repo parquet, transcodes and uploads the selected
+clips, writes the manifest):
+
+```bash
+uv run --extra hf-parquet coval-build-dataset --hf pipecat-ai/stt-benchmark-data \
+    --config default --split train \
+    --dataset-id stt-v3 --num 897 --dur-max 15 --normalize \
+    --license "unspecified (no data license published by pipecat-ai)" \
+    --source "pipecat-ai/stt-benchmark-data train"
+```
+
+Then fill `speech_end_offset_ms` (the TTFS anchor) with
+`scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
+
+**Never overwrite v3.** Future expansions go in `stt-v4`.
+
+License: **unspecified** — the HF dataset card carries no license tag and the
+`stt-benchmark` repo has no license file (pipecat's `smart-turn` BSD-2-Clause
+covers the model code, not the audio). The audio is mirrored to the public GCS
+bucket on the same basis as pipecat's own public redistribution; if pipecat
+publishes a data license, record it here and in the manifest.
+
 ### `stt-v2.json`
 
-**What we benchmark.** STT providers are scored against a frozen 50-utterance
+**Retired from the scheduled mix** (replaced by the `stt-v1` + `stt-v3` pair);
+retained for reproducibility of runs recorded against it. Never overwrite.
+
+**What we benchmark.** STT providers were scored against a frozen 50-utterance
 sample of the `environment_degradation__en__fleurs_clean_en` split of
 [bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR) — the clean
 (undegraded) English baseline of WildASR's environment-degradation suite,
@@ -56,14 +116,15 @@ uv run coval-build-dataset --hf bosonai/WildASR \
 Then fill `speech_end_offset_ms` (the TTFS anchor) with
 `scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
 
-**Never overwrite v2.** Future expansions go in `stt-v3`.
+**Never overwrite v2.** Future expansions go in `stt-v4` (`stt-v3` is taken by
+the pipecat set above).
 
 License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
 
 ### `stt-v1.json`
 
-**Superseded by `stt-v2`** — retained for historical reproducibility of runs
-recorded against it. Never overwrite.
+**In the scheduled mix** as the easy set alongside `stt-v3` (it was retired in
+favor of `stt-v2` from 2026-07-08 to 2026-07-13). Never overwrite.
 
 **What we benchmark.** STT providers are scored against a frozen 50-utterance
 sample of [LibriSpeech `test-clean`](https://www.openslr.org/12/) (OpenSLR-12).

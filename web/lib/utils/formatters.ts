@@ -114,6 +114,8 @@ export function normalizeModelName(modelKey: string): string {
     "tts-rt-v1": "TTS RT v1",
     neural: "Neural", // azure
     "dragon-hd-latest": "Dragon HD Latest", // azure
+    "speech-2.8-hd": "Speech 2.8 HD",
+    "speech-2.8-turbo": "Speech 2.8 Turbo",
     // STT
     "nova-2": "Nova 2",
     "nova-3": "Nova 3",
@@ -229,6 +231,7 @@ export function normalizeTTSProviderName(providerName: string): string {
     gradium: "Gradium",
     hume: "Hume",
     inworld: "Inworld AI",
+    minimax: "MiniMax",
     openai: "OpenAI",
     rime: "Rime",
     soniox: "Soniox",
