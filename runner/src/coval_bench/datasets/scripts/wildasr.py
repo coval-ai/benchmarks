@@ -96,20 +96,20 @@ class _Utterance:
     chosen: dict[str, _Chosen]
 
 
-def _read_split_rows(source: Path, variant: str) -> dict[str, list[_Row]]:
-    """Rows of *variant* grouped by transcript, deduped by audio hash, in order.
+def _read_split_rows(source: Path, split: str) -> dict[str, list[_Row]]:
+    """Rows of *split* grouped by transcript, deduped by audio hash, in order.
 
-    A transcript's row list is its distinct condition audios: consecutive for
-    interleaved splits, file-order separated for block-layout splits — order of
-    first appearance gives stable condition indices either way. Exact duplicate
-    rows (same ``audio_hash_id``) collapse to their first occurrence; a row
-    without a hash is kept as its own entry.
+    A transcript's row list is its distinct audios: consecutive for interleaved
+    splits, file-order separated for block-layout splits — order of first
+    appearance gives stable condition indices either way. Exact duplicate rows
+    (same ``audio_hash_id``) collapse to their first occurrence; a row without
+    a hash is kept as its own entry.
     """
     import pyarrow.parquet as pq
 
-    shards = sorted((source / "parquet").glob(f"*{_split(variant)}-*.parquet"))
+    shards = sorted((source / "parquet").glob(f"*{split}-*.parquet"))
     if not shards:
-        raise hf_source.HFUnsupported(f"{_REPO}: no cached parquet for split {_split(variant)}")
+        raise hf_source.HFUnsupported(f"{_REPO}: no cached parquet for split {split}")
     grouped: dict[str, list[_Row]] = {}
     seen: dict[str, set[str]] = {}
     for shard in shards:
@@ -143,7 +143,7 @@ def _family_pool(source: Path) -> list[_Utterance]:
     the rotation advances to the first in-band condition rather than dropping
     an utterance whose rotation-point condition is too long.
     """
-    split_rows = {variant: _read_split_rows(source, variant) for variant in _VARIANTS}
+    split_rows = {variant: _read_split_rows(source, _split(variant)) for variant in _VARIANTS}
     shape = {
         variant: dict(Counter(len(rows) for rows in split_rows[variant].values()))
         for variant in _VARIANTS
@@ -189,27 +189,34 @@ def _family_pool(source: Path) -> list[_Utterance]:
     return pool
 
 
-def _download(cache_root: Path) -> Path:
-    """Download the six environment-split parquet shards into the shared cache."""
+def _require_pyarrow() -> None:
     try:
         import pyarrow  # noqa: F401
     except ImportError as exc:
         raise hf_source.HFUnsupported(
-            "WildASR family build needs pyarrow (run with --extra hf-parquet)"
+            "WildASR builds need pyarrow (run with --extra hf-parquet)"
         ) from exc
+
+
+def _download_split(pq_dir: Path, files: list[str], split: str) -> None:
+    shards = [f for f in files if Path(f).name.startswith(f"{split}-")]
+    if not shards:
+        raise hf_source.HFUnsupported(f"{_REPO}: no parquet shards for split {split}")
+    for rel in shards:
+        dest = pq_dir / rel.replace("/", "__")
+        if not dest.exists():
+            logger.info("wildasr_parquet_download", file=rel)
+            hf_source.download_parquet(_REPO, rel, dest)
+
+
+def _download(cache_root: Path) -> Path:
+    """Download the six environment-split parquet shards into the shared cache."""
+    _require_pyarrow()
     pq_dir = cache_root / "parquet"
     pq_dir.mkdir(parents=True, exist_ok=True)
     files = hf_source.list_parquet_files(_REPO, _CONFIG)
     for variant in _VARIANTS:
-        split = _split(variant)
-        shards = [f for f in files if Path(f).name.startswith(f"{split}-")]
-        if not shards:
-            raise hf_source.HFUnsupported(f"{_REPO}: no parquet shards for split {split}")
-        for rel in shards:
-            dest = pq_dir / rel.replace("/", "__")
-            if not dest.exists():
-                logger.info("wildasr_parquet_download", file=rel)
-                hf_source.download_parquet(_REPO, rel, dest)
+        _download_split(pq_dir, files, _split(variant))
     return cache_root
 
 
@@ -266,3 +273,62 @@ def _make_spec(variant: str) -> DatasetSpec:
 WILDASR_ENV_SPECS: dict[str, DatasetSpec] = {
     spec.dataset_id: spec for spec in (_make_spec(variant) for variant in _VARIANTS)
 }
+
+# The demographic accent split shares the parquet plumbing but none of the
+# family selection: it overlaps zero utterances with the env family, carries no
+# accent or speaker labels, and is benchmarked unpaired. The same transcript
+# read under different accents is a distinct clip, so identity is the audio
+# hash, not the transcript.
+_ACCENT_SPLIT = "demographic_shift__en__demographic_accent_en"
+
+
+def _accent_download(cache_root: Path) -> Path:
+    _require_pyarrow()
+    pq_dir = cache_root / "parquet"
+    pq_dir.mkdir(parents=True, exist_ok=True)
+    _download_split(pq_dir, hf_source.list_parquet_files(_REPO, _CONFIG), _ACCENT_SPLIT)
+    return cache_root
+
+
+def _accent_parse(source: Path) -> list[Clip]:
+    audio_dir = source / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    clips: list[Clip] = []
+    for transcript, rows in _read_split_rows(source, _ACCENT_SPLIT).items():
+        for row in rows:
+            clips.append(
+                Clip(
+                    audio_path=audio_dir / f"{row.shard.stem}-{row.shard_row}.wav",
+                    transcript=transcript,
+                    duration_sec=row.duration,
+                    meta={
+                        "audio_hash_id": row.audio_hash_id,
+                        "_pq": str(row.shard),
+                        "_row": row.shard_row,
+                    },
+                )
+            )
+    return clips
+
+
+def _accent_key(clip: Clip) -> object:
+    return clip.meta["audio_hash_id"] or (clip.meta["_pq"], clip.meta["_row"])
+
+
+WILDASR_ACCENT = DatasetSpec(
+    dataset_id="stt-wildasr-accent",
+    cache_name="wildasr-accent",
+    download=_accent_download,
+    parse=_accent_parse,
+    dur_min=_DUR_MIN,
+    dur_max=_DUR_MAX,
+    min_words=_MIN_WORDS,
+    num=None,
+    dedup_key=_accent_key,
+    balance_dims=(),
+    license="Apache-2.0 (WildASR)",
+    source=f"{_REPO} {_ACCENT_SPLIT}",
+    needs_vad_offset=True,
+    fetch=_fetch,
+    normalize_audio=True,
+)
