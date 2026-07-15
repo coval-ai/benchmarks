@@ -190,6 +190,12 @@ def _get_load_dataset() -> Any:  # noqa: ANN401
     return mod.load_dataset
 
 
+def _get_family_rng() -> Any:  # noqa: ANN401
+    """Resolve ``family_rng`` at call time (lazy import)."""
+    mod = importlib.import_module("coval_bench.datasets")
+    return mod.family_rng
+
+
 def _get_db_symbols() -> tuple[Any, Any, Any, Any]:
     """Return (lifespan_pool, RunWriter, RunStatus, ResultStatus, Result) at call time."""
     conn_mod = importlib.import_module("coval_bench.db.conn")
@@ -968,6 +974,7 @@ async def run_benchmarks(
                     settings.dataset_id,
                     settings=settings,
                     sample_size=None if smoke else settings.dataset_sample_size,
+                    rng=_get_family_rng()(settings.dataset_id, scheduled_at),
                 )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
                 logger.info("stt_dataset_sampled", item_count=len(items))
