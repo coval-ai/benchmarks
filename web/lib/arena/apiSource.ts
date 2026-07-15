@@ -1,10 +1,11 @@
+import type { ArenaDomain } from "./domains";
 import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from "./types";
 
 // Real battle source: talks to same-origin Next.js API proxy routes under /api/arena/*,
 // which inject the server-only X-Labeler-Key and proxy to the runner. Inert until
 // NEXT_PUBLIC_ARENA_SOURCE=api is set (the factory defaults to the mock). The BFF routes it
 // calls:
-//   POST /api/arena/battle              { text }                        -> BlindBattle
+//   POST /api/arena/battle              { text, domain }                -> BlindBattle
 //   POST /api/arena/vote                { battleId, outcome, voterId }  -> VoteResult
 //   GET  /api/arena/battle/{id}/reveal?voterId=...                      -> Reveal
 
@@ -24,8 +25,8 @@ async function postJson<T>(url: string, body: unknown, timeoutMs = QUICK_TIMEOUT
 }
 
 export class ApiBattleSource implements BattleSource {
-  createBattle(text: string): Promise<BlindBattle> {
-    return postJson<BlindBattle>("/api/arena/battle", { text }, SYNTH_TIMEOUT_MS);
+  createBattle(text: string, domain: ArenaDomain): Promise<BlindBattle> {
+    return postJson<BlindBattle>("/api/arena/battle", { text, domain }, SYNTH_TIMEOUT_MS);
   }
 
   submitVote(input: VoteInput): Promise<VoteResult> {

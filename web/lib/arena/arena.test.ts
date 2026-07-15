@@ -2,12 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { ARENA_DOMAINS, isArenaDomain } from "./domains";
 import { MockBattleSource } from "./mockSource";
 import { getBattleSource } from "./source";
 
+describe("arena domains", () => {
+  it("accepts every dropdown value and rejects everything else", () => {
+    for (const d of ARENA_DOMAINS) expect(isArenaDomain(d.value)).toBe(true);
+    expect(isArenaDomain("all")).toBe(false);
+    expect(isArenaDomain("")).toBe(false);
+    expect(isArenaDomain(undefined)).toBe(false);
+  });
+});
+
 describe("MockBattleSource", () => {
   it("creates a blind battle: prompt echoed, two distinct playable audio sources", async () => {
-    const battle = await new MockBattleSource().createBattle("hello world");
+    const battle = await new MockBattleSource().createBattle("hello world", "healthcare");
     expect(battle.battleId).toBeTruthy();
     expect(battle.prompt).toBe("hello world");
     expect(battle.audioA).toMatch(/^data:audio\/wav;base64,/);
@@ -16,13 +26,13 @@ describe("MockBattleSource", () => {
   });
 
   it("does not leak any model identity in the blind battle payload", async () => {
-    const battle = await new MockBattleSource().createBattle("hi");
+    const battle = await new MockBattleSource().createBattle("hi", "sales");
     expect(Object.keys(battle).sort()).toEqual(["audioA", "audioB", "battleId", "prompt"]);
   });
 
   it("reveals two distinct models for a created battle", async () => {
     const src = new MockBattleSource();
-    const battle = await src.createBattle("hi");
+    const battle = await src.createBattle("hi", "other");
     const reveal = await src.reveal(battle.battleId, "t");
     expect(reveal.a.model).toBeTruthy();
     expect(reveal.b.model).toBeTruthy();
@@ -35,7 +45,7 @@ describe("MockBattleSource", () => {
 
   it("echoes the outcome on submitVote", async () => {
     const src = new MockBattleSource();
-    const battle = await src.createBattle("hi");
+    const battle = await src.createBattle("hi", "customer-service");
     const res = await src.submitVote({ battleId: battle.battleId, outcome: "A_WIN", voterId: "t" });
     expect(res).toEqual({ battleId: battle.battleId, outcome: "A_WIN" });
   });

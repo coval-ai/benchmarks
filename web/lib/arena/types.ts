@@ -1,3 +1,5 @@
+import type { ArenaDomain } from "./domains";
+
 export type Outcome = "A_WIN" | "B_WIN" | "TIE";
 
 // What the UI renders during the blind phase — never any model identity.
@@ -34,7 +36,7 @@ export interface Reveal {
 // The single seam the UI depends on. Swap the implementation (mock <-> api) and the
 // whole battle page keeps working unchanged. See ./README.md.
 export interface BattleSource {
-  createBattle(text: string): Promise<BlindBattle>;
+  createBattle(text: string, domain: ArenaDomain): Promise<BlindBattle>;
   submitVote(input: VoteInput): Promise<VoteResult>;
   reveal(battleId: string, voterId: string): Promise<Reveal>;
 }

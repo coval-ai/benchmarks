@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ARENA_DOMAINS, type ArenaDomain } from "@/lib/arena/domains";
 import { getBattleSource } from "@/lib/arena/source";
 import type { BlindBattle, Outcome, Reveal, RevealedModel } from "@/lib/arena/types";
 import { AudioPlayer } from "./components/AudioPlayer";
@@ -19,6 +20,7 @@ export default function ArenaPage() {
 
   const [step, setStep] = useState<1 | 2 | 4>(1);
   const [text, setText] = useState("");
+  const [domain, setDomain] = useState<ArenaDomain | "">("");
   const [battle, setBattle] = useState<BlindBattle | null>(null);
   const [vote, setVote] = useState<Outcome | null>(null);
   const [reveal, setReveal] = useState<Reveal | null>(null);
@@ -46,12 +48,12 @@ export default function ArenaPage() {
 
   const generate = async () => {
     const trimmed = text.trim();
-    if (trimmed.length < MIN_CHARS || loading) return;
+    if (trimmed.length < MIN_CHARS || !domain || loading) return;
     const token = ++runToken.current;
     setLoading(true);
     setError(null);
     try {
-      const b = await source.createBattle(trimmed);
+      const b = await source.createBattle(trimmed, domain);
       if (token !== runToken.current) return; // a newer action superseded this one
       setBattle(b);
       setStep(2);
@@ -117,6 +119,21 @@ export default function ArenaPage() {
 
         {step === 1 && (
           <section className="flex flex-col gap-3">
+            <select
+              value={domain}
+              onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
+              aria-label="Domain"
+              className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
+            >
+              <option value="" disabled>
+                Select a domain…
+              </option>
+              {ARENA_DOMAINS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
             <textarea
               value={text}
               maxLength={MAX_CHARS}
@@ -140,7 +157,7 @@ export default function ArenaPage() {
             <button
               type="button"
               onClick={generate}
-              disabled={text.trim().length < MIN_CHARS || loading}
+              disabled={text.trim().length < MIN_CHARS || !domain || loading}
               className="self-start rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
             >
               {loading ? "Generating…" : "Generate speech"}

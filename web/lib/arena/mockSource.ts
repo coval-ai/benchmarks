@@ -1,4 +1,5 @@
 import { getEnabledTtsModels } from "../playground/providers";
+import type { ArenaDomain } from "./domains";
 import type { BattleSource, BlindBattle, Reveal, RevealedModel, VoteInput, VoteResult } from "./types";
 
 // Self-contained mock: no network, no backend. Generates two distinct audible tones as
@@ -56,7 +57,7 @@ export class MockBattleSource implements BattleSource {
   private assignments = new Map<string, Reveal>();
   private counter = 0;
 
-  async createBattle(text: string): Promise<BlindBattle> {
+  async createBattle(text: string, _domain: ArenaDomain): Promise<BlindBattle> {
     await delay(600); // exercise the loading state
     const pool = [...getEnabledTtsModels()];
     const a = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
