@@ -107,6 +107,13 @@ def test_balanced_sample_deterministic() -> None:
     assert [_sid(c) for c in forward] == [_sid(c) for c in reverse]
 
 
+def test_balanced_sample_num_none_takes_all() -> None:
+    """num=None keeps every deduped clip, in the deterministic order."""
+    clips = [_clip(i, "F", True) for i in range(5)] + [_clip(2, "F", True)]  # one dup
+    out = balanced_sample(clips, num=None, dedup_key=_sid, balance_dims=())
+    assert [_sid(c) for c in out] == [0, 1, 2, 3, 4]
+
+
 def test_clean_filters_duration_band_and_word_floor() -> None:
     """_clean drops clips outside the duration band or under the word floor."""
     clips = [

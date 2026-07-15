@@ -7,6 +7,70 @@ the recorded hash before use.
 
 ## How each manifest is produced
 
+### The WildASR environment family (`stt-wildasr-*`)
+
+Six index-aligned STT datasets built from the `environment_degradation` splits of
+[bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR): `clean` plus
+five degradations of the same recordings (`clipping`, `far_field`, `noise_gap`,
+`phone_codec`, `reverberation`). Because every manifest selects the same
+utterances in the same order with the same filenames, `audio/0042.wav` is the
+same utterance in every family dataset — clean-vs-degraded comparisons pair by
+filename.
+
+**Family selection** (shared by all six builds; implemented in
+`datasets/scripts/wildasr.py`, deterministic from the frozen source):
+
+- Utterance identity is the clean transcript. The source repeats most utterances
+  as exact duplicate rows (same `audio_hash_id`), so rows are deduped by hash per
+  (split, transcript); a split's *conditions* for an utterance are its distinct
+  degraded audios. Deterministic degradations collapse to their true condition
+  count (clipping 1, phone_codec 2, reverberation 3); randomized ones keep every
+  distinct draw (far_field 6 or 3, noise_gap 8 or 4).
+- Multi-condition splits contribute one row per utterance, rotated by the
+  utterance's clean-order ordinal mod its condition count and advancing to the
+  first in-band condition, so conditions are evenly represented without
+  discarding utterances whose rotation-point condition runs long. Each item
+  records `condition_idx`/`condition_count` and the source `audio_hash_id`.
+- Filters are family-wide: an utterance stays only if EVERY split has a
+  condition inside the 2.0–15.0 s band (noise_gap inserts silence that pushes
+  long clips over) and its transcript has ≥ 3 words. An utterance whose
+  transcript maps to more than one distinct clean recording would be ambiguous
+  and is dropped (none in the current source).
+- Result: **284 utterances** — every one the duration band permits — from the
+  source's 350 (30 have out-of-band clean audio, 36 have a split where no
+  condition fits the band), ~41 minutes of clean audio, transcripts unique and
+  lexicographically ordered.
+- Recording level: loudness-normalized during transcode (RMS target −20 dBFS,
+  peak-guarded), same as `stt-v2`/`stt-v3` — the source audio is published very
+  quiet.
+
+**What we measure.** Same as the other STT sets: WER, TTFT, audio→final latency,
+TTFS, RTF. The degraded sets exist for targeted robustness comparisons against
+`stt-wildasr-clean` on the same utterances.
+
+To rebuild any family dataset (reads the repo parquet, needs the `hf-parquet`
+extra; `--keep-cache` keeps the ~2 GB source for sibling builds):
+
+```bash
+uv run --extra hf-parquet coval-build-dataset stt-wildasr-clean --keep-cache
+```
+
+Then fill `speech_end_offset_ms` (the TTFS anchor) with
+`scripts/precompute_vad_offsets.py --write` against the built 16 kHz WAVs.
+
+**Never overwrite a family manifest.** A source refresh changes the selection,
+which would silently break cross-family filename alignment for recorded runs —
+expansions get new ids.
+
+License: `Apache-2.0` (WildASR); audio derived from FLEURS (`CC-BY-4.0`).
+
+#### `stt-wildasr-clean.json`
+
+The clean (undegraded) baseline of the family and the paired reference for the
+five degradation datasets. Succeeds `stt-v2` (same source split, which stays
+frozen): built via the family selection above instead of stt-v2's 50-clip
+first-100-rows window.
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of

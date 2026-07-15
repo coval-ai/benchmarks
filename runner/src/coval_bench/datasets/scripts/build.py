@@ -28,8 +28,9 @@ import structlog
 from coval_bench.datasets.scripts import hf_source
 from coval_bench.datasets.scripts.framework import Clip, DatasetSpec, run_build
 from coval_bench.datasets.scripts.s2s_v1 import S2S_V1
+from coval_bench.datasets.scripts.wildasr import WILDASR_ENV_SPECS
 
-_SPECS: dict[str, DatasetSpec] = {S2S_V1.dataset_id: S2S_V1}
+_SPECS: dict[str, DatasetSpec] = {S2S_V1.dataset_id: S2S_V1, **WILDASR_ENV_SPECS}
 _CACHE_ROOT = Path.home() / ".cache" / "coval-bench"
 _ADAPTERS_DIR = Path(__file__).parent / "adapters"
 

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from coval_bench.datasets.scripts.build import _hf_spec, _meta_dim
 from coval_bench.datasets.scripts.framework import Clip
-from coval_bench.datasets.scripts.hf_source import _as_duration, _config_parquet_files
+from coval_bench.datasets.scripts.hf_source import _config_parquet_files, as_duration
 
 
 def _clip(meta: dict[str, object]) -> Clip:
@@ -18,11 +18,11 @@ def _clip(meta: dict[str, object]) -> Clip:
 
 def test_as_duration_coerces_null_and_junk() -> None:
     """Null / blank / non-numeric duration cells become 0.0 instead of crashing."""
-    assert _as_duration(3.5) == 3.5
-    assert _as_duration("2.0") == 2.0
-    assert _as_duration(None) == 0.0
-    assert _as_duration("") == 0.0
-    assert _as_duration("n/a") == 0.0
+    assert as_duration(3.5) == 3.5
+    assert as_duration("2.0") == 2.0
+    assert as_duration(None) == 0.0
+    assert as_duration("") == 0.0
+    assert as_duration("n/a") == 0.0
 
 
 def test_config_parquet_files_matches_config_dirs() -> None:
