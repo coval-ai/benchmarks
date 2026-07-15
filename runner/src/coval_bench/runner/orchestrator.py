@@ -37,6 +37,7 @@ import atexit
 import contextlib
 import hashlib
 import importlib
+import random
 import signal
 import wave
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
@@ -546,6 +547,23 @@ async def _run_stt_item(
 # ---------------------------------------------------------------------------
 
 
+def _assign_tts_voices(entry: RegisteredModel, item_count: int, run_id: int) -> list[str | None]:
+    """Assign a voice to each dataset item, one entry per item in dataset order.
+
+    Models with a ``voices`` pool get an exactly balanced split (counts differ
+    by at most one when the pool doesn't divide the item count evenly). Which
+    item lands on which voice is shuffled with a run/model-derived seed, so the
+    text↔voice pairing rotates across runs while staying reproducible for a
+    given run.
+    """
+    if not entry.voices:
+        return [entry.voice] * item_count
+    assignments: list[str | None] = [entry.voices[i % len(entry.voices)] for i in range(item_count)]
+    rng = random.Random(f"{run_id}:{entry.provider}:{entry.model}")  # noqa: S311
+    rng.shuffle(assignments)
+    return assignments
+
+
 async def _run_tts_item(
     *,
     entry: RegisteredModel,
@@ -553,13 +571,18 @@ async def _run_tts_item(
     run_id: int,
     sem: asyncio.Semaphore,
     settings: Settings,
+    voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
 
+    *voice* overrides the entry's pinned voice (used by the balanced voice
+    split); ``None`` falls back to ``entry.voice``.
+
     If *writer* is non-None, results are persisted before returning. See
     :func:`_run_stt_item` for the rationale (incremental flush).
     """
+    voice = voice if voice is not None else entry.voice
     tts_providers = _get_tts_providers()
     _, _, _, models_mod = _get_db_symbols()
     Benchmark = models_mod.Benchmark
@@ -583,7 +606,7 @@ async def _run_tts_item(
             return []
 
         transcript: str = item.transcript
-        provider = provider_cls(settings=settings, model=entry.model, voice=entry.voice)
+        provider = provider_cls(settings=settings, model=entry.model, voice=voice)
 
         tts_result = None
         item_error: str | None = None
@@ -637,7 +660,7 @@ async def _run_tts_item(
                     run_id=run_id,
                     provider=entry.provider,
                     model=entry.model,
-                    voice=entry.voice,
+                    voice=voice,
                     benchmark=Benchmark.TTS,
                     metric_type=Metric.TTFA,
                     metric_value=ttfa_value,
@@ -677,7 +700,7 @@ async def _run_tts_item(
                                 run_id=run_id,
                                 provider=entry.provider,
                                 model=entry.model,
-                                voice=entry.voice,
+                                voice=voice,
                                 benchmark=Benchmark.TTS,
                                 metric_type=Metric.WER,
                                 metric_value=wer_result.wer_percentage,
@@ -707,7 +730,7 @@ async def _run_tts_item(
                                 run_id=run_id,
                                 provider=entry.provider,
                                 model=entry.model,
-                                voice=entry.voice,
+                                voice=voice,
                                 benchmark=Benchmark.TTS,
                                 metric_type=Metric.WER,
                                 metric_value=None,
@@ -1016,7 +1039,15 @@ async def run_benchmarks(
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
                 logger.info("tts_dataset_sampled", item_count=len(tts_items))
 
-                tts_pairs = [(entry, item) for item in tts_items for entry in enabled_tts]
+                tts_pairs = [
+                    (entry, item, voice)
+                    for entry in enabled_tts
+                    for item, voice in zip(
+                        tts_items,
+                        _assign_tts_voices(entry, len(tts_items), run_id),
+                        strict=True,
+                    )
+                ]
                 tts_tasks = [
                     _run_tts_item(
                         entry=entry,
@@ -1024,13 +1055,14 @@ async def run_benchmarks(
                         run_id=run_id,
                         sem=sem,
                         settings=settings,
+                        voice=voice,
                         writer=writer,
                     )
-                    for entry, item in tts_pairs
+                    for entry, item, voice in tts_pairs
                 ]
 
                 tts_batch = await asyncio.gather(*tts_tasks, return_exceptions=True)
-                for (entry, _item), batch_result in zip(tts_pairs, tts_batch, strict=True):
+                for (entry, _item, _voice), batch_result in zip(tts_pairs, tts_batch, strict=True):
                     if isinstance(batch_result, BaseException):
                         logger.warning(
                             "tts_task_raised",
