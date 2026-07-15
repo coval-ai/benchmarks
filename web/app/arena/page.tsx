@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ARENA_DOMAINS, type ArenaDomain } from "@/lib/arena/domains";
 import { getBattleSource } from "@/lib/arena/source";
 import type { BlindBattle, Outcome, Reveal, RevealedModel } from "@/lib/arena/types";
@@ -29,33 +29,47 @@ export default function ArenaPage() {
   const source = getBattleSource();
   const voterId = useVoterId();
 
-  const [step, setStep] = useState<1 | 2 | 4>(1);
   const [text, setText] = useState("");
   const [domain, setDomain] = useState<ArenaDomain | "">("");
   const [battle, setBattle] = useState<BlindBattle | null>(null);
+  const [battleDomain, setBattleDomain] = useState<ArenaDomain | "">("");
   const [vote, setVote] = useState<Outcome | null>(null);
   const [reveal, setReveal] = useState<Reveal | null>(null);
+  const [recorded, setRecorded] = useState(false);
+  const [autoAdvance, setAutoAdvance] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<"a" | "b" | null>(null);
-  const newBattleRef = useRef<HTMLButtonElement>(null);
+  const nextBattleRef = useRef<HTMLButtonElement>(null);
   const runToken = useRef(0);
 
   useEffect(() => {
-    if (step === 4) newBattleRef.current?.focus();
-  }, [step]);
-
-  const reset = useCallback(() => {
-    runToken.current += 1; // invalidate any in-flight createBattle
-    setStep(1);
-    setText("");
-    setBattle(null);
-    setVote(null);
-    setReveal(null);
-    setError(null);
-    setActive(null);
+    try {
+      setAutoAdvance(localStorage.getItem("arena_auto_advance") === "1");
+    } catch {
+      // Storage blocked (private mode, sandboxed iframe, etc.): session-only default.
+    }
   }, []);
+
+  useEffect(() => {
+    if (recorded && !loading) nextBattleRef.current?.focus();
+  }, [recorded, loading]);
+
+  const persistAutoAdvance = (on: boolean) => {
+    setAutoAdvance(on);
+    try {
+      localStorage.setItem("arena_auto_advance", on ? "1" : "0");
+    } catch {
+      // Storage blocked: the toggle still works for this session.
+    }
+  };
+
+  const stopAutoAdvance = () => {
+    runToken.current += 1; // drop the in-flight next battle
+    setLoading(false);
+    persistAutoAdvance(false);
+  };
 
   const generate = async (promptText: string, promptDomain: ArenaDomain | "") => {
     const trimmed = promptText.trim();
@@ -67,7 +81,11 @@ export default function ArenaPage() {
       const b = await source.createBattle(trimmed, promptDomain);
       if (token !== runToken.current) return; // a newer action superseded this one
       setBattle(b);
-      setStep(2);
+      setBattleDomain(promptDomain);
+      setVote(null);
+      setReveal(null);
+      setRecorded(false);
+      setActive(null);
     } catch {
       if (token === runToken.current) setError("Couldn't generate audio. Please try again.");
     } finally {
@@ -77,7 +95,6 @@ export default function ArenaPage() {
 
   const quickBattle = () => {
     const example = pickExample();
-    reset();
     setText(example.text);
     setDomain(example.domain);
     void generate(example.text, example.domain);
@@ -95,7 +112,8 @@ export default function ArenaPage() {
       } catch {
         setReveal(null); // vote is recorded; identities just unavailable
       }
-      setStep(4);
+      setRecorded(true);
+      if (autoAdvance) quickBattle();
     } catch {
       setVote(null); // let them retry
       setError("Couldn't record your vote. Please try again.");
@@ -104,16 +122,56 @@ export default function ArenaPage() {
     }
   };
 
+  const trimmed = text.trim();
+  const dirty = battle !== null && (trimmed !== battle.prompt || domain !== battleDomain);
+  const canVote = battle !== null && !recorded && !dirty;
+
   return (
     <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
       <div className="mx-auto flex max-w-[760px] flex-col gap-8">
         <h1 className="text-center font-sans text-2xl">Which voice sounds more natural?</h1>
 
-        {battle && (
-          <p className="text-center font-sans text-base italic leading-relaxed text-text-secondary">
-            “{battle.prompt}”
-          </p>
-        )}
+        <section className="flex flex-col gap-3">
+          <select
+            value={domain}
+            onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
+            aria-label="Domain"
+            className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
+          >
+            <option value="" disabled>
+              Select a domain *
+            </option>
+            {ARENA_DOMAINS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          <textarea
+            value={text}
+            maxLength={MAX_CHARS}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Describe a scenario or write text to synthesize…"
+            rows={4}
+            className="w-full resize-none rounded-xl border border-border-primary bg-surface-elevated p-4 font-sans text-base leading-relaxed outline-none focus:border-selected-border"
+          />
+          <div className="flex items-center justify-between text-sm text-text-tertiary">
+            <button
+              type="button"
+              onClick={() => {
+                const example = pickExample();
+                setText(example.text);
+                setDomain(example.domain);
+              }}
+              className="font-sans underline underline-offset-2 hover:text-text-secondary"
+            >
+              Use an example
+            </button>
+            <span className="font-mono">
+              {text.length}/{MAX_CHARS}
+            </span>
+          </div>
+        </section>
 
         <div
           key={battle?.battleId ?? "pending"}
@@ -122,8 +180,8 @@ export default function ArenaPage() {
           <BattleCard
             side="a"
             blindTitle="Model A"
-            revealed={step === 4 && reveal ? reveal.a : null}
-            picked={step === 4 ? vote : null}
+            revealed={recorded && reveal ? reveal.a : null}
+            picked={recorded ? vote : null}
             isActive={active === "a"}
             src={battle?.audioA ?? null}
             onActivate={() => setActive("a")}
@@ -134,106 +192,84 @@ export default function ArenaPage() {
           <BattleCard
             side="b"
             blindTitle="Model B"
-            revealed={step === 4 && reveal ? reveal.b : null}
-            picked={step === 4 ? vote : null}
+            revealed={recorded && reveal ? reveal.b : null}
+            picked={recorded ? vote : null}
             isActive={active === "b"}
             src={battle?.audioB ?? null}
             onActivate={() => setActive("b")}
           />
         </div>
 
-        {step === 1 && (
-          <section className="flex flex-col gap-3">
-            <select
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
-              aria-label="Domain"
-              className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
-            >
-              <option value="" disabled>
-                Select a domain *
-              </option>
-              {ARENA_DOMAINS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-            <textarea
-              value={text}
-              maxLength={MAX_CHARS}
-              onChange={(e) => setText(e.target.value)}
-              placeholder="Describe a scenario or write text to synthesize…"
-              rows={4}
-              className="w-full resize-none rounded-xl border border-border-primary bg-surface-elevated p-4 font-sans text-base leading-relaxed outline-none focus:border-selected-border"
-            />
-            <div className="flex items-center justify-between text-sm text-text-tertiary">
+        <section className="flex min-h-[52px] flex-col gap-3" aria-live="polite">
+          {recorded && loading ? (
+            <div className="flex items-center justify-center gap-3">
+              <p className="font-mono text-sm text-text-secondary">
+                ✓ Recorded — loading the next battle…
+              </p>
               <button
                 type="button"
-                onClick={() => {
-                  const example = pickExample();
-                  setText(example.text);
-                  setDomain(example.domain);
-                }}
-                className="font-sans underline underline-offset-2 hover:text-text-secondary"
+                onClick={stopAutoAdvance}
+                className="rounded-full border border-border-primary px-4 py-1.5 font-mono text-xs text-text-secondary hover:bg-hover-bg"
               >
-                Use an example
+                Stop
               </button>
-              <span className="font-mono">
-                {text.length}/{MAX_CHARS}
-              </span>
             </div>
+          ) : canVote && !loading ? (
+            <>
+              <div className="grid grid-cols-[1fr_0.7fr_1fr] gap-3">
+                <VoteButton label="Model A" onClick={() => castVote("A_WIN")} disabled={submitting} />
+                <VoteButton label="Tie" onClick={() => castVote("TIE")} disabled={submitting} />
+                <VoteButton label="Model B" onClick={() => castVote("B_WIN")} disabled={submitting} />
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 self-center font-mono text-xs text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={autoAdvance}
+                  onChange={() => persistAutoAdvance(!autoAdvance)}
+                />
+                Auto-advance
+              </label>
+            </>
+          ) : recorded && !dirty && !loading ? (
+            <div className="flex flex-col items-center gap-4">
+              <p className="font-mono text-sm text-text-secondary">✓ Battle recorded</p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  ref={nextBattleRef}
+                  type="button"
+                  onClick={quickBattle}
+                  className="rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active"
+                >
+                  Another battle
+                </button>
+                <label className="flex cursor-pointer items-center gap-2 font-mono text-xs text-text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={autoAdvance}
+                    onChange={() => persistAutoAdvance(!autoAdvance)}
+                  />
+                  Auto-advance
+                </label>
+                <a
+                  href="/arena/leaderboard"
+                  className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
+                >
+                  View leaderboard
+                </a>
+              </div>
+            </div>
+          ) : (
             <button
               type="button"
               onClick={() => void generate(text, domain)}
-              disabled={text.trim().length < MIN_CHARS || !domain || loading}
+              disabled={trimmed.length < MIN_CHARS || !domain || loading}
               className="self-start rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
             >
               {loading ? "Generating…" : "Generate speech"}
             </button>
-            {error && <p className="font-sans text-sm text-accent-rust">{error}</p>}
-          </section>
-        )}
-
-        {battle && step !== 4 && (
-          <section className="flex flex-col gap-3">
-            <div className="grid grid-cols-[1fr_0.7fr_1fr] gap-3">
-              <VoteButton label="Model A" onClick={() => castVote("A_WIN")} disabled={submitting} />
-              <VoteButton label="Tie" onClick={() => castVote("TIE")} disabled={submitting} />
-              <VoteButton label="Model B" onClick={() => castVote("B_WIN")} disabled={submitting} />
-            </div>
-            {error && <p className="text-center font-sans text-sm text-accent-rust">{error}</p>}
-          </section>
-        )}
-
-        {step === 4 && (
-          <div className="flex flex-col items-center gap-4" aria-live="polite">
-            <p className="font-mono text-sm text-text-secondary">✓ Battle recorded</p>
-            <div className="flex gap-3">
-              <button
-                ref={newBattleRef}
-                type="button"
-                onClick={quickBattle}
-                className="rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active"
-              >
-                Another battle
-              </button>
-              <button
-                type="button"
-                onClick={reset}
-                className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
-              >
-                Write my own
-              </button>
-              <a
-                href="/arena/leaderboard"
-                className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
-              >
-                View leaderboard
-              </a>
-            </div>
-          </div>
-        )}
+          )}
+          {error && <p className="text-center font-sans text-sm text-accent-rust">{error}</p>}
+        </section>
       </div>
     </main>
   );
