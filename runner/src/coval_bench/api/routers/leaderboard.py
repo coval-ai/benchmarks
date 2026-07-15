@@ -28,6 +28,7 @@ from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
+from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
@@ -54,6 +55,7 @@ _MV_SQL_TEMPLATE = """
     FROM {view}
     WHERE metric_type = %(metric)s
       AND benchmark = %(benchmark)s
+      AND dataset_id = %(dataset)s
     ORDER BY avg_value ASC
 """
 
@@ -88,7 +90,7 @@ async def get_leaderboard(
             f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S.",
         )
 
-    params: dict[str, Any] = {"metric": metric, "benchmark": benchmark}
+    params: dict[str, Any] = {"metric": metric, "benchmark": benchmark, "dataset": DATASET_ALL}
     sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
 
     async with pool.connection() as conn:

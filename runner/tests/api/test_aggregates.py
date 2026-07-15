@@ -110,6 +110,75 @@ async def test_excludes_failed_null_and_other_benchmark(
     assert stats[0]["sample_count"] == 1
 
 
+async def test_dataset_filter_splits_and_default_pools(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Default response pools every dataset; ?dataset= scopes to one; the
+    datasets list enumerates what has data."""
+    run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_v1, metric_value=1.0)
+    run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
+    await _insert_result(postgresql, run_v3, metric_value=3.0)
+    await _insert_result(postgresql, run_v3, metric_value=5.0)
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    pooled = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    assert pooled["dataset"] == "__all__"
+    assert pooled["datasets"] == ["stt-v1", "stt-v3"]
+    assert pooled["model_stats"][0]["sample_count"] == 3
+    assert pooled["model_stats"][0]["avg_value"] == pytest.approx(3.0)
+
+    scoped = (
+        await client.get("/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v3"})
+    ).json()
+    assert scoped["dataset"] == "stt-v3"
+    assert scoped["model_stats"][0]["sample_count"] == 2
+    assert scoped["model_stats"][0]["avg_value"] == pytest.approx(4.0)
+
+    missing = (
+        await client.get("/v1/results/aggregates", params={"benchmark": "STT", "dataset": "nope"})
+    ).json()
+    assert missing["model_stats"] == []
+    assert missing["datasets"] == ["stt-v1", "stt-v3"]
+
+
+async def test_tts_rows_attributed_to_tts_dataset(client: AsyncClient, postgresql: Any) -> None:
+    """TTS rows aggregate under tts-v1 regardless of the run row's dataset id."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(
+        postgresql, run_id, metric_value=250.0, benchmark="TTS", metric_type="TTFA"
+    )
+    await _refresh_mv(postgresql)
+
+    scoped = (
+        await client.get("/v1/results/aggregates", params={"benchmark": "TTS", "dataset": "tts-v1"})
+    ).json()
+    assert scoped["model_stats"][0]["sample_count"] == 1
+    assert scoped["datasets"] == ["tts-v1"]
+
+
+async def test_series_split_by_dataset(client: AsyncClient, postgresql: Any) -> None:
+    """The series block scopes to the requested dataset's bucket rows."""
+    scheduled = datetime.now(dt.UTC).replace(microsecond=0, second=0, minute=0)
+    run_v1 = await _insert_run(postgresql, dataset_id="stt-v1", scheduled_at=scheduled)
+    await _insert_result(postgresql, run_v1, metric_value=1.0)
+    run_v3 = await _insert_run(postgresql, dataset_id="stt-v3", scheduled_at=scheduled)
+    await _insert_result(postgresql, run_v3, metric_value=3.0)
+    await _fill_buckets(postgresql)
+
+    pooled = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    assert len(pooled["series"]) == 1
+    assert pooled["series"][0]["sample_count"] == 2
+
+    scoped = (
+        await client.get("/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v1"})
+    ).json()
+    assert len(scoped["series"]) == 1
+    assert scoped["series"][0]["sample_count"] == 1
+    assert scoped["series"][0]["value_sum"] == pytest.approx(1.0)
+
+
 async def test_partial_runs_included(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql, status="partial")
     await _insert_result(postgresql, run_id, metric_value=2.0)

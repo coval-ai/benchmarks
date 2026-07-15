@@ -185,9 +185,15 @@ class RunWriter:
                 await cur.execute(
                     """
                     INSERT INTO benchmarks_v2.results_by_bucket
-                        (provider, model, benchmark, metric_type, bucket_at,
+                        (provider, model, benchmark, dataset_id, metric_type, bucket_at,
                          min_value, p25, p50, p75, max_value, value_sum, sample_count)
-                    SELECT r.provider, r.model, r.benchmark, r.metric_type, %(bucket)s,
+                    SELECT r.provider, r.model, r.benchmark,
+                           COALESCE(
+                               CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1'
+                                    ELSE rn.dataset_id END,
+                               '__all__'
+                           ),
+                           r.metric_type, %(bucket)s,
                            MIN(r.metric_value)::float8,
                            PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY r.metric_value)::float8,
                            PERCENTILE_CONT(0.5)  WITHIN GROUP (ORDER BY r.metric_value)::float8,
@@ -209,7 +215,11 @@ class RunWriter:
                                   + (%(period)s::double precision) * INTERVAL '1 second'
                           )
                       )
-                    GROUP BY r.provider, r.model, r.benchmark, r.metric_type
+                    GROUP BY GROUPING SETS (
+                        (r.provider, r.model, r.benchmark, r.metric_type,
+                         CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END),
+                        (r.provider, r.model, r.benchmark, r.metric_type)
+                    )
                     """,
                     params,
                 )

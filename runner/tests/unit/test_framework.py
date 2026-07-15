@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from pydantic import ValidationError
 
+from coval_bench.config import Settings
 from coval_bench.datasets.scripts.framework import (
     Clip,
     _clean,
@@ -21,6 +23,18 @@ from coval_bench.datasets.scripts.framework import (
     _write_manifest,
     balanced_sample,
 )
+
+
+def test_write_manifest_rejects_reserved_dataset_id() -> None:
+    """'__all__' is the pooled-aggregates sentinel — never a real dataset."""
+    with pytest.raises(ValueError, match="reserved"):
+        _write_manifest("{}", "__all__")
+
+
+def test_settings_reject_reserved_dataset_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATASET_ID", "__all__")
+    with pytest.raises(ValidationError, match="reserved"):
+        Settings(_env_file=None)
 
 
 def _clip(

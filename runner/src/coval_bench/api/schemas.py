@@ -167,11 +167,15 @@ class AggregatesResponse(BaseModel):
     """Response schema for GET /v1/results/aggregates.
 
     Wraps and returns all our ModelStatEntry and SeriesPoint data for a time
-    window.
+    window. ``dataset`` echoes the dataset the blocks were computed over
+    ('__all__' = pooled across datasets); ``datasets`` lists the dataset ids
+    with data in the window.
     """
 
     benchmark: BenchmarkLiteral
     window: WindowLiteral
+    dataset: str
+    datasets: list[str]
     model_stats: list[ModelStatEntry]
     series: list[SeriesPoint]
 
