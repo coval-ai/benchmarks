@@ -72,4 +72,12 @@ export const methodologyChanges: MethodologyChange[] = [
     detail:
       "Each cycle now benchmarks two STT datasets as separate runs, 10 clips sampled from each: LibriSpeech test-clean (stt-v1, studio-read speech) and a new conversational set built from pipecat's stt-benchmark data (stt-v3, 897 spontaneous voice-agent clips with model-generated reference transcripts). Headline stats pool both, so average WER becomes the blend of an easy and a hard set; the WildASR clean set (stt-v2) is retired from the schedule. WER values before and after are not comparable; latency metrics shift with the new clip mix.",
   },
+  {
+    date: "2026-07-15",
+    time: "17:00:00-07:00",
+    metrics: ["ttfa", "wer"],
+    title: "TTS runs now split samples across a female and a male voice",
+    detail:
+      "Each TTS model previously synthesized all 10 samples per run with one pinned voice. Runs now split them evenly — 5 on a female voice and 5 on a male voice — with the text-to-voice pairing shuffled per run and the voice recorded on every result row. Several models also change voice at this point (OpenAI, Hume, Soniox, MiniMax, Gradium, ElevenLabs), so TTFA and WER can shift; single-voice and split-voice values are not directly comparable.",
+  },
 ];
