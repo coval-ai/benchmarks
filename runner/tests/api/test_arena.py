@@ -191,6 +191,40 @@ async def test_get_battle_is_blind(client: AsyncClient, postgresql: Any) -> None
     assert data["domain"] == "support"
 
 
+async def test_get_battle_domain_filter(client: AsyncClient, postgresql: Any) -> None:
+    """?domain= serves only that domain's battles; without it every battle is eligible,
+    including untagged (NULL-domain) ones."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    untagged_id = await _insert_battle(postgresql, domain=None)
+
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    assert response.json()["id"] == untagged_id
+
+    healthcare_id = await _insert_battle(postgresql, domain="healthcare")
+
+    response = await client.get(
+        "/v1/arena/battle", params={"domain": "healthcare"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 200
+    assert response.json()["id"] == healthcare_id
+
+    response = await client.get(
+        "/v1/arena/battle", params={"domain": "sales"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 404
+
+
+async def test_get_battle_rejects_unknown_domain(client: AsyncClient, postgresql: Any) -> None:
+    """A domain outside the fixed list is rejected with 422."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_battle(postgresql)
+    response = await client.get(
+        "/v1/arena/battle", params={"domain": "banking"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 422
+
+
 async def test_get_battle_excludes_expired_clips(
     client: AsyncClient, app: FastAPI, postgresql: Any
 ) -> None:
@@ -600,7 +634,7 @@ async def test_create_battle_returns_blind_battle(
 
     response = await client.post(
         "/v1/arena/battle",
-        json={"prompt": "Your appointment is confirmed.", "domain": "customer service"},
+        json={"prompt": "Your appointment is confirmed.", "domain": "customer-service"},
         headers=_LABELER_HEADERS,
     )
 
@@ -610,7 +644,7 @@ async def test_create_battle_returns_blind_battle(
     assert "provider_a" not in data
     assert "model_a" not in data
     assert data["prompt_text"] == "Your appointment is confirmed."
-    assert data["domain"] == "customer service"
+    assert data["domain"] == "customer-service"
     assert data["audio_a_url"].startswith("/clips/")
 
 
@@ -618,9 +652,20 @@ async def test_create_battle_rejects_empty_prompt(client: AsyncClient, postgresq
     """A blank prompt is rejected with 422 — no synthesis attempted."""
     await _apply_arena_schema(_make_db_url(postgresql))
     response = await client.post(
-        "/v1/arena/battle", json={"prompt": "   "}, headers=_LABELER_HEADERS
+        "/v1/arena/battle", json={"prompt": "   ", "domain": "other"}, headers=_LABELER_HEADERS
     )
     assert response.status_code == 422
+
+
+async def test_create_battle_rejects_bad_domain(client: AsyncClient, postgresql: Any) -> None:
+    """An unknown or reserved ('all') domain is rejected with 422."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    for payload in (
+        {"prompt": "hello", "domain": "banking"},
+        {"prompt": "hello", "domain": "all"},
+    ):
+        response = await client.post("/v1/arena/battle", json=payload, headers=_LABELER_HEADERS)
+        assert response.status_code == 422, payload
 
 
 async def test_create_battle_502_when_synthesis_fails(
@@ -637,7 +682,7 @@ async def test_create_battle_502_when_synthesis_fails(
     )
 
     response = await client.post(
-        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
     )
     assert response.status_code == 502
 
@@ -722,7 +767,7 @@ async def test_create_battle_429_when_cap_reached(
     monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
 
     response = await client.post(
-        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
     )
     assert response.status_code == 429
 
@@ -742,6 +787,6 @@ async def test_create_battle_cap_disabled_when_zero(
     )
 
     response = await client.post(
-        "/v1/arena/battle", json={"prompt": "hello"}, headers=_LABELER_HEADERS
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
     )
     assert response.status_code == 201
