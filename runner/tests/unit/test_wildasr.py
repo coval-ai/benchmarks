@@ -139,6 +139,12 @@ def test_family_pool_is_deterministic(source: Path) -> None:
     assert key(_family_pool(source)) == key(_family_pool(source))
 
 
+def test_specs_normalize_audio_and_need_vad_offsets() -> None:
+    """Every family dataset is loudness-normalized and gets a TTFS anchor."""
+    assert all(s.normalize_audio for s in WILDASR_ENV_SPECS.values())
+    assert all(s.needs_vad_offset for s in WILDASR_ENV_SPECS.values())
+
+
 def test_extract_parquet_audio_writes_selected_rows(tmp_path: Path) -> None:
     """Audio bytes land at each selected clip's audio_path, keyed by _pq/_row."""
     from coval_bench.datasets.scripts.framework import Clip
