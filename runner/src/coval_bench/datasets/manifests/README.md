@@ -27,17 +27,19 @@ filename.
   count (clipping 1, phone_codec 2, reverberation 3); randomized ones keep every
   distinct draw (far_field 6 or 3, noise_gap 8 or 4).
 - Multi-condition splits contribute one row per utterance, rotated by the
-  utterance's clean-order ordinal mod its condition count, so conditions are
-  evenly represented. Each item records `condition_idx`/`condition_count` and the
-  source `audio_hash_id`.
-- Filters are family-wide: an utterance stays only if its chosen row in EVERY
-  split sits inside the 2.0–15.0 s band (noise_gap inserts silence that pushes
+  utterance's clean-order ordinal mod its condition count and advancing to the
+  first in-band condition, so conditions are evenly represented without
+  discarding utterances whose rotation-point condition runs long. Each item
+  records `condition_idx`/`condition_count` and the source `audio_hash_id`.
+- Filters are family-wide: an utterance stays only if EVERY split has a
+  condition inside the 2.0–15.0 s band (noise_gap inserts silence that pushes
   long clips over) and its transcript has ≥ 3 words. An utterance whose
   transcript maps to more than one distinct clean recording would be ambiguous
   and is dropped (none in the current source).
-- Result: **257 utterances** from the source's 350 (93 dropped by the duration
-  band), ~36 minutes of clean audio, transcripts unique and lexicographically
-  ordered.
+- Result: **284 utterances** — every one the duration band permits — from the
+  source's 350 (30 have out-of-band clean audio, 36 have a split where no
+  condition fits the band), ~41 minutes of clean audio, transcripts unique and
+  lexicographically ordered.
 - Recording level: loudness-normalized during transcode (RMS target −20 dBFS,
   peak-guarded), same as `stt-v2`/`stt-v3` — the source audio is published very
   quiet.

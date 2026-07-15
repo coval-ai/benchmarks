@@ -17,11 +17,11 @@ index-aligned so clean and degraded rows can be compared per utterance:
   Deterministic degradations collapse to their true condition count; randomized
   ones (noise, far-field) legitimately keep every distinct draw, so condition
   counts may vary per utterance;
-- an utterance survives only if its chosen row in EVERY split passes the duration
-  band (family-wide filter);
 - multi-condition splits contribute one row per utterance, rotated deterministically
-  (utterance ordinal mod that utterance's condition count) so conditions are
-  evenly represented;
+  (utterance ordinal mod that utterance's condition count, advancing to the first
+  in-band condition) so conditions are evenly represented;
+- an utterance survives only if EVERY split has an in-band condition for it
+  (family-wide duration filter);
 - an utterance is dropped only if the clean split carries more than one DISTINCT
   recording for its transcript — transcript is the cross-split join key, and two
   clean recordings would make it ambiguous which one the degradations derive from.
@@ -139,7 +139,9 @@ def _family_pool(source: Path) -> list[_Utterance]:
     rotation) are assigned over clean's transcripts in row order, before any
     filtering, so a drop never shifts a survivor's chosen condition. A split's
     condition count for an utterance is its distinct-audio row count, so counts
-    may vary per utterance (randomized degradations keep every distinct draw).
+    may vary per utterance (randomized degradations keep every distinct draw);
+    the rotation advances to the first in-band condition rather than dropping
+    an utterance whose rotation-point condition is too long.
     """
     split_rows = {variant: _read_split_rows(source, variant) for variant in _VARIANTS}
     shape = {
@@ -164,8 +166,15 @@ def _family_pool(source: Path) -> list[_Utterance]:
             if not rows:
                 reason = "missing"
                 break
-            idx = ordinal % len(rows)
-            if not (_DUR_MIN <= rows[idx].duration <= _DUR_MAX):
+            idx = next(
+                (
+                    (ordinal + offset) % len(rows)
+                    for offset in range(len(rows))
+                    if _DUR_MIN <= rows[(ordinal + offset) % len(rows)].duration <= _DUR_MAX
+                ),
+                None,
+            )
+            if idx is None:
                 reason = "duration"
                 break
             chosen[variant] = _Chosen(row=rows[idx], condition_idx=idx, condition_count=len(rows))

@@ -66,10 +66,14 @@ def source(tmp_path: Path) -> Path:
     _write_split(pq_dir, "far_field", _interleaved_rows("ff", 3) + [(_T_E, 5.0, f"ff3-{_T_E}")])
     _write_split(pq_dir, "reverberation", _interleaved_rows("rv", 3))
     _write_split(pq_dir, "phone_codec", _block_rows("pc", 2) + [(_T_E, 5.0, f"pc0-{_T_E}")])
-    # _T_D's chosen noise_gap condition (5 % 4 = 1) pushed past the ceiling
+    # _T_D: no in-band noise_gap condition at all; _T_C: rotation start (4 % 4 = 0)
+    # out of band, so the rotation must advance to condition 1
     noise_gap = _interleaved_rows("ng", 4)
-    long_row = _UNIQUE.index(_T_D) * 4 + 1
-    noise_gap[long_row] = (_T_D, 16.0, noise_gap[long_row][2])
+    for offset in range(4):
+        row = _UNIQUE.index(_T_D) * 4 + offset
+        noise_gap[row] = (_T_D, 16.0, noise_gap[row][2])
+    c_row = _UNIQUE.index(_T_C) * 4
+    noise_gap[c_row] = (_T_C, 16.0, noise_gap[c_row][2])
     _write_split(pq_dir, "noise_gap", noise_gap)
     return tmp_path
 
@@ -88,6 +92,7 @@ def test_condition_rotation_uses_prefilter_ordinal(source: Path) -> None:
     assert by_transcript[_T_B].chosen["phone_codec"].condition_idx == 3 % 2
     assert by_transcript[_T_A].chosen["noise_gap"].condition_idx == 2 % 4
     assert by_transcript[_T_C].chosen["far_field"].condition_idx == 4 % 3
+    assert by_transcript[_T_C].chosen["noise_gap"].condition_idx == 1  # advanced past 4 % 4
 
 
 def test_duplicate_rows_collapse_and_uneven_conditions_kept(source: Path) -> None:
