@@ -190,19 +190,20 @@ def test_migration_backfills_existing_results(pg_conn: psycopg.Connection[Any]) 
 
     with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         cur.execute(
-            "SELECT min_value, p50, max_value, value_sum, sample_count "
+            "SELECT dataset_id, min_value, p50, max_value, value_sum, sample_count "
             "FROM benchmarks_v2.results_by_bucket "
             "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
         )
         rows = cur.fetchall()
 
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["sample_count"] == 2
-    assert float(row["value_sum"]) == pytest.approx(4.0)
-    assert float(row["min_value"]) == pytest.approx(1.0)
-    assert float(row["max_value"]) == pytest.approx(3.0)
-    assert float(row["p50"]) == pytest.approx(2.0)
+    # One per-dataset row plus the pooled '__all__' row, identical stats here.
+    assert {row["dataset_id"] for row in rows} == {"d", "__all__"}
+    for row in rows:
+        assert row["sample_count"] == 2
+        assert float(row["value_sum"]) == pytest.approx(4.0)
+        assert float(row["min_value"]) == pytest.approx(1.0)
+        assert float(row["max_value"]) == pytest.approx(3.0)
+        assert float(row["p50"]) == pytest.approx(2.0)
 
 
 def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
@@ -667,21 +668,65 @@ def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
     pg_conn.autocommit = True
     with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         cur.execute(
-            "SELECT bucket_at, min_value, p50, max_value, value_sum, sample_count "
+            "SELECT dataset_id, bucket_at, min_value, p50, max_value, value_sum, sample_count "
             "FROM benchmarks_v2.results_by_bucket "
             "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
         )
         rows = cur.fetchall()
 
-    # One bucket spanning all three samples.
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["bucket_at"] == scheduled
-    assert row["sample_count"] == 3
-    assert float(row["value_sum"]) == pytest.approx(9.0)
-    assert float(row["min_value"]) == pytest.approx(1.0)
-    assert float(row["max_value"]) == pytest.approx(5.0)
-    assert float(row["p50"]) == pytest.approx(3.0)
+    # One bucket spanning all three samples: per-dataset row + pooled row.
+    assert {row["dataset_id"] for row in rows} == {"stt-v1", "__all__"}
+    for row in rows:
+        assert row["bucket_at"] == scheduled
+        assert row["sample_count"] == 3
+        assert float(row["value_sum"]) == pytest.approx(9.0)
+        assert float(row["min_value"]) == pytest.approx(1.0)
+        assert float(row["max_value"]) == pytest.approx(5.0)
+        assert float(row["p50"]) == pytest.approx(3.0)
+
+
+def test_refresh_bucket_splits_datasets(pg_conn: psycopg.Connection[Any]) -> None:
+    """Two runs on different datasets in one bucket: per-dataset rows split,
+    the pooled '__all__' row spans both."""
+    _apply_migrations(pg_conn)
+    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            for dataset_id, values in (("stt-v1", [1.0]), ("stt-v3", [3.0, 5.0])):
+                run = await writer.start_run(
+                    runner_sha="abc123",
+                    dataset_id=dataset_id,
+                    dataset_sha256="deadbeef",
+                    scheduled_at=scheduled,
+                )
+                assert run.id is not None
+                await writer.record_results([_wer_result(run.id, v) for v in values])
+                await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+                await writer.refresh_bucket(run.id, period_seconds=1800)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT dataset_id, value_sum, sample_count "
+            "FROM benchmarks_v2.results_by_bucket "
+            "WHERE provider = 'openai' AND model = 'whisper-1' AND metric_type = 'WER'"
+        )
+        by_dataset = {row["dataset_id"]: row for row in cur.fetchall()}
+
+    assert set(by_dataset) == {"stt-v1", "stt-v3", "__all__"}
+    assert by_dataset["stt-v1"]["sample_count"] == 1
+    assert float(by_dataset["stt-v1"]["value_sum"]) == pytest.approx(1.0)
+    assert by_dataset["stt-v3"]["sample_count"] == 2
+    assert float(by_dataset["stt-v3"]["value_sum"]) == pytest.approx(8.0)
+    assert by_dataset["__all__"]["sample_count"] == 3
+    assert float(by_dataset["__all__"]["value_sum"]) == pytest.approx(9.0)
 
 
 def test_refresh_bucket_excludes_failed_run(pg_conn: psycopg.Connection[Any]) -> None:

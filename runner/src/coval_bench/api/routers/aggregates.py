@@ -34,6 +34,7 @@ from starlette.requests import Request
 
 from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
+    DATASET_ALL,
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
     BenchmarkLiteral,
@@ -60,6 +61,7 @@ _STATS_SQL_TEMPLATE = (
     " min_value, max_value, sample_count"
     " FROM {view}"
     " WHERE benchmark = %(benchmark)s"
+    " AND dataset_id = %(dataset)s"
     " ORDER BY provider, model, metric_type"
 )
 
@@ -68,8 +70,15 @@ _SERIES_SQL = (
     " min_value, p25, p50, p75, max_value, value_sum, sample_count"
     " FROM benchmarks_v2.results_by_bucket"
     " WHERE benchmark = %(benchmark)s"
+    " AND dataset_id = %(dataset)s"
     " AND bucket_at >= NOW() - %(interval)s::interval"
     " ORDER BY bucket_at, provider, model, metric_type"
+)
+
+_DATASETS_SQL_TEMPLATE = (
+    "SELECT DISTINCT dataset_id FROM {view}"
+    " WHERE benchmark = %(benchmark)s AND dataset_id <> %(sentinel)s"
+    " ORDER BY dataset_id"
 )
 
 
@@ -79,6 +88,10 @@ async def get_results_aggregates(
     request: Request,  # required by slowapi
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral = Query(default="24h"),
+    dataset: str | None = Query(
+        default=None,
+        description="Dataset id to aggregate over; omit for the pooled all-dataset blocks.",
+    ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
@@ -90,23 +103,35 @@ async def get_results_aggregates(
         benchmark: One of STT, TTS.
         window: Time window — stats over results.created_at, series over
             bucket_at. Defaults to 24h.
+        dataset: Dataset id the blocks are computed over. Omitted, the pooled
+            rows (every dataset together) are served — the pre-dataset-dimension
+            behavior.
     """
+    dataset_key = dataset or DATASET_ALL
 
     async def fill() -> AggregatesResponse:
         stats_sql = _STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+        datasets_sql = _DATASETS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+        stats_params: dict[str, Any] = {"benchmark": benchmark, "dataset": dataset_key}
         series_params: dict[str, Any] = {
             "benchmark": benchmark,
+            "dataset": dataset_key,
             "interval": WINDOW_INTERVALS[window],
         }
 
         async with pool.connection() as conn:
             conn.row_factory = psycopg.rows.dict_row
-            stat_rows = await (await conn.execute(stats_sql, {"benchmark": benchmark})).fetchall()
+            stat_rows = await (await conn.execute(stats_sql, stats_params)).fetchall()
             series_rows = await (await conn.execute(_SERIES_SQL, series_params)).fetchall()
+            dataset_rows = await (
+                await conn.execute(datasets_sql, {"benchmark": benchmark, "sentinel": DATASET_ALL})
+            ).fetchall()
 
         return AggregatesResponse(
             benchmark=benchmark,
             window=window,
+            dataset=dataset_key,
+            datasets=[r["dataset_id"] for r in dataset_rows],
             model_stats=[
                 ModelStatEntry.model_validate(r)
                 for r in stat_rows
@@ -119,7 +144,7 @@ async def get_results_aggregates(
             ],
         )
 
-    cache_key = ("aggregates", benchmark, window)
+    cache_key = ("aggregates", benchmark, window, dataset_key)
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
@@ -128,6 +153,7 @@ async def get_results_aggregates(
         {
             "benchmark": benchmark,
             "window": window,
+            "dataset": dataset_key,
             "model_stat_count": len(response.model_stats),
             "series_point_count": len(response.series),
             "cache_hit": cache_status != "miss",

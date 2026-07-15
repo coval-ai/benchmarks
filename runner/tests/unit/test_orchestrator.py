@@ -316,6 +316,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     assert summary.success_count == summary.total_results
     assert summary.fail_count == 0
     writer.start_run.assert_awaited_once()
+    assert writer.start_run.await_args.kwargs["dataset_id"] == settings.dataset_id
     # Per-task incremental flush — one call per (registered) provider × item.
     # The default STT matrix has additional deepgram models (nova-3, flux), so
     # both deepgram and elevenlabs each fire multiple times via the same mock.
@@ -822,6 +823,8 @@ async def test_audio_file_cleanup(settings: Settings) -> None:
         assert not audio_path.exists(), "TTS audio file was not cleaned up"
         # TTFA result was still recorded successfully
         assert summary.success_count >= 1
+        # A TTS-only run is stamped with the TTS dataset, not the env default.
+        assert writer.start_run.await_args.kwargs["dataset_id"] == "tts-v1"
 
 
 @pytest.mark.asyncio

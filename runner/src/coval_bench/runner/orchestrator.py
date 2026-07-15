@@ -863,12 +863,17 @@ async def run_benchmarks(
     async with lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
 
+        # A TTS-only run never touches the configured STT dataset; a 'both'
+        # run's row still records the STT id (its TTS rows are attributed to
+        # tts-v1 at the aggregation layer).
+        run_dataset_id = "tts-v1" if benchmark_kind == "tts" else settings.dataset_id
+
         # Dataset SHA256 for the run record (computed from the packaged manifest)
         try:
             import importlib.resources as _importlib_resources
 
             manifest_ref = _importlib_resources.files("coval_bench.datasets.manifests").joinpath(
-                f"{settings.dataset_id}.json"
+                f"{run_dataset_id}.json"
             )
             manifest_bytes = manifest_ref.read_bytes()
             dataset_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
@@ -880,7 +885,7 @@ async def run_benchmarks(
         scheduled_at = datetime.fromtimestamp(epoch - epoch % period, tz=UTC)
         run = await writer.start_run(
             runner_sha=settings.runner_sha,
-            dataset_id=settings.dataset_id,
+            dataset_id=run_dataset_id,
             dataset_sha256=dataset_sha256,
             scheduled_at=scheduled_at,
         )
