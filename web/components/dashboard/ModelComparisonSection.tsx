@@ -14,7 +14,7 @@ import MetricToggle from "@/components/dashboard/MetricToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
-const HeatmapSection: React.FC = () => {
+const ModelComparisonSection: React.FC = () => {
   const {
     heatmapDisplayData: data,
     getProviderForModel,
@@ -41,8 +41,9 @@ const HeatmapSection: React.FC = () => {
               provider: getProviderForModel(model),
               metric: activeMetric,
               [`latency_${percentile}_ms`]: latency[percentile],
-              avg_wer_percent: avgWER,
-              wer_std_dev: werStdDev,
+              ...(avgWER !== undefined
+                ? { avg_wer_percent: avgWER, wer_std_dev: werStdDev }
+                : {}),
               runs: sampleCount,
             }))
           }
@@ -62,4 +63,4 @@ const HeatmapSection: React.FC = () => {
   );
 };
 
-export default HeatmapSection;
+export default ModelComparisonSection;

@@ -11,9 +11,8 @@ import KeyMetrics from "@/components/dashboard/KeyMetrics";
 import { ChartSkeleton } from "@/components/dashboard/DashboardSkeleton";
 
 // S2S has a single metric (V2V latency, no WER). The WER-based sections
-// (AccuracyBarSection, LatencyAccuracySection) are omitted, and the model
-// comparison table (HeatmapSection) is deferred to a later pass — its WER
-// columns would need per-column S2S gating.
+// (AccuracyBarSection, LatencyAccuracySection) are omitted; the model
+// comparison table renders WER-free (it hides the column when rows lack it).
 const TimelineChart = dynamic(
   () => import("@/components/visualizations/TimelineChart"),
   { ssr: false, loading: () => <ChartSkeleton /> }
@@ -21,6 +20,11 @@ const TimelineChart = dynamic(
 
 const BoxPlotSection = dynamic(
   () => import("@/components/dashboard/BoxPlotSection"),
+  { ssr: false, loading: () => <ChartSkeleton /> }
+);
+
+const ModelComparisonSection = dynamic(
+  () => import("@/components/dashboard/ModelComparisonSection"),
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
@@ -32,6 +36,7 @@ export function S2SDashboard() {
           <KeyMetrics />
           <TimelineChart />
           <BoxPlotSection />
+          <ModelComparisonSection />
         </DashboardLayout>
       </SidebarMenuProvider>
     </DashboardProvider>

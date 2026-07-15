@@ -56,6 +56,13 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
 
   const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[DEFAULT_PERCENTILE_IDX])!;
 
+  // Latency-only benchmarks (S2S) ship rows without WER; hide that column.
+  const hasWER = useMemo(() => data.every((d) => d.avgWER !== undefined), [data]);
+  const columns = useMemo(
+    () => (hasWER ? COLUMNS : COLUMNS.filter((c) => c.key !== "avgWER")),
+    [hasWER]
+  );
+
   // One pass per (data, percentile, sort) change: pull the selected latency
   // percentile, precompute the relative bar fractions, sort, and note the best
   // value per column.
@@ -67,7 +74,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     const [latencyMin, latencySpan] = span(
       data.map((d) => d.latency[percentile.key])
     );
-    const [werMin, werSpan] = span(data.map((d) => d.avgWER));
+    const [werMin, werSpan] = hasWER
+      ? span(data.map((d) => d.avgWER ?? 0))
+      : [0, 0];
     const rel = (v: number, min: number, s: number) =>
       s === 0 ? 1 : (min + s - v) / s;
 
@@ -76,10 +85,10 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         ...d,
         latency: d.latency[percentile.key],
         latencyRel: rel(d.latency[percentile.key], latencyMin, latencySpan),
-        werRel: rel(d.avgWER, werMin, werSpan)
+        werRel: hasWER ? rel(d.avgWER ?? 0, werMin, werSpan) : 1
       }))
       .sort((a, b) => {
-        const delta = a[sort.key] - b[sort.key];
+        const delta = (a[sort.key] ?? 0) - (b[sort.key] ?? 0);
         return sort.direction === "asc" ? delta : -delta;
       });
 
@@ -91,7 +100,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         sampleCount: Math.max(...data.map((d) => d.sampleCount))
       }
     };
-  }, [data, percentile.key, sort]);
+  }, [data, percentile.key, sort, hasWER]);
 
   type Row = (typeof rows)[number];
 
@@ -175,7 +184,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
               <th className="py-2 pr-4 text-left font-medium">Model</th>
-              {COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th
                   key={column.key}
                   aria-sort={
@@ -232,17 +241,18 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     {bar(row.latencyRel)}
                   </>
                 )}
-                {cell(
-                  row,
-                  "avgWER",
-                  <>
-                    {row.avgWER.toFixed(1)}
-                    <span className="text-xs text-text-tertiary">
-                      % ± {row.werStdDev.toFixed(1)}
-                    </span>
-                    {bar(row.werRel)}
-                  </>
-                )}
+                {hasWER &&
+                  cell(
+                    row,
+                    "avgWER",
+                    <>
+                      {(row.avgWER ?? 0).toFixed(1)}
+                      <span className="text-xs text-text-tertiary">
+                        % ± {(row.werStdDev ?? 0).toFixed(1)}
+                      </span>
+                      {bar(row.werRel)}
+                    </>
+                  )}
                 {cell(
                   row,
                   "sampleCount",
