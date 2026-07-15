@@ -86,6 +86,15 @@ degradation: 6 distinct draws per utterance (3 where the source published no
 duplicate row), one chosen by the family rotation and recorded as
 `condition_idx`/`condition_count`.
 
+#### `stt-wildasr-noisegap.json`
+
+The noise-gap intervention
+(`environment_degradation__en__fleurs_noise_gap_en`): silence/noise segments
+inserted into the audio, so every clip runs longer than its clean sibling
+(still inside the 15 s band — the family filter dropped the utterances whose
+draws exceed it). Randomized, 8 distinct draws per utterance (4 where the
+source published no duplicate row).
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
