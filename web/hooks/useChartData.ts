@@ -301,30 +301,27 @@ export function useChartData({
 
       selectedModels.forEach((model) => {
         const latencyStat = getStat(model, metric);
-        const werStat = getStat(model, "WER");
+        // S2S is latency-only; the table hides the WER column for such rows.
+        const werStat = activeTab === "s2s" ? undefined : getStat(model, "WER");
 
-        if (!latencyStat || !werStat) return;
+        if (!latencyStat || (activeTab !== "s2s" && !werStat)) return;
 
         // The schema types every stat as a number, but guard the raw fields
         // (before unit conversion, which would coerce null to 0) against a
         // response with missing/non-finite values leaking into the table.
-        if (
-          ![
-            latencyStat.min_value,
-            latencyStat.p25,
-            latencyStat.p50,
-            latencyStat.p75,
-            latencyStat.p90,
-            latencyStat.p95,
-            latencyStat.p99,
-            latencyStat.max_value,
-            werStat.avg_value,
-            werStat.stddev_value,
-            latencyStat.sample_count
-          ].every(Number.isFinite)
-        ) {
-          return;
-        }
+        const rawFields = [
+          latencyStat.min_value,
+          latencyStat.p25,
+          latencyStat.p50,
+          latencyStat.p75,
+          latencyStat.p90,
+          latencyStat.p95,
+          latencyStat.p99,
+          latencyStat.max_value,
+          latencyStat.sample_count
+        ];
+        if (werStat) rawFields.push(werStat.avg_value, werStat.stddev_value);
+        if (!rawFields.every(Number.isFinite)) return;
 
         heatmapData.push({
           model,
@@ -338,8 +335,9 @@ export function useChartData({
             p99: toDisplayUnits(latencyStat.p99),
             p100: toDisplayUnits(latencyStat.max_value)
           },
-          avgWER: werStat.avg_value,
-          werStdDev: werStat.stddev_value,
+          ...(werStat
+            ? { avgWER: werStat.avg_value, werStdDev: werStat.stddev_value }
+            : {}),
           sampleCount: latencyStat.sample_count
         });
       });
@@ -351,7 +349,7 @@ export function useChartData({
           ) || a.model.localeCompare(b.model)
       );
     },
-    [selectedModels, getStat, toDisplayUnits]
+    [selectedModels, getStat, toDisplayUnits, activeTab]
   );
 
   const werBarDataMemo = useMemo<BarDataPoint[]>(() => {

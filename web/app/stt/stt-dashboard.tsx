@@ -33,8 +33,8 @@ const AccuracyBarSection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
-const HeatmapSection = dynamic(
-  () => import("@/components/dashboard/HeatmapSection"),
+const ModelComparisonSection = dynamic(
+  () => import("@/components/dashboard/ModelComparisonSection"),
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
@@ -48,7 +48,7 @@ export function STTDashboard() {
           <BoxPlotSection />
           <AccuracyBarSection />
           <LatencyAccuracySection />
-          <HeatmapSection />
+          <ModelComparisonSection />
         </DashboardLayout>
       </SidebarMenuProvider>
     </DashboardProvider>
