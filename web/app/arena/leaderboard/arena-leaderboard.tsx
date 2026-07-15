@@ -29,7 +29,8 @@ export function ArenaLeaderboardPage() {
       <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-[84px] sm:px-6 md:pt-[96px]">
         <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
         <p className="mt-2 text-sm text-text-secondary">
-          Models ranked by Elo rating from blind A/B votes.
+          Models ranked by Elo rating from blind A/B votes. Greyed rows are
+          provisional — the confidence interval is still wide.
         </p>
 
         {isLoading && <p className="mt-8 text-sm text-text-tertiary">Loading…</p>}
@@ -71,11 +72,7 @@ export function ArenaLeaderboardPage() {
                         {normalizeTTSProviderName(entry.provider)}
                       </td>
                       <td className="py-2.5 pr-4 text-right tabular-nums">
-                        {preliminary ? (
-                          <span className="text-text-tertiary">collecting…</span>
-                        ) : (
-                          eloLabel(entry)
-                        )}
+                        {eloLabel(entry)}
                       </td>
                     </tr>
                   );
