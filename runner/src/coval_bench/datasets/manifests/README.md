@@ -108,7 +108,32 @@ The room-reverberation intervention
 (`environment_degradation__en__fleurs_reverberation_en`). 3 RIR conditions
 per utterance; reverb tails lengthen every clip past its clean sibling, so
 the rotation advances past out-of-band draws (hence the uneven condition
-spread).
+spread). 9 of the 284 items carry a null `speech_end_offset_ms`: SileroVAD
+detects no speech in the harshest draws, so WER is measured but TTFS is
+skipped for those clips.
+
+### `stt-wildasr-accent.json`
+
+The demographic intervention: the `demographic_shift__en__demographic_accent_en`
+split of [bosonai/WildASR](https://huggingface.co/datasets/bosonai/WildASR),
+accented English speech. Unpaired — zero transcript overlap with the
+environment family — and the source publishes no accent or speaker labels, so
+it benchmarks accented speech in aggregate.
+
+- **Selection** (in `datasets/scripts/wildasr.py`, deterministic): every
+  distinct recording in the split, deduped by `audio_hash_id`. The same
+  transcript read under different accents is deliberately kept as distinct
+  clips, so transcripts repeat while recordings never do.
+- **845 clips** of the source's 1,000 survive the standard 2.0–15.0 s band and
+  ≥ 3-word floor (the split skews short: median 3.7 s, max 8.0 s), ~54 minutes
+  of audio.
+- Loudness-normalized like the rest of the WildASR sets; `speech_end_offset_ms`
+  filled by `scripts/precompute_vad_offsets.py`.
+
+To rebuild: `uv run --extra hf-parquet coval-build-dataset stt-wildasr-accent`,
+then the VAD offsets script. **Never overwrite** — expansions get new ids.
+
+License: `Apache-2.0` (WildASR).
 
 ### `stt-v3.json`
 

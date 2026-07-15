@@ -14,6 +14,7 @@ pq = pytest.importorskip("pyarrow.parquet")
 from coval_bench.datasets.scripts.framework import _clean, balanced_sample  # noqa: E402
 from coval_bench.datasets.scripts.hf_source import extract_parquet_audio  # noqa: E402
 from coval_bench.datasets.scripts.wildasr import (  # noqa: E402
+    WILDASR_ACCENT,
     WILDASR_ENV_SPECS,
     _family_pool,
     _Utterance,
@@ -145,9 +146,47 @@ def test_family_pool_is_deterministic(source: Path) -> None:
 
 
 def test_specs_normalize_audio_and_need_vad_offsets() -> None:
-    """Every family dataset is loudness-normalized and gets a TTFS anchor."""
-    assert all(s.normalize_audio for s in WILDASR_ENV_SPECS.values())
-    assert all(s.needs_vad_offset for s in WILDASR_ENV_SPECS.values())
+    """Every WildASR dataset is loudness-normalized and gets a TTFS anchor."""
+    specs = [*WILDASR_ENV_SPECS.values(), WILDASR_ACCENT]
+    assert all(s.normalize_audio for s in specs)
+    assert all(s.needs_vad_offset for s in specs)
+
+
+def test_accent_keeps_distinct_audio_per_transcript(tmp_path: Path) -> None:
+    """Same transcript under different accents = distinct clips; exact duplicate
+    rows collapse; the take-all selection keeps every survivor."""
+    pq_dir = tmp_path / "parquet"
+    pq_dir.mkdir()
+    rows = [
+        ("one two three four", 4.0, "acc-a"),
+        ("one two three four", 4.5, "acc-b"),
+        ("one two three four", 4.0, "acc-a"),
+        ("five six seven eight", 3.0, "acc-c"),
+    ]
+    table = pa.table(
+        {
+            "transcript": [t for t, _, _ in rows],
+            "duration": [d for _, d, _ in rows],
+            "audio_hash_id": [h for _, _, h in rows],
+        }
+    )
+    name = "data__demographic_shift__en__demographic_accent_en-00000-of-00001.parquet"
+    pq.write_table(table, pq_dir / name)
+
+    clips = WILDASR_ACCENT.parse(tmp_path)
+    clips = _clean(
+        clips,
+        dur_min=WILDASR_ACCENT.dur_min,
+        dur_max=WILDASR_ACCENT.dur_max,
+        min_words=WILDASR_ACCENT.min_words,
+    )
+    selected = balanced_sample(
+        clips,
+        num=WILDASR_ACCENT.num,
+        dedup_key=WILDASR_ACCENT.dedup_key,
+        balance_dims=WILDASR_ACCENT.balance_dims,
+    )
+    assert sorted(str(c.meta["audio_hash_id"]) for c in selected) == ["acc-a", "acc-b", "acc-c"]
 
 
 def test_extract_parquet_audio_writes_selected_rows(tmp_path: Path) -> None:
