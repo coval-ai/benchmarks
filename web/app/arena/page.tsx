@@ -8,11 +8,22 @@ import { AudioPlayer } from "./components/AudioPlayer";
 
 const MIN_CHARS = 3;
 const MAX_CHARS = 500;
-const EXAMPLES = [
-  "Thanks for calling — I can help you with that refund right away.",
-  "The northern lights danced across the sky in ribbons of green and violet.",
-  "Honestly? I'd grab the earlier train. Traffic downtown is brutal today.",
+const EXAMPLES: { text: string; domain: ArenaDomain }[] = [
+  { text: "Thanks for calling — I can help you with that refund right away.", domain: "customer-service" },
+  { text: "This is the third time I've called about the same broken dishwasher, and I am absolutely furious!", domain: "customer-service" },
+  { text: "Your prescription refill is ready for pickup at the pharmacy.", domain: "healthcare" },
+  { text: "Take 500 milligrams every eight hours for the next 10 days.", domain: "healthcare" },
+  { text: "Would Tuesday or Thursday work better for a quick demo?", domain: "sales" },
+  { text: "We won it! The committee voted unanimously — welcome to the family!", domain: "sales" },
+  { text: "Good morning, thank you for calling — how may I direct your call?", domain: "receptionist-booking" },
+  { text: "You won't believe it — a cancellation just came in for the exact date you wanted!", domain: "receptionist-booking" },
+  { text: "The northern lights danced across the sky in ribbons of green and violet.", domain: "other" },
+  { text: "Honestly? I'd grab the earlier train. Traffic downtown is brutal today.", domain: "other" },
 ];
+
+function pickExample(): { text: string; domain: ArenaDomain } {
+  return EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)] ?? EXAMPLES[0]!;
+}
 
 export default function ArenaPage() {
   const source = getBattleSource();
@@ -46,14 +57,14 @@ export default function ArenaPage() {
     setActive(null);
   }, []);
 
-  const generate = async () => {
-    const trimmed = text.trim();
-    if (trimmed.length < MIN_CHARS || !domain || loading) return;
+  const generate = async (promptText: string, promptDomain: ArenaDomain | "") => {
+    const trimmed = promptText.trim();
+    if (trimmed.length < MIN_CHARS || !promptDomain || loading) return;
     const token = ++runToken.current;
     setLoading(true);
     setError(null);
     try {
-      const b = await source.createBattle(trimmed, domain);
+      const b = await source.createBattle(trimmed, promptDomain);
       if (token !== runToken.current) return; // a newer action superseded this one
       setBattle(b);
       setStep(2);
@@ -62,6 +73,14 @@ export default function ArenaPage() {
     } finally {
       if (token === runToken.current) setLoading(false);
     }
+  };
+
+  const quickBattle = () => {
+    const example = pickExample();
+    reset();
+    setText(example.text);
+    setDomain(example.domain);
+    void generate(example.text, example.domain);
   };
 
   const castVote = async (outcome: Outcome) => {
@@ -89,6 +108,12 @@ export default function ArenaPage() {
     <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
       <div className="mx-auto flex max-w-[760px] flex-col gap-8">
         <h1 className="text-center font-sans text-2xl">Which voice sounds more natural?</h1>
+
+        {battle && (
+          <p className="text-center font-sans text-base italic leading-relaxed text-text-secondary">
+            “{battle.prompt}”
+          </p>
+        )}
 
         <div
           key={battle?.battleId ?? "pending"}
@@ -126,7 +151,7 @@ export default function ArenaPage() {
               className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
             >
               <option value="" disabled>
-                Select a domain…
+                Select a domain *
               </option>
               {ARENA_DOMAINS.map((d) => (
                 <option key={d.value} value={d.value}>
@@ -145,7 +170,11 @@ export default function ArenaPage() {
             <div className="flex items-center justify-between text-sm text-text-tertiary">
               <button
                 type="button"
-                onClick={() => setText(EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)] ?? "")}
+                onClick={() => {
+                  const example = pickExample();
+                  setText(example.text);
+                  setDomain(example.domain);
+                }}
                 className="font-sans underline underline-offset-2 hover:text-text-secondary"
               >
                 Use an example
@@ -156,7 +185,7 @@ export default function ArenaPage() {
             </div>
             <button
               type="button"
-              onClick={generate}
+              onClick={() => void generate(text, domain)}
               disabled={text.trim().length < MIN_CHARS || !domain || loading}
               className="self-start rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
             >
@@ -184,10 +213,17 @@ export default function ArenaPage() {
               <button
                 ref={newBattleRef}
                 type="button"
-                onClick={reset}
+                onClick={quickBattle}
                 className="rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active"
               >
-                New battle
+                Another battle
+              </button>
+              <button
+                type="button"
+                onClick={reset}
+                className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
+              >
+                Write my own
               </button>
               <a
                 href="/arena/leaderboard"
