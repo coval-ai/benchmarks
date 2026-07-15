@@ -44,7 +44,7 @@ def _pcm_from_chunk(chunk: bytes) -> bytes:
 class InworldTTSProvider(TTSProvider):
     """Inworld AI TTS provider using WebSocket bidirectional streaming."""
 
-    _VALID_MODELS = frozenset({"inworld-tts-1.5-max", "inworld-tts-1.5-mini"})
+    _VALID_MODELS = frozenset({"inworld-tts-2", "inworld-tts-1.5-max", "inworld-tts-1.5-mini"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if model not in self._VALID_MODELS:
