@@ -102,6 +102,14 @@ The telephony-codec intervention
 codec conditions per utterance, rotation split evenly across the pool;
 durations identical to clean.
 
+#### `stt-wildasr-reverb.json`
+
+The room-reverberation intervention
+(`environment_degradation__en__fleurs_reverberation_en`). 3 RIR conditions
+per utterance; reverb tails lengthen every clip past its clean sibling, so
+the rotation advances past out-of-band draws (hence the uneven condition
+spread).
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
