@@ -78,6 +78,14 @@ The clipping-distortion intervention
 utterance, 1:1 with clean: identical transcripts and durations at every index,
 different audio.
 
+#### `stt-wildasr-farfield.json`
+
+The far-field / distant-mic intervention
+(`environment_degradation__en__fleurs_far_field_en`). A randomized
+degradation: 6 distinct draws per utterance (3 where the source published no
+duplicate row), one chosen by the family rotation and recorded as
+`condition_idx`/`condition_count`.
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
