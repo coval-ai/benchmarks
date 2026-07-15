@@ -92,6 +92,8 @@ extend-select = ["E", "F", "I", "B", "UP", "SIM", "S", "ANN"]
 "src/coval_bench/providers/stt/*.py" = ["ANN401"]
 # FastAPI uses Depends/Query in function argument defaults by design
 "src/coval_bench/api/routers/*.py" = ["B008"]
+# One prompt sample per source line, even past 100 chars
+"src/coval_bench/arena/prompts.py" = ["E501"]
 
 [tool.ruff.format]
 # defaults

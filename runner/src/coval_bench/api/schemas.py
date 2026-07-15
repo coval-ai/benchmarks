@@ -205,11 +205,16 @@ class BattleOut(BaseModel):
     audio_b_url: str
 
 
+ArenaDomain = Literal["customer-service", "healthcare", "sales", "receptionist-booking", "other"]
+"""Domains a battle can be tagged with. Each doubles as a leaderboard key, so the set is
+closed and excludes ``all`` — that key is reserved for the aggregate board."""
+
+
 class BattleCreate(BaseModel):
     """Request to generate a new battle from a user prompt."""
 
     prompt: str = Field(..., max_length=500)
-    domain: str | None = None
+    domain: ArenaDomain | None = None
 
 
 class LeaderboardEntryOut(BaseModel):

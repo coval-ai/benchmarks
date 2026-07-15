@@ -34,6 +34,7 @@ from starlette.requests import Request
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
+    ArenaDomain,
     ArenaLeaderboardResponse,
     BattleCreate,
     BattleOut,
@@ -119,27 +120,32 @@ async def _battle_out(settings: Settings, row: dict[str, Any]) -> BattleOut:
 @limiter.limit("60/minute")
 async def get_battle(
     request: Request,  # required by slowapi
+    domain: ArenaDomain | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
 ) -> BattleOut:
-    """Return one battle to vote on, chosen at random. 404 if none exist."""
+    """Return one battle to vote on, chosen at random (within ``domain`` when given).
+    404 if none exist."""
+    # Placeholder selection: a uniformly random battle. Adaptive pairing will
+    # replace this to surface the most informative matchups. With GCS-backed
+    # clips, skip battles older than the bucket retention — their audio is gone.
+    conditions = []
+    params: dict[str, Any] = {}
+    if settings.arena_gcs_bucket:
+        conditions.append("created_at >= now() - make_interval(days => %(days)s)")
+        params["days"] = settings.arena_clip_retention_days
+    if domain is not None:
+        conditions.append("domain = %(domain)s")
+        params["domain"] = domain
+    where = f"WHERE {' AND '.join(conditions)} " if conditions else ""
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
-        # Placeholder selection: a uniformly random battle. Adaptive pairing will
-        # replace this to surface the most informative matchups. With GCS-backed
-        # clips, skip battles older than the bucket retention — their audio is gone.
-        if settings.arena_gcs_bucket:
-            rows = await conn.execute(
-                f"SELECT {_BATTLE_COLS} FROM arena.battles "  # noqa: S608
-                "WHERE created_at >= now() - make_interval(days => %(days)s) "
-                "ORDER BY random() LIMIT 1",
-                {"days": settings.arena_clip_retention_days},
-            )
-        else:
-            rows = await conn.execute(
-                f"SELECT {_BATTLE_COLS} FROM arena.battles ORDER BY random() LIMIT 1"  # noqa: S608
-            )
+        rows = await conn.execute(
+            f"SELECT {_BATTLE_COLS} FROM arena.battles {where}"  # noqa: S608
+            "ORDER BY random() LIMIT 1",
+            params,
+        )
         row = await rows.fetchone()
     if row is None:
         raise HTTPException(404, "no battles available")

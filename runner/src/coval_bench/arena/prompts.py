@@ -3,27 +3,128 @@
 
 """Example prompts per domain for seeding demo battles.
 
-The arena's real prompts are user-written; these are a small fixture so a labeler
-has battles to vote on before any user prompts arrive. Keys are the launch domains
+The arena's real prompts are user-written; these are a fixture so a labeler has
+battles to vote on before any user prompts arrive. Keys are the launch domains
+(typed as ``ArenaDomain`` so a renamed domain fails type-checking, not at runtime)
 and are stored verbatim as a battle's ``domain``.
+
+Each domain has 25 prompts, in list order: 5 easy (plain conversational sentences),
+8 word-complexity (proper names, numbers, domain jargon, abbreviations — one or two
+per sentence), and 12 emotional (3 each of anger, sadness, happiness, surprise) —
+the arena votes on naturalness, so expressive delivery is the biggest test surface.
 """
 
 from __future__ import annotations
 
-EXAMPLE_PROMPTS: dict[str, list[str]] = {
-    "customer service": [
+from coval_bench.api.schemas import ArenaDomain
+
+EXAMPLE_PROMPTS: dict[ArenaDomain, list[str]] = {
+    "customer-service": [
         "Thanks for holding — I've found your order and it'll ship today.",
-        "I'm sorry for the trouble; let me refund that charge right now.",
-        "Your appointment is confirmed for Tuesday at nine in the morning.",
-    ],
-    "insurance": [
-        "Your claim has been approved and payment will arrive within five business days.",
-        "This policy covers water damage but excludes flooding from natural disasters.",
-        "To file a claim, I'll need your policy number and the date of the incident.",
+        "Could you tell me the email address on the account?",
+        "I've updated your delivery address and notified the driver.",
+        "You can return it in store or by mail, whichever is easier.",
+        "Is there anything else I can help you with today?",
+        "I've issued a refund of $84.99 to your card ending in 4417.",
+        "Your order number is 7 3 2 9 5 8 6, placed on May the 12th.",
+        "Your case has been assigned to my colleague Marisol Gutierrez.",
+        "Your warranty runs through October 2027, so this repair is free.",
+        "Call us back at 1-800-555-0142, extension 230, if anything changes.",
+        "I've issued RMA number 6 6 2 0 1 4 — you'll get the ETA by SMS shortly.",
+        "The $312.75 chargeback supersedes the store credit we issued on the 3rd.",
+        "Per our T&Cs, the LCD panel is covered, but the AC adapter isn't.",
+        "This is the third time I've called about the same broken dishwasher, and I am absolutely furious!",
+        "No, don't put me on hold again — I have been waiting for forty-five minutes!",
+        "I want to speak to a manager right now; this is completely unacceptable!",
+        "I'm afraid we couldn't recover the photos from the damaged drive... I'm so sorry.",
+        "Unfortunately that model has been discontinued, and honestly, I wish I had better news for you.",
+        "We're sad to see you go after eight years; I've processed the cancellation as you asked.",
+        "That's wonderful news — I'm thrilled we finally got the reimbursement through!",
+        "You're going to love this: your replacement arrives tomorrow, a whole week early!",
+        "Fantastic! The refund cleared, the discount's applied, and you're all set!",
+        "Wait — it says here the package was already delivered... this morning?!",
+        "Oh! You're actually our one-millionth customer — I can't believe I get to tell you this!",
+        "Hold on, the system just approved the full refund — I've never seen it do that so fast!",
     ],
     "healthcare": [
-        "Your test results came back normal, so no follow-up is needed.",
         "Please take this medication twice daily with food.",
-        "The doctor will see you now; the visit usually takes about fifteen minutes.",
+        "The doctor will see you now; the visit takes about fifteen minutes.",
+        "Bring a list of any medications you're currently taking.",
+        "Your prescription refill is ready for pickup at the pharmacy.",
+        "You're all checked in — have a seat and we'll call you shortly.",
+        "Your appointment with Dr. Alvarez is Tuesday at 9:30 in the morning.",
+        "Take 500 milligrams every eight hours for the next 10 days.",
+        "The copay is $45, and your deductible has $312.60 remaining.",
+        "Your blood pressure was 138 over 86 today, a bit above target.",
+        "The azithromycin may interact with your omeprazole, so we're switching you to cefuroxime.",
+        "We're referring you to an otolaryngologist for the recurring labyrinthitis.",
+        "The MRI is pre-authorized; radiology needs your ID, insurance card, and the HIPAA consent form.",
+        "Your PCP wants a CBC and an EKG done 48 hours before the ENT consult.",
+        "I've been in this waiting room for two hours — this is absolutely ridiculous!",
+        "You billed me for a procedure that never happened, and nobody will explain why!",
+        "How could the lab lose my samples twice? I did everything you asked!",
+        "I'm so sorry... the results weren't what we hoped for.",
+        "We did everything we could, and I want you to know she wasn't in any pain.",
+        "It's been a hard year for your family; please know we're all thinking of you.",
+        "Wonderful news — the biopsy came back completely benign!",
+        "Your recovery has been remarkable; the whole team is so proud of you!",
+        "Congratulations — you're going to be parents!",
+        "Wait, the transplant list just called... they have a match?!",
+        "Oh my goodness, your A1C dropped three whole points — I had to read it twice!",
+        "You're telling me he walked in here without the crutches? Already?!",
+    ],
+    "sales": [
+        "Based on what you've described, the professional plan is the best fit.",
+        "Would Tuesday or Thursday work better for a quick demo?",
+        "What's the biggest bottleneck in your current workflow?",
+        "How many seats would you need to start?",
+        "Support and updates are included in every tier.",
+        "The annual plan is $18,900, which works out to $1,575 a month.",
+        "You'd save 22 percent by switching to annual billing.",
+        "Your account executive, Thiago Albuquerque, will own the rollout.",
+        "Renewal lands on March 15th, with a 30-day out clause.",
+        "Our SLA is 99.9 percent uptime, with SSO and SCIM on every tier.",
+        "Legal gets the MSA and DPA today; the NDA is already countersigned.",
+        "The POC ran in your AWS VPC, and the ROI model assumes GA pricing.",
+        "Usage-based proration kicks in once you exceed the contracted threshold.",
+        "Your competitor just poached two of my champions mid-deal — I'm livid!",
+        "We sat through six discovery calls and you still quoted the wrong product!",
+        "Don't tell me the price went up again — we shook hands on this in March!",
+        "I hate to say it, but we lost the renewal... eight years of partnership, gone.",
+        "Honestly, it stings — they went with the cheaper vendor knowing it does half as much.",
+        "I'm sorry to be the one to tell you, but the pilot didn't make the budget cut.",
+        "We won it! The committee voted unanimously — welcome to the family!",
+        "I'm genuinely excited about this one; your use case is a perfect fit!",
+        "Congratulations on the Series B — champagne is absolutely in order!",
+        "Wait, you want to triple the seat count... before the trial even ends?!",
+        "The CFO signed already? It usually takes them a quarter!",
+        "You're kidding — the demo convinced the one stakeholder we thought was unwinnable?!",
+    ],
+    "receptionist-booking": [
+        "Good morning, thank you for calling — how may I direct your call?",
+        "Would you prefer the morning or the afternoon slot?",
+        "I'll email a confirmation with parking directions right away.",
+        "Can you spell the last name for me, please?",
+        "You're all set — we look forward to seeing you on Thursday.",
+        "I have a table for 4 available at 7 or 7:45.",
+        "Your confirmation number is 5 5 9 3 0 7, checking in on the 3rd.",
+        "The deposit is $75, refundable up to 48 hours before arrival.",
+        "Suite 1204 is available from 2 p.m.; late checkout runs until 1.",
+        "Good morning, you've reached the office of Dr. Anneliese Featherstonhaugh.",
+        "The reservation is under Wojciechowski — W-O-J, as in whiskey, oscar, juliett.",
+        "The maître d' has noted your anniversary and the gluten-free requirement.",
+        "Your itinerary includes the Wednesday matinée and the 10 a.m. vineyard excursion.",
+        "You gave our suite away? We booked it eight months ago for our wedding night!",
+        "I've been transferred four times and I just need to change one reservation!",
+        "The room was supposed to be ready at three — it's seven and my kids are asleep on the lobby floor!",
+        "I'm terribly sorry, but Saturday is completely booked — I feel awful about the mix-up.",
+        "We're sorry to hear about your father; of course we'll refund the whole stay.",
+        "It breaks my heart, but tonight was chef's last service — the restaurant closes for good tomorrow.",
+        "Congratulations on the engagement! We'll make the evening unforgettable!",
+        "Welcome back! It's always such a pleasure to see you again!",
+        "Your honeymoon suite is ready, the roses arrived, and the sunset view is perfect tonight!",
+        "Oh! A party of forty... tonight?! Let me see what we can possibly do!",
+        "You won't believe it — a cancellation just came in for the exact date you wanted!",
+        "Wait, you flew in from Auckland and the conference is... next month?!",
     ],
 }
