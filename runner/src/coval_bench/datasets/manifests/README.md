@@ -71,6 +71,13 @@ five degradation datasets. Succeeds `stt-v2` (same source split, which stays
 frozen): built via the family selection above instead of stt-v2's 50-clip
 first-100-rows window.
 
+#### `stt-wildasr-clipping.json`
+
+The clipping-distortion intervention
+(`environment_degradation__en__fleurs_clipping_en`). One condition per
+utterance, 1:1 with clean: identical transcripts and durations at every index,
+different audio.
+
 ### `stt-v3.json`
 
 **What it is.** A frozen 897-clip set — the full usable pool of
