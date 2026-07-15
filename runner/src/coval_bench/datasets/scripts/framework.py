@@ -28,6 +28,8 @@ from typing import TYPE_CHECKING
 import soundfile as sf
 import structlog
 
+from coval_bench.config import DATASET_ALL
+
 if TYPE_CHECKING:
     import google.cloud.storage as _gcs_storage
 
@@ -279,6 +281,8 @@ def _write_manifest(json_text: str, dataset_id: str) -> Path:
     """Write the manifest to the packaged ``<dataset_id>.json``."""
     if not re.fullmatch(r"[A-Za-z0-9._-]+", dataset_id):
         raise ValueError(f"invalid dataset_id {dataset_id!r}: use letters, digits, '.', '_', '-'")
+    if dataset_id == DATASET_ALL:
+        raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
     pkg = impres.files("coval_bench.datasets.manifests")
     dest = Path(str(pkg.joinpath(f"{dataset_id}.json")))
     dest.write_text(json_text, encoding="utf-8")

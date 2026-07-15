@@ -14,10 +14,6 @@ from typing import Literal
 BenchmarkLiteral = Literal["STT", "TTS", "S2S"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 
-# Sentinel dataset_id under which the matviews and results_by_bucket
-# materialize the pooled (all-datasets) rows.
-DATASET_ALL = "__all__"
-
 # Fixed interval strings — looked up by Python, never user-interpolated into
 # SQL. Used by live queries (the aggregates series block).
 WINDOW_INTERVALS: dict[str, str] = {

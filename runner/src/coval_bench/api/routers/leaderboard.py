@@ -24,10 +24,11 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.common import DATASET_ALL, WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
+from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")

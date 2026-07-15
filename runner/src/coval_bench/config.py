@@ -14,8 +14,11 @@ import functools
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Reserved: the aggregation layer materializes pooled rows under this sentinel.
+DATASET_ALL = "__all__"
 
 
 class Settings(BaseSettings):
@@ -44,6 +47,13 @@ class Settings(BaseSettings):
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
     dataset_id: str = "stt-v1"
+
+    @field_validator("dataset_id")
+    @classmethod
+    def _dataset_id_not_reserved(cls, value: str) -> str:
+        if value == DATASET_ALL:
+            raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
+        return value
 
     # Items drawn at random per run from each manifest, shared across all
     # models for parity. Set >= manifest size to run everything.

@@ -34,7 +34,6 @@ from starlette.requests import Request
 
 from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
-    DATASET_ALL,
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
     BenchmarkLiteral,
@@ -49,6 +48,7 @@ from coval_bench.api.deps import (
 )
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
+from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
