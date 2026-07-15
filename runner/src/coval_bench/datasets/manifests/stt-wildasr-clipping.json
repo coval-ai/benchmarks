@@ -1,0 +1,2849 @@
+{
+  "_license": "Apache-2.0 (WildASR; audio derived from FLEURS, CC-BY-4.0)",
+  "id": "stt-wildasr-clipping",
+  "version": "1.0.0",
+  "license": "Apache-2.0 (WildASR; audio derived from FLEURS, CC-BY-4.0)",
+  "source": "bosonai/WildASR environment_degradation__en__fleurs_clipping_en",
+  "items": [
+    {
+      "path": "audio/0001.wav",
+      "sha256": "adb3947b5b9eb2c26142fe4d32614536c5d8e6e9efea65df88ad923d8b880938",
+      "transcript": "\"he [wales] basically lied to us from the start. first by acting as if this was for legal reasons. second by pretending he was listening to us right up to his art deletion.",
+      "duration_sec": 12.36,
+      "speech_end_offset_ms": 11428.0,
+      "audio_hash_id": "068314818d285d26fec699001abfca2ad9a734a9ff574d846e2b80fd04844173",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0002.wav",
+      "sha256": "fb5b3ed485e796d93a61976c272880202418260c7642d22e017322f888361411",
+      "transcript": "a car bomb detonated at police headquarters in gaziantep turkey yesterday morning killed two police officers and injured more than twenty other people",
+      "duration_sec": 10.02,
+      "speech_end_offset_ms": 8644.0,
+      "audio_hash_id": "bcbda036920850fd78d42743d27e84c77525370c5ccf0137cccc7073e9aabdda",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0003.wav",
+      "sha256": "47b3c69578ddc1008c3756d4b5978d9ed837a69b5417bfa3ad53ff79a3493afd",
+      "transcript": "a civilization is a singular culture shared by a significant large group of people who live and work co-operatively a society",
+      "duration_sec": 8.88,
+      "speech_end_offset_ms": 7780.0,
+      "audio_hash_id": "a7b3bfba98676ece3a20f0ce6fb5aed1aa1986b2225a58a293f8041585523e22",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0004.wav",
+      "sha256": "95d2fde2660bae6450b41af61d3b1234982de813f110e149ae112091d6d2a9d5",
+      "transcript": "a curry is a dish based on herbs and spices together with either meat or vegetables",
+      "duration_sec": 9.06,
+      "speech_end_offset_ms": 7428.0,
+      "audio_hash_id": "be6cd15ad1fd5ce3ee2e65adfeb7c117618df16b77c5ed27fd7091b5c6f3cda4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0005.wav",
+      "sha256": "314644f44bdd1209fae2667ea32a0b331903983574f6d5fc6f6a16dbbd07b78a",
+      "transcript": "a full 20% of the water that pours out of the planet's rivers into the oceans comes from the amazon",
+      "duration_sec": 7.32,
+      "speech_end_offset_ms": 6692.0,
+      "audio_hash_id": "31b857470e24349f68a23d93d743dda79c9d0017b6d5904512cb391ad024f98f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0006.wav",
+      "sha256": "4d17895ecde311aa29dfb857ceb82164a6c8a2deb3069494e80ff1e0a8923005",
+      "transcript": "a search of the internet for hostile environment course' will probably provide the address of a local company",
+      "duration_sec": 7.2,
+      "speech_end_offset_ms": 6244.0,
+      "audio_hash_id": "dc6d44312f1e48dd235c2b90ddeca1f684d9e31bc53db9af97761f48c0d40e33",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0007.wav",
+      "sha256": "f95faa0526fb756f74df3fc213ff8160b587f969dd86b624769688cd5c09c476",
+      "transcript": "a simple popular dinner especially during the summer is the pa amb oli bread with olive oil tomato and any available condiments such as cheese tunafish etc",
+      "duration_sec": 12.24,
+      "speech_end_offset_ms": 11268.0,
+      "audio_hash_id": "6534e5e91f493c712f30263fe73786f58981b462a01658c31c1d89b2b8f10f61",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0008.wav",
+      "sha256": "adcdf338d2bdfe3f33a40309210744d2e53159f7b3cbff71217b8921179ebae0",
+      "transcript": "a well rounded athlete the tiger can climb though not well swim leap great distances and pull with five times the force of a strong human",
+      "duration_sec": 10.2,
+      "speech_end_offset_ms": 9284.0,
+      "audio_hash_id": "fb1d5d17ab4f4a5459d5a74d826a899a4b0dad38eefb2e2246ae9599848e3b0d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0009.wav",
+      "sha256": "8c844f1bc81b340168a2e769f5db9e8166598f064d5e07ebe153830bf90ffb01",
+      "transcript": "accepted were aristotle's views on all matters of science including psychology",
+      "duration_sec": 6.72,
+      "speech_end_offset_ms": 4836.0,
+      "audio_hash_id": "33b643588da2a8526d82a5d40fd67db4c0fe53961773375bad2c2c00443b592e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0010.wav",
+      "sha256": "331e58dad282654ecbfdf86c6cb3e309f85bbf18e5c0c024f27984cddf67ab8e",
+      "transcript": "according to japan's nuclear agency radioactive caesium and iodine has been identified at the plant",
+      "duration_sec": 7.38,
+      "speech_end_offset_ms": 6276.0,
+      "audio_hash_id": "05d50e276a2d26f12b9f2e0d7f54ed01653e732f13a82179548530db657acce0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0011.wav",
+      "sha256": "c414f9bf34ab7ebcf3c231f09feb5a23b04050372f846000c156f104768a7901",
+      "transcript": "aerosmith have cancelled their remaining concerts on their tour",
+      "duration_sec": 3.96,
+      "speech_end_offset_ms": 3652.0,
+      "audio_hash_id": "9a992ee806ff73b559f35aad79afbd49f4ff0323dff239aca191ce1c824b5919",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0012.wav",
+      "sha256": "37ff869b25a77113c7abfa65144f84f01ce5c3e5a487a94aa89f5bea25f656dc",
+      "transcript": "after the accident occurred gibson was transported to a hospital but died shortly afterwards",
+      "duration_sec": 6.24,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "7753fa43c8f90e80c78a99392b5d8753c38ce2a3b81d7350d8990a4b495e55ca",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0013.wav",
+      "sha256": "e2898a92258499c55b997bca3bdf07d2c50b6292eb0dd80509302a38dedfb49a",
+      "transcript": "after the dam was built in 1963 the seasonal floods that would spread sediment throughout the river were halted",
+      "duration_sec": 9.24,
+      "speech_end_offset_ms": 7556.0,
+      "audio_hash_id": "5a7db473bfc595ffe701fcef6257a8e57c082f6840b1c19daec58f6af5a3eb11",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0014.wav",
+      "sha256": "11f7a83b5540ee1c634a9d5e0d903419fed81164bb4a7851e00a781f8a5b3e69",
+      "transcript": "all nouns alongside the word sie for you always begin with a capital letter even in the middle of a sentence",
+      "duration_sec": 8.76,
+      "speech_end_offset_ms": 8324.0,
+      "audio_hash_id": "0ef5c70d395f403d2668d910efaed5927fa5a061cef769fe0fbd50693041ef75",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0015.wav",
+      "sha256": "54bce258d28f94e6c7fb8166555d94d7ac2c01b8751c734962f097131ec74ab8",
+      "transcript": "all things considered we should not be surprised if our own ancestors solved their protein problem in somewhat the same way that chimps on the savanna do today",
+      "duration_sec": 9.48,
+      "speech_end_offset_ms": 8548.0,
+      "audio_hash_id": "530a3fc83adeee3f98ab2c7706e2c64acfb3dfa3ce5dd5a757a85f9f0f92aaf9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0016.wav",
+      "sha256": "545efd5b162c91c2edfa947ec5c3f7e769bd3d4226e75bc36e7c8ea856b69325",
+      "transcript": "alloys are basically a mixture of two or more metals don't forget that there are many elements on the periodic table",
+      "duration_sec": 8.38,
+      "speech_end_offset_ms": 7428.0,
+      "audio_hash_id": "b3f09f1fa8d7199c1b8976748d9c079e0ef119468b1f2aba5cf798dd4899a163",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0017.wav",
+      "sha256": "3ad34e21cb34a39eb60facca1ed3c52c1240d7d9e7d4228594cb0c6827a29f1f",
+      "transcript": "along the same line men are required to wear trousers covering the knees",
+      "duration_sec": 6.0,
+      "speech_end_offset_ms": 5284.0,
+      "audio_hash_id": "1cf675e92a397d3dadcedf56d11d473dee243229884b29c23cb1da6f9df44190",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0018.wav",
+      "sha256": "f0b2695b4359f012ab832317f824c47b7dd2cf5cbb7195192aecb17941c8a232",
+      "transcript": "also after the revolution occupations were open to all male applicants allowing the most ambitious and successful to succeed",
+      "duration_sec": 7.02,
+      "speech_end_offset_ms": 6724.0,
+      "audio_hash_id": "5f9da1608b22e91ce56c70f38a09436020afd318f85cd87d67f1948434aa82df",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0019.wav",
+      "sha256": "c610e9b80d3f648683864b7ec644609ee380373b8bc77fa0b782d30f118a83eb",
+      "transcript": "also between each dynasty was an unstable age of divided provinces the best-known of these periods was the three kingdoms epoch taking place for 60 years between the han and the jin dynasty",
+      "duration_sec": 11.82,
+      "speech_end_offset_ms": 11332.0,
+      "audio_hash_id": "4199b75fd6f2c4e20bff45fa712dd5d12724c00bc979c83e5b90c4aa5eaaba59",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0020.wav",
+      "sha256": "a9a4a6dcd6a875300d65a17db74f49f4baa9feda9d7e7ff23dbc33c67bc58de2",
+      "transcript": "also to the north visit the great sanctuary of our lady of fatima shrine a place of worldwide famous marian apparitions",
+      "duration_sec": 7.56,
+      "speech_end_offset_ms": 7560.0,
+      "audio_hash_id": "f3dcf7cd87a18d8ca615b7b8b2f72d1aacf174a5148cff452202869e6d64ef81",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0021.wav",
+      "sha256": "41b0a4e57a871371541b41503f5b0ca0ffd7b1663b8a41cfc0133080562a8c7f",
+      "transcript": "ancient cultures and tribes began to keep them for easy access to milk hair meat and skins",
+      "duration_sec": 6.84,
+      "speech_end_offset_ms": 6564.0,
+      "audio_hash_id": "c39c36420de65209a8938521e66bf0a374269aebdf2fef72e2950fddc31aa617",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0022.wav",
+      "sha256": "3acc3c0fe5c952b2a3e541e7311fec92cb9f64b8bb1168992d1a16e70520518c",
+      "transcript": "angel 2006 explains the continuum approach as a method being used to help organizations reach a higher level of performance",
+      "duration_sec": 8.28,
+      "speech_end_offset_ms": 7876.0,
+      "audio_hash_id": "f85de95a3f409c4fcb4f13c939461499ad631673d647be33bb94e934bbf114a3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0023.wav",
+      "sha256": "7e477163270e2c6f1c65d618fa0769bcccf09fde6d7e899d3b5ac1117e847a67",
+      "transcript": "anyone who's going to drive at high latitudes or over mountain passes should consider the possibility of snow ice or freezing temperatures",
+      "duration_sec": 8.58,
+      "speech_end_offset_ms": 7684.0,
+      "audio_hash_id": "3578d5712b790aa55d22306aa837d8bd86b716007d314c0fdc8d409a529653d3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0024.wav",
+      "sha256": "356a7ed0c59472bf359fc3286b46f79460d509ff93dfd6f405b0b1480cc55cc9",
+      "transcript": "apia is the capital of samoa the town is on the island of upolu and has a population of just under 40,000",
+      "duration_sec": 10.96,
+      "speech_end_offset_ms": 10500.0,
+      "audio_hash_id": "ce1e39efb82952a2ebaa82c666ded87951ea986c3d4811850efb936a705d510c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0025.wav",
+      "sha256": "3a9522bb53887fa67f7d6ed67a9c131b43830311e9623dd3146c0e8fd688711f",
+      "transcript": "aristotle a philosopher theorised that everything is made up of a mixture of one or more of four elements they were earth water air and fire",
+      "duration_sec": 9.06,
+      "speech_end_offset_ms": 8612.0,
+      "audio_hash_id": "acb7b65042c7444e3ade1ba200f253fd13a13aacfa2f277da5f69c55185ee2d7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0026.wav",
+      "sha256": "8c3900fda334207533eb8b9dc92497f1b1735b3f9d02272c2663083dd7c91020",
+      "transcript": "as a result the performers smoke cannabis joints on stage and the theatre itself is encouraging the audience to join in",
+      "duration_sec": 10.56,
+      "speech_end_offset_ms": 8804.0,
+      "audio_hash_id": "e5302cf3be2524d9efecd20d118a489183bad4503509f704f2da45c230d0a62f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0027.wav",
+      "sha256": "3377abae47f850a9c80516b053f18adcefcbe8db0a991192a214cd83966f5647",
+      "transcript": "as a result the process of an organization working together to overcome an obstacle can lead to a new innovative process to serve the customer's need",
+      "duration_sec": 12.12,
+      "speech_end_offset_ms": 10820.0,
+      "audio_hash_id": "f263485c7ac061edf2c10eec896bc07ae2952de905b33635194fff791bc9290e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0028.wav",
+      "sha256": "eaba9fcc7af5eaa20330c5bfb74d62885465ea86329268a4ea761cf3e6dbaebf",
+      "transcript": "as a result two fish species have become extinct and two others have become endangered including the humpback chub",
+      "duration_sec": 11.44,
+      "speech_end_offset_ms": 10404.0,
+      "audio_hash_id": "f441b23e69c66c62e257c3e745531081e95f0db859f14ddff09c7daec09d75fb",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0029.wav",
+      "sha256": "0feb7c917585f5311058c90ab73051f8d2476f0a743dcde34c5c6aa0e8f4a14d",
+      "transcript": "as knowledge of greek declined the west found itself cut off from its greek philosophical and scientific roots",
+      "duration_sec": 10.18,
+      "speech_end_offset_ms": 8836.0,
+      "audio_hash_id": "c2c5e851f26ecf6775d0e8a85d5c2714ce22816285af435ee3885db386044b8d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0030.wav",
+      "sha256": "4cdabc034115def29c973c1143d0be55972848ddc954a49a4bee6259af8c7c55",
+      "transcript": "as light pollution in their heyday was not the kind of problem it is today they are usually located in cities or at campuses easier to reach than those built in modern times",
+      "duration_sec": 9.9,
+      "speech_end_offset_ms": 8804.0,
+      "audio_hash_id": "46a53544260fe1d09edb90a7348198a51d7d0e13ac01637fb54277356d49ee58",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0031.wav",
+      "sha256": "491bbc422664b41764b9571f7515e3374c6aca25f69e5fda9bd2491d90c3ea20",
+      "transcript": "as with all south african national parks there are daily conservation and entry fees for the park",
+      "duration_sec": 9.42,
+      "speech_end_offset_ms": 8452.0,
+      "audio_hash_id": "0956fadbeefa4f1575561898135f376493f1c64cdd0b6864bde592ab4d81513b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0032.wav",
+      "sha256": "1ce807fd52a2e36be26ad99c4d3278158a697d7163e29031d2bc7fc11032b210",
+      "transcript": "asus eee pc earlier launched world-wide for cost-saving and functionality factors became a hot topic in 2007 taipei it month",
+      "duration_sec": 10.74,
+      "speech_end_offset_ms": 9476.0,
+      "audio_hash_id": "259ac92e466bb3768b44432c177f999e809e56340dea2a9b3137aed96ecc09a5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0033.wav",
+      "sha256": "65d9340b799bc405bcea47d5b3006b1235cbc972ff6d4745383bd78b5e5c1670",
+      "transcript": "barcelona's official languages are catalan and spanish about a half prefer to speak catalan a vast majority understands it and virtually everyone knows spanish",
+      "duration_sec": 11.22,
+      "speech_end_offset_ms": 9476.0,
+      "audio_hash_id": "5a03d01919156f4eac463a3ac78fd96f1125e1c7111e29dd20d6dbc9cf32a9f5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0034.wav",
+      "sha256": "8041bd3322ca79ca6a1a6161fa71ff19377730db141de9b808f67cb860048593",
+      "transcript": "be careful not to allow fabric to become too hot which can cause shrinkage or in extreme cases scorch",
+      "duration_sec": 10.16,
+      "speech_end_offset_ms": 9668.0,
+      "audio_hash_id": "9aa0fa620d93277dacd45e5998b99409f4c0022e8bac4e2f87097291df90112a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0035.wav",
+      "sha256": "cbab605715b54bc2b8d5ba68db73be2b2c8a29660d8f52c88d1449429c155173",
+      "transcript": "be firm in turning down men and don't be afraid to stand your ground cultural differences or not it doesn't make it ok!",
+      "duration_sec": 10.98,
+      "speech_end_offset_ms": 9220.0,
+      "audio_hash_id": "5383b674813da9e15d8c31fa0c711ac278f5c3a51a3e63158f1eab80545795e8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0036.wav",
+      "sha256": "a52133651bfb93c406bd8b648e33b424458ca82e7b6b572212460535e0d480ae",
+      "transcript": "between 10:00-11:00 pm mdt a fire was started by the inmates in the yard",
+      "duration_sec": 8.94,
+      "speech_end_offset_ms": 7812.0,
+      "audio_hash_id": "79056b1e8e86a1b3919357bcab5fc9f8e8983e4cc2c9e8f46ee068e58f082a72",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0037.wav",
+      "sha256": "9db060e31c9fe7693b817853701a43c1bd1e8a6a01b44ac1601fca67cc51c18b",
+      "transcript": "beyond wednesday's event carpanedo competed in two individual races at the championships",
+      "duration_sec": 5.7,
+      "speech_end_offset_ms": 5412.0,
+      "audio_hash_id": "f1f38a0e1d4628f01cb06db53fc89a8864ebb35f249f4e822bc5ccee471d2e73",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0038.wav",
+      "sha256": "0e6f66631adef691cca71b177b66694b7409e2b54d55cd3890082a7b712d4b37",
+      "transcript": "bishkek was described as sinking into a state of anarchy by one observer as gangs of people roamed the streets and plundered stores of consumer goods",
+      "duration_sec": 9.6,
+      "speech_end_offset_ms": 8612.0,
+      "audio_hash_id": "a1c3184cd09054a2ec38823c4dd166df7c72ff3d7125a7e6e5d9cb4d683b65f6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0039.wav",
+      "sha256": "f3f5fbb02732514ff4c27053b06507827df85a3176d8c4cb61deab1da97d8c12",
+      "transcript": "blogging is a tool that inspires collaboration and encourages students to extend learning well beyond the traditional school day",
+      "duration_sec": 9.6,
+      "speech_end_offset_ms": 8644.0,
+      "audio_hash_id": "9d0303bef0c842ca79621de5765c9739a0ac1add55357906b4494b7879ee055d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0040.wav",
+      "sha256": "c6ed566a8bcc4445195ed1492370aa2103d25222ccdb945b815a3db2e4a629ee",
+      "transcript": "blogs can also help improve student writing while students often begin their blog experience with sloppy grammar and spelling the presence of an audience generally changes that",
+      "duration_sec": 8.76,
+      "speech_end_offset_ms": 8388.0,
+      "audio_hash_id": "0094cbaa1f28f9eb0c567ac7c1d14c9c8d2c9e9f99f6a35c7fda94f985c13c17",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0041.wav",
+      "sha256": "9b1fba12774adc7b9f3a2b83ae2097f7ff7a36937c1a17e5d23667a23f7456df",
+      "transcript": "built by the egyptians in the third century bce the great pyramid is one of many large pyramid structures built to honor dead pharaoh",
+      "duration_sec": 8.94,
+      "speech_end_offset_ms": 7844.0,
+      "audio_hash_id": "786abb218d3e63506f09f0fa1432f1e21973a9025ce9d5227cf3043870a09db7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0042.wav",
+      "sha256": "ec9732da1561765406c3cb835a1d1776af2c82da0745a6df2bca70775793d3f2",
+      "transcript": "buses depart the inter-district bus station across the river throughout the day though most especially those heading to the east and jakar/bumthang leave between 06:30 and 07:30",
+      "duration_sec": 12.12,
+      "speech_end_offset_ms": 11108.0,
+      "audio_hash_id": "35609ccef62545658d9a604cd32cc57cd7073337b2747eecf55cc4d30a25e656",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0043.wav",
+      "sha256": "862fd6e46f1e2799a3021162b92dc68e25a418f3d6f168c8a511d17d572e0c97",
+      "transcript": "but after losing the captain's wicket india only made 36 runs loosing 7 wickets to end the innings",
+      "duration_sec": 8.52,
+      "speech_end_offset_ms": 7364.0,
+      "audio_hash_id": "7332e0aa19804ff9169e4036ed50b55273dcb2eefa2b7893f01a847afd375241",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0044.wav",
+      "sha256": "f2ff7362c89c77db652d1faa81f68e9170b7889faa09721c25724e37fc32840d",
+      "transcript": "but being placed in the high tropics just a few degrees north of equator you will need to deal with both heat always and strong sun when the sky is clear more rarely",
+      "duration_sec": 10.44,
+      "speech_end_offset_ms": 9508.0,
+      "audio_hash_id": "34ba6e1353352f29c04d8800d2d3eb507d8530c8b74a148c5e9e73994b4befd8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0045.wav",
+      "sha256": "a22612fcf63554403e149f0132530edb74699b43772e27f10f417c79233e1fb6",
+      "transcript": "but there are a lot of things about birds that still look like a dinosaur",
+      "duration_sec": 5.36,
+      "speech_end_offset_ms": 4836.0,
+      "audio_hash_id": "d27b036364bf9939b9cb8ca3002882d875776642f8308ba0b413586d88aadc5a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0046.wav",
+      "sha256": "fd10487d45af5104f70cfb16dced23e05d9326eb5fe8a4c87d11b4f0297a1f09",
+      "transcript": "by 1976 thirty percent of machu picchu had been restored and restoration continues till today",
+      "duration_sec": 6.78,
+      "speech_end_offset_ms": 6780.0,
+      "audio_hash_id": "7d4bafeaf1166b2d062c1a1fb947dd19d5c73df5eb661490a38db1e164b40abf",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0047.wav",
+      "sha256": "5d916750474f663bf7ab9abf78e2e98dd85bd30c0ce29e4adb0b73d9b6e7e8da",
+      "transcript": "california governor arnold schwarzenegger signed into law a bill that bans the sale or rental of violent video games to minors",
+      "duration_sec": 11.34,
+      "speech_end_offset_ms": 8996.0,
+      "audio_hash_id": "b27a1caa2afa1a3b39d45ea0c48b7c56b37676cd5bdf15c3bf3f5c4ad8ee7371",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0048.wav",
+      "sha256": "c5fb55a84059462aec20aee5caff16b044bd56c280735cb53f0bad3016f5f98e",
+      "transcript": "cancellation policies vary but as of late march most coronavirus-based cancellation policies don't extend to july 2020 when the olympics had been scheduled",
+      "duration_sec": 9.3,
+      "speech_end_offset_ms": 8868.0,
+      "audio_hash_id": "5d76581feff501e8dc295ea21f702a2770031afaf211249ace3bb1a5c983881d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0049.wav",
+      "sha256": "822f7af763f5d231a2864bd4362627eb27d4f2ec93b6ac860cd4af2d4c3ac62e",
+      "transcript": "casablanca is one of the least interesting places to shop in all of morocco",
+      "duration_sec": 6.24,
+      "speech_end_offset_ms": 5124.0,
+      "audio_hash_id": "7891c204e2828dea3a741b88de7d811127f4f19072b4395895f4a7f3b3208c17",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0050.wav",
+      "sha256": "2b1e3fa1c4f1a788ced2fc87fb0304a29069a3d06d9dd65910646c8eaceea55d",
+      "transcript": "children are placed in foster care for a wide variety of reasons that range from neglect to abuse and even to extortion",
+      "duration_sec": 10.72,
+      "speech_end_offset_ms": 10180.0,
+      "audio_hash_id": "1458a822154bb3cb8c3388e0c65ecba01251549c6849148e677d971ef9ac9415",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0051.wav",
+      "sha256": "a5e1b287f239afd08fe0a0de01c808a51cb8aa289c6c2c9cf318a53bc82e634f",
+      "transcript": "cochamó valley - chile's premier climbing destination known as the yosemite of south america with a variety of granite big walls and crags",
+      "duration_sec": 12.12,
+      "speech_end_offset_ms": 10436.0,
+      "audio_hash_id": "1d92ffc39beb7601b75ad3079b028788c952f29f1bf2a5b09ea58902f9e02cfe",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0052.wav",
+      "sha256": "0476ed46d5cfab033443befbbc2b2357e2583766b9f3e47c0049cfd43c7c505a",
+      "transcript": "congress began funding the obscenity initiative in fiscal 2005 and specified that the fbi must devote 10 agents to adult pornography",
+      "duration_sec": 10.02,
+      "speech_end_offset_ms": 8804.0,
+      "audio_hash_id": "5e429e34af263eda037ec6c55d57e4b2b10141cd4ce32fb2ab99c12c3ccfff9b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0053.wav",
+      "sha256": "212c6b4f63589e0785bc6790568ca0c132083d14fe46b1a05c84545820302a96",
+      "transcript": "crossties were introduced fairly early to hold the tracks in place gradually however it was realised that tracks would be more efficient if they had a stip of iron on the top",
+      "duration_sec": 10.74,
+      "speech_end_offset_ms": 10436.0,
+      "audio_hash_id": "2a14ad88307f1e08843996337482d90407fdb899a839522c55b0bdaa99dd9fa8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0054.wav",
+      "sha256": "e590ad7686258e897b90310667ce818998ef6ba2325e571df78705bde6eefb40",
+      "transcript": "cuomo 53 began his governorship earlier this year and signed a bill last month legalizing same-sex marriage",
+      "duration_sec": 9.42,
+      "speech_end_offset_ms": 8164.0,
+      "audio_hash_id": "003570bc0a672c763a3965da2933ea3e2cbb947e3a296c66123e0100f6957ad3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0055.wav",
+      "sha256": "4bf6a20e74646985e5452a826d547015ed1a9f195a001ef9d22c6a0f72ac0fbe",
+      "transcript": "danielle lantagne a un expert on the disease stated the outbreak was likely caused by the peacekeepers",
+      "duration_sec": 6.3,
+      "speech_end_offset_ms": 5892.0,
+      "audio_hash_id": "68267fca97e365dc20424367c2d6a39474832ae6163a91985189d0d674660f63",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0056.wav",
+      "sha256": "630315db89268d3ef09291b9c79f5b1205fd288ced54f89a557ca7574d2cd3f3",
+      "transcript": "del potro had the early advantage in the second set but this too required a tie break after reaching 6-6",
+      "duration_sec": 8.1,
+      "speech_end_offset_ms": 6980.0,
+      "audio_hash_id": "cfbc287098d371f807b3f7d7ed6ffb0a26ae322d5f71ee7a9e7c922370590c6b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0057.wav",
+      "sha256": "116445d61c25a89c82e8a885a6d8fa2aa072b0a971becd04b5b423dbc599eb56",
+      "transcript": "do not deface the site by marking or scratching graffiti into structures",
+      "duration_sec": 4.5,
+      "speech_end_offset_ms": 4260.0,
+      "audio_hash_id": "a832aa0d3ad30ad4e08d76412a77051dffe7e75c9941a809990dc48e32841ff4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0058.wav",
+      "sha256": "4f9e23c27053b7cfe2cfa1497baf6bdc7b331d7cffdd91b07c6e21b25d431961",
+      "transcript": "due to the underwater topology the return flow is concentrated at a few deeper sections and a fast current to deep water may form there",
+      "duration_sec": 10.92,
+      "speech_end_offset_ms": 9764.0,
+      "audio_hash_id": "9dd71d24807f2032b57430dfe8b6b60425f2606b0830678244b7d98aedb744ae",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0059.wav",
+      "sha256": "79ed1dcdaf5c346637c86cc90223a3990873ce5d0f120f252a0b66fd72ec4783",
+      "transcript": "during the 1920s the prevailing attitudes of most citizens and nations was that of pacifism and isolation",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 6628.0,
+      "audio_hash_id": "5b9442288d19cea552904cf7a41268ae63cf9fde675df220a9f6bd74b3e77acd",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0060.wav",
+      "sha256": "132e39af4ddb994a67088e054b0774b73ad4e135e34b442662179be64260a9dc",
+      "transcript": "during the revolutionary war the thirteen states first formed a weak central government-with the congress being its only component-under the articles of confederation",
+      "duration_sec": 10.08,
+      "speech_end_offset_ms": 9028.0,
+      "audio_hash_id": "641cdac683122fa5ff1662a5eb95dc90568977cc50ab40bba9efe53623609343",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0061.wav",
+      "sha256": "e8ab94568047c25e50ec01291a7c3c791e254ac6fb77180038021f319d8a89bf",
+      "transcript": "during the struggle for independence organised by the mau movement a peaceful gathering in the town resulted in the killing of the paramount chief tupua tamasese lealofi iii",
+      "duration_sec": 12.12,
+      "speech_end_offset_ms": 11428.0,
+      "audio_hash_id": "f1f1d6a8bf70863fff58c36b20bf3371a5c2990c2b6659be8c016d5d0ea3507c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0062.wav",
+      "sha256": "8fb9302574d82bbb193cfd1e8e396fb3da30673d893035a6c9cae6b691380f4c",
+      "transcript": "during this period of european history the catholic church which had become rich and powerful came under scrutiny",
+      "duration_sec": 11.4,
+      "speech_end_offset_ms": 10532.0,
+      "audio_hash_id": "1f80c3c3bfd5b6ac0a17e76b2ad91034e267ef76e8584ffc6c1c262b10c6b7bd",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0063.wav",
+      "sha256": "61b720bf29b7cfa5965304d486a3775e97d5bdeca61e6b1df0d42ed8b7f67b7e",
+      "transcript": "duvall who is married with two adult children did not leave a big impression on miller to whom the story was related",
+      "duration_sec": 6.24,
+      "speech_end_offset_ms": 6240.0,
+      "audio_hash_id": "12f71cc8f69fa93efce0fc2fae1d49b58c387ca138a9a5a537ad9fa6ca1a2ebc",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0064.wav",
+      "sha256": "5d3a81ac70c339f2f90046e3aabfe7f1538d9f77f0d58e3f6c8562e67bec66be",
+      "transcript": "elements like calcium and potassium are considered metals of course there are also metals like silver and gold",
+      "duration_sec": 6.24,
+      "speech_end_offset_ms": 5924.0,
+      "audio_hash_id": "8a8503cefc170c54b5fbc11d7f6aac79a6c2ab278ac3b2fa7592e45512b80e0f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0065.wav",
+      "sha256": "39b4eb836dbbe40573893b4e430c4da05aa8bd94bf199c5a32856ece79984ecf",
+      "transcript": "everyone participates in society and uses transportation systems almost everyone complains about transportation systems",
+      "duration_sec": 11.64,
+      "speech_end_offset_ms": 10724.0,
+      "audio_hash_id": "42dcde60ffc3f64723a9840673bd480cf6a3fa4ff9e1a4709c98662ce326f9e0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0066.wav",
+      "sha256": "d78ab9e950e027124d78106a82c72b62b94b1793caee0d98763765292850f3f0",
+      "transcript": "everything in the universe is made of matter all matter is made of tiny particles called atoms",
+      "duration_sec": 6.42,
+      "speech_end_offset_ms": 5924.0,
+      "audio_hash_id": "ec5fd36d67a7290b99d50e73dd87b7ace99a35094643160baeac61f625503ea9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0067.wav",
+      "sha256": "f130b08ad15bbb19c269ab91cb165fe6a781f7d5863f754ce2bdfcbfa10a6485",
+      "transcript": "fellow wrestlers also paid tribute to luna",
+      "duration_sec": 3.6,
+      "speech_end_offset_ms": 2852.0,
+      "audio_hash_id": "529e0ed0ea986f28358ecec7c81824c5fb508778941ab200fd490a33ffd4422e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0068.wav",
+      "sha256": "cadc43f982aff6b45030f2be775da32d47a92d60689f149becf28eccedca7228",
+      "transcript": "feral children may have experienced severe child abuse or trauma before being abandoned or running away",
+      "duration_sec": 6.54,
+      "speech_end_offset_ms": 5796.0,
+      "audio_hash_id": "d947af0d3e3805cd0518fecad29dc895750437b9a06b30a4630c0c2482519c28",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0069.wav",
+      "sha256": "bc3463666368b5e4a7f1282ecd3e597809b672d1faa91a7f7d001861bcf2c79c",
+      "transcript": "field trips are a large part of any classroom quite often a teacher would love to take her students places to which a bus trip is not an option",
+      "duration_sec": 9.84,
+      "speech_end_offset_ms": 8452.0,
+      "audio_hash_id": "0769c9a5d0614415a86d0cbb47157673e1ab9c932d35dd5958d68c67d37ebfaf",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0070.wav",
+      "sha256": "48cb752bd48cb2ad11718c16140fa5e32f5d160f501a126e04bc253694444a84",
+      "transcript": "finally there are many small cats including loose pet cats that eat the far more numerous small prey like insects rodents lizards and birds",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 8640.0,
+      "audio_hash_id": "56c44e182a568bcf92c986b4838bf447754bb1d0a217aca6ad439b6784c8130e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0071.wav",
+      "sha256": "8b3662b9983b899769d2a5b6b8d84acfee42f21f3cd625c30dc169eb003fd515",
+      "transcript": "finland is a great boating destination the land of a thousand lakes has thousands of islands too in the lakes and in the coastal archipelagos",
+      "duration_sec": 9.36,
+      "speech_end_offset_ms": 8292.0,
+      "audio_hash_id": "bc01a6e67134eb1bc13e7edda51885c8fb3c582f21c93ef30a4e9cdda93ac558",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0072.wav",
+      "sha256": "40b3e243d7767becd66d83d7a0097c4a657cc39593cef9c2f42c3bc2205b5526",
+      "transcript": "fire rescue crews eventually doused the fire by 11:35 pm",
+      "duration_sec": 5.72,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "699c1696848a08aed4e89a55001ea524cbfe004d93abc8e9210496aaf3736f88",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0073.wav",
+      "sha256": "2f77be373e7ffe2aa2a80f8b1f76b80657d9c51781deb4bac2dfe931ef2009ed",
+      "transcript": "first most riders wear riding boots with a heel and a smooth quite narrow sole",
+      "duration_sec": 7.86,
+      "speech_end_offset_ms": 6852.0,
+      "audio_hash_id": "05507e423cecfd05c06a6fc97c4b252fa60edd9dbdaa4872a7967f522bd39e11",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0074.wav",
+      "sha256": "fa11bf350e351880962cd6a73f785665232107e0813dfca51566fb4180289a86",
+      "transcript": "for example each year students from bennet school in north carolina design a website about their trip to the state capital each year the website gets remodeled but old versions are kept online to serve as a scrapbook",
+      "duration_sec": 11.28,
+      "speech_end_offset_ms": 10948.0,
+      "audio_hash_id": "478b208ae4874426b5b3bceb836152caf999ed4ed1be407f14dfb74d7195351b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0075.wav",
+      "sha256": "bf69118997d1df9de59b5750c0bb854b98fec8dc8eea5d52d6c92454d41aac23",
+      "transcript": "for the springboks it ended a five-match losing streak",
+      "duration_sec": 4.98,
+      "speech_end_offset_ms": 4644.0,
+      "audio_hash_id": "c4ec4b0e11432cdcdb188ba75ba6aacbdbeb7463817336af70d9207ff8b1a5e5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0076.wav",
+      "sha256": "dca8e01f5dbc6601f0252d7030f62f2ec96896beb9e5ae18fe80bfdfe2044c8b",
+      "transcript": "four skiers in the women's sitting group failed to finish their runs and 45 of the 117 total skiers in the giant slalom failed to rank in the race",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 7680.0,
+      "audio_hash_id": "3cebc9025c97f1f95bff871d0007f85a84359b421d3ccdf2b13c550c1f1a75d9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0077.wav",
+      "sha256": "421fc5c58e3833b7abd0048fd6d00dcb396ccfdc68e688166bde4a76286ff860",
+      "transcript": "giancarlo fisichella lost control of his car and ended the race very soon after the start",
+      "duration_sec": 5.16,
+      "speech_end_offset_ms": 4868.0,
+      "audio_hash_id": "9fd2f540e2f7439cae61b8f94805f26c929cd50aa2f3c1412b12127a6cb5951c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0078.wav",
+      "sha256": "2af2fccd7d25fd1b2f4d176393dfe264e2a34f473a6743a0fb2b5b75f5558779",
+      "transcript": "goats seem to have been first domesticated roughly 10,000 years ago in the zagros mountains of iran",
+      "duration_sec": 10.62,
+      "speech_end_offset_ms": 8772.0,
+      "audio_hash_id": "f63d1b7ac792b41e2b1d3e4e534d1eebf8ec2727ed0135f834ebb8643b274d98",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0079.wav",
+      "sha256": "052a634ab62106d9711567d35b9b8c493740ef18c6929fa36e04ce6104e017aa",
+      "transcript": "he added that they should not however be asked to take on obligations that go beyond their development stage responsibility and capabilities",
+      "duration_sec": 12.22,
+      "speech_end_offset_ms": 11012.0,
+      "audio_hash_id": "d50ed88754c27dd2d1bd5c30a0315f9f514c4764695c4c0003a06d4a8617ae7c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0080.wav",
+      "sha256": "ea8cbb4573d14d6962c184b07d7a9d6c3a63b8d0fa8464960e38f913dde12647",
+      "transcript": "he did not set a figure for the cuts saying they will be made based on china's economic output",
+      "duration_sec": 6.36,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "1b1df35406aa453a7afe2ae9235aec49a6310fe0e40d464555344d3cd94c2d1c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0081.wav",
+      "sha256": "f6f1e4629bf99f74675e6096830e4378c98d5a75866581c0c65de364eaf72b9c",
+      "transcript": "he has been unable to take the drugs needed to overcome his pain as they are banned from the games",
+      "duration_sec": 6.36,
+      "speech_end_offset_ms": 5316.0,
+      "audio_hash_id": "0e0b3072b1cf2577eb20448e99b7458671ee2e6d87dd696f85920809d3ff3be6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0082.wav",
+      "sha256": "37ef76aee801dd3a0cebd13225b857bba669afb6e542e8bd85147be9e2dc7b2f",
+      "transcript": "he referred to the rumors as political chatter and silliness",
+      "duration_sec": 3.84,
+      "speech_end_offset_ms": 3588.0,
+      "audio_hash_id": "ced89c0cb53ef317cb9eda09f76affee44d44f4f193c6e73f5b46539adff9c08",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0083.wav",
+      "sha256": "3aa23ae7381cc732f093557ebed004bdd5887baca807ac91bcbfc4e82633a86b",
+      "transcript": "he was also engaged in engraving banknotes for many countries recent examples of his work including the prime ministerial portraits on the front of the new canadian $5 and $100 bills",
+      "duration_sec": 12.36,
+      "speech_end_offset_ms": 12360.0,
+      "audio_hash_id": "561679e386e26db0936c2e341727c3a9b0f320c1167a1b51088df8f295f7e5ba",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0084.wav",
+      "sha256": "a120d462753549efd9055044a0882924d0277bf6553f82fb9604f18f22c40bb2",
+      "transcript": "he was greeted by singapore's deputy prime minister wong kan seng and discussed trade and terrorism issues with the singapore prime minister lee hsien loong",
+      "duration_sec": 11.64,
+      "speech_end_offset_ms": 10436.0,
+      "audio_hash_id": "1c0b42a9b0d61959178f84424c3ac7a336d3184e3ae599ab6c164b2177a7906f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0085.wav",
+      "sha256": "7c2ad9836a31be8d25a6aaab7126029744d900f1f2897006ade0a5cfeba1ef60",
+      "transcript": "he was initially hospitalised in the james paget hospital in great yarmouth",
+      "duration_sec": 7.5,
+      "speech_end_offset_ms": 7044.0,
+      "audio_hash_id": "aaac96b7826cd656c8e7efc14c167f7681a6556dc47654da21e4f5025526b798",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0086.wav",
+      "sha256": "b8c5bb5a40665f999c22fb41717b0a25136ecfe8718192a670009cfcbfe2fbd9",
+      "transcript": "he was reportedly aged in his 20s. in a statement bieber said [w]hile i was not present nor directly involved with this tragic accident my thoughts and prayers are with the family of the victim.",
+      "duration_sec": 10.56,
+      "speech_end_offset_ms": 9636.0,
+      "audio_hash_id": "4d02c66531d71ecdedd4118261d287ca8bde9755d49ade780ffd803c32d523c8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0087.wav",
+      "sha256": "7aeb5a108ce35f94f39e0612bbcad9b970aa6b78dfbb97a48f209d091d9dfb56",
+      "transcript": "he was subsequently relocated to addenbrooke's hospital in cambridge",
+      "duration_sec": 6.84,
+      "speech_end_offset_ms": 5124.0,
+      "audio_hash_id": "75acaa470e56ed6e541cd2fe09d1530c872912116928d18318a27316e4a0d9f6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0088.wav",
+      "sha256": "6f290a1d9b62d0949189c33629dcaf5ccf1a97e2be7a10f1c53dd6d173288917",
+      "transcript": "hong kong island gives the territory of hong kong its name and is the place that many tourists regard as the main focus",
+      "duration_sec": 7.02,
+      "speech_end_offset_ms": 6468.0,
+      "audio_hash_id": "80396d1ac761d9ce45cbb5e0f442de97a33bd067b1d67d8b717cc2fc341d9b12",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0089.wav",
+      "sha256": "187fe845ced04addd591d0094f689e8b092c5e529202dcab04d82466607243f4",
+      "transcript": "however due to the slow communication channels styles in the west could lag behind by 25 to 30 year",
+      "duration_sec": 10.56,
+      "speech_end_offset_ms": 8932.0,
+      "audio_hash_id": "f86223c93b135de71e203aa094e629d9b98f04917fb74a77db77fcdd988ecc03",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0090.wav",
+      "sha256": "f5a7bc20823f9ba763bbe0dd6a3d3962c26fa2a4023c7a7a25c6e8fece6aa59b",
+      "transcript": "however that is not true although there is something written on the back of the document it is not a treasure map",
+      "duration_sec": 10.02,
+      "speech_end_offset_ms": 8804.0,
+      "audio_hash_id": "edfdb1ad3efa69458e0d1ddfd367f70cc24450fcfcaeb1a0e95592e8ed7bdce8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0091.wav",
+      "sha256": "11d7e77cb7ce59033c81a9a61cc4974ffbae6bc020f2352eb8672ae97c46558d",
+      "transcript": "hydrogen ions are protons that had their electrons stripped off them since hydrogen atoms consist of one proton and one electron",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 7332.0,
+      "audio_hash_id": "0394c323ee0fa3d8c976ad5cd7af4edbd45c845a9978e073db551d749bf50a7c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0092.wav",
+      "sha256": "cf00c3fb6e920444ad2d7c14b623fb23e50d86671cd63844e35c44d66103bc78",
+      "transcript": "if you have watched the movie national treasure you may think a treasure map was written on the back of the declaration of independence",
+      "duration_sec": 6.78,
+      "speech_end_offset_ms": 6468.0,
+      "audio_hash_id": "c4dc2eedfe8715ac622f34c2d7192a9ee8c52add9478a7f1b0ac4a066139f110",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0093.wav",
+      "sha256": "c42a8f9bf617dbcc30502ac32fea1f1816b222f7ca211998cab5ee4b28090ef5",
+      "transcript": "if you only go ashore using shipboard excursions you will not need a separate visa as of 2009",
+      "duration_sec": 9.26,
+      "speech_end_offset_ms": 8196.0,
+      "audio_hash_id": "7c4d6bc9d047287c6170f4b5be7122dce0f8957c8ad829e7ac96429bf3b31af0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0094.wav",
+      "sha256": "dc82f22dc82e60863cf32f9c9368c01cddc24992089ffc74c6f1a9a99f1a9637",
+      "transcript": "if you want to be close to the action you're going to have to get in early to get a camping site close to the music",
+      "duration_sec": 9.24,
+      "speech_end_offset_ms": 7940.0,
+      "audio_hash_id": "2662d9adec6e73ab1df437a68d7d59e452c54f36ce1848b6b9c3b659d4ecb74b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0095.wav",
+      "sha256": "e585fd60c5f550b3d57a0d8064d2ec0bd78c7e303c1a3fa6fd43413d3405b345",
+      "transcript": "if you're not used to driving on country roads keep your wits about you steep grades narrow lanes and sharp curves predominate",
+      "duration_sec": 11.1,
+      "speech_end_offset_ms": 10532.0,
+      "audio_hash_id": "73ae4db8e4ea2836d68347cd42faff731199768aee9df6c221c53ce22555e019",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0096.wav",
+      "sha256": "b918971a0a98868eca5b56e6168fc25487c142837fa16231c848c3ed5f52679a",
+      "transcript": "in 1990 it was added to the list of world heritage sites in danger due to the threat of desert sands",
+      "duration_sec": 7.32,
+      "speech_end_offset_ms": 6628.0,
+      "audio_hash_id": "0692c92638f3d78627dc186fbf8a8cf51baad5031a0e0e36ff4f52e0709dd456",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0097.wav",
+      "sha256": "3bf775cb6792d0356a372e9061ea949428152d2aa54aeebb16d29fa50483b4c1",
+      "transcript": "in 2002 goma was destroyed by lava from the nyiragongo volcano which buried most of the town's streets particularly the town centre",
+      "duration_sec": 10.38,
+      "speech_end_offset_ms": 9188.0,
+      "audio_hash_id": "78869531437cb1c5e48abfa5e6bcf766d25fcf88256f8770895880b90c432e9d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0098.wav",
+      "sha256": "993f83ebd176cd930c155650adabb00398b8c2b0ffc2a09aaed2423e67d8a360",
+      "transcript": "in a carriage they traveled back to paris surrounded by a mob of people screaming and shouting threats against the king and queen",
+      "duration_sec": 10.22,
+      "speech_end_offset_ms": 8612.0,
+      "audio_hash_id": "de49aed17a191c969aa24adc7ae76ce3c90605717729674ea191bc6dfeb61457",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0099.wav",
+      "sha256": "1548754ed660ce24bb86fda3e9826837ad2da0df763ac707c2789e3e1641c612",
+      "transcript": "in fact it is not easy to find at all even if one knew it existed once inside the cave it is a total isolation",
+      "duration_sec": 7.92,
+      "speech_end_offset_ms": 7204.0,
+      "audio_hash_id": "65c8ef43e6be69e296c569514c57fd82a02388088a68cad27faf5373774048df",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0100.wav",
+      "sha256": "53cb04ec97191378995b268b25e716251fd2352263677e4a11e38dc02584f1c0",
+      "transcript": "in just two weeks the americans and free french forces had liberated southern france and were turning towards germany",
+      "duration_sec": 10.18,
+      "speech_end_offset_ms": 9412.0,
+      "audio_hash_id": "7da0ae12d177edc80ea1dc67b5644195b1dddd3295273395d9e1dda4bdbf7981",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0101.wav",
+      "sha256": "e5b361351ac7eac1ab2cfc1142f987c0e67ed6e7aa746db55be24dc0054577da",
+      "transcript": "in many other cities of italy and in the rest of the world particularly in poland similar setups were made which were viewed by a great number of people",
+      "duration_sec": 8.4,
+      "speech_end_offset_ms": 7524.0,
+      "audio_hash_id": "f802045e216397dcf6ce223cc7416683d7c369f01585991c7c8ccdf851a186d4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0102.wav",
+      "sha256": "200fe1513d25a4f14c8db99129141614f92ae4810a62fbbe0a32ed6658bb9a02",
+      "transcript": "in particular it is claimed that one can detect whether a person is lying by interpreting micro-expressions correctly",
+      "duration_sec": 6.12,
+      "speech_end_offset_ms": 5828.0,
+      "audio_hash_id": "e6c6713c93b6edf4883a4f562c09eba57d6c0b41465ac2e0fc3a16a71c0ae98a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0103.wav",
+      "sha256": "53c9c9a637c2d864fe461bf0dd2afd1ad3c9601d08431b1196c7f3cc8c45c101",
+      "transcript": "in some areas boiling water for a minute is enough in others several minutes are needed",
+      "duration_sec": 5.64,
+      "speech_end_offset_ms": 4772.0,
+      "audio_hash_id": "2e0c9b224b11bfd934f77cd35277038dab0081fa621b0c5bb75d9ff23fd101f8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0104.wav",
+      "sha256": "f5fc665773365bbd4280076c0b82019d224d2a1bbe4a83fe77979d96bc465bcd",
+      "transcript": "in the archipelagos and lakes you do not necessarily need a yacht",
+      "duration_sec": 7.48,
+      "speech_end_offset_ms": 6788.0,
+      "audio_hash_id": "f18ba5de78ef526fe516e4313e32f60fac32feb96cc76707bc074f07868619c2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0105.wav",
+      "sha256": "fb2e4d9dc1a39bc5e4ae8bdfa420b8be61dcd63531b832987081c0c581830151",
+      "transcript": "in the north the region is bounded by the sahel and in the south and west by the atlantic ocean",
+      "duration_sec": 9.58,
+      "speech_end_offset_ms": 8164.0,
+      "audio_hash_id": "1535bb82cd3f68cd91370af8b74126b1f6f5ba4adf2db28c98e07813b909d3ae",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0106.wav",
+      "sha256": "054a22f5dbddc15cc1f13b0f0dac182aaaa0f65ebe1ca8936092f89ff5a60ace",
+      "transcript": "in the warm climate of the middle east the house was not so important",
+      "duration_sec": 6.72,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "b4496021220cb7e69de3c1f1bffefcdaa80bb37c71a47627831986b99def4098",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0107.wav",
+      "sha256": "ce45516339526c036bbdf2d49c63e5bb867c8e962d918f848aec4986e918d2f2",
+      "transcript": "it also attacked anything that entered the water even a giant dinosaur such as t rex would be no match for it",
+      "duration_sec": 9.12,
+      "speech_end_offset_ms": 7684.0,
+      "audio_hash_id": "407224d4003a66ac006371ec3b549097d1b1dfc559b727ee73ff529202189ffc",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0108.wav",
+      "sha256": "cbe192b57320857db6c09c9cb3426b491d84cf3c43f0cf5d9bf7efe0a3de84a0",
+      "transcript": "it has brought us the train the car and many other transportation devices",
+      "duration_sec": 4.86,
+      "speech_end_offset_ms": 4860.0,
+      "audio_hash_id": "6f6b43348365aad541208602ff56bcec730828bc04686920f51a6965757a3b37",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0109.wav",
+      "sha256": "599c669ea5c8bff587ecc1ea1e2bc84f3b35688304a3b3e3a07e6470793eb847",
+      "transcript": "it is one of the main attractions of south africa and it is considered the flagship of south african national parks sanparks",
+      "duration_sec": 10.92,
+      "speech_end_offset_ms": 9444.0,
+      "audio_hash_id": "06735536d0fd3aa6369049aeba0403346759cc669d75abde6cdecd1a916767ac",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0110.wav",
+      "sha256": "8e862e4e08a8fe2a46bcc4d8b6224549a537064010d064f89a16e8722e96c635",
+      "transcript": "it is related to but usually not involving alpine style ski touring or mountaineering the latter ones done in steep terrain and requiring much stiffer skis and boots",
+      "duration_sec": 9.9,
+      "speech_end_offset_ms": 8868.0,
+      "audio_hash_id": "ccfdcc51718f0959b81cc093342c5dec473af395ae851729558eea777789e66d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0111.wav",
+      "sha256": "df0a95689bc8d6649f39cd8726049d14e7263ec5074031b6b2d9ad18fa79f971",
+      "transcript": "it is thinner under the maria and thicker under the highlands",
+      "duration_sec": 7.2,
+      "speech_end_offset_ms": 6884.0,
+      "audio_hash_id": "d58c3540f218854746c6758da06fb6020a949ef60977ce3f7cb89a7f5d6e1ba0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0112.wav",
+      "sha256": "4aa0e2b5b8363257542ccd724cce820fbe4e4c085e87c882f189c4ef0b10e22c",
+      "transcript": "it was ruled by the vichy french these were french people who had made peace with the germans in 1940 and worked with the invaders instead of fighting them",
+      "duration_sec": 9.6,
+      "speech_end_offset_ms": 8420.0,
+      "audio_hash_id": "9bc021ca5260e2ce6b6fea2e2dec8def57775bac4ee910ea231089f0131ee94e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0113.wav",
+      "sha256": "1819b7345c5711a59ac13e3b447a3b5739c466884e1d1bbcd96b57b62a583ae6",
+      "transcript": "italian is also the everyday language used by most of those who work in the state while latin is often used in religious ceremonies",
+      "duration_sec": 12.32,
+      "speech_end_offset_ms": 12068.0,
+      "audio_hash_id": "ccf99f40f79812df16f7f4462e7f180de003b32b8aac0660a2dcb9dd323e0071",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0114.wav",
+      "sha256": "66280bcfe826c0f21da65b6793d26dbdcce45800f223a69e07b2cd00224a18dd",
+      "transcript": "its renown for being an epicenter of luxury began in about 400 a.d. and lasted up until about 1100 a.d",
+      "duration_sec": 11.48,
+      "speech_end_offset_ms": 10948.0,
+      "audio_hash_id": "7280d0d49c00fe775e8c1488a090ae7c55e294089d81a88d8fcff9392aa5d89b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0115.wav",
+      "sha256": "95e0383cf47ae33d0f393a58ce336969cf58be975ed6766bc6c4ce9fc808ce98",
+      "transcript": "just like the moon exerts a pull on the earth causing tides so does the milky way exert a force on the sagittarius galaxy",
+      "duration_sec": 7.14,
+      "speech_end_offset_ms": 6724.0,
+      "audio_hash_id": "10080127046fd90ec06845a9ccfce9a7c73f2094fff4ba1c274efb5b3ce60d7a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0116.wav",
+      "sha256": "f18f02e657008239ceed24942214ad3624596e2d66c8799388dc0fd8d10dd9b2",
+      "transcript": "large areas further north are quite sparsely populated and some is nearly uninhabited wilderness",
+      "duration_sec": 7.44,
+      "speech_end_offset_ms": 6276.0,
+      "audio_hash_id": "9992b9f00a90c281566da0e5fb622e32500962e43d278a14c303c99e78ce8c48",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0117.wav",
+      "sha256": "c5cde97d72d3aa4e0fe337f27a0a7d4a0134ba0af4b93a6eb3d34edfb0bf6900",
+      "transcript": "last week meti announced that apple had informed it of 34 additional overheating incidents which the company called non-serious",
+      "duration_sec": 9.12,
+      "speech_end_offset_ms": 8548.0,
+      "audio_hash_id": "153dda096168d4eed22cd0c5a635bda3de39ee25078ac296c61fae049fe460c3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0118.wav",
+      "sha256": "38c9905b4a01fcb845dd1e9d59385a1c9a322c8e1e2305871a6a006da2703c72",
+      "transcript": "late on sunday the united states president donald trump in a statement delivered via the press secretary announced us troops would be leaving syria",
+      "duration_sec": 9.96,
+      "speech_end_offset_ms": 8836.0,
+      "audio_hash_id": "ee85472801d49bb45ee23098d99f8032f2a35233d84b06d20c3112726e24f5c4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0119.wav",
+      "sha256": "05af7609de4f7d5611bd0eda7d14754dcd38e91f67f43a59e52bc23a5ca96601",
+      "transcript": "layton had asked for changes to the conservatives' environmental bill during the meeting with the pm asking for a thorough and complete rewriting of the conservative party's environmental bill",
+      "duration_sec": 9.72,
+      "speech_end_offset_ms": 9252.0,
+      "audio_hash_id": "f7364e0e0f48915dd581760ece704ddea34beae846caa6b3fc707fe845fd066d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0120.wav",
+      "sha256": "73245b51f9bad77d8454152c71dfd6c3f587f7ed8da8e9d733b92c2e83715e87",
+      "transcript": "liberal criticism of the reconstruction effort has focused on the awarding of reconstruction contracts to perceived washington insiders",
+      "duration_sec": 8.04,
+      "speech_end_offset_ms": 7780.0,
+      "audio_hash_id": "7705bfb57e2d6aba63d364266bb1b92b92ef44337e3a7e6d1c355dbf0e0140e5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0121.wav",
+      "sha256": "ed0a4fb0476bc3b94f5264ee9eed663c3e6088e0ae1cadc78933d6cbdb21ff58",
+      "transcript": "lion prides act much like packs of wolves or dogs animals surprisingly similar to lions but not other big cats in behavior and also very deadly to their prey",
+      "duration_sec": 10.92,
+      "speech_end_offset_ms": 10148.0,
+      "audio_hash_id": "5ead2f5badc4df50c98a3c2de30e8644dfb90989e59d5a211f57c1c4e76515a2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0122.wav",
+      "sha256": "e2091a92911373efb4cf74cf93e582a1fac4ed24b19fe86e45e8e6fd18d9d722",
+      "transcript": "lions are the most social cats living in large groups called prides",
+      "duration_sec": 6.6,
+      "speech_end_offset_ms": 5540.0,
+      "audio_hash_id": "feafa6eff30d6801665d66e626cb9d9b0ad6e7885ce9fc896e2b060f8ff9cd76",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0123.wav",
+      "sha256": "6cea30785898581a00a7696099200edd67ec94c893f13e6810d8c92993284cbd",
+      "transcript": "madagascar is by far the biggest and a continent on its own when it comes to wildlife",
+      "duration_sec": 7.32,
+      "speech_end_offset_ms": 6500.0,
+      "audio_hash_id": "0ffebeb460008c94fca301dec41c18c21dd7054322a264641ffc5783f7168a06",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0124.wav",
+      "sha256": "de327ecc1669c196456fca9d16e8f976aaa53c9271bcd54a205559e97734c5b7",
+      "transcript": "many german baked goods also feature almonds hazelnuts and other tree nuts popular cakes often pair particularly well with a cup of strong coffee",
+      "duration_sec": 10.44,
+      "speech_end_offset_ms": 9348.0,
+      "audio_hash_id": "23426b9db6e9bc911c9556875f3c44416545ead3dcbb22701531b93121b41be0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0125.wav",
+      "sha256": "6695d20dc3ef097874f66bc0f1da0398b47835e8ab598f632dbaad770e112dcd",
+      "transcript": "many people don't think about them as dinosaurs because they have feathers and can fly",
+      "duration_sec": 4.32,
+      "speech_end_offset_ms": 4320.0,
+      "audio_hash_id": "72ca5c538f08af8dc411979af26a7b0423627dba0a00f282015ddcb404e2db21",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0126.wav",
+      "sha256": "f44749c2c693893bca6d0ed01498584b9ef5496d0afb783c4c218e14e923bae0",
+      "transcript": "martelly swore in a new provisional electoral council cep of nine members yesterday",
+      "duration_sec": 10.12,
+      "speech_end_offset_ms": 8100.0,
+      "audio_hash_id": "11c31dab0cf9b18fd17c8bd393987e259d742b496f4af7fd97e7bef8e12f4d23",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0127.wav",
+      "sha256": "c42367fd8a5e8ef4b7577dd0e356768c04afb6ebda5e919207f4fbb3ce7b0fac",
+      "transcript": "mass car ownership also leads to a higher incidence of accidents on the roads which leads to the invention of new techniques in healthcare for repairing damaged bodies",
+      "duration_sec": 9.48,
+      "speech_end_offset_ms": 9092.0,
+      "audio_hash_id": "3d281b45994f0818093110c7d9d7ac4705c3a62aecbc9869bc288edacf173fa7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0128.wav",
+      "sha256": "27e140a9dfda2c741aedc147df111fae8a62152cb357b182e78130dc8760ff83",
+      "transcript": "middle order batsmen sachin tendulkar and rahul dravid performed well and made a hundred-run partnership",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 7460.0,
+      "audio_hash_id": "807f621637078ee843b597c73bfea63bf70ed412e50e75a3df5dc83621f72c3f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0129.wav",
+      "sha256": "c7b27afe050dda42d14393fee37217b9552fd2197d762d8dca5a0862ece125c7",
+      "transcript": "mosasaurus was the apex predator of its time so it feared nothing except other mosasaurs",
+      "duration_sec": 6.9,
+      "speech_end_offset_ms": 6628.0,
+      "audio_hash_id": "eee4507ed3006d2f31cb874290c6f3832cb3f2471420385af51daa3b1a175c85",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0130.wav",
+      "sha256": "a4072e35f6687ca9434a0cff951e6e7a6de794e2c742f10213bed73b07d4bb19",
+      "transcript": "most modern research telescopes are enormous facilities in remote areas with favorable atmospheric conditions",
+      "duration_sec": 6.84,
+      "speech_end_offset_ms": 6840.0,
+      "audio_hash_id": "b50b6241451d1ca60a4b83b43350d43b23004b1da53921a1b5537dd5457fd640",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0131.wav",
+      "sha256": "46f3c000b1b5721bc2ff8bab384aa4349e885a3089bd57c53571903da0e9fc09",
+      "transcript": "most of the buildings on the edges of the complex have been rebuilt in order to give tourists a better idea of how they originally appeared",
+      "duration_sec": 7.62,
+      "speech_end_offset_ms": 7012.0,
+      "audio_hash_id": "9e6ed2a2de8e0798c9ffa9a2a8b8ec23d6edb1afde4dfbc7f3bbb16cdc344bb6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0132.wav",
+      "sha256": "fe8406d42a257b55d36a54badcf9efbaeefbda444919febe25869c3d7b699856",
+      "transcript": "most of the smaller islands are independent nations or associated with france and known as luxury beach resorts",
+      "duration_sec": 10.52,
+      "speech_end_offset_ms": 10520.0,
+      "audio_hash_id": "69d9fbba207e1ef34ae51cdf76093e37ac3c28222bd3237022a9412bab417e59",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0133.wav",
+      "sha256": "bdd0cf75728d68aa9b37887fbc2c19b795cd043aed8796dbf4bffd6f99ba4306",
+      "transcript": "ms is a disease that affects the central nervous system which is made up of the brain the spinal cord and the optic nerve",
+      "duration_sec": 7.2,
+      "speech_end_offset_ms": 6948.0,
+      "audio_hash_id": "56b81ab91389c9a36cdf86530101a0a0fc38e26fc8ebcf3c655cdbe3078027fa",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0134.wav",
+      "sha256": "cda5aef68e0c230b63fe97b518788280e6418f394f725edc2ec5f14eda6bf4b9",
+      "transcript": "muhammad was deeply interested in matters beyond this mundane life. he used to frequent a cave that became known as  hira‘” on the mountain of  noor” light for contemplation",
+      "duration_sec": 11.28,
+      "speech_end_offset_ms": 9988.0,
+      "audio_hash_id": "cb0be16cb624ea264d9dd46bd27cd5faa2ca1ab0e2634b54cb335c2c61e0d7f6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0135.wav",
+      "sha256": "314035d27b9dedc778ea2e00ce841dbdb81a627805316eda8004cf36c0ba01b2",
+      "transcript": "needless to say if you know a romance language it will be easier for you to learn portuguese",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 6788.0,
+      "audio_hash_id": "71e1919c1002603ef767e6ba49dfac9b421f4df647ecca0e1b243a185ac27a14",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0136.wav",
+      "sha256": "7e7aa330b17a11aa8517fda48af04b50543dabaf6b96cda29197b6c1834087b9",
+      "transcript": "nextgen is a system the faa claims would allow aircraft to fly shorter routes and save millions of gallons of fuel each year and cut carbon emissions",
+      "duration_sec": 10.08,
+      "speech_end_offset_ms": 8740.0,
+      "audio_hash_id": "179ec871f1602f58d5ee464a6d22edb22fb508e16eeb8d359e950d7d278f9cd9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0137.wav",
+      "sha256": "8447192b722540d93f900bdfc98e0a042420e5206f9ea813896d4d6615fd1ace",
+      "transcript": "no tsunami warning has been issued and according to the jakarta geophysics agency no tsunami warning will be issued because the quake did not meet the magnitude 6.5 requirement",
+      "duration_sec": 11.88,
+      "speech_end_offset_ms": 10724.0,
+      "audio_hash_id": "d2fd2c79b2524e9beff68596699ce891463cd525462973c7f0a4ec22b093814f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0138.wav",
+      "sha256": "bc04542c4424123681f8aba6d9b81fd6fcd838908ea311bce87ec9d1707031e5",
+      "transcript": "nothing can be seen other than the clear beautiful sky above and the many surrounding mountains very little of this world can be seen or heard from inside the cave",
+      "duration_sec": 9.48,
+      "speech_end_offset_ms": 9092.0,
+      "audio_hash_id": "1f6a1792e5cc2885ae744762394bc8eaa3425d714b9d1d823b51364cc38a5395",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0139.wav",
+      "sha256": "57387a6665790914f830cdd697e1c112b455570ff0a6d56385cb716debe91083",
+      "transcript": "on 15 august 1940 the allies invaded southern france the invasion was called operation dragoon",
+      "duration_sec": 10.12,
+      "speech_end_offset_ms": 9700.0,
+      "audio_hash_id": "b09d6abd2e4aed55deee65ab3d5d4456d6eb62a3378e4e1a013f876548d873fa",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0140.wav",
+      "sha256": "e6fc5a283d8bedba230d4ab9d8621e6cd952c79409f2f93dd1a6319de21b5804",
+      "transcript": "on some routes the larger companies have their own planes but for other routes and smaller firms there was a problem",
+      "duration_sec": 9.36,
+      "speech_end_offset_ms": 7620.0,
+      "audio_hash_id": "3475c3cad304ebed990ac59ca3e997e72c04487d3c8ac89bd853123190065450",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0141.wav",
+      "sha256": "3c5939ce04ec44c74f842c00c11d58b7dca3b8e445d908f8bbe6fb3ac3d334a7",
+      "transcript": "on the other hand icy and snowy conditions are normal in many countries and traffic goes on mostly uninterrupted all year round",
+      "duration_sec": 9.72,
+      "speech_end_offset_ms": 8004.0,
+      "audio_hash_id": "3fb08b4fd8391622311335401051420ee38bdafc5a934434a0562ad68b8def91",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0142.wav",
+      "sha256": "eba113da68cd894c7604429746e431ab25197ccad934172bb7d6d040de3eced6",
+      "transcript": "one bomb exploded outside the governor general's office",
+      "duration_sec": 6.64,
+      "speech_end_offset_ms": 5828.0,
+      "audio_hash_id": "cf61dc2705da104a73f7d16223abf338b8120ce1ebe4a1928e4e0e6b20f5f07b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0143.wav",
+      "sha256": "c74c9e1bad7884bc7b3181b7a2b3e5254e8ac7d1267be15f7ec68faab45618a3",
+      "transcript": "one can only wonder what the keyboard will become when something newer comes along",
+      "duration_sec": 5.46,
+      "speech_end_offset_ms": 5028.0,
+      "audio_hash_id": "a265a7b879262ef9b3c8f429728e089abf67752b3a94262cdcf045baf5fdd4d1",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0144.wav",
+      "sha256": "542eec523e51666b2983dd46226a14404364778c3a9ad74861c2cc54043a036d",
+      "transcript": "only mutations in germ-line cells can be passed on to children while mutations elsewhere can cause cell-death or cancer",
+      "duration_sec": 10.98,
+      "speech_end_offset_ms": 8452.0,
+      "audio_hash_id": "de56461c796e872e47765500bacc6a3dc4a9fbb5a56d64787a04cc4a99a90c4d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0145.wav",
+      "sha256": "835a22f3a8d1af1750260d1e7b43842caa19e11171d237b07ba986f0896979fb",
+      "transcript": "other subjects on the agenda in bali include saving the world's remaining forests and sharing technologies to help developing nations grow in less-polluting ways",
+      "duration_sec": 9.66,
+      "speech_end_offset_ms": 8548.0,
+      "audio_hash_id": "43a99764d26abfd64aaa91105a8b1ba8a4ff43a0a636e1b8f359949f8fa2be75",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0146.wav",
+      "sha256": "6a74e216e7be7b9907e2e7c4600e14d866c46d3d751f8444575e11d631c2392b",
+      "transcript": "ottawa is canada's charming bilingual capital and features an array of art galleries and museums that showcase canada's past and present",
+      "duration_sec": 8.52,
+      "speech_end_offset_ms": 8292.0,
+      "audio_hash_id": "50865c5c1d1c7132649cd44cfea56cca8ead89683b5b043042ebe8bb28ed60b7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0147.wav",
+      "sha256": "a2d3aa90f358ef850fa11ffdcfd1d3c103e8bf649ca82236674cb59fa0e89ebe",
+      "transcript": "parisians have a reputation for being egocentric rude and arrogant",
+      "duration_sec": 7.54,
+      "speech_end_offset_ms": 6692.0,
+      "audio_hash_id": "e9d4183f9cc2f5cd4bbfcf000e82150d86aca580f73de546fbdb888c24124bba",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0148.wav",
+      "sha256": "3b5dadde19fffb23be9632cd221f30a6b71ae7fc7864d4e4bfd0b9c1acc25f51",
+      "transcript": "people have known about basic chemical elements such as gold silver and copper from antiquity as these can all be discovered in nature in native form and are relatively simple to mine with primitive tools",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 10800.0,
+      "audio_hash_id": "ded9038212745ce1bc8c86c77e90e4a9582a827ad86c9f3814b6dc507ce12e57",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0149.wav",
+      "sha256": "3a84bdf7e81713af0dd962b95935e5a794b17febf7251a80ca74ab4970a8f1d2",
+      "transcript": "people may not anticipate that patience and understanding are also necessary for travellers returning home",
+      "duration_sec": 5.94,
+      "speech_end_offset_ms": 5636.0,
+      "audio_hash_id": "96d0e834ab318ac7f07092c6a0ebb083858aa6b9844ebb5590c749e915138e22",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0150.wav",
+      "sha256": "ee9a45899119b767a1d464cac46d45e9af0d4db4f1efce293e27b6ac02c55153",
+      "transcript": "people now write messages on computer screens never having to come close to a sharpener",
+      "duration_sec": 8.8,
+      "speech_end_offset_ms": 7972.0,
+      "audio_hash_id": "97d8cb86f77ffef9e336cd02fee3c9f388976054151f7433f73bf2dc9adc5379",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0151.wav",
+      "sha256": "29454850fc1a7c2623b1333945866700cc623b4de79aa2523409695ca4beb2da",
+      "transcript": "plants look their best when in a natural environment so resist the temptation to remove even just one specimen",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 6724.0,
+      "audio_hash_id": "2cfe54975d2b819e3a9bb2a048db5017a0b26ffea3c4334772303701f260f2b8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0152.wav",
+      "sha256": "2f55582544ae959c23fba89020ed7f1fc8a1228ba8276454f2514b93b108e959",
+      "transcript": "plants make oxygen which humans breathe and they take in carbon-dioxide which humans exhale that is breathe out",
+      "duration_sec": 7.02,
+      "speech_end_offset_ms": 6564.0,
+      "audio_hash_id": "64de75b16d54b065bb17d4cc69c9eaed2be703ba1d62954ec96480b20bea7072",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0153.wav",
+      "sha256": "4f4283626d6cfa825bd1c1dde75e21a1dec131ee914e9868b79c418db77bacaa",
+      "transcript": "plants make their food from the sun by photosynthesis they also provide shade",
+      "duration_sec": 7.94,
+      "speech_end_offset_ms": 6884.0,
+      "audio_hash_id": "c06f972f0d5b9151c8bb35b54a4a2581f1a5a4a84dcd81123e1fa0aea766fc63",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0154.wav",
+      "sha256": "60d15a2d90ace3f49ccfaadaf799b2588c1a23bf2024f36e2fe42cc9b02b4363",
+      "transcript": "police superintendent chandra shekhar solanki said the accused appeared in court with covered faces",
+      "duration_sec": 7.2,
+      "speech_end_offset_ms": 6596.0,
+      "audio_hash_id": "b6b3bfaa8e1aab680ad427a28fb7dd8934df06ec0989264515b866225ae51835",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0155.wav",
+      "sha256": "9d9acc8dcc727387826726decaa8ec77bcedda8d25eeff83a3021302971efa37",
+      "transcript": "popular sports include football basketball volleyball water-polo fencing rugby cycling ice hockey roller hockey and f1 motor racing",
+      "duration_sec": 9.3,
+      "speech_end_offset_ms": 8996.0,
+      "audio_hash_id": "f623cd7b66e30559f188aa34d770789b4276c211e25bf1158f34d1b53d99a982",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0156.wav",
+      "sha256": "180bccb03d4255084317758e000b5918e8c87b5b891d2e50e4d613ad0c8f3018",
+      "transcript": "prides are made up of one to three related adult males along with as many as thirty females and cubs",
+      "duration_sec": 6.78,
+      "speech_end_offset_ms": 6468.0,
+      "audio_hash_id": "57aedfa0ba453762c08fbf04f82744d96ae4fb405133153c36c8bca5e68b3d5b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0157.wav",
+      "sha256": "653f199a929880ffc477d605347227904f983c3ee5dbe1dd412dd24d824539d6",
+      "transcript": "prior to the arrival of troops haiti had not encountered problems related to the disease since the 1800s",
+      "duration_sec": 7.38,
+      "speech_end_offset_ms": 6276.0,
+      "audio_hash_id": "dcf8319fa70d6bb24082df702f533e1682cdd0c8f10336f69f8487b59b816ada",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0158.wav",
+      "sha256": "b2dda3ccb06f795c6527530085a6a4faab00bd30e4e319f8b2ebaf7635351d2b",
+      "transcript": "professor pamela ferguson of the university of dundee notes journalists do seem to be walking a dangerous line if publishing photos etc of suspects",
+      "duration_sec": 10.5,
+      "speech_end_offset_ms": 9316.0,
+      "audio_hash_id": "cd676993f23e22cb81e8126da3e52aa4e20e6c4eae55ef89f57fd229fa90e185",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0159.wav",
+      "sha256": "e6b2c5161d2ec0ddb73e365864868d2949558cc03c05d9df05b201d745eb5e79",
+      "transcript": "re-entry shock comes on sooner than culture shock there's less of a honeymoon phase lasts longer and can be more severe",
+      "duration_sec": 8.58,
+      "speech_end_offset_ms": 7684.0,
+      "audio_hash_id": "88ae1e588e2f20f94899fa3d6b0f2fc224ae3adcfc80137e29d11cef64b17d9c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0160.wav",
+      "sha256": "c9d929ab39de35c5d011ef84bfc9c3ae56b3f9c73bc5931743042a73c2a69124",
+      "transcript": "regional and seasonal severe weather phenomena include blizzards snowstorms ice storms and dust storms",
+      "duration_sec": 7.58,
+      "speech_end_offset_ms": 7140.0,
+      "audio_hash_id": "91bbe3996b41b523d0b16ef1e4b7d1d115cde4c99ea1461b5ee58f4c28dead8d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0161.wav",
+      "sha256": "6f062f0bfac1fe03dd99e700bf2e467dc293ab4a06957d2ad2c09ce19f07b76d",
+      "transcript": "regular announcements in the metro are made only in catalan but unplanned disruptions are announced by an automated system in a wide variety of languages including spanish english french arabic and japanese",
+      "duration_sec": 11.52,
+      "speech_end_offset_ms": 11172.0,
+      "audio_hash_id": "0b07b44c5630052fd6d47e487c2f1bd866dc283de290c2b0a6f10e7edfba4aec",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0162.wav",
+      "sha256": "2045aedb756b48c7617b88afc057f03ab753b7c503c15234313c59cb77551463",
+      "transcript": "remember that even though music on the main stages may have finished there may be sections of the festival that will keep playing music until late into the night",
+      "duration_sec": 11.9,
+      "speech_end_offset_ms": 10980.0,
+      "audio_hash_id": "1d34609d0830e8c274d4a5eee55ad1af4147a8a414da7d1a7e63570753c93cf5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0163.wav",
+      "sha256": "b2c0f52ad6ac3882fe7a5474b656801a60fa501ad6219a9627ce94373bfcb9bf",
+      "transcript": "resting on the top of one of the mountains north of mecca the cave is completely isolated from the rest of the world",
+      "duration_sec": 10.14,
+      "speech_end_offset_ms": 8036.0,
+      "audio_hash_id": "6f324cb6d765b809721c2cd67c3f2672d4c170ef63b905063d8b12d328c3d53a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0164.wav",
+      "sha256": "9668d46778489aa2e450c938cc88067f786f5e388c8683e8f8b58cdb07e5b5e5",
+      "transcript": "rip currents are the returning flow from waves breaking off the beach often at a reef or similar",
+      "duration_sec": 6.42,
+      "speech_end_offset_ms": 6020.0,
+      "audio_hash_id": "96129b1b6bff54f8be199c286a7eff589e49875aff403166cd0c425d1be4452c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0165.wav",
+      "sha256": "a7f6767f03caa984ba7e2ed5d47970ce78d478b2112eb9dec00ed81c7ad4c64e",
+      "transcript": "rolando mendoza fired his m16 rifle at the tourists",
+      "duration_sec": 6.0,
+      "speech_end_offset_ms": 5220.0,
+      "audio_hash_id": "0f03f5f758baf2e397a12314b967c5a642ec155924e09ce2b6d067cd18af329b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0166.wav",
+      "sha256": "485ba2486713c8b5fe12525e36a17df49f18d10abee1929346121dd540a1437d",
+      "transcript": "romanticism had a large element of cultural determinism drawn from writers such as goethe fichte and schlegel",
+      "duration_sec": 10.68,
+      "speech_end_offset_ms": 8836.0,
+      "audio_hash_id": "50041f119bacc2dd35517e2ed96bf23dc0054ac2863b1ada239fd46943658632",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0167.wav",
+      "sha256": "69e79eee023b62056d7dafbd49bed73d0f58b3bb2710472ef3675e5c6f61f929",
+      "transcript": "saint petersburg cruises include time in town. cruise passengers are exempted from visa requirements check the terms",
+      "duration_sec": 7.5,
+      "speech_end_offset_ms": 7500.0,
+      "audio_hash_id": "7bb485acdbd41be833832c00a803a8af791af9970ae71dbc8870421b63394fa0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0168.wav",
+      "sha256": "3463dfd4ea3c49041bd4a552730d3bc2adfc33225a4e2ead1b9c7c45f43505e6",
+      "transcript": "scaffolding is not a method of learning but rather an aid that provides support to individuals whom are undergoing a new learning experience such as using a new computer program or beginning a new project",
+      "duration_sec": 11.76,
+      "speech_end_offset_ms": 10756.0,
+      "audio_hash_id": "63e17fd44aae91c5035e60fa260aa540e150e407d1dc8c2c01952c77ed809174",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0169.wav",
+      "sha256": "803098d44f7d3cb0430aaec0b24941edd7bcd730b6c122c5234e4683e315c126",
+      "transcript": "scientists hope to understand how planets form especially how the earth formed since comets collided with the earth long ago",
+      "duration_sec": 6.18,
+      "speech_end_offset_ms": 5828.0,
+      "audio_hash_id": "5441d7f1cfc94c25d12ee202cfa6bb3de7c0a91899d93da1d37d9c11d696d622",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0170.wav",
+      "sha256": "a9253d429917b81357083a3654dbdfecfb7e8f06fb89e483ce2fd8fdf96f4ca3",
+      "transcript": "scotturb bus 403 travels regularly to sintra stopping at cabo da roca",
+      "duration_sec": 11.56,
+      "speech_end_offset_ms": 10852.0,
+      "audio_hash_id": "b95dae8cbb1e98ae9614e4812862fe6a47b6085d107deb49f0c136f2d13674c2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0171.wav",
+      "sha256": "567c4aaeec4ee97acefb5e6ecdfd4ded502ab53413559a9b8d99785e25cb5f58",
+      "transcript": "segregation and recombination shuffle variation back and forth between the two pools with each generation",
+      "duration_sec": 11.52,
+      "speech_end_offset_ms": 10052.0,
+      "audio_hash_id": "6ff568673260fb6904bd86665deda49438f5d9874af4d17bfbfb84059ea3f8da",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0172.wav",
+      "sha256": "5fd5bb1b82bdf8aebeade97bec4ec8a212a7c592747cc46260f112b9fce1eb29",
+      "transcript": "several large television screens were installed in various places in rome to let the people watch the ceremony",
+      "duration_sec": 10.26,
+      "speech_end_offset_ms": 8644.0,
+      "audio_hash_id": "38f5cc1bb39b4c941a198d79d04e7533453896aea58daccc7685a68a8e044b7b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0173.wav",
+      "sha256": "6ef5ce3e41514b3c39cc41696f377e9acd8d5c9a397dd340775ca15ce66fa52e",
+      "transcript": "severe weather is the generic term for any dangerous weather phenomenon with the potential to cause damage serious social disruption or loss of human life",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 9572.0,
+      "audio_hash_id": "29cd85c17b1c9af1bad54f8aeb9a90e71e4defbb0e298eb47d781746dee96650",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0174.wav",
+      "sha256": "778c38bbcaca4c67bbdc815d31aebab8e4fecfec4738d23f284bf19b5f5c7308",
+      "transcript": "sharing a field trip virtually is also a great way to reflect a on a trip and share experiences with future classes",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 6788.0,
+      "audio_hash_id": "bc510911276fbef97c0bf79da309bb2db79f43f75161de43c25ff3935067620c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0175.wav",
+      "sha256": "6495ae78bfab4bdaa80da6ce0b97b805a54b46247e6fc65ff482263836923f79",
+      "transcript": "since the foundation of asunción in 1537 paraguay has managed to keep a lot of its indigenous character and identity",
+      "duration_sec": 11.82,
+      "speech_end_offset_ms": 9636.0,
+      "audio_hash_id": "6b62122bfb56f04a4471e739143934731b9b5372486241436d992ef620a85895",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0176.wav",
+      "sha256": "526e03216a6716ddc82574117d7a4c09a4ccd1557be855a9c494b30abf4e43ce",
+      "transcript": "six hostages including the children and elderly were released early as were the filipino photographers",
+      "duration_sec": 9.16,
+      "speech_end_offset_ms": 8612.0,
+      "audio_hash_id": "2ee0a1cf6ded0077190be32daf9967ba0f0fa4b29660824f8e0580e2ebe2a200",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0177.wav",
+      "sha256": "0ed1b3a1fee1334adaac0e24c5fe58c068df249d6e53ee67274dbb1ca9d53ac2",
+      "transcript": "so it is likely that the notation was added simply as a label",
+      "duration_sec": 5.86,
+      "speech_end_offset_ms": 4868.0,
+      "audio_hash_id": "1a604f2ea31776fc985487240ef9c6e5f1d862ae5b7b28f51b607853697502ad",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0178.wav",
+      "sha256": "ca69e6ffdb453163c57db974418c863f58817aa859e094b34b57b28364cd27da",
+      "transcript": "some atoms have unstable nuclei which means that they tend to break apart with little or no nudging",
+      "duration_sec": 6.12,
+      "speech_end_offset_ms": 5700.0,
+      "audio_hash_id": "392755977ec4924bdf07e11a8a7c044f95ef68c5e1cf5513dce16898c17af16a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0179.wav",
+      "sha256": "44181ec699cc009d75025c2080b3bc04defd527fd4692f7018a382e294402732",
+      "transcript": "some cruises feature berlin germany in the brochures as you can see from the map above berlin is no where near the sea and a visit to the city is not included in the price of the cruise",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 9892.0,
+      "audio_hash_id": "4950229b40db7c2e45399ae41748e09f7edc54563eca9cb44df7d885f308a019",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0180.wav",
+      "sha256": "9dbbf59805881ff09563820da8127c9492df5ebcb3c8d9e69c2cf1b6a75a48b0",
+      "transcript": "some people thought he was right but many people believed the opposite; that the solar system moved around the earth including the sun and even the other stars",
+      "duration_sec": 7.74,
+      "speech_end_offset_ms": 7492.0,
+      "audio_hash_id": "902951ccef110041c620da086e54997f4fb385839f2ab81e4b4cbd257c4927fb",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0181.wav",
+      "sha256": "daee5f6d18149d0f9763d16bcfecb9da50ff067a72d89d836039dad45b3e8843",
+      "transcript": "soon after the outbreak of hostilities britain initiated a naval blockade of germany",
+      "duration_sec": 5.46,
+      "speech_end_offset_ms": 5156.0,
+      "audio_hash_id": "4db75521cb1e44e4f20e8fcf57418b9de14439923c6d73ee24e6ce85443e0cb4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0182.wav",
+      "sha256": "b8c5792db5cfa81fff13f0490135f45700c907200da14f30c7d6cf23e2984c1f",
+      "transcript": "still take advice from authorities obey all signs and pay close attention to safety warnings",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 7492.0,
+      "audio_hash_id": "87bf0b7c87db10e65d81f82b277c85cbfa2eb447ab82746b4ece475af9254f9a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0183.wav",
+      "sha256": "973bfa55e3bd948801b4281d01ca6ebd8bcd73533da5f09f10f4ec7bb6740528",
+      "transcript": "swirl the two dry powders together and then with clean wet hands squeeze them into a ball",
+      "duration_sec": 8.36,
+      "speech_end_offset_ms": 7300.0,
+      "audio_hash_id": "a2bf46bb7fd2d8e707ee4261f232ec14aaa81acf547f8ae848193668c7cc2ecd",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0184.wav",
+      "sha256": "bc3b06dd28ea2dba2a56f15ab2703d31a0a777dd24607be22f2b17c543892b68",
+      "transcript": "television reports show white smoke coming from the plant",
+      "duration_sec": 5.04,
+      "speech_end_offset_ms": 3876.0,
+      "audio_hash_id": "123510cca9fdec97a653a3c0a8a1de96f98a14b48458c21e850c13cb85bbd754",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0185.wav",
+      "sha256": "e159cdee27b2f7cd80da3421ed0af13aa0269d21dfbc5104b160d1a41c732215",
+      "transcript": "the 25 dunlap broadsides still known to exist are the oldest surviving copies of the document the original handwritten copy has not survived",
+      "duration_sec": 9.84,
+      "speech_end_offset_ms": 8900.0,
+      "audio_hash_id": "ca5fe66d6b90cc3a7ea045ee913e5cd4cfbc2957338295a1a8a2cfce1e048e66",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0186.wav",
+      "sha256": "2960a15ef1eb82c3d680df9c9a85ad6b93c9b58c55b6b1c8552bc265a5f6945d",
+      "transcript": "the 802.11n standard operates on both the 2.4ghz and 5.0ghz frequencies",
+      "duration_sec": 12.0,
+      "speech_end_offset_ms": 10788.0,
+      "audio_hash_id": "8a92a04fd8d59fac6644016c99ea93b96821e2542a5fa94219cd0fc782d1ec1e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0187.wav",
+      "sha256": "11a3e7fde58da1f2efead8b8abb6142b69f026b662e525e37cb461239423397f",
+      "transcript": "the announcement was made after trump had a phone conversation with turkish president recep tayyip erdoğan",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 9252.0,
+      "audio_hash_id": "6da42e7857195d6ae3f7a4c30ac76e2fc08b335bebd8ec86a414acadf7457866",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0188.wav",
+      "sha256": "9d4da50177ff3480f3e972c44a02b735a20426b67dfb3cbeec39be83547d9da0",
+      "transcript": "the aspect ratio of this format dividing by twelve to obtain the simplest whole-number ratio is therefore said to be 3:2",
+      "duration_sec": 11.04,
+      "speech_end_offset_ms": 10468.0,
+      "audio_hash_id": "0f32733745a86cf0958de7cbbfe9b6540ce04506683939c3e92a9a945eb9f537",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0189.wav",
+      "sha256": "33c2ecf15840967d353022e419597790eed64e894879ebae620957e537d60fb3",
+      "transcript": "the bridge is scheduled to be fully operational in september 2017 when the brazilian customs checkpoints are expected to be finished",
+      "duration_sec": 8.28,
+      "speech_end_offset_ms": 7364.0,
+      "audio_hash_id": "800d0378a42b078d7e38420be576fd742be9f3d41c066721c20c74092eb9eea3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0190.wav",
+      "sha256": "536bbf4f05da1294042c5bf4fb51807228fb65a35e9ad80c57fff124b6df78fe",
+      "transcript": "the cabbage juice changes color depending on how acidic or basic alkaline the chemical is",
+      "duration_sec": 5.76,
+      "speech_end_offset_ms": 5412.0,
+      "audio_hash_id": "b42505e73bd7839b4760e06a30e02cfce4570ff82030ffc14baed45bfde6b1d2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0191.wav",
+      "sha256": "feaab9cc552f0a4f0a387d534fda90b46fb1daa586a1e629237a92f34b73370c",
+      "transcript": "the capital of moldova is chişinău. the local language is romanian but russian is widely used",
+      "duration_sec": 6.6,
+      "speech_end_offset_ms": 6372.0,
+      "audio_hash_id": "1d0310687a6469b727c86588c790086aa196dd1e3b4ea54406a4c8877a0f8078",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0192.wav",
+      "sha256": "d2fc2ec09c6849459a25bcecd843c83c45fb757c21aca04da45dfc80232d9ce5",
+      "transcript": "the central authority of the church had been in rome for over a thousand years and this concentration of power and money led many to question whether this tenet was being met",
+      "duration_sec": 9.24,
+      "speech_end_offset_ms": 8868.0,
+      "audio_hash_id": "fa45421a5f7de10728ff205434d97dea7f59dabc9d2e17bb3a10895b08a86e5c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0193.wav",
+      "sha256": "886f6007f339119d430b0a4c7c908ea70bb44104fd7a3ee9ef58cea7cf39eebe",
+      "transcript": "the city is also the base to climb the nyiragongo volcano along with some of the cheapest mountain gorilla tracking in africa",
+      "duration_sec": 11.28,
+      "speech_end_offset_ms": 9860.0,
+      "audio_hash_id": "b5954b837a2d31fa53ab0eda66ce44be882d716e5e36ee1316047beb0ce04e17",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0194.wav",
+      "sha256": "91baf4a03abae0ff606f5bfdb98b38e2b477e4f3aeafe4d2e30922fb91e670fd",
+      "transcript": "the city is in stark contrast to the rest of the country's cities because it has more of an arabic flair than of an african",
+      "duration_sec": 6.72,
+      "speech_end_offset_ms": 6468.0,
+      "audio_hash_id": "6e9ae8a237f128b2098d2280e228d8a289176230bf4ad09b717441d13baa3ef2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0195.wav",
+      "sha256": "0ec14e46d2c0b86d5aab6221452eeac4a3d9005743ad1ac87c1de6ea3355e1c7",
+      "transcript": "the commission was martelly's response to widespread anti-regime protests that started in october",
+      "duration_sec": 8.52,
+      "speech_end_offset_ms": 7460.0,
+      "audio_hash_id": "68ff8151c9756cab7b89ab53b95ebc01628c392570c8f7632cd1262e744dca65",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0196.wav",
+      "sha256": "b6173c3eba4da09b6c68dbd8d8b2a5d4baa4aa91b64bbacb0d5ce5e0450ea3bb",
+      "transcript": "the composition of these crystals matches those found in the urine of affected pets when compared by infrared spectroscopy ftir",
+      "duration_sec": 11.88,
+      "speech_end_offset_ms": 10628.0,
+      "audio_hash_id": "88d97ad413088f8e9295a774c71d441cb3b95ad65955aba698de52d1d5ddb497",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0197.wav",
+      "sha256": "aee80d000b2764688998d5e0a34dc9e02b7445a65fd9436e7a6ff2b2202c5ce6",
+      "transcript": "the correlation between brain pathology and behaviour supports scientists in their research",
+      "duration_sec": 6.36,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "96617c1c14ea21102c22c9f1f29895db6f7d85797e0798b3ffef8b32aa761f3e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0198.wav",
+      "sha256": "f7c3eeb59ddf33fcaf796a7ddb4a0cb4306958092711f1d07d8c079daafccd68",
+      "transcript": "the crash occurred high up in mountainous terrain and is believed to have been the result of hostile fire",
+      "duration_sec": 9.82,
+      "speech_end_offset_ms": 8612.0,
+      "audio_hash_id": "da29f581e50aa9dd88eec5a0f06315049ea8c0bf330cd06634c53b942214edad",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0199.wav",
+      "sha256": "4628d70c65bcca29f57047568efe85afb7bf811d8c80d01969857e3f813c3320",
+      "transcript": "the crust is about 70 km thick on the near side and 100 km thick on the far side",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 6628.0,
+      "audio_hash_id": "b9d93f31af3623ed8b09fe94826de16dc851d1f15d9cf1d058eb7da5bd9c7b54",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0200.wav",
+      "sha256": "cdaddff66a5b795e12a52b2b695a3e9e3240c8546015d16874cdf3889bd47ed9",
+      "transcript": "the debate was sparked by controversy over spending on relief and reconstruction in the wake hurricane katrina which some fiscal conservatives have humorously labeled bush's new orleans deal",
+      "duration_sec": 12.36,
+      "speech_end_offset_ms": 11300.0,
+      "audio_hash_id": "25ba9935ce5aff5c38fc5f3a84777c28083ac3f40aa97ce3f7651426a053af27",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0201.wav",
+      "sha256": "efda2334f13b91a1af82464982102dee90873cac6ae62d75f88d292f6773722f",
+      "transcript": "the disease is carried by pigs which then migrates to humans through mosquitos",
+      "duration_sec": 5.4,
+      "speech_end_offset_ms": 5092.0,
+      "audio_hash_id": "f6223afd87f6fcd3b854dcc079926f6b1c1e223f12e4b92bc1d49d157aa0dae5",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0202.wav",
+      "sha256": "5f8ee8a0762b6565351ef8a3a422c69b7e7144200ab35a386e49e40110839830",
+      "transcript": "the document according to the leak will refer to the borders dispute which palestine wants based on the borders before the 1967 mideast war",
+      "duration_sec": 8.28,
+      "speech_end_offset_ms": 7908.0,
+      "audio_hash_id": "58cc7e5b877073d3fc249505eaf20d5900d9aa2e4d81a5c7beac713fa1b9fa67",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0203.wav",
+      "sha256": "9358ac94a7fbf27e4eea0f9a1250bda9312d2a2ce1d6a6785f7cc6578e443d05",
+      "transcript": "the find also grants insight into the evolution of feathers in birds",
+      "duration_sec": 4.62,
+      "speech_end_offset_ms": 4620.0,
+      "audio_hash_id": "628ef170fd71d41ffdf1aa593de92ee7f756475901427ddc33d2c959ba0859b7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0204.wav",
+      "sha256": "388bebf1a71c9fee98dfb4f6b70ecb6484f4e946745e0a5a96c295e981759782",
+      "transcript": "the fission bomb works on the principle that it takes energy to put together a nucleus with many protons and neutrons",
+      "duration_sec": 6.3,
+      "speech_end_offset_ms": 6300.0,
+      "audio_hash_id": "027d51eae32d564ca614ec3c4940b4aab8a71fad657bb3fc86e9f0e5da1dfb91",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0205.wav",
+      "sha256": "dd811b23ef2c3fa85d3ed6e2f7e548be8198d67526325c6c3f36cfa65e4abbc6",
+      "transcript": "the governor's office said nineteen of the injured were police officers",
+      "duration_sec": 7.26,
+      "speech_end_offset_ms": 5124.0,
+      "audio_hash_id": "c6adb8efc3103a5ff3234301da5b1dedecbc0b8689f4687bf61e078e8462023c",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0206.wav",
+      "sha256": "0156887c729aec4b1cd8c2a638928e80b9d7f074c9497762c0e3afb4b9b11941",
+      "transcript": "the great pyramid at giza is the only one of the seven wonders that is still standing today",
+      "duration_sec": 6.06,
+      "speech_end_offset_ms": 5252.0,
+      "audio_hash_id": "f63df9966558b79f93d72cdfe3196de5a712f38d70ede03263c4af0f12491a66",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0207.wav",
+      "sha256": "470a56ed54cf35caa78b4c00255a4791f950d590f51bf3c38395d477cf9283cb",
+      "transcript": "the haitian institute for justice and democracy has referenced independent studies that suggest the nepalese un peacekeeping battalion unknowingly brought the disease to haiti",
+      "duration_sec": 11.04,
+      "speech_end_offset_ms": 11040.0,
+      "audio_hash_id": "32c1b4162db8ee378bbba1e5c2f8890cae3be0f78a57851f03028f9acec9de48",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0208.wav",
+      "sha256": "c07faf65175023ae2ada1c5201bf488e8b46c2e4ef9a3436f30387a3e886b196",
+      "transcript": "the hospital has followed protocol for infection control including separating the patient from others to prevent possible infection of others",
+      "duration_sec": 11.42,
+      "speech_end_offset_ms": 10692.0,
+      "audio_hash_id": "11d0531604af12e2b7db86a8e0bfcf5485e58f466a9766f04604af269e1a52ec",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0209.wav",
+      "sha256": "3a5e2b446438dc7ee8f86c88b528c8599224a9627bc38f25eb849d653df25891",
+      "transcript": "the hot chocolate is up to belgian standards fruit juices are pricey but excellent",
+      "duration_sec": 6.42,
+      "speech_end_offset_ms": 6020.0,
+      "audio_hash_id": "b62bc3921291e94c61553d91a834c354a79f707f4b2b215643e974018cff6cb2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0210.wav",
+      "sha256": "b5bb4a3406fad027b8ca52a7c5282740799c2a8aa0cb5ed64a3ffb50be25b0b0",
+      "transcript": "the internet combines elements of both mass and interpersonal communication",
+      "duration_sec": 5.72,
+      "speech_end_offset_ms": 5476.0,
+      "audio_hash_id": "030fa88f39820a6c30d0e508d717f4cdacef0ab8ec3a64471738c20508fd3175",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0211.wav",
+      "sha256": "53671a68a5725eb10afaa57bc4464d63e5173b96a3ceeba012ca81366ab2f596",
+      "transcript": "the lower the tension the more positive the life force present every person has the potential to find absolute peace and contentment",
+      "duration_sec": 10.4,
+      "speech_end_offset_ms": 9892.0,
+      "audio_hash_id": "5d63151fa1d4f280f269893b0b4598c2ae60aa6f96f9804bcbd118182d248531",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0212.wav",
+      "sha256": "76dda5f4a1193cf3ff6289252675ceb0829c0cbe16e2b0ea5eebb140cd6f5f00",
+      "transcript": "the moisture on your hands will react with the outer layers which will feel funny and form a sort of shell",
+      "duration_sec": 8.52,
+      "speech_end_offset_ms": 8036.0,
+      "audio_hash_id": "5428d0520fdc6ba2476f88f85a7da28506361678e8512462d77556f7ae36f133",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0213.wav",
+      "sha256": "574e52716afbcccdf60a71725b198c45138b0378b44d25febae42042ec4c9bbb",
+      "transcript": "the moroccan sultan rebuilt the city as daru l-badya and it was given the name casablanca by spanish traders who established trading bases there",
+      "duration_sec": 11.52,
+      "speech_end_offset_ms": 10596.0,
+      "audio_hash_id": "7b5f7371bafbe445c8d32f17706e2e06f7940db33978472812b0c83aa62c5598",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0214.wav",
+      "sha256": "f67d20bfbb9f132f90992c3f8d5336281db13ddf4133cc958824675cb83709ec",
+      "transcript": "the northern marianas emergency management office said that there were no damages reported in the nation",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 7652.0,
+      "audio_hash_id": "4278147c2d191b9741eb84342389f8f70f9fad90c821aafee81a12a93e0c4c70",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0215.wav",
+      "sha256": "ac825a962558570b3352c1035b6733bf6879d545fb13ffb32e97b82b865dc850",
+      "transcript": "the number of people present was so large that it was not possible for everybody to gain access to the funeral in st peter's square",
+      "duration_sec": 9.66,
+      "speech_end_offset_ms": 8036.0,
+      "audio_hash_id": "24b6381df9737d38399fbe3b6e6ed879fb90564074b27dfab1b2c1a7016e4f03",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0216.wav",
+      "sha256": "bd9697ed0031e917d05ef624e8537d9e5d015a42df10946d7337592ef5116ba7",
+      "transcript": "the official falklands currency is the falkland pound fkp whose value is set equivalent to that of one british pound gbp",
+      "duration_sec": 10.08,
+      "speech_end_offset_ms": 10080.0,
+      "audio_hash_id": "c14d72f66b58e23b2fe0f8007651af99f8430af049fbe1e3444aa8122e9326fd",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0217.wav",
+      "sha256": "9b6f0c3a2e54af3d4cf4a956cd5fba4d5f865007ce654011394d50526be50dd4",
+      "transcript": "the ph level is indicated by the amount of hydrogen the h in ph ions in the tested chemical",
+      "duration_sec": 6.6,
+      "speech_end_offset_ms": 6148.0,
+      "audio_hash_id": "30c6fece9fccb64e8216378119c700e08d1582a4b1555d163b6166885f3348d6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0218.wav",
+      "sha256": "7ae644db28974b87ef218b5bf4f974ecda321d1971ae4d0a52f86e48d1618541",
+      "transcript": "the photographers later took the place of an aged lady as she needed the lavatory mendoza was gunned down",
+      "duration_sec": 8.62,
+      "speech_end_offset_ms": 7812.0,
+      "audio_hash_id": "12c3ecd97461d32cb13138d340da2ede53980a882c8e7daf976e71aae160125b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0219.wav",
+      "sha256": "7f580187be1129d9073c1f3072af52a9a799bd603b69e7d2a3886e0dc55f6f6a",
+      "transcript": "the presence of a true  invisible team” larson and lafasto 1989 p109 is also a unique component of a virtual team",
+      "duration_sec": 11.94,
+      "speech_end_offset_ms": 10724.0,
+      "audio_hash_id": "f66fd862afba6567e71d1ff6633ac81655144d4d56abafd6d2c66e971fb11713",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0220.wav",
+      "sha256": "bb0616bdbfcfbc794c98de5aa75d00ab872dd1ba1989fbdbd762a01a616e359f",
+      "transcript": "the pyramid sound and light show is one of the most interesting things in the area for kids",
+      "duration_sec": 8.34,
+      "speech_end_offset_ms": 7972.0,
+      "audio_hash_id": "badf853e8df00a8f6ca966c7b63f4235132a75156a0887ca02c10cea85fdded1",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0221.wav",
+      "sha256": "7b8d683677c1351bbd48178adabb4a0491c148da367516e6d5645cefc418e6a9",
+      "transcript": "the report is highly critical of almost every aspect of the present policy of the executive towards iraq and it urges an immediate change of direction",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 8640.0,
+      "audio_hash_id": "5e228c79d6c65f3f77f38eb5a15b3696e10cc0fb0e47752f188566ca36640e68",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0222.wav",
+      "sha256": "c2bb0250885b712d8e748bc8f587c2aba8949b65b0ac8f9dda2dfa2cfb3bd786",
+      "transcript": "the ruling party south west africa people's organisation swapo also retained a majority in the parliamentary elections",
+      "duration_sec": 10.64,
+      "speech_end_offset_ms": 9988.0,
+      "audio_hash_id": "40624047c82578faba690dfebe9f5d964cb5cc1faf09b6f7131d0a352962a1fa",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0223.wav",
+      "sha256": "6e7d165695432b86abf2d8afaf8385da00dee17d0c180ec304565f0806bd837f",
+      "transcript": "the same month saw another airliner overrun a runway at mashhad and strike a wall killing seventeen",
+      "duration_sec": 6.48,
+      "speech_end_offset_ms": 6212.0,
+      "audio_hash_id": "f9bae4871a3caf71595bc3e9a1652ade1ceb1a6705080223b34f999b86bb9b7b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0224.wav",
+      "sha256": "f10d7c8721fc3703fd49259ba3fba73344f1885f4983f4bddde3a57e91541f15",
+      "transcript": "the scenes are displayed on the pyramids and the different pyramids are lit up",
+      "duration_sec": 4.32,
+      "speech_end_offset_ms": 3908.0,
+      "audio_hash_id": "25271cf6aed02f64d68774f04cbc141bb70431cf5f80c3b049dc0cfee1719b8d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0225.wav",
+      "sha256": "2c9c27d0d4cac6aacec9cab7b6f73a9aab473279a011b2dc5af2123778373599",
+      "transcript": "the schengen zone however works somewhat like one country in this respect",
+      "duration_sec": 6.8,
+      "speech_end_offset_ms": 6052.0,
+      "audio_hash_id": "2e461b0996bcf54c8cd20f04290834e3b2f99f2cbdd2850d2565d7c340f6a005",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0226.wav",
+      "sha256": "3b7020d6dfd79130e39fb4d656408121506cc9e14945591b9289ca9d61cf7d48",
+      "transcript": "the scientists were able to conclude that the dark matter affect other dark matter in the same way regular matter does",
+      "duration_sec": 12.12,
+      "speech_end_offset_ms": 11108.0,
+      "audio_hash_id": "91a8d17d67df17cd2688aa39b8a1acc23ef84cb1d815a56e34fde5b118297023",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0227.wav",
+      "sha256": "0b91cc5d3b000cbbb8116d9c6fb567c80df8fa97773708cc3769f30c3cb17975",
+      "transcript": "the service is frequently used by shipping including pleasure craft as well as expeditions who have remote data and voice needs",
+      "duration_sec": 11.28,
+      "speech_end_offset_ms": 8932.0,
+      "audio_hash_id": "045d0d35882767bf3a5d81c6c72e523771aea1914a000f1e2307b27f2426f080",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0228.wav",
+      "sha256": "e85d494c261aa3f5950141fea221ec51bfa8da7cb031170e666cbfd3c114766c",
+      "transcript": "the smaller the rossby number the less active the star with respect to magnetic reversals",
+      "duration_sec": 5.64,
+      "speech_end_offset_ms": 5412.0,
+      "audio_hash_id": "8dea8f4a653fdf6a8088b34d5c56a96419eff0d84b31f15fa17476ab18617cd1",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0229.wav",
+      "sha256": "646e2725773c2fcf52b2a9eefccba06b6a50daa58b97838897aa373b54da188e",
+      "transcript": "the sundarbans are the largest littoral mangrove belt in the world stretching 80 km 50 mi into the bangladeshi and indian hinterland from the coast",
+      "duration_sec": 10.2,
+      "speech_end_offset_ms": 9060.0,
+      "audio_hash_id": "c27b5da65d3edb1fb59b82654d2d6fff9e8804865eca0c47b3ffb7831522c668",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0230.wav",
+      "sha256": "a10c1539c5de40c69743bff0a476d45024eda69679f4a3f2da40c04c1bb5ceb1",
+      "transcript": "the sundarbans has been declared a unesco world heritage site the part of the forest within indian territory is called sundarbans national park",
+      "duration_sec": 11.88,
+      "speech_end_offset_ms": 10020.0,
+      "audio_hash_id": "2568dab08075f059bff5b4dd5354b0e0d1011286de42a302e1dddb8890deb1f7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0231.wav",
+      "sha256": "28b0cb776f034d40bd8b92a1498ecd522ac2060a6c1c981428cb98149bab2553",
+      "transcript": "the surface of the moon is made of rocks and dust the outer layer of the moon is called the crust",
+      "duration_sec": 5.64,
+      "speech_end_offset_ms": 5380.0,
+      "audio_hash_id": "e9dfc2b38f93e30c73dd926e535a77a672ef1b417a5c2aa97fa391a9ad5b24ac",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0232.wav",
+      "sha256": "afb66e440d81a3be846aeab30d434094e30ed23214d007160800e1b61d9529a0",
+      "transcript": "the tenth named storm of the atlantic hurricane season subtropical storm jerry formed in the atlantic ocean today",
+      "duration_sec": 8.66,
+      "speech_end_offset_ms": 7876.0,
+      "audio_hash_id": "a8a8a98bdd3f35d6417f98ce539793e4faae32a1dd39b201234317624295223b",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0233.wav",
+      "sha256": "87793ddc80f9ab7737a451e7c71e76be6c4cd1e7fdfa027d94ae1b3f849c464a",
+      "transcript": "the term bug is used by entomologists in a formal sense for this group of insects",
+      "duration_sec": 6.48,
+      "speech_end_offset_ms": 5412.0,
+      "audio_hash_id": "a6cda0eb5a5dec99968e29d5b97c63fde7c2e06c80fa19786007f1abc84f7b3e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0234.wav",
+      "sha256": "55595764f7e39be67da74b487c476c09e3aa884aabef9c3644728d3174908f43",
+      "transcript": "the term safari in popular use refers to overland travel to view the stunning african wildlife particularly on savanna",
+      "duration_sec": 8.64,
+      "speech_end_offset_ms": 7780.0,
+      "audio_hash_id": "14f2e3bd391637d1ab9676ef62706950c6522b2f81d43694c7f2185ffe795c4d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0235.wav",
+      "sha256": "3e10921e87b3586240f8ef9b417f1b71e12c67ddfac49e8494af0768aa5b9f2a",
+      "transcript": "the three kingdoms was one of the bloodiest eras in ancient china's history thousands of people died fighting to sit in the highest seat in the grand palace at xi'an",
+      "duration_sec": 11.88,
+      "speech_end_offset_ms": 10660.0,
+      "audio_hash_id": "5fd8f2c9cb0724085f68ec3c20aa64ab8f53052dc4d9ec3e2e83da48494d7fb7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0236.wav",
+      "sha256": "f1ae9e3814cdece31a81c644d91152e9f507f0e0fc1df32828c4394cb471df48",
+      "transcript": "the tiger's roar is not like the full-voiced roar of a lion but more like a sentence of snarly shouted words",
+      "duration_sec": 8.76,
+      "speech_end_offset_ms": 7332.0,
+      "audio_hash_id": "995663c9838ab1ef97c64417169e60e1993cb6020c8996eef912fe7d2b43978e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0237.wav",
+      "sha256": "ae2959ad19b987e5992007df169c7d1d37bfe064e9067b220b1e110060b5ad95",
+      "transcript": "the two compounds react with one another to form crystals that may block kidney function researchers at the university said",
+      "duration_sec": 7.44,
+      "speech_end_offset_ms": 6436.0,
+      "audio_hash_id": "1c46d7238a2c16cf61ae642b70dff6ec8bb7687180b863c4d382571771538b17",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0238.wav",
+      "sha256": "9def8a6db2794d40325c810da85dbef764e4e42634bf6a0fc14a88f839f839d0",
+      "transcript": "the u.s. corps of engineers estimated that 6 inches of rainfall could breach the previously damaged levees",
+      "duration_sec": 8.76,
+      "speech_end_offset_ms": 7748.0,
+      "audio_hash_id": "2b218045859ed1a1bb6d876a6eb9caae204a2c49d4f43bb0ccc961beb5e1d323",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0239.wav",
+      "sha256": "9908fc4543b84f9967af3d4bd8b1441bb69187caa63b44678555ced49fc3592e",
+      "transcript": "the use of video recording has led to important discoveries in the interpretation of micro-expressions facial movements which last a few milliseconds",
+      "duration_sec": 11.54,
+      "speech_end_offset_ms": 11108.0,
+      "audio_hash_id": "6bd61a4af5a9e09635e3f652fc073c6eff387befd5c16461eb8bf5af0cdd71d1",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0240.wav",
+      "sha256": "387010065380e15f357328e6c8aa8a3b6237b7c227d80d44f0d210a07f492dca",
+      "transcript": "the vehicle itself was taken away from the scene of the accident at approximately 1200 gmt on the same day",
+      "duration_sec": 8.58,
+      "speech_end_offset_ms": 7748.0,
+      "audio_hash_id": "72035bfef79d53a6c5011752e084c4d4158d759b4a8d85d90972fa69c71c01d6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0241.wav",
+      "sha256": "3822d9cf7f0f97d56da2ac09bf0a71fe13dcc4af71c3b79f78b1513166ac42da",
+      "transcript": "the vertical clearance under the bridge is 15 meters construction was completed in august 2011 it didn't open to traffic until march 2017",
+      "duration_sec": 9.84,
+      "speech_end_offset_ms": 8868.0,
+      "audio_hash_id": "5c7dd4ca418a100a63d942d4ad87ff3aba18575af5bbc5b3e9946215004576a6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0242.wav",
+      "sha256": "4d362b7355328d54061bd5c2def4b6b1c307ab7fd1e10b41bd05b85c48eaa78e",
+      "transcript": "the work done was mostly theoretical but the program was written to simulate observations made of the sagittarius galaxy",
+      "duration_sec": 10.8,
+      "speech_end_offset_ms": 8740.0,
+      "audio_hash_id": "9a78a3ee1d326992167062be911c3149de257ab59bc3f6720f7544fdbb22b4e2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0243.wav",
+      "sha256": "9eee7181a35ff6d5f4fd0538151b46075b07e28ed840a631eeda087afdacd35c",
+      "transcript": "their disciplined defence ball handling skills and excellent team work made them stand out and it was clear that this was the team to beat",
+      "duration_sec": 7.86,
+      "speech_end_offset_ms": 6980.0,
+      "audio_hash_id": "35e55bc4d970b715f5a2c89e388889e28a67dd6599773f54832a7fedb52a99ae",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0244.wav",
+      "sha256": "a1214eadcfa991946f9c101b91d6fce9155cbe35b4ed7c8d24da82fd810f662a",
+      "transcript": "there are of course christian theological explanations for this tradition but it may well be a pre-christian spring and fertility ritual",
+      "duration_sec": 9.36,
+      "speech_end_offset_ms": 9360.0,
+      "audio_hash_id": "121fcf212c0ae090a484821c524d0c4af0818a1e08489533dd875d3ceb186e63",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0245.wav",
+      "sha256": "565df453b770e814fe9db8d379b463cfc2faf514b18ebf9137ce807b3e3a76e6",
+      "transcript": "there are still many men and women alive who survived their time here and many more who had loved ones who were murdered or worked to death there jews and non-jews alike",
+      "duration_sec": 11.1,
+      "speech_end_offset_ms": 9956.0,
+      "audio_hash_id": "188b0011b8eaeb5c233066cd179ab17328616fa00f9e41638a6fd940e9c672dc",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0246.wav",
+      "sha256": "af5f5d6fa984e91de43d122b47d2e186e7cc16bf5b07a6e1aa3a826b3753e8b4",
+      "transcript": "there is no universal definition for which manufactured items are antiques some tax agencies define goods older than 100 years as antiques",
+      "duration_sec": 11.8,
+      "speech_end_offset_ms": 10692.0,
+      "audio_hash_id": "140d727ad3ac0d59f800555f96163ad88f99168912055c88271ab8d7c55f7060",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0247.wav",
+      "sha256": "d618df7b3c0e697b9120df06973dd5d9028a71763de358e6fdf5b576a58ae808",
+      "transcript": "there may be more maria on the near side because the crust is thinner it was easier for lava to rise up to the surface",
+      "duration_sec": 8.96,
+      "speech_end_offset_ms": 8484.0,
+      "audio_hash_id": "061078ccfc433f1620bea56e368d66e39b8f3bfe93e278d63686b41b524ebf3d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0248.wav",
+      "sha256": "ab276dc6bd478e6f01bffe055659d03eae4929e65a5086a821c0075d8c5ed8e5",
+      "transcript": "these are sometimes-crowded family beaches with a good range of shops lining the shore swimming is safe",
+      "duration_sec": 10.5,
+      "speech_end_offset_ms": 8292.0,
+      "audio_hash_id": "2c29a15e334a8a718f61767997a0ee7093b615d1bcd47df6f108d1c2405d64ec",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0249.wav",
+      "sha256": "9550f3e4bd0daab1d0b2fde71ec01a46588b229a9d1a2c2df06322c5f49ef382",
+      "transcript": "these couples may choose to make an adoption plan for their baby",
+      "duration_sec": 6.84,
+      "speech_end_offset_ms": 6052.0,
+      "audio_hash_id": "b79d66136c54805b55b849c0c0faedc1832e8e7f661b331073a6d648976257f4",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0250.wav",
+      "sha256": "bae661916831112ab7e543ca6b47b57b4c2eeb1b76d2fb0eaff500c9754b2dbe",
+      "transcript": "they are almost all sandy beaches with safe swimming and most have shade provided by pohutukawa trees",
+      "duration_sec": 8.46,
+      "speech_end_offset_ms": 7492.0,
+      "audio_hash_id": "358ccf8cf673390ee341492cc189c64d01e722f93ce4bbc0f6a6cc8ebf6e0948",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0251.wav",
+      "sha256": "485dece97b6dbf30fc84126ef14919bd3717e4820c60ff7899f0673291a6e629",
+      "transcript": "they have feet with scales and claws they lay eggs and they walk on their two back legs like a t-rex",
+      "duration_sec": 6.66,
+      "speech_end_offset_ms": 6660.0,
+      "audio_hash_id": "7bd5fe3971b89f63a2c392f46e902c6d73e242a881783cca9ade077483c69019",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0252.wav",
+      "sha256": "5b9142d1e63762d0d2304c7cf3cdf3ea8c2763fe21ed9607c1deead7e1c89166",
+      "transcript": "they usually have special food drink and entertainment offers to keep guests in a good mood and keep them at the premise",
+      "duration_sec": 6.96,
+      "speech_end_offset_ms": 6084.0,
+      "audio_hash_id": "953571d8a0e4d5934877ca1a951c34d7ef46f86aecd3873e30fd7b76ea0ea20a",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0253.wav",
+      "sha256": "4e83763f570bb3f5af9546883f99a6e3ac036e5678a54a61807966a115f397d5",
+      "transcript": "think of the skiing route as of a similar hiking route",
+      "duration_sec": 4.94,
+      "speech_end_offset_ms": 4324.0,
+      "audio_hash_id": "2f3d4ce886d2ecb7e85219a67c17aab7fbf5fd6b8abdde7fc031ea7cfc8965c2",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0254.wav",
+      "sha256": "831bf3ea1a4b570ae5ede68269937595d73e09d54fa22b041338046b60ca1bdf",
+      "transcript": "this is an important way to distinguish between some verbs and objects",
+      "duration_sec": 4.5,
+      "speech_end_offset_ms": 4228.0,
+      "audio_hash_id": "bdc0c0dca3e385f0db334c4bb0090f283b790ce1fe5faee1e898cabe624fbcfc",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0255.wav",
+      "sha256": "482a4025286a20952bcca5531543e1f4f9cd6aea322641d952deaf6d2de813f4",
+      "transcript": "this is called a chemical's ph you can make an indicator using red cabbage juice",
+      "duration_sec": 5.88,
+      "speech_end_offset_ms": 4964.0,
+      "audio_hash_id": "46573c14f99bedfcbefb64444ed9860df49d557cd503b897a3c9a22d4a743e7d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0256.wav",
+      "sha256": "4dcff268858f38be784d454e5aecf34e52317f9003e2bca8c2522592e8b36295",
+      "transcript": "this is not going to be goodbye this is the closing of one chapter and the opening of a new one",
+      "duration_sec": 5.88,
+      "speech_end_offset_ms": 5028.0,
+      "audio_hash_id": "89e8d5b258913bb0b806d3cc2ea7b4ff64a30dee267c546643887cef114918e8",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0257.wav",
+      "sha256": "d9b1a7333e53e5caf3efdd12ff79f099e5eb6367f85bcacfc2e97bd1a59c1b9f",
+      "transcript": "this offers a good opportunity to see the aurora borealis as the sky will be dark more or less around the clock",
+      "duration_sec": 6.72,
+      "speech_end_offset_ms": 6436.0,
+      "audio_hash_id": "5d063355e5ecc0ea50c99be8436890c12676dff49b25e4d6c31c932d9324ddb6",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0258.wav",
+      "sha256": "c7418e6cdf7f56307d41db0c0fea1d16273c36f864e5e18c0f980b890566c1fa",
+      "transcript": "this sediment was necessary for creating sandbars and beaches which served as wildlife habitats",
+      "duration_sec": 11.22,
+      "speech_end_offset_ms": 9540.0,
+      "audio_hash_id": "78ed26800b990333769662caaf7ca1bec451d92bff4dd2d9d491fadf33f77163",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0259.wav",
+      "sha256": "baf7b4cb60c7f168d13e60464fb767d5ebc173b5f47b6f32fec0c44e3ec2e812",
+      "transcript": "this seems sensible because the earth doesn't feel as if it's moving does it",
+      "duration_sec": 5.64,
+      "speech_end_offset_ms": 4708.0,
+      "audio_hash_id": "4aef435e39284bf33023cb564f69507b947ffc25bedcee3a635ce760143fcbf1",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0260.wav",
+      "sha256": "cb29bc550be524dec6c6605d672618717e9e473a70f67d21980ce03b2372c406",
+      "transcript": "this will allow players to control actions and movements in video games by moving the device through the air",
+      "duration_sec": 5.76,
+      "speech_end_offset_ms": 5760.0,
+      "audio_hash_id": "4abcc661550c69932a7d9956373cd1a7dad0ca8fd4edd3979cd77e20ec615023",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0261.wav",
+      "sha256": "a217a9b6b9db95494a5d356996e634a2a37ee731cb7592038ddb9351bfc0f56f",
+      "transcript": "through the night between 150 and 200 copies were made now known as dunlap broadsides",
+      "duration_sec": 4.8,
+      "speech_end_offset_ms": 4800.0,
+      "audio_hash_id": "86b92eb1b9473e06c948c1ffd6e72a6366ef83804e89eabfd1e9e1d1ac0fbb17",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0262.wav",
+      "sha256": "83139a8119d270c8b85e51819f37c87efd47a422cce60030bea18e4151ffb1df",
+      "transcript": "throughout 1960s brzezinski worked for john f kennedy as his advisor and then the lyndon b johnson administration",
+      "duration_sec": 8.76,
+      "speech_end_offset_ms": 7332.0,
+      "audio_hash_id": "c85fabc2d57639db4b66276ebd333b2d57f4f8039ebe7f5dfe974cbce6d2d1d7",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0263.wav",
+      "sha256": "e28225a1a023deca13e677fc532209e3b044c866b45460038b33c8bb2e806f31",
+      "transcript": "thus the pencil was a good friend to many people when it came out",
+      "duration_sec": 3.96,
+      "speech_end_offset_ms": 3652.0,
+      "audio_hash_id": "d7b5d1e29a83bf50d48d548e5871c97b622d76b1af9a71fea4896254327d8fe3",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0264.wav",
+      "sha256": "e64e468f399c925f0e804c78115b910d285482c782759fc0d4d02404d2debf96",
+      "transcript": "to get the best views of hong kong leave the island and head for the kowloon waterfront opposite",
+      "duration_sec": 6.9,
+      "speech_end_offset_ms": 5892.0,
+      "audio_hash_id": "012373bb34222552e35aae4b8ded9bd7c9363d9c18db85c852148485e5026880",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0265.wav",
+      "sha256": "f936aa3717ee02229ddd731c279bb395757456d144acd1abc3ee280b17873de2",
+      "transcript": "to the north and within easy reach is the romantic and fascinating town of sintra and which was made famous to foreigners after a glowing account of its splendours recorded by lord byron",
+      "duration_sec": 11.46,
+      "speech_end_offset_ms": 10980.0,
+      "audio_hash_id": "9fa5fef04c255efb4d3b47970e93fc5cd546c5c924906cb5659e5f2ba6ee8073",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0266.wav",
+      "sha256": "248b86bf91d8cf3a2b8b3e5b4aa89fed006cf2a25451f7731ad6f17efcb9197c",
+      "transcript": "today the only insects that cannot fold back their wings are dragon flies and mayflies",
+      "duration_sec": 5.94,
+      "speech_end_offset_ms": 4996.0,
+      "audio_hash_id": "3008cff13521e0463b33672de89ca06222d1ba2de1e2772c4c45d5a31199118e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0267.wav",
+      "sha256": "4188e4d22a745b4998d4cc523ec1b99fdb21161295105fc5924d3f3be31ef88a",
+      "transcript": "traffic flow is the study of the movement of individual drivers and vehicles between two points and the interactions they make with one another",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 7680.0,
+      "audio_hash_id": "9912c71c895388d8c35694b621007dc7503c55f1e54b6788a107cc67b1f6e60d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0268.wav",
+      "sha256": "4159dd50c46fb25ea1d127907927effae679df03b697c469f79f202598d8d935",
+      "transcript": "travellers are strongly advised to be aware of any risk of severe weather affecting their area as they may affect any travel plans",
+      "duration_sec": 7.32,
+      "speech_end_offset_ms": 7320.0,
+      "audio_hash_id": "48237e091b6600ee6d754b0e8dc8728a590124f0325ffad311223a3c166ffa94",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0269.wav",
+      "sha256": "bac8d501df0953057e97fb630ca27f9739aad848428d88f2a4a09052512fdc09",
+      "transcript": "travellers bound for countries with heavy taxation can sometimes save a considerable amount of money especially on products such as alcoholic beverages and tobacco",
+      "duration_sec": 10.38,
+      "speech_end_offset_ms": 9252.0,
+      "audio_hash_id": "6035ffc66e9c9a4847e1bcaf3d50c6e0162872acfc9b7658aafa3d64998bbe24",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0270.wav",
+      "sha256": "62d67ed202891a139615abbab9a6918884a5e45a502b72521361e4a4390227de",
+      "transcript": "twentieth century research has shown that there are two pools of genetic variation hidden and expressed",
+      "duration_sec": 6.96,
+      "speech_end_offset_ms": 6180.0,
+      "audio_hash_id": "587c7b27face0abf3d035b463736091e5f0ab4e2c995f0990fa46ba1d5dbdd7f",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0271.wav",
+      "sha256": "f0a3bc0e5831ec17e5953321048fc64c6a07dd470c36d0daca49350dd4e1619a",
+      "transcript": "using ships to transport goods is by far the most efficient way to move large amounts of people and goods across oceans",
+      "duration_sec": 7.62,
+      "speech_end_offset_ms": 6820.0,
+      "audio_hash_id": "7abc97f683d10f8714e3147bdcc2f4776a0d262921e5431b35a4d6385d41b41e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0272.wav",
+      "sha256": "a1066afb3f8b245aa41263c047ff9e076aa291e4e7cfca549dd99447b3ae0ddf",
+      "transcript": "usually you always here the sound of tourists and vendors the story of the sound and light is just like a story book",
+      "duration_sec": 7.38,
+      "speech_end_offset_ms": 6308.0,
+      "audio_hash_id": "98f5ed8c9b40ebd8058bd207202dadc9e0425a91fb2fd1e7c4ef0fd011a29d4d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0273.wav",
+      "sha256": "93ce04e83e3243e5efcd017f4ef3b40a189c1b691f94d258d486a3ab0d98a96d",
+      "transcript": "vatican city's population is around 800 it is the smallest independent country in the world and the country with the lowest population",
+      "duration_sec": 10.74,
+      "speech_end_offset_ms": 7684.0,
+      "audio_hash_id": "90df64ccc033dceaf4352bfd68dac3f5aff4d41721d7aaf04626feaa0ba5788e",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0274.wav",
+      "sha256": "a6e1ab11bca6dacc3bb04966029ca42a37be2ba13a5a8790acd669b0b561f465",
+      "transcript": "virtual scaffolds are internalized in the software and are meant to question prompt and explain procedures that may have been to challenging for the student to handle alone",
+      "duration_sec": 9.72,
+      "speech_end_offset_ms": 9316.0,
+      "audio_hash_id": "a59cff0997b9d730f96ce925b95d5f92775f5f04111a8b82e2d3269f5b1c62a0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0275.wav",
+      "sha256": "e0d89dbb2ce12bc93a4dfbd5eb59b022cc5fa0a057f86778852e3e256559b24d",
+      "transcript": "virtual teams are held to the same standards of excellence as conventional teams but there are subtle differences",
+      "duration_sec": 5.64,
+      "speech_end_offset_ms": 5640.0,
+      "audio_hash_id": "0da40689fe961980ae9498206e20245bfbdb3308cdda2437a0e1b6e2c4a1cad0",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0276.wav",
+      "sha256": "660e46b3dceae47602dc1a1288488f6526076658c04e15aa9c258afcb13ef898",
+      "transcript": "we make our houses from plants and make clothes from plants most foods that we eat are plants without plants animals could not survive",
+      "duration_sec": 7.92,
+      "speech_end_offset_ms": 7920.0,
+      "audio_hash_id": "087cd28b2feaf9623056f6a19f1f42c4e82d599309986bfd3fb020f7c4d65011",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0277.wav",
+      "sha256": "b6523ed0673121354a9687cef5c010d6e6fbc873582d5903b76ac09020a6ed38",
+      "transcript": "when all available resources are effectively used across the functional departments of an organization creativity and ingenuity can transpire",
+      "duration_sec": 9.18,
+      "speech_end_offset_ms": 8228.0,
+      "audio_hash_id": "4d9cb734ed1119e4230fadf268a3cf343aec631bbfd391d53888da0b84feb7d9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0278.wav",
+      "sha256": "fdfa7fb40ebb52043e0b2d15977a24cb1115aded47372b5e60876414723e5c2f",
+      "transcript": "while goma is reasonably safe any visits outside of goma should be researched to understand the state of the fighting that persists in the north kivu province",
+      "duration_sec": 9.84,
+      "speech_end_offset_ms": 9316.0,
+      "audio_hash_id": "3ad26cff7c512146b749da26eb536c02dec8f366d495332d74686a466c2c4c8d",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0279.wav",
+      "sha256": "4da563805a69290f3fc735ce882d72681d89d234e62ddfcda86d23c556a11d72",
+      "transcript": "while he was working at the hospital liggins began to investigate premature labor during his spare time",
+      "duration_sec": 5.46,
+      "speech_end_offset_ms": 5460.0,
+      "audio_hash_id": "d6e2d2a0b7b90e6013b90c93b9972ee8fc9c07bca4618ed122f1644ce4d10f61",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0280.wav",
+      "sha256": "4f27434a6d16e534764b46ccd9f2e546411f0e1c1a52baa0e30802395cfb1793",
+      "transcript": "while one experimental vaccine appears able to reduce ebola mortality up until now no drugs have been clearly demonstrated suitable for treating existing infection",
+      "duration_sec": 12.0,
+      "speech_end_offset_ms": 11524.0,
+      "audio_hash_id": "d36761e84f74a70e379e100b2594d21e0243202d2610c2cea50c112a4e05fb15",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0281.wav",
+      "sha256": "37eb3de5536afeb54d7487f6b1934790135c0dec304a9fa43840b4169d3188b3",
+      "transcript": "with kundalini yoga the kundalini energy enlightenment energy is awakened through yoga postures breathing exercises mantras and visualizations",
+      "duration_sec": 11.04,
+      "speech_end_offset_ms": 10116.0,
+      "audio_hash_id": "3f1223d19be61189287270b268766640edb97621aa124490759c7adbc542a9e9",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0282.wav",
+      "sha256": "d98821709a6346430a377618a2b408c4174038b64579a8df828901f73c7d6b13",
+      "transcript": "with two years of the end of the war the former allies were now enemies and the cold war began",
+      "duration_sec": 7.68,
+      "speech_end_offset_ms": 6404.0,
+      "audio_hash_id": "35f8e160c7c8a41b72c6effffd4428d98e9d0dad6d2f4946dcf767bf91082900",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0283.wav",
+      "sha256": "799c052a2bad9493673f857507eac67319fb2f67bdd07c7294ac0daa905d44c2",
+      "transcript": "women it is recommended that any women travellers say that they are married regardless of actual marital status",
+      "duration_sec": 10.14,
+      "speech_end_offset_ms": 9124.0,
+      "audio_hash_id": "3d5f59331d53cd8b7a0054a9f659d8354f2adfff4c9c7810af94a00e4017c110",
+      "condition_idx": 0,
+      "condition_count": 1
+    },
+    {
+      "path": "audio/0284.wav",
+      "sha256": "b01f8c80d778b686c4933c5dd9c3fe64df2fd87b887452ba1c0a7e47398a60c7",
+      "transcript": "you may also wish to consult the advice of governments other than your own but their advice is designed for their citizens",
+      "duration_sec": 8.34,
+      "speech_end_offset_ms": 8340.0,
+      "audio_hash_id": "287eeefa4eb9ce31492cc50bff1ef3c66cd62f42f7fa548f047ac800bf9e72fc",
+      "condition_idx": 0,
+      "condition_count": 1
+    }
+  ]
+}
