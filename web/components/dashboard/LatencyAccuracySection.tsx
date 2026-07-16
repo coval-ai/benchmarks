@@ -15,6 +15,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts";
+import { Info } from "lucide-react";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
@@ -24,6 +25,7 @@ import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
 import MetricInfo from "@/components/shared/MetricInfo";
+import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -133,6 +135,7 @@ const LatencyAccuracySection: React.FC = () => {
         <SectionHeader
           label="Latency vs Accuracy"
           description={description}
+          note={metricAboutNote(metric)}
           exportXLabel={`Average ${latencyLabel}`}
           exportAnnotate={(clone) => {
             const nameCounts = new Map<string, number>();
@@ -189,7 +192,8 @@ const LatencyAccuracySection: React.FC = () => {
                   aria-hidden="true"
                 />
                 <MetricInfo metric="human-parity" align="right">
-                  Human-parity zone
+                  Human-parity zone{" "}
+                  <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
                 </MetricInfo>
               </li>
             </ul>

@@ -30,6 +30,8 @@ import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 const AccuracyBarSection: React.FC = () => {
   const {
     werDescription: description,
+    werBarView,
+    availableWerBarViews,
     werBarDataWithColors,
     getProviderForModel,
     isMobile,
@@ -104,12 +106,27 @@ const AccuracyBarSection: React.FC = () => {
   // WER-based: never rendered on S2S (no WER metric).
   if (mode === "s2s") return null;
 
+  // The toggle buttons carry no tooltips; the active view's blurb rides along
+  // in the "About this benchmark" tooltip instead (only when a toggle shows).
+  const activeWerView =
+    availableWerBarViews.length > 1
+      ? availableWerBarViews.find((view) => view.key === werBarView)
+      : undefined;
+
   return (
     <div className="mb-4">
       <Card padding="p-5 lg:p-8">
         <SectionHeader
           label="Accuracy by Model"
           description={description}
+          note={
+            activeWerView
+              ? {
+                  term: `${activeWerView.label} view`,
+                  text: activeWerView.tooltip,
+                }
+              : undefined
+          }
           hint="Click bar to compare models"
           exportXLabel="Model"
           exportRows={() =>
@@ -166,92 +183,112 @@ const AccuracyBarSection: React.FC = () => {
           </div>
         )}
         <div
-          className={`h-96 overflow-x-auto transition-opacity ${werBarLoading ? "opacity-40" : ""}`}
+          className={`flex h-96 transition-opacity ${werBarLoading ? "opacity-40" : ""}`}
           onMouseEnter={trackChartHover}
+          data-export-frame
         >
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-            minWidth={werBarDataWithColors.length * 48}
-            debounce={200}
-          >
-            <BarChart
-              data={werBarDataWithColors}
-              margin={{
-                top: 20,
-                right: 8,
-                left: 0,
-                bottom: 80,
-              }}
+          {/* The y-axis lives in its own zero-plot chart outside the scroll
+              container so it stays pinned while the bars scroll. It gets the
+              same data (via an invisible Bar) so both charts compute the same
+              scale, and the 180 bottom margin mirrors the main chart's
+              80 margin + 100 x-axis height so ticks align with gridlines. */}
+          <div className="w-[52px] shrink-0" data-chart-axis>
+            <ResponsiveContainer width="100%" height="100%" debounce={200}>
+              <BarChart
+                data={werBarDataWithColors}
+                margin={{ top: 20, right: 0, left: 0, bottom: 180 }}
+              >
+                <YAxis
+                  width={52}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: themeColors.axisText, fontSize: 12 }}
+                  tickFormatter={(value) => `${value}%`}
+                  label={{
+                    value: "WER % · lower is better",
+                    angle: -90,
+                    position: "insideLeft",
+                    fill: themeColors.axisText,
+                    fontSize: 12,
+                    style: { textAnchor: "middle" },
+                  }}
+                />
+                <Bar dataKey="averageWER" fill="transparent" isAnimationActive={false} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="min-w-0 flex-1 overflow-x-auto">
+            <ResponsiveContainer
+              width="100%"
+              height="100%"
+              minWidth={werBarDataWithColors.length * 48 + 52}
+              debounce={200}
             >
-              <CartesianGrid
-                vertical={false}
-                strokeDasharray="2 2"
-                stroke={themeColors.grid}
-              />
-              <XAxis
-                dataKey="model"
-                axisLine={false}
-                tickLine={false}
-                tick={
-                  <CustomBarChartTick
-                    getProviderForModel={getProviderForModel}
-                    isMobile={isMobile}
-                  />
-                }
-                height={100}
-                interval={0}
-              />
-              <YAxis
-                width={52}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: themeColors.axisText, fontSize: 12 }}
-                tickFormatter={(value) => `${value}%`}
-                label={{
-                  value: "WER % · lower is better",
-                  angle: -90,
-                  position: "insideLeft",
-                  fill: themeColors.axisText,
-                  fontSize: 12,
-                  style: { textAnchor: "middle" },
-                }}
-              />
-              <Tooltip
-                content={<CustomBarTooltip getProviderForModel={getProviderForModel} />}
-                cursor={false}
-                active={isMobile ? false : undefined}
-              />
-              <Bar
-                dataKey="averageWER"
-                radius={[4, 4, 0, 0]}
-                isAnimationActive={false}
-                onClick={handleWERBarClickTracked}
-                label={barLabel}
-                style={{
-                  cursor: "pointer",
+              <BarChart
+                data={werBarDataWithColors}
+                margin={{
+                  top: 20,
+                  right: 8,
+                  left: 0,
+                  bottom: 80,
                 }}
               >
-                {werBarDataWithColors.map((entry) => (
-                  <Cell
-                    key={`wer-cell-${entry.model}`}
-                    fill={entry.fill}
-                    fillOpacity={entry.fillOpacity}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${normalizeModelName(entry.model)}: ${entry.averageWER.toFixed(1)}% WER${clickedWERBars.has(entry.model) ? ", selected" : ""}`}
-                    onKeyDown={(e: React.KeyboardEvent) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleWERBarClickTracked(entry);
-                      }
-                    }}
-                    onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+                <CartesianGrid
+                  vertical={false}
+                  strokeDasharray="2 2"
+                  stroke={themeColors.grid}
+                />
+                <XAxis
+                  dataKey="model"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={
+                    <CustomBarChartTick
+                      getProviderForModel={getProviderForModel}
+                      isMobile={isMobile}
+                    />
+                  }
+                  height={100}
+                  interval={0}
+                  padding={{ left: 52 }}
+                />
+                <YAxis hide />
+                <Tooltip
+                  content={<CustomBarTooltip getProviderForModel={getProviderForModel} />}
+                  cursor={false}
+                  active={isMobile ? false : undefined}
+                />
+                <Bar
+                  dataKey="averageWER"
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={false}
+                  onClick={handleWERBarClickTracked}
+                  label={barLabel}
+                  style={{
+                    cursor: "pointer",
+                  }}
+                >
+                  {werBarDataWithColors.map((entry) => (
+                    <Cell
+                      key={`wer-cell-${entry.model}`}
+                      fill={entry.fill}
+                      fillOpacity={entry.fillOpacity}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${normalizeModelName(entry.model)}: ${entry.averageWER.toFixed(1)}% WER${clickedWERBars.has(entry.model) ? ", selected" : ""}`}
+                      onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleWERBarClickTracked(entry);
+                        }
+                      }}
+                      onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </Card>
     </div>

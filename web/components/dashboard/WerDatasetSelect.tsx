@@ -4,6 +4,7 @@
 "use client";
 
 import React from "react";
+import { Info } from "lucide-react";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
@@ -35,7 +36,8 @@ const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
         content="Scopes the WER column to one evaluation set. Full datasets are distinct recordings; WildASR perturbations replay the clean utterances with one degradation applied. Pooled blends every dataset in the window."
         align={isMobile ? "left" : "right"}
       >
-        WER dataset
+        WER dataset{" "}
+        <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
       </MetricInfo>
       <span className="relative inline-flex">
         <select

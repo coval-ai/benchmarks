@@ -29,6 +29,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   isMobile = false
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
+  const axisRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({
     width: width || 800,
@@ -118,14 +119,22 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     const xScale = d3
       .scaleBand()
       .domain(data.data.map((d) => d.model))
-      .range([0, chartWidth])
+      .range([6, chartWidth])
       .paddingInner(0.2)
       .paddingOuter(0);
 
-    // Ticks every 0.5 s. The domain snaps to those boundaries so the
-    // outermost gridlines — the visible floor and ceiling — enclose the
-    // whiskers.
-    const tickStepMs = 500;
+    // Ticks land on 0.5 s multiples, with the step widened until the range
+    // fits a readable tick count (phones get fewer — 19 labels of TTFT data
+    // is noise). The domain snaps to those boundaries so the outermost
+    // gridlines — the visible floor and ceiling — enclose the whiskers.
+    const baseStepMs = 500;
+    const maxTicks = isMobile ? 7 : 12;
+    const tickStepMs =
+      baseStepMs *
+      Math.ceil(
+        Math.max(data.globalMax - Math.max(0, data.globalMin), baseStepMs) /
+          (baseStepMs * maxTicks)
+      );
     const yMin = Math.max(0, Math.floor(data.globalMin / tickStepMs) * tickStepMs);
     let yMax = Math.ceil(data.globalMax / tickStepMs) * tickStepMs;
     if (yMax === yMin) yMax = yMin + tickStepMs;
@@ -134,10 +143,11 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .domain([yMin, yMax])
       .range([chartHeight, 0]);
 
-    // Create main group
+    // The plot svg scrolls while the y-axis labels live in a separate fixed
+    // svg to its left, so the scale stays visible at any scroll position.
     const g = svg
       .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
+      .attr("transform", `translate(0,${margin.top})`);
 
     // Add Y axis
     const yAxis = d3
@@ -160,11 +170,22 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .attr("stroke", themeColors.grid)
       .attr("stroke-dasharray", "2 2");
 
-    yAxisGroup.selectAll("text")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", yAxisTickFontSize);
+    yAxisGroup.selectAll("text").remove();
 
     yAxisGroup.select(".domain").remove();
+
+    const axisSvg = d3.select(axisRef.current);
+    axisSvg.selectAll("*").remove();
+    const axisGroup = axisSvg
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`)
+      .call(yAxis);
+
+    axisGroup.selectAll("line").remove();
+    axisGroup.select(".domain").remove();
+    axisGroup.selectAll("text")
+      .attr("fill", themeColors.axisText)
+      .attr("font-size", yAxisTickFontSize);
 
     // Add X axis
     const xAxis = d3.axisBottom(xScale);
@@ -417,17 +438,26 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           <p>No data available for box plot</p>
         </div>
       ) : (
-        <div
-          className="overflow-x-auto touch-manipulation select-none"
-          onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
-        >
+        <div className="flex">
           <svg
-            ref={svgRef}
-            width={svgWidth}
+            ref={axisRef}
+            width={margin.left}
             height={dimensions.height}
-            className="overflow-visible"
-            style={{ background: "transparent" }}
+            className="shrink-0"
+            data-chart-axis
           />
+          <div
+            className="min-w-0 flex-1 overflow-x-auto touch-manipulation select-none"
+            onScroll={(e) => setScrollX(e.currentTarget.scrollLeft)}
+          >
+            <svg
+              ref={svgRef}
+              width={svgWidth - margin.left}
+              height={dimensions.height}
+              className="overflow-visible"
+              style={{ background: "transparent" }}
+            />
+          </div>
         </div>
       )}
       {tip && (

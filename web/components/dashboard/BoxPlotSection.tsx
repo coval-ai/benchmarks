@@ -11,6 +11,7 @@ import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricInfo from "@/components/shared/MetricInfo";
 import MetricToggle from "@/components/dashboard/MetricToggle";
+import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -39,6 +40,7 @@ const BoxPlotSection: React.FC = () => {
         <SectionHeader
           label="Latency Variation"
           description={description}
+          note={metricAboutNote(activeMetric)}
           exportRows={() =>
             boxPlotData.data.map(({ model, quartiles, stats }) => ({
               model,

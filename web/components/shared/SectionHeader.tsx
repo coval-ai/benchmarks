@@ -27,6 +27,9 @@ interface SectionHeaderProps {
   };
   /** Optional hint shown after the "About this benchmark" label, separated by an interpunct. */
   hint?: string;
+  /** Context that changes with a toggle (active metric or dataset view), shown
+   *  as its own bolded block under the description in the tooltip. */
+  note?: { term: string; text: string };
   /** When false, the detailed text shows inline instead of behind a toggle. */
   expandable?: boolean;
   /** Rows for the Download Data (CSV) button; must reflect the active filters. */
@@ -44,6 +47,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   description,
   stat,
   hint,
+  note,
   expandable = true,
   exportRows,
   exportImage = true,
@@ -110,6 +114,12 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           (a, b) =>
             b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight
         )[0];
+    // Charts with a pinned y-axis render it as a slim sibling SVG; the export
+    // composites it back to the left of the scrolling plot.
+    const findAxis = () =>
+      card.querySelector<SVGSVGElement>(
+        "[data-chart-axis] svg, svg[data-chart-axis]"
+      ) ?? undefined;
     let svg = findSvg();
     // The exporting flag rejects overlapping clicks on the same card, which
     // would otherwise read the temporary stage size as the layout to restore.
@@ -119,9 +129,9 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // the same image, taller than the on-screen chart so dense charts have
     // room to place labels. The charts re-render on container resize, which
     // can replace the SVG node, hence the re-query once the stage settles.
-    const wrapper = svg.closest<HTMLElement>(
-      ".recharts-responsive-container"
-    )?.parentElement;
+    const wrapper =
+      svg.closest<HTMLElement>("[data-export-frame]") ??
+      svg.closest<HTMLElement>(".recharts-responsive-container")?.parentElement;
     const priorWidth = card.style.width;
     const priorHeight = wrapper?.style.height ?? "";
     card.style.width = "1000px";
@@ -163,6 +173,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         value: stat.value,
       },
       annotate: exportAnnotate,
+      axis: findAxis(),
       legend: Array.from(
         card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
       ).map((li) => {
@@ -236,7 +247,19 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         {expandable ? (
           <span className="text-sm font-light text-text-tertiary">
             <MetricInfo
-              content={description.detailed}
+              content={
+                note ? (
+                  <>
+                    {description.detailed}
+                    <span className="mt-2 block border-t border-border-secondary pt-2">
+                      <span className="font-semibold">{note.term}.</span>{" "}
+                      {note.text}
+                    </span>
+                  </>
+                ) : (
+                  description.detailed
+                )
+              }
               align="left"
               panelClassName="top-full mt-1.5 w-[min(38rem,calc(100vw-4rem))]"
             >
