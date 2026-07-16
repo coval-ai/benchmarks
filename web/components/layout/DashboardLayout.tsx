@@ -55,15 +55,15 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <DashboardHeader />
       <MobileModelSheet />
 
-      {/* Content column — centered on the page (under the centered tabs). The
-          sticky sidebar and the spacer are 18rem each so the column stays
-          centered. The footer sits below this row, so it pushes the sticky
-          sidebar up natively. w-full is load-bearing below lg: mx-auto
-          disables the flex cross-axis stretch, and the column would otherwise
-          size to its content and overflow the viewport. */}
+      {/* Content column fills whatever the sticky sidebar leaves — it tracks
+          window resizes instantly (no width transition, which would drag the
+          charts through a 300ms animation on every resize). min-w-0 is
+          load-bearing: the column would otherwise size to its content and
+          overflow the viewport. The footer sits below this row, so it pushes
+          the sticky sidebar up natively. */}
       <div className="relative z-10 flex flex-1">
         <ModelSidebar />
-        <div className="transition-all duration-300 pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden w-full mx-auto lg:w-[calc(100vw-36rem)]">
+        <div className="pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden flex-1 min-w-0">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-text-primary">
               {benchmarkTitle}
@@ -92,7 +92,6 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             )}
           </div>
         </div>
-        <div className="hidden lg:block w-72 shrink-0" />
       </div>
 
       {!loading && <DashboardFooter />}

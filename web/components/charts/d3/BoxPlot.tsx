@@ -17,7 +17,7 @@ const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
 const margin = { top: 20, right: 8, bottom: 80, left: 40 };
-const mobileSlotWidth = 48;
+const minSlotWidth = 48;
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -55,17 +55,25 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     };
   }, [tip]);
 
-  // Handle responsive sizing — always fit the card's content box.
+  // Handle responsive sizing — always fit the card's content box. Resizes
+  // are debounced (matching the recharts containers' debounce) so a window
+  // drag doesn't force a full d3 redraw per frame, and unchanged sizes bail
+  // out before triggering a render.
   useEffect(() => {
-    const handleResize = () => {
+    let timer: ReturnType<typeof setTimeout>;
+    const measure = () => {
       if (!containerRef.current) return;
-      setDimensions({
-        width: containerRef.current.offsetWidth,
-        height: height
-      });
+      const width = containerRef.current.offsetWidth;
+      setDimensions((d) =>
+        d.width === width && d.height === height ? d : { width, height }
+      );
+    };
+    const handleResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(measure, 50);
     };
 
-    handleResize();
+    measure();
     window.addEventListener("resize", handleResize);
 
     // Track container size changes that happen without a window resize
@@ -75,21 +83,22 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     }
 
     return () => {
+      clearTimeout(timer);
       window.removeEventListener("resize", handleResize);
       resizeObserver.disconnect();
     };
   }, [height]);
 
-  // On mobile every model gets a guaranteed slot and the chart scrolls
-  // horizontally (same pattern as the WER bar chart) — wide enough slots
-  // re-enable the desktop axis labels and make each column a real touch
-  // target.
-  const svgWidth = isMobile
-    ? Math.max(
-        dimensions.width,
-        data.data.length * mobileSlotWidth + margin.left + margin.right
-      )
-    : dimensions.width;
+  // Guarantee every model a minimum-width slot; when they don't all fit the
+  // container the chart scrolls horizontally (same pattern as the WER bar
+  // chart) rather than crushing the axis labels into each other. This holds at
+  // any viewport width — full screen, half, quarter, drag-resized, or mobile —
+  // so wide desktops render flush while narrow ones scroll.
+  const svgWidth = Math.max(
+    dimensions.width,
+    data.data.length * minSlotWidth + margin.left + margin.right
+  );
+  const scrollable = svgWidth > dimensions.width;
 
   // Layout effect so the d3 content redraws in the same frame the <svg>
   // resizes — the PNG export clones the SVG as soon as its width settles, and
@@ -172,7 +181,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first
     {
-      const labelMaxWidth = xScale.step() * 0.96;
+      const labelMaxWidth = xScale.step() * 0.82;
       const minModelFont = 8;
 
       data.data.forEach((modelData) => {
@@ -342,7 +351,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
       // Full-height invisible hit area so a finger can land anywhere in the
       // model's column, not just on the thin strokes.
-      if (isMobile) {
+      if (scrollable) {
         boxGroup
           .append("rect")
           .attr("x", centerX - xScale.step() / 2)
@@ -396,7 +405,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions, svgWidth, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
+  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -426,16 +435,16 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           onClick={(e) => e.stopPropagation()}
           className="absolute z-10 whitespace-nowrap text-xs"
           style={{
-            // On mobile the panel hangs from the top of the plot — inside
-            // the card, clear of the heading above — and tracks its column
-            // as the chart scrolls, so it never covers the box being
+            // When the chart scrolls the panel hangs from the top of the plot
+            // — inside the card, clear of the heading above — and tracks its
+            // column as the chart scrolls, so it never covers the box being
             // inspected and follows the finger while swiping.
             left: Math.min(
-              Math.max(isMobile ? tip.x - scrollX : tip.x, 90),
+              Math.max(scrollable ? tip.x - scrollX : tip.x, 90),
               dimensions.width - 90
             ),
-            top: isMobile ? margin.top : tip.yTop,
-            transform: isMobile
+            top: scrollable ? margin.top : tip.yTop,
+            transform: scrollable
               ? "translate(-50%, 0)"
               : "translate(-50%, calc(-100% - 8px))",
             transition: "left 150ms ease-out, top 150ms ease-out",
