@@ -7,6 +7,8 @@
 ``GET  /v1/arena/battle/{id}``     — a specific battle.
 ``GET  /v1/arena/example-prompt``  — a random seed-bank prompt with its domain.
 ``GET  /v1/arena/leaderboard``     — the latest computed board for a metric/domain.
+``GET  /v1/arena/admin/cooccurrence`` — who-battled-whom heatmap (labeler-only, HTML).
+``GET  /v1/arena/admin/convergence``  — CI-vs-votes per model (labeler-only, HTML).
 ``POST /v1/arena/vote``            — record a labeler's vote (labeler-only at MVP).
 
 Reads hit the pool directly; the write path uses the arena DB-access layer
@@ -29,6 +31,7 @@ from typing import Any
 import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from slowapi.util import get_remote_address
@@ -50,6 +53,12 @@ from coval_bench.api.schemas import (
 )
 from coval_bench.arena.audio_store import clip_url
 from coval_bench.arena.generate import generate_battle
+from coval_bench.arena.monitoring import (
+    build_convergence,
+    build_cooccurrence,
+    render_convergence,
+    render_cooccurrence,
+)
 from coval_bench.arena.pairing import (
     PAIRING_DOMAIN,
     PAIRING_METRIC,
@@ -374,3 +383,45 @@ async def reveal_battle(
         a=RevealModelOut(provider=battle.provider_a, model=battle.model_a, label=battle.model_a),
         b=RevealModelOut(provider=battle.provider_b, model=battle.model_b, label=battle.model_b),
     )
+
+
+@router.get("/arena/admin/cooccurrence", dependencies=[Depends(require_labeler)])
+@limiter.limit("60/minute")
+async def get_arena_cooccurrence(
+    request: Request,  # required by slowapi
+    metric: str = Query(default=PAIRING_METRIC),
+    domain: str = Query(default=PAIRING_DOMAIN),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
+) -> HTMLResponse:
+    """The who-battled-whom heatmap. Reveals model identities, hence labeler-only."""
+    store = ArenaStore(pool)
+    rows = await store.get_cooccurrence_counts()
+    ratings = await store.get_latest_ratings(metric_name=metric, domain=domain)
+    cooc = build_cooccurrence(rows, {key: r.rating_elo for key, r in ratings.items()})
+    capture_api_event(
+        posthog_client,
+        "arena_admin_report_viewed",
+        {"report": "cooccurrence", "$process_person_profile": False},
+    )
+    return HTMLResponse(render_cooccurrence(cooc))
+
+
+@router.get("/arena/admin/convergence", dependencies=[Depends(require_labeler)])
+@limiter.limit("60/minute")
+async def get_arena_convergence(
+    request: Request,  # required by slowapi
+    metric: str = Query(default=PAIRING_METRIC),
+    domain: str = Query(default=PAIRING_DOMAIN),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
+) -> HTMLResponse:
+    """Per-model CI-vs-votes curves from snapshot history. Labeler-only."""
+    rows = await ArenaStore(pool).get_snapshot_history(metric_name=metric, domain=domain)
+    conv = build_convergence(rows)
+    capture_api_event(
+        posthog_client,
+        "arena_admin_report_viewed",
+        {"report": "convergence", "$process_person_profile": False},
+    )
+    return HTMLResponse(render_convergence(conv))
