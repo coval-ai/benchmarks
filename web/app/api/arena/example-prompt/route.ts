@@ -9,11 +9,15 @@ interface ExamplePromptOut {
   domain: ExamplePrompt["domain"];
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   if (!(await arenaAccessOk())) return new Response(null, { status: 404 });
   let res: Response;
   try {
-    res = await arenaRunnerFetch("/v1/arena/example-prompt");
+    res = await arenaRunnerFetch(
+      "/v1/arena/example-prompt",
+      undefined,
+      req.headers.get("x-forwarded-for"),
+    );
   } catch {
     return Response.json({ error: "Example fetch failed." }, { status: 502 });
   }

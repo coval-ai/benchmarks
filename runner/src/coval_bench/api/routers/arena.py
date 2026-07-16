@@ -31,6 +31,7 @@ import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
+from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
@@ -110,6 +111,14 @@ def require_labeler(
         raise HTTPException(404)
 
 
+def _client_key(request: Request) -> str:
+    """Rate-limit key: the end client forwarded by the BFF, else the caller address.
+
+    All browser traffic reaches this API through the BFF, so keying on the remote
+    address would pool every labeler into one shared bucket."""
+    return request.headers.get("x-arena-client") or get_remote_address(request)
+
+
 async def _battle_out(settings: Settings, row: dict[str, Any]) -> BattleOut:
     """Resolve stored clip keys to fresh playable URLs (off the loop — GCS signing is I/O)."""
     row = dict(row)
@@ -166,7 +175,7 @@ async def get_battle(
     response_model=ExamplePromptOut,
     dependencies=[Depends(require_labeler)],
 )
-@limiter.limit("60/minute")
+@limiter.limit("60/minute", key_func=_client_key)
 async def get_example_prompt(
     request: Request,  # required by slowapi
 ) -> ExamplePromptOut:
