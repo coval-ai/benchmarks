@@ -4,7 +4,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Check, ImageDown, Link2, Table } from "lucide-react";
+import { Check, ImageDown, Info, Link2, Table } from "lucide-react";
+import MetricInfo from "@/components/shared/MetricInfo";
 import { downloadCSV, downloadChartPNG } from "@/lib/utils/chartExport";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { setExportStaged } from "@/hooks/useMobileDetection";
@@ -24,7 +25,7 @@ interface SectionHeaderProps {
     label: React.ReactNode;
     value: string;
   };
-  /** Optional hint shown after the "About this benchmark" link, separated by an interpunct. */
+  /** Optional hint shown after the "About this benchmark" label, separated by an interpunct. */
   hint?: string;
   /** When false, the detailed text shows inline instead of behind a toggle. */
   expandable?: boolean;
@@ -236,18 +237,25 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         {expandable ? (
           <>
             <span className="text-sm font-light text-text-tertiary">
-              <button
-                type="button"
-                onClick={() => setShowDetails((prev) => !prev)}
-                aria-expanded={showDetails}
-                className="underline decoration-1 underline-offset-2 decoration-text-tertiary/40"
+              <MetricInfo
+                content={description.detailed}
+                align="left"
+                panelClassName="top-full mt-1.5 w-[min(38rem,calc(100vw-4rem))]"
               >
-                About this benchmark
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDetails((prev) => !prev)}
+                  aria-expanded={showDetails}
+                  className="-my-2 inline-flex cursor-help items-center gap-1 py-2 transition-colors hover:text-text-secondary"
+                >
+                  About this benchmark
+                  <Info size={14} aria-hidden="true" />
+                </button>
+              </MetricInfo>
               {hint && <span> • {hint}</span>}
             </span>
             {showDetails && (
-              <p className="mt-2 text-text-tertiary text-sm leading-snug">
+              <p className="mt-2 text-text-tertiary text-sm leading-snug sm:hidden">
                 {description.detailed}
               </p>
             )}
