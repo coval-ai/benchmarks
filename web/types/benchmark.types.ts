@@ -65,6 +65,8 @@ export interface BoxPlotDataPoint {
     mean: number;
     std: number;
     count: number;
+    p95: number;
+    max: number;
   };
 }
 

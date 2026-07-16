@@ -213,7 +213,9 @@ export function useChartData({
         stats: {
           mean: toDisplayUnits(stat.avg_value),
           std: toDisplayUnits(stat.stddev_value),
-          count: stat.sample_count
+          count: stat.sample_count,
+          p95: toDisplayUnits(stat.p95),
+          max: toDisplayUnits(stat.max_value)
         }
       };
     });
