@@ -13,7 +13,7 @@ import {
 import type { TimeWindow } from "@/lib/config/timeWindows";
 
 export function useTimeWindow(surface: PostHogSurface, mode?: PostHogMode) {
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("7d");
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
 
   const changeTimeWindow = useCallback(
     (next: TimeWindow) => {
