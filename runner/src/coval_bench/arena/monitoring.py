@@ -208,8 +208,8 @@ def render_convergence(conv: Convergence) -> str:
     """Full standalone HTML document for the convergence view."""
     chart = _render.line_chart(
         conv.series,
-        x_label="votes_total",
-        y_label="ci_half_width (Elo)",
+        x_label="votes",
+        y_label="CI half-width (± Elo)",
         ref_y=conv.threshold,
     )
 

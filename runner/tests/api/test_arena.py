@@ -809,3 +809,43 @@ async def test_create_battle_cap_disabled_when_zero(
         "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
     )
     assert response.status_code == 201
+
+
+async def test_admin_reports_hidden_without_labeler_key(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Both admin reports 404 (not 403) without the labeler key."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    for path in ("/v1/arena/admin/cooccurrence", "/v1/arena/admin/convergence"):
+        response = await client.get(path)
+        assert response.status_code == 404
+
+
+async def test_admin_cooccurrence_renders_battles(client: AsyncClient, postgresql: Any) -> None:
+    """The heatmap includes the battled pair's identities."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_battle(postgresql)
+    await _insert_snapshot(postgresql)
+
+    response = await client.get("/v1/arena/admin/cooccurrence", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "elevenlabs/eleven_multilingual_v2" in response.text
+    assert "cartesia/sonic-3" in response.text
+
+
+async def test_admin_convergence_renders_history(client: AsyncClient, postgresql: Any) -> None:
+    """The convergence chart includes models from snapshot history."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_snapshot(postgresql)
+    await _insert_snapshot(
+        postgresql,
+        computed_at=datetime(2026, 6, 19, 12, 0, tzinfo=UTC),
+        votes_total=20,
+        ci_half_width=35.0,
+    )
+
+    response = await client.get("/v1/arena/admin/convergence", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "elevenlabs/eleven_multilingual_v2" in response.text
