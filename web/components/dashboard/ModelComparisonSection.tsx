@@ -11,6 +11,7 @@ import ModelComparisonTable, {
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
+import { datasetLabel } from "@/lib/config/datasets";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -19,6 +20,8 @@ const ModelComparisonSection: React.FC = () => {
     heatmapDisplayData: data,
     getProviderForModel,
     activeMetric,
+    werDataset,
+    werDatasetLoading,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("heatmap");
   const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
@@ -40,10 +43,13 @@ const ModelComparisonSection: React.FC = () => {
               model,
               provider: getProviderForModel(model),
               metric: activeMetric,
-              [`latency_${percentile}_ms`]: latency[percentile],
+              ...(latency
+                ? { [`latency_${percentile}_ms`]: latency[percentile] }
+                : {}),
               ...(avgWER !== undefined
                 ? { avg_wer_percent: avgWER, wer_std_dev: werStdDev }
                 : {}),
+              ...(werDataset ? { wer_dataset: werDataset } : {}),
               runs: sampleCount,
             }))
           }
@@ -57,6 +63,8 @@ const ModelComparisonSection: React.FC = () => {
           getProviderForModel={getProviderForModel}
           percentileIdx={percentileIdx}
           onPercentileChange={setPercentileIdx}
+          werLabel={werDataset ? datasetLabel(werDataset) : undefined}
+          werLoading={werDatasetLoading}
         />
       </Card>
     </div>

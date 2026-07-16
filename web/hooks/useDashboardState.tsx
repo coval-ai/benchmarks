@@ -8,6 +8,7 @@ import {
   useMemo,
   useCallback,
   useDeferredValue,
+  useEffect,
 } from "react";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
@@ -28,9 +29,11 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
+import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
-import type { ModelStats } from "@/types/benchmark.types";
+import type { BarDataPoint, ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 
 export function useDashboardState(page: "tts" | "stt" | "s2s") {
@@ -53,6 +56,64 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     window: timeWindow,
   });
   const providersQuery = useProvidersQuery();
+
+  // STT only: pin the WER column to one dataset (null = pooled across all).
+  const [werDataset, setWerDataset] = useState<string | null>(null);
+  const activeWerDataset = page === "stt" ? werDataset : null;
+  const changeWerDataset = useCallback(
+    (dataset: string | null) => {
+      setWerDataset(dataset);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardWerDatasetChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        dataset: dataset ?? "all",
+      });
+    },
+    [page]
+  );
+
+  const { werByModel: werDatasetStats, loading: werDatasetLoading } =
+    useDatasetScopedWer(
+      { benchmark: benchmarkParam, window: timeWindow },
+      activeWerDataset
+    );
+  const availableWerDatasets = useMemo(
+    () => aggregatesQuery.data?.datasets ?? [],
+    [aggregatesQuery.data]
+  );
+
+  // STT only: the accuracy bar chart switches between the pooled WER
+  // (cumulative) and the easy/hard single-dataset views.
+  const [werBarView, setWerBarView] = useState<WerBarView>("cumulative");
+  const activeWerBarView = page === "stt" ? werBarView : "cumulative";
+  const werBarDatasetId =
+    WER_BAR_VIEWS.find((v) => v.key === activeWerBarView)?.dataset ?? null;
+  const changeWerBarView = useCallback(
+    (view: WerBarView) => {
+      setWerBarView(view);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardWerBarViewChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        view,
+      });
+    },
+    [page]
+  );
+  const { werByModel: werBarDatasetStats, loading: werBarLoading } =
+    useDatasetScopedWer(
+      { benchmark: benchmarkParam, window: timeWindow },
+      werBarDatasetId
+    );
+
+  useEffect(() => {
+    if (availableWerDatasets.length === 0) return;
+    if (werDataset && !availableWerDatasets.includes(werDataset)) {
+      setWerDataset(null);
+    }
+    if (werBarDatasetId && !availableWerDatasets.includes(werBarDatasetId)) {
+      setWerBarView("cumulative");
+    }
+  }, [availableWerDatasets, werDataset, werBarDatasetId]);
 
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
@@ -224,7 +285,27 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const { avgSecondary, lowestWERModel, lowestWERProvider } = keyMetrics;
 
   // Get computed data
-  const werBarData = chartData.getWERBarData();
+  const cumulativeWerBarData = chartData.getWERBarData();
+  const werBarData = useMemo<BarDataPoint[]>(() => {
+    if (!werBarDatasetStats) return cumulativeWerBarData;
+    return deferredSelectedModels
+      .map((model) => {
+        const hit = werBarDatasetStats.get(model);
+        return hit
+          ? { model, averageWER: hit.avg_value, provider: hit.provider }
+          : null;
+      })
+      .filter((b): b is BarDataPoint => b !== null)
+      .sort((a, b) => a.averageWER - b.averageWER);
+  }, [werBarDatasetStats, cumulativeWerBarData, deferredSelectedModels]);
+
+  const availableWerBarViews = useMemo(() => {
+    if (page !== "stt") return [];
+    const available = new Set(availableWerDatasets);
+    return WER_BAR_VIEWS.filter(
+      (v) => v.dataset === null || available.has(v.dataset)
+    );
+  }, [page, availableWerDatasets]);
 
   const werBarDataWithColors = useMemo(() => {
     const hasSelection = werBarData.some((item) => clickedWERBars.has(item.model));
@@ -278,10 +359,19 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
 
-  const heatmapDisplayData = useMemo(
-    () => getHeatmapData(activeMetric),
-    [getHeatmapData, activeMetric]
-  );
+  const heatmapDisplayData = useMemo(() => {
+    const rows = getHeatmapData(activeMetric);
+    if (!werDatasetStats) return rows;
+    return rows.map((row) => {
+      const wer = werDatasetStats.get(row.model);
+      return {
+        ...row,
+        avgWER: wer?.avg_value,
+        werStdDev: wer?.stddev_value,
+        sampleCount: wer?.sample_count ?? 0,
+      };
+    });
+  }, [getHeatmapData, activeMetric, werDatasetStats]);
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = {
@@ -334,6 +424,18 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     sttMetric,
     setSttMetric,
     activeMetric,
+
+    // WER dataset pin (STT comparison card)
+    werDataset: activeWerDataset,
+    changeWerDataset,
+    availableWerDatasets,
+    werDatasetLoading,
+
+    // WER bar chart view (STT accuracy card)
+    werBarView: activeWerBarView,
+    changeWerBarView,
+    availableWerBarViews,
+    werBarLoading,
 
     // Key metrics
     primaryKeyMetric,

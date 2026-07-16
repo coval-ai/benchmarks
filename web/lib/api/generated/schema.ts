@@ -10,6 +10,7 @@ export interface paths {
         query: {
           benchmark: components["schemas"]["BenchmarkLiteral"];
           window?: components["schemas"]["WindowLiteral"];
+          dataset?: string | null;
           schedule_period?: number;
         };
       };
@@ -29,6 +30,8 @@ export interface components {
     AggregatesResponse: {
       benchmark: components["schemas"]["BenchmarkLiteral"];
       window: components["schemas"]["WindowLiteral"];
+      dataset: string;
+      datasets: string[];
       model_stats: components["schemas"]["ModelStatEntry"][];
       series: components["schemas"]["SeriesPoint"][];
     };
