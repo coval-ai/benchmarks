@@ -422,7 +422,7 @@ def arena_seed_battles(per_domain: int) -> None:
 )
 @click.option(
     "--scales",
-    default="50,100,150,200,250",
+    default="100,150,200,250,300,400",
     show_default=True,
     help="Comma-separated candidate SCALE values.",
 )

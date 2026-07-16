@@ -22,7 +22,7 @@ from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus, Registere
 # Volume knob (Elo points): the rating gap at which a matchup's sampling priority
 # decays by 1/e. Tuned offline and committed — deliberately a constant, never an
 # env var, so the value running in prod is always the value in source.
-SCALE = 150.0
+SCALE = 300.0
 
 # Which leaderboard board pairing reads ratings from. A single global board for
 # now; per-domain boards can replace these once a domain has enough votes.
