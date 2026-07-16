@@ -10,16 +10,16 @@ export const metricDescriptions = {
   ttft: {
     short: "Time to First Token",
     tooltip:
-      "Time until the provider returns its first transcript token — how quickly partial results start streaming. Low TTFT with high TTFS points to slow finalization. Lower is better.",
+      "Time until the provider returns its first transcript token, showing how quickly partial results start streaming. Low TTFT with high TTFS points to slow finalization. Lower is better.",
     detailed:
       "We run TTFT measurements on a fixed test case to measure consistency over time. A model that consistently responds within a narrow time range provides better user experience than one with highly variable timing, even if the variable model is sometimes faster. Unpredictable delays can be seen through sudden latency spikes."
   },
   ttfs: {
     short: "Time to Final Segment",
     tooltip:
-      "Time from end of speech until the final transcript is returned — the delay a voice agent actually waits before it can respond. Lower is better.",
+      "Time from end of speech until the final transcript is returned, the delay a voice agent actually waits before it can respond. Lower is better.",
     detailed:
-      "TTFS measures how quickly a provider returns the final transcript once speech has ended, anchored at a shared VAD end-of-speech point so every provider is compared from the same instant. It isolates engine finalization speed — the latency a voice agent actually waits on before it can respond — independent of how long the speaker talked."
+      "TTFS measures how quickly a provider returns the final transcript once speech has ended, anchored at a shared VAD end-of-speech point so every provider is compared from the same instant. It isolates engine finalization speed, the latency a voice agent actually waits on before it can respond, independent of how long the speaker talked."
   },
   wer: {
     short: "Word Error Rate (%)",

@@ -180,7 +180,7 @@ const LatencyAccuracySection: React.FC = () => {
           {activeTab === "stt" && metric === "TTFS" && (
             <ul data-chart-legend className="mb-4 ml-auto">
               <li
-                className="flex items-center gap-1.5 font-mono text-xs"
+                className="flex items-center gap-1.5 text-xs"
                 style={{ color: themeColors.textSecondary }}
               >
                 <span
