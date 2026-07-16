@@ -477,6 +477,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           </p>
           {(tip.pinned
             ? [
+                ["Max", `${tip.point.stats.max.toFixed(0)}ms`],
                 ["P95", `${tip.point.stats.p95.toFixed(0)}ms`],
                 ["P75", `${tip.point.quartiles.q3.toFixed(0)}ms`],
                 ["P50", `${tip.point.quartiles.median.toFixed(0)}ms`],
