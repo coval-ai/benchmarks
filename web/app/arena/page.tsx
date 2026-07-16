@@ -3,27 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { ARENA_DOMAINS, type ArenaDomain } from "@/lib/arena/domains";
 import { getBattleSource } from "@/lib/arena/source";
-import type { BlindBattle, Outcome, Reveal, RevealedModel } from "@/lib/arena/types";
+import type {
+  BlindBattle,
+  ExamplePrompt,
+  Outcome,
+  Reveal,
+  RevealedModel,
+} from "@/lib/arena/types";
 import { AudioPlayer } from "./components/AudioPlayer";
 
 const MIN_CHARS = 3;
 const MAX_CHARS = 500;
-const EXAMPLES: { text: string; domain: ArenaDomain }[] = [
-  { text: "Thanks for calling — I can help you with that refund right away.", domain: "customer-service" },
-  { text: "This is the third time I've called about the same broken dishwasher, and I am absolutely furious!", domain: "customer-service" },
-  { text: "Your prescription refill is ready for pickup at the pharmacy.", domain: "healthcare" },
-  { text: "Take 500 milligrams every eight hours for the next 10 days.", domain: "healthcare" },
-  { text: "Would Tuesday or Thursday work better for a quick demo?", domain: "sales" },
-  { text: "We won it! The committee voted unanimously — welcome to the family!", domain: "sales" },
-  { text: "Good morning, thank you for calling — how may I direct your call?", domain: "receptionist-booking" },
-  { text: "You won't believe it — a cancellation just came in for the exact date you wanted!", domain: "receptionist-booking" },
-  { text: "The northern lights danced across the sky in ribbons of green and violet.", domain: "other" },
-  { text: "Honestly? I'd grab the earlier train. Traffic downtown is brutal today.", domain: "other" },
-];
-
-function pickExample(): { text: string; domain: ArenaDomain } {
-  return EXAMPLES[Math.floor(Math.random() * EXAMPLES.length)] ?? EXAMPLES[0]!;
-}
 
 export default function ArenaPage() {
   const source = getBattleSource();
@@ -93,8 +83,28 @@ export default function ArenaPage() {
     }
   };
 
-  const quickBattle = () => {
-    const example = pickExample();
+  const applyExample = async () => {
+    setError(null);
+    try {
+      const example = await source.getExamplePrompt();
+      setText(example.text);
+      setDomain(example.domain);
+    } catch {
+      setError("Couldn't fetch an example. Please try again.");
+    }
+  };
+
+  const quickBattle = async () => {
+    const token = ++runToken.current;
+    setError(null);
+    let example: ExamplePrompt;
+    try {
+      example = await source.getExamplePrompt();
+    } catch {
+      if (token === runToken.current) setError("Couldn't fetch an example. Please try again.");
+      return;
+    }
+    if (token !== runToken.current) return; // Stop (or a newer action) superseded this
     setText(example.text);
     setDomain(example.domain);
     void generate(example.text, example.domain);
@@ -113,7 +123,7 @@ export default function ArenaPage() {
         setReveal(null); // vote is recorded; identities just unavailable
       }
       setRecorded(true);
-      if (autoAdvance) quickBattle();
+      if (autoAdvance) void quickBattle();
     } catch {
       setVote(null); // let them retry
       setError("Couldn't record your vote. Please try again.");
@@ -158,11 +168,7 @@ export default function ArenaPage() {
           <div className="flex items-center justify-between text-sm text-text-tertiary">
             <button
               type="button"
-              onClick={() => {
-                const example = pickExample();
-                setText(example.text);
-                setDomain(example.domain);
-              }}
+              onClick={() => void applyExample()}
               className="font-sans underline underline-offset-2 hover:text-text-secondary"
             >
               Use an example
@@ -237,7 +243,7 @@ export default function ArenaPage() {
                 <button
                   ref={nextBattleRef}
                   type="button"
-                  onClick={quickBattle}
+                  onClick={() => void quickBattle()}
                   className="rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active"
                 >
                   Another battle

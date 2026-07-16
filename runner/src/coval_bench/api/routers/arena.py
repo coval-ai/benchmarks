@@ -3,10 +3,11 @@
 
 """Voice Arena endpoints.
 
-``GET  /v1/arena/battle``       — a battle to vote on (blind: no model identities).
-``GET  /v1/arena/battle/{id}``  — a specific battle.
-``GET  /v1/arena/leaderboard``  — the latest computed board for a metric/domain.
-``POST /v1/arena/vote``         — record a labeler's vote (labeler-only at MVP).
+``GET  /v1/arena/battle``          — a battle to vote on (blind: no model identities).
+``GET  /v1/arena/battle/{id}``     — a specific battle.
+``GET  /v1/arena/example-prompt``  — a random seed-bank prompt with its domain.
+``GET  /v1/arena/leaderboard``     — the latest computed board for a metric/domain.
+``POST /v1/arena/vote``            — record a labeler's vote (labeler-only at MVP).
 
 Reads hit the pool directly; the write path uses the arena DB-access layer
 (``ArenaStore``). Leaderboard rows are produced by the snapshot job, so the
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import secrets
 import uuid
 from typing import Any
 
@@ -38,6 +40,7 @@ from coval_bench.api.schemas import (
     ArenaLeaderboardResponse,
     BattleCreate,
     BattleOut,
+    ExamplePromptOut,
     LeaderboardEntryOut,
     RevealModelOut,
     RevealOut,
@@ -52,6 +55,7 @@ from coval_bench.arena.pairing import (
     active_tts_models,
     select_pair,
 )
+from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
@@ -155,6 +159,20 @@ async def get_battle(
         {"$process_person_profile": False},
     )
     return await _battle_out(settings, row)
+
+
+@router.get(
+    "/arena/example-prompt",
+    response_model=ExamplePromptOut,
+    dependencies=[Depends(require_labeler)],
+)
+@limiter.limit("60/minute")
+async def get_example_prompt(
+    request: Request,  # required by slowapi
+) -> ExamplePromptOut:
+    """Return a random prompt from the per-domain seed bank, tagged with its domain."""
+    domain = secrets.choice(list(EXAMPLE_PROMPTS))
+    return ExamplePromptOut(prompt=secrets.choice(EXAMPLE_PROMPTS[domain]), domain=domain)
 
 
 @router.get(

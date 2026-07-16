@@ -1,6 +1,28 @@
 import { getEnabledTtsModels } from "../playground/providers";
 import type { ArenaDomain } from "./domains";
-import type { BattleSource, BlindBattle, Reveal, RevealedModel, VoteInput, VoteResult } from "./types";
+import type {
+  BattleSource,
+  BlindBattle,
+  ExamplePrompt,
+  Reveal,
+  RevealedModel,
+  VoteInput,
+  VoteResult,
+} from "./types";
+
+// Offline stand-in for the runner's seed bank (GET /v1/arena/example-prompt).
+const EXAMPLE_PROMPTS: ExamplePrompt[] = [
+  { text: "Thanks for calling — I can help you with that refund right away.", domain: "customer-service" },
+  { text: "This is the third time I've called about the same broken dishwasher, and I am absolutely furious!", domain: "customer-service" },
+  { text: "Your prescription refill is ready for pickup at the pharmacy.", domain: "healthcare" },
+  { text: "Take 500 milligrams every eight hours for the next 10 days.", domain: "healthcare" },
+  { text: "Would Tuesday or Thursday work better for a quick demo?", domain: "sales" },
+  { text: "We won it! The committee voted unanimously — welcome to the family!", domain: "sales" },
+  { text: "Good morning, thank you for calling — how may I direct your call?", domain: "receptionist-booking" },
+  { text: "You won't believe it — a cancellation just came in for the exact date you wanted!", domain: "receptionist-booking" },
+  { text: "The northern lights danced across the sky in ribbons of green and violet.", domain: "other" },
+  { text: "Honestly? I'd grab the earlier train. Traffic downtown is brutal today.", domain: "other" },
+];
 
 // Self-contained mock: no network, no backend. Generates two distinct audible tones as
 // WAV data URIs so the real <audio> player works exactly as in production, picks two
@@ -71,6 +93,13 @@ export class MockBattleSource implements BattleSource {
       audioA: toneDataUri(220), // A3
       audioB: toneDataUri(330), // E4 — clearly distinct from A
     };
+  }
+
+  async getExamplePrompt(): Promise<ExamplePrompt> {
+    await delay(120);
+    const example = EXAMPLE_PROMPTS[Math.floor(Math.random() * EXAMPLE_PROMPTS.length)];
+    if (!example) throw new Error("arena mock: no example prompts");
+    return example;
   }
 
   async submitVote(input: VoteInput): Promise<VoteResult> {
