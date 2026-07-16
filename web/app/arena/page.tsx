@@ -289,6 +289,12 @@ export default function ArenaPage() {
                 >
                   View leaderboard
                 </a>
+                <a
+                  href="/arena/admin"
+                  className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
+                >
+                  Monitoring
+                </a>
               </div>
             </div>
           ) : (

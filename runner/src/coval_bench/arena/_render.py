@@ -10,24 +10,35 @@ operator can open in any browser. Pure string builders — trivially unit-testab
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 
 # Sequential white -> deep-blue ramp (low count -> high count).
 _RAMP_LOW = (255, 255, 255)
 _RAMP_HIGH = (8, 48, 107)
-# Distinct hues cycled across series in a line chart.
+# CVD-validated 8-hue categorical palette; ordering is the safety mechanism.
+# Beyond 8 series, identity is color+dash (never a 9th generated hue).
 _SERIES_COLORS = (
-    "#1f77b4",
-    "#d62728",
-    "#2ca02c",
-    "#9467bd",
-    "#ff7f0e",
-    "#17becf",
-    "#8c564b",
-    "#e377c2",
-    "#7f7f7f",
-    "#bcbd22",
+    "#2a78d6",
+    "#008300",
+    "#e87ba4",
+    "#eda100",
+    "#1baf7a",
+    "#eb6834",
+    "#4a3aa7",
+    "#e34948",
 )
+_SERIES_DASHES = ("", "6 3", "2 2", "8 3 2 3")
+
+
+def _nice_step(span: float, target_ticks: int = 6) -> float:
+    """A 1/2/5-scaled tick step giving roughly ``target_ticks`` labels."""
+    raw = span / max(target_ticks, 1)
+    magnitude = 10.0 ** math.floor(math.log10(raw))
+    for mult in (1.0, 2.0, 5.0, 10.0):
+        if raw <= mult * magnitude:
+            return mult * magnitude
+    return 10.0 * magnitude
 
 
 def _lerp_color(t: float) -> str:
@@ -113,8 +124,10 @@ def line_chart(
     pad = 48.0
     xs = [x for x, _ in pts]
     ys = [y for _, y in pts] + ([ref_y] if ref_y is not None else [])
-    x_min, x_max = min(xs), max(xs)
-    y_min, y_max = min(ys), max(ys)
+    # Anchor both axes at 0 when the data allows: votes and CI widths are
+    # non-negative, and distance-to-zero is part of what the chart shows.
+    x_min, x_max = min(0.0, min(xs)), max(xs)
+    y_min, y_max = min(0.0, min(ys)), max(ys)
     x_span = x_max - x_min or 1.0
     y_span = y_max - y_min or 1.0
 
@@ -124,18 +137,59 @@ def line_chart(
     def py(y: float) -> float:
         return height - pad - (y - y_min) / y_span * (height - 2 * pad)
 
-    # Legend grows rightward from the plot edge; widen the canvas so long names
-    # are not clipped at the viewBox (~6px/char at font 10).
-    label_px = max((len(name) for name in series), default=0) * 6
+    # Legend grows rightward from the plot edge; widen the canvas so the
+    # color+dash swatch and long names are not clipped at the viewBox
+    # (~6px/char at font 10, plus 28px for the swatch).
+    label_px = max((len(name) for name in series), default=0) * 6 + 28
     canvas_w = width - pad + 12 + label_px
     parts = [f'<svg viewBox="0 0 {canvas_w:g} {height}" width="{canvas_w:g}" height="{height}">']
     parts.append(
-        f'<line x1="{pad}" y1="{height - pad}" x2="{width - pad}" '
-        f'y2="{height - pad}" stroke="#999"/>'
-        f'<line x1="{pad}" y1="{pad}" x2="{pad}" y2="{height - pad}" stroke="#999"/>'
+        "<style>"
+        "g.s polyline{stroke-width:2}"
+        "g.s:hover polyline{stroke-width:3.5}"
+        "svg:has(g.s:hover) g.s:not(:hover){opacity:.25}"
+        "</style>"
+    )
+
+    x0, y0 = px(x_min), py(y_min)
+    x_step = _nice_step(x_span)
+    y_step = _nice_step(y_span)
+    ticks: list[str] = []
+    v = math.ceil(x_min / x_step) * x_step
+    while v <= x_max + 1e-9:
+        tx = px(v)
+        ticks.append(
+            f'<line x1="{tx:.1f}" y1="{pad}" x2="{tx:.1f}" y2="{y0:.1f}" stroke="#e1e0d9"/>'
+            f'<line x1="{tx:.1f}" y1="{y0:.1f}" x2="{tx:.1f}" y2="{y0 + 5:.1f}" stroke="#c3c2b7"/>'
+            f'<text x="{tx:.1f}" y="{y0 + 16:.1f}" text-anchor="middle" font-size="10" '
+            f'fill="#898781">{v:g}</text>'
+        )
+        v += x_step
+    if x_span <= 60:
+        for unit in range(math.ceil(x_min), math.floor(x_max) + 1):
+            tx = px(unit)
+            ticks.append(
+                f'<line x1="{tx:.1f}" y1="{y0:.1f}" x2="{tx:.1f}" y2="{y0 + 3:.1f}" '
+                f'stroke="#c3c2b7"/>'
+            )
+    v = math.ceil(y_min / y_step) * y_step
+    while v <= y_max + 1e-9:
+        ty = py(v)
+        ticks.append(
+            f'<line x1="{pad}" y1="{ty:.1f}" x2="{width - pad}" y2="{ty:.1f}" stroke="#e1e0d9"/>'
+            f'<line x1="{pad - 5}" y1="{ty:.1f}" x2="{pad}" y2="{ty:.1f}" stroke="#c3c2b7"/>'
+            f'<text x="{pad - 8}" y="{ty + 3:.1f}" text-anchor="end" font-size="10" '
+            f'fill="#898781">{v:g}</text>'
+        )
+        v += y_step
+    parts.extend(ticks)
+
+    parts.append(
+        f'<line x1="{pad}" y1="{y0:.1f}" x2="{width - pad}" y2="{y0:.1f}" stroke="#c3c2b7"/>'
+        f'<line x1="{x0:.1f}" y1="{pad}" x2="{x0:.1f}" y2="{y0:.1f}" stroke="#c3c2b7"/>'
     )
     parts.append(
-        f'<text x="{width / 2}" y="{height - 12}" text-anchor="middle" '
+        f'<text x="{width / 2}" y="{height - 8}" text-anchor="middle" '
         f'font-size="12">{_esc(x_label)}</text>'
         f'<text x="14" y="{height / 2}" text-anchor="middle" font-size="12" '
         f'transform="rotate(-90 14 {height / 2})">{_esc(y_label)}</text>'
@@ -143,18 +197,31 @@ def line_chart(
     if ref_y is not None:
         ry = py(ref_y)
         parts.append(
-            f'<line x1="{pad}" y1="{ry}" x2="{width - pad}" y2="{ry}" '
-            f'stroke="#c00" stroke-dasharray="4 3"/>'
-            f'<text x="{width - pad}" y="{ry - 4}" text-anchor="end" '
-            f'font-size="10" fill="#c00">{ref_y:g}</text>'
+            f'<line x1="{pad}" y1="{ry:.1f}" x2="{width - pad}" y2="{ry:.1f}" '
+            f'stroke="#d03b3b" stroke-dasharray="4 3"/>'
+            f'<text x="{width - pad}" y="{ry - 4:.1f}" text-anchor="end" '
+            f'font-size="10" fill="#d03b3b">target {ref_y:g}</text>'
         )
     for idx, (name, points) in enumerate(series.items()):
         color = _SERIES_COLORS[idx % len(_SERIES_COLORS)]
+        dash = _SERIES_DASHES[(idx // len(_SERIES_COLORS)) % len(_SERIES_DASHES)]
+        dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
         path = " ".join(f"{px(x):.1f},{py(y):.1f}" for x, y in points)
-        parts.append(f'<polyline fill="none" stroke="{color}" points="{path}"/>')
+        markers = "".join(
+            f'<circle cx="{px(x):.1f}" cy="{py(y):.1f}" r="3" fill="{color}">'
+            f"<title>{_esc(name)} — {x_label} {x:g}, {y_label} {y:.4g}</title></circle>"
+            for x, y in points
+        )
         parts.append(
-            f'<text x="{width - pad + 6}" y="{12 + idx * 14}" font-size="10" '
-            f'fill="{color}">{_esc(name)}</text>'
+            f'<g class="s"><polyline fill="none" stroke="{color}"{dash_attr} '
+            f'points="{path}"><title>{_esc(name)}</title></polyline>{markers}</g>'
+        )
+        ly = 12 + idx * 14
+        parts.append(
+            f'<line x1="{width - pad + 6}" y1="{ly - 3}" x2="{width - pad + 26}" '
+            f'y2="{ly - 3}" stroke="{color}"{dash_attr} stroke-width="2"/>'
+            f'<text x="{width - pad + 30}" y="{ly}" font-size="10" '
+            f'fill="#111">{_esc(name)}</text>'
         )
     parts.append("</svg>")
     return "".join(parts)
