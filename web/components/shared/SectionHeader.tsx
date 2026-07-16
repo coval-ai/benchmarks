@@ -240,7 +240,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
               <MetricInfo
                 content={description.detailed}
                 align="left"
-                panelClassName="top-full mt-1.5 w-[min(38rem,calc(100vw-4rem))]"
+                panelClassName="top-full mt-1.5 hidden w-[min(38rem,calc(100vw-4rem))] sm:block"
               >
                 <button
                   type="button"

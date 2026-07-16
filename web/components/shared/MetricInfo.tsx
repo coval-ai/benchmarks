@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useRef, useState } from "react";
 import { metricDescriptions } from "@/lib/config/metrics";
 
 const alignClasses = {
@@ -28,6 +28,15 @@ const MetricInfo: React.FC<{
 }) => {
   const id = useId();
   const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
   const info: { short: string; tooltip?: string } | undefined = metric
     ? metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions]
     : undefined;
@@ -48,6 +57,7 @@ const MetricInfo: React.FC<{
   const isElement = React.isValidElement(children);
   return (
     <span
+      ref={wrapperRef}
       className={`group relative inline-block ${isElement ? "" : "-m-2 cursor-help p-2"}`}
       tabIndex={isElement ? undefined : 0}
       aria-describedby={isElement ? undefined : id}
