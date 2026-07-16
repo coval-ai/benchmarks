@@ -7,6 +7,8 @@ type Props = {
   label: string;
   isActive: boolean; // true when this is the side currently allowed to play
   onActivate: () => void; // claim single-playback focus
+  autoPlay?: boolean; // start playing as soon as this side holds focus
+  onEnded?: () => void;
 };
 
 function fmt(t: number): string {
@@ -16,7 +18,7 @@ function fmt(t: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
+export function AudioPlayer({ src, label, isActive, onActivate, autoPlay, onEnded }: Props) {
   const ref = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -28,6 +30,12 @@ export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
   useEffect(() => {
     if (!isActive) ref.current?.pause();
   }, [isActive]);
+
+  // Auto-play on gaining focus. A browser autoplay block just leaves the
+  // player paused with its normal play button.
+  useEffect(() => {
+    if (autoPlay && isActive) ref.current?.play().catch(() => {});
+  }, [autoPlay, isActive]);
 
   // Pause on unmount so audio never outlives the component.
   useEffect(() => {
@@ -61,6 +69,7 @@ export function AudioPlayer({ src, label, isActive, onActivate }: Props) {
             setPlaying(false);
             setProgress(0);
             if (ref.current) ref.current.currentTime = 0; // rearm for replay from the start
+            onEnded?.();
           }}
           onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
           onTimeUpdate={(e) =>

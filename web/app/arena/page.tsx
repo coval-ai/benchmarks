@@ -31,8 +31,11 @@ export default function ArenaPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<"a" | "b" | null>(null);
+  const [autoPlay, setAutoPlay] = useState(false);
   const nextBattleRef = useRef<HTMLButtonElement>(null);
   const runToken = useRef(0);
+  const autoAdvanceRef = useRef(autoAdvance);
+  autoAdvanceRef.current = autoAdvance;
 
   useEffect(() => {
     try {
@@ -81,7 +84,10 @@ export default function ArenaPage() {
       setVote(null);
       setReveal(null);
       setRecorded(false);
-      setActive(null);
+      // With auto-advance on, play the new battle hands-free: A starts now,
+      // B takes over when A ends (see onEnded below).
+      setActive(autoAdvanceRef.current ? "a" : null);
+      setAutoPlay(autoAdvanceRef.current);
     } catch {
       if (token === runToken.current) setError("Couldn't generate audio. Please try again.");
     } finally {
@@ -121,6 +127,7 @@ export default function ArenaPage() {
     setSubmitting(true);
     setVote(outcome);
     setActive(null); // stop both players
+    setAutoPlay(false);
     try {
       await source.submitVote({ battleId: battle.battleId, outcome, voterId });
       try {
@@ -129,12 +136,22 @@ export default function ArenaPage() {
         setReveal(null); // vote is recorded; identities just unavailable
       }
       setRecorded(true);
-      if (autoAdvance) void quickBattle();
+      if (autoAdvanceRef.current) void quickBattle();
     } catch {
       setVote(null); // let them retry
       setError("Couldn't record your vote. Please try again.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const chainEnded = (side: "a" | "b") => {
+    if (!autoPlay) return;
+    if (side === "a") {
+      setActive("b");
+    } else {
+      setAutoPlay(false);
+      setActive(null);
     }
   };
 
@@ -197,6 +214,8 @@ export default function ArenaPage() {
             isActive={active === "a"}
             src={battle?.audioA ?? null}
             onActivate={() => setActive("a")}
+            autoPlay={autoPlay}
+            onEnded={() => chainEnded("a")}
           />
           <div className="flex items-center justify-center font-mono text-xs text-text-tertiary">
             VS
@@ -209,6 +228,8 @@ export default function ArenaPage() {
             isActive={active === "b"}
             src={battle?.audioB ?? null}
             onActivate={() => setActive("b")}
+            autoPlay={autoPlay}
+            onEnded={() => chainEnded("b")}
           />
         </div>
 
@@ -323,6 +344,8 @@ function BattleCard({
   isActive,
   src,
   onActivate,
+  autoPlay,
+  onEnded,
 }: {
   side: "a" | "b";
   blindTitle: string;
@@ -331,6 +354,8 @@ function BattleCard({
   isActive: boolean;
   src: string | null;
   onActivate: () => void;
+  autoPlay: boolean;
+  onEnded: () => void;
 }) {
   const won = picked === (side === "a" ? "A_WIN" : "B_WIN");
   const tie = picked === "TIE";
@@ -364,6 +389,8 @@ function BattleCard({
         label={`Model ${side.toUpperCase()}`}
         isActive={isActive}
         onActivate={onActivate}
+        autoPlay={autoPlay}
+        onEnded={onEnded}
       />
     </div>
   );
