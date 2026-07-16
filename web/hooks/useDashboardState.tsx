@@ -30,6 +30,7 @@ import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
 import type { BarDataPoint, ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
@@ -70,30 +71,15 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [page]
   );
 
-  const werDatasetQuery = useAggregatesQuery({
-    benchmark: benchmarkParam,
-    window: timeWindow,
-    ...(activeWerDataset ? { dataset: activeWerDataset } : {}),
-  });
+  const { werByModel: werDatasetStats, loading: werDatasetLoading } =
+    useDatasetScopedWer(
+      { benchmark: benchmarkParam, window: timeWindow },
+      activeWerDataset
+    );
   const availableWerDatasets = useMemo(
     () => aggregatesQuery.data?.datasets ?? [],
     [aggregatesQuery.data]
   );
-  const werDatasetStats = useMemo(() => {
-    if (!activeWerDataset) return null;
-    const map = new Map<string, { avg: number; std: number }>();
-    (werDatasetQuery.data?.model_stats ?? []).forEach((s) => {
-      if (s.metric_type !== "WER") return;
-      map.set(toModelKey(s.provider, s.model), {
-        avg: s.avg_value,
-        std: s.stddev_value,
-      });
-    });
-    return map;
-  }, [activeWerDataset, werDatasetQuery.data]);
-  const werDatasetLoading =
-    activeWerDataset !== null &&
-    (werDatasetQuery.isLoading || werDatasetQuery.isPlaceholderData);
 
   // STT only: the accuracy bar chart switches between the pooled WER
   // (cumulative) and the easy/hard single-dataset views.
@@ -112,14 +98,11 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     },
     [page]
   );
-  const werBarDatasetQuery = useAggregatesQuery({
-    benchmark: benchmarkParam,
-    window: timeWindow,
-    ...(werBarDatasetId ? { dataset: werBarDatasetId } : {}),
-  });
-  const werBarLoading =
-    werBarDatasetId !== null &&
-    (werBarDatasetQuery.isLoading || werBarDatasetQuery.isPlaceholderData);
+  const { werByModel: werBarDatasetStats, loading: werBarLoading } =
+    useDatasetScopedWer(
+      { benchmark: benchmarkParam, window: timeWindow },
+      werBarDatasetId
+    );
 
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
@@ -293,30 +276,17 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   // Get computed data
   const cumulativeWerBarData = chartData.getWERBarData();
   const werBarData = useMemo<BarDataPoint[]>(() => {
-    if (!werBarDatasetId) return cumulativeWerBarData;
-    const byKey = new Map<string, { avg: number; provider: string }>();
-    (werBarDatasetQuery.data?.model_stats ?? []).forEach((s) => {
-      if (s.metric_type !== "WER") return;
-      byKey.set(toModelKey(s.provider, s.model), {
-        avg: s.avg_value,
-        provider: s.provider,
-      });
-    });
+    if (!werBarDatasetStats) return cumulativeWerBarData;
     return deferredSelectedModels
       .map((model) => {
-        const hit = byKey.get(model);
+        const hit = werBarDatasetStats.get(model);
         return hit
-          ? { model, averageWER: hit.avg, provider: hit.provider }
+          ? { model, averageWER: hit.avg_value, provider: hit.provider }
           : null;
       })
       .filter((b): b is BarDataPoint => b !== null)
       .sort((a, b) => a.averageWER - b.averageWER);
-  }, [
-    werBarDatasetId,
-    cumulativeWerBarData,
-    werBarDatasetQuery.data,
-    deferredSelectedModels,
-  ]);
+  }, [werBarDatasetStats, cumulativeWerBarData, deferredSelectedModels]);
 
   const availableWerBarViews = useMemo(() => {
     if (page !== "stt") return [];
@@ -385,8 +355,8 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       const wer = werDatasetStats.get(row.model);
       return {
         ...row,
-        avgWER: wer?.avg,
-        werStdDev: wer?.std,
+        avgWER: wer?.avg_value,
+        werStdDev: wer?.stddev_value,
       };
     });
   }, [getHeatmapData, activeMetric, werDatasetStats]);
