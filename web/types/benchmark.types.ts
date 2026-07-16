@@ -65,6 +65,10 @@ export interface BoxPlotDataPoint {
     mean: number;
     std: number;
     count: number;
+    /** True extremes and p95, before any whisker clamping. */
+    min: number;
+    max: number;
+    p95: number;
   };
 }
 
