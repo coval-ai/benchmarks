@@ -6,6 +6,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
+import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
@@ -15,6 +16,8 @@ interface ModelComparisonTableProps {
   getProviderForModel: (model: string) => string;
   percentileIdx: number;
   onPercentileChange: (idx: number) => void;
+  werLabel?: string;
+  werLoading?: boolean;
 }
 
 type ColumnKey = "latency" | "avgWER" | "sampleCount";
@@ -47,7 +50,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel,
   percentileIdx,
-  onPercentileChange
+  onPercentileChange,
+  werLabel,
+  werLoading
 }) => {
   const activeTab = useActiveTab();
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
@@ -57,7 +62,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   const percentile = (PERCENTILES[percentileIdx] ?? PERCENTILES[DEFAULT_PERCENTILE_IDX])!;
 
   // Latency-only benchmarks (S2S) ship rows without WER; hide that column.
-  const hasWER = useMemo(() => data.every((d) => d.avgWER !== undefined), [data]);
+  const hasWER = useMemo(() => data.some((d) => d.avgWER !== undefined), [data]);
   const columns = useMemo(
     () => (hasWER ? COLUMNS : COLUMNS.filter((c) => c.key !== "avgWER")),
     [hasWER]
@@ -74,9 +79,10 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     const [latencyMin, latencySpan] = span(
       data.map((d) => d.latency[percentile.key])
     );
-    const [werMin, werSpan] = hasWER
-      ? span(data.map((d) => d.avgWER ?? 0))
-      : [0, 0];
+    const werValues = data
+      .map((d) => d.avgWER)
+      .filter((v): v is number => v !== undefined);
+    const [werMin, werSpan] = werValues.length > 0 ? span(werValues) : [0, 0];
     const rel = (v: number, min: number, s: number) =>
       s === 0 ? 1 : (min + s - v) / s;
 
@@ -85,10 +91,16 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         ...d,
         latency: d.latency[percentile.key],
         latencyRel: rel(d.latency[percentile.key], latencyMin, latencySpan),
-        werRel: hasWER ? rel(d.avgWER ?? 0, werMin, werSpan) : 1
+        werRel:
+          hasWER && d.avgWER !== undefined
+            ? rel(d.avgWER, werMin, werSpan)
+            : 1
       }))
       .sort((a, b) => {
-        const delta = (a[sort.key] ?? 0) - (b[sort.key] ?? 0);
+        const [av, bv] = [a[sort.key], b[sort.key]];
+        if (av === undefined || bv === undefined)
+          return (av === undefined ? 1 : 0) - (bv === undefined ? 1 : 0);
+        const delta = av - bv;
         return sort.direction === "asc" ? delta : -delta;
       });
 
@@ -177,6 +189,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
             </span>
           )}
         </span>
+        <WerDatasetSelect className="ml-auto" />
       </div>
 
       <div className="overflow-x-auto">
@@ -213,6 +226,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                           : "↓"
                         : ""}
                     </span>
+                    {column.key === "avgWER" && werLabel && (
+                      <span className="block text-[10px] font-normal normal-case text-text-tertiary">
+                        {werLabel}
+                      </span>
+                    )}
                   </button>
                 </th>
               ))}
@@ -245,13 +263,21 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                   cell(
                     row,
                     "avgWER",
-                    <>
-                      {(row.avgWER ?? 0).toFixed(1)}
-                      <span className="text-xs text-text-tertiary">
-                        % ± {(row.werStdDev ?? 0).toFixed(1)}
-                      </span>
-                      {bar(row.werRel)}
-                    </>
+                    <div
+                      className={`transition-opacity ${werLoading ? "opacity-40" : ""}`}
+                    >
+                      {row.avgWER !== undefined ? (
+                        <>
+                          {row.avgWER.toFixed(1)}
+                          <span className="text-xs text-text-tertiary">
+                            % ± {(row.werStdDev ?? 0).toFixed(1)}
+                          </span>
+                          {bar(row.werRel)}
+                        </>
+                      ) : (
+                        <span className="text-text-tertiary">—</span>
+                      )}
+                    </div>
                   )}
                 {cell(
                   row,

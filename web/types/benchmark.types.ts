@@ -35,8 +35,8 @@ export type LatencyPercentile =
 export interface ModelHeatmapData {
   model: string;
   latency: Record<LatencyPercentile, number>;
-  // Absent on latency-only benchmarks (S2S); the comparison table hides the
-  // WER column when any row lacks it.
+  // Absent on latency-only benchmarks (S2S), or on models with no rows for a
+  // pinned WER dataset.
   avgWER?: number;
   werStdDev?: number;
   sampleCount: number;

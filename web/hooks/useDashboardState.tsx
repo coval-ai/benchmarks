@@ -54,6 +54,46 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   });
   const providersQuery = useProvidersQuery();
 
+  // STT only: pin the WER column to one dataset (null = pooled across all).
+  const [werDataset, setWerDataset] = useState<string | null>(null);
+  const activeWerDataset = page === "stt" ? werDataset : null;
+  const changeWerDataset = useCallback(
+    (dataset: string | null) => {
+      setWerDataset(dataset);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardWerDatasetChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        dataset: dataset ?? "all",
+      });
+    },
+    [page]
+  );
+
+  const werDatasetQuery = useAggregatesQuery({
+    benchmark: benchmarkParam,
+    window: timeWindow,
+    ...(activeWerDataset ? { dataset: activeWerDataset } : {}),
+  });
+  const availableWerDatasets = useMemo(
+    () => aggregatesQuery.data?.datasets ?? [],
+    [aggregatesQuery.data]
+  );
+  const werDatasetStats = useMemo(() => {
+    if (!activeWerDataset) return null;
+    const map = new Map<string, { avg: number; std: number }>();
+    (werDatasetQuery.data?.model_stats ?? []).forEach((s) => {
+      if (s.metric_type !== "WER") return;
+      map.set(toModelKey(s.provider, s.model), {
+        avg: s.avg_value,
+        std: s.stddev_value,
+      });
+    });
+    return map;
+  }, [activeWerDataset, werDatasetQuery.data]);
+  const werDatasetLoading =
+    activeWerDataset !== null &&
+    (werDatasetQuery.isLoading || werDatasetQuery.isPlaceholderData);
+
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
   const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
@@ -278,10 +318,18 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
           "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
       };
 
-  const heatmapDisplayData = useMemo(
-    () => getHeatmapData(activeMetric),
-    [getHeatmapData, activeMetric]
-  );
+  const heatmapDisplayData = useMemo(() => {
+    const rows = getHeatmapData(activeMetric);
+    if (!werDatasetStats) return rows;
+    return rows.map((row) => {
+      const wer = werDatasetStats.get(row.model);
+      return {
+        ...row,
+        avgWER: wer?.avg,
+        werStdDev: wer?.std,
+      };
+    });
+  }, [getHeatmapData, activeMetric, werDatasetStats]);
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = {
@@ -334,6 +382,12 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     sttMetric,
     setSttMetric,
     activeMetric,
+
+    // WER dataset pin (STT comparison card)
+    werDataset: activeWerDataset,
+    changeWerDataset,
+    availableWerDatasets,
+    werDatasetLoading,
 
     // Key metrics
     primaryKeyMetric,
