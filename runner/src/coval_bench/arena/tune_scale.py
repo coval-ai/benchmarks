@@ -45,7 +45,7 @@ from coval_bench.registries.models import RegisteredModel
 
 _EPS = 1e-12
 
-DEFAULT_SCALES = (50.0, 100.0, 150.0, 200.0, 250.0)
+DEFAULT_SCALES = (100.0, 150.0, 200.0, 250.0, 300.0, 400.0)
 
 
 @dataclass(frozen=True)
