@@ -100,6 +100,12 @@ def _parse_time(raw: object) -> datetime | None:
         return None
 
 
+def _error_status(raw: object) -> str | None:
+    """Normalize Coval's error_status field; clean runs report the string "SUCCESS"."""
+    status = cast("str | None", raw) or None
+    return None if status == "SUCCESS" else status
+
+
 def _bucket_start(at: datetime, period_seconds: int) -> datetime:
     """Floor a timestamp to the epoch-anchored fetch grid."""
     epoch = int(at.timestamp())
@@ -132,7 +138,7 @@ async def recent_completed_runs(
         run = CovalRun(
             run_id=cast("str", r["run_id"]),
             create_time=_parse_time(r.get("create_time")),
-            error_status=cast("str | None", r.get("error_status")) or None,
+            error_status=_error_status(r.get("error_status")),
         )
         if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
             continue
@@ -201,7 +207,7 @@ async def _ingest_run(
         resp = await client.get(f"/runs/{coval_run.run_id}")
         resp.raise_for_status()
         run = cast("dict[str, Any]", resp.json()["run"])
-        error_status = run.get("error_status")
+        error_status = _error_status(run.get("error_status"))
         if error_status:
             logger.warning(
                 "errored_run_skipped",

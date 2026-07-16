@@ -33,7 +33,7 @@ def _list_json(*runs: dict[str, Any]) -> dict[str, Any]:
 def _run_json(
     values: list[dict[str, Any]],
     metric_id: str = "MID",
-    error_status: str | None = None,
+    error_status: str | None = "SUCCESS",
 ) -> dict[str, Any]:
     run: dict[str, Any] = {"results": {"metrics": {metric_id: {"values": values}}}}
     if error_status:
@@ -125,7 +125,7 @@ def test_result_rows_maps_values() -> None:
 async def test_recent_completed_runs_window_and_parse() -> None:
     captured: list[httpx.Request] = []
     list_json = _list_json(
-        {"run_id": "R3", "create_time": _iso(timedelta(hours=1))},
+        {"run_id": "R3", "create_time": _iso(timedelta(hours=1)), "error_status": "SUCCESS"},
         {
             "run_id": "R2",
             "create_time": _iso(timedelta(hours=4)),
