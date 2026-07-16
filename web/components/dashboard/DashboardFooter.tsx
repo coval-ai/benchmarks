@@ -4,9 +4,8 @@
 import Link from "next/link";
 import React from "react";
 
-// Dark gradient footer mirrored from www.coval.ai (`.footer`). Layout and
-// colors replicate the live site's `.footer-*` classes. Colors are hardcoded
-// light-on-dark (the cream design tokens would be dark-on-dark here).
+// Footer layout mirrored from www.coval.ai (`.footer-*`), recolored with the
+// theme tokens so it sits flush on the page background in both themes.
 
 // Site navigation, mirrored from the top nav sections plus the source repo.
 const FOOTER_LINKS = [
@@ -20,20 +19,12 @@ const GITHUB_URL = "https://github.com/coval-ai/benchmarks";
 
 const DashboardFooter: React.FC = () => {
   return (
-    <footer
-      className="relative flex min-h-[calc(25vh-30px)] w-full flex-col overflow-hidden text-[#999]"
-      style={{
-        background:
-          "linear-gradient(to bottom, #0f0c0a 0% 55%, #0c0908 68%, #080604 80%, #040302, #000)"
-      }}
-    >
-      <div aria-hidden className="footer-noise" />
-
+    <footer className="w-full border-t border-border-primary bg-background text-text-secondary">
       {/* .footer-inner */}
-      <div className="relative z-[1] flex w-full flex-1 flex-col justify-center px-4 py-8 md:px-6">
+      <div className="flex w-full flex-col justify-center px-4 py-8 md:px-6">
         {/* .footer-bottom */}
         <div className="flex flex-col items-start gap-3">
-          <span className="font-sans text-lg font-medium tracking-wide text-[#f2f1ee]">
+          <span className="font-sans text-lg font-medium tracking-wide text-text-primary">
             Voice AI Benchmarks
           </span>
 
@@ -45,7 +36,7 @@ const DashboardFooter: React.FC = () => {
               <Link
                 key={link.href}
                 href={link.href}
-                className="text-[#ccc] transition-colors duration-150 hover:text-[#f2f1ee]"
+                className="text-text-secondary transition-colors duration-150 hover:text-text-primary"
               >
                 {link.label}
               </Link>
@@ -54,7 +45,7 @@ const DashboardFooter: React.FC = () => {
               href={GITHUB_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-[#ccc] transition-colors duration-150 hover:text-[#f2f1ee]"
+              className="inline-flex items-center gap-1.5 text-text-secondary transition-colors duration-150 hover:text-text-primary"
             >
               <svg
                 viewBox="0 0 16 16"
@@ -69,7 +60,7 @@ const DashboardFooter: React.FC = () => {
             </a>
           </nav>
 
-          <p className="text-xs text-[#555]">&copy; 2026 Coval, Inc.</p>
+          <p className="text-xs text-text-tertiary">&copy; 2026 Coval, Inc.</p>
         </div>
       </div>
     </footer>
