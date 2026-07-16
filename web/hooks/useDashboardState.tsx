@@ -357,6 +357,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
         ...row,
         avgWER: wer?.avg_value,
         werStdDev: wer?.stddev_value,
+        sampleCount: wer?.sample_count ?? 0,
       };
     });
   }, [getHeatmapData, activeMetric, werDatasetStats]);
