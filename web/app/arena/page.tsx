@@ -34,6 +34,8 @@ export default function ArenaPage() {
   const [autoPlay, setAutoPlay] = useState(false);
   const nextBattleRef = useRef<HTMLButtonElement>(null);
   const runToken = useRef(0);
+  const autoAdvanceRef = useRef(autoAdvance);
+  autoAdvanceRef.current = autoAdvance;
 
   useEffect(() => {
     try {
@@ -84,8 +86,8 @@ export default function ArenaPage() {
       setRecorded(false);
       // With auto-advance on, play the new battle hands-free: A starts now,
       // B takes over when A ends (see onEnded below).
-      setActive(autoAdvance ? "a" : null);
-      setAutoPlay(autoAdvance);
+      setActive(autoAdvanceRef.current ? "a" : null);
+      setAutoPlay(autoAdvanceRef.current);
     } catch {
       if (token === runToken.current) setError("Couldn't generate audio. Please try again.");
     } finally {
@@ -134,7 +136,7 @@ export default function ArenaPage() {
         setReveal(null); // vote is recorded; identities just unavailable
       }
       setRecorded(true);
-      if (autoAdvance) void quickBattle();
+      if (autoAdvanceRef.current) void quickBattle();
     } catch {
       setVote(null); // let them retry
       setError("Couldn't record your vote. Please try again.");
