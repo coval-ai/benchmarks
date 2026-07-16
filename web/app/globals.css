@@ -228,37 +228,11 @@ body {
   mix-blend-mode: multiply;
 }
 
-/* Multiply vanishes on Ink, so screen-blend the grain (like the footer) and
-   lift the opacity to keep the texture visible in dark mode. */
+/* Multiply vanishes on Ink, so screen-blend the grain and lift the opacity to
+   keep the texture visible in dark mode. */
 [data-theme="dark"] .noise-overlay {
   opacity: 0.06;
   mix-blend-mode: screen;
-}
-
-/* Footer grain — coval.ai's `.footer-noise`: screen-blended, fading in toward
-   the bottom of the dark band. */
-.footer-noise {
-  position: absolute;
-  inset: 0;
-  background-image: var(--noise-bg);
-  background-repeat: repeat;
-  background-size: 256px 256px;
-  opacity: 0.27;
-  mix-blend-mode: screen;
-  pointer-events: none;
-  z-index: 0;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.4) 25%,
-    rgba(0, 0, 0, 1) 60%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.4) 25%,
-    rgba(0, 0, 0, 1) 60%
-  );
 }
 
 .tooltip-scroll {
