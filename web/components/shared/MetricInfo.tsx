@@ -42,9 +42,12 @@ const MetricInfo: React.FC<{
     : undefined;
   let body: React.ReactNode = content ?? null;
   if (body == null && info?.tooltip) {
+    const childText = React.Children.toArray(children)
+      .filter((c): c is string => typeof c === "string")
+      .join("")
+      .trim();
     const repeatsTrigger =
-      typeof children === "string" &&
-      children.trim().toLowerCase() === info.short.toLowerCase();
+      childText.toLowerCase() === info.short.toLowerCase();
     body = repeatsTrigger ? (
       info.tooltip
     ) : (

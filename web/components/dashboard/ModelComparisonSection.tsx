@@ -12,6 +12,7 @@ import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
 import { datasetLabel } from "@/lib/config/datasets";
+import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -37,7 +38,7 @@ const ModelComparisonSection: React.FC = () => {
             detailed:
               "Latency percentiles come straight from the measured runs — drag the slider to move from the fastest run (p0) through the median to the slowest (p100). Click a column to sort.",
           }}
-          expandable={false}
+          note={metricAboutNote(activeMetric)}
           exportRows={() =>
             data.map(({ model, latency, avgWER, werStdDev, sampleCount }) => ({
               model,

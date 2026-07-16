@@ -1,6 +1,20 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Definition of the active metric, shown as a bolded block inside the
+// "About this benchmark" tooltip on cards that carry the TTFS/TTFT toggle —
+// the toggle buttons themselves carry no tooltips. Metrics without a tooltip
+// (TTFA, V2V) resolve to undefined and add nothing.
+export const metricAboutNote = (
+  metric: string
+): { term: string; text: string } | undefined => {
+  const d =
+    metricDescriptions[metric.toLowerCase() as keyof typeof metricDescriptions];
+  return d && "tooltip" in d
+    ? { term: `${metric} — ${d.short}`, text: d.tooltip }
+    : undefined;
+};
+
 export const metricDescriptions = {
   ttfa: {
     short: "Time to First Audio",
@@ -24,7 +38,7 @@ export const metricDescriptions = {
   wer: {
     short: "Word Error Rate (%)",
     detailed:
-      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users. Click a bar to highlight it for comparison."
+      "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
   },
   "human-parity": {
     short: "Human-parity zone",

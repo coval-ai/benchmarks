@@ -68,6 +68,8 @@ export interface ChartPNGHeader {
   stat?: { label: string; value: string };
   /** Mutates the cloned SVG before rasterizing, e.g. to label scatter dots. */
   annotate?: (clone: SVGSVGElement) => void;
+  /** Pinned y-axis rendered as a sibling SVG, composited left of the plot. */
+  axis?: SVGSVGElement;
 }
 
 const FONT = "ui-sans-serif, system-ui, sans-serif";
@@ -279,6 +281,8 @@ export async function downloadChartPNG(
   const dark = isDarkBg(colors.tooltipBg);
   const svgRect = svg.getBoundingClientRect();
   const { width, height } = svgRect;
+  const axisWidth = header.axis?.getBoundingClientRect().width ?? 0;
+  const fullWidth = width + axisWidth;
   // The rendered SVG often reserves empty space below its content (e.g. room
   // recharts keeps for its HTML legend); crop it so the image ends where the
   // chart does. The bound comes from text elements (axis ticks/titles are the
@@ -292,6 +296,12 @@ export async function downloadChartPNG(
   clone.setAttribute("width", `${width}`);
   clone.setAttribute("height", `${height}`);
   header.annotate?.(clone);
+  let axisClone: SVGSVGElement | undefined;
+  if (header.axis) {
+    axisClone = header.axis.cloneNode(true) as SVGSVGElement;
+    axisClone.setAttribute("width", `${axisWidth}`);
+    axisClone.setAttribute("height", `${height}`);
+  }
   // Annotations may land below the chart's own text (labelScatterDots records
   // how far down it drew); they must survive the crop too.
   const annotationBottom =
@@ -305,11 +315,17 @@ export async function downloadChartPNG(
     )
   );
   let chart: HTMLImageElement;
+  let axisImg: HTMLImageElement | undefined;
   let logo: HTMLImageElement;
   try {
     chart = await loadImage(
       `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`
     );
+    if (axisClone) {
+      axisImg = await loadImage(
+        `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(axisClone))}`
+      );
+    }
     logo = await loadImage("/coval-logo.svg");
   } catch {
     return false;
@@ -319,7 +335,7 @@ export async function downloadChartPNG(
   const canvas = document.createElement("canvas");
   const measure = canvas.getContext("2d");
   if (!measure) return false;
-  const rows = legendRows(measure, header.legend ?? [], width);
+  const rows = legendRows(measure, header.legend ?? [], fullWidth);
   // Measure the headline stat first so we know how much width it claims.
   let statW = 0;
   if (header.stat) {
@@ -332,9 +348,9 @@ export async function downloadChartPNG(
   // so stack the stat under the title when a legible title strip (≥140px) can't
   // sit beside it. Either way the title WRAPS into the width actually available,
   // so a long multi-word title wraps instead of running off the canvas edge.
-  const statFitsBeside = header.stat ? statW + 16 + 140 <= width : false;
+  const statFitsBeside = header.stat ? statW + 16 + 140 <= fullWidth : false;
   const availableTitleWidth =
-    width - (header.stat && statFitsBeside ? statW + 16 : 0);
+    fullWidth - (header.stat && statFitsBeside ? statW + 16 : 0);
   measure.font = `600 20px ${FONT}`;
   const titleLines = header.title
     ? wrapText(measure, header.title, availableTitleWidth)
@@ -352,7 +368,7 @@ export async function downloadChartPNG(
     (titleBlock > 0 || rows.length > 0 ? 12 : 0);
   // The bottom strip carries the optional x-axis title and the watermark.
   const bottomBlock = Math.max(header.xLabel ? 24 : 0, logoHeight + 10);
-  const totalWidth = width + 2 * MARGIN;
+  const totalWidth = fullWidth + 2 * MARGIN;
   const totalHeight = MARGIN + headerBlock + contentHeight + bottomBlock + MARGIN / 2;
   canvas.width = totalWidth * 2;
   canvas.height = totalHeight * 2;
@@ -412,13 +428,26 @@ export async function downloadChartPNG(
   }
   ctx.globalAlpha = 1;
   const chartY = MARGIN + headerBlock;
+  if (axisImg) {
+    ctx.drawImage(
+      axisImg,
+      0,
+      0,
+      axisWidth,
+      contentHeight,
+      MARGIN,
+      chartY,
+      axisWidth,
+      contentHeight
+    );
+  }
   ctx.drawImage(
     chart,
     0,
     0,
     width,
     contentHeight,
-    MARGIN,
+    MARGIN + axisWidth,
     chartY,
     width,
     contentHeight

@@ -356,7 +356,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     : {
         short: "Word Error Rate (%)",
         detailed:
-          "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses. We evaluate against test audio that includes diverse speakers, accents, and real-world audio conditions. Click a bar to highlight it for comparison.",
+          "In voice AI applications, transcription accuracy directly impacts the performance of downstream tasks. Even small transcription errors can lead to misinterpretations, frustrating experiences, or incorrect system responses.",
       };
 
   const heatmapDisplayData = useMemo(() => {
