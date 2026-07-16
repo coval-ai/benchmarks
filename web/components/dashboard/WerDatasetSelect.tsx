@@ -7,10 +7,12 @@ import React from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
+import MetricInfo from "@/components/shared/MetricInfo";
 
 const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
   const activeTab = useActiveTab();
-  const { werDataset, changeWerDataset, availableWerDatasets } = useDashboard();
+  const { werDataset, changeWerDataset, availableWerDatasets, isMobile } =
+    useDashboard();
 
   if (activeTab !== "stt" || availableWerDatasets.length === 0) return null;
 
@@ -24,14 +26,20 @@ const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
     ));
 
   return (
-    <label
+    <span
       className={`inline-flex items-center gap-2 text-xs text-text-secondary${
         className ? ` ${className}` : ""
       }`}
     >
-      WER dataset
+      <MetricInfo
+        content="Scopes the WER column to one evaluation set. Full datasets are distinct recordings; WildASR perturbations replay the clean utterances with one degradation applied. Pooled blends every dataset in the window."
+        align={isMobile ? "left" : "right"}
+      >
+        WER dataset
+      </MetricInfo>
       <span className="relative inline-flex">
         <select
+          aria-label="WER dataset"
           value={werDataset ?? ""}
           onChange={(e) => changeWerDataset(e.target.value || null)}
           className="appearance-none rounded-lg border border-border-primary bg-surface-elevated py-1.5 pl-2.5 pr-7 text-xs font-medium text-text-primary outline-none transition-colors hover:border-selected-border focus:border-selected-border"
@@ -63,7 +71,7 @@ const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
           />
         </svg>
       </span>
-    </label>
+    </span>
   );
 };
 

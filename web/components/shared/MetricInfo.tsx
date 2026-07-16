@@ -62,6 +62,11 @@ const MetricInfo: React.FC<{
       tabIndex={isElement ? undefined : 0}
       aria-describedby={isElement ? undefined : id}
       onClick={isElement ? undefined : () => setOpen((prev) => !prev)}
+      onPointerUp={
+        isElement
+          ? (e) => e.pointerType !== "mouse" && setOpen((prev) => !prev)
+          : undefined
+      }
       onBlur={isElement ? undefined : () => setOpen(false)}
     >
       {isElement

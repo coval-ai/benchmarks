@@ -24,7 +24,7 @@ const MetricToggle: React.FC = () => {
             type="button"
             onClick={() => setSttMetric(m)}
             className={
-              "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
+              "rounded-md px-4 py-3 text-sm sm:px-3 sm:py-1 sm:text-xs font-medium transition-colors " +
               (sttMetric === m
                 ? "bg-surface-primary text-text-primary shadow-sm"
                 : "text-text-secondary hover:text-text-primary")

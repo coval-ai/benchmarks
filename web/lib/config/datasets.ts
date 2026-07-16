@@ -27,8 +27,26 @@ export type WerBarView = "cumulative" | "clean" | "production";
 
 // cumulative pools every dataset; clean/production pin the bar chart to the
 // clean-audio (WildASR clean) and conversational (PipeCat) sets respectively.
-export const WER_BAR_VIEWS: { key: WerBarView; label: string; dataset: string | null }[] = [
-  { key: "cumulative", label: "Cumulative", dataset: null },
-  { key: "clean", label: "Clean", dataset: "stt-wildasr-clean" },
-  { key: "production", label: "Production", dataset: "stt-v3" },
+export const WER_BAR_VIEWS: { key: WerBarView; label: string; dataset: string | null; tooltip: string }[] = [
+  {
+    key: "cumulative",
+    label: "Cumulative",
+    dataset: null,
+    tooltip:
+      "Pools every dataset in the window — clean, production, and WildASR perturbation sets — into one blended WER.",
+  },
+  {
+    key: "clean",
+    label: "Clean",
+    dataset: "stt-wildasr-clean",
+    tooltip:
+      "WildASR clean only: studio-quality, undegraded speech — the baseline the perturbation sets degrade.",
+  },
+  {
+    key: "production",
+    label: "Production",
+    dataset: "stt-v3",
+    tooltip:
+      "PipeCat only: spontaneous voice-agent conversations with fragments and fillers — the closest to real production traffic.",
+  },
 ];
