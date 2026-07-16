@@ -735,7 +735,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="xai",
         model="grok-realtime",
         tags=(_REALTIME, _MULTI),
-        status=_ACTIVE,
+        # hidden from the site for launch while xAI capacity issues distort
+        # latency; the fetch job doesn't read this registry, so data keeps
+        # accruing for the flip back to active.
+        status=_PENDING,
     ),
 ]
 
