@@ -18,14 +18,14 @@ export function useDatasetScopedWer(
   });
 
   const werByModel = useMemo(() => {
-    if (!datasetId) return null;
+    if (!datasetId || (query.isError && !query.data)) return null;
     const map = new Map<string, ModelStatEntry>();
     (query.data?.model_stats ?? []).forEach((s) => {
       if (s.metric_type !== "WER") return;
       map.set(toModelKey(s.provider, s.model), s);
     });
     return map;
-  }, [datasetId, query.data]);
+  }, [datasetId, query.data, query.isError]);
 
   const loading =
     datasetId !== null && (query.isLoading || query.isPlaceholderData);

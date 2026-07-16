@@ -8,6 +8,7 @@ import {
   useMemo,
   useCallback,
   useDeferredValue,
+  useEffect,
 } from "react";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
@@ -103,6 +104,16 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       { benchmark: benchmarkParam, window: timeWindow },
       werBarDatasetId
     );
+
+  useEffect(() => {
+    if (availableWerDatasets.length === 0) return;
+    if (werDataset && !availableWerDatasets.includes(werDataset)) {
+      setWerDataset(null);
+    }
+    if (werBarDatasetId && !availableWerDatasets.includes(werBarDatasetId)) {
+      setWerBarView("cumulative");
+    }
+  }, [availableWerDatasets, werDataset, werBarDatasetId]);
 
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
