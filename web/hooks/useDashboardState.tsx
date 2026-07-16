@@ -28,9 +28,10 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
+import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
-import type { ModelStats } from "@/types/benchmark.types";
+import type { BarDataPoint, ModelStats } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 
 export function useDashboardState(page: "tts" | "stt" | "s2s") {
@@ -93,6 +94,32 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const werDatasetLoading =
     activeWerDataset !== null &&
     (werDatasetQuery.isLoading || werDatasetQuery.isPlaceholderData);
+
+  // STT only: the accuracy bar chart switches between the pooled WER
+  // (cumulative) and the easy/hard single-dataset views.
+  const [werBarView, setWerBarView] = useState<WerBarView>("cumulative");
+  const activeWerBarView = page === "stt" ? werBarView : "cumulative";
+  const werBarDatasetId =
+    WER_BAR_VIEWS.find((v) => v.key === activeWerBarView)?.dataset ?? null;
+  const changeWerBarView = useCallback(
+    (view: WerBarView) => {
+      setWerBarView(view);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardWerBarViewChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        view,
+      });
+    },
+    [page]
+  );
+  const werBarDatasetQuery = useAggregatesQuery({
+    benchmark: benchmarkParam,
+    window: timeWindow,
+    ...(werBarDatasetId ? { dataset: werBarDatasetId } : {}),
+  });
+  const werBarLoading =
+    werBarDatasetId !== null &&
+    (werBarDatasetQuery.isLoading || werBarDatasetQuery.isPlaceholderData);
 
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
@@ -264,7 +291,40 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const { avgSecondary, lowestWERModel, lowestWERProvider } = keyMetrics;
 
   // Get computed data
-  const werBarData = chartData.getWERBarData();
+  const cumulativeWerBarData = chartData.getWERBarData();
+  const werBarData = useMemo<BarDataPoint[]>(() => {
+    if (!werBarDatasetId) return cumulativeWerBarData;
+    const byKey = new Map<string, { avg: number; provider: string }>();
+    (werBarDatasetQuery.data?.model_stats ?? []).forEach((s) => {
+      if (s.metric_type !== "WER") return;
+      byKey.set(toModelKey(s.provider, s.model), {
+        avg: s.avg_value,
+        provider: s.provider,
+      });
+    });
+    return deferredSelectedModels
+      .map((model) => {
+        const hit = byKey.get(model);
+        return hit
+          ? { model, averageWER: hit.avg, provider: hit.provider }
+          : null;
+      })
+      .filter((b): b is BarDataPoint => b !== null)
+      .sort((a, b) => a.averageWER - b.averageWER);
+  }, [
+    werBarDatasetId,
+    cumulativeWerBarData,
+    werBarDatasetQuery.data,
+    deferredSelectedModels,
+  ]);
+
+  const availableWerBarViews = useMemo(() => {
+    if (page !== "stt") return [];
+    const available = new Set(availableWerDatasets);
+    return WER_BAR_VIEWS.filter(
+      (v) => v.dataset === null || available.has(v.dataset)
+    );
+  }, [page, availableWerDatasets]);
 
   const werBarDataWithColors = useMemo(() => {
     const hasSelection = werBarData.some((item) => clickedWERBars.has(item.model));
@@ -388,6 +448,12 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     changeWerDataset,
     availableWerDatasets,
     werDatasetLoading,
+
+    // WER bar chart view (STT accuracy card)
+    werBarView: activeWerBarView,
+    changeWerBarView,
+    availableWerBarViews,
+    werBarLoading,
 
     // Key metrics
     primaryKeyMetric,

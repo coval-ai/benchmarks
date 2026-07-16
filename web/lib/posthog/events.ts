@@ -19,7 +19,8 @@ export const POSTHOG_EVENTS = {
   playgroundResultPlayed: "playground_result_played",
   dashboardTimeWindowChanged: "dashboard_time_window_changed",
   dashboardChartShared: "dashboard_chart_shared",
-  dashboardWerDatasetChanged: "dashboard_wer_dataset_changed"
+  dashboardWerDatasetChanged: "dashboard_wer_dataset_changed",
+  dashboardWerBarViewChanged: "dashboard_wer_bar_view_changed"
 } as const;
 
 export type PostHogSurface =

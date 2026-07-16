@@ -19,6 +19,7 @@ import { normalizeModelName } from "@/lib/utils/formatters";
 import CustomBarChartTick from "@/components/charts/CustomBarChartTick";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
+import WerBarViewToggle from "@/components/dashboard/WerBarViewToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -36,6 +37,7 @@ const AccuracyBarSection: React.FC = () => {
     handleWERBarClick,
     clearWERBars,
     hasActiveFacets,
+    werBarLoading,
   } = useDashboard();
 
   const themeColors = useThemeColors();
@@ -128,6 +130,7 @@ const AccuracyBarSection: React.FC = () => {
               werBarDataWithColors.length === 0 ? "—" : `${avgWER.toFixed(1)}%`,
           }}
         />
+        <WerBarViewToggle />
         {selectedBars.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
             {selectedBars.map((item) => (
@@ -162,7 +165,10 @@ const AccuracyBarSection: React.FC = () => {
             </button>
           </div>
         )}
-        <div className="h-96 overflow-x-auto" onMouseEnter={trackChartHover}>
+        <div
+          className={`h-96 overflow-x-auto transition-opacity ${werBarLoading ? "opacity-40" : ""}`}
+          onMouseEnter={trackChartHover}
+        >
           <ResponsiveContainer
             width="100%"
             height="100%"

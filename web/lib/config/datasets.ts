@@ -21,3 +21,13 @@ export function datasetLabel(id: string): string {
 export function isPerturbationDataset(id: string): boolean {
   return id.startsWith("stt-wildasr-");
 }
+
+export type WerBarView = "cumulative" | "easy" | "hard";
+
+// cumulative pools every dataset; easy/hard pin the bar chart to the read-speech
+// and conversational sets respectively.
+export const WER_BAR_VIEWS: { key: WerBarView; label: string; dataset: string | null }[] = [
+  { key: "cumulative", label: "Cumulative", dataset: null },
+  { key: "easy", label: "Easy", dataset: "stt-v1" },
+  { key: "hard", label: "Hard", dataset: "stt-v3" },
+];
