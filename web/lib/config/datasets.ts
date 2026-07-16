@@ -19,7 +19,8 @@ export function datasetLabel(id: string): string {
 }
 
 export function isPerturbationDataset(id: string): boolean {
-  return id.startsWith("stt-wildasr-");
+  // WildASR clean is the undegraded baseline, so it groups with the full sets.
+  return id.startsWith("stt-wildasr-") && id !== "stt-wildasr-clean";
 }
 
 export type WerBarView = "cumulative" | "clean" | "production";
