@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.arena.pairing import active_tts_models
+from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.providers.base import TTSResult
 from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
 
@@ -174,6 +175,24 @@ async def test_get_battle_404_when_empty(client: AsyncClient, postgresql: Any) -
     """No battles seeded -> 404."""
     await _apply_arena_schema(_make_db_url(postgresql))
     response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
+    assert response.status_code == 404
+
+
+async def test_example_prompt_served_from_bank(client: AsyncClient, postgresql: Any) -> None:
+    """The example endpoint returns a bank prompt tagged with its source domain."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    response = await client.get("/v1/arena/example-prompt", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["prompt"] in EXAMPLE_PROMPTS[data["domain"]]
+
+
+async def test_example_prompt_hidden_without_labeler_key(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Unauthenticated callers get 404, indistinguishable from a missing route."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    response = await client.get("/v1/arena/example-prompt")
     assert response.status_code == 404
 
 

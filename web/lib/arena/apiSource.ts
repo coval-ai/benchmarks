@@ -1,5 +1,12 @@
 import type { ArenaDomain } from "./domains";
-import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from "./types";
+import type {
+  BattleSource,
+  BlindBattle,
+  ExamplePrompt,
+  Reveal,
+  VoteInput,
+  VoteResult,
+} from "./types";
 
 // Real battle source: talks to same-origin Next.js API proxy routes under /api/arena/*,
 // which inject the server-only X-Labeler-Key and proxy to the runner. Inert until
@@ -8,6 +15,7 @@ import type { BattleSource, BlindBattle, Reveal, VoteInput, VoteResult } from ".
 //   POST /api/arena/battle              { text, domain }                -> BlindBattle
 //   POST /api/arena/vote                { battleId, outcome, voterId }  -> VoteResult
 //   GET  /api/arena/battle/{id}/reveal?voterId=...                      -> Reveal
+//   GET  /api/arena/example-prompt                                      -> ExamplePrompt
 
 // Coarse hang-backstops, not latency SLAs; tune once real backend latency is known.
 const QUICK_TIMEOUT_MS = 5_000; // vote/reveal: quick DB ops
@@ -31,6 +39,14 @@ export class ApiBattleSource implements BattleSource {
 
   submitVote(input: VoteInput): Promise<VoteResult> {
     return postJson<VoteResult>("/api/arena/vote", input);
+  }
+
+  async getExamplePrompt(): Promise<ExamplePrompt> {
+    const res = await fetch("/api/arena/example-prompt", {
+      signal: AbortSignal.timeout(QUICK_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`example-prompt -> ${res.status}`);
+    return (await res.json()) as ExamplePrompt;
   }
 
   async reveal(battleId: string, voterId: string): Promise<Reveal> {

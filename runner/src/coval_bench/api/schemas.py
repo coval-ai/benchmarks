@@ -217,6 +217,13 @@ class BattleCreate(BaseModel):
     domain: ArenaDomain | None = None
 
 
+class ExamplePromptOut(BaseModel):
+    """A random seed-bank prompt for the arena UI's example picker."""
+
+    prompt: str
+    domain: ArenaDomain
+
+
 class LeaderboardEntryOut(BaseModel):
     """One model's row within an arena leaderboard board."""
 

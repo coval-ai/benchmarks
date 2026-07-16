@@ -3,10 +3,11 @@
 
 """Voice Arena endpoints.
 
-``GET  /v1/arena/battle``       — a battle to vote on (blind: no model identities).
-``GET  /v1/arena/battle/{id}``  — a specific battle.
-``GET  /v1/arena/leaderboard``  — the latest computed board for a metric/domain.
-``POST /v1/arena/vote``         — record a labeler's vote (labeler-only at MVP).
+``GET  /v1/arena/battle``          — a battle to vote on (blind: no model identities).
+``GET  /v1/arena/battle/{id}``     — a specific battle.
+``GET  /v1/arena/example-prompt``  — a random seed-bank prompt with its domain.
+``GET  /v1/arena/leaderboard``     — the latest computed board for a metric/domain.
+``POST /v1/arena/vote``            — record a labeler's vote (labeler-only at MVP).
 
 Reads hit the pool directly; the write path uses the arena DB-access layer
 (``ArenaStore``). Leaderboard rows are produced by the snapshot job, so the
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import secrets
 import uuid
 from typing import Any
 
@@ -29,6 +31,7 @@ import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
+from slowapi.util import get_remote_address
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
@@ -38,6 +41,7 @@ from coval_bench.api.schemas import (
     ArenaLeaderboardResponse,
     BattleCreate,
     BattleOut,
+    ExamplePromptOut,
     LeaderboardEntryOut,
     RevealModelOut,
     RevealOut,
@@ -52,6 +56,7 @@ from coval_bench.arena.pairing import (
     active_tts_models,
     select_pair,
 )
+from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
@@ -106,6 +111,14 @@ def require_labeler(
         raise HTTPException(404)
 
 
+def _client_key(request: Request) -> str:
+    """Rate-limit key: the end client forwarded by the BFF, else the caller address.
+
+    All browser traffic reaches this API through the BFF, so keying on the remote
+    address would pool every labeler into one shared bucket."""
+    return request.headers.get("x-arena-client") or get_remote_address(request)
+
+
 async def _battle_out(settings: Settings, row: dict[str, Any]) -> BattleOut:
     """Resolve stored clip keys to fresh playable URLs (off the loop — GCS signing is I/O)."""
     row = dict(row)
@@ -155,6 +168,20 @@ async def get_battle(
         {"$process_person_profile": False},
     )
     return await _battle_out(settings, row)
+
+
+@router.get(
+    "/arena/example-prompt",
+    response_model=ExamplePromptOut,
+    dependencies=[Depends(require_labeler)],
+)
+@limiter.limit("60/minute", key_func=_client_key)
+async def get_example_prompt(
+    request: Request,  # required by slowapi
+) -> ExamplePromptOut:
+    """Return a random prompt from the per-domain seed bank, tagged with its domain."""
+    domain = secrets.choice(list(EXAMPLE_PROMPTS))
+    return ExamplePromptOut(prompt=secrets.choice(EXAMPLE_PROMPTS[domain]), domain=domain)
 
 
 @router.get(

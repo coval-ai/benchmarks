@@ -2,6 +2,12 @@ import type { ArenaDomain } from "./domains";
 
 export type Outcome = "A_WIN" | "B_WIN" | "TIE";
 
+// A seed-bank prompt with the domain it belongs to, for the "Use an example" picker.
+export interface ExamplePrompt {
+  text: string;
+  domain: ArenaDomain;
+}
+
 // What the UI renders during the blind phase — never any model identity.
 export interface BlindBattle {
   battleId: string;
@@ -39,4 +45,5 @@ export interface BattleSource {
   createBattle(text: string, domain: ArenaDomain): Promise<BlindBattle>;
   submitVote(input: VoteInput): Promise<VoteResult>;
   reveal(battleId: string, voterId: string): Promise<Reveal>;
+  getExamplePrompt(): Promise<ExamplePrompt>;
 }
