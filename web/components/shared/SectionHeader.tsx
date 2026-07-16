@@ -50,7 +50,6 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   exportXLabel,
   exportAnnotate,
 }) => {
-  const [showDetails, setShowDetails] = useState(false);
   const [copied, setCopied] = useState(false);
   const themeColors = useThemeColors();
   const anchorId = label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -235,31 +234,17 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           {description.short}
         </p>
         {expandable ? (
-          <>
-            <span className="text-sm font-light text-text-tertiary">
-              <MetricInfo
-                content={description.detailed}
-                align="left"
-                panelClassName="top-full mt-1.5 hidden w-[min(38rem,calc(100vw-4rem))] sm:block"
-              >
-                <button
-                  type="button"
-                  onClick={() => setShowDetails((prev) => !prev)}
-                  aria-expanded={showDetails}
-                  className="-my-2 inline-flex cursor-help items-center gap-1 py-2 transition-colors hover:text-text-secondary"
-                >
-                  About this benchmark
-                  <Info size={14} aria-hidden="true" />
-                </button>
-              </MetricInfo>
-              {hint && <span> • {hint}</span>}
-            </span>
-            {showDetails && (
-              <p className="mt-2 text-text-tertiary text-sm leading-snug sm:hidden">
-                {description.detailed}
-              </p>
-            )}
-          </>
+          <span className="text-sm font-light text-text-tertiary">
+            <MetricInfo
+              content={description.detailed}
+              align="left"
+              panelClassName="top-full mt-1.5 w-[min(38rem,calc(100vw-4rem))]"
+            >
+              About this benchmark{" "}
+              <Info size={14} aria-hidden="true" className="inline align-[-2px]" />
+            </MetricInfo>
+            {hint && <span> • {hint}</span>}
+          </span>
         ) : (
           <p className="text-text-tertiary text-sm leading-snug">
             {description.detailed}
