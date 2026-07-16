@@ -24,10 +24,10 @@ export function isPerturbationDataset(id: string): boolean {
 
 export type WerBarView = "cumulative" | "easy" | "hard";
 
-// cumulative pools every dataset; easy/hard pin the bar chart to the read-speech
-// and conversational sets respectively.
+// cumulative pools every dataset; easy/hard pin the bar chart to the clean-audio
+// (WildASR clean) and conversational (PipeCat) sets respectively.
 export const WER_BAR_VIEWS: { key: WerBarView; label: string; dataset: string | null }[] = [
   { key: "cumulative", label: "Cumulative", dataset: null },
-  { key: "easy", label: "Easy", dataset: "stt-v1" },
+  { key: "easy", label: "Easy", dataset: "stt-wildasr-clean" },
   { key: "hard", label: "Hard", dataset: "stt-v3" },
 ];
