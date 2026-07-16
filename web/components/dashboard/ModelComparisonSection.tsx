@@ -43,7 +43,9 @@ const ModelComparisonSection: React.FC = () => {
               model,
               provider: getProviderForModel(model),
               metric: activeMetric,
-              [`latency_${percentile}_ms`]: latency[percentile],
+              ...(latency
+                ? { [`latency_${percentile}_ms`]: latency[percentile] }
+                : {}),
               ...(avgWER !== undefined
                 ? { avg_wer_percent: avgWER, wer_std_dev: werStdDev }
                 : {}),

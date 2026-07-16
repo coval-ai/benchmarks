@@ -34,7 +34,9 @@ export type LatencyPercentile =
 
 export interface ModelHeatmapData {
   model: string;
-  latency: Record<LatencyPercentile, number>;
+  // Absent when the model isn't measured under the active latency metric (e.g.
+  // reports TTFT but not TTFS); the comparison table shows "Not applicable".
+  latency?: Record<LatencyPercentile, number>;
   // Absent on latency-only benchmarks (S2S), or on models with no rows for a
   // pinned WER dataset.
   avgWER?: number;

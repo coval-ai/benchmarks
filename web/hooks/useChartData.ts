@@ -12,7 +12,8 @@ import type {
   BoxPlotData,
   BoxPlotDataPoint,
   ModelHeatmapData,
-  BarDataPoint
+  BarDataPoint,
+  LatencyPercentile
 } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 import { latencyToMs, normalizeModelName, normalizeProviderNameForTab, toModelKey, parseModelKey } from "@/lib/utils/formatters";
@@ -304,28 +305,26 @@ export function useChartData({
         // S2S is latency-only; the table hides the WER column for such rows.
         const werStat = activeTab === "s2s" ? undefined : getStat(model, "WER");
 
-        if (!latencyStat || (activeTab !== "s2s" && !werStat)) return;
-
         // The schema types every stat as a number, but guard the raw fields
         // (before unit conversion, which would coerce null to 0) against a
         // response with missing/non-finite values leaking into the table.
-        const rawFields = [
-          latencyStat.min_value,
-          latencyStat.p25,
-          latencyStat.p50,
-          latencyStat.p75,
-          latencyStat.p90,
-          latencyStat.p95,
-          latencyStat.p99,
-          latencyStat.max_value,
-          latencyStat.sample_count
-        ];
-        if (werStat) rawFields.push(werStat.avg_value, werStat.stddev_value);
-        if (!rawFields.every(Number.isFinite)) return;
-
-        heatmapData.push({
-          model,
-          latency: {
+        let latency: Record<LatencyPercentile, number> | undefined;
+        let latencySampleCount: number | undefined;
+        if (
+          latencyStat &&
+          [
+            latencyStat.min_value,
+            latencyStat.p25,
+            latencyStat.p50,
+            latencyStat.p75,
+            latencyStat.p90,
+            latencyStat.p95,
+            latencyStat.p99,
+            latencyStat.max_value,
+            latencyStat.sample_count
+          ].every(Number.isFinite)
+        ) {
+          latency = {
             p0: toDisplayUnits(latencyStat.min_value),
             p25: toDisplayUnits(latencyStat.p25),
             p50: toDisplayUnits(latencyStat.p50),
@@ -334,11 +333,30 @@ export function useChartData({
             p95: toDisplayUnits(latencyStat.p95),
             p99: toDisplayUnits(latencyStat.p99),
             p100: toDisplayUnits(latencyStat.max_value)
-          },
+          };
+          latencySampleCount = latencyStat.sample_count;
+        }
+
+        // S2S needs a latency stat (no WER to fall back on). Other tabs anchor
+        // on WER: a model measured for WER but not the active latency metric
+        // (e.g. TTFT but not TTFS) stays in the table with N/A latency.
+        if (activeTab === "s2s") {
+          if (!latency) return;
+        } else if (
+          !werStat ||
+          !Number.isFinite(werStat.avg_value) ||
+          !Number.isFinite(werStat.stddev_value)
+        ) {
+          return;
+        }
+
+        heatmapData.push({
+          model,
+          ...(latency ? { latency } : {}),
           ...(werStat
             ? { avgWER: werStat.avg_value, werStdDev: werStat.stddev_value }
             : {}),
-          sampleCount: latencyStat.sample_count
+          sampleCount: latencySampleCount ?? werStat?.sample_count ?? 0
         });
       });
 

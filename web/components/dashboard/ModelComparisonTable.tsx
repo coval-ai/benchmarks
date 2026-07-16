@@ -76,9 +76,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
       const min = Math.min(...values);
       return [min, Math.max(...values) - min];
     };
-    const [latencyMin, latencySpan] = span(
-      data.map((d) => d.latency[percentile.key])
-    );
+    const latencyValues = data
+      .map((d) => d.latency?.[percentile.key])
+      .filter((v): v is number => v !== undefined);
+    const [latencyMin, latencySpan] =
+      latencyValues.length > 0 ? span(latencyValues) : [0, 0];
     const werValues = data
       .map((d) => d.avgWER)
       .filter((v): v is number => v !== undefined);
@@ -87,15 +89,19 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
       s === 0 ? 1 : (min + s - v) / s;
 
     const rows = data
-      .map((d) => ({
-        ...d,
-        latency: d.latency[percentile.key],
-        latencyRel: rel(d.latency[percentile.key], latencyMin, latencySpan),
-        werRel:
-          hasWER && d.avgWER !== undefined
-            ? rel(d.avgWER, werMin, werSpan)
-            : 1
-      }))
+      .map((d) => {
+        const latency = d.latency?.[percentile.key];
+        return {
+          ...d,
+          latency,
+          latencyRel:
+            latency !== undefined ? rel(latency, latencyMin, latencySpan) : 1,
+          werRel:
+            hasWER && d.avgWER !== undefined
+              ? rel(d.avgWER, werMin, werSpan)
+              : 1
+        };
+      })
       .sort((a, b) => {
         const [av, bv] = [a[sort.key], b[sort.key]];
         if (av === undefined || bv === undefined)
@@ -253,11 +259,15 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 {cell(
                   row,
                   "latency",
-                  <>
-                    {Math.round(row.latency)}
-                    <span className="text-xs text-text-tertiary"> ms</span>
-                    {bar(row.latencyRel)}
-                  </>
+                  row.latency !== undefined ? (
+                    <>
+                      {Math.round(row.latency)}
+                      <span className="text-xs text-text-tertiary"> ms</span>
+                      {bar(row.latencyRel)}
+                    </>
+                  ) : (
+                    <span className="text-text-tertiary">Not applicable</span>
+                  )
                 )}
                 {hasWER &&
                   cell(
