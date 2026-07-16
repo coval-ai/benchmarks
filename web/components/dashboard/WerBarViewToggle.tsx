@@ -5,7 +5,7 @@
 
 import React from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
-import { datasetLabel } from "@/lib/config/datasets";
+import MetricInfo from "@/components/shared/MetricInfo";
 
 const WerBarViewToggle: React.FC = () => {
   const { werBarView, changeWerBarView, availableWerBarViews } = useDashboard();
@@ -14,21 +14,27 @@ const WerBarViewToggle: React.FC = () => {
 
   return (
     <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-surface-toggle-inactive p-0.5">
-      {availableWerBarViews.map((view) => (
-        <button
+      {availableWerBarViews.map((view, i) => (
+        <MetricInfo
           key={view.key}
-          type="button"
-          title={view.dataset ? datasetLabel(view.dataset) : undefined}
-          onClick={() => changeWerBarView(view.key)}
-          className={
-            "rounded-md px-3 py-1 text-xs font-medium transition-colors " +
-            (werBarView === view.key
-              ? "bg-surface-primary text-text-primary shadow-sm"
-              : "text-text-secondary hover:text-text-primary")
+          content={view.tooltip}
+          align={
+            i === 0 ? "left" : i === availableWerBarViews.length - 1 ? "right" : "center"
           }
         >
-          {view.label}
-        </button>
+          <button
+            type="button"
+            onClick={() => changeWerBarView(view.key)}
+            className={
+              "rounded-md px-4 py-3 text-sm sm:px-3 sm:py-1 sm:text-xs font-medium transition-colors " +
+              (werBarView === view.key
+                ? "bg-surface-primary text-text-primary shadow-sm"
+                : "text-text-secondary hover:text-text-primary")
+            }
+          >
+            {view.label}
+          </button>
+        </MetricInfo>
       ))}
     </div>
   );
