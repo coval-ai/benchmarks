@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import tempfile
 import wave
 from collections.abc import AsyncIterator, MutableMapping
@@ -328,6 +329,49 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
+
+
+@pytest.mark.asyncio
+async def test_run_writes_artifact_when_configured(
+    audio_file: Path, settings: Settings, tmp_path: Path
+) -> None:
+    """Opt-in run artifacts capture the final in-memory result set."""
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    artifact_settings = settings.model_copy(update={"run_artifact_dir": tmp_path})
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=artifact_settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=[*_paused_registry(Benchmark.STT), _stt_entry("deepgram", "nova-2")],
+        )
+
+    artifact = tmp_path / f"run-{summary.run_id}.jsonl"
+    records = [json.loads(line) for line in artifact.read_text().splitlines()]
+    assert records[0]["record_type"] == "run"
+    assert records[0]["run_id"] == summary.run_id
+    assert records[-1]["record_type"] == "summary"
+    assert records[-1]["status"] == str(RunStatus.SUCCEEDED)
+    assert records[-1]["total_results"] == summary.total_results
+    assert {r["metric_type"] for r in records if r["record_type"] == "result"} >= {
+        "TTFT",
+        "AudioToFinal",
+        "RTF",
+        "TTFS",
+        "WER",
+    }
 
 
 # ---------------------------------------------------------------------------

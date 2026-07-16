@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # --- Runner ---
     runner_sha: str = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    run_artifact_dir: Path | None = None
 
     # Scheduler period in seconds. The runner floors its start time to this grid
     # to compute each run's scheduled_at. MUST stay in sync with the Cloud

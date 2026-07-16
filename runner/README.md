@@ -46,6 +46,10 @@ docker compose up -d api         # FastAPI on http://localhost:8000
 # Trigger a single-item benchmark run (writes to the local Postgres):
 docker compose run --rm runner coval-bench run --smoke --kind tts
 
+# Optional: write a portable JSONL artifact for the run:
+docker compose run --rm -e RUN_ARTIFACT_DIR=/tmp/artifacts runner \
+  coval-bench run --smoke --kind tts
+
 # Probe one TTS provider without DB writes:
 docker compose run --rm runner coval-bench tts-smoke \
   --provider cartesia --model sonic-3 --voice <voice-id> --text "hello"
