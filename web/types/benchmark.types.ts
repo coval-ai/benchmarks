@@ -66,7 +66,6 @@ export interface BoxPlotDataPoint {
     std: number;
     count: number;
     p95: number;
-    /** True maximum, before whisker clamping. */
     max: number;
   };
 }
