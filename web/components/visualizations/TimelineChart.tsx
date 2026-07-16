@@ -818,6 +818,7 @@ const TimelineChart: React.FC = () => {
           <ResponsiveContainer
             width="100%"
             height="100%"
+            debounce={200}
             onResize={() => requestAnimationFrame(syncInteractionBox)}
           >
             <LineChart
