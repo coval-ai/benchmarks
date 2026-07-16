@@ -57,6 +57,12 @@ export default function ArenaPage() {
 
   const stopAutoAdvance = () => {
     runToken.current += 1; // drop the in-flight next battle
+    if (battle) {
+      // Realign the inputs with the battle still on screen — quickBattle may
+      // have already written the aborted example into them.
+      setText(battle.prompt);
+      setDomain(battleDomain);
+    }
     setLoading(false);
     persistAutoAdvance(false);
   };
