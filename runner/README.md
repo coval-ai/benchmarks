@@ -47,7 +47,9 @@ docker compose up -d api         # FastAPI on http://localhost:8000
 docker compose run --rm runner coval-bench run --smoke --kind tts
 
 # Optional: write a portable JSONL artifact for the run:
-docker compose run --rm -e RUN_ARTIFACT_DIR=/tmp/artifacts runner \
+mkdir -p artifacts
+docker compose run --rm -v "$PWD/artifacts:/artifacts" \
+  -e RUN_ARTIFACT_DIR=/artifacts runner \
   coval-bench run --smoke --kind tts
 
 # Probe one TTS provider without DB writes:

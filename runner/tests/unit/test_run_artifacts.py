@@ -52,6 +52,19 @@ def test_write_run_artifact_sanitizes_transcripts_and_groups_failures(tmp_path: 
             status=ResultStatus.FAILED,
             error="timeout",
         ),
+        Result(
+            run_id=7,
+            provider="deepgram",
+            model="nova-3",
+            benchmark=Benchmark.STT,
+            metric_type="AudioToFinal",
+            metric_value=1.2,
+            metric_units="seconds",
+            audio_filename="0003.wav",
+            transcript=None,
+            status=ResultStatus.SUCCESS,
+            error=None,
+        ),
     ]
 
     path = write_run_artifact(
@@ -75,6 +88,7 @@ def test_write_run_artifact_sanitizes_transcripts_and_groups_failures(tmp_path: 
         "result",
         "result",
         "result",
+        "result",
         "summary",
     ]
     assert records[0]["dataset_id"] == "stt-v3"
@@ -82,7 +96,9 @@ def test_write_run_artifact_sanitizes_transcripts_and_groups_failures(tmp_path: 
     assert records[1]["transcript_sha256"]
     assert records[1]["transcript_chars"] == 11
     assert records[-1]["status"] == "partial"
-    assert records[-1]["success_count"] == 1
+    assert records[4]["transcript_sha256"] is None
+    assert records[4]["transcript_chars"] is None
+    assert records[-1]["success_count"] == 2
     assert records[-1]["fail_count"] == 2
     assert records[-1]["failure_buckets"] == [
         {

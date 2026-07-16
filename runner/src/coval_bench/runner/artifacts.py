@@ -150,7 +150,7 @@ def _result_row(result: Result) -> ArtifactResultRow:
 
 
 def _transcript_sha256(transcript: str | None) -> str | None:
-    if transcript is None:
+    if not isinstance(transcript, str):
         return None
     return hashlib.sha256(transcript.encode("utf-8")).hexdigest()
 

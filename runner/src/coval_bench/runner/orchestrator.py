@@ -821,7 +821,7 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
             return
 
 
-def _write_run_artifact_if_enabled(
+async def _write_run_artifact_if_enabled(
     *,
     settings: Settings,
     run_id: int,
@@ -840,7 +840,8 @@ def _write_run_artifact_if_enabled(
     if settings.run_artifact_dir is None:
         return
     try:
-        artifact_path = write_run_artifact(
+        artifact_path = await asyncio.to_thread(
+            write_run_artifact,
             artifact_dir=settings.run_artifact_dir,
             run_id=run_id,
             runner_sha=runner_sha,
@@ -1161,7 +1162,7 @@ async def run_benchmarks(
                 success_count=success_count,
                 fail_count=fail_count,
             )
-            _write_run_artifact_if_enabled(
+            await _write_run_artifact_if_enabled(
                 settings=settings,
                 run_id=run_id,
                 runner_sha=settings.runner_sha,
@@ -1231,7 +1232,7 @@ async def run_benchmarks(
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
-            _write_run_artifact_if_enabled(
+            await _write_run_artifact_if_enabled(
                 settings=settings,
                 run_id=run_id,
                 runner_sha=settings.runner_sha,
@@ -1284,7 +1285,14 @@ async def run_benchmarks(
             err_msg = _truncate(str(exc))
             log_run_failed(err_msg, exc)
             typed_results = [r for r in all_results if isinstance(r, Result)]
-            _write_run_artifact_if_enabled(
+            try:
+                await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
+            except Exception as write_exc:
+                logger.error(
+                    "run_row_update_failed_after_failure",
+                    exc_info=write_exc,
+                )
+            await _write_run_artifact_if_enabled(
                 settings=settings,
                 run_id=run_id,
                 runner_sha=settings.runner_sha,
@@ -1298,13 +1306,6 @@ async def run_benchmarks(
                 status=str(RunStatus.FAILED),
                 results=typed_results,
             )
-            try:
-                await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
-            except Exception as write_exc:
-                logger.error(
-                    "run_row_update_failed_after_failure",
-                    exc_info=write_exc,
-                )
             _emit_posthog(
                 posthog_client,
                 "benchmark_run_failed",
