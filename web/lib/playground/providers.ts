@@ -68,11 +68,11 @@ export const ttsModels: TtsModelConfig[] = [
     enabled: true
   },
   {
-    id: "cartesia:sonic-3:default",
+    id: "cartesia:sonic-3.5:default",
     provider: "cartesia",
-    label: "Sonic 3",
-    model: "sonic-3",
-    voice: "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+    label: "Sonic 3.5",
+    model: "sonic-3.5",
+    voice: "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
     enabled: true
   },
   {

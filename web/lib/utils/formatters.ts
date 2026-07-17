@@ -99,7 +99,6 @@ export function normalizeModelName(modelKey: string): string {
     eleven_flash_v2_5: "Flash v2.5",
     eleven_turbo_v2_5: "Turbo v2.5",
     eleven_v3: "v3",
-    "sonic-3": "Sonic 3",
     "sonic-3.5": "Sonic 3.5",
     "aura-2-thalia-en": "Aura 2",
     arcana: "Arcana",
