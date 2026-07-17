@@ -23,6 +23,8 @@ import {
   hasAnySelection,
   restrictToModelKeys,
   toggleFacetValue,
+  MODEL_FACET_CATEGORY,
+  MODEL_EXCLUDE_CATEGORY,
   type FacetSelection,
 } from "@/lib/utils/facets";
 import { capturePostHogEvent } from "@/lib/posthog/client";
@@ -160,21 +162,77 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     () => hasAnySelection(selectedFacets),
     [selectedFacets]
   );
+  // Pure selection transition shared by chip clicks and legend toggles. It is
+  // applied inside functional setState below so rapid successive clicks never
+  // compute from a stale render's state.
+  const applyFacetToggle = useCallback(
+    (current: FacetSelection, category: string, value: string): FacetSelection => {
+      const removing = (current[category] ?? []).includes(value);
+      const isModelCategory =
+        category === MODEL_FACET_CATEGORY || category === MODEL_EXCLUDE_CATEGORY;
+      const taggedWith = (key: string) =>
+        (tagIndex.get(key) ?? []).some(
+          (t) => t.category === category && t.value === value
+        );
+      const picks = current[MODEL_FACET_CATEGORY] ?? [];
+      // A provider chip ringed only by legend picks reads as "on": clicking it
+      // clears those picks rather than layering the tag filter on top.
+      const clearingPicks =
+        !removing &&
+        !!tagCategories.find((c) => c.category === category)?.provider_valued &&
+        picks.some(taggedWith);
+      let next: FacetSelection;
+      if (clearingPicks) {
+        next = { ...current };
+        const kept = picks.filter((k) => !taggedWith(k));
+        if (kept.length > 0) next[MODEL_FACET_CATEGORY] = kept;
+        else delete next[MODEL_FACET_CATEGORY];
+      } else {
+        next = toggleFacetValue(current, category, value);
+        if (removing && !isModelCategory) {
+          // Dropping a tag filter also forgets the per-model hides beneath it.
+          const excludes = (next[MODEL_EXCLUDE_CATEGORY] ?? []).filter(
+            (k) => !taggedWith(k)
+          );
+          if (excludes.length > 0) next[MODEL_EXCLUDE_CATEGORY] = excludes;
+          else delete next[MODEL_EXCLUDE_CATEGORY];
+        }
+      }
+      // Toggling your way down to zero models resets the selection: the chart
+      // reloads with everything rather than sitting empty.
+      if (
+        Object.keys(dataBackedByProvider).length > 0 &&
+        Object.keys(filterModelsByFacets(dataBackedByProvider, tagIndex, next))
+          .length === 0
+      ) {
+        next = {};
+      }
+      return next;
+    },
+    [tagIndex, tagCategories, dataBackedByProvider]
+  );
   const toggleFacet = useCallback(
     (category: string, value: string) => {
+      setSelectedFacets((current) => applyFacetToggle(current, category, value));
+      // Analytics reads the render-time state; only the transition above must
+      // be race-proof.
       const removing = (selectedFacets[category] ?? []).includes(value);
-      const next = toggleFacetValue(selectedFacets, category, value);
-      setSelectedFacets(next);
+      const next = applyFacetToggle(selectedFacets, category, value);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        action: removing ? "remove" : "add",
+        action:
+          removing ||
+          (next[MODEL_FACET_CATEGORY] ?? []).length <
+            (selectedFacets[MODEL_FACET_CATEGORY] ?? []).length
+            ? "remove"
+            : "add",
         category,
         value,
         active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
       });
     },
-    [selectedFacets, page]
+    [applyFacetToggle, selectedFacets, page]
   );
   const clearFacets = useCallback(() => {
     if (!hasAnySelection(selectedFacets)) return;
@@ -191,6 +249,61 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const selectedModels = useMemo(
     () => Object.values(modelsByProvider).flat(),
     [modelsByProvider]
+  );
+
+  // Legend universe: every data-backed model, like the chips panel — filtering
+  // dims legend entries rather than hiding them.
+  const legendModels = useMemo(
+    () => Object.values(dataBackedByProvider).flat(),
+    [dataBackedByProvider]
+  );
+
+  // A legend click toggles exactly what the user sees: un-pick a picked model,
+  // re-show an excluded one, hide a line an active tag filter covers, or —
+  // with no tag filter — pick the model to isolate it. Classification also
+  // runs inside the functional update so it always sees the freshest state.
+  const classifyLegendToggle = useCallback(
+    (current: FacetSelection, model: string): string => {
+      if ((current[MODEL_FACET_CATEGORY] ?? []).includes(model))
+        return MODEL_FACET_CATEGORY;
+      if ((current[MODEL_EXCLUDE_CATEGORY] ?? []).includes(model))
+        return MODEL_EXCLUDE_CATEGORY;
+      const hasTagFilter = Object.entries(current).some(
+        ([c, v]) =>
+          c !== MODEL_FACET_CATEGORY &&
+          c !== MODEL_EXCLUDE_CATEGORY &&
+          v.length > 0
+      );
+      const shown = Object.values(
+        filterModelsByFacets(dataBackedByProvider, tagIndex, current)
+      )
+        .flat()
+        .includes(model);
+      return hasTagFilter && shown
+        ? MODEL_EXCLUDE_CATEGORY
+        : MODEL_FACET_CATEGORY;
+    },
+    [dataBackedByProvider, tagIndex]
+  );
+  const toggleLegendModel = useCallback(
+    (model: string) => {
+      setSelectedFacets((current) =>
+        applyFacetToggle(current, classifyLegendToggle(current, model), model)
+      );
+      const category = classifyLegendToggle(selectedFacets, model);
+      const next = applyFacetToggle(selectedFacets, category, model);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        action: (selectedFacets[category] ?? []).includes(model)
+          ? "remove"
+          : "add",
+        category,
+        value: model,
+        active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
+      });
+    },
+    [applyFacetToggle, classifyLegendToggle, selectedFacets, page]
   );
 
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
@@ -455,6 +568,8 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     toggleFacet,
     clearFacets,
     hasActiveFacets,
+    legendModels,
+    toggleLegendModel,
 
     // UI state
     isMobile,

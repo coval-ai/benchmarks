@@ -44,6 +44,7 @@ const FacetFilter: React.FC = () => {
             {group.options.map((option) => {
               const fill = option.color ?? null;
               const fg = fill ? getReadableTextColor(fill) : null;
+              const ringed = option.active || option.implied;
               return (
                 <button
                   key={option.value}
@@ -56,7 +57,7 @@ const FacetFilter: React.FC = () => {
                           backgroundColor: fill,
                           color: fg!,
                           borderColor: "transparent",
-                          boxShadow: option.active
+                          boxShadow: ringed
                             ? "0 0 0 2px var(--color-surface-primary), 0 0 0 3.5px var(--color-text-primary)"
                             : undefined,
                         }
