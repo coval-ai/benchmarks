@@ -27,7 +27,7 @@ class SonioxSTTProvider(STTProvider):
 
     _VALID_MODELS = frozenset({"stt-rt-v4", "stt-rt-v5"})
 
-    def __init__(self, api_key: SecretStr | None, model: str = "stt-rt-v4") -> None:
+    def __init__(self, api_key: SecretStr | None, model: str = "stt-rt-v5") -> None:
         if not self._model_supported(model):
             raise ValueError(
                 f"Invalid Soniox STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"

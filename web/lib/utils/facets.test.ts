@@ -13,14 +13,14 @@ import {
   toggleFacetValue,
 } from "./facets";
 
-// Four STT models: every mode is realtime (single-value → not a facet); host
+// Four STT models: every mode is streaming (single-value → not a facet); host
 // and features vary, so those are the real facets. Each tag carries the label
 // the API supplies; host is provider-valued so its label is the raw id.
 function tag(category: string, value: string, label: string) {
   return { category, value, label };
 }
 const TYPE = tag("type", "STT", "STT");
-const REALTIME = tag("mode", "realtime", "Realtime");
+const STREAMING = tag("mode", "streaming", "Streaming");
 const MULTI = tag("features", "multilingual", "Multilingual");
 const VAD = tag("features", "vad", "VAD");
 const host = (id: string) => tag("host", id, id);
@@ -38,17 +38,17 @@ const PROVIDERS = {
     {
       provider: "deepgram",
       models: [
-        { model: "nova-2", tags: [TYPE, host("deepgram"), REALTIME, MULTI, VAD] },
-        { model: "flux-general-en", tags: [TYPE, host("deepgram"), REALTIME, VAD] },
+        { model: "nova-2", tags: [TYPE, host("deepgram"), STREAMING, MULTI, VAD] },
+        { model: "flux-general-en", tags: [TYPE, host("deepgram"), STREAMING, VAD] },
       ],
     },
     {
       provider: "openai",
-      models: [{ model: "gpt-4o-transcribe", tags: [TYPE, host("openai"), REALTIME, MULTI, VAD] }],
+      models: [{ model: "gpt-4o-transcribe", tags: [TYPE, host("openai"), STREAMING, MULTI, VAD] }],
     },
     {
       provider: "cartesia",
-      models: [{ model: "ink-2", tags: [TYPE, host("cartesia"), REALTIME, VAD] }],
+      models: [{ model: "ink-2", tags: [TYPE, host("cartesia"), STREAMING, VAD] }],
     },
   ],
   tts: [],

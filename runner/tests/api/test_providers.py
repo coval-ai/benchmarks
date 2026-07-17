@@ -98,7 +98,7 @@ async def test_inactive_tts_models_marked_disabled(client: AsyncClient) -> None:
 
 
 async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
-    """Each model emits type/host/lab/source/tenancy facets derived from the registry."""
+    """Each model emits type/host/creator/source facets derived from the registry."""
     response = await client.get("/v1/providers")
     data = response.json()
 
@@ -107,24 +107,22 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
     facets = {(t["category"], t["value"]) for t in grok_stt["tags"]}
     assert ("type", "STT") in facets
     assert ("host", "xai") in facets
-    # lab defaults to the host when no creator override is set; source is then original.
-    assert ("lab", "xai") in facets
-    assert ("source", "original") in facets
-    assert ("tenancy", "shared") in facets
+    # creator defaults to the host when no override is set; source is then official-api.
+    assert ("creator", "xai") in facets
+    assert ("source", "official-api") in facets
     assert ("licensing", "proprietary") in facets
     assert ("deployment", "cloud") in facets
 
     # Each tag carries a display label: provider-valued categories keep the raw
-    # id, TYPE uppercases, everything else capitalizes.
+    # id, TYPE uppercases, everything else capitalizes or uses a curated label.
     labels = {(t["category"], t["value"]): t["label"] for t in grok_stt["tags"]}
     assert labels[("type", "STT")] == "STT"
     assert labels[("host", "xai")] == "xai"
-    assert labels[("source", "original")] == "Original"
-    assert labels[("tenancy", "shared")] == "Shared"
+    assert labels[("source", "official-api")] == "Official API"
 
 
 async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
-    """Curated capability tags, open-weight licensing, and self-hostable deployment surface."""
+    """Curated capability tags, open-weight licensing, and on-prem deployment surface."""
     response = await client.get("/v1/providers")
     data = response.json()
 
@@ -133,16 +131,21 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     sm_facets = {(t["category"], t["value"]) for t in default["tags"]}
     assert ("features", "diarization") in sm_facets
     assert ("features", "translation") in sm_facets
-    assert ("deployment", "self-hostable") in sm_facets
+    assert ("deployment", "on-prem") in sm_facets
 
     groq = next(e for e in data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq["models"] if m["model"] == "canopylabs/orpheus-v1-english")
     orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
     labels = {(t["category"], t["value"]): t["label"] for t in orpheus["tags"]}
-    assert ("licensing", "open-weight") in orpheus_facets
     assert ("features", "emotion-control") in orpheus_facets
-    assert labels[("licensing", "open-weight")] == "Open-weight"
     assert labels[("features", "emotion-control")] == "Emotion control"
+
+    baseten = next(e for e in data["tts"] if e["provider"] == "baseten")
+    qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
+    qwen_facets = {(t["category"], t["value"]) for t in qwen["tags"]}
+    qwen_labels = {(t["category"], t["value"]): t["label"] for t in qwen["tags"]}
+    assert ("licensing", "open-weight") in qwen_facets
+    assert qwen_labels[("licensing", "open-weight")] == "Open-weight"
 
 
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
@@ -155,27 +158,26 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
         "type",
         "mode",
         "host",
-        "lab",
+        "creator",
         "features",
         "source",
-        "tenancy",
         "licensing",
         "deployment",
     ]
     by_category = {c["category"]: c for c in categories}
     assert by_category["features"]["label"] == "Features"
-    # Host/lab values are provider ids the frontend formats itself.
+    # Host/creator values are provider ids the frontend formats itself.
     assert by_category["host"]["provider_valued"] is True
-    assert by_category["lab"]["provider_valued"] is True
+    assert by_category["creator"]["provider_valued"] is True
     assert by_category["mode"]["provider_valued"] is False
 
-    # groq hosts canopylabs' orpheus, so the creator override drives lab and source.
+    # groq hosts canopylabs' orpheus, so the creator override drives creator and source.
     groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq_entry["models"] if m["model"] == "canopylabs/orpheus-v1-english")
     orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
     assert ("host", "groq") in orpheus_facets
-    assert ("lab", "canopylabs") in orpheus_facets
-    assert ("source", "inference") in orpheus_facets
+    assert ("creator", "canopylabs") in orpheus_facets
+    assert ("source", "shared-inference") in orpheus_facets
 
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
