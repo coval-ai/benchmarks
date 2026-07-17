@@ -14,12 +14,14 @@
 // from OKLCH anchors — see the brand guide color families.
 
 export const modelColors: Record<string, string> = {
-  // OpenAI — rose. TTS, STT, and S2S span the rose range.
+  // OpenAI — rose. TTS, STT, and S2S span the rose range. Cross-hosted models
+  // follow their lab's family, so Together-hosted Whisper sits here too.
   "gpt-4o-mini-tts": "#de6d9b",
   "gpt-4o-transcribe": "#f782b1",
   "gpt-4o-mini-transcribe": "#d1608f",
   "gpt-realtime-whisper": "#b24574",
   "gpt-realtime": "#c35483", // S2S
+  "together:whisper-large-v3": "#8f3055",
 
   // Google — sky (light blue). Chirp STT + Gemini realtime.
   chirp_2: "#53b0de",
@@ -97,7 +99,6 @@ export const modelColors: Record<string, string> = {
   "nemotron-3-asr-streaming-0.6b": "#62ab5b",
   "nemotron-3.5-asr-streaming-0.6b": "#4a9243",
   "parakeet-tdt-0.6b-v3": "#33792c",
-  "together:whisper-large-v3": "#1c6016",
 
   // Composite keys for models whose slug is shared across providers
   "speechmatics:default": "#a24112",
@@ -114,6 +115,8 @@ export const providerColors: Record<string, string> = {
   Rime: "#3c8836",
   Gradium: "#74c16c",
   Hume: "#59b7e4",
+  "Fish Audio": "#ec79a8",
+  MiniMax: "#3cc3ab",
   "Inworld AI": "#8b85de",
   xAI: "#c890ea",
   Soniox: "#859704",
