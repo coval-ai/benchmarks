@@ -37,7 +37,7 @@ def _sims_payload(run_id: str, test_cases: list[str]) -> dict[str, Any]:
 def _fake_client(
     test_cases_by_run: dict[str, list[str]],
     *,
-    audio_404: set[str] = frozenset(),
+    audio_404: frozenset[str] = frozenset(),
     transcript: str = "is my alarm set for tomorrow morning",
 ) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -76,7 +76,7 @@ class _FakeBucket:
             if key in self.fail_reads:
                 raise RuntimeError("transient read failure")
             if key not in self.objects:
-                raise NotFound(key)
+                raise NotFound(key)  # type: ignore[no-untyped-call]
             return self.objects[key]
 
         blob.download_as_bytes = _download
@@ -158,7 +158,7 @@ async def test_no_shared_clip_stores_nothing() -> None:
 @pytest.mark.asyncio
 async def test_missing_audio_ships_partial_manifest() -> None:
     storage_client, bucket = _fake_storage()
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}, audio_404={"RO-b"}) as client:
+    async with _fake_client({"RO": ["b"], "RG": ["b"]}, audio_404=frozenset({"RO-b"})) as client:
         stored = await copy_tick_samples(
             client,
             bucket_name="bkt",
