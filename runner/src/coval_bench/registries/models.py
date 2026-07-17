@@ -57,7 +57,7 @@ class RegisteredModel(BaseModel, frozen=True):
     tags: tuple[ModelTag, ...] = ()
     tenancy: Tenancy = Tenancy.SHARED
     licensing: Licensing = Licensing.PROPRIETARY
-    self_hostable: bool = False  # can run in the customer's own infra
+    on_prem: bool = False  # provider offers on-prem/customer-infra deployment
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -91,7 +91,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="nova-2",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -99,7 +99,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="nova-3",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -107,7 +107,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="flux-general-en",
         tags=(_REALTIME, _VAD, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -115,14 +115,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="flux-general-multi",
         tags=(_REALTIME, _MULTI, _VAD, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_STT,
         provider="elevenlabs",
         model="scribe_v2_realtime",
-        tags=(_REALTIME, _MULTI, _VAD, _CODESW, _KEYTERM),
+        tags=(_REALTIME, _MULTI, _VAD, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -151,7 +151,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-streaming",
         tags=(_REALTIME, _VAD, _DIAR, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -159,7 +159,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-streaming-multilingual",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
@@ -169,7 +169,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-3-pro",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -177,7 +177,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-3.5-pro",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM, _CONVCTX),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -185,7 +185,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechmatics",
         model="default",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -193,7 +193,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechmatics",
         model="enhanced",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -258,7 +258,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="voxtral-mini-transcribe-realtime-2602",
         tags=(_REALTIME, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     # Baseten dedicated endpoints (Whisper Large V3). PENDING: implemented and
@@ -272,7 +271,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _VAD),
         tenancy=Tenancy.DEDICATED,
         licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
     ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
@@ -289,6 +288,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="chirp_2",
         tags=(_REALTIME, _MULTI, _VAD),
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -296,6 +296,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="chirp_3",
         tags=(_REALTIME, _MULTI, _VAD),
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -304,8 +305,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="reverb",
         creator="rev",
         tags=(_REALTIME, _MULTI, _VAD, _KEYTERM),
-        licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     # Together AI serverless realtime endpoints (open-weight models).
@@ -316,7 +316,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="nvidia",
         tags=(_REALTIME,),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -326,7 +325,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="nvidia",
         tags=(_REALTIME, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -336,7 +334,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="nvidia",
         tags=(_REALTIME, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -346,7 +343,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="openai",
         tags=(_REALTIME, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     #######
@@ -435,7 +431,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
         tags=(_REALTIME, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -544,7 +540,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Ashley",
         voices=("Ashley", "Alex"),
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -554,7 +550,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Ashley",
         voices=("Ashley", "Alex"),
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -597,7 +593,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="canopylabs",
         tags=(_REALTIME, _EMOTION),
         licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
         arena_enabled=False,
     ),
@@ -633,7 +629,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_REALTIME, _MULTI, _STREAM),
         tenancy=Tenancy.DEDICATED,
         licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
     ),
     RegisteredModel(

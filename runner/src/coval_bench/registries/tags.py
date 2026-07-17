@@ -27,10 +27,13 @@ class TagCategory(StrEnum):
 
 
 class ModelTag(StrEnum):
-    """Curated model attributes surfaced as MODE and FEATURES filter chips."""
+    """Curated model attributes surfaced as MODE and FEATURES filter chips.
+
+    CODE_SWITCHING means intra-sentence language mixing in one stream;
+    session-level language identification or switching does not qualify.
+    """
 
     REALTIME = "realtime"
-    BATCH = "batch"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
     DIARIZATION = "diarization"
@@ -45,7 +48,6 @@ class ModelTag(StrEnum):
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.REALTIME: TagCategory.MODE,
-    ModelTag.BATCH: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
     ModelTag.DIARIZATION: TagCategory.FEATURES,

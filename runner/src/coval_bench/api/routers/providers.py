@@ -56,7 +56,7 @@ def _tag(category: TagCategory, value: str) -> ModelTagOut:
 def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
     """Flatten a model's facets: derived columns/attributes plus curated tags."""
     source = "inference" if m.creator and m.creator != m.provider else "original"
-    deployment = "self-hostable" if m.self_hostable else "cloud"
+    deployment = "on-prem" if m.on_prem else "cloud"
     return [
         _tag(TagCategory.TYPE, m.benchmark),
         _tag(TagCategory.HOST, m.provider),

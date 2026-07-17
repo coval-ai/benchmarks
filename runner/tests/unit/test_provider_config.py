@@ -34,11 +34,11 @@ def test_registered_model_defaults() -> None:
     assert m.tags == ()
     assert m.tenancy is Tenancy.SHARED
     assert m.licensing is Licensing.PROPRIETARY
-    assert m.self_hostable is False
+    assert m.on_prem is False
 
 
 def test_every_model_has_exactly_one_mode() -> None:
-    modes = {ModelTag.REALTIME, ModelTag.BATCH}
+    modes = {ModelTag.REALTIME}
     for m in MODEL_REGISTRY:
         assert len(set(m.tags) & modes) == 1, f"{m.provider}/{m.model} needs one mode tag"
 
