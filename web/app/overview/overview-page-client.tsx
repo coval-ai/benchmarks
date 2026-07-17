@@ -6,6 +6,7 @@
 import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import OverviewLeaderboards from "@/components/overview/OverviewLeaderboards";
+import AboutMethodology from "@/components/overview/AboutMethodology";
 
 export function OverviewPageClient() {
   return (
@@ -27,19 +28,23 @@ export function OverviewPageClient() {
       />
       <DashboardHeader />
 
-      <main className="relative z-10 mx-auto flex min-h-[90vh] w-full max-w-5xl flex-1 flex-col px-4 sm:px-6 pb-10 pt-[84px] md:pt-[96px]">
-        <h1 className="mx-auto max-w-xl text-balance text-center text-2xl font-medium leading-tight tracking-tight text-text-primary sm:text-3xl md:text-4xl">
-          Voice AI benchmarks in real world conditions.
-        </h1>
+      <main className="relative z-10 mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6 pb-10 pt-[84px] md:pt-[96px]">
+        <div className="flex min-h-[calc(100vh-84px)] flex-col md:min-h-[calc(100vh-96px)]">
+          <h1 className="mx-auto max-w-xl text-balance text-center text-2xl font-medium leading-tight tracking-tight text-text-primary sm:text-3xl md:text-4xl">
+            Voice AI benchmarks in real world conditions.
+          </h1>
 
-        <p className="mx-auto mt-3 max-w-md text-pretty text-center text-base leading-snug text-text-secondary">
-          Measuring the accuracy, latency, and quality of text-to-speech and
-          speech-to-text models.
-        </p>
+          <p className="mx-auto mt-3 max-w-md text-pretty text-center text-base leading-snug text-text-secondary">
+            Measuring the accuracy, latency, and quality of text-to-speech and
+            speech-to-text models.
+          </p>
 
-        <div className="mt-6 md:mt-8">
-          <OverviewLeaderboards />
+          <div className="mt-6 md:mt-8">
+            <OverviewLeaderboards />
+          </div>
         </div>
+
+        <AboutMethodology />
       </main>
 
       <DashboardFooter />
