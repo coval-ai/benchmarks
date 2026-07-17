@@ -320,7 +320,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_STREAMING,),
         licensing=_OPEN,
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_STT,

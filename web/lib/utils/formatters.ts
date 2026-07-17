@@ -131,7 +131,6 @@ export function normalizeModelName(modelKey: string): string {
     "ink-2": "Ink 2",
     "stt-rt-v5": "STT RT v5",
     "inworld-stt-1": "STT 1",
-    "nemotron-3-asr-streaming-0.6b": "Nemotron 3 ASR Streaming",
     "nemotron-3.5-asr-streaming-0.6b": "Nemotron 3.5 ASR Streaming",
     "parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3",
     "whisper-large-v3": "Whisper Large v3",
