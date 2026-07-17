@@ -29,7 +29,7 @@ const TAG_CATEGORIES: TagCategoryOut[] = [
   { category: "type", label: "Type", provider_valued: false },
   { category: "mode", label: "Mode", provider_valued: false },
   { category: "host", label: "Host", provider_valued: true },
-  { category: "lab", label: "Lab", provider_valued: true },
+  { category: "creator", label: "Creator", provider_valued: true },
   { category: "features", label: "Features", provider_valued: false },
 ];
 
@@ -65,8 +65,8 @@ const index = () => buildTagIndex("STT", PROVIDERS);
 const cats = () => getTagCategories(PROVIDERS);
 
 describe("getTagCategories", () => {
-  it("hoists lab above host, keeping the rest in API order", () => {
-    expect(cats().map((c) => c.category)).toEqual(["type", "mode", "lab", "host", "features"]);
+  it("hoists creator above host, keeping the rest in API order", () => {
+    expect(cats().map((c) => c.category)).toEqual(["type", "mode", "creator", "host", "features"]);
   });
 });
 

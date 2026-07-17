@@ -37,14 +37,15 @@ export interface FacetGroup {
 }
 
 /**
- * The facet vocabulary (categories, labels) — sourced from the API, except lab
- * is hoisted above host: who built a model matters more than who serves it.
+ * The facet vocabulary (categories, labels) — sourced from the API, except
+ * creator is hoisted above host: who built a model matters more than who
+ * serves it.
  */
 export function getTagCategories(providers?: ProvidersApiResponse): TagCategoryOut[] {
   const categories = [...(providers?.tag_categories ?? [])];
-  const lab = categories.findIndex((c) => c.category === "lab");
+  const creator = categories.findIndex((c) => c.category === "creator");
   const host = categories.findIndex((c) => c.category === "host");
-  if (host !== -1 && lab > host) categories.splice(host, 0, ...categories.splice(lab, 1));
+  if (host !== -1 && creator > host) categories.splice(host, 0, ...categories.splice(creator, 1));
   return categories;
 }
 
