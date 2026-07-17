@@ -57,12 +57,12 @@ const FacetFilter: React.FC = () => {
                   [group.category]: !isOpen,
                 }))
               }
-              className="flex min-h-11 w-full items-center justify-between gap-2 py-2 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary transition-colors hover:text-text-primary lg:min-h-0"
+              className="flex min-h-11 w-full items-center justify-between gap-2 py-2 font-mono text-[13px] text-text-tertiary transition-colors hover:text-text-primary lg:min-h-0"
             >
               <span>{group.label}</span>
               <span className="flex items-center gap-1.5">
                 {activeCount > 0 && (
-                  <span className="rounded-full bg-surface-toggle-active px-1.5 py-px text-[10px] tabular-nums text-text-on-toggle-active">
+                  <span className="rounded-full bg-surface-toggle-active px-1.5 py-px font-mono text-[10px] tabular-nums text-text-on-toggle-active">
                     {activeCount}
                   </span>
                 )}
@@ -110,7 +110,7 @@ const FacetFilter: React.FC = () => {
                         style={{
                           minWidth: `${String(option.maxCount).length}ch`,
                         }}
-                        className={`inline-block text-center tabular-nums ${
+                        className={`inline-block text-center font-mono tabular-nums ${
                           fill
                             ? "opacity-70"
                             : option.active
