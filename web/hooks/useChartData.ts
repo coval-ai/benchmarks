@@ -450,22 +450,19 @@ export function useChartData({
     [getCurrentTimeWindow, getTimelineData]
   );
 
-  /** Models that have at least one plotted point in the current timeline window. */
+  /** Of `models` (default: the selected ones), those with at least one point in the current timeline window. */
   const getModelsWithTimelineData = useCallback(
-    (metric: string): string[] => {
+    (metric: string, models: string[] = selectedModels): string[] => {
       const [windowStart, windowEnd] = getCurrentTimeWindow();
-      const windowed = getTimelineData(metric).filter(
-        (point) => point.timestamp >= windowStart && point.timestamp <= windowEnd
-      );
-      return selectedModels.filter((model) =>
-        windowed.some(
-          (point) =>
-            point[`${model}_value`] !== undefined &&
-            point[`${model}_value`] !== null
-        )
+      const byModel = timelineByMetricModel[metric] ?? {};
+      return models.filter((model) =>
+        Object.keys(byModel[model] ?? {}).some((ts) => {
+          const t = Number(ts);
+          return t >= windowStart && t <= windowEnd;
+        })
       );
     },
-    [selectedModels, getCurrentTimeWindow, getTimelineData]
+    [selectedModels, getCurrentTimeWindow, timelineByMetricModel]
   );
 
   return {

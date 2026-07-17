@@ -10,12 +10,23 @@ import { getModelColor } from "./colors";
 /** category -> selected values. Within a category values OR; across categories they AND. */
 export type FacetSelection = Record<string, string[]>;
 
+/**
+ * Reserved selection categories for individual models (the chart legend
+ * toggles them). Not API tag categories, so they never render as sidebar chip
+ * groups; a model matches them by its own composite key rather than a tag.
+ * Picks show a model on top of the tag filter; excludes hide one from it.
+ */
+export const MODEL_FACET_CATEGORY = "model";
+export const MODEL_EXCLUDE_CATEGORY = "model_hidden";
+
 export interface FacetOption {
   value: string;
   label: string;
   count: number;
   maxCount: number;
   active: boolean;
+  /** A legend-selected model carries this tag, so the chip rings without being toggled itself. */
+  implied: boolean;
   color?: string;
 }
 
@@ -83,16 +94,31 @@ export function restrictToModelKeys(
   return out;
 }
 
-/** Narrow modelsByProvider to the models passing the current facet selection. */
+/**
+ * Narrow modelsByProvider to the models passing the current facet selection.
+ * Legend model picks broaden an active tag filter (union) but stand alone
+ * when no tag category is selected; excludes hide single models from either.
+ */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,
   tagIndex: Map<string, ModelTagOut[]>,
   selected: FacetSelection
 ): ModelsByProvider {
   if (!hasAnySelection(selected)) return modelsByProvider;
+  const {
+    [MODEL_FACET_CATEGORY]: picks = [],
+    [MODEL_EXCLUDE_CATEGORY]: excludes = [],
+    ...tagSelected
+  } = selected;
+  const hasTags = hasAnySelection(tagSelected);
   const out: ModelsByProvider = {};
   for (const [provider, keys] of Object.entries(modelsByProvider)) {
-    const kept = keys.filter((key) => matchesSelection(tagIndex.get(key) ?? [], selected));
+    const kept = keys.filter((key) => {
+      if (excludes.includes(key)) return false;
+      if (picks.includes(key)) return true;
+      if (hasTags) return matchesSelection(tagIndex.get(key) ?? [], tagSelected);
+      return picks.length === 0;
+    });
     if (kept.length > 0) out[provider] = kept;
   }
   return out;
@@ -113,6 +139,14 @@ export function buildFacetGroups(
   normalizeProvider: (name: string) => string
 ): FacetGroup[] {
   const visibleKeys = Object.values(modelsByProvider).flat();
+  // Counts and active states follow only the tag categories; legend model
+  // picks surface solely as the implied ring on provider chips.
+  const modelSelection = selected[MODEL_FACET_CATEGORY] ?? [];
+  const tagSelected = Object.fromEntries(
+    Object.entries(selected).filter(
+      ([c]) => c !== MODEL_FACET_CATEGORY && c !== MODEL_EXCLUDE_CATEGORY
+    )
+  );
   const groups: FacetGroup[] = [];
 
   for (const { category, label, provider_valued } of tagCategories) {
@@ -124,7 +158,7 @@ export function buildFacetGroups(
     }
     if (valueLabels.size < 2) continue;
 
-    const others: FacetSelection = { ...selected, [category]: [] };
+    const others: FacetSelection = { ...tagSelected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]
       .map(([value, valueLabel]) => {
         const matching = visibleKeys.filter((key) =>
@@ -145,7 +179,10 @@ export function buildFacetGroups(
           label,
           count,
           maxCount: matching.length,
-          active: (selected[category] ?? []).includes(value),
+          active: (tagSelected[category] ?? []).includes(value),
+          implied:
+            !!provider_valued &&
+            modelSelection.some((key) => matching.includes(key)),
           color,
         };
       })

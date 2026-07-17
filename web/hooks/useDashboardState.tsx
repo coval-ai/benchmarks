@@ -9,6 +9,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useRef,
 } from "react";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
@@ -23,6 +24,8 @@ import {
   hasAnySelection,
   restrictToModelKeys,
   toggleFacetValue,
+  MODEL_FACET_CATEGORY,
+  MODEL_EXCLUDE_CATEGORY,
   type FacetSelection,
 } from "@/lib/utils/facets";
 import { capturePostHogEvent } from "@/lib/posthog/client";
@@ -152,6 +155,41 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   }, [allModelsByProvider, modelStats]);
 
   const [selectedFacets, setSelectedFacets] = useState<FacetSelection>({});
+  // Rapid clicks dispatch before React re-renders, so the handlers below read
+  // and write this mirror of the latest selection: every transition and its
+  // analytics see the same up-to-date value instead of a stale render's state.
+  const selectedFacetsRef = useRef(selectedFacets);
+
+  // A data refresh (e.g. a different time window) can drop models a legend
+  // selection references; prune them — and reset entirely if nothing would
+  // plot — so a stale selection can never pin the charts empty.
+  useEffect(() => {
+    const universe = new Set(Object.values(dataBackedByProvider).flat());
+    if (universe.size === 0) return;
+    const current = selectedFacetsRef.current;
+    let next = current;
+    for (const category of [MODEL_FACET_CATEGORY, MODEL_EXCLUDE_CATEGORY]) {
+      const values = next[category];
+      if (!values) continue;
+      const kept = values.filter((key) => universe.has(key));
+      if (kept.length !== values.length) {
+        next = { ...next };
+        if (kept.length > 0) next[category] = kept;
+        else delete next[category];
+      }
+    }
+    if (
+      hasAnySelection(next) &&
+      Object.keys(filterModelsByFacets(dataBackedByProvider, tagIndex, next))
+        .length === 0
+    ) {
+      next = {};
+    }
+    if (next !== current) {
+      selectedFacetsRef.current = next;
+      setSelectedFacets(next);
+    }
+  }, [dataBackedByProvider, tagIndex]);
   const modelsByProvider = useMemo(
     () => filterModelsByFacets(dataBackedByProvider, tagIndex, selectedFacets),
     [dataBackedByProvider, tagIndex, selectedFacets]
@@ -160,37 +198,155 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     () => hasAnySelection(selectedFacets),
     [selectedFacets]
   );
+  // Pure selection transition shared by chip clicks and legend toggles; the
+  // handlers below apply it to the ref mirror so rapid successive clicks never
+  // compute from a stale render's state.
+  const applyFacetToggle = useCallback(
+    (current: FacetSelection, category: string, value: string): FacetSelection => {
+      const removing = (current[category] ?? []).includes(value);
+      const isModelCategory =
+        category === MODEL_FACET_CATEGORY || category === MODEL_EXCLUDE_CATEGORY;
+      const taggedWith = (key: string) =>
+        (tagIndex.get(key) ?? []).some(
+          (t) => t.category === category && t.value === value
+        );
+      const picks = current[MODEL_FACET_CATEGORY] ?? [];
+      // A provider chip ringed only by legend picks reads as "on": clicking it
+      // clears those picks rather than layering the tag filter on top.
+      const clearingPicks =
+        !removing &&
+        !!tagCategories.find((c) => c.category === category)?.provider_valued &&
+        picks.some(taggedWith);
+      let next: FacetSelection;
+      if (clearingPicks) {
+        next = { ...current };
+        const kept = picks.filter((k) => !taggedWith(k));
+        if (kept.length > 0) next[MODEL_FACET_CATEGORY] = kept;
+        else delete next[MODEL_FACET_CATEGORY];
+      } else {
+        next = toggleFacetValue(current, category, value);
+        if (removing && !isModelCategory) {
+          // Dropping a tag filter also forgets the per-model hides beneath it.
+          const excludes = (next[MODEL_EXCLUDE_CATEGORY] ?? []).filter(
+            (k) => !taggedWith(k)
+          );
+          if (excludes.length > 0) next[MODEL_EXCLUDE_CATEGORY] = excludes;
+          else delete next[MODEL_EXCLUDE_CATEGORY];
+        }
+      }
+      // Toggling your way down to zero models resets the selection: the chart
+      // reloads with everything rather than sitting empty.
+      if (
+        Object.keys(dataBackedByProvider).length > 0 &&
+        Object.keys(filterModelsByFacets(dataBackedByProvider, tagIndex, next))
+          .length === 0
+      ) {
+        next = {};
+      }
+      return next;
+    },
+    [tagIndex, tagCategories, dataBackedByProvider]
+  );
   const toggleFacet = useCallback(
     (category: string, value: string) => {
-      const removing = (selectedFacets[category] ?? []).includes(value);
-      const next = toggleFacetValue(selectedFacets, category, value);
+      const current = selectedFacetsRef.current;
+      const removing = (current[category] ?? []).includes(value);
+      const next = applyFacetToggle(current, category, value);
+      selectedFacetsRef.current = next;
       setSelectedFacets(next);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        action: removing ? "remove" : "add",
+        // A toggle that trips the empty-chart reset reports "clear", matching
+        // the state it actually produced.
+        action: !removing && !hasAnySelection(next)
+          ? "clear"
+          : removing ||
+              (next[MODEL_FACET_CATEGORY] ?? []).length <
+                (current[MODEL_FACET_CATEGORY] ?? []).length
+            ? "remove"
+            : "add",
         category,
         value,
         active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
       });
     },
-    [selectedFacets, page]
+    [applyFacetToggle, page]
   );
   const clearFacets = useCallback(() => {
-    if (!hasAnySelection(selectedFacets)) return;
+    if (!hasAnySelection(selectedFacetsRef.current)) return;
+    selectedFacetsRef.current = {};
     setSelectedFacets({});
     capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
       surface: `${page}_dashboard`,
       mode: page,
       action: "clear",
     });
-  }, [selectedFacets, page]);
+  }, [page]);
 
   // The facet filter is the only selector now, and its universe is already the
   // data-backed models, so everything still visible after filtering is plotted.
   const selectedModels = useMemo(
     () => Object.values(modelsByProvider).flat(),
     [modelsByProvider]
+  );
+
+  // Legend universe: every data-backed model, like the chips panel — filtering
+  // dims legend entries rather than hiding them.
+  const legendModels = useMemo(
+    () => Object.values(dataBackedByProvider).flat(),
+    [dataBackedByProvider]
+  );
+
+  // A legend click toggles exactly what the user sees: un-pick a picked model,
+  // re-show an excluded one, hide a line an active tag filter covers, or —
+  // with no tag filter — pick the model to isolate it. Classification reads
+  // the ref mirror so it always sees the freshest state.
+  const classifyLegendToggle = useCallback(
+    (current: FacetSelection, model: string): string => {
+      if ((current[MODEL_FACET_CATEGORY] ?? []).includes(model))
+        return MODEL_FACET_CATEGORY;
+      if ((current[MODEL_EXCLUDE_CATEGORY] ?? []).includes(model))
+        return MODEL_EXCLUDE_CATEGORY;
+      const hasTagFilter = Object.entries(current).some(
+        ([c, v]) =>
+          c !== MODEL_FACET_CATEGORY &&
+          c !== MODEL_EXCLUDE_CATEGORY &&
+          v.length > 0
+      );
+      const shown = Object.values(
+        filterModelsByFacets(dataBackedByProvider, tagIndex, current)
+      )
+        .flat()
+        .includes(model);
+      return hasTagFilter && shown
+        ? MODEL_EXCLUDE_CATEGORY
+        : MODEL_FACET_CATEGORY;
+    },
+    [dataBackedByProvider, tagIndex]
+  );
+  const toggleLegendModel = useCallback(
+    (model: string) => {
+      const current = selectedFacetsRef.current;
+      const category = classifyLegendToggle(current, model);
+      const removing = (current[category] ?? []).includes(model);
+      const next = applyFacetToggle(current, category, model);
+      selectedFacetsRef.current = next;
+      setSelectedFacets(next);
+      capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
+        surface: `${page}_dashboard`,
+        mode: page,
+        action: !removing && !hasAnySelection(next)
+          ? "clear"
+          : removing
+            ? "remove"
+            : "add",
+        category,
+        value: model,
+        active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
+      });
+    },
+    [applyFacetToggle, classifyLegendToggle, page]
   );
 
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
@@ -455,6 +611,8 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     toggleFacet,
     clearFacets,
     hasActiveFacets,
+    legendModels,
+    toggleLegendModel,
 
     // UI state
     isMobile,

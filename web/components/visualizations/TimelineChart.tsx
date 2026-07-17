@@ -41,11 +41,16 @@ interface LegendEntry {
 
 // Custom legend: names are rendered in black (recharts colors them per-series
 // by default), and items fill top-to-bottom within each column so the list
-// reads alphabetically down each column rather than across rows.
+// reads alphabetically down each column rather than across rows. Each entry
+// toggles its model in and out of the chart, like a Filters sidebar chip.
 const TimelineLegend: React.FC<{
   payload?: LegendEntry[];
+  /** Zoom-clipped series: dimmed and pushed to the end. */
   dimmedKeys?: Set<string>;
-}> = ({ payload, dimmedKeys }) => (
+  /** Deselected models: dimmed in place so entries never move under the pointer mid-toggle. */
+  hiddenKeys?: Set<string>;
+  onToggle?: (dataKey: string) => void;
+}> = ({ payload, dimmedKeys, hiddenKeys, onToggle }) => (
   <ul className="columns-2 gap-x-4 px-2 pt-5 sm:columns-3 sm:gap-x-6 lg:columns-4">
     {[...(payload ?? [])]
       .sort(
@@ -54,19 +59,27 @@ const TimelineLegend: React.FC<{
           Number(dimmedKeys?.has(b.dataKey ?? "") ?? 0)
       )
       .map((entry) => {
-        const dimmed = dimmedKeys?.has(entry.dataKey ?? "");
+        const hidden = hiddenKeys?.has(entry.dataKey ?? "");
+        const dimmed = dimmedKeys?.has(entry.dataKey ?? "") || hidden;
         return (
           <li
             key={entry.dataKey ?? entry.value}
             data-dimmed={dimmed || undefined}
-            className={`mb-1.5 flex items-start gap-1.5 text-xs leading-tight text-text-primary break-inside-avoid${dimmed ? " opacity-35" : ""}`}
+            className="mb-0.5 break-inside-avoid"
           >
-            <span
-              className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
-              style={{ backgroundColor: entry.color }}
-              aria-hidden="true"
-            />
-            <span>{entry.value}</span>
+            <button
+              type="button"
+              aria-pressed={!hidden}
+              onClick={() => onToggle?.(entry.dataKey ?? "")}
+              className={`flex w-full items-start gap-1.5 rounded-md px-1 py-2 text-left text-xs leading-tight text-text-primary transition-opacity hover:bg-surface-toggle-inactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 sm:py-1${dimmed ? " opacity-35" : ""}`}
+            >
+              <span
+                className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
+                style={{ backgroundColor: entry.color }}
+                aria-hidden="true"
+              />
+              <span>{entry.value}</span>
+            </button>
           </li>
         );
       })}
@@ -202,6 +215,8 @@ const TimelineChart: React.FC = () => {
     getAvgLatencyMs,
     activeMetric: metric,
     dataTimeWindow,
+    legendModels,
+    toggleLegendModel,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
@@ -705,12 +720,19 @@ const TimelineChart: React.FC = () => {
   // The legend is rendered as a sibling BELOW the chart (not a recharts
   // <Legend>), so the plot keeps the full card height instead of being
   // squeezed — a 20-series legend inside the chart left only ~40px to plot on
-  // mobile. Build the payload the custom legend expects from the plotted models.
-  const legendPayload: LegendEntry[] = modelsWithData.map((model) => ({
+  // mobile. Its universe is every data-backed model, chip-style: filtered-out
+  // models stay listed but dim, and a click toggles them back in.
+  const legendModelList = getModelsWithTimelineData(metric, legendModels);
+  const legendPayload: LegendEntry[] = legendModelList.map((model) => ({
     value: formatChartLabel(model, getProviderForModel(model)),
     color: getModelColor(model),
     dataKey: `${model}_value`,
   }));
+  const plottedKeys = new Set(modelsWithData);
+  const legendHiddenKeys = new Set<string>();
+  for (const model of legendModelList) {
+    if (!plottedKeys.has(model)) legendHiddenKeys.add(`${model}_value`);
+  }
 
   // Mobile has no hover cursor, so a vertical playhead marks the instant being
   // scrubbed or pinned — the timestamp both the compact readout and the pinned
@@ -1113,11 +1135,15 @@ const TimelineChart: React.FC = () => {
               );
             })()}
         </div>
-        {modelsWithData.length > 1 && (
+        {legendPayload.length > 0 && (
           <div data-chart-legend>
             <TimelineLegend
               payload={legendPayload}
               dimmedKeys={dimmedLegendKeys}
+              hiddenKeys={legendHiddenKeys}
+              onToggle={(dataKey) =>
+                toggleLegendModel(dataKey.replace(/_value$/, ""))
+              }
             />
           </div>
         )}
