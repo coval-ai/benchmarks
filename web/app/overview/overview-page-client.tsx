@@ -3,10 +3,38 @@
 
 "use client";
 
+import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import OverviewLeaderboards from "@/components/overview/OverviewLeaderboards";
 import AboutMethodology from "@/components/overview/AboutMethodology";
+
+function ScrollHint() {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setHidden(window.scrollY > 80);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return (
+    <button
+      type="button"
+      aria-label="Scroll down to methodology"
+      onClick={() =>
+        document
+          .getElementById("about-methodology")
+          ?.scrollIntoView({ behavior: "smooth" })
+      }
+      className={`mx-auto mt-auto flex h-11 w-11 items-center justify-center pt-4 text-text-tertiary transition-opacity duration-300 hover:text-text-primary ${
+        hidden ? "pointer-events-none opacity-0" : "opacity-100"
+      }`}
+    >
+      <ChevronDown size={20} aria-hidden className="animate-bounce" />
+    </button>
+  );
+}
 
 export function OverviewPageClient() {
   return (
@@ -42,6 +70,8 @@ export function OverviewPageClient() {
           <div className="mt-6 md:mt-8">
             <OverviewLeaderboards />
           </div>
+
+          <ScrollHint />
         </div>
 
         <AboutMethodology />

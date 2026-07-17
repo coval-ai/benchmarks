@@ -145,7 +145,7 @@ const AboutMethodology: React.FC = () => (
       <p className="font-mono text-sm text-text-tertiary">Methodology</p>
       <h2
         id="about-methodology"
-        className="mt-3 text-balance text-2xl font-medium leading-tight tracking-tight text-text-primary md:text-3xl"
+        className="mt-3 scroll-mt-24 text-balance text-2xl font-medium leading-tight tracking-tight text-text-primary md:text-3xl"
       >
         About Metrics &amp; Methodology
       </h2>
