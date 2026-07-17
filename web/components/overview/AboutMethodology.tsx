@@ -25,43 +25,48 @@ const SECTIONS: MethodologySection[] = [
     summary:
       "Frozen, versioned datasets spanning studio-quality read speech and spontaneous conversational audio.",
     terms: [
-      { code: "stt-v1", tag: "STT", name: "LibriSpeech test-clean", def: "50 studio-quality read utterances (CC-BY-4.0), the easy tier" },
-      { code: "stt-v3", tag: "STT", name: "Conversational clips", def: "897 spontaneous voice-agent turns from pipecat's stt-benchmark-data, the hard tier" },
+      { code: "clean", tag: "STT", name: "Clean read speech", def: "284 FLEURS clips, the undistorted control" },
+      { code: "accent", tag: "STT", name: "Accented speech", def: "845 clips spanning demographic accents" },
+      { code: "noisegap", tag: "STT", name: "Background noise", def: "284 clips with intermittent noise bursts" },
+      { code: "reverb", tag: "STT", name: "Reverberation", def: "284 clips with room echo" },
+      { code: "farfield", tag: "STT", name: "Far-field mic", def: "284 clips recorded at distance" },
+      { code: "clipping", tag: "STT", name: "Clipped audio", def: "284 clips with peak distortion" },
+      { code: "phonecodec", tag: "STT", name: "Phone codec", def: "284 clips through telephony compression" },
+      { code: "stt-v3", tag: "STT", name: "Conversational clips", def: "897 spontaneous voice-agent turns from pipecat's stt-benchmark-data" },
       { code: "tts-v1", tag: "TTS", name: "Text prompts", def: "30 short text inputs for synthesis" },
     ],
     details: [
-      "Speech-to-text runs both tiers each cycle: studio-quality read speech that most providers train on, and real conversational speech — fragments, fillers, prompted turns. Every clip is loudness-normalized to −20 dBFS RMS and pinned by SHA-256, so the audio a provider hears is byte-identical across runs.",
+      "Clean studio audio is what most speech-to-text providers train on, so almost everyone scores well on it. We test that too, but we don't stop there. We pull open-source datasets that cover the conditions real calls actually run into: accents, background noise, reverb, mic distance, clipping, and phone-line compression, plus spontaneous conversational turns full of the fragments and fillers of real speech. Every clip is loudness-normalized to −20 dBFS RMS and locked to a SHA-256 hash, so the audio a provider hears stays identical from one run to the next.",
       "Each scheduled run draws a random sample from its manifest and every model scores on that identical draw, so comparisons within a run are apples-to-apples while the full set is covered over time. Retired datasets stay published for historical reproducibility.",
     ],
   },
   {
     title: "How We Calculate Metrics",
     summary:
-      "Each board carries the metrics that matter for its modality, aggregated as percentiles over continuous evaluation cycles.",
+      "Each board carries the metrics that matter for its modality, reported as percentiles across every evaluation run.",
     terms: [
       { code: "TTFA", tag: "TTS", name: "Time to First Audio", def: "first audio chunk arrival plus any leading silence before the first audible sample" },
       { code: "TTFT", tag: "STT", name: "Time to First Token", def: "how quickly partial transcripts start streaming" },
       { code: "TTFS", tag: "STT", name: "Time to Final Segment", def: "from a shared VAD end-of-speech anchor to the final transcript" },
       { code: "WER", tag: "STT", name: "Word Error Rate", def: "scored after Whisper's EnglishTextNormalizer on both reference and hypothesis" },
-      { code: "V2V", tag: "S2S", name: "Voice-to-Voice", def: "end of user speech to the first frame of agent audio, from the recorded conversation" },
     ],
     details: [
-      "Latency metrics measure what a voice agent actually waits on. TTFA is perceived first-audible latency, not just network arrival; TTFS anchors every provider at the same VAD end-of-speech instant; V2V is derived from the conversation audio itself, so it includes full pipeline overhead.",
-      "Connection setup — TCP, TLS, protocol handshakes — is excluded uniformly across every provider. Aggregates expose the full percentile distribution (p25 through p99) alongside the mean; leaderboards rank by the median (p50).",
+      "Latency metrics measure what a voice agent actually waits on. TTFA counts the delay a listener would notice, including any silence before the first audible sample, not just the moment the first bytes arrive. TTFS starts every provider from the same end-of-speech instant, picked by one shared voice-activity model, so no one gets an edge from where they decide the speaker stopped.",
+      "We exclude connection setup (TCP, TLS, and protocol handshakes) the same way for every provider, so the numbers reflect the model and not the network. Aggregates show the full spread from p25 to p99 next to the mean, and leaderboards rank by the median.",
     ],
   },
   {
     title: "Evaluation Standards",
     summary:
-      "Pinned inputs, reproducible outputs — every leaderboard number traces back to its exact configuration.",
+      "Pinned inputs, reproducible outputs. Every leaderboard number traces back to the exact configuration that produced it.",
     terms: [
-      { code: "matrix", name: "Exact model versions", def: "every provider entry uses the versioned identifier the provider exposes, never an alias" },
-      { code: "norm_version", name: "Versioned pipeline", def: "changed WER methodology never mixes with rows produced before it" },
+      { code: "model_id", name: "Exact model versions", def: "every provider entry uses the versioned identifier the provider exposes, never an alias" },
+      { code: "norm_version", name: "Versioned pipeline", def: "a change to WER methodology never mixes with rows produced before it" },
       { code: "runner_sha", name: "Traceable runs", def: "every run records the runner commit that produced it" },
     ],
     details: [
-      "Scoring is delegated to standard, lock-file-pinned libraries — jiwer for edit distance, whisper-normalizer for text normalization. When the methodology changes, results from before and after are marked incomparable rather than silently blended.",
-      "The full runner, dataset manifests, and methodology docs are open source, and every audio file is integrity-checked by SHA-256 on fetch — every number on this site can be reproduced from the repository.",
+      "Scoring runs on standard, lock-file-pinned libraries: jiwer for edit distance and whisper-normalizer for text normalization. When we change the methodology, we mark results from before and after as incomparable instead of quietly blending them.",
+      "The runner, the dataset manifests, and the methodology docs are all open source, and every audio file is checked against its SHA-256 hash on fetch. Every number on this site can be reproduced straight from the repository.",
     ],
   },
 ];
