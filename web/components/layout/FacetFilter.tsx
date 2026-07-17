@@ -3,16 +3,18 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { ChevronDown } from "lucide-react";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 
 const COLLAPSE_THRESHOLD = 8;
 
 const FacetFilter: React.FC = () => {
   const { facetGroups, toggleFacet, clearFacets, hasActiveFacets } =
     useDashboard();
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  const { openFacetGroups: openGroups, setOpenFacetGroups: setOpenGroups } =
+    useSidebarMenu();
 
   if (facetGroups.length === 0) return null;
 

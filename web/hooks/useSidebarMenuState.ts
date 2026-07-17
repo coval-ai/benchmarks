@@ -7,5 +7,6 @@ import { useState } from "react";
 
 export function useSidebarMenuState() {
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
-  return { mobileSheetOpen, setMobileSheetOpen };
+  const [openFacetGroups, setOpenFacetGroups] = useState<Record<string, boolean>>({});
+  return { mobileSheetOpen, setMobileSheetOpen, openFacetGroups, setOpenFacetGroups };
 }
