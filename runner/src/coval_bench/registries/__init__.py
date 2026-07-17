@@ -20,7 +20,7 @@ from coval_bench.registries.models import (
     Licensing,
     ModelStatus,
     RegisteredModel,
-    Tenancy,
+    Source,
 )
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
@@ -42,7 +42,7 @@ __all__ = [
     "Licensing",
     "ModelStatus",
     "RegisteredModel",
-    "Tenancy",
+    "Source",
     "CATEGORY_LABELS",
     "PROVIDER_VALUED_CATEGORIES",
     "TAG_CATEGORIES",
