@@ -215,7 +215,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="soniox",
         model="stt-rt-v4",
         tags=(_REALTIME, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_STT,
