@@ -75,7 +75,6 @@ export const modelColors: Record<string, string> = {
 
   // Soniox — lime (green-gold).
   "tts-rt-v1": "#9db030",
-  "stt-rt-v4": "#859704",
   "stt-rt-v5": "#697800",
 
   // Smallest — amber.

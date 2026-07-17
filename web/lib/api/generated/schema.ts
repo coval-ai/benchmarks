@@ -113,7 +113,15 @@ export interface components {
       value_sum: number;
       sample_count: number;
     };
-    TagCategory: "type" | "mode" | "host" | "lab" | "features" | "source" | "tenancy";
+    TagCategory:
+      | "type"
+      | "mode"
+      | "host"
+      | "creator"
+      | "features"
+      | "source"
+      | "licensing"
+      | "deployment";
     TagCategoryOut: {
       category: components["schemas"]["TagCategory"];
       label: string;

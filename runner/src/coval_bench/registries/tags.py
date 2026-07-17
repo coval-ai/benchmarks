@@ -10,7 +10,7 @@ from enum import StrEnum
 class TagCategory(StrEnum):
     """Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
 
-    TYPE/HOST/LAB are derived from registry columns and SOURCE/TENANCY/LICENSING/
+    TYPE/HOST/CREATOR are derived from registry columns and SOURCE/LICENSING/
     DEPLOYMENT from model attributes, all at the API boundary; only MODE and
     FEATURES draw their values from ``ModelTag``.
     """
@@ -18,10 +18,9 @@ class TagCategory(StrEnum):
     TYPE = "type"
     MODE = "mode"
     HOST = "host"
-    LAB = "lab"
+    CREATOR = "creator"
     FEATURES = "features"
     SOURCE = "source"
-    TENANCY = "tenancy"
     LICENSING = "licensing"
     DEPLOYMENT = "deployment"
 
@@ -29,11 +28,15 @@ class TagCategory(StrEnum):
 class ModelTag(StrEnum):
     """Curated model attributes surfaced as MODE and FEATURES filter chips.
 
-    CODE_SWITCHING means intra-sentence language mixing in one stream;
-    session-level language identification or switching does not qualify.
+    KEYTERM_BIASING means expected vocabulary or a static context prompt
+    supplied at session start biases recognition; CONVERSATIONAL_CONTEXT means
+    the model conditions on prior turns of the live session as the dialog
+    evolves; CODE_SWITCHING means intra-sentence language mixing in one
+    stream — session-level language identification or switching does not
+    qualify.
     """
 
-    REALTIME = "realtime"
+    STREAMING = "streaming"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
     DIARIZATION = "diarization"
@@ -47,7 +50,7 @@ class ModelTag(StrEnum):
 
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
-    ModelTag.REALTIME: TagCategory.MODE,
+    ModelTag.STREAMING: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
     ModelTag.DIARIZATION: TagCategory.FEATURES,
@@ -70,10 +73,9 @@ CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.TYPE: "Type",
     TagCategory.MODE: "Mode",
     TagCategory.HOST: "Host",
-    TagCategory.LAB: "Lab",
+    TagCategory.CREATOR: "Creator",
     TagCategory.FEATURES: "Features",
     TagCategory.SOURCE: "Source",
-    TagCategory.TENANCY: "Tenancy",
     TagCategory.LICENSING: "Licensing",
     TagCategory.DEPLOYMENT: "Deployment",
 }
@@ -83,10 +85,15 @@ if CATEGORY_LABELS.keys() != set(TagCategory):
     raise RuntimeError(f"CATEGORY_LABELS is missing labels for: {_missing}")
 
 # Categories whose values are provider/creator ids; the client formats them.
-PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset({TagCategory.HOST, TagCategory.LAB})
+PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset(
+    {TagCategory.HOST, TagCategory.CREATOR}
+)
 
 # Value labels that aren't a plain capitalization.
 _VALUE_LABELS: dict[str, str] = {
+    "shared-inference": "Shared inference",
+    "dedicated-inference": "Dedicated inference",
+    "official-api": "Official API",
     ModelTag.VAD.value: "VAD",
     ModelTag.CODE_SWITCHING.value: "Code switching",
     ModelTag.KEYTERM_BIASING.value: "Keyterm biasing",

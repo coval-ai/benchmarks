@@ -12,7 +12,7 @@ from coval_bench.registries import (
     ModelStatus,
     ModelTag,
     RegisteredModel,
-    Tenancy,
+    Source,
 )
 
 
@@ -32,13 +32,13 @@ def test_registered_model_defaults() -> None:
     assert m.voice is None
     assert m.creator is None
     assert m.tags == ()
-    assert m.tenancy is Tenancy.SHARED
+    assert m.source is Source.OFFICIAL_API
     assert m.licensing is Licensing.PROPRIETARY
     assert m.on_prem is False
 
 
 def test_every_model_has_exactly_one_mode() -> None:
-    modes = {ModelTag.REALTIME}
+    modes = {ModelTag.STREAMING}
     for m in MODEL_REGISTRY:
         assert len(set(m.tags) & modes) == 1, f"{m.provider}/{m.model} needs one mode tag"
 
