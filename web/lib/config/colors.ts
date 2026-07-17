@@ -94,7 +94,6 @@ export const modelColors: Record<string, string> = {
 
   // Together AI — green, dark range (STT; Rime's greens are TTS-only and
   // Gradium's STT default sits in the light range, so they stay apart).
-  "nemotron-3-asr-streaming-0.6b": "#62ab5b",
   "nemotron-3.5-asr-streaming-0.6b": "#4a9243",
   "parakeet-tdt-0.6b-v3": "#33792c",
   "together:whisper-large-v3": "#1c6016",
