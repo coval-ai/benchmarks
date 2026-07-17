@@ -115,6 +115,8 @@ export const providerColors: Record<string, string> = {
   Rime: "#3c8836",
   Gradium: "#74c16c",
   Hume: "#59b7e4",
+  "Fish Audio": "#ec79a8",
+  MiniMax: "#3cc3ab",
   "Inworld AI": "#8b85de",
   xAI: "#c890ea",
   Soniox: "#859704",

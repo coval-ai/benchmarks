@@ -51,6 +51,9 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
   openai: "OpenAI",
   xai: "xAI",
   inworld: "Inworld AI",
+  fishaudio: "Fish Audio",
+  minimax: "MiniMax",
+  together: "Together AI",
 };
 
 /** Map a raw provider id (from a "provider:model" key) to its providerColors key. */
@@ -120,6 +123,15 @@ export function getModelColor(modelKey: string): string {
       const step = ((Math.abs(hashCode(model)) % 3) - 1) * 0.16; // -0.16 | 0 | +0.16
       return step === 0 ? base : shiftLightness(base, step);
     }
+  }
+
+  if (provider) {
+    // Unknown provider: hash the provider (not the model) into an anchor so
+    // its models still share one family, shaded per model like above.
+    const base =
+      fallbackColors[Math.abs(hashCode(provider)) % fallbackColors.length] ?? "#70a6f5";
+    const step = ((Math.abs(hashCode(model)) % 3) - 1) * 0.16;
+    return step === 0 ? base : shiftLightness(base, step);
   }
 
   const hash = hashCode(modelKey);
