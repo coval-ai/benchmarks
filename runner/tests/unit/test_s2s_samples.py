@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from google.api_core.exceptions import NotFound
 
 from coval_bench.s2s import samples
 from coval_bench.s2s.samples import PREFIX, SampleRun, copy_tick_samples
@@ -63,6 +64,7 @@ def _fake_client(
 class _FakeBucket:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.fail_reads: set[str] = set()
 
     def blob(self, key: str) -> MagicMock:
         blob = MagicMock()
@@ -71,11 +73,14 @@ class _FakeBucket:
         )
 
         def _download() -> bytes:
+            if key in self.fail_reads:
+                raise RuntimeError("transient read failure")
             if key not in self.objects:
-                raise KeyError(key)
+                raise NotFound(key)
             return self.objects[key]
 
         blob.download_as_bytes = _download
+        blob.exists = lambda: key in self.objects
         return blob
 
 
@@ -227,3 +232,94 @@ async def test_never_raises_on_total_failure() -> None:
             download_client=client,
         )
     assert stored == 0
+
+
+@pytest.mark.asyncio
+async def test_existing_manifest_is_never_overwritten() -> None:
+    storage_client, bucket = _fake_storage()
+    tick = "2026-07-17T00:00:00Z"
+    bucket.objects[f"{PREFIX}/{tick}/manifest.json"] = b'{"sentinel": true}'
+    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 0
+    assert bucket.objects[f"{PREFIX}/{tick}/manifest.json"] == b'{"sentinel": true}'
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_transcript_omits_input_audio_url() -> None:
+    storage_client, bucket = _fake_storage()
+    async with _fake_client(
+        {"RO": ["b"], "RG": ["b"]}, transcript="what is the weather now"
+    ) as client:
+        await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
+    assert manifest["input_audio_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_index_read_failure_preserves_history() -> None:
+    storage_client, bucket = _fake_storage()
+    bucket.objects[samples.INDEX_KEY] = json.dumps(["2026-07-16T00:00:00Z"]).encode()
+    bucket.fail_reads.add(samples.INDEX_KEY)
+    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 2
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == ["2026-07-16T00:00:00Z"]
+    assert f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json" in bucket.objects
+
+
+@pytest.mark.asyncio
+async def test_fetch_failure_retries_once_and_succeeds() -> None:
+    attempts = {"audio": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/simulations"):
+            run_id = request.url.params["filter"].split('"')[1]
+            return httpx.Response(200, json=_sims_payload(run_id, ["b"]))
+        if path.endswith("/audio"):
+            attempts["audio"] += 1
+            if attempts["audio"] == 1:
+                return httpx.Response(500)
+            return httpx.Response(200, json={"audio_url": "https://blobs.test/x.wav"})
+        if "blobs.test" in str(request.url):
+            return httpx.Response(200, content=b"RIFFfake")
+        return httpx.Response(
+            200, json={"transcript": [{"role": "user", "content": "hi"}], "test_case_id": "b"}
+        )
+
+    storage_client, bucket = _fake_storage()
+    async with httpx.AsyncClient(
+        base_url="https://api.test/v1", transport=httpx.MockTransport(handler)
+    ) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 2
+    assert attempts["audio"] == 3  # provider one: fail+retry; provider two: first try

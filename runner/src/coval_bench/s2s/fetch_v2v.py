@@ -304,6 +304,24 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
+
+    def note_sample_candidate(coval_run: CovalRun) -> None:
+        # Newest-first scan: the first eligible run per provider is its newest,
+        # whether it was ingested this tick or on an earlier one — staggered
+        # arrivals must not shrink the sample to one provider.
+        if sampled_runs is None or any(r.provider == spec.provider for r in sampled_runs):
+            return
+        sampled_runs.append(
+            SampleRun(
+                provider=spec.provider,
+                model=spec.model,
+                coval_run_id=coval_run.run_id,
+                bucket_at=_bucket_start(
+                    coval_run.create_time or datetime.now(tz=UTC), period_seconds
+                ),
+            )
+        )
+
     try:
         runs = await recent_completed_runs(client, agent_id, period_seconds=period_seconds)
 
@@ -324,6 +342,7 @@ async def _fetch_one_provider(
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
+                note_sample_candidate(coval_run)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
                 continue
@@ -338,21 +357,8 @@ async def _fetch_one_provider(
             )
             if status is None:
                 continue
-            if (
-                sampled_runs is not None
-                and status is not RunStatus.FAILED
-                and not any(r.provider == spec.provider for r in sampled_runs)
-            ):
-                sampled_runs.append(
-                    SampleRun(
-                        provider=spec.provider,
-                        model=spec.model,
-                        coval_run_id=coval_run.run_id,
-                        bucket_at=_bucket_start(
-                            coval_run.create_time or datetime.now(tz=UTC), period_seconds
-                        ),
-                    )
-                )
+            if status is not RunStatus.FAILED:
+                note_sample_candidate(coval_run)
             statuses.append(status)
             if not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
@@ -428,7 +434,13 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
-        if settings.s2s_samples_bucket and sampled_runs:
+        if settings.s2s_samples_bucket and total_ingested and sampled_runs:
+            expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
+            missing = expected - {r.provider for r in sampled_runs}
+            if missing:
+                # Error level on purpose: this is the alert that a provider is
+                # absent from the day's sample; the tick still publishes the rest.
+                logger.error("samples_provider_missing", missing=sorted(missing))
             await copy_tick_samples(
                 client,
                 bucket_name=settings.s2s_samples_bucket,

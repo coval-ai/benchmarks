@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import importlib.resources
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
+from google.api_core.exceptions import NotFound
+
+from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
     from random import Random
@@ -53,14 +57,19 @@ def _norm(text: str) -> str:
 
 
 def _clips_by_transcript() -> dict[str, str]:
-    """Packaged-manifest transcript -> public dataset clip path."""
+    """Packaged-manifest transcript -> public dataset clip path, unambiguous only.
+
+    Several transcripts appear on multiple clips (different speakers); those
+    can't be resolved by text, so they're dropped and the sample ships with
+    input_audio_url = null rather than possibly the wrong recording.
+    """
     ref = importlib.resources.files("coval_bench.datasets.manifests").joinpath("s2s-v1.json")
     manifest = json.loads(ref.read_bytes())
-    return {
-        _norm(item["transcript"]): cast("str", item["path"])
-        for item in manifest["items"]
-        if item.get("transcript") and item.get("path")
-    }
+    paths_by_transcript: dict[str, set[str]] = {}
+    for item in manifest["items"]:
+        if item.get("transcript") and item.get("path"):
+            paths_by_transcript.setdefault(_norm(item["transcript"]), set()).add(item["path"])
+    return {t: next(iter(paths)) for t, paths in paths_by_transcript.items() if len(paths) == 1}
 
 
 def _input_transcript(sim: dict[str, Any]) -> str | None:
@@ -70,6 +79,23 @@ def _input_transcript(sim: dict[str, Any]) -> str | None:
             content = message.get("content")
             return content if isinstance(content, str) else None
     return None
+
+
+async def _fetch_retry[T](fn: Callable[[], Awaitable[T]], *, provider: str, what: str) -> T:
+    """with_retry for Coval fetches, alerting (error log) on the FIRST failure."""
+    first = True
+
+    async def attempt() -> T:
+        nonlocal first
+        try:
+            return await fn()
+        except httpx.HTTPError:
+            if first:
+                first = False
+                logger.error("sample_fetch_failed", provider=provider, what=what)
+            raise
+
+    return await with_retry(attempt, max_attempts=2, retry_on=(httpx.HTTPError,))
 
 
 async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> dict[str, str]:
@@ -106,12 +132,20 @@ def _upload(bucket: storage.Bucket, key: str, data: bytes, content_type: str) ->
 
 
 def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
-    """Prepend the tick to index.json (single daily writer — no race to guard)."""
+    """Prepend the tick to index.json (single daily writer — no race to guard).
+
+    Only a confirmed missing object starts an empty index; any other read
+    failure leaves the existing index untouched so a transient error can't
+    erase the history.
+    """
     blob = bucket.blob(INDEX_KEY)
     try:
         ticks = cast("list[str]", json.loads(blob.download_as_bytes()))
-    except Exception:
+    except NotFound:
         ticks = []
+    except Exception:
+        logger.error("samples_index_read_failed", tick=tick_key, exc_info=True)
+        return
     ticks = [tick_key, *(t for t in ticks if t != tick_key)][:_INDEX_MAX_ENTRIES]
     _upload(bucket, INDEX_KEY, json.dumps(ticks).encode(), "application/json")
 
@@ -143,7 +177,7 @@ async def copy_tick_samples(
                 storage_client=storage_client,
             )
     except Exception:
-        logger.warning("samples_tick_failed", exc_info=True)
+        logger.error("samples_tick_failed", exc_info=True)
         return 0
 
 
@@ -158,11 +192,17 @@ async def _copy_tick_samples(
 ) -> int:
     sims_per_run: dict[str, dict[str, str]] = {}
     for run in runs:
-        sims_per_run[run.coval_run_id] = await _sims_by_test_case(client, run.coval_run_id)
+
+        async def list_sims(run: SampleRun = run) -> dict[str, str]:
+            return await _sims_by_test_case(client, run.coval_run_id)
+
+        sims_per_run[run.coval_run_id] = await _fetch_retry(
+            list_sims, provider=run.provider, what="sims_list"
+        )
 
     shared = set.intersection(*(set(m) for m in sims_per_run.values()))
     if not shared:
-        logger.warning("samples_no_shared_clip", runs=[r.coval_run_id for r in runs])
+        logger.error("samples_no_shared_clip", runs=[r.coval_run_id for r in runs])
         return 0
     test_case_id = rng.choice(sorted(shared))
 
@@ -177,18 +217,32 @@ async def _copy_tick_samples(
     # points at data that exists.
     tick_key = max(r.bucket_at for r in runs).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+    if bucket.blob(manifest_key).exists():
+        logger.info("samples_tick_exists", tick=tick_key)
+        return 0
+
     transcript: str | None = None
     recordings: list[dict[str, Any]] = []
     for run in runs:
         sim_id = sims_per_run[run.coval_run_id][test_case_id]
         try:
             if transcript is None:
-                detail = await client.get(f"/simulations/{sim_id}")
-                detail.raise_for_status()
+
+                async def fetch_detail(sim_id: str = sim_id) -> httpx.Response:
+                    resp = await client.get(f"/simulations/{sim_id}")
+                    resp.raise_for_status()
+                    return resp
+
+                detail = await _fetch_retry(fetch_detail, provider=run.provider, what="sim_detail")
                 transcript = _input_transcript(cast("dict[str, Any]", detail.json()))
-            audio = await _download_recording(client, download_client, sim_id)
+
+            async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
+                return await _download_recording(client, download_client, sim_id)
+
+            audio = await _fetch_retry(fetch_recording, provider=run.provider, what="recording")
             if audio is None:
-                logger.warning("sample_audio_missing", provider=run.provider, sim_id=sim_id)
+                logger.error("sample_audio_missing", provider=run.provider, sim_id=sim_id)
                 continue
             key = f"{PREFIX}/{tick_key}/{run.provider}.wav"
             _upload(bucket, key, audio, "audio/wav")
@@ -202,9 +256,7 @@ async def _copy_tick_samples(
                 }
             )
         except Exception:
-            logger.warning(
-                "sample_copy_failed", provider=run.provider, sim_id=sim_id, exc_info=True
-            )
+            logger.error("sample_copy_failed", provider=run.provider, sim_id=sim_id, exc_info=True)
 
     if not recordings:
         return 0
