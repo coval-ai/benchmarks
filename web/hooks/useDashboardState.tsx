@@ -159,6 +159,37 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   // and write this mirror of the latest selection: every transition and its
   // analytics see the same up-to-date value instead of a stale render's state.
   const selectedFacetsRef = useRef(selectedFacets);
+
+  // A data refresh (e.g. a different time window) can drop models a legend
+  // selection references; prune them — and reset entirely if nothing would
+  // plot — so a stale selection can never pin the charts empty.
+  useEffect(() => {
+    const universe = new Set(Object.values(dataBackedByProvider).flat());
+    if (universe.size === 0) return;
+    const current = selectedFacetsRef.current;
+    let next = current;
+    for (const category of [MODEL_FACET_CATEGORY, MODEL_EXCLUDE_CATEGORY]) {
+      const values = next[category];
+      if (!values) continue;
+      const kept = values.filter((key) => universe.has(key));
+      if (kept.length !== values.length) {
+        next = { ...next };
+        if (kept.length > 0) next[category] = kept;
+        else delete next[category];
+      }
+    }
+    if (
+      hasAnySelection(next) &&
+      Object.keys(filterModelsByFacets(dataBackedByProvider, tagIndex, next))
+        .length === 0
+    ) {
+      next = {};
+    }
+    if (next !== current) {
+      selectedFacetsRef.current = next;
+      setSelectedFacets(next);
+    }
+  }, [dataBackedByProvider, tagIndex]);
   const modelsByProvider = useMemo(
     () => filterModelsByFacets(dataBackedByProvider, tagIndex, selectedFacets),
     [dataBackedByProvider, tagIndex, selectedFacets]
