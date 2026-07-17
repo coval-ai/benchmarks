@@ -36,9 +36,16 @@ export interface FacetGroup {
   options: FacetOption[];
 }
 
-/** The facet vocabulary (categories, labels, order) — sourced entirely from the API. */
+/**
+ * The facet vocabulary (categories, labels) — sourced from the API, except lab
+ * is hoisted above host: who built a model matters more than who serves it.
+ */
 export function getTagCategories(providers?: ProvidersApiResponse): TagCategoryOut[] {
-  return providers?.tag_categories ?? [];
+  const categories = [...(providers?.tag_categories ?? [])];
+  const lab = categories.findIndex((c) => c.category === "lab");
+  const host = categories.findIndex((c) => c.category === "host");
+  if (host !== -1 && lab > host) categories.splice(host, 0, ...categories.splice(lab, 1));
+  return categories;
 }
 
 /** Map every catalogue model's composite key to its tags. */
