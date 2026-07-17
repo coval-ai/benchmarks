@@ -883,8 +883,10 @@ async def run_benchmarks(
             if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                 (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    enabled_stt = [e for e in stt_matrix if e.status is ModelStatus.ACTIVE]
-    enabled_tts = [e for e in tts_matrix if e.status is ModelStatus.ACTIVE]
+    # EARLY_ACCESS models run on the normal schedule; only the API hides them.
+    scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
+    enabled_stt = [e for e in stt_matrix if e.status in scheduled]
+    enabled_tts = [e for e in tts_matrix if e.status in scheduled]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row

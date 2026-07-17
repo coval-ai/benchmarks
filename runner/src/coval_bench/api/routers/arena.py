@@ -99,12 +99,14 @@ _LEADERBOARD_SQL = """
     ORDER BY s.rating_elo DESC
 """
 
-# TTS models the site hides (retired/pending). Their votes still feed the rating
-# fit, but boards computed before a retirement must not keep showing them.
+# TTS models the site hides (retired/pending/early-access). Their votes still
+# feed the rating fit, but boards computed before a retirement must not keep
+# showing them.
 _HIDDEN_TTS_MODELS = frozenset(
     (m.provider, m.model)
     for m in MODEL_REGISTRY
-    if m.benchmark is Benchmark.TTS and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING)
+    if m.benchmark is Benchmark.TTS
+    and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
 )
 
 

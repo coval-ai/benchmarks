@@ -150,6 +150,9 @@ class Settings(BaseSettings):
     # ephemeral preview deploys only.
     cors_origin_regex: str | None = r"^https://benchmarks-[a-z0-9-]+-covalai\.vercel\.app$"
     rate_limit_per_minute: int = 60
+    # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
+    # models on the data endpoints. Unset means no request is internal.
+    internal_api_key: SecretStr | None = None
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

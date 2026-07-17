@@ -6,9 +6,13 @@
 The catalogue is sourced from the model registry
 (``coval_bench.registries.MODEL_REGISTRY``) — the same source of truth the
 orchestrator runs from, so the website can never drift from the runner's
-reality. Every registered model is exposed; ``disabled`` is true for
-``RETIRED`` and ``PENDING`` models so the frontend keeps them off the site
-even when historical result rows exist.
+reality. Every registered model is exposed, with two exceptions by status:
+
+* ``RETIRED``/``PENDING`` models are included with ``disabled=true`` so the
+  frontend keeps them off the site even when historical result rows exist.
+* ``EARLY_ACCESS`` models are omitted entirely — a disabled entry would still
+  leak the model's existence — unless the request presents the internal API
+  key, in which case they are included enabled.
 
 No DB hit is made by this endpoint.
 """
@@ -21,6 +25,7 @@ from posthog import Posthog
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog
+from coval_bench.api.internal import is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ModelInfo,
@@ -79,30 +84,34 @@ def _tag_categories() -> list[TagCategoryOut]:
     ]
 
 
-def _build_provider_map(benchmark: Benchmark) -> dict[str, list[ModelInfo]]:
+def _build_provider_map(benchmark: Benchmark, internal: bool) -> dict[str, list[ModelInfo]]:
     """Build an ordered {provider: [ModelInfo, ...]} map from the model registry.
 
     Every registered model for *benchmark* is included (whatever its status)
-    so the frontend knows about retired models and can keep them hidden.
+    so the frontend knows about retired models and can keep them hidden —
+    except EARLY_ACCESS models, which only internal callers see (enabled).
     Providers and models keep registry order.
     """
     result: dict[str, list[ModelInfo]] = {}
     for m in MODEL_REGISTRY:
-        if m.benchmark is benchmark:
-            result.setdefault(m.provider, []).append(
-                ModelInfo(
-                    model=m.model,
-                    disabled=m.status in _HIDDEN_STATUSES,
-                    tags=_model_tags(m),
-                )
+        if m.benchmark is not benchmark:
+            continue
+        if m.status is ModelStatus.EARLY_ACCESS and not internal:
+            continue
+        result.setdefault(m.provider, []).append(
+            ModelInfo(
+                model=m.model,
+                disabled=m.status in _HIDDEN_STATUSES,
+                tags=_model_tags(m),
             )
+        )
     return result
 
 
-def _describe() -> ProvidersResponse:
-    stt_map = _build_provider_map(Benchmark.STT)
-    tts_map = _build_provider_map(Benchmark.TTS)
-    s2s_map = _build_provider_map(Benchmark.S2S)
+def _describe(internal: bool) -> ProvidersResponse:
+    stt_map = _build_provider_map(Benchmark.STT, internal)
+    tts_map = _build_provider_map(Benchmark.TTS, internal)
+    s2s_map = _build_provider_map(Benchmark.S2S, internal)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
@@ -117,14 +126,16 @@ def _describe() -> ProvidersResponse:
 async def get_providers(
     request: Request,
     posthog_client: Posthog | None = Depends(get_posthog),
+    internal: bool = Depends(is_internal),
 ) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
     Sourced from the model registry (all entries, not just actively run ones).
     Each model includes a ``disabled`` flag that the frontend can use to
     hide or grey out models that are known but not actively benchmarked.
+    Early-access models appear only for internal callers.
     """
-    response = _describe()
+    response = _describe(internal)
     capture_api_event(
         posthog_client,
         "providers_listed",
