@@ -43,7 +43,7 @@ class Licensing(StrEnum):
     OPEN_WEIGHT = "open-weight"
 
 
-class RegisteredModel(BaseModel, frozen=True):
+class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     """A single benchmarked model: identity, display metadata, run config."""
 
     benchmark: Benchmark
