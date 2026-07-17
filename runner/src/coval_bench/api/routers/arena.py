@@ -69,6 +69,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -97,6 +98,14 @@ _LEADERBOARD_SQL = """
     WHERE s.metric_name = %(metric)s AND s.domain = %(domain)s
     ORDER BY s.rating_elo DESC
 """
+
+# TTS models the site hides (retired/pending). Their votes still feed the rating
+# fit, but boards computed before a retirement must not keep showing them.
+_HIDDEN_TTS_MODELS = frozenset(
+    (m.provider, m.model)
+    for m in MODEL_REGISTRY
+    if m.benchmark is Benchmark.TTS and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING)
+)
 
 
 def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
@@ -245,7 +254,11 @@ async def get_arena_leaderboard(
         rows = await conn.execute(_LEADERBOARD_SQL, {"metric": metric, "domain": domain})
         board = await rows.fetchall()
 
-    entries = [LeaderboardEntryOut.model_validate(r) for r in board]
+    entries = [
+        LeaderboardEntryOut.model_validate(r)
+        for r in board
+        if (r["provider"], r["model"]) not in _HIDDEN_TTS_MODELS
+    ]
     capture_api_event(
         posthog_client,
         "arena_leaderboard_queried",

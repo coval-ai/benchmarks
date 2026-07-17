@@ -417,9 +417,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="cartesia",
         model="sonic-3",
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
-        voices=("f786b574-daa5-4673-aa0c-cbe3e8534c02", "a5136bf9-224c-4d76-b823-52bd5efcffcc"),
         tags=(_REALTIME, _MULTI, _CLONE, _EMOTION, _STREAM),
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,

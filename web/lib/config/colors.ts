@@ -37,7 +37,6 @@ export const modelColors: Record<string, string> = {
   "grok-stt": "#844da2",
 
   // Cartesia — blue (TTS sonic + STT ink).
-  "sonic-3": "#80b3fe",
   "sonic-3.5": "#5e93e1",
   "ink-2": "#3b6eb9",
 

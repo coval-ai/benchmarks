@@ -334,7 +334,7 @@ async def test_leaderboard_returns_latest_board_sorted(
     await _insert_snapshot(postgresql, computed_at=stale, provider="old", model="m", rating_elo=999)
     # The latest board: two models, inserted out of rank order.
     await _insert_snapshot(
-        postgresql, computed_at=latest, provider="cartesia", model="sonic-3", rating_elo=1480
+        postgresql, computed_at=latest, provider="cartesia", model="sonic-3.5", rating_elo=1480
     )
     await _insert_snapshot(
         postgresql, computed_at=latest, provider="elevenlabs", model="v2", rating_elo=1520
@@ -345,8 +345,24 @@ async def test_leaderboard_returns_latest_board_sorted(
     data = response.json()
     entries = data["entries"]
     assert len(entries) == 2
-    assert [e["model"] for e in entries] == ["v2", "sonic-3"]
+    assert [e["model"] for e in entries] == ["v2", "sonic-3.5"]
     assert data["methodology_version"] == "davidson-v1"
+
+
+async def test_leaderboard_hides_retired_models(client: AsyncClient, postgresql: Any) -> None:
+    """A board computed before a model was retired must not keep showing it."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    computed = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    await _insert_snapshot(
+        postgresql, computed_at=computed, provider="cartesia", model="sonic-3", rating_elo=1520
+    )
+    await _insert_snapshot(
+        postgresql, computed_at=computed, provider="cartesia", model="sonic-3.5", rating_elo=1480
+    )
+
+    response = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
+    assert response.status_code == 200
+    assert [e["model"] for e in response.json()["entries"]] == ["sonic-3.5"]
 
 
 async def test_leaderboard_domain_filter(client: AsyncClient, postgresql: Any) -> None:
@@ -357,7 +373,7 @@ async def test_leaderboard_domain_filter(client: AsyncClient, postgresql: Any) -
         postgresql, computed_at=computed, domain="all", provider="elevenlabs", model="v2"
     )
     await _insert_snapshot(
-        postgresql, computed_at=computed, domain="support", provider="cartesia", model="sonic-3"
+        postgresql, computed_at=computed, domain="support", provider="cartesia", model="sonic-3.5"
     )
 
     support = await client.get(
@@ -365,7 +381,7 @@ async def test_leaderboard_domain_filter(client: AsyncClient, postgresql: Any) -
     )
     assert support.status_code == 200
     assert support.json()["domain"] == "support"
-    assert [e["model"] for e in support.json()["entries"]] == ["sonic-3"]
+    assert [e["model"] for e in support.json()["entries"]] == ["sonic-3.5"]
 
     default = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
     assert [e["model"] for e in default.json()["entries"]] == ["v2"]
@@ -388,7 +404,7 @@ async def test_leaderboard_latest_is_scoped_per_metric(
         computed_at=datetime(2026, 6, 17, 12, 0, tzinfo=UTC),
         metric_name="clarity",
         provider="cartesia",
-        model="sonic-3",
+        model="sonic-3.5",
     )
 
     response = await client.get(
@@ -397,7 +413,7 @@ async def test_leaderboard_latest_is_scoped_per_metric(
     assert response.status_code == 200
     data = response.json()
     assert data["metric"] == "clarity"
-    assert [e["model"] for e in data["entries"]] == ["sonic-3"]
+    assert [e["model"] for e in data["entries"]] == ["sonic-3.5"]
 
 
 async def test_leaderboard_does_not_mix_methodology_versions(
@@ -418,7 +434,7 @@ async def test_leaderboard_does_not_mix_methodology_versions(
         computed_at=shared,
         methodology_version="davidson-v2",
         provider="cartesia",
-        model="sonic-3",
+        model="sonic-3.5",
     )
 
     response = await client.get("/v1/arena/leaderboard", headers=_LABELER_HEADERS)
@@ -426,7 +442,7 @@ async def test_leaderboard_does_not_mix_methodology_versions(
     data = response.json()
     # One board only: the tiebreaker picks davidson-v2, so v1's row is excluded.
     assert data["methodology_version"] == "davidson-v2"
-    assert [e["model"] for e in data["entries"]] == ["sonic-3"]
+    assert [e["model"] for e in data["entries"]] == ["sonic-3.5"]
 
 
 async def test_locked_reads_are_404_without_key(client: AsyncClient, postgresql: Any) -> None:
