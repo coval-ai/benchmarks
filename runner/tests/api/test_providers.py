@@ -137,10 +137,15 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     orpheus = next(m for m in groq["models"] if m["model"] == "canopylabs/orpheus-v1-english")
     orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
     labels = {(t["category"], t["value"]): t["label"] for t in orpheus["tags"]}
-    assert ("licensing", "open-weight") in orpheus_facets
     assert ("features", "emotion-control") in orpheus_facets
-    assert labels[("licensing", "open-weight")] == "Open-weight"
     assert labels[("features", "emotion-control")] == "Emotion control"
+
+    baseten = next(e for e in data["tts"] if e["provider"] == "baseten")
+    qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
+    qwen_facets = {(t["category"], t["value"]) for t in qwen["tags"]}
+    qwen_labels = {(t["category"], t["value"]): t["label"] for t in qwen["tags"]}
+    assert ("licensing", "open-weight") in qwen_facets
+    assert qwen_labels[("licensing", "open-weight")] == "Open-weight"
 
 
 async def test_tag_categories_metadata(client: AsyncClient) -> None:

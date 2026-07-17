@@ -26,7 +26,13 @@ class TagCategory(StrEnum):
 
 
 class ModelTag(StrEnum):
-    """Curated model attributes surfaced as MODE and FEATURES filter chips."""
+    """Curated model attributes surfaced as MODE and FEATURES filter chips.
+
+    KEYTERM_BIASING means expected vocabulary or a static context prompt
+    supplied at session start biases recognition; CONVERSATIONAL_CONTEXT means
+    the model conditions on prior turns of the live session as the dialog
+    evolves.
+    """
 
     STREAMING = "streaming"
     BATCH = "batch"
