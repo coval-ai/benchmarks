@@ -6,7 +6,6 @@
 import React, { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useDashboard } from "@/contexts/DashboardContext";
-import { getReadableTextColor } from "@/lib/utils/colors";
 
 const COLLAPSE_THRESHOLD = 8;
 
@@ -76,32 +75,17 @@ const FacetFilter: React.FC = () => {
             {visibleOptions.length > 0 && (
               <div className="flex flex-wrap gap-1.5 pb-2">
                 {visibleOptions.map((option) => {
-                  const fill = option.color ?? null;
-                  const fg = fill ? getReadableTextColor(fill) : null;
-                  const ringed = option.active || option.implied;
                   return (
                     <button
                       key={option.value}
                       type="button"
                       aria-pressed={option.active}
                       onClick={() => toggleFacet(group.category, option.value)}
-                      style={
-                        fill
-                          ? {
-                              backgroundColor: fill,
-                              color: fg!,
-                              borderColor: "transparent",
-                              boxShadow: ringed
-                                ? "0 0 0 2px var(--color-surface-primary), 0 0 0 3.5px var(--color-text-primary)"
-                                : undefined,
-                            }
-                          : undefined
-                      }
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none lg:px-2.5 lg:py-1 focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
-                        fill
-                          ? ""
-                          : option.active
-                            ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
+                        option.active
+                          ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
+                          : option.implied
+                            ? "border-text-primary text-text-primary"
                             : "border-border-primary text-text-secondary hover:border-text-tertiary/50 hover:text-text-primary"
                       }`}
                     >
@@ -111,11 +95,9 @@ const FacetFilter: React.FC = () => {
                           minWidth: `${String(option.maxCount).length}ch`,
                         }}
                         className={`inline-block text-center font-mono tabular-nums ${
-                          fill
-                            ? "opacity-70"
-                            : option.active
-                              ? "text-text-on-toggle-active/70"
-                              : "text-text-tertiary"
+                          option.active
+                            ? "text-text-on-toggle-active/70"
+                            : "text-text-tertiary"
                         }`}
                       >
                         {option.count}
