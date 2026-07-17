@@ -105,6 +105,10 @@ async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> di
     )
     resp.raise_for_status()
     payload = resp.json()
+    if payload.get("next_page_token"):
+        # 100 covers today's 50-clip dataset twice over; page instead of
+        # truncating silently if a future dataset outgrows it.
+        logger.error("samples_sims_truncated", coval_run_id=coval_run_id)
     items = next((v for v in payload.values() if isinstance(v, list)), [])
     return {
         cast("str", s["test_case_id"]): cast("str", s["simulation_id"])
@@ -139,8 +143,12 @@ def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
     erase the history.
     """
     blob = bucket.blob(INDEX_KEY)
+    ticks: list[str]
     try:
-        ticks = cast("list[str]", json.loads(blob.download_as_bytes()))
+        decoded = json.loads(blob.download_as_bytes())
+        if not isinstance(decoded, list) or not all(isinstance(t, str) for t in decoded):
+            raise ValueError("index.json must be a list of tick strings")
+        ticks = decoded
     except NotFound:
         ticks = []
     except Exception:
@@ -219,6 +227,9 @@ async def _copy_tick_samples(
 
     manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
     if bucket.blob(manifest_key).exists():
+        # Idempotent repair: a prior run may have published the manifest but
+        # failed the index update, leaving the tick invisible.
+        _update_index(bucket, tick_key)
         logger.info("samples_tick_exists", tick=tick_key)
         return 0
 

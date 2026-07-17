@@ -323,3 +323,39 @@ async def test_fetch_failure_retries_once_and_succeeds() -> None:
         )
     assert stored == 2
     assert attempts["audio"] == 3  # provider one: fail+retry; provider two: first try
+
+
+@pytest.mark.asyncio
+async def test_tick_exists_repairs_missing_index() -> None:
+    storage_client, bucket = _fake_storage()
+    tick = "2026-07-17T00:00:00Z"
+    bucket.objects[f"{PREFIX}/{tick}/manifest.json"] = b'{"sentinel": true}'
+    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 0
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [tick]
+    assert bucket.objects[f"{PREFIX}/{tick}/manifest.json"] == b'{"sentinel": true}'
+
+
+@pytest.mark.asyncio
+async def test_malformed_index_is_preserved() -> None:
+    storage_client, bucket = _fake_storage()
+    bucket.objects[samples.INDEX_KEY] = b'{"not": "a list"}'
+    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 2
+    assert bucket.objects[samples.INDEX_KEY] == b'{"not": "a list"}'

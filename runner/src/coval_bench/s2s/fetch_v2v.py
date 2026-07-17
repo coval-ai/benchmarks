@@ -304,22 +304,22 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
+    candidate: SampleRun | None = None
 
     def note_sample_candidate(coval_run: CovalRun) -> None:
         # Newest-first scan: the first eligible run per provider is its newest,
         # whether it was ingested this tick or on an earlier one — staggered
-        # arrivals must not shrink the sample to one provider.
-        if sampled_runs is None or any(r.provider == spec.provider for r in sampled_runs):
+        # arrivals must not shrink the sample to one provider. Held locally and
+        # committed only after the staleness check, so a stale provider's old
+        # recording never ships under today's tick.
+        nonlocal candidate
+        if candidate is not None:
             return
-        sampled_runs.append(
-            SampleRun(
-                provider=spec.provider,
-                model=spec.model,
-                coval_run_id=coval_run.run_id,
-                bucket_at=_bucket_start(
-                    coval_run.create_time or datetime.now(tz=UTC), period_seconds
-                ),
-            )
+        candidate = SampleRun(
+            provider=spec.provider,
+            model=spec.model,
+            coval_run_id=coval_run.run_id,
+            bucket_at=_bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds),
         )
 
     try:
@@ -379,6 +379,9 @@ async def _fetch_one_provider(
             )
             return RunStatus.FAILED, len(statuses)
 
+        if sampled_runs is not None and candidate is not None:
+            sampled_runs.append(candidate)
+
         if statuses:
             if all(s is RunStatus.FAILED for s in statuses):
                 return RunStatus.FAILED, len(statuses)
@@ -434,7 +437,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
-        if settings.s2s_samples_bucket and total_ingested and sampled_runs:
+        if settings.s2s_samples_bucket and sampled_runs:
             expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
             missing = expected - {r.provider for r in sampled_runs}
             if missing:
