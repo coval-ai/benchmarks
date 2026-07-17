@@ -3,12 +3,12 @@
 
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
-import { getReadableTextColor } from "@/lib/utils/colors";
 
 const FacetFilter: React.FC = () => {
   const { facetGroups, toggleFacet, clearFacets, hasActiveFacets } = useDashboard();
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   if (facetGroups.length === 0) return null;
 
@@ -27,69 +27,86 @@ const FacetFilter: React.FC = () => {
         )}
       </div>
 
-      {facetGroups.map((group) => (
-        <div
-          key={group.category}
-          role="group"
-          aria-labelledby={`facet-${group.category}`}
-          className="px-2"
-        >
+      {facetGroups.map((group) => {
+        const isOpen = expanded[group.category] ?? false;
+        const selectedCount = group.options.filter((o) => o.active).length;
+        return (
           <div
-            id={`facet-${group.category}`}
-            className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary"
+            key={group.category}
+            role="group"
+            aria-labelledby={`facet-${group.category}`}
+            className="px-2"
           >
-            {group.label}
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {group.options.map((option) => {
-              const fill = option.color ?? null;
-              const fg = fill ? getReadableTextColor(fill) : null;
-              const ringed = option.active || option.implied;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  aria-pressed={option.active}
-                  onClick={() => toggleFacet(group.category, option.value)}
-                  style={
-                    fill
-                      ? {
-                          backgroundColor: fill,
-                          color: fg!,
-                          borderColor: "transparent",
-                          boxShadow: ringed
-                            ? "0 0 0 2px var(--color-surface-primary), 0 0 0 3.5px var(--color-text-primary)"
-                            : undefined,
-                        }
-                      : undefined
-                  }
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
-                    fill
-                      ? ""
-                      : option.active
+            <button
+              type="button"
+              id={`facet-${group.category}`}
+              aria-expanded={isOpen}
+              onClick={() =>
+                setExpanded((prev) => ({ ...prev, [group.category]: !isOpen }))
+              }
+              className="mb-1.5 flex w-full items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-text-tertiary transition-colors hover:text-text-primary"
+            >
+              <span className="flex items-center gap-1.5">
+                {group.label}
+                {selectedCount > 0 && (
+                  <span className="rounded-full bg-surface-toggle-active px-1.5 text-[10px] tabular-nums text-text-on-toggle-active">
+                    {selectedCount}
+                  </span>
+                )}
+              </span>
+              <svg
+                viewBox="0 0 12 12"
+                aria-hidden="true"
+                className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
+              >
+                <path
+                  d="M2.5 4.5 6 8l3.5-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            {isOpen && (
+              <div className="flex flex-wrap gap-1.5">
+                {group.options.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={option.active}
+                    onClick={() => toggleFacet(group.category, option.value)}
+                    style={
+                      option.implied && !option.active
+                        ? {
+                            boxShadow:
+                              "0 0 0 2px var(--color-surface-primary), 0 0 0 3.5px var(--color-text-primary)",
+                          }
+                        : undefined
+                    }
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
+                      option.active
                         ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
                         : "border-border-primary text-text-secondary hover:border-text-tertiary/50 hover:text-text-primary"
-                  }`}
-                >
-                  <span>{option.label}</span>
-                  <span
-                    style={{ minWidth: `${String(option.maxCount).length}ch` }}
-                    className={`inline-block text-center tabular-nums ${
-                      fill
-                        ? "opacity-70"
-                        : option.active
-                          ? "text-text-on-toggle-active/70"
-                          : "text-text-tertiary"
                     }`}
                   >
-                    {option.count}
-                  </span>
-                </button>
-              );
-            })}
+                    <span>{option.label}</span>
+                    <span
+                      style={{ minWidth: `${String(option.maxCount).length}ch` }}
+                      className={`inline-block text-center tabular-nums ${
+                        option.active ? "text-text-on-toggle-active/70" : "text-text-tertiary"
+                      }`}
+                    >
+                      {option.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 };

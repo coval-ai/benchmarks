@@ -4,8 +4,6 @@
 import type { ModelTagOut, ProvidersApiResponse, TagCategoryOut } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import { toModelKey } from "./formatters";
-import { providerColors } from "../config/colors";
-import { getModelColor } from "./colors";
 
 /** category -> selected values. Within a category values OR; across categories they AND. */
 export type FacetSelection = Record<string, string[]>;
@@ -27,7 +25,6 @@ export interface FacetOption {
   active: boolean;
   /** A legend-selected model carries this tag, so the chip rings without being toggled itself. */
   implied: boolean;
-  color?: string;
 }
 
 export interface FacetGroup {
@@ -128,8 +125,8 @@ export function filterModelsByFacets(
  * Build the chip groups, in the API's category order. A category is shown only
  * when the visible models hold at least two distinct values for it. Each
  * option's count is how many models would remain if it were selected, honoring
- * the other categories' selection; labels and colors ignore the selection so
- * chips never rename or recolor while filtering.
+ * the other categories' selection; labels ignore the selection so chips never
+ * rename while filtering.
  */
 export function buildFacetGroups(
   modelsByProvider: ModelsByProvider,
@@ -168,12 +165,6 @@ export function buildFacetGroups(
           matchesSelection(tagIndex.get(key) ?? [], others)
         ).length;
         const label = provider_valued ? normalizeProvider(value) : valueLabel;
-        let color: string | undefined;
-        if (provider_valued) {
-          // Chip follows the chart: derive the chip from the color of one of
-          // its models so the sidebar can never drift from the series colors.
-          color = (matching[0] ? getModelColor(matching[0]) : undefined) ?? providerColors[label];
-        }
         return {
           value,
           label,
@@ -183,7 +174,6 @@ export function buildFacetGroups(
           implied:
             !!provider_valued &&
             modelSelection.some((key) => matching.includes(key)),
-          color,
         };
       })
       .sort((a, b) => a.label.localeCompare(b.label));

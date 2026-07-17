@@ -116,8 +116,8 @@ export interface components {
     TagCategory:
       | "type"
       | "mode"
-      | "host"
       | "creator"
+      | "host"
       | "features"
       | "source"
       | "licensing"

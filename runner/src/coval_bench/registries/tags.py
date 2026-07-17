@@ -17,8 +17,8 @@ class TagCategory(StrEnum):
 
     TYPE = "type"
     MODE = "mode"
-    HOST = "host"
     CREATOR = "creator"
+    HOST = "host"
     FEATURES = "features"
     SOURCE = "source"
     LICENSING = "licensing"
@@ -72,8 +72,8 @@ if TAG_CATEGORIES.keys() != set(ModelTag):
 CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.TYPE: "Type",
     TagCategory.MODE: "Mode",
-    TagCategory.HOST: "Host",
     TagCategory.CREATOR: "Creator",
+    TagCategory.HOST: "Host",
     TagCategory.FEATURES: "Features",
     TagCategory.SOURCE: "Source",
     TagCategory.LICENSING: "Licensing",

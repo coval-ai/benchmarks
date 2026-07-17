@@ -157,8 +157,8 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert [c["category"] for c in categories] == [
         "type",
         "mode",
-        "host",
         "creator",
+        "host",
         "features",
         "source",
         "licensing",
