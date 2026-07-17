@@ -112,11 +112,11 @@ def test_provider_name() -> None:
 
 
 def test_provider_model() -> None:
-    assert make_provider().model == "stt-rt-v4"
+    assert make_provider().model == "stt-rt-v5"
 
 
-def test_stt_rt_v5_supported() -> None:
-    assert SonioxSTTProvider(api_key=SecretStr("k"), model="stt-rt-v5").model == "stt-rt-v5"
+def test_stt_rt_v4_still_supported() -> None:
+    assert SonioxSTTProvider(api_key=SecretStr("k"), model="stt-rt-v4").model == "stt-rt-v4"
 
 
 # ---------------------------------------------------------------------------
