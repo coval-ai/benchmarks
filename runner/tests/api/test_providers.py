@@ -122,7 +122,7 @@ async def test_every_model_carries_derived_facets(client: AsyncClient) -> None:
 
 
 async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
-    """Curated capability tags, open-weight licensing, and self-hostable deployment surface."""
+    """Curated capability tags, open-weight licensing, and on-prem deployment surface."""
     response = await client.get("/v1/providers")
     data = response.json()
 
@@ -131,7 +131,7 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     sm_facets = {(t["category"], t["value"]) for t in default["tags"]}
     assert ("features", "diarization") in sm_facets
     assert ("features", "translation") in sm_facets
-    assert ("deployment", "self-hostable") in sm_facets
+    assert ("deployment", "on-prem") in sm_facets
 
     groq = next(e for e in data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq["models"] if m["model"] == "canopylabs/orpheus-v1-english")

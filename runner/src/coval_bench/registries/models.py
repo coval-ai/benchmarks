@@ -43,7 +43,7 @@ class Licensing(StrEnum):
     OPEN_WEIGHT = "open-weight"
 
 
-class RegisteredModel(BaseModel, frozen=True):
+class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     """A single benchmarked model: identity, display metadata, run config."""
 
     benchmark: Benchmark
@@ -58,7 +58,7 @@ class RegisteredModel(BaseModel, frozen=True):
     tags: tuple[ModelTag, ...] = ()
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
-    self_hostable: bool = False  # can run in the customer's own infra
+    on_prem: bool = False  # provider offers on-prem/customer-infra deployment
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -92,7 +92,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="nova-2",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -100,7 +100,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="nova-3",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -108,7 +108,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="flux-general-en",
         tags=(_STREAMING, _VAD, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -116,14 +116,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="flux-general-multi",
         tags=(_STREAMING, _MULTI, _VAD, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_STT,
         provider="elevenlabs",
         model="scribe_v2_realtime",
-        tags=(_STREAMING, _MULTI, _VAD, _CODESW, _KEYTERM),
+        tags=(_STREAMING, _MULTI, _VAD, _KEYTERM),
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -152,7 +152,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-streaming",
         tags=(_STREAMING, _VAD, _DIAR, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -160,7 +160,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-streaming-multilingual",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
@@ -170,7 +170,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-3-pro",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -178,7 +178,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="assemblyai",
         model="universal-3.5-pro",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM, _CONVCTX),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -186,7 +186,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechmatics",
         model="default",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -194,7 +194,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechmatics",
         model="enhanced",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -251,7 +251,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="cartesia",
         model="ink-2",
         tags=(_STREAMING, _VAD),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -260,7 +260,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="voxtral-mini-transcribe-realtime-2602",
         tags=(_STREAMING, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     # Baseten dedicated endpoints (Whisper Large V3). PENDING: implemented and
@@ -274,7 +273,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _VAD),
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
     ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
@@ -284,7 +283,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="default",
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -292,6 +291,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="chirp_2",
         tags=(_STREAMING, _MULTI, _VAD, _KEYTERM),
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -299,6 +299,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="chirp_3",
         tags=(_STREAMING, _MULTI, _VAD, _KEYTERM),
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -307,8 +308,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="reverb",
         creator="rev",
         tags=(_STREAMING, _KEYTERM),
-        licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     # Together AI serverless realtime endpoints (open-weight models).
@@ -320,7 +320,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_STREAMING,),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -331,7 +330,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_STREAMING, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -342,7 +340,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_STREAMING, _MULTI),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -353,7 +350,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_STREAMING, _MULTI, _VAD),
         licensing=_OPEN,
-        self_hostable=True,
         status=_ACTIVE,
     ),
     #######
@@ -425,7 +421,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="sonic-3",
         voice="f786b574-daa5-4673-aa0c-cbe3e8534c02",
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -435,7 +431,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
         voices=("f786b574-daa5-4673-aa0c-cbe3e8534c02", "a5136bf9-224c-4d76-b823-52bd5efcffcc"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -444,7 +440,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
         tags=(_STREAMING, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -462,7 +458,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="palabra-tts-v1",
         voice="default_low",
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
     ),
     # Rime — all three on /ws3 WebSocket.
@@ -474,7 +470,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="luna",
         voices=("luna", "masonry"),
         tags=(_STREAMING, _MULTI, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -484,7 +480,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="luna",
         voices=("luna", "masonry"),
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -494,7 +490,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="luna",
         voices=("luna", "cedar"),
         tags=(_STREAMING, _MULTI, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -503,7 +499,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="mistv2",
         voice="luna",
         tags=(_STREAMING, _MULTI),
-        self_hostable=True,
+        on_prem=True,
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -558,7 +554,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Ashley",
         voices=("Ashley", "Alex"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -568,7 +564,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Ashley",
         voices=("Ashley", "Alex"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -591,7 +587,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("en-US-AvaNeural", "en-US-AndrewNeural"),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
-        self_hostable=True,
+        on_prem=True,
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -647,7 +643,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
-        self_hostable=True,
+        on_prem=True,
         status=_PENDING,
     ),
     RegisteredModel(

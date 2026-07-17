@@ -31,11 +31,12 @@ class ModelTag(StrEnum):
     KEYTERM_BIASING means expected vocabulary or a static context prompt
     supplied at session start biases recognition; CONVERSATIONAL_CONTEXT means
     the model conditions on prior turns of the live session as the dialog
-    evolves.
+    evolves; CODE_SWITCHING means intra-sentence language mixing in one
+    stream — session-level language identification or switching does not
+    qualify.
     """
 
     STREAMING = "streaming"
-    BATCH = "batch"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
     DIARIZATION = "diarization"
@@ -50,7 +51,6 @@ class ModelTag(StrEnum):
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.STREAMING: TagCategory.MODE,
-    ModelTag.BATCH: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
     ModelTag.DIARIZATION: TagCategory.FEATURES,
