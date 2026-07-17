@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.resources
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -27,6 +28,7 @@ from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.s2s.samples import SampleRun, copy_tick_samples
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -291,6 +293,7 @@ async def _fetch_one_provider(
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
+    sampled_runs: list[SampleRun] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -335,6 +338,21 @@ async def _fetch_one_provider(
             )
             if status is None:
                 continue
+            if (
+                sampled_runs is not None
+                and status is not RunStatus.FAILED
+                and not any(r.provider == spec.provider for r in sampled_runs)
+            ):
+                sampled_runs.append(
+                    SampleRun(
+                        provider=spec.provider,
+                        model=spec.model,
+                        coval_run_id=coval_run.run_id,
+                        bucket_at=_bucket_start(
+                            coval_run.create_time or datetime.now(tz=UTC), period_seconds
+                        ),
+                    )
+                )
             statuses.append(status)
             if not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
@@ -385,6 +403,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
+        sampled_runs: list[SampleRun] = []
         for spec in AGENTS:
             agent_id = getattr(settings, spec.agent_id_attr)
             if not agent_id:
@@ -399,6 +418,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,
+                sampled_runs=sampled_runs,
             )
             total_ingested += ingested
 
@@ -407,6 +427,14 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 await writer.refresh_stats_matviews()
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
+
+        if settings.s2s_samples_bucket and sampled_runs:
+            await copy_tick_samples(
+                client,
+                bucket_name=settings.s2s_samples_bucket,
+                runs=sampled_runs,
+                rng=random.Random(),  # noqa: S311
+            )
         logger.info(
             "s2s_fetch_done",
             statuses={p: str(s) for p, s in statuses.items()},

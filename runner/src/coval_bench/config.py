@@ -129,6 +129,8 @@ class Settings(BaseSettings):
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)
     # Staleness threshold = fetch period + this grace.
     s2s_stale_grace_seconds: int = Field(default=0, ge=0)
+    # Public bucket for per-tick sample recordings; empty disables sampling.
+    s2s_samples_bucket: str = ""
 
     # --- Analytics ---
     posthog_project_token: str = ""
