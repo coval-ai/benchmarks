@@ -257,10 +257,13 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        action:
-          removing ||
-          (next[MODEL_FACET_CATEGORY] ?? []).length <
-            (current[MODEL_FACET_CATEGORY] ?? []).length
+        // A toggle that trips the empty-chart reset reports "clear", matching
+        // the state it actually produced.
+        action: !removing && !hasAnySelection(next)
+          ? "clear"
+          : removing ||
+              (next[MODEL_FACET_CATEGORY] ?? []).length <
+                (current[MODEL_FACET_CATEGORY] ?? []).length
             ? "remove"
             : "add",
         category,
@@ -333,7 +336,11 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        action: removing ? "remove" : "add",
+        action: !removing && !hasAnySelection(next)
+          ? "clear"
+          : removing
+            ? "remove"
+            : "add",
         category,
         value: model,
         active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
