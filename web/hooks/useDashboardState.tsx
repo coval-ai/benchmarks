@@ -9,6 +9,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useRef,
 } from "react";
 import { useChartData } from "@/hooks/useChartData";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
@@ -154,6 +155,10 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   }, [allModelsByProvider, modelStats]);
 
   const [selectedFacets, setSelectedFacets] = useState<FacetSelection>({});
+  // Rapid clicks dispatch before React re-renders, so the handlers below read
+  // and write this mirror of the latest selection: every transition and its
+  // analytics see the same up-to-date value instead of a stale render's state.
+  const selectedFacetsRef = useRef(selectedFacets);
   const modelsByProvider = useMemo(
     () => filterModelsByFacets(dataBackedByProvider, tagIndex, selectedFacets),
     [dataBackedByProvider, tagIndex, selectedFacets]
@@ -162,8 +167,8 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     () => hasAnySelection(selectedFacets),
     [selectedFacets]
   );
-  // Pure selection transition shared by chip clicks and legend toggles. It is
-  // applied inside functional setState below so rapid successive clicks never
+  // Pure selection transition shared by chip clicks and legend toggles; the
+  // handlers below apply it to the ref mirror so rapid successive clicks never
   // compute from a stale render's state.
   const applyFacetToggle = useCallback(
     (current: FacetSelection, category: string, value: string): FacetSelection => {
@@ -213,18 +218,18 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   );
   const toggleFacet = useCallback(
     (category: string, value: string) => {
-      setSelectedFacets((current) => applyFacetToggle(current, category, value));
-      // Analytics reads the render-time state; only the transition above must
-      // be race-proof.
-      const removing = (selectedFacets[category] ?? []).includes(value);
-      const next = applyFacetToggle(selectedFacets, category, value);
+      const current = selectedFacetsRef.current;
+      const removing = (current[category] ?? []).includes(value);
+      const next = applyFacetToggle(current, category, value);
+      selectedFacetsRef.current = next;
+      setSelectedFacets(next);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
         action:
           removing ||
           (next[MODEL_FACET_CATEGORY] ?? []).length <
-            (selectedFacets[MODEL_FACET_CATEGORY] ?? []).length
+            (current[MODEL_FACET_CATEGORY] ?? []).length
             ? "remove"
             : "add",
         category,
@@ -232,17 +237,18 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
         active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
       });
     },
-    [applyFacetToggle, selectedFacets, page]
+    [applyFacetToggle, page]
   );
   const clearFacets = useCallback(() => {
-    if (!hasAnySelection(selectedFacets)) return;
+    if (!hasAnySelection(selectedFacetsRef.current)) return;
+    selectedFacetsRef.current = {};
     setSelectedFacets({});
     capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
       surface: `${page}_dashboard`,
       mode: page,
       action: "clear",
     });
-  }, [selectedFacets, page]);
+  }, [page]);
 
   // The facet filter is the only selector now, and its universe is already the
   // data-backed models, so everything still visible after filtering is plotted.
@@ -260,8 +266,8 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   // A legend click toggles exactly what the user sees: un-pick a picked model,
   // re-show an excluded one, hide a line an active tag filter covers, or —
-  // with no tag filter — pick the model to isolate it. Classification also
-  // runs inside the functional update so it always sees the freshest state.
+  // with no tag filter — pick the model to isolate it. Classification reads
+  // the ref mirror so it always sees the freshest state.
   const classifyLegendToggle = useCallback(
     (current: FacetSelection, model: string): string => {
       if ((current[MODEL_FACET_CATEGORY] ?? []).includes(model))
@@ -287,23 +293,22 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   );
   const toggleLegendModel = useCallback(
     (model: string) => {
-      setSelectedFacets((current) =>
-        applyFacetToggle(current, classifyLegendToggle(current, model), model)
-      );
-      const category = classifyLegendToggle(selectedFacets, model);
-      const next = applyFacetToggle(selectedFacets, category, model);
+      const current = selectedFacetsRef.current;
+      const category = classifyLegendToggle(current, model);
+      const removing = (current[category] ?? []).includes(model);
+      const next = applyFacetToggle(current, category, model);
+      selectedFacetsRef.current = next;
+      setSelectedFacets(next);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardFacetChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        action: (selectedFacets[category] ?? []).includes(model)
-          ? "remove"
-          : "add",
+        action: removing ? "remove" : "add",
         category,
         value: model,
         active_facet_count: Object.values(next).reduce((n, v) => n + v.length, 0),
       });
     },
-    [applyFacetToggle, classifyLegendToggle, selectedFacets, page]
+    [applyFacetToggle, classifyLegendToggle, page]
   );
 
   const loading = aggregatesQuery.isLoading || providersQuery.isLoading;
