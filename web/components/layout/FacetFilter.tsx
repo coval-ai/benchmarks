@@ -7,16 +7,23 @@ import React from "react";
 import { ChevronDown } from "lucide-react";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
+import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 
 const COLLAPSE_THRESHOLD = 8;
 
 const FacetFilter: React.FC = () => {
-  const { facetGroups, toggleFacet, clearFacets, hasActiveFacets } =
-    useDashboard();
+  const {
+    facetGroups,
+    toggleFacet,
+    clearFacets,
+    hasActiveFacets,
+    timeWindow,
+    changeTimeWindow,
+    windowDataStale,
+  } = useDashboard();
   const { openFacetGroups: openGroups, setOpenFacetGroups: setOpenGroups } =
     useSidebarMenu();
-
-  if (facetGroups.length === 0) return null;
 
   return (
     <div className="space-y-1">
@@ -31,6 +38,34 @@ const FacetFilter: React.FC = () => {
             Clear
           </button>
         )}
+      </div>
+
+      <div
+        role="group"
+        aria-labelledby="facet-time-range"
+        className="px-2 py-1"
+      >
+        <div className="flex min-h-11 items-center gap-2 py-2 lg:min-h-0">
+          <span
+            id="facet-time-range"
+            className="font-mono text-[13px] text-text-tertiary"
+          >
+            Time range
+          </span>
+          <CymaticLoader
+            size={20}
+            animated={windowDataStale}
+            className={`text-text-primary transition-opacity duration-300 ${
+              windowDataStale ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        </div>
+        <TimeWindowToggle
+          value={timeWindow}
+          onChange={changeTimeWindow}
+          loading={windowDataStale}
+          className="mb-2 w-full"
+        />
       </div>
 
       {facetGroups.map((group) => {

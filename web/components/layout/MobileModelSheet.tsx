@@ -7,9 +7,14 @@ import React from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import FacetFilter from "@/components/layout/FacetFilter";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 
 const MobileModelSheet: React.FC = () => {
-  const { mobileSheetTitle: title, hasActiveFacets } = useDashboard();
+  const {
+    mobileSheetTitle: title,
+    hasActiveFacets,
+    windowDataStale,
+  } = useDashboard();
   const {
     mobileSheetOpen,
     setMobileSheetOpen: onSetMobileSheetOpen,
@@ -64,7 +69,11 @@ const MobileModelSheet: React.FC = () => {
                 aria-label="Filters active"
               />
             )}
-            <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
+            {windowDataStale ? (
+              <CymaticLoader size={20} animated className="text-text-primary" />
+            ) : (
+              <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
+            )}
           </div>
         </div>
       )}
