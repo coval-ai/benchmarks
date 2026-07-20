@@ -37,7 +37,7 @@ const MobileModelSheet: React.FC = () => {
         aria-hidden={!mobileSheetOpen}
         inert={!mobileSheetOpen}
         className={`fixed bottom-0 left-0 right-0 z-40 bg-surface-overlay backdrop-blur-xl border-t border-border-primary rounded-t-3xl transition-transform duration-200 ease-out ${
-          mobileSheetOpen ? "translate-y-0" : "translate-y-full"
+          mobileSheetOpen ? "visible translate-y-0" : "invisible translate-y-full"
         }`}
         style={{ height: "50vh" }}
       >
