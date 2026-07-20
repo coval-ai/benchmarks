@@ -49,9 +49,11 @@ const SECTIONS: MethodologySection[] = [
       { code: "TTFT", tag: "STT", name: "Time to First Token", def: "how quickly partial transcripts start streaming" },
       { code: "TTFS", tag: "STT", name: "Time to Final Segment", def: "from a shared VAD end-of-speech anchor to the final transcript" },
       { code: "WER", tag: "STT", name: "Word Error Rate", def: "scored after Whisper's EnglishTextNormalizer on both reference and hypothesis" },
+      { code: "WER", tag: "TTS", name: "Word Error Rate", def: "synthesized audio transcribed by a fixed ASR model, scored against the input text" },
     ],
     details: [
       "Latency metrics measure what a voice agent actually waits on. TTFA counts the delay a listener would notice, including any silence before the first audible sample, not just the moment the first bytes arrive. TTFS starts every provider from the same end-of-speech instant, picked by one shared voice-activity model, so no one gets an edge from where they decide the speaker stopped.",
+      "Text-to-speech gets a WER too: we transcribe each provider's synthesized audio with one fixed ASR model (OpenAI's whisper-1) and score it against the input text, so the number measures whether the speech is intelligible and complete. The transcriber's own mistakes put a small floor under every provider equally, and both directions share one scoring pipeline.",
       "We exclude connection setup (TCP, TLS, and protocol handshakes) the same way for every provider, so the numbers reflect the model and not the network. Aggregates show the full spread from p25 to p99 next to the mean, and leaderboards rank by the median.",
     ],
   },
@@ -109,7 +111,7 @@ const MethodologyRow: React.FC<{ section: MethodologySection }> = ({ section }) 
             <dl className="mb-4 divide-y divide-border-secondary overflow-hidden rounded-lg border border-border-secondary bg-surface-elevated">
               {section.terms.map(({ code, tag, name, def }) => (
                 <div
-                  key={code}
+                  key={`${code}-${tag ?? ""}`}
                   className="grid grid-cols-[6.75rem_1fr] items-baseline gap-x-4 px-4 py-3 sm:grid-cols-[8.5rem_1fr]"
                 >
                   <dt className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
