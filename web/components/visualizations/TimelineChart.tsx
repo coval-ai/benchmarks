@@ -79,7 +79,7 @@ export const TimelineLegend: React.FC<{
       </button>
       <div
         id={panelId}
-        className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"} sm:grid-rows-[1fr]`}
+        className={`grid transition-[grid-template-rows,visibility] duration-300 ease-in-out ${open ? "visible grid-rows-[1fr]" : "invisible grid-rows-[0fr]"} sm:visible sm:grid-rows-[1fr]`}
       >
         <div className="overflow-hidden">
           <ul className="grid auto-cols-max grid-flow-col grid-rows-4 gap-x-4 overflow-x-auto px-2 pb-1 sm:block sm:columns-3 sm:gap-x-6 sm:pt-5 lg:columns-4">
