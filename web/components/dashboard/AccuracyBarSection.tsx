@@ -221,7 +221,7 @@ const AccuracyBarSection: React.FC = () => {
             <ResponsiveContainer
               width="100%"
               height="100%"
-              minWidth={werBarDataWithColors.length * 48 + 52}
+              minWidth={werBarDataWithColors.length * (isMobile ? 56 : 48) + 52}
               debounce={200}
             >
               <BarChart

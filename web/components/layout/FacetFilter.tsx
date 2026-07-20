@@ -33,7 +33,7 @@ const FacetFilter: React.FC = () => {
           <button
             type="button"
             onClick={clearFacets}
-            className="text-xs text-text-tertiary transition-colors hover:text-text-primary"
+            className="min-h-11 px-2 text-xs text-text-tertiary transition-colors hover:text-text-primary lg:min-h-0"
           >
             Clear
           </button>
@@ -118,7 +118,7 @@ const FacetFilter: React.FC = () => {
                       type="button"
                       aria-pressed={option.active}
                       onClick={() => toggleFacet(group.category, option.value)}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none lg:px-2.5 lg:py-1 focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
+                      className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition-colors focus-visible:outline-none lg:min-h-0 lg:px-2.5 lg:py-1 focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
                         option.active
                           ? "border-transparent bg-surface-toggle-active text-text-on-toggle-active"
                           : option.implied

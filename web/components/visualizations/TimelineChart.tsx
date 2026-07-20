@@ -817,7 +817,7 @@ const TimelineChart: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setZoom(null)}
-                className="rounded-md bg-surface-toggle-inactive px-3 py-1 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary"
+                className="h-11 rounded-md bg-surface-toggle-inactive px-3 text-xs font-medium text-text-secondary transition-colors hover:text-text-primary lg:h-auto lg:py-1"
               >
                 Reset zoom
               </button>
@@ -837,7 +837,7 @@ const TimelineChart: React.FC = () => {
                       : { x: z?.x, y: [0, Number(v)] }
                   );
                 }}
-                className="rounded-md bg-surface-toggle-inactive px-2 py-1 text-xs font-medium text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+                className="h-11 rounded-md bg-surface-toggle-inactive px-3 text-xs font-medium text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 lg:h-auto lg:px-2"
               >
                 <option value="auto">Auto</option>
                 {Y_MAX_PRESETS.map((v) => (

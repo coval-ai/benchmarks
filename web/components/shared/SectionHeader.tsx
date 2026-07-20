@@ -13,7 +13,7 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const iconButtonClass =
-  "flex h-7 w-7 items-center justify-center rounded-lg border border-border-secondary bg-surface-primary text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary";
+  "flex h-11 w-11 items-center justify-center rounded-lg border border-border-secondary bg-surface-primary text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary lg:h-7 lg:w-7";
 
 interface SectionHeaderProps {
   label: string;

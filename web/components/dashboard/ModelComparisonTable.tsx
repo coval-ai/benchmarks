@@ -184,7 +184,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           step={1}
           value={percentileIdx}
           onChange={(e) => onPercentileChange(Number(e.target.value))}
-          className="w-44 accent-accent-blue"
+          className="h-11 w-44 accent-accent-blue lg:h-auto"
           aria-valuetext={percentile.key}
         />
         <span className="tabular-nums font-medium text-text-primary">
@@ -218,7 +218,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                   <button
                     type="button"
                     onClick={() => handleSort(column)}
-                    className={`whitespace-nowrap hover:text-text-primary transition-colors ${
+                    className={`min-h-11 whitespace-nowrap hover:text-text-primary transition-colors lg:min-h-0 ${
                       sort.key === column.key ? "text-text-primary" : ""
                     }`}
                   >

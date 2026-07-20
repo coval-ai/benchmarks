@@ -49,7 +49,7 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
       aria-label="Time window"
       aria-busy={loading ?? false}
       onKeyDown={handleKeyDown}
-      className={`inline-flex h-11 items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] lg:h-8 ${className}`}
+      className={`inline-flex h-[50px] items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] lg:h-8 ${className}`}
     >
       {TIME_WINDOWS.map((timeWindow) => {
         const active = timeWindow === value;
@@ -61,7 +61,7 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
             aria-checked={active}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(timeWindow)}
-            className={`inline-flex grow items-center justify-center self-stretch rounded-sm px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 ${
+            className={`inline-flex min-w-11 grow items-center justify-center self-stretch rounded-sm px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 lg:min-w-0 ${
               active
                 ? "bg-surface-primary text-text-primary shadow-sm"
                 : "text-text-secondary hover:text-text-primary"
