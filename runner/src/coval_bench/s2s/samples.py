@@ -106,8 +106,9 @@ async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> di
     resp.raise_for_status()
     payload = resp.json()
     if payload.get("next_page_token"):
-        # 100 covers today's 50-clip dataset twice over; page instead of
-        # truncating silently if a future dataset outgrows it.
+        # 100 covers today's 50-clip dataset twice over; if a dataset outgrows
+        # it we proceed on the first page but alert, so paging gets added
+        # instead of shared clips silently going missing.
         logger.error("samples_sims_truncated", coval_run_id=coval_run_id)
     items = next((v for v in payload.values() if isinstance(v, list)), [])
     return {
@@ -204,9 +205,16 @@ async def _copy_tick_samples(
         async def list_sims(run: SampleRun = run) -> dict[str, str]:
             return await _sims_by_test_case(client, run.coval_run_id)
 
-        sims_per_run[run.coval_run_id] = await _fetch_retry(
-            list_sims, provider=run.provider, what="sims_list"
-        )
+        try:
+            sims_per_run[run.coval_run_id] = await _fetch_retry(
+                list_sims, provider=run.provider, what="sims_list"
+            )
+        except Exception:
+            logger.error("samples_provider_missing", missing=[run.provider], exc_info=True)
+
+    runs = [run for run in runs if run.coval_run_id in sims_per_run]
+    if not runs:
+        return 0
 
     shared = set.intersection(*(set(m) for m in sims_per_run.values()))
     if not shared:

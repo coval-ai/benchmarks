@@ -359,3 +359,37 @@ async def test_malformed_index_is_preserved() -> None:
         )
     assert stored == 2
     assert bucket.objects[samples.INDEX_KEY] == b'{"not": "a list"}'
+
+
+@pytest.mark.asyncio
+async def test_sims_list_failure_drops_only_that_provider() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/simulations"):
+            run_id = request.url.params["filter"].split('"')[1]
+            if run_id == "RO":
+                return httpx.Response(500)
+            return httpx.Response(200, json=_sims_payload(run_id, ["b"]))
+        if path.endswith("/audio"):
+            return httpx.Response(200, json={"audio_url": "https://blobs.test/x.wav"})
+        if "blobs.test" in str(request.url):
+            return httpx.Response(200, content=b"RIFFfake")
+        return httpx.Response(
+            200, json={"transcript": [{"role": "user", "content": "hi"}], "test_case_id": "b"}
+        )
+
+    storage_client, bucket = _fake_storage()
+    async with httpx.AsyncClient(
+        base_url="https://api.test/v1", transport=httpx.MockTransport(handler)
+    ) as client:
+        stored = await copy_tick_samples(
+            client,
+            bucket_name="bkt",
+            runs=RUNS,
+            rng=random.Random(0),
+            storage_client=storage_client,
+            download_client=client,
+        )
+    assert stored == 1
+    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
+    assert [r["provider"] for r in manifest["recordings"]] == ["google"]
