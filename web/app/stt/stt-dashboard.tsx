@@ -50,10 +50,10 @@ export function STTDashboard() {
         <DashboardLayout>
           <KeyMetrics />
           <TimelineChart />
-          <WerRadarSection />
           <BoxPlotSection />
           <AccuracyBarSection />
           <LatencyAccuracySection />
+          <WerRadarSection />
           <ModelComparisonSection />
         </DashboardLayout>
       </SidebarMenuProvider>
