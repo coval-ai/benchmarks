@@ -34,6 +34,7 @@ export type DashboardChartId =
   | "timeline"
   | "scatter"
   | "wer_bar"
+  | "wer_radar"
   | "box_plot"
   | "heatmap"
   | "performance_delta";

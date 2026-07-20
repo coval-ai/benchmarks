@@ -43,7 +43,7 @@ interface LegendEntry {
 // by default), and items fill top-to-bottom within each column so the list
 // reads alphabetically down each column rather than across rows. Each entry
 // toggles its model in and out of the chart, like a Filters sidebar chip.
-const TimelineLegend: React.FC<{
+export const TimelineLegend: React.FC<{
   payload?: LegendEntry[];
   /** Zoom-clipped series: dimmed and pushed to the end. */
   dimmedKeys?: Set<string>;

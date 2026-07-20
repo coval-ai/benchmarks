@@ -28,9 +28,13 @@ interface TimelineTooltipProps {
   interactionHint?: string | false;
   /** Caps the scroll area (px); keeps the pinned list from covering the chart on mobile. */
   maxHeight?: number;
+  /** Non-timeline charts: shown verbatim instead of the timestamp label. */
+  labelText?: string;
+  /** Non-latency values: overrides the default "123ms" rendering. */
+  formatValue?: (value: number) => string;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, labelText, formatValue }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -74,9 +78,10 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       <p
         style={{ margin: "0 0 8px 0", fontWeight: "bold", fontSize: "12px" }}
       >
-        {showDate
-          ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
-          : formatTimeWithSeconds(Number(label))}
+        {labelText ??
+          (showDate
+            ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
+            : formatTimeWithSeconds(Number(label)))}
       </p>
       <div
         className="tooltip-scroll"
@@ -150,7 +155,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                   flexShrink: 0
                 }}
               >
-                {item.value.toFixed(0)}ms
+                {formatValue ? formatValue(item.value) : `${item.value.toFixed(0)}ms`}
               </span>
             </div>
           );
