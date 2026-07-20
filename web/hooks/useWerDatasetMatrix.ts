@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { aggregatesQueryOptions } from "@/lib/api/queries";
 import { toModelKey } from "@/lib/utils/formatters";
@@ -19,7 +19,19 @@ export function useWerDatasetMatrix(
     ),
   });
 
+  // Settled = every query holds fresh data for the current params or ended in
+  // a terminal error. The matrix only rebuilds on that boundary, so axes never
+  // pop in one by one on first paint and a window switch never mixes
+  // new-window values on fast axes with old-window values on slow ones — the
+  // previous complete snapshot stays up (dimmed via `loading`) until the new
+  // one lands whole.
+  const settled = results.every(
+    (r) => (r.data && !r.isPlaceholderData) || r.isError
+  );
+  const lastMatrixRef = useRef<Map<string, Map<string, number>> | null>(null);
+
   const werByDataset = useMemo(() => {
+    if (!settled) return lastMatrixRef.current;
     const matrix = new Map<string, Map<string, number>>();
     results.forEach((r, i) => {
       if (!r.data) return;
@@ -30,11 +42,10 @@ export function useWerDatasetMatrix(
       });
       if (byModel.size > 0) matrix.set(datasets[i]!, byModel);
     });
-    return matrix.size > 0 ? matrix : null;
+    lastMatrixRef.current = matrix.size > 0 ? matrix : null;
+    return lastMatrixRef.current;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasets, results.map((r) => r.dataUpdatedAt).join()]);
+  }, [settled, datasets, results.map((r) => r.dataUpdatedAt).join()]);
 
-  const loading = results.some((r) => r.isPending || r.isPlaceholderData);
-
-  return { werByDataset, loading };
+  return { werByDataset, loading: !settled };
 }

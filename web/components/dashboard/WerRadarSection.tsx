@@ -195,6 +195,19 @@ const WerRadarSection: React.FC = () => {
     setScrub(null);
   }, [timeWindow, isMobile]);
 
+  // Refreshed axes or model toggles can leave the pin pointing at a reading
+  // that no longer exists; holding it would hide the panel while keeping
+  // hover readouts suppressed.
+  useEffect(() => {
+    if (
+      pinned &&
+      (plotted.length === 0 ||
+        !radarData.some((r) => r.label === pinned.label))
+    ) {
+      setPinned(null);
+    }
+  }, [pinned, plotted, radarData]);
+
   useEffect(() => {
     if (pinned === null) return;
     const onDocMouseDown = (e: MouseEvent) => {
@@ -434,7 +447,9 @@ const WerRadarSection: React.FC = () => {
                   <Radar
                     key={model}
                     name={formatChartLabel(model, getProviderForModel(model))}
-                    dataKey={model}
+                    // Function form: a string key with a dot (e.g. a "-3.5"
+                    // slug) would be parsed as an object path and render empty.
+                    dataKey={(row: Record<string, number>) => row[model]}
                     stroke={getModelColor(model)}
                     fill={getModelColor(model)}
                     strokeWidth={
@@ -512,29 +527,35 @@ const WerRadarSection: React.FC = () => {
             </div>
           )}
         </div>
-        {ready && best && (
+        {effectiveAxes.length >= 3 && (
           <p className="mt-2 text-sm text-text-secondary">
-            <span className="font-medium text-text-primary">
-              {formatChartLabel(best.model, getProviderForModel(best.model))}
-            </span>{" "}
-            has the lowest average WER ({best.mean.toFixed(1)}%) across{" "}
-            {effectiveAxes.length} datasets
-            {plotted.length > 1 && (
+            {best ? (
               <>
-                , best on{" "}
-                {
-                  effectiveAxes.filter((d) =>
-                    plotted.every(
-                      (m) =>
-                        werByDataset!.get(d)!.get(best.model)! <=
-                        werByDataset!.get(d)!.get(m)!
-                    )
-                  ).length
-                }{" "}
-                of them
+                <span className="font-medium text-text-primary">
+                  {formatChartLabel(best.model, getProviderForModel(best.model))}
+                </span>{" "}
+                has the lowest average WER ({best.mean.toFixed(1)}%) across{" "}
+                {effectiveAxes.length} datasets
+                {plotted.length > 1 && (
+                  <>
+                    , best on{" "}
+                    {
+                      effectiveAxes.filter((d) =>
+                        plotted.every(
+                          (m) =>
+                            werByDataset!.get(d)!.get(best.model)! <=
+                            werByDataset!.get(d)!.get(m)!
+                        )
+                      ).length
+                    }{" "}
+                    of them
+                  </>
+                )}
+                .
               </>
+            ) : (
+              <>No selected models have WER results on every dataset above.</>
             )}
-            .
           </p>
         )}
         {legendPayload.length > 0 && (
