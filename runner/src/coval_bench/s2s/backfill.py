@@ -11,6 +11,10 @@ exists is skipped, so re-runs only fill gaps and never reshape a published tick.
 
 Run this AFTER the silence-trim sampler ships, so backfilled recordings come out
 trimmed too — a bucket already published fat is not reshaped by a later re-run.
+
+Buckets are processed sequentially, so this never races itself. It does share
+index.json's read-modify-write with the daily fetch tick, though, so run it when
+that job is idle (outside the ~23:00 UTC window) to avoid a lost index update.
 """
 
 from __future__ import annotations
