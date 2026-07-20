@@ -28,13 +28,19 @@ interface TimelineTooltipProps {
   interactionHint?: string | false;
   /** Caps the scroll area (px); keeps the pinned list from covering the chart on mobile. */
   maxHeight?: number;
+  /**
+   * S2S pinned tooltip only: makes each row a play control for that model's
+   * recording at this bucket. Omitted everywhere else, so those rows stay
+   * static and unchanged.
+   */
+  onModelClick?: (model: string, label: number) => void;
   /** Non-timeline charts: shown verbatim instead of the timestamp label. */
   labelText?: string;
   /** Non-latency values: overrides the default "123ms" rendering. */
   formatValue?: (value: number) => string;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, labelText, formatValue }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, labelText, formatValue }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -104,16 +110,31 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
           const isLeader = item.dataKey === leaderKey;
+          const clickable = onModelClick != null;
 
           return (
             <div
               key={item.dataKey}
+              {...(clickable
+                ? {
+                    role: "button" as const,
+                    tabIndex: 0,
+                    onClick: () => onModelClick(modelName, Number(label)),
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onModelClick(modelName, Number(label));
+                      }
+                    }
+                  }
+                : {})}
               style={{
                 margin: "6px 0",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                opacity: item.inView ? 1 : 0.35
+                opacity: item.inView ? 1 : 0.35,
+                ...(clickable ? { cursor: "pointer" } : {})
               }}
             >
               <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -156,6 +177,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 }}
               >
                 {formatValue ? formatValue(item.value) : `${item.value.toFixed(0)}ms`}
+                {clickable ? <span style={{ marginLeft: "6px" }} aria-hidden>▶</span> : null}
               </span>
             </div>
           );

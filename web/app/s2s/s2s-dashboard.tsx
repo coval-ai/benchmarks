@@ -7,8 +7,8 @@ import dynamic from "next/dynamic";
 import { DashboardProvider } from "@/contexts/DashboardContext";
 import { SidebarMenuProvider } from "@/contexts/SidebarMenuContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import KeyMetrics from "@/components/dashboard/KeyMetrics";
 import { ChartSkeleton } from "@/components/dashboard/DashboardSkeleton";
+import { S2STopRow } from "./components/S2STopRow";
 
 // S2S has a single metric (V2V latency, no WER). The WER-based sections
 // (AccuracyBarSection, LatencyAccuracySection) are omitted; the model
@@ -33,7 +33,7 @@ export function S2SDashboard() {
     <DashboardProvider page="s2s">
       <SidebarMenuProvider>
         <DashboardLayout>
-          <KeyMetrics />
+          <S2STopRow />
           <TimelineChart />
           <BoxPlotSection />
           <ModelComparisonSection />

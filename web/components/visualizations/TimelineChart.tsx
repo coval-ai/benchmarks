@@ -181,6 +181,13 @@ interface TooltipPayloadItem {
   color: string;
 }
 
+// A timeline point's timestamp (epoch ms) is the 3h bucket start, which the S2S
+// sampler uses verbatim as the tick-folder key — so this reproduces that key to
+// join a clicked tooltip row to its recording set.
+function bucketTickKey(label: number): string {
+  return new Date(label).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 interface PinnedTooltip {
   label: string;
   payload: TooltipPayloadItem[];
@@ -252,6 +259,8 @@ const TimelineChart: React.FC = () => {
     dataTimeWindow,
     legendModels,
     toggleLegendModel,
+    page,
+    requestS2SPlay,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("timeline");
 
@@ -1144,6 +1153,12 @@ const TimelineChart: React.FC = () => {
                 showDate={dateScale}
                 dimmedKeys={dimmedLegendKeys}
                 maxHeight={isMobile ? 106 : undefined}
+                onModelClick={
+                  page === "s2s"
+                    ? (model, label) =>
+                        requestS2SPlay(bucketTickKey(label), getProviderForModel(model))
+                    : undefined
+                }
               />
             </div>
           )}
