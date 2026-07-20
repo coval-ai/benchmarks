@@ -41,17 +41,25 @@ const RadarAxisTick: React.FC<{
   payload?: { value: string };
   x?: number;
   y?: number;
+  cy?: number;
   textAnchor?: "inherit" | "start" | "middle" | "end";
   colors: ThemeColors;
   isMobile: boolean;
   activeLabel?: string;
-}> = ({ payload, x = 0, y = 0, textAnchor, colors, isMobile, activeLabel }) => {
+}> = ({ payload, x = 0, y = 0, cy, textAnchor, colors, isMobile, activeLabel }) => {
   const [name, family] = splitAxisLabel(payload?.value ?? "");
   const active = payload?.value != null && payload.value === activeLabel;
+  // Labels straddling the chart's vertical axis sit flush against the top
+  // and bottom vertices: lift the top block one line so its family sublabel
+  // stays out of the grid, and drop the bottom block clear of the vertex.
+  const middle = textAnchor === "middle" && cy != null;
+  const aboveChart = middle && family != null && y < cy!;
+  const belowChart = middle && y >= cy!;
+  const dy = aboveChart ? -(isMobile ? 11 : 13) : belowChart ? (isMobile ? 8 : 10) : 0;
   return (
     <text
       x={x}
-      y={y}
+      y={y + dy}
       textAnchor={textAnchor}
       fill={active ? colors.label : colors.axisText}
       fontWeight={active ? 600 : undefined}
