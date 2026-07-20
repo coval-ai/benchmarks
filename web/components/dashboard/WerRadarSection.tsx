@@ -273,9 +273,9 @@ const WerRadarSection: React.FC = () => {
         <SectionHeader
           label="Accuracy Across Datasets"
           description={{
-            short: "Where each model holds up — and where it breaks",
+            short: "Where each model holds up and where it breaks",
             detailed:
-              "Each axis is one evaluation dataset; the radius is word accuracy (100 − WER), so the outer edge is perfect transcription and dents show where a model degrades — accents, noise, reverb, or spontaneous production speech. The scale starts at the worst plotted value, not zero, to keep differences readable. The chart plots the models selected in Filters; click a legend entry to toggle a model, and click or tap the chart to pin a dataset's exact values.",
+              "Each spoke is one test set: clean audio, accents, background noise, phone lines, and so on. Distance from the center is accuracy (100 minus WER), so a bigger shape is a better model and a dent is a weak spot. Note the scale zooms in on the plotted models instead of starting at zero. A model is only drawn if it has results on every set. Click the chart to pin the exact numbers for a dataset.",
           }}
           hint={
             isMobile
