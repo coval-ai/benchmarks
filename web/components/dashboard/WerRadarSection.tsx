@@ -275,7 +275,7 @@ const WerRadarSection: React.FC = () => {
           description={{
             short: "Where each model holds up and where it breaks",
             detailed:
-              "Measures how each model's transcription accuracy holds up across recording conditions. Every axis is one evaluation dataset from the selected time window, ranging from clean studio speech to accented, noisy, reverberant, and phone-degraded audio, plus spontaneous production conversations. The radius plots word accuracy (100 minus WER): a model that stays accurate everywhere traces a large, even shape, and a pull toward the center marks the conditions where its accuracy degrades. Only models with results on every dataset are plotted, and the radial scale starts at the worst plotted value rather than zero so differences stay legible. Click the chart to pin a dataset's exact WER values.",
+              "A model that transcribes studio audio well can still fall apart on noisy, reverberant, or phone-quality speech. Each axis is one dataset from the selected window and the radius is word accuracy, so an even shape holds up across conditions while a dip toward the center marks where accuracy degrades. Only models with results on every dataset are plotted, and the scale starts at the worst plotted value rather than zero.\n\nClick the chart to pin a dataset's exact WER values.",
           }}
           hint={
             isMobile

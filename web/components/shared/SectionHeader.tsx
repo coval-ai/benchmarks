@@ -250,14 +250,14 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
               content={
                 note ? (
                   <>
-                    {description.detailed}
+                    <span className="whitespace-pre-line">{description.detailed}</span>
                     <span className="mt-2 block border-t border-border-secondary pt-2">
                       <span className="font-semibold">{note.term}.</span>{" "}
                       {note.text}
                     </span>
                   </>
                 ) : (
-                  description.detailed
+                  <span className="whitespace-pre-line">{description.detailed}</span>
                 )
               }
               align="left"
