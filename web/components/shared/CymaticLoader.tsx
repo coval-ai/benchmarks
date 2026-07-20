@@ -119,12 +119,17 @@ export function CymaticLoader({
   animated?: boolean;
 }) {
   const [step, setStep] = useState(1);
-  const [reduceMotion] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateReduceMotion = () => setReduceMotion(mediaQuery.matches);
+    updateReduceMotion();
+    mediaQuery.addEventListener("change", updateReduceMotion);
+    return () => mediaQuery.removeEventListener("change", updateReduceMotion);
+  }, []);
 
   useEffect(() => {
     if (!animated || reduceMotion) return;
