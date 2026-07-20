@@ -13,17 +13,10 @@ import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
 import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
-import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const {
-    loading,
-    loadError,
-    benchmarkTitle,
-    timeWindow,
-    changeTimeWindow,
-    windowDataStale,
-  } = useDashboard();
+  const { loading, loadError, benchmarkTitle, windowDataStale } =
+    useDashboard();
   const mode = useActiveTab();
   const firedDepthsRef = useRef<Set<number>>(new Set());
 
@@ -64,16 +57,9 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <div className="relative z-10 flex flex-1">
         <ModelSidebar />
         <div className="pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden flex-1 min-w-0">
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">
-              {benchmarkTitle}
-            </h1>
-            <TimeWindowToggle
-              value={timeWindow}
-              onChange={changeTimeWindow}
-              className="ml-auto"
-            />
-          </div>
+          <h1 className="mb-6 text-2xl font-bold tracking-tight text-text-primary">
+            {benchmarkTitle}
+          </h1>
 
           <div
             className={`transition-opacity duration-200 ${

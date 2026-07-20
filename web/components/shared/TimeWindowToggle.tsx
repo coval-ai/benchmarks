@@ -13,12 +13,14 @@ import {
 interface TimeWindowToggleProps {
   value: TimeWindow;
   onChange: (window: TimeWindow) => void;
+  loading?: boolean;
   className?: string;
 }
 
 const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
   value,
   onChange,
+  loading,
   className = "",
 }) => {
   // Radiogroup contract: one Tab stop, arrows move the selection.
@@ -45,8 +47,9 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
     <div
       role="radiogroup"
       aria-label="Time window"
+      aria-busy={loading ?? false}
       onKeyDown={handleKeyDown}
-      className={`inline-flex h-8 items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] ${className}`}
+      className={`inline-flex h-11 items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] lg:h-8 ${className}`}
     >
       {TIME_WINDOWS.map((timeWindow) => {
         const active = timeWindow === value;
@@ -58,7 +61,7 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
             aria-checked={active}
             tabIndex={active ? 0 : -1}
             onClick={() => onChange(timeWindow)}
-            className={`inline-flex items-center justify-center self-stretch rounded-sm px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 ${
+            className={`inline-flex grow items-center justify-center self-stretch rounded-sm px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 focus-visible:ring-offset-1 ${
               active
                 ? "bg-surface-primary text-text-primary shadow-sm"
                 : "text-text-secondary hover:text-text-primary"
