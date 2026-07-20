@@ -33,6 +33,11 @@ const AccuracyBarSection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
+const WerRadarSection = dynamic(
+  () => import("@/components/dashboard/WerRadarSection"),
+  { ssr: false, loading: () => <ChartSkeleton /> }
+);
+
 const ModelComparisonSection = dynamic(
   () => import("@/components/dashboard/ModelComparisonSection"),
   { ssr: false, loading: () => <ChartSkeleton /> }
@@ -48,6 +53,7 @@ export function STTDashboard() {
           <BoxPlotSection />
           <AccuracyBarSection />
           <LatencyAccuracySection />
+          <WerRadarSection />
           <ModelComparisonSection />
         </DashboardLayout>
       </SidebarMenuProvider>
