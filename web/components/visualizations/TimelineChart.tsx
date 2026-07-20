@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   LineChart,
   Line,
@@ -50,8 +50,39 @@ export const TimelineLegend: React.FC<{
   /** Deselected models: dimmed in place so entries never move under the pointer mid-toggle. */
   hiddenKeys?: Set<string>;
   onToggle?: (dataKey: string) => void;
-}> = ({ payload, dimmedKeys, hiddenKeys, onToggle }) => (
-  <ul className="columns-2 gap-x-4 px-2 pt-5 sm:columns-3 sm:gap-x-6 lg:columns-4">
+}> = ({ payload, dimmedKeys, hiddenKeys, onToggle }) => {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  return (
+    <div className="mt-3 border-t border-border-primary sm:mt-0 sm:border-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((prev) => !prev)}
+        className="group flex w-full items-center justify-between gap-4 px-2 py-3 text-left sm:hidden"
+      >
+        <span className="text-sm font-medium text-text-primary">
+          Models{" "}
+          <span className="font-mono text-xs text-text-tertiary">
+            {payload?.length ?? 0}
+          </span>
+        </span>
+        <span aria-hidden className="flex shrink-0 items-center gap-2">
+          <span className="text-xs font-light text-text-tertiary">
+            {open ? "Click to collapse" : "Click to expand"}
+          </span>
+          <span className="font-mono text-xl leading-none text-text-tertiary transition-colors group-hover:text-text-primary">
+            {open ? "–" : "+"}
+          </span>
+        </span>
+      </button>
+      <div
+        id={panelId}
+        className={`grid transition-[grid-template-rows,visibility] duration-300 ease-in-out ${open ? "visible grid-rows-[1fr]" : "invisible grid-rows-[0fr]"} sm:visible sm:grid-rows-[1fr]`}
+      >
+        <div className="overflow-hidden">
+          <ul className="grid auto-cols-max grid-flow-col grid-rows-4 gap-x-4 overflow-x-auto px-2 pb-1 sm:block sm:columns-3 sm:gap-x-6 sm:pt-5 lg:columns-4">
     {[...(payload ?? [])]
       .sort(
         (a, b) =>
@@ -71,7 +102,7 @@ export const TimelineLegend: React.FC<{
               type="button"
               aria-pressed={!hidden}
               onClick={() => onToggle?.(entry.dataKey ?? "")}
-              className={`flex w-full items-start gap-1.5 rounded-md px-1 py-2 text-left text-xs leading-tight text-text-primary transition-opacity hover:bg-surface-toggle-inactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 sm:py-1${dimmed ? " opacity-35" : ""}`}
+              className={`flex min-h-11 w-full items-center gap-1.5 rounded-md px-1 py-2 text-left text-xs leading-tight text-text-primary transition-opacity hover:bg-surface-toggle-inactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 sm:min-h-0 sm:items-start sm:py-1${dimmed ? " opacity-35" : ""}`}
             >
               <span
                 className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
@@ -83,8 +114,12 @@ export const TimelineLegend: React.FC<{
           </li>
         );
       })}
-  </ul>
-);
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface MarkerLabelProps {
   viewBox?: { x?: number; y?: number; width?: number; height?: number };
