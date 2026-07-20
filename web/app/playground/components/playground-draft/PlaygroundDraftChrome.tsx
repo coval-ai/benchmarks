@@ -68,7 +68,7 @@ export function PlaygroundDraftChrome({
                 aria-controls="playground-panel-tts"
                 tabIndex={mode === "tts" ? 0 : -1}
                 disabled={modeTabsLocked}
-                className={`relative z-10 flex min-h-9 min-w-[100px] flex-1 items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-[color,background-color,box-shadow] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 ${
+                className={`relative z-10 flex min-h-11 min-w-[100px] flex-1 items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-[color,background-color,box-shadow] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-9 ${
                   mode === "tts"
                     ? "bg-surface-toggle-active text-text-on-toggle-active shadow-sm"
                     : "text-text-secondary hover:text-text-primary"
@@ -87,7 +87,7 @@ export function PlaygroundDraftChrome({
                 aria-controls="playground-panel-stt"
                 tabIndex={mode === "stt" ? 0 : -1}
                 disabled={modeTabsLocked}
-                className={`relative z-10 flex min-h-9 min-w-[100px] flex-1 items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-[color,background-color,box-shadow] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 ${
+                className={`relative z-10 flex min-h-11 min-w-[100px] flex-1 items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-[color,background-color,box-shadow] duration-300 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-9 ${
                   mode === "stt"
                     ? "bg-surface-toggle-active text-text-on-toggle-active shadow-sm"
                     : "text-text-secondary hover:text-text-primary"

@@ -10,8 +10,8 @@
 :root {
   /* Surfaces */
   --color-surface-primary: #f9faf8;
-  --color-surface-secondary: #f2f1ee;
-  --color-surface-elevated: #f5f4f0;
+  --color-surface-secondary: #f3f2eb;
+  --color-surface-elevated: #f9faf8;
   --color-surface-tooltip: #f9faf8;
   --color-surface-backdrop: rgba(15, 12, 10, 0.5);
   --color-surface-overlay: rgba(242, 241, 238, 0.85);
@@ -25,7 +25,7 @@
 
   /* Borders */
   --color-border-primary: #dbdbd3;
-  --color-border-secondary: #e8e6e0;
+  --color-border-secondary: #eae9e0;
 
   /* Charts */
   --color-chart-grid: #dbdbd3;
@@ -43,7 +43,7 @@
   /* Toggle */
   --color-surface-toggle-active: #0f0c0a;
   --color-text-on-toggle-active: #f9faf8;
-  --color-surface-toggle-inactive: #e8e6e0;
+  --color-surface-toggle-inactive: #eae9e0;
   --color-text-on-toggle-inactive: #515151;
 
   /* Spinner */
@@ -65,7 +65,7 @@
   --color-accent-lavender: #6e51a6;
 
   /* Base */
-  --background: #f2f1ee;
+  --background: #f9faf8;
   --foreground: #0f0c0a;
 
   /* Film grain (coval.ai). Tiled fractal-noise SVG; layered via overlays. */
@@ -83,29 +83,29 @@
   color-scheme: dark;
 
     --color-surface-primary: #0f0c0a;
-    --color-surface-secondary: #17120f;
-    --color-surface-elevated: #1c1611;
-    --color-surface-tooltip: #1c1611;
+    --color-surface-secondary: #292720;
+    --color-surface-elevated: #0f0c0a;
+    --color-surface-tooltip: #292720;
     --color-surface-backdrop: rgba(0, 0, 0, 0.6);
     --color-surface-overlay: rgba(15, 12, 10, 0.85);
 
     --color-text-primary: #f9faf8;
-    --color-text-secondary: #c7c2bc;
+    --color-text-secondary: #dbdbd3;
     /* Graphite, lightened from brand #7f7a76 so muted text still clears WCAG AA
        (4.5:1) on the lightest elevated surface, not just the Ink base. */
-    --color-text-tertiary: #8b8681;
+    --color-text-tertiary: #8c887b;
     --color-text-on-tooltip: #f9faf8;
-    --color-text-on-tooltip-secondary: #c7c2bc;
+    --color-text-on-tooltip-secondary: #dbdbd3;
 
-    --color-border-primary: #2e2823;
-    --color-border-secondary: #241f1b;
+    --color-border-primary: #292720;
+    --color-border-secondary: #292720;
 
-    --color-chart-grid: #2e2823;
-    --color-chart-axis-text: #c7c2bc;
+    --color-chart-grid: #292720;
+    --color-chart-axis-text: #dbdbd3;
     --color-chart-label: #f9faf8;
     --color-chart-median: #f9faf8;
     --color-chart-box-fill: rgba(249, 250, 248, 0.08);
-    --color-chart-bar-stroke: #3a332d;
+    --color-chart-bar-stroke: #3d3b34;
 
     --color-hover-bg: rgba(249, 250, 248, 0.06);
     --color-selected-bg: rgba(249, 250, 248, 0.1);
@@ -113,8 +113,8 @@
 
     --color-surface-toggle-active: #f9faf8;
     --color-text-on-toggle-active: #0f0c0a;
-    --color-surface-toggle-inactive: #241f1b;
-    --color-text-on-toggle-inactive: #c7c2bc;
+    --color-surface-toggle-inactive: #292720;
+    --color-text-on-toggle-inactive: #dbdbd3;
 
     --color-spinner-track: rgba(249, 250, 248, 0.15);
     --color-spinner-head: #f9faf8;

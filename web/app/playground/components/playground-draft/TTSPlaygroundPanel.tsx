@@ -343,7 +343,7 @@ export function TTSPlaygroundPanel({
               aria-label="Clear prompt text, cancel in-flight requests, and close results"
               onClick={handleClear}
               disabled={hasInFlight}
-              className="rounded-full border border-border-primary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              className="min-h-11 rounded-full border border-border-primary px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 lg:min-h-0"
             >
               Clear
             </button>
@@ -357,7 +357,7 @@ export function TTSPlaygroundPanel({
                 <button
                   key={ex.label}
                   type="button"
-                  className="rounded-full border border-border-primary bg-transparent px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-text-tertiary hover:text-text-primary"
+                  className="min-h-11 rounded-full border border-border-primary bg-transparent px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-text-tertiary hover:text-text-primary lg:min-h-0"
                   onClick={() => {
                     capturePostHogEvent(POSTHOG_EVENTS.playgroundExamplePromptUsed, {
                       surface: "playground",
@@ -415,7 +415,7 @@ export function TTSPlaygroundPanel({
             <button
               type="button"
               onClick={() => setBenchmarkOpen(true)}
-              className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
+              className="inline-flex min-h-11 items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
             >
               View results
             </button>
@@ -429,7 +429,7 @@ export function TTSPlaygroundPanel({
                 ? "Enter runs benchmark when focus is outside fields, or ⌘/Ctrl+Enter from the text box"
                 : undefined
             }
-            className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
+            className="inline-flex min-h-11 items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
           >
             <Play className="size-4 shrink-0" aria-hidden />
             Benchmark
@@ -465,7 +465,7 @@ export function TTSPlaygroundPanel({
                   <button
                     type="button"
                     aria-label="Close benchmark results"
-                    className="mb-3 flex size-9 shrink-0 items-center justify-center rounded-full border playground-modal-border-subtle text-text-tertiary transition-colors hover:bg-hover-bg hover:text-text-primary sm:mb-4 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="mb-3 flex size-11 shrink-0 items-center justify-center rounded-full border playground-modal-border-subtle text-text-tertiary transition-colors hover:bg-hover-bg hover:text-text-primary sm:mb-4 lg:size-9 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                     onClick={() => setBenchmarkOpen(false)}
                   >
                     <X className="size-4" />

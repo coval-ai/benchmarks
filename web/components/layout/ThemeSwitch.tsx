@@ -21,7 +21,7 @@ const ThemeSwitch: React.FC<{ className?: string }> = ({ className = "" }) => {
     <div
       role="radiogroup"
       aria-label="Theme"
-      className={`inline-flex h-8 items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] ${className}`}
+      className={`inline-flex h-[50px] items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] lg:h-8 ${className}`}
     >
       {OPTIONS.map(({ value, Icon, label }) => {
         const active = mounted && resolvedTheme === value;
@@ -33,7 +33,7 @@ const ThemeSwitch: React.FC<{ className?: string }> = ({ className = "" }) => {
             aria-checked={active}
             aria-label={label}
             onClick={() => setTheme(value)}
-            className={`inline-flex items-center justify-center self-stretch rounded-sm px-2.5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 ${
+            className={`inline-flex w-11 items-center justify-center self-stretch rounded-sm px-0 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 lg:w-auto lg:px-2.5 ${
               active
                 ? "bg-surface-primary text-text-primary shadow-sm"
                 : "text-text-secondary hover:text-text-primary"

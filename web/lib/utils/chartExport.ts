@@ -136,7 +136,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 // nudged for legibility on the export surface: bright colors darken on the light
 // canvas, dark colors lighten on the dark canvas.
 const labelColor = (hex?: string, dark = false) => {
-  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return dark ? "#c7c2bc" : "#3d3d3d";
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return dark ? "#dbdbd3" : "#3d3d3d";
   const n = parseInt(hex.slice(1), 16);
   let [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
