@@ -3,12 +3,14 @@
 
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
+import { SampleFetchError } from "@/lib/audioSamples/createSampleFeed";
 import { s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import { usePlaybackCoordinator } from "@/hooks/useSequencedPlayback";
 import { SampleInput } from "./SampleInput";
 import { SampleOutputs, type SampleOutputItem } from "./SampleOutputs";
 
@@ -18,8 +20,18 @@ function tickLabel(tick: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+// Which failure case fired, for the console — network/http/parse vs an
+// unclassified error, with the status when we have one.
+function describeError(err: unknown): string {
+  if (err instanceof SampleFetchError) {
+    return err.status != null ? `${err.kind} (status ${err.status})` : err.kind;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function SamplesCard() {
   const { modelsByProvider, normalizeProviderName, s2sPlayRequest } = useDashboard();
+  const coordinator = usePlaybackCoordinator();
   const visibleProviders = useMemo(
     () => new Set(Object.keys(modelsByProvider)),
     [modelsByProvider]
@@ -32,6 +44,15 @@ export function SamplesCard() {
   const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
 
+  const fetchError = manifestQuery.isError || indexQuery.isError;
+  // Keep the failure cause internal (dev console only); public visitors just see
+  // the generic "temporarily unavailable" copy below.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    const err = manifestQuery.error ?? indexQuery.error;
+    if (err) console.error(`[s2s-samples] fetch failed: ${describeError(err)}`, err);
+  }, [manifestQuery.error, indexQuery.error]);
+
   const items = useMemo<SampleOutputItem[]>(() => {
     if (!manifest) return [];
     return visibleRecordings(manifest, visibleProviders).map((r) => ({
@@ -43,7 +64,7 @@ export function SamplesCard() {
 
   const handlePlay = useCallback(
     (provider: string) => {
-      capturePostHogEvent(POSTHOG_EVENTS.s2sSamplePlayed, {
+      capturePostHogEvent(POSTHOG_EVENTS.s2sSamplePlayRequested, {
         surface: "s2s_dashboard",
         mode: "s2s",
         provider,
@@ -71,7 +92,7 @@ export function SamplesCard() {
 
       {loading ? (
         <div className="h-40 animate-pulse rounded-lg bg-surface-secondary" />
-      ) : indexQuery.isError ? (
+      ) : fetchError ? (
         <p className="py-8 text-center text-sm text-text-tertiary">
           Samples are temporarily unavailable.
         </p>
@@ -86,6 +107,7 @@ export function SamplesCard() {
           <SampleInput
             transcript={manifest?.transcript ?? null}
             inputAudioUrl={manifest?.input_audio_url ?? null}
+            coordinator={coordinator}
           />
           <SampleOutputs
             items={items}
@@ -96,6 +118,7 @@ export function SamplesCard() {
                 ? { provider: s2sPlayRequest.provider, nonce: s2sPlayRequest.nonce }
                 : null
             }
+            coordinator={coordinator}
           />
         </div>
       )}

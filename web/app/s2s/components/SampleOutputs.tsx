@@ -5,7 +5,11 @@
 
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { useSequencedPlayback, type PlaybackTrack } from "@/hooks/useSequencedPlayback";
+import {
+  useSequencedPlayback,
+  type PlaybackCoordinator,
+  type PlaybackTrack,
+} from "@/hooks/useSequencedPlayback";
 import { getModelColor } from "@/lib/utils/colors";
 import { toModelKey } from "@/lib/utils/formatters";
 
@@ -52,11 +56,13 @@ export function SampleOutputs({
   normalizeProvider,
   onPlay,
   playRequest,
+  coordinator,
 }: {
   items: SampleOutputItem[];
   normalizeProvider: (provider: string) => string;
   onPlay?: (provider: string) => void;
   playRequest?: { provider: string; nonce: number } | null;
+  coordinator?: PlaybackCoordinator;
 }) {
   const tracks = useMemo<PlaybackTrack[]>(
     () => items.map((i) => ({ key: i.provider, url: i.url })),
@@ -67,7 +73,8 @@ export function SampleOutputs({
 
   const { audioRef, activeIndex, isPlaying, toggle, playFrom, handleEnded } = useSequencedPlayback(
     tracks,
-    (track) => onPlay?.(track.key)
+    (track) => onPlay?.(track.key),
+    coordinator
   );
 
   // A timeline-tooltip click plays a specific provider. Wait until that tick's

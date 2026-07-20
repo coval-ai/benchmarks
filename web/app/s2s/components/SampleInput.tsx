@@ -5,7 +5,10 @@
 
 import { Pause, Play } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useSequencedPlayback } from "@/hooks/useSequencedPlayback";
+import {
+  useSequencedPlayback,
+  type PlaybackCoordinator,
+} from "@/hooks/useSequencedPlayback";
 
 // The shared side of a tick: the one utterance every provider heard. Rendered
 // once above the per-provider outputs. Input audio is optional — the sampler
@@ -13,15 +16,21 @@ import { useSequencedPlayback } from "@/hooks/useSequencedPlayback";
 export function SampleInput({
   transcript,
   inputAudioUrl,
+  coordinator,
 }: {
   transcript: string | null;
   inputAudioUrl: string | null;
+  coordinator?: PlaybackCoordinator;
 }) {
   const tracks = useMemo(
     () => (inputAudioUrl ? [{ key: "input", url: inputAudioUrl }] : []),
     [inputAudioUrl]
   );
-  const { audioRef, isPlaying, toggle, handleEnded } = useSequencedPlayback(tracks);
+  const { audioRef, isPlaying, toggle, handleEnded } = useSequencedPlayback(
+    tracks,
+    undefined,
+    coordinator
+  );
   const [expanded, setExpanded] = useState(false);
 
   return (
