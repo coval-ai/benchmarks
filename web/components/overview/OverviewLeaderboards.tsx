@@ -15,6 +15,7 @@ import type { ModelStatEntry } from "@/lib/api/client";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
 import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
 
 const TOP_N = 5;
@@ -48,6 +49,7 @@ const OverviewLeaderboards: React.FC = () => {
   // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  const windowDataStale = ttsQuery.isPlaceholderData || sttQuery.isPlaceholderData;
 
   const ttsRows = useMemo(
     () =>
@@ -75,8 +77,19 @@ const OverviewLeaderboards: React.FC = () => {
 
   return (
     <div>
-      <div className="mb-3 flex justify-end">
-        <TimeWindowToggle value={timeWindow} onChange={changeTimeWindow} />
+      <div className="mb-3 flex items-center justify-end gap-3">
+        <CymaticLoader
+          size={20}
+          animated={windowDataStale}
+          className={`text-text-primary transition-opacity duration-300 ${
+            windowDataStale ? "opacity-100" : "opacity-0"
+          }`}
+        />
+        <TimeWindowToggle
+          value={timeWindow}
+          onChange={changeTimeWindow}
+          loading={windowDataStale}
+        />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <LeaderboardCard

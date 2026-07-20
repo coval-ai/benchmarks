@@ -154,6 +154,7 @@ export function CymaticLoader({
         <span
           // eslint-disable-next-line react/no-array-index-key -- fixed-size positional bead grid; index is the identity
           key={index}
+          suppressHydrationWarning
           className="absolute rounded-full bg-current will-change-[transform,opacity]"
           style={{
             left: "50%",
