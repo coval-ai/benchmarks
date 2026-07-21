@@ -13,6 +13,8 @@ import {
   ResponsiveContainer,
   Tooltip,
   Cell,
+  type BarRectangleItem,
+  type LabelProps,
 } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import { normalizeModelName } from "@/lib/utils/formatters";
@@ -26,6 +28,9 @@ import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+
+const X_AXIS_HEIGHT = 100;
+const CHART_BOTTOM_MARGIN = 80;
 
 const AccuracyBarSection: React.FC = () => {
   const {
@@ -80,19 +85,13 @@ const AccuracyBarSection: React.FC = () => {
     width = 0,
     value,
     index = 0,
-  }: {
-    x?: number;
-    y?: number;
-    width?: number;
-    value?: number;
-    index?: number;
-  }) => {
+  }: LabelProps) => {
     const entry = werBarDataWithColors[index];
-    if (width < 28 && !(entry && clickedWERBars.has(entry.model))) return <g />;
+    if (Number(width) < 28 && !(entry && clickedWERBars.has(entry.model))) return <g />;
     return (
       <text
-        x={x + width / 2}
-        y={y - 8}
+        x={Number(x) + Number(width) / 2}
+        y={Number(y) - 8}
         textAnchor="middle"
         fill={themeColors.label}
         fillOpacity={entry?.fillOpacity}
@@ -187,16 +186,17 @@ const AccuracyBarSection: React.FC = () => {
           onMouseEnter={trackChartHover}
           data-export-frame
         >
-          {/* The y-axis lives in its own zero-plot chart outside the scroll
-              container so it stays pinned while the bars scroll. It gets the
-              same data (via an invisible Bar) so both charts compute the same
-              scale, and the 180 bottom margin mirrors the main chart's
-              80 margin + 100 x-axis height so ticks align with gridlines. */}
           <div className="w-[52px] shrink-0" data-chart-axis>
             <ResponsiveContainer width="100%" height="100%" debounce={200}>
               <BarChart
                 data={werBarDataWithColors}
-                margin={{ top: 20, right: 0, left: 0, bottom: 180 }}
+                accessibilityLayer={false}
+                margin={{
+                  top: 20,
+                  right: 0,
+                  left: 0,
+                  bottom: CHART_BOTTOM_MARGIN + X_AXIS_HEIGHT,
+                }}
               >
                 <YAxis
                   width={52}
@@ -221,19 +221,22 @@ const AccuracyBarSection: React.FC = () => {
             <ResponsiveContainer
               width="100%"
               height="100%"
-              minWidth={werBarDataWithColors.length * 48 + 52}
+              minWidth={werBarDataWithColors.length * (isMobile ? 56 : 48) + 52}
               debounce={200}
             >
               <BarChart
                 data={werBarDataWithColors}
+                accessibilityLayer
                 margin={{
                   top: 20,
                   right: 8,
                   left: 0,
-                  bottom: 80,
+                  bottom: CHART_BOTTOM_MARGIN,
                 }}
               >
                 <CartesianGrid
+                  xAxisId={0}
+                  yAxisId={0}
                   vertical={false}
                   strokeDasharray="2 2"
                   stroke={themeColors.grid}
@@ -248,7 +251,7 @@ const AccuracyBarSection: React.FC = () => {
                       isMobile={isMobile}
                     />
                   }
-                  height={100}
+                  height={X_AXIS_HEIGHT}
                   interval={0}
                   padding={{ left: 52 }}
                 />
@@ -257,12 +260,15 @@ const AccuracyBarSection: React.FC = () => {
                   content={<CustomBarTooltip getProviderForModel={getProviderForModel} />}
                   cursor={false}
                   active={isMobile ? false : undefined}
+                  isAnimationActive={false}
                 />
                 <Bar
                   dataKey="averageWER"
                   radius={[4, 4, 0, 0]}
                   isAnimationActive={false}
-                  onClick={handleWERBarClickTracked}
+                  onClick={(bar: BarRectangleItem) =>
+                    handleWERBarClickTracked(bar.payload)
+                  }
                   label={barLabel}
                   style={{
                     cursor: "pointer",

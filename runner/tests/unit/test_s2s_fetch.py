@@ -404,3 +404,81 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
 
     assert statuses == {"openai": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    writer.coval_run_ingested = AsyncMock(return_value=True)
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "SUCCESS"}
+    )
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, {}) as client:
+        _status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert ingested == 0
+    assert [(r.provider, r.coval_run_id) for r in sampled] == [("openai", "R1")]
+
+
+@pytest.mark.asyncio
+async def test_newest_run_is_the_sample_candidate_once() -> None:
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "R2", "create_time": _iso(timedelta(hours=1))},
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=4))},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert [r.coval_run_id for r in sampled] == ["R2"]
+
+
+@pytest.mark.asyncio
+async def test_stale_provider_lends_no_sample_candidate() -> None:
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    writer.coval_run_ingested = AsyncMock(return_value=True)
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=5)), "error_status": "SUCCESS"}
+    )
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, {}) as client:
+        status, _ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert status is RunStatus.FAILED
+    assert sampled == []

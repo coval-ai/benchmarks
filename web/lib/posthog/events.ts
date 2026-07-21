@@ -20,7 +20,8 @@ export const POSTHOG_EVENTS = {
   dashboardTimeWindowChanged: "dashboard_time_window_changed",
   dashboardChartShared: "dashboard_chart_shared",
   dashboardWerDatasetChanged: "dashboard_wer_dataset_changed",
-  dashboardWerBarViewChanged: "dashboard_wer_bar_view_changed"
+  dashboardWerBarViewChanged: "dashboard_wer_bar_view_changed",
+  s2sSamplePlayRequested: "s2s_sample_play_requested"
 } as const;
 
 export type PostHogSurface =
@@ -34,6 +35,7 @@ export type DashboardChartId =
   | "timeline"
   | "scatter"
   | "wer_bar"
+  | "wer_radar"
   | "box_plot"
   | "heatmap"
   | "performance_delta";

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import importlib.resources
+import random
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -27,6 +28,7 @@ from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.s2s.samples import SampleRun, copy_tick_samples
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -291,6 +293,7 @@ async def _fetch_one_provider(
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
+    sampled_runs: list[SampleRun] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -301,6 +304,24 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
+    candidate: SampleRun | None = None
+
+    def note_sample_candidate(coval_run: CovalRun) -> None:
+        # Newest-first scan: the first eligible run per provider is its newest,
+        # whether it was ingested this tick or on an earlier one — staggered
+        # arrivals must not shrink the sample to one provider. Held locally and
+        # committed only after the staleness check, so a stale provider's old
+        # recording never ships under today's tick.
+        nonlocal candidate
+        if candidate is not None:
+            return
+        candidate = SampleRun(
+            provider=spec.provider,
+            model=spec.model,
+            coval_run_id=coval_run.run_id,
+            bucket_at=_bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds),
+        )
+
     try:
         runs = await recent_completed_runs(client, agent_id, period_seconds=period_seconds)
 
@@ -321,6 +342,7 @@ async def _fetch_one_provider(
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
+                note_sample_candidate(coval_run)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
                 continue
@@ -335,6 +357,8 @@ async def _fetch_one_provider(
             )
             if status is None:
                 continue
+            if status is not RunStatus.FAILED:
+                note_sample_candidate(coval_run)
             statuses.append(status)
             if not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
@@ -354,6 +378,9 @@ async def _fetch_one_provider(
                 threshold_seconds=threshold,
             )
             return RunStatus.FAILED, len(statuses)
+
+        if sampled_runs is not None and candidate is not None:
+            sampled_runs.append(candidate)
 
         if statuses:
             if all(s is RunStatus.FAILED for s in statuses):
@@ -385,6 +412,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
+        sampled_runs: list[SampleRun] = []
         for spec in AGENTS:
             agent_id = getattr(settings, spec.agent_id_attr)
             if not agent_id:
@@ -399,6 +427,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,
+                sampled_runs=sampled_runs,
             )
             total_ingested += ingested
 
@@ -407,6 +436,20 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 await writer.refresh_stats_matviews()
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
+
+        if settings.s2s_samples_bucket and sampled_runs:
+            expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
+            missing = expected - {r.provider for r in sampled_runs}
+            if missing:
+                # Error level on purpose: this is the alert that a provider is
+                # absent from the day's sample; the tick still publishes the rest.
+                logger.error("samples_provider_missing", missing=sorted(missing))
+            await copy_tick_samples(
+                client,
+                bucket_name=settings.s2s_samples_bucket,
+                runs=sampled_runs,
+                rng=random.Random(),  # noqa: S311
+            )
         logger.info(
             "s2s_fetch_done",
             statuses={p: str(s) for p, s in statuses.items()},

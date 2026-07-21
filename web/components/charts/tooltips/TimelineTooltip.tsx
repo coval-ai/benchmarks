@@ -2,17 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import type { TooltipContentProps } from "recharts";
 import { formatDate, formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
 
-interface TimelineTooltipProps {
-  active?: boolean;
-  payload?: Array<{
-    dataKey: string;
-    value: number;
-    name: string;
-    color: string;
-  }>;
-  label?: string | number;
+interface TimelineTooltipProps extends Partial<Pick<
+  TooltipContentProps<number, string>,
+  "active" | "payload" | "label"
+>> {
   getProviderForModel: (model: string) => string;
   showDate?: boolean;
   /**
@@ -28,14 +24,29 @@ interface TimelineTooltipProps {
   interactionHint?: string | false;
   /** Caps the scroll area (px); keeps the pinned list from covering the chart on mobile. */
   maxHeight?: number;
+  /**
+   * S2S pinned tooltip only: makes each row a play control for that model's
+   * recording at this bucket. Omitted everywhere else, so those rows stay
+   * static and unchanged.
+   */
+  onModelClick?: (model: string, label: number) => void;
+  /** Non-timeline charts: shown verbatim instead of the timestamp label. */
+  labelText?: string;
+  /** Non-latency values: overrides the default "123ms" rendering. */
+  formatValue?: (value: number) => string;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, labelText, formatValue }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
   const validData = payload
-    .filter((item) => item.value != null && item.value > 0)
+    .flatMap((item) => {
+      const dataKey = typeof item.dataKey === "string" ? item.dataKey : item.graphicalItemId;
+      return typeof item.value === "number" && item.value > 0 && dataKey
+        ? [{ ...item, dataKey, value: item.value }]
+        : [];
+    })
     .sort((a, b) => a.value - b.value); // Ascending = fastest first
 
   if (validData.length === 0) return null;
@@ -74,9 +85,10 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       <p
         style={{ margin: "0 0 8px 0", fontWeight: "bold", fontSize: "12px" }}
       >
-        {showDate
-          ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
-          : formatTimeWithSeconds(Number(label))}
+        {labelText ??
+          (showDate
+            ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
+            : formatTimeWithSeconds(Number(label)))}
       </p>
       <div
         className="tooltip-scroll"
@@ -99,16 +111,31 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
           const isLeader = item.dataKey === leaderKey;
+          const clickable = onModelClick != null;
 
           return (
             <div
               key={item.dataKey}
+              {...(clickable
+                ? {
+                    role: "button" as const,
+                    tabIndex: 0,
+                    onClick: () => onModelClick(modelName, Number(label)),
+                    onKeyDown: (e: React.KeyboardEvent) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onModelClick(modelName, Number(label));
+                      }
+                    }
+                  }
+                : {})}
               style={{
                 margin: "6px 0",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                opacity: item.inView ? 1 : 0.35
+                opacity: item.inView ? 1 : 0.35,
+                ...(clickable ? { cursor: "pointer" } : {})
               }}
             >
               <div style={{ display: "flex", alignItems: "center", flex: 1 }}>
@@ -150,7 +177,8 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                   flexShrink: 0
                 }}
               >
-                {item.value.toFixed(0)}ms
+                {formatValue ? formatValue(item.value) : `${item.value.toFixed(0)}ms`}
+                {clickable ? <span style={{ marginLeft: "6px" }} aria-hidden>▶</span> : null}
               </span>
             </div>
           );

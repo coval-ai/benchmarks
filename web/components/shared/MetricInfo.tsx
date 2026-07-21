@@ -32,7 +32,10 @@ const MetricInfo: React.FC<{
   useEffect(() => {
     if (!open) return;
     const close = (e: PointerEvent) => {
-      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!wrapperRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+        wrapperRef.current?.blur();
+      }
     };
     document.addEventListener("pointerdown", close);
     return () => document.removeEventListener("pointerdown", close);
@@ -61,7 +64,7 @@ const MetricInfo: React.FC<{
   return (
     <span
       ref={wrapperRef}
-      className={`group relative inline-block ${isElement ? "" : "-m-2 cursor-help p-2"}`}
+      className={`group relative inline-block ${isElement ? "" : "-m-3.5 cursor-help p-3.5 lg:-m-2 lg:p-2"}`}
       tabIndex={isElement ? undefined : 0}
       aria-describedby={isElement ? undefined : id}
       onClick={isElement ? undefined : () => setOpen((prev) => !prev)}

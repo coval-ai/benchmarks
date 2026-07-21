@@ -10,14 +10,18 @@ import type {
   FetchOptions,
 } from "./client";
 
-export function useAggregatesQuery(params: AggregatesQueryParams) {
-  return useQuery({
+export function aggregatesQueryOptions(params: AggregatesQueryParams) {
+  return {
     queryKey: ["aggregates", params],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       getAggregates(params, { signal } satisfies FetchOptions),
     // Toggling windows keeps the prior data up instead of flashing the skeleton.
     placeholderData: keepPreviousData,
-  });
+  };
+}
+
+export function useAggregatesQuery(params: AggregatesQueryParams) {
+  return useQuery(aggregatesQueryOptions(params));
 }
 
 export function useProvidersQuery() {

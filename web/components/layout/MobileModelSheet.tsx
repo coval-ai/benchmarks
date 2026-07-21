@@ -7,9 +7,14 @@ import React from "react";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import FacetFilter from "@/components/layout/FacetFilter";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 
 const MobileModelSheet: React.FC = () => {
-  const { mobileSheetTitle: title, hasActiveFacets } = useDashboard();
+  const {
+    mobileSheetTitle: title,
+    hasActiveFacets,
+    windowDataStale,
+  } = useDashboard();
   const {
     mobileSheetOpen,
     setMobileSheetOpen: onSetMobileSheetOpen,
@@ -19,7 +24,9 @@ const MobileModelSheet: React.FC = () => {
     <div className="lg:hidden">
       {/* Backdrop - only when open */}
       {mobileSheetOpen && (
-        <div
+        <button
+          type="button"
+          aria-label="Close filters"
           className="fixed inset-0 z-30 bg-surface-backdrop transition-opacity duration-200"
           onClick={() => onSetMobileSheetOpen(false)}
         />
@@ -27,18 +34,22 @@ const MobileModelSheet: React.FC = () => {
 
       {/* Bottom Sheet */}
       <div
+        aria-hidden={!mobileSheetOpen}
+        inert={!mobileSheetOpen}
         className={`fixed bottom-0 left-0 right-0 z-40 bg-surface-overlay backdrop-blur-xl border-t border-border-primary rounded-t-3xl transition-transform duration-200 ease-out ${
-          mobileSheetOpen ? "translate-y-0" : "translate-y-full"
+          mobileSheetOpen ? "visible translate-y-0" : "invisible translate-y-full"
         }`}
         style={{ height: "50vh" }}
       >
         {/* Handle */}
-        <div
-          className="flex justify-center pt-3 pb-2 cursor-pointer"
+        <button
+          type="button"
+          aria-label="Close filters"
+          className="flex min-h-11 w-full items-center justify-center"
           onClick={() => onSetMobileSheetOpen(!mobileSheetOpen)}
         >
           <div className="w-12 h-1 bg-text-tertiary rounded-full"></div>
-        </div>
+        </button>
 
         {/* Sheet Content */}
         <div className="px-4 pb-8 h-full overflow-y-auto">
@@ -52,8 +63,10 @@ const MobileModelSheet: React.FC = () => {
 
       {/* Floating Handle - Only when sheet is closed */}
       {!mobileSheetOpen && (
-        <div
-          className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-40 bg-surface-overlay backdrop-blur-xl border border-border-primary rounded-full px-4 py-2 cursor-pointer shadow-lg"
+        <button
+          type="button"
+          aria-label="Open filters"
+          className="fixed bottom-4 left-1/2 z-40 min-h-11 -translate-x-1/2 rounded-full border border-border-primary bg-surface-overlay px-4 py-2 shadow-lg backdrop-blur-xl"
           onClick={() => onSetMobileSheetOpen(true)}
         >
           <div className="flex items-center space-x-2 text-text-secondary text-sm">
@@ -64,9 +77,13 @@ const MobileModelSheet: React.FC = () => {
                 aria-label="Filters active"
               />
             )}
-            <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
+            {windowDataStale ? (
+              <CymaticLoader size={20} animated className="text-text-primary" />
+            ) : (
+              <div className="w-6 h-0.5 bg-text-tertiary rounded-full"></div>
+            )}
           </div>
-        </div>
+        </button>
       )}
     </div>
   );

@@ -41,17 +41,17 @@ export const LIGHT_CHART_COLORS: ThemeColors = {
 };
 
 export const DARK_CHART_COLORS: ThemeColors = {
-  grid: "#2e2823",
-  axisText: "#c7c2bc",
+  grid: "#292720",
+  axisText: "#dbdbd3",
   label: "#f9faf8",
   median: "#f9faf8",
   boxFill: "rgba(249, 250, 248, 0.08)",
-  barStroke: "#3a332d",
-  tooltipBg: "#1c1611",
+  barStroke: "#3d3b34",
+  tooltipBg: "#292720",
   tooltipText: "#f9faf8",
-  tooltipSecondary: "#c7c2bc",
+  tooltipSecondary: "#dbdbd3",
   textPrimary: "#f9faf8",
-  textSecondary: "#c7c2bc",
+  textSecondary: "#dbdbd3",
   zoneFill: "rgba(150, 190, 250, 0.18)",
   zoneStroke: "rgba(198, 220, 250, 0.45)",
 };

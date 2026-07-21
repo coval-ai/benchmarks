@@ -44,7 +44,7 @@ const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
           aria-label="WER dataset"
           value={werDataset ?? ""}
           onChange={(e) => changeWerDataset(e.target.value || null)}
-          className="appearance-none rounded-lg border border-border-primary bg-surface-elevated py-1.5 pl-2.5 pr-7 text-xs font-medium text-text-primary outline-none transition-colors hover:border-selected-border focus:border-selected-border"
+          className="h-11 appearance-none rounded-lg border border-border-primary bg-surface-elevated pl-2.5 pr-7 text-xs font-medium text-text-primary outline-none transition-colors hover:border-selected-border focus:border-selected-border lg:h-auto lg:py-1.5"
         >
           <option value="">All datasets (pooled)</option>
           {perturbations.length > 0 ? (

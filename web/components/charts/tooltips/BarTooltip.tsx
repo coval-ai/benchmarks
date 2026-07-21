@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import type { TooltipContentProps } from "recharts";
 import { normalizeModelName } from "@/lib/utils/formatters";
-import { CustomBarTooltipProps } from "@/types/chart.types";
+
+interface CustomBarTooltipProps extends Partial<Pick<
+  TooltipContentProps<number, string>,
+  "active" | "payload" | "label"
+>> {
+  getProviderForModel?: (model: string) => string;
+}
 
 const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   active,
@@ -12,8 +19,10 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   getProviderForModel
 }) => {
   if (active && payload && payload.length > 0) {
-    const value = payload[0]?.value;
-    const modelKey = label ?? "";
+    const item = payload[0];
+    if (item?.dataKey !== "averageWER" || typeof item.value !== "number") return null;
+    const value = item.value;
+    const modelKey = String(label ?? "");
     const provider = getProviderForModel?.(modelKey);
     const modelLabel = provider
       ? `${provider} ${normalizeModelName(modelKey)}`

@@ -13,7 +13,7 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 const iconButtonClass =
-  "flex h-7 w-7 items-center justify-center rounded-lg border border-border-secondary bg-surface-primary text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary";
+  "flex h-11 w-11 items-center justify-center rounded-lg border border-border-secondary bg-surface-primary text-text-secondary transition-colors hover:bg-surface-toggle-inactive hover:text-text-primary lg:h-7 lg:w-7";
 
 interface SectionHeaderProps {
   label: string;
@@ -108,7 +108,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // The chart is the largest SVG in the card; icon SVGs and a chart still
     // sizing to zero during layout are excluded so we never export those.
     const findSvg = () =>
-      Array.from(card.querySelectorAll("svg"))
+      Array.from(card.querySelectorAll<SVGSVGElement>("[data-export-frame] svg"))
         .filter((el) => el.clientWidth > 100 && el.clientHeight > 100)
         .sort(
           (a, b) =>
@@ -129,9 +129,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // the same image, taller than the on-screen chart so dense charts have
     // room to place labels. The charts re-render on container resize, which
     // can replace the SVG node, hence the re-query once the stage settles.
-    const wrapper =
-      svg.closest<HTMLElement>("[data-export-frame]") ??
-      svg.closest<HTMLElement>(".recharts-responsive-container")?.parentElement;
+    const wrapper = svg.closest<HTMLElement>("[data-export-frame]");
     const priorWidth = card.style.width;
     const priorHeight = wrapper?.style.height ?? "";
     card.style.width = "1000px";
@@ -175,7 +173,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       annotate: exportAnnotate,
       axis: findAxis(),
       legend: Array.from(
-        card.querySelectorAll(".recharts-legend-wrapper li, [data-chart-legend] li")
+        card.querySelectorAll("[data-chart-legend] li")
       ).map((li) => {
         const entry = li.cloneNode(true) as HTMLElement;
         entry.querySelectorAll('[role="tooltip"]').forEach((el) => el.remove());
@@ -250,14 +248,14 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
               content={
                 note ? (
                   <>
-                    {description.detailed}
+                    <span className="whitespace-pre-line">{description.detailed}</span>
                     <span className="mt-2 block border-t border-border-secondary pt-2">
                       <span className="font-semibold">{note.term}.</span>{" "}
                       {note.text}
                     </span>
                   </>
                 ) : (
-                  description.detailed
+                  <span className="whitespace-pre-line">{description.detailed}</span>
                 )
               }
               align="left"

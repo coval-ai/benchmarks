@@ -67,7 +67,7 @@ const DashboardHeader: React.FC = () => {
         {/* Section tabs — centered on the page, independent of the brand width */}
         <nav
           aria-label="Benchmark sections"
-          className="absolute left-1/2 top-0 hidden h-full -translate-x-1/2 items-center gap-1 md:flex"
+          className="absolute left-1/2 top-0 hidden h-full -translate-x-1/2 items-center gap-1 lg:flex"
         >
           {SECTIONS.map((section) => {
             const active = pathname === section.href;
@@ -96,7 +96,7 @@ const DashboardHeader: React.FC = () => {
         </nav>
 
         {/* Theme toggle + GitHub link (desktop only) */}
-        <div className="ml-auto hidden items-center gap-4 md:flex">
+        <div className="ml-auto hidden items-center gap-4 lg:flex">
           <ThemeSwitch />
           <a
             href="https://github.com/coval-ai/benchmarks"
@@ -116,7 +116,7 @@ const DashboardHeader: React.FC = () => {
           aria-label={menuOpen ? "Close menu" : "Open menu"}
           aria-expanded={menuOpen}
           aria-controls="mobile-menu"
-          className="ml-auto flex h-10 w-10 flex-col items-center justify-center gap-1.5 text-text-primary md:hidden"
+          className="ml-auto flex h-11 w-11 flex-col items-center justify-center gap-1.5 text-text-primary lg:hidden"
         >
           <span
             className={`h-0.5 w-6 bg-current transition-transform duration-300 ease-out ${
@@ -136,7 +136,7 @@ const DashboardHeader: React.FC = () => {
         id="mobile-menu"
         aria-label="Global navigation"
         aria-hidden={!menuOpen}
-        className={`fixed inset-x-0 top-[60px] bottom-0 flex flex-col gap-2 bg-surface-primary px-4 py-6 transition-all duration-300 ease-out md:hidden ${
+        className={`fixed inset-x-0 top-[60px] bottom-0 flex flex-col gap-2 bg-surface-primary px-4 py-6 transition-all duration-300 ease-out lg:hidden ${
           menuOpen
             ? "translate-y-0 opacity-100 pointer-events-auto"
             : "-translate-y-2 opacity-0 pointer-events-none"

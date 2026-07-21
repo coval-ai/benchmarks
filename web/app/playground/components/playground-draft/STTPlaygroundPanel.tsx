@@ -581,7 +581,7 @@ export function STTPlaygroundPanel({
               />
               <button
                 type="button"
-                className="absolute left-0.5 top-1/2 z-[3] flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] transition-opacity hover:opacity-95 dark:bg-black/55 dark:text-white/90 dark:ring-white/12"
+                className="absolute left-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] transition-opacity hover:opacity-95 dark:bg-black/55 dark:text-white/90 dark:ring-white/12"
                 aria-label="Swipe or scroll transcripts to the left"
                 onClick={() => scrollCarouselStep(-1)}
               >
@@ -597,7 +597,7 @@ export function STTPlaygroundPanel({
               />
               <button
                 type="button"
-                className="absolute right-0.5 top-1/2 z-[3] flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] transition-opacity hover:opacity-95 dark:bg-black/55 dark:text-white/90 dark:ring-white/12"
+                className="absolute right-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] transition-opacity hover:opacity-95 dark:bg-black/55 dark:text-white/90 dark:ring-white/12"
                 aria-label="Swipe or scroll transcripts to the right for more models"
                 onClick={() => scrollCarouselStep(1)}
               >
@@ -698,7 +698,7 @@ export function STTPlaygroundPanel({
             <button
               type="button"
               onClick={() => setLeaderOpen(true)}
-              className="inline-flex items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
+              className="inline-flex min-h-11 items-center justify-center gap-2 self-stretch rounded-full border border-border-primary px-5 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-hover-bg focus-visible:ring-2 focus-visible:ring-text-tertiary/30 sm:self-auto"
             >
               View results
             </button>
@@ -716,7 +716,7 @@ export function STTPlaygroundPanel({
                 ? "Turn on at least one model to record a comparison."
                 : "Hold Enter to record, release to stop when focus is outside buttons and fields"
             }
-            className={`inline-flex items-center justify-center gap-2 self-stretch rounded-full border px-5 py-2.5 text-sm font-medium transition-colors sm:self-auto ${
+            className={`inline-flex min-h-11 items-center justify-center gap-2 self-stretch rounded-full border px-5 py-2.5 text-sm font-medium transition-colors sm:self-auto ${
               ((phase === "idle" || phase === "complete" || phase === "error") &&
                 !canStartOrRetakeRecording) ||
               phase === "submitting"
@@ -769,7 +769,7 @@ export function STTPlaygroundPanel({
                     ref={closeButtonRef}
                     type="button"
                     aria-label="Close results"
-                    className="mb-3 flex size-9 shrink-0 items-center justify-center rounded-full border playground-modal-border-subtle text-text-tertiary transition-colors hover:bg-hover-bg hover:text-text-primary sm:mb-4 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="mb-3 flex size-11 shrink-0 items-center justify-center rounded-full border playground-modal-border-subtle text-text-tertiary transition-colors hover:bg-hover-bg hover:text-text-primary sm:mb-4 lg:size-9 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                     onClick={() => setLeaderOpen(false)}
                   >
                     <X className="size-4" />
@@ -821,7 +821,7 @@ export function STTPlaygroundPanel({
                   <button
                     type="button"
                     title="Close (Enter)"
-                    className="w-full rounded-lg py-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary sm:text-sm dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
+                    className="min-h-11 w-full rounded-lg py-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-hover-bg hover:text-text-primary sm:text-sm dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-white"
                     onClick={() => setLeaderOpen(false)}
                   >
                     Done
