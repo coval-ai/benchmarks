@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import structlog
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
@@ -104,6 +105,19 @@ def test_malformed_input_yields_nothing(raw: str) -> None:
     settings = _settings(raw)
     assert stealth_upstreams(settings) == {}
     assert stealth_entries(settings) == []
+
+
+def test_malformed_input_logs_no_real_values() -> None:
+    # Values unique to this test: ``_parse`` caches, so a repeat string wouldn't log.
+    raw = json.dumps(
+        {"stealth-03": {"benchmark": "STT", "model": "real-leak-model", "api_key": "sk-leak"}}
+    )  # missing required ``provider``
+    with structlog.testing.capture_logs() as logs:
+        assert stealth_upstreams(_settings(raw)) == {}
+    dump = repr(logs)
+    assert "stealth_models_invalid" in dump
+    assert "real-leak-model" not in dump
+    assert "sk-leak" not in dump
 
 
 def test_resolve_voice_maps_labels_to_real_ids() -> None:

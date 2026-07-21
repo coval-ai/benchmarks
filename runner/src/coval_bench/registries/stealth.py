@@ -82,7 +82,13 @@ def _parse(raw: str) -> dict[str, StealthUpstream]:
     try:
         return _UPSTREAMS_ADAPTER.validate_json(raw)
     except ValidationError as exc:
-        logger.warning("stealth_models_invalid", exc_info=exc)
+        # Locations and types only — a rendered ValidationError includes input
+        # values, which for this payload are the real names and keys.
+        errors = [
+            f"{'.'.join(map(str, err['loc'])) or '<root>'}: {err['type']}"
+            for err in exc.errors(include_input=False)
+        ]
+        logger.warning("stealth_models_invalid", errors=errors)
         return {}
 
 
