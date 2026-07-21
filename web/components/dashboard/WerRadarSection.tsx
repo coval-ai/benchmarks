@@ -390,11 +390,16 @@ const WerRadarSection: React.FC = () => {
                 }
                 onClick={(state, e) => {
                   if (isMobile) return;
+                  // The state param is derived synchronously from the store
+                  // recharts just updated with this click's coordinates; the
+                  // interaction ref is fed by hooks and can still describe
+                  // the previous hover until the layer re-renders, so it is
+                  // only a fallback.
                   const interaction = interactionRef.current?.tooltip;
-                  const lbl = interaction?.label ?? state?.activeLabel;
+                  const lbl = state?.activeLabel ?? interaction?.label;
                   const rect = chartRef.current?.getBoundingClientRect();
                   const me = e as unknown as React.MouseEvent;
-                  const coord = interaction?.coordinate ?? state?.activeCoordinate ?? {
+                  const coord = state?.activeCoordinate ?? interaction?.coordinate ?? {
                     x: me.clientX - (rect?.left ?? 0),
                     y: me.clientY - (rect?.top ?? 0),
                   };
