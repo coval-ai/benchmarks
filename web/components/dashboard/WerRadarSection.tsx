@@ -488,6 +488,7 @@ const WerRadarSection: React.FC = () => {
                       model === best?.model || plotted.length <= 2 ? 0.12 : 0
                     }
                     dot={false}
+                    activeDot={{ stroke: "none" }}
                     isAnimationActive={false}
                   />
                 ))}
