@@ -45,12 +45,11 @@ from coval_bench.api.deps import (
     get_cache_locks,
     get_pool,
     get_posthog,
-    get_settings,
 )
-from coval_bench.api.internal import hidden_models, is_internal
+from coval_bench.api.internal import hidden_predicate, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
-from coval_bench.config import DATASET_ALL, Settings
+from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
@@ -99,7 +98,6 @@ async def get_results_aggregates(
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
     internal: bool = Depends(is_internal),
-    settings: Settings = Depends(get_settings),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -112,11 +110,10 @@ async def get_results_aggregates(
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
-    # Early-access embargo: hidden models are stripped unless the caller is internal.
-    hidden = frozenset() if internal else hidden_models(settings)
+    is_hidden = hidden_predicate(internal)
 
     def visible(row: dict[str, Any]) -> bool:
-        return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
+        return not is_hidden(row["provider"], row["model"]) and not is_metric_excluded(
             row["provider"], row["model"], row["metric_type"]
         )
 

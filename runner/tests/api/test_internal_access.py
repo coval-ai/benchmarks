@@ -251,3 +251,28 @@ async def test_providers_stealth_alias_internal_only(client: AsyncClient) -> Non
     # not appear anywhere in the serialized response.
     assert "real-secret" not in internal.text
     assert "acme" not in internal.text
+
+
+async def test_stealth_rows_hidden_even_without_secret(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The stealth namespace is embargoed statically — a stale or unset
+    STEALTH_MODELS on the API must hide alias rows, not leak them."""
+    await _seed_stealth_and_public_rows(postgresql)
+    await _refresh_mv(postgresql)
+
+    public_results = await client.get("/v1/results")
+    assert public_results.status_code == 200
+    models = _models_in(public_results.json()["results"])
+    assert ("deepgram", "nova-3") in models
+    assert ("stealth", _STEALTH_ALIAS) not in models
+
+    params = {"metric": "WER", "benchmark": "STT", "window": "24h"}
+    public_board = await client.get("/v1/leaderboard", params=params)
+    assert public_board.status_code == 200
+    board_models = _models_in(public_board.json()["entries"])
+    assert ("deepgram", "nova-3") in board_models
+    assert ("stealth", _STEALTH_ALIAS) not in board_models
+
+    internal = await client.get("/v1/results", headers=_INTERNAL_HEADERS)
+    assert ("stealth", _STEALTH_ALIAS) in _models_in(internal.json()["results"])

@@ -925,10 +925,16 @@ async def run_benchmarks(
             if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                 (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    # Env-defined stealth models join the matrix at runtime (see registries.stealth).
-    for stealth_entry in stealth_entries(settings):
+    stealth = stealth_entries(settings)
+    for stealth_entry in stealth:
         (stt_matrix if stealth_entry.benchmark is Benchmark.STT else tts_matrix).append(
             stealth_entry
+        )
+    if settings.stealth_models is not None:
+        logger.info(
+            "stealth_models_loaded",
+            count=len(stealth),
+            aliases=[e.model for e in stealth],
         )
 
     # EARLY_ACCESS models run on the normal schedule; only the API hides them.

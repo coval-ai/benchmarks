@@ -12,26 +12,28 @@ public view — the endpoints stay public either way, so there is nothing to 404
 from __future__ import annotations
 
 import hmac
+from collections.abc import Callable
 
 from fastapi import Depends, Header
 
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import (
-    MODEL_REGISTRY,
-    STEALTH_PROVIDER,
-    ModelStatus,
-    stealth_upstreams,
-)
+from coval_bench.registries import MODEL_REGISTRY, STEALTH_PROVIDER, ModelStatus
 
 
-def hidden_models(settings: Settings) -> frozenset[tuple[str, str]]:
-    """The ``(provider, model)`` pairs public API responses must not contain."""
-    registry = {
+def hidden_registry_models() -> frozenset[tuple[str, str]]:
+    """The registry ``(provider, model)`` pairs public API responses must not contain."""
+    return frozenset(
         (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-    }
-    stealth = {(STEALTH_PROVIDER, alias) for alias in stealth_upstreams(settings)}
-    return frozenset(registry | stealth)
+    )
+
+
+def hidden_predicate(internal: bool) -> Callable[[str, str], bool]:
+    """Per-request row filter: True when this caller must not see (provider, model)."""
+    if internal:
+        return lambda provider, model: False
+    hidden = hidden_registry_models()
+    return lambda provider, model: provider == STEALTH_PROVIDER or (provider, model) in hidden
 
 
 def is_internal(
