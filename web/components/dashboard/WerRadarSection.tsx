@@ -14,13 +14,14 @@ import {
   Tooltip,
 } from "recharts";
 import Card from "@/components/shared/Card";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import SectionHeader from "@/components/shared/SectionHeader";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
 import { TimelineLegend } from "@/components/visualizations/TimelineChart";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors, type ThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
-import { useWerDatasetMatrix } from "@/hooks/useWerDatasetMatrix";
+import { MIN_RADAR_AXES, useWerDatasetMatrix } from "@/hooks/useWerDatasetMatrix";
 import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
@@ -254,7 +255,7 @@ const WerRadarSection: React.FC = () => {
     };
   };
 
-  const ready = effectiveAxes.length >= 3 && plotted.length > 0;
+  const ready = effectiveAxes.length >= MIN_RADAR_AXES && plotted.length > 0;
   const best = ranked[0];
   const activeAxisLabel = scrub?.label ?? pinned?.label;
   const legendPayload = coveredModels.map((model) => ({
@@ -476,7 +477,10 @@ const WerRadarSection: React.FC = () => {
               </RadarChart>
             </ResponsiveContainer>
           ) : loading ? (
-            <span className="block h-full w-full animate-pulse rounded bg-surface-secondary" />
+            <div role="status" className="flex h-full items-center justify-center">
+              <CymaticLoader size={40} animated className="text-text-primary" />
+              <span className="sr-only">Loading benchmark data</span>
+            </div>
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-text-tertiary">
               No dataset-scoped WER data in this window.
@@ -535,7 +539,7 @@ const WerRadarSection: React.FC = () => {
             </div>
           )}
         </div>
-        {effectiveAxes.length >= 3 && (
+        {effectiveAxes.length >= MIN_RADAR_AXES && (
           <p className="mt-2 text-sm text-text-secondary">
             {best ? (
               <>
