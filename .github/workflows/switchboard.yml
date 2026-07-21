@@ -80,9 +80,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
-          # DRY-RUN: pinned to #262 branch so `resolve` mode is available.
-          # Flip back to `main` before hand-back (green-pending-#262-merge).
-          ref: dana/plan-resolve-event
+          ref: main
           token: ${{ steps.app_token.outputs.token }}
           path: switchboard-src
           persist-credentials: false
