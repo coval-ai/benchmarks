@@ -80,7 +80,9 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
-          ref: main
+          # VALIDATION: pinned to the #262 branch to exercise resolve mode with
+          # the now-present token. Flip back to `main` after (green-pending-#262).
+          ref: dana/plan-resolve-event
           token: ${{ steps.app_token.outputs.token }}
           path: switchboard-src
           persist-credentials: false
