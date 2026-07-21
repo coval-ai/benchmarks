@@ -2,17 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import type { TooltipContentProps } from "recharts";
 import { formatDate, formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
 
-interface TimelineTooltipProps {
-  active?: boolean;
-  payload?: Array<{
-    dataKey: string;
-    value: number;
-    name: string;
-    color: string;
-  }>;
-  label?: string | number;
+interface TimelineTooltipProps extends Partial<Pick<
+  TooltipContentProps<number, string>,
+  "active" | "payload" | "label"
+>> {
   getProviderForModel: (model: string) => string;
   showDate?: boolean;
   /**
@@ -45,7 +41,12 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
   const validData = payload
-    .filter((item) => item.value != null && item.value > 0)
+    .flatMap((item) => {
+      const dataKey = typeof item.dataKey === "string" ? item.dataKey : item.graphicalItemId;
+      return typeof item.value === "number" && item.value > 0 && dataKey
+        ? [{ ...item, dataKey, value: item.value }]
+        : [];
+    })
     .sort((a, b) => a.value - b.value); // Ascending = fastest first
 
   if (validData.length === 0) return null;

@@ -161,7 +161,7 @@ export function labelScatterDots(
 ) {
   const dark = isDarkBg(colors.tooltipBg);
   const pos = (el: Element, attr: string) => Number(el.getAttribute(attr));
-  const circles = Array.from(clone.querySelectorAll('circle[r="6"]')).sort(
+  const circles = Array.from(clone.querySelectorAll("[data-export-point]")).sort(
     (a, b) => pos(a, "cx") - pos(b, "cx") || pos(a, "cy") - pos(b, "cy")
   );
   const sorted = [...points].sort((a, b) => a.x - b.x || b.y - a.y);

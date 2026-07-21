@@ -432,7 +432,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
   // dimensions at their initial value once data arrives.
   return (
-    <div ref={containerRef} className="relative w-full">
+    <div ref={containerRef} className="relative w-full" data-export-frame>
       {data.data.length === 0 ? (
         // Same height as the populated chart so toggling to a model with no
         // latency runs doesn't shift the sections below.

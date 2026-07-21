@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ScatterChart,
   Scatter,
@@ -14,6 +14,7 @@ import {
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
+  getRelativeCoordinate,
 } from "recharts";
 import { Info } from "lucide-react";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
@@ -31,6 +32,9 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
+import ChartInteractionLayer, {
+  type ChartInteractionHandle,
+} from "@/components/charts/ChartInteractionLayer";
 
 // Human transcription accuracy is 2–4% WER under optimal conditions (per our
 // ASR benchmarks doc); the band's ceiling puts human-level-or-better inside
@@ -60,8 +64,43 @@ const LatencyAccuracySection: React.FC = () => {
     [scatterData]
   );
   const [activeIdx, setActiveIdx] = useState(-1);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<ChartInteractionHandle>(null);
   useEffect(() => setActiveIdx(-1), [sortedData]);
-  const activePoint = isMobile ? sortedData[activeIdx] : undefined;
+  const activePoint = sortedData[activeIdx];
+
+  // Keyboard access uses one focusable container plus aria-activedescendant
+  // instead of focusing the circles: Recharts recreates the shape nodes when
+  // the selection re-renders, so DOM focus placed on a circle dies silently
+  // with it. Focus never leaves the container; arrows move the selection and
+  // the active option id, which survives any node swap. Handlers ignore keys
+  // bubbling from the focused chart surface so its arrow navigation stays
+  // independent.
+  const onPlotKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || sortedData.length === 0) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, sortedData.length - 1));
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Escape") {
+      setActiveIdx(-1);
+    }
+  };
+
+  useEffect(() => {
+    if (!activePoint) return;
+    const dismiss = (e: Event) => {
+      if (!chartRef.current?.contains(e.target as Node)) setActiveIdx(-1);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    window.addEventListener("scroll", dismiss, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("scroll", dismiss, { capture: true });
+    };
+  }, [activePoint]);
 
   const description = {
     short: `Average ${latencyLabel} and WER per model`,
@@ -113,8 +152,9 @@ const LatencyAccuracySection: React.FC = () => {
 
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!sortedData.length) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const xValue = ((e.clientX - rect.left - 40) / (rect.width - 48)) * xMax;
+    const { relativeX } = getRelativeCoordinate(e);
+    const xValue = Number(interactionRef.current?.xValueAt(relativeX));
+    if (!Number.isFinite(xValue)) return;
     setActiveIdx(
       sortedData.reduce(
         (best, p, i) =>
@@ -201,7 +241,16 @@ const LatencyAccuracySection: React.FC = () => {
         </div>
 
         <div
+          ref={chartRef}
+          data-export-frame
           className="relative h-64 select-none"
+          role="listbox"
+          aria-label={`Models by ${latencyLabel} and WER; arrow keys move between points`}
+          tabIndex={0}
+          aria-activedescendant={
+            activeIdx >= 0 ? `latency-scatter-point-${activeIdx}` : undefined
+          }
+          onKeyDown={onPlotKeyDown}
           onMouseEnter={trackChartHover}
           onPointerDown={isMobile ? scrub : undefined}
           onPointerMove={
@@ -209,19 +258,33 @@ const LatencyAccuracySection: React.FC = () => {
               ? (e) => (e.pointerType === "touch" || e.buttons > 0) && scrub(e)
               : undefined
           }
-          onPointerUp={isMobile ? () => setActiveIdx(-1) : undefined}
           onPointerCancel={isMobile ? () => setActiveIdx(-1) : undefined}
           style={isMobile ? { touchAction: "pan-y" } : undefined}
         >
           {activePoint && (
             <div
-              className={`pointer-events-none absolute top-2 z-10 max-w-[40%] text-xs ${
+              className={`absolute top-2 z-10 max-w-[40%] text-xs ${
                 activePoint.x > xMax / 2 ? "left-12" : "right-2"
               }`}
+              onPointerDown={(e) => e.stopPropagation()}
             >
+              <button
+                type="button"
+                aria-label="Close model details"
+                onClick={() => setActiveIdx(-1)}
+                className="absolute -right-2 -top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-toggle-inactive text-lg text-text-secondary"
+              >
+                ×
+              </button>
               <CustomScatterTooltip
                 active
-                payload={[{ payload: activePoint, name: activePoint.model, value: activePoint.x }]}
+                payload={[{
+                  payload: activePoint,
+                  name: activePoint.model,
+                  value: activePoint.x,
+                  dataKey: "x",
+                  graphicalItemId: activePoint.model,
+                }]}
                 activeTab={activeTab}
                 metric={metric}
               />
@@ -230,8 +293,12 @@ const LatencyAccuracySection: React.FC = () => {
           <ResponsiveContainer width="100%" height="100%" debounce={200}>
             <ScatterChart
               margin={{ top: 10, right: 8, left: 0, bottom: 0 }}
+              accessibilityLayer
             >
+              <ChartInteractionLayer ref={interactionRef} />
               <CartesianGrid
+                xAxisId={0}
+                yAxisId={0}
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
               />
@@ -272,7 +339,10 @@ const LatencyAccuracySection: React.FC = () => {
                 tickFormatter={(value) => `${value}%`}
               />
               {!isMobile && (
-                <Tooltip content={<CustomScatterTooltip activeTab={activeTab} metric={metric} />} />
+                <Tooltip
+                  content={<CustomScatterTooltip activeTab={activeTab} metric={metric} />}
+                  isAnimationActive={false}
+                />
               )}
               {activePoint && (
                 <ReferenceLine x={activePoint.x} stroke={themeColors.axisText} strokeDasharray="3 3" />
@@ -289,17 +359,26 @@ const LatencyAccuracySection: React.FC = () => {
                   fill={getModelColor(model)}
                   name={model}
                   isAnimationActive={false}
-                  shape={(props: { cx?: number; cy?: number; fill?: string; payload?: ScatterDataPoint }) => (
-                    <circle
-                      cx={props.cx}
-                      cy={props.cy}
-                      r={props.payload === activePoint ? 8 : 6}
-                      fill={props.fill}
-                      fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
-                      stroke={props.payload === activePoint ? themeColors.axisText : undefined}
-                      strokeWidth={2}
-                    />
-                  )}
+                  shape={(props: { cx?: number; cy?: number; fill?: string; payload?: ScatterDataPoint }) => {
+                    const idx = sortedData.indexOf(props.payload!);
+                    return (
+                      <circle
+                        data-export-point
+                        id={`latency-scatter-point-${idx}`}
+                        cx={props.cx}
+                        cy={props.cy}
+                        r={props.payload === activePoint ? 8 : 6}
+                        fill={props.fill}
+                        fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
+                        stroke={props.payload === activePoint ? themeColors.axisText : undefined}
+                        strokeWidth={2}
+                        role="option"
+                        aria-selected={props.payload === activePoint}
+                        aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER`}
+                        onClick={() => setActiveIdx(idx)}
+                      />
+                    );
+                  }}
                 />
               ))}
             </ScatterChart>

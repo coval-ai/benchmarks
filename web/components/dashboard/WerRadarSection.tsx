@@ -17,6 +17,9 @@ import Card from "@/components/shared/Card";
 import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import SectionHeader from "@/components/shared/SectionHeader";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
+import ChartInteractionLayer, {
+  type ChartInteractionHandle,
+} from "@/components/charts/ChartInteractionLayer";
 import { TimelineLegend } from "@/components/visualizations/TimelineChart";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors, type ThemeColors } from "@/hooks/useThemeColors";
@@ -81,6 +84,7 @@ interface PinnedReading {
   x: number;
   y: number;
   flip: boolean;
+  bottom?: boolean;
 }
 
 const formatWer = (value: number) => `${value.toFixed(1)}%`;
@@ -178,6 +182,7 @@ const WerRadarSection: React.FC = () => {
     if (!row) return [];
     return plotted.map((model) => ({
       dataKey: model,
+      graphicalItemId: model,
       name: model,
       color: getModelColor(model),
       value: 100 - (row[model] as number),
@@ -185,6 +190,7 @@ const WerRadarSection: React.FC = () => {
   };
 
   const chartRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<ChartInteractionHandle>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedReading | null>(null);
   const [scrub, setScrub] = useState<{ label: string; flip: boolean } | null>(
@@ -252,6 +258,7 @@ const WerRadarSection: React.FC = () => {
     return {
       label: radarData[idx]?.label as string,
       flip: e.clientX > rect.left + rect.width / 2,
+      bottom: e.clientY < rect.top + rect.height / 2,
     };
   };
 
@@ -355,6 +362,7 @@ const WerRadarSection: React.FC = () => {
                     x: at.flip ? 0 : width,
                     y: 8,
                     flip: !at.flip,
+                    bottom: at.bottom,
                   });
                 }
               : undefined
@@ -373,6 +381,7 @@ const WerRadarSection: React.FC = () => {
             <ResponsiveContainer width="100%" height="100%" debounce={200}>
               <RadarChart
                 data={radarData}
+                accessibilityLayer
                 outerRadius={isMobile ? "62%" : "72%"}
                 margin={
                   isMobile
@@ -381,10 +390,16 @@ const WerRadarSection: React.FC = () => {
                 }
                 onClick={(state, e) => {
                   if (isMobile) return;
-                  const lbl = state?.activeLabel;
+                  // The state param is derived synchronously from the store
+                  // recharts just updated with this click's coordinates; the
+                  // interaction ref is fed by hooks and can still describe
+                  // the previous hover until the layer re-renders, so it is
+                  // only a fallback.
+                  const interaction = interactionRef.current?.tooltip;
+                  const lbl = state?.activeLabel ?? interaction?.label;
                   const rect = chartRef.current?.getBoundingClientRect();
                   const me = e as unknown as React.MouseEvent;
-                  const coord = state?.activeCoordinate ?? {
+                  const coord = state?.activeCoordinate ?? interaction?.coordinate ?? {
                     x: me.clientX - (rect?.left ?? 0),
                     y: me.clientY - (rect?.top ?? 0),
                   };
@@ -410,6 +425,7 @@ const WerRadarSection: React.FC = () => {
                   });
                 }}
               >
+                <ChartInteractionLayer ref={interactionRef} />
                 <PolarGrid stroke={themeColors.grid} />
                 <PolarAngleAxis
                   dataKey="label"
@@ -437,6 +453,7 @@ const WerRadarSection: React.FC = () => {
                 />
                 <Tooltip
                   active={pinned || isMobile ? false : undefined}
+                  isAnimationActive={false}
                   offset={72}
                   content={({ active, label }) =>
                     active && label != null ? (
@@ -509,7 +526,8 @@ const WerRadarSection: React.FC = () => {
               className="absolute z-20 cursor-auto shadow-lg"
               style={{
                 left: pinned.x,
-                top: pinned.y,
+                top: pinned.bottom ? undefined : pinned.y,
+                bottom: pinned.bottom ? pinned.y : undefined,
                 transform: isMobile
                   ? pinned.flip
                     ? "translate(calc(-100% - 12px), 0)"
@@ -524,7 +542,7 @@ const WerRadarSection: React.FC = () => {
                 type="button"
                 aria-label="Close pinned stats"
                 onClick={() => setPinned(null)}
-                className="absolute right-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-surface-toggle-inactive text-xs leading-none text-text-secondary hover:text-text-primary"
+                className="absolute right-0 top-0 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-toggle-inactive text-lg leading-none text-text-secondary hover:text-text-primary md:right-2 md:top-2 md:h-5 md:w-5 md:text-xs"
               >
                 ×
               </button>

@@ -12,7 +12,8 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
-  ReferenceLine
+  ReferenceLine,
+  type TooltipPayloadEntry,
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
 import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
@@ -23,6 +24,9 @@ import {
   type MethodologyMetricKey
 } from "@/lib/config/methodologyChanges";
 import CustomTimelineTooltip from "@/components/charts/tooltips/TimelineTooltip";
+import ChartInteractionLayer, {
+  type ChartInteractionHandle,
+} from "@/components/charts/ChartInteractionLayer";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricInfo from "@/components/shared/MetricInfo";
@@ -174,13 +178,6 @@ const ScrubMarkerDot: React.FC<{
   />
 );
 
-interface TooltipPayloadItem {
-  dataKey: string;
-  value: number;
-  name: string;
-  color: string;
-}
-
 // A timeline point's timestamp (epoch ms) is the 3h bucket start, which the S2S
 // sampler uses verbatim as the tick-folder key — so this reproduces that key to
 // join a clicked tooltip row to its recording set.
@@ -190,7 +187,7 @@ function bucketTickKey(label: number): string {
 
 interface PinnedTooltip {
   label: string;
-  payload: TooltipPayloadItem[];
+  payload: TooltipPayloadEntry[];
   x: number;
   y: number;
   flip: boolean;
@@ -265,7 +262,8 @@ const TimelineChart: React.FC = () => {
   const trackChartHover = useChartHoverTracking("timeline");
 
   const chartRef = useRef<HTMLDivElement>(null);
-  const chartInstRef = useRef<React.ElementRef<typeof LineChart>>(null);
+  const surfaceRef = useRef<SVGSVGElement>(null);
+  const interactionRef = useRef<ChartInteractionHandle>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
   const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
@@ -296,6 +294,9 @@ const TimelineChart: React.FC = () => {
     y: number;
     armX: boolean;
     armY: boolean;
+    box: PlotBox;
+    left: number;
+    top: number;
   } | null>(null);
   const dragEndAtRef = useRef(0);
   const [dragging, setDragging] = useState(false);
@@ -305,7 +306,7 @@ const TimelineChart: React.FC = () => {
     ts: number;
   } | null>(null);
 
-  const currentTimeWindow = getCurrentTimeWindow();
+  const currentTimeWindow = useMemo(getCurrentTimeWindow, [getCurrentTimeWindow]);
   const [windowStart, windowEnd] = currentTimeWindow;
 
   // The metric and time window are shared dashboard-wide, so drop the zoom and
@@ -337,8 +338,7 @@ const TimelineChart: React.FC = () => {
       // A tap's synthesized mousedown must not kill the pin it just placed;
       // the mobile overlays own in-chart dismissal.
       if (isMobile && chartRef.current?.contains(target)) return;
-      const surface = chartRef.current?.querySelector(".recharts-surface");
-      if (surface?.contains(target)) return;
+      if (surfaceRef.current?.contains(target)) return;
       setPinned(null);
     };
     document.addEventListener("mousedown", onDocMouseDown);
@@ -372,8 +372,14 @@ const TimelineChart: React.FC = () => {
   }, [isMobile, hasMobileMeasurement, updateMobileScrub]);
 
   const themeColors = useThemeColors();
-  const modelsWithData = getModelsWithTimelineData(metric);
-  const windowedTimelineData = getWindowedTimelineData(metric);
+  const modelsWithData = useMemo(
+    () => getModelsWithTimelineData(metric),
+    [getModelsWithTimelineData, metric]
+  );
+  const windowedTimelineData = useMemo(
+    () => getWindowedTimelineData(metric),
+    [getWindowedTimelineData, metric]
+  );
   const activeMetricKey = metric.toLowerCase() as MethodologyMetricKey;
   // With an explicit time (an offset-qualified "HH:MM:SS±hh:mm") pin the marker
   // to that exact instant; otherwise anchor date-only strings at UTC noon so the
@@ -444,6 +450,7 @@ const TimelineChart: React.FC = () => {
       ),
     [zoomX]
   );
+  const timelineTicks = useMemo(getTimelineTicks, [getTimelineTicks]);
   const dateScale = dataTimeWindow !== "24h";
   const dateTicks =
     dateScale && !(zoomX && zoomX[1] - zoomX[0] <= 48 * 60 * 60 * 1000);
@@ -478,27 +485,26 @@ const TimelineChart: React.FC = () => {
     return Math.ceil(max / step) * step;
   }, [getTimelineData, metric, modelsWithData, zoomX]);
 
-  const yDomain: [number, number | "dataMax"] = zoom?.y ?? [0, yAxisMax];
-  const ySpan =
-    typeof yDomain[1] === "number" ? yDomain[1] - yDomain[0] : null;
-
-  // Ticks land on a tidy step sized to the zoomed span; finer steps need a
-  // second decimal to stay distinguishable.
-  let yTicks: number[] | undefined;
-  let yTickDecimals = 1;
-  if (ySpan !== null && ySpan > 0) {
+  const yDomain = useMemo<[number, number | "dataMax"]>(
+    () => zoom?.y ?? [0, yAxisMax],
+    [zoom?.y, yAxisMax]
+  );
+  const { yTicks, yTickDecimals } = useMemo(() => {
+    const span =
+      typeof yDomain[1] === "number" ? yDomain[1] - yDomain[0] : null;
+    if (span === null || span <= 0) return { yTicks: undefined, yTickDecimals: 1 };
     const step =
-      [50, 100, 200, 250, 500, 1000, 2000].find((s) => ySpan / s <= 6) ?? 2500;
-    yTicks = [];
+      [50, 100, 200, 250, 500, 1000, 2000].find((s) => span / s <= 6) ?? 2500;
+    const ticks = [];
     for (
       let t = Math.ceil(yDomain[0] / step) * step;
-      t <= yDomain[0] + ySpan + 1;
+      t <= yDomain[0] + span + 1;
       t += step
     ) {
-      yTicks.push(t);
+      ticks.push(t);
     }
-    yTickDecimals = step < 500 ? 2 : 1;
-  }
+    return { yTicks: ticks, yTickDecimals: step < 500 ? 2 : 1 };
+  }, [yDomain]);
 
   const yMaxSelectValue = !zoom?.y
     ? "auto"
@@ -506,16 +512,14 @@ const TimelineChart: React.FC = () => {
       ? String(zoom.y[1])
       : "custom";
 
-  // Plot-area box in container pixels, read off the chart instance (recharts
-  // keeps it in state; mouse-event payloads omit it).
   const plotBox = useCallback((): PlotBox | null => {
-    const offset = chartInstRef.current?.state.offset;
-    if (!offset?.width || !offset.height) return null;
+    const area = interactionRef.current?.plotArea;
+    if (!area?.width || !area.height) return null;
     return {
-      left: offset.left ?? 0,
-      top: offset.top ?? 0,
-      width: offset.width,
-      height: offset.height,
+      left: area.x,
+      top: area.y,
+      width: area.width,
+      height: area.height,
     };
   }, []);
 
@@ -564,7 +568,15 @@ const TimelineChart: React.FC = () => {
       y > box.top + box.height
     )
       return;
-    dragRef.current = { x, y, armX: false, armY: false };
+    dragRef.current = {
+      x,
+      y,
+      armX: false,
+      armY: false,
+      box,
+      left: rect.left,
+      top: rect.top,
+    };
     if (captureImmediately) e.currentTarget.setPointerCapture(e.pointerId);
   };
 
@@ -573,12 +585,11 @@ const TimelineChart: React.FC = () => {
     mobilePlot = false
   ) => {
     const start = dragRef.current;
-    const box = plotBox();
-    const rect = chartRef.current?.getBoundingClientRect();
     const el = boxRef.current;
-    if (!start || !box || !rect || !el) return;
-    const rawX = e.clientX - rect.left;
-    const rawY = e.clientY - rect.top;
+    if (!start || !el) return;
+    const { box } = start;
+    const rawX = e.clientX - start.left;
+    const rawY = e.clientY - start.top;
     const x = Math.min(Math.max(rawX, box.left), box.left + box.width);
     const y = Math.min(Math.max(rawY, box.top), box.top + box.height);
     const dx = Math.abs(rawX - start.x);
@@ -598,7 +609,9 @@ const TimelineChart: React.FC = () => {
     }
     // Desktop waits for a real drag so a click can still pin its tooltip. The
     // mobile plot overlay never pins, so it safely captures from touch-down.
-    if (!mobilePlot) chartRef.current?.setPointerCapture(e.pointerId);
+    if (!mobilePlot && !e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     if (!dragging) setDragging(true);
     el.style.display = "block";
     el.style.left = `${start.armX ? Math.min(start.x, x) : box.left}px`;
@@ -609,41 +622,33 @@ const TimelineChart: React.FC = () => {
 
   const finishDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     const start = dragRef.current;
-    const box = plotBox();
-    const rect = chartRef.current?.getBoundingClientRect();
     endDrag();
-    if (!start || !box || !rect || (!start.armX && !start.armY)) return;
+    if (!start || (!start.armX && !start.armY)) return;
+    const { box } = start;
     dragEndAtRef.current = Date.now();
     const x = Math.min(
-      Math.max(e.clientX - rect.left, box.left),
+      Math.max(e.clientX - start.left, box.left),
       box.left + box.width
     );
     const y = Math.min(
-      Math.max(e.clientY - rect.top, box.top),
+      Math.max(e.clientY - start.top, box.top),
       box.top + box.height
     );
     const applyX = start.armX && Math.abs(x - start.x) > 8;
     const applyY = start.armY && Math.abs(y - start.y) > 8;
-    const yScale = (
-      chartInstRef.current?.state.yAxisMap &&
-      (Object.values(chartInstRef.current.state.yAxisMap)[0] as {
-        scale?: { invert?: (n: number) => number };
-      })
-    )?.scale;
     let yRange = zoom?.y;
-    if (applyY && yScale?.invert) {
-      yRange = [
-        Math.max(0, yScale.invert(Math.max(start.y, y))),
-        yScale.invert(Math.min(start.y, y)),
-      ];
+    if (applyY) {
+      const lo = Number(interactionRef.current?.yValueAt(Math.max(start.y, y)));
+      const hi = Number(interactionRef.current?.yValueAt(Math.min(start.y, y)));
+      if (Number.isFinite(lo) && Number.isFinite(hi)) {
+        yRange = [Math.max(0, lo), hi];
+      }
     }
     if (!applyX && yRange === zoom?.y) return;
-    const toX = (px: number) =>
-      xDomain[0] + ((px - box.left) / box.width) * (xDomain[1] - xDomain[0]);
+    const xLo = Number(interactionRef.current?.xValueAt(Math.min(start.x, x)));
+    const xHi = Number(interactionRef.current?.xValueAt(Math.max(start.x, x)));
     setZoom({
-      x: applyX
-        ? [toX(Math.min(start.x, x)), toX(Math.max(start.x, x))]
-        : zoom?.x,
+      x: applyX && Number.isFinite(xLo) && Number.isFinite(xHi) ? [xLo, xHi] : zoom?.x,
       y: yRange,
     });
   };
@@ -669,6 +674,7 @@ const TimelineChart: React.FC = () => {
       return typeof value === "number"
         ? [{
             dataKey: `${model}_value`,
+            graphicalItemId: `${model}_value`,
             value,
             name: formatChartLabel(model, getProviderForModel(model)),
             color: getModelColor(model),
@@ -766,7 +772,10 @@ const TimelineChart: React.FC = () => {
   // squeezed — a 20-series legend inside the chart left only ~40px to plot on
   // mobile. Its universe is every data-backed model, chip-style: filtered-out
   // models stay listed but dim, and a click toggles them back in.
-  const legendModelList = getModelsWithTimelineData(metric, legendModels);
+  const legendModelList = useMemo(
+    () => getModelsWithTimelineData(metric, legendModels),
+    [getModelsWithTimelineData, metric, legendModels]
+  );
   const legendPayload: LegendEntry[] = legendModelList.map((model) => ({
     value: formatChartLabel(model, getProviderForModel(model)),
     color: getModelColor(model),
@@ -862,6 +871,7 @@ const TimelineChart: React.FC = () => {
 
         <div
           ref={chartRef}
+          data-export-frame
           className="relative h-96 cursor-crosshair select-none touch-pan-y"
           onMouseEnter={trackChartHover}
           onDoubleClick={() => {
@@ -869,6 +879,8 @@ const TimelineChart: React.FC = () => {
           }}
           onPointerDown={(e) => {
             if (e.pointerType !== "mouse") return;
+            e.preventDefault();
+            surfaceRef.current?.blur();
             startDrag(e);
           }}
           onPointerMove={(e) => {
@@ -888,14 +900,30 @@ const TimelineChart: React.FC = () => {
             onResize={() => requestAnimationFrame(syncInteractionBox)}
           >
             <LineChart
-              ref={chartInstRef}
+              ref={surfaceRef}
               data={windowedTimelineData}
+              accessibilityLayer
               margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
               onClick={(state) => {
                 if (Date.now() - dragEndAtRef.current < 300) return;
-                const lbl = state?.activeLabel;
-                const coord = state?.activeCoordinate;
-                const payload = (state?.activePayload ?? []) as TooltipPayloadItem[];
+                const { activeLabel: lbl, activeCoordinate: coord } = state;
+                const point = windowedTimelineData.find(
+                  (candidate) => candidate.timestamp === Number(lbl)
+                );
+                const payload = point
+                  ? modelsWithData.flatMap((model) => {
+                      const value = point[`${model}_value`];
+                      return typeof value === "number"
+                        ? [{
+                            dataKey: `${model}_value`,
+                            graphicalItemId: `${model}_value`,
+                            value,
+                            name: formatChartLabel(model, getProviderForModel(model)),
+                            color: getModelColor(model),
+                          }]
+                        : [];
+                    })
+                  : [];
                 const hasRows = payload.some(
                   (item) => typeof item?.value === "number" && item.value > 0
                 );
@@ -912,7 +940,7 @@ const TimelineChart: React.FC = () => {
                       ? Math.min(Math.max(rawY, pad), height - pad)
                       : rawY;
                   return {
-                    label: lbl,
+                    label: String(lbl),
                     payload,
                     x,
                     y,
@@ -921,7 +949,10 @@ const TimelineChart: React.FC = () => {
                 });
               }}
             >
+              <ChartInteractionLayer ref={interactionRef} />
               <CartesianGrid
+                xAxisId={0}
+                yAxisId={0}
                 vertical={false}
                 strokeDasharray="2 2"
                 stroke={themeColors.grid}
@@ -931,7 +962,7 @@ const TimelineChart: React.FC = () => {
                 type="number"
                 scale="time"
                 domain={xDomain}
-                ticks={zoomTicks ?? getTimelineTicks()}
+                ticks={zoomTicks ?? timelineTicks}
                 allowDataOverflow
                 axisLine={false}
                 tickLine={false}
@@ -963,6 +994,7 @@ const TimelineChart: React.FC = () => {
                 }
               />
               <Tooltip
+                isAnimationActive={false}
                 content={
                   <CustomTimelineTooltip
                     getProviderForModel={getProviderForModel}
@@ -977,6 +1009,7 @@ const TimelineChart: React.FC = () => {
               {modelsWithData.map((model) => (
                 <Line
                   key={model}
+                  id={`${model}_value`}
                   type="monotone"
                   dataKey={`${model}_value`}
                   stroke={getModelColor(model)}
@@ -1141,7 +1174,7 @@ const TimelineChart: React.FC = () => {
                 type="button"
                 aria-label="Close pinned stats"
                 onClick={() => setPinned(null)}
-                className="absolute right-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-surface-toggle-inactive text-xs leading-none text-text-secondary hover:text-text-primary"
+                className="absolute right-0 top-0 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-toggle-inactive text-lg leading-none text-text-secondary hover:text-text-primary md:right-2 md:top-2 md:h-5 md:w-5 md:text-xs"
               >
                 ×
               </button>
