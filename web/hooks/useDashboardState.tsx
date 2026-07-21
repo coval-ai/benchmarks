@@ -46,6 +46,18 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const [sttMetric, setSttMetric] = useState<"TTFS" | "TTFT">("TTFS");
   const activeMetric =
     page === "s2s" ? "V2V" : page === "tts" ? "TTFA" : sttMetric;
+
+  // S2S only: a click on a model row in the pinned timeline tooltip asks the
+  // samples card to jump to that bucket + provider and play. nonce lets a repeat
+  // click on the same row replay.
+  const [s2sPlayRequest, setS2sPlayRequest] = useState<{
+    tick: string;
+    provider: string;
+    nonce: number;
+  } | null>(null);
+  const requestS2SPlay = useCallback((tick: string, provider: string) => {
+    setS2sPlayRequest((prev) => ({ tick, provider, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
   const { timeWindow, changeTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
@@ -562,7 +574,12 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   return {
     // Page identity
+    page,
     latencyLabel,
+
+    // S2S samples card <-> timeline tooltip bridge
+    s2sPlayRequest,
+    requestS2SPlay,
 
     // Display strings
     pageTitle,
