@@ -182,3 +182,72 @@ def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) ->
     configured = Settings()
     assert is_internal(x_internal_key="k", settings=configured) is True
     assert is_internal(x_internal_key="wrong", settings=configured) is False
+
+
+# ---------------------------------------------------------------------------
+# Stealth models (env-defined aliases; see coval_bench.registries.stealth)
+# ---------------------------------------------------------------------------
+
+_STEALTH_ALIAS = "stealth-01"
+
+
+@pytest.fixture
+def stealth_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Define one env-only stealth STT model before the app builds Settings."""
+    monkeypatch.setenv(
+        "STEALTH_MODELS",
+        '{"stealth-01": {"benchmark": "STT", "provider": "acme", "model": "real-secret"}}',
+    )
+
+
+async def _seed_stealth_and_public_rows(postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, provider="stealth", model=_STEALTH_ALIAS)
+    await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3")
+
+
+@pytest.mark.usefixtures("stealth_env")
+async def test_results_hides_stealth_alias_from_public(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Alias rows are embargoed like registry EARLY_ACCESS models."""
+    await _seed_stealth_and_public_rows(postgresql)
+
+    for headers in ({}, _WRONG_HEADERS):
+        response = await client.get("/v1/results", headers=headers)
+        assert response.status_code == 200
+        models = _models_in(response.json()["results"])
+        assert ("deepgram", "nova-3") in models
+        assert ("stealth", _STEALTH_ALIAS) not in models
+
+
+@pytest.mark.usefixtures("stealth_env")
+async def test_results_serves_stealth_alias_to_internal(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    await _seed_stealth_and_public_rows(postgresql)
+
+    response = await client.get("/v1/results", headers=_INTERNAL_HEADERS)
+    assert response.status_code == 200
+    assert ("stealth", _STEALTH_ALIAS) in _models_in(response.json()["results"])
+
+
+@pytest.mark.usefixtures("stealth_env")
+async def test_providers_stealth_alias_internal_only(client: AsyncClient) -> None:
+    """/v1/providers lists the alias (enabled) for internal callers only."""
+    public = await client.get("/v1/providers")
+    assert public.status_code == 200
+    assert "stealth" not in {p["provider"] for p in public.json()["stt"]}
+
+    internal = await client.get("/v1/providers", headers=_INTERNAL_HEADERS)
+    assert internal.status_code == 200
+    by_provider = {p["provider"]: p["models"] for p in internal.json()["stt"]}
+    assert "stealth" in by_provider
+    (model,) = by_provider["stealth"]
+    assert model["model"] == _STEALTH_ALIAS
+    assert model["disabled"] is False
+
+    # Even the internal view carries only the alias — the real identity must
+    # not appear anywhere in the serialized response.
+    assert "real-secret" not in internal.text
+    assert "acme" not in internal.text

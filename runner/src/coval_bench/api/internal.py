@@ -21,14 +21,21 @@ from fastapi import Depends, Header
 
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus
+from coval_bench.registries import (
+    MODEL_REGISTRY,
+    STEALTH_PROVIDER,
+    ModelStatus,
+    stealth_upstreams,
+)
 
 
-def hidden_models() -> frozenset[tuple[str, str]]:
+def hidden_models(settings: Settings) -> frozenset[tuple[str, str]]:
     """The ``(provider, model)`` pairs public API responses must not contain."""
-    return frozenset(
+    registry = {
         (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-    )
+    }
+    stealth = {(STEALTH_PROVIDER, alias) for alias in stealth_upstreams(settings)}
+    return frozenset(registry | stealth)
 
 
 def is_internal(

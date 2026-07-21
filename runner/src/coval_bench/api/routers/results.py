@@ -205,7 +205,7 @@ async def list_results(
     # -- Early-access embargo: exclude hidden models unless the caller is internal.
     # SQL-level (not post-read) so `limit` semantics stay exact.
     if not internal:
-        for i, (ea_provider, ea_model) in enumerate(sorted(hidden_models())):
+        for i, (ea_provider, ea_model) in enumerate(sorted(hidden_models(settings))):
             conditions.append(f"NOT (r.provider = %(ea_p{i})s AND r.model = %(ea_m{i})s)")
             params[f"ea_p{i}"] = ea_provider
             params[f"ea_m{i}"] = ea_model

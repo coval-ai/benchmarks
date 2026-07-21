@@ -25,11 +25,11 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.internal import hidden_models, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
-from coval_bench.config import DATASET_ALL
+from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.registries import is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
@@ -71,6 +71,7 @@ async def get_leaderboard(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     internal: bool = Depends(is_internal),
+    settings: Settings = Depends(get_settings),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
@@ -101,7 +102,7 @@ async def get_leaderboard(
         entry_rows = await rows.fetchall()
 
     # Early-access embargo: hidden models are stripped unless the caller is internal.
-    hidden = frozenset() if internal else hidden_models()
+    hidden = frozenset() if internal else hidden_models(settings)
     entries = [
         LeaderboardEntry.model_validate(r)
         for r in entry_rows

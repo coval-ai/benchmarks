@@ -30,7 +30,9 @@ class ModelStatus(StrEnum):
     PENDING = "pending"  # implemented but waiting on credits; hidden like retired
     # Pre-launch model under embargo: benchmarked on the normal schedule, but
     # its existence and results are served only to requests presenting the
-    # internal API key (see coval_bench.api.internal).
+    # internal API key (see coval_bench.api.internal). When even the identity
+    # must stay out of this repo, define the model via the STEALTH_MODELS env
+    # var instead of the registry (see coval_bench.registries.stealth).
     EARLY_ACCESS = "early-access"
 
 

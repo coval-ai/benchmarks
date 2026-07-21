@@ -55,10 +55,14 @@ from coval_bench.registries import (
     METRIC_EXCLUSIONS,
     METRIC_SPECS,
     MODEL_REGISTRY,
+    STEALTH_PROVIDER,
     Benchmark,
     Metric,
     ModelStatus,
     RegisteredModel,
+    StealthUpstream,
+    stealth_entries,
+    stealth_upstreams,
 )
 from coval_bench.runner.retry import with_retry
 
@@ -248,7 +252,22 @@ async def _run_stt_item(
     logged_reasons: set[str] = set()
 
     async with sem:
-        provider_cls = stt_providers.get(entry.provider)
+        # Stealth entries dispatch to their real upstream; everything persisted
+        # below keeps the alias from ``entry`` (see registries.stealth).
+        target_provider, target_model = entry.provider, entry.model
+        upstream: StealthUpstream | None = None
+        if entry.provider == STEALTH_PROVIDER:
+            upstream = stealth_upstreams(settings).get(entry.model)
+            if upstream is None:
+                logger.warning(
+                    "stealth_model_unresolved",
+                    provider=entry.provider,
+                    model=entry.model,
+                )
+                return []
+            target_provider, target_model = upstream.provider, upstream.model
+
+        provider_cls = stt_providers.get(target_provider)
         if provider_cls is None:
             logger.warning(
                 "unknown_stt_provider",
@@ -257,16 +276,21 @@ async def _run_stt_item(
             )
             return []
 
-        key_attr = f"{entry.provider}_api_key"
+        key_attr = f"{target_provider}_api_key"
         api_key = getattr(settings, key_attr, None)
-        kwargs: dict[str, Any] = {"api_key": api_key, "model": entry.model}
-        if entry.provider == "google":
+        if upstream is not None and upstream.api_key is not None:
+            api_key = upstream.api_key
+        kwargs: dict[str, Any] = {"api_key": api_key, "model": target_model}
+        if target_provider == "google":
             kwargs["project_id"] = settings.google_project_id
-        elif entry.provider == "baseten":
+        elif target_provider == "baseten":
             kwargs["ws_url"] = settings.baseten_whisper_url
-        elif entry.provider == "azure":
+        elif target_provider == "azure":
             kwargs["region"] = settings.azure_region
         provider = provider_cls(**kwargs)
+
+        # Metric exclusions follow the real upstream, not the persisted alias.
+        exclusion_key = (target_provider, target_model)
 
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
@@ -327,7 +351,7 @@ async def _run_stt_item(
         ttft_status, ttft_error = _metric_outcome(
             ttft_seconds, item_error, Metric.TTFT, ResultStatus
         )
-        ttft_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFT]
+        ttft_excluded = exclusion_key in METRIC_EXCLUSIONS[Metric.TTFT]
         if not ttft_excluded:
             results.append(
                 Result(
@@ -399,7 +423,7 @@ async def _run_stt_item(
         ttfs_status, ttfs_error = _metric_outcome(
             ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
         )
-        ttfs_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFS]
+        ttfs_excluded = exclusion_key in METRIC_EXCLUSIONS[Metric.TTFS]
         if not ttfs_excluded:
             results.append(
                 Result(
@@ -596,7 +620,29 @@ async def _run_tts_item(
     logged_reasons: set[str] = set()
 
     async with sem:
-        provider_cls = tts_providers.get(entry.provider)
+        # Stealth entries dispatch to their real upstream; ``voice`` stays the
+        # persisted positional label, only the wire voice is resolved to the
+        # real ID (see registries.stealth).
+        target_provider, target_model = entry.provider, entry.model
+        wire_voice = voice
+        call_settings = settings
+        if entry.provider == STEALTH_PROVIDER:
+            upstream = stealth_upstreams(settings).get(entry.model)
+            if upstream is None:
+                logger.warning(
+                    "stealth_model_unresolved",
+                    provider=entry.provider,
+                    model=entry.model,
+                )
+                return []
+            target_provider, target_model = upstream.provider, upstream.model
+            wire_voice = upstream.resolve_voice(voice)
+            if upstream.api_key is not None:
+                call_settings = settings.model_copy(
+                    update={f"{target_provider}_api_key": upstream.api_key}
+                )
+
+        provider_cls = tts_providers.get(target_provider)
         if provider_cls is None:
             logger.warning(
                 "unknown_tts_provider",
@@ -606,7 +652,7 @@ async def _run_tts_item(
             return []
 
         transcript: str = item.transcript
-        provider = provider_cls(settings=settings, model=entry.model, voice=voice)
+        provider = provider_cls(settings=call_settings, model=target_model, voice=wire_voice)
 
         tts_result = None
         item_error: str | None = None
@@ -883,6 +929,13 @@ async def run_benchmarks(
             if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                 (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
+    # Env-defined stealth models: alias entries appended at runtime so their
+    # real identities never appear in this repo (see registries.stealth).
+    for stealth_entry in stealth_entries(settings):
+        (stt_matrix if stealth_entry.benchmark is Benchmark.STT else tts_matrix).append(
+            stealth_entry
+        )
+
     # EARLY_ACCESS models run on the normal schedule; only the API hides them.
     scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
     enabled_stt = [e for e in stt_matrix if e.status in scheduled]
@@ -966,15 +1019,25 @@ async def run_benchmarks(
             # ------------------------------------------------------------------
             stt_providers = _get_stt_providers()
             tts_providers = _get_tts_providers()
+            upstreams = stealth_upstreams(settings)
+
+            def _warmup_key(entry: RegisteredModel) -> str:
+                # Stealth models warm their real upstream's class.
+                if entry.provider == STEALTH_PROVIDER:
+                    upstream = upstreams.get(entry.model)
+                    if upstream is not None:
+                        return upstream.provider
+                return entry.provider
+
             provider_classes: set[type[Provider]] = set()
             if benchmark_kind in ("stt", "both"):
                 for entry in enabled_stt:
-                    cls = stt_providers.get(entry.provider)
+                    cls = stt_providers.get(_warmup_key(entry))
                     if cls is not None:
                         provider_classes.add(cls)
             if benchmark_kind in ("tts", "both"):
                 for entry in enabled_tts:
-                    cls = tts_providers.get(entry.provider)
+                    cls = tts_providers.get(_warmup_key(entry))
                     if cls is not None:
                         provider_classes.add(cls)
             if provider_classes:

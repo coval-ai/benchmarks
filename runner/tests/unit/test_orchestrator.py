@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import tempfile
 import wave
 from collections.abc import AsyncIterator, MutableMapping
@@ -2301,3 +2302,154 @@ async def test_posthog_capture_failure_does_not_fail_run(
 
     assert summary.status == str(RunStatus.SUCCEEDED)
     fake.capture.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Stealth models — dispatch to the real upstream, persist only the alias
+# ---------------------------------------------------------------------------
+
+
+def _flatten_recorded(writer: MagicMock) -> list[Result]:
+    return [r for call in writer.record_results.await_args_list for r in call.args[0]]
+
+
+@pytest.mark.asyncio
+async def test_stealth_stt_dispatches_upstream_persists_alias(audio_file: Path) -> None:
+    """The real client gets the real model and key; every row keeps the alias."""
+    stealth_json = json.dumps(
+        {
+            "stealth-01": {
+                "benchmark": "STT",
+                "provider": "deepgram",
+                "model": "real-secret-model",
+                "api_key": "sk-stealth",
+            }
+        }
+    )
+    settings = _TEST_SETTINGS.model_copy(update={"stealth_models": SecretStr(stealth_json)})
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ):
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_paused_registry(Benchmark.STT),
+        )
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    kwargs = provider_cls.call_args.kwargs
+    assert kwargs["model"] == "real-secret-model"
+    assert kwargs["api_key"] is not None
+    assert kwargs["api_key"].get_secret_value() == "sk-stealth"
+
+    recorded = _flatten_recorded(writer)
+    assert recorded, "no results persisted"
+    assert {(r.provider, r.model) for r in recorded} == {("stealth", "stealth-01")}
+
+
+@pytest.mark.asyncio
+async def test_stealth_tts_resolves_voice_persists_label(audio_file: Path) -> None:
+    """The wire voice is the real ID; the persisted voice is the positional label."""
+    stealth_json = json.dumps(
+        {
+            "stealth-02": {
+                "benchmark": "TTS",
+                "provider": "elevenlabs",
+                "model": "real-tts-model",
+                "voice": "real-voice-pinned",
+                "voices": ["real-voice-f", "real-voice-m"],
+            }
+        }
+    )
+    settings = _TEST_SETTINGS.model_copy(update={"stealth_models": SecretStr(stealth_json)})
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        synth_path = Path(tmpdir) / "synth.wav"
+        synth_path.write_bytes(b"\x00" * 512)
+        tts_result = TTSResult(
+            provider="elevenlabs",
+            model="real-tts-model",
+            voice="real-voice-f",
+            ttfa_ms=120.0,
+            audio_path=synth_path,
+            error=None,
+        )
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=tts_result)
+        provider_cls = MagicMock(return_value=provider_inst)
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        async with _orchestrator_env(
+            audio_path=audio_file,
+            tts_providers={"elevenlabs": provider_cls},
+            run=run,
+            writer=writer,
+        ):
+            with patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ):
+                summary = await run_benchmarks(
+                    settings=settings,
+                    benchmark_kind="tts",
+                    smoke=True,
+                    matrix_overrides=_paused_registry(Benchmark.TTS),
+                )
+
+    assert summary.success_count >= 1
+    kwargs = provider_cls.call_args.kwargs
+    assert kwargs["model"] == "real-tts-model"
+    # One smoke item → first pool voice.
+    assert kwargs["voice"] == "real-voice-f"
+    # No per-alias key in the JSON → the original settings pass through.
+    assert kwargs["settings"] is settings
+
+    recorded = _flatten_recorded(writer)
+    assert recorded, "no results persisted"
+    assert {(r.provider, r.model) for r in recorded} == {("stealth", "stealth-02")}
+    assert {r.voice for r in recorded} == {"voice-1"}
+
+
+@pytest.mark.asyncio
+async def test_stealth_unresolved_alias_is_skipped(audio_file: Path) -> None:
+    """An alias with no upstream mapping runs nothing and calls no provider."""
+    provider_cls = MagicMock()
+    orphan = RegisteredModel(
+        benchmark=Benchmark.STT,
+        provider="stealth",
+        model="stealth-99",
+        status=ModelStatus.EARLY_ACCESS,
+    )
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_providers={"deepgram": provider_cls},
+        run=run,
+        writer=writer,
+    ):
+        await run_benchmarks(
+            settings=_TEST_SETTINGS,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=[*_paused_registry(Benchmark.STT), orphan],
+        )
+
+    provider_cls.assert_not_called()
+    assert _flatten_recorded(writer) == []
