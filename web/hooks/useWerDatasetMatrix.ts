@@ -3,11 +3,14 @@
 
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { aggregatesQueryOptions } from "@/lib/api/queries";
 import { toModelKey } from "@/lib/utils/formatters";
 import type { AggregatesQueryParams } from "@/lib/api/client";
+
+// A radar polygon needs at least three axes; below this the chart can't draw.
+export const MIN_RADAR_AXES = 3;
 
 export function useWerDatasetMatrix(
   base: Pick<AggregatesQueryParams, "benchmark" | "window">,
@@ -26,7 +29,7 @@ export function useWerDatasetMatrix(
   // Each axis renders as soon as its own query lands — no waiting on the
   // slowest dataset. Placeholder (previous-window) rows are excluded so a
   // window switch can never mix old and new values across axes.
-  const werByDataset = useMemo(() => {
+  const fresh = useMemo(() => {
     const matrix = new Map<string, Map<string, number>>();
     results.forEach((r, i) => {
       if (!r.data || r.isPlaceholderData) return;
@@ -43,5 +46,13 @@ export function useWerDatasetMatrix(
 
   const loading = results.some((r) => r.isPending || r.isPlaceholderData);
 
-  return { werByDataset, loading };
+  // While a refetch is in flight, keep showing the previous window's matrix
+  // (dimmed by the caller) until the fresh one has enough axes to draw a
+  // radar — the chart never blanks, and no render ever mixes windows.
+  // Render-phase ref write is idempotent by construction: it only ever
+  // stores the current render's own derived value.
+  const last = useRef(fresh);
+  if ((fresh?.size ?? 0) >= MIN_RADAR_AXES || !loading) last.current = fresh;
+
+  return { werByDataset: last.current, loading };
 }
