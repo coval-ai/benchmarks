@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends
 from posthog import Posthog
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_posthog, get_settings
+from coval_bench.api.deps import capture_api_event, get_posthog
 from coval_bench.api.internal import is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -30,7 +30,6 @@ from coval_bench.api.schemas import (
     ProvidersResponse,
     TagCategoryOut,
 )
-from coval_bench.config import Settings
 from coval_bench.registries import (
     CATEGORY_LABELS,
     MODEL_REGISTRY,
@@ -40,7 +39,6 @@ from coval_bench.registries import (
     ModelStatus,
     RegisteredModel,
     TagCategory,
-    stealth_entries,
     tag_value_label,
 )
 
@@ -82,15 +80,13 @@ def _tag_categories() -> list[TagCategoryOut]:
     ]
 
 
-def _build_provider_map(
-    models: list[RegisteredModel], benchmark: Benchmark, internal: bool
-) -> dict[str, list[ModelInfo]]:
-    """Build an ordered {provider: [ModelInfo, ...]} map from *models*.
+def _build_provider_map(benchmark: Benchmark, internal: bool) -> dict[str, list[ModelInfo]]:
+    """Build an ordered {provider: [ModelInfo, ...]} map from the model registry.
 
     Registry order throughout; EARLY_ACCESS models appear only for internal callers.
     """
     result: dict[str, list[ModelInfo]] = {}
-    for m in models:
+    for m in MODEL_REGISTRY:
         if m.benchmark is not benchmark:
             continue
         if m.status is ModelStatus.EARLY_ACCESS and not internal:
@@ -105,12 +101,10 @@ def _build_provider_map(
     return result
 
 
-def _describe(internal: bool, settings: Settings) -> ProvidersResponse:
-    # Stealth aliases are always EARLY_ACCESS, so the internal gate covers them.
-    models = [*MODEL_REGISTRY, *stealth_entries(settings)]
-    stt_map = _build_provider_map(models, Benchmark.STT, internal)
-    tts_map = _build_provider_map(models, Benchmark.TTS, internal)
-    s2s_map = _build_provider_map(models, Benchmark.S2S, internal)
+def _describe(internal: bool) -> ProvidersResponse:
+    stt_map = _build_provider_map(Benchmark.STT, internal)
+    tts_map = _build_provider_map(Benchmark.TTS, internal)
+    s2s_map = _build_provider_map(Benchmark.S2S, internal)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
@@ -126,7 +120,6 @@ async def get_providers(
     request: Request,
     posthog_client: Posthog | None = Depends(get_posthog),
     internal: bool = Depends(is_internal),
-    settings: Settings = Depends(get_settings),
 ) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
@@ -135,7 +128,7 @@ async def get_providers(
     hide or grey out models that are known but not actively benchmarked.
     Early-access models appear only for internal callers.
     """
-    response = _describe(internal, settings)
+    response = _describe(internal)
     capture_api_event(
         posthog_client,
         "providers_listed",

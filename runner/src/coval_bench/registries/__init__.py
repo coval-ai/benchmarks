@@ -22,12 +22,6 @@ from coval_bench.registries.models import (
     RegisteredModel,
     Source,
 )
-from coval_bench.registries.stealth import (
-    STEALTH_PROVIDER,
-    StealthUpstream,
-    stealth_entries,
-    stealth_upstreams,
-)
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
     PROVIDER_VALUED_CATEGORIES,
@@ -53,11 +47,7 @@ __all__ = [
     "PROVIDER_VALUED_CATEGORIES",
     "TAG_CATEGORIES",
     "ModelTag",
-    "STEALTH_PROVIDER",
-    "StealthUpstream",
     "TagCategory",
     "is_metric_excluded",
-    "stealth_entries",
-    "stealth_upstreams",
     "tag_value_label",
 ]

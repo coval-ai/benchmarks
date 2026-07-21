@@ -46,7 +46,7 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
 )
-from coval_bench.api.internal import hidden_predicate, is_internal
+from coval_bench.api.internal import hidden_models, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
 from coval_bench.config import DATASET_ALL
@@ -110,10 +110,10 @@ async def get_results_aggregates(
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
-    is_hidden = hidden_predicate(internal)
+    hidden = frozenset() if internal else hidden_models()
 
     def visible(row: dict[str, Any]) -> bool:
-        return not is_hidden(row["provider"], row["model"]) and not is_metric_excluded(
+        return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
             row["provider"], row["model"], row["metric_type"]
         )
 

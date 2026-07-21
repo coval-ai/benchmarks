@@ -155,9 +155,6 @@ class Settings(BaseSettings):
     # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
     # models on the data endpoints. Unset means no request is internal.
     internal_api_key: SecretStr | None = None
-    # Env-defined stealth models (JSON: alias -> real upstream); shape and
-    # semantics in coval_bench.registries.stealth.
-    stealth_models: SecretStr | None = None
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

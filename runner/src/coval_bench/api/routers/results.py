@@ -43,11 +43,10 @@ from coval_bench.api.common import (
     WindowLiteral,
 )
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
-from coval_bench.api.internal import hidden_registry_models, is_internal
+from coval_bench.api.internal import hidden_models, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
 from coval_bench.config import Settings
-from coval_bench.registries import STEALTH_PROVIDER
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -206,9 +205,7 @@ async def list_results(
     # -- Early-access embargo: exclude hidden models unless the caller is internal.
     # SQL-level (not post-read) so `limit` semantics stay exact.
     if not internal:
-        conditions.append("r.provider != %(stealth_provider)s")
-        params["stealth_provider"] = STEALTH_PROVIDER
-        for i, (ea_provider, ea_model) in enumerate(sorted(hidden_registry_models())):
+        for i, (ea_provider, ea_model) in enumerate(sorted(hidden_models())):
             conditions.append(f"NOT (r.provider = %(ea_p{i})s AND r.model = %(ea_m{i})s)")
             params[f"ea_p{i}"] = ea_provider
             params[f"ea_m{i}"] = ea_model

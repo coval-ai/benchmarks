@@ -26,7 +26,7 @@ from starlette.requests import Request
 
 from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
-from coval_bench.api.internal import hidden_predicate, is_internal
+from coval_bench.api.internal import hidden_models, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL
@@ -100,11 +100,11 @@ async def get_leaderboard(
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
 
-    is_hidden = hidden_predicate(internal)
+    hidden = frozenset() if internal else hidden_models()
     entries = [
         LeaderboardEntry.model_validate(r)
         for r in entry_rows
-        if not is_hidden(r["provider"], r["model"])
+        if (r["provider"], r["model"]) not in hidden
         and not is_metric_excluded(r["provider"], r["model"], metric)
     ]
     capture_api_event(
