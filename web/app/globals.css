@@ -6,6 +6,11 @@
    overriding the tokens below under `.bench-theme` (see the media query). */
 @custom-variant dark (&:is(.dark *));
 
+.recharts-surface:focus-visible {
+  outline: 2px solid var(--color-chart-label);
+  outline-offset: 2px;
+}
+
 /* coval.ai cream palette — single light theme. */
 :root {
   /* Surfaces */

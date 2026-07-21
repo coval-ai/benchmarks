@@ -2,18 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import type { TooltipContentProps } from "recharts";
+import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
-import { TooltipProps } from "@/types/chart.types";
 
-interface ScatterTooltipProps extends TooltipProps {
+interface ScatterTooltipProps extends Partial<Pick<
+  TooltipContentProps<number, string>,
+  "active" | "payload" | "label"
+>> {
   activeTab: "tts" | "stt";
   metric: string;
 }
 
 const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric }) => {
   if (active && payload && payload.length > 0) {
-    const point = payload[0]?.payload;
-    if (!point) return null;
+    const item = payload[0];
+    const point = item?.payload as ScatterDataPoint | undefined;
+    if (item?.dataKey !== "x" || typeof item.value !== "number" || !item.name || !point) return null;
     return (
       <div
         style={{
