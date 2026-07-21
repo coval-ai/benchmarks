@@ -904,10 +904,9 @@ const TimelineChart: React.FC = () => {
               data={windowedTimelineData}
               accessibilityLayer
               margin={{ top: 5, right: 8, left: 0, bottom: 5 }}
-              onClick={() => {
+              onClick={(state) => {
                 if (Date.now() - dragEndAtRef.current < 300) return;
-                const { label: lbl, coordinate: coord } =
-                  interactionRef.current?.tooltip ?? {};
+                const { activeLabel: lbl, activeCoordinate: coord } = state;
                 const point = windowedTimelineData.find(
                   (candidate) => candidate.timestamp === Number(lbl)
                 );
