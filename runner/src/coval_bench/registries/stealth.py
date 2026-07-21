@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Env-defined stealth models — embargoed identities never enter this repo.
 
-A stealth model is an ``EARLY_ACCESS`` entry whose real provider, model, and
-voice IDs live only in the ``STEALTH_MODELS`` environment variable (JSON,
-mounted from Secret Manager). The registry entry, every result row, and every
-API response carry only the alias (``stealth``/``stealth-01``); the
-orchestrator resolves the alias to the real upstream at client-construction
-time, so no public surface — source, database, or API — can contain a real
-name.
+Real provider, model, and voice IDs live only in the ``STEALTH_MODELS`` env
+var (JSON, mounted from Secret Manager); registry entries, result rows, and
+API responses carry only the alias, with voices persisted as positional
+labels (``voice-0`` pinned, ``voice-1``… pool). Unset, placeholder, or
+malformed input logs a warning and yields no stealth models — misconfiguration
+skips the models, it never leaks a name.
 
 JSON shape, keyed by alias::
 
@@ -22,13 +21,6 @@ JSON shape, keyed by alias::
         "api_key": "optional; defaults to the provider's configured key"
       }
     }
-
-Voices are persisted as positional labels (``voice-0`` for the pinned voice,
-``voice-1``/``voice-2``… for the balanced pool) so per-voice splits survive
-without storing real voice IDs.
-
-An unset, placeholder, or malformed value logs a warning and yields no stealth
-models: misconfiguration skips the models, it never leaks a name.
 """
 
 from __future__ import annotations

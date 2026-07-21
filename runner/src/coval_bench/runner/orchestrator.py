@@ -220,6 +220,22 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
+def _resolve_stealth(
+    entry: RegisteredModel, settings: Settings
+) -> tuple[str, str, StealthUpstream | None] | None:
+    """The (provider, model, upstream) to call; persisted rows keep ``entry``'s alias.
+
+    ``None`` for a stealth alias with no upstream mapping — warned, caller skips.
+    """
+    if entry.provider != STEALTH_PROVIDER:
+        return entry.provider, entry.model, None
+    upstream = stealth_upstreams(settings).get(entry.model)
+    if upstream is None:
+        logger.warning("stealth_model_unresolved", provider=entry.provider, model=entry.model)
+        return None
+    return upstream.provider, upstream.model, upstream
+
+
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -252,20 +268,10 @@ async def _run_stt_item(
     logged_reasons: set[str] = set()
 
     async with sem:
-        # Stealth entries dispatch to their real upstream; everything persisted
-        # below keeps the alias from ``entry`` (see registries.stealth).
-        target_provider, target_model = entry.provider, entry.model
-        upstream: StealthUpstream | None = None
-        if entry.provider == STEALTH_PROVIDER:
-            upstream = stealth_upstreams(settings).get(entry.model)
-            if upstream is None:
-                logger.warning(
-                    "stealth_model_unresolved",
-                    provider=entry.provider,
-                    model=entry.model,
-                )
-                return []
-            target_provider, target_model = upstream.provider, upstream.model
+        resolved = _resolve_stealth(entry, settings)
+        if resolved is None:
+            return []
+        target_provider, target_model, upstream = resolved
 
         provider_cls = stt_providers.get(target_provider)
         if provider_cls is None:
@@ -620,27 +626,17 @@ async def _run_tts_item(
     logged_reasons: set[str] = set()
 
     async with sem:
-        # Stealth entries dispatch to their real upstream; ``voice`` stays the
-        # persisted positional label, only the wire voice is resolved to the
-        # real ID (see registries.stealth).
-        target_provider, target_model = entry.provider, entry.model
-        wire_voice = voice
+        resolved = _resolve_stealth(entry, settings)
+        if resolved is None:
+            return []
+        target_provider, target_model, upstream = resolved
+        # ``voice`` stays the persisted positional label; only the wire voice is real.
+        wire_voice = voice if upstream is None else upstream.resolve_voice(voice)
         call_settings = settings
-        if entry.provider == STEALTH_PROVIDER:
-            upstream = stealth_upstreams(settings).get(entry.model)
-            if upstream is None:
-                logger.warning(
-                    "stealth_model_unresolved",
-                    provider=entry.provider,
-                    model=entry.model,
-                )
-                return []
-            target_provider, target_model = upstream.provider, upstream.model
-            wire_voice = upstream.resolve_voice(voice)
-            if upstream.api_key is not None:
-                call_settings = settings.model_copy(
-                    update={f"{target_provider}_api_key": upstream.api_key}
-                )
+        if upstream is not None and upstream.api_key is not None:
+            call_settings = settings.model_copy(
+                update={f"{target_provider}_api_key": upstream.api_key}
+            )
 
         provider_cls = tts_providers.get(target_provider)
         if provider_cls is None:
@@ -929,8 +925,7 @@ async def run_benchmarks(
             if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                 (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    # Env-defined stealth models: alias entries appended at runtime so their
-    # real identities never appear in this repo (see registries.stealth).
+    # Env-defined stealth models join the matrix at runtime (see registries.stealth).
     for stealth_entry in stealth_entries(settings):
         (stt_matrix if stealth_entry.benchmark is Benchmark.STT else tts_matrix).append(
             stealth_entry

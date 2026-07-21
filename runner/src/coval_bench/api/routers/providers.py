@@ -6,13 +6,9 @@
 The catalogue is sourced from the model registry
 (``coval_bench.registries.MODEL_REGISTRY``) — the same source of truth the
 orchestrator runs from, so the website can never drift from the runner's
-reality. Every registered model is exposed, with two exceptions by status:
-
-* ``RETIRED``/``PENDING`` models are included with ``disabled=true`` so the
-  frontend keeps them off the site even when historical result rows exist.
-* ``EARLY_ACCESS`` models are omitted entirely — a disabled entry would still
-  leak the model's existence — unless the request presents the internal API
-  key, in which case they are included enabled.
+reality. ``RETIRED``/``PENDING`` models come back ``disabled=true``;
+``EARLY_ACCESS`` models are omitted for public callers (a disabled entry
+would still leak existence) and included enabled for internal ones.
 
 No DB hit is made by this endpoint.
 """
@@ -91,10 +87,7 @@ def _build_provider_map(
 ) -> dict[str, list[ModelInfo]]:
     """Build an ordered {provider: [ModelInfo, ...]} map from *models*.
 
-    Every model for *benchmark* is included (whatever its status) so the
-    frontend knows about retired models and can keep them hidden — except
-    EARLY_ACCESS models, which only internal callers see (enabled).
-    Providers and models keep registry order.
+    Registry order throughout; EARLY_ACCESS models appear only for internal callers.
     """
     result: dict[str, list[ModelInfo]] = {}
     for m in models:
@@ -113,8 +106,7 @@ def _build_provider_map(
 
 
 def _describe(internal: bool, settings: Settings) -> ProvidersResponse:
-    # Stealth entries are always EARLY_ACCESS, so the internal gate above
-    # keeps even their aliases out of public responses.
+    # Stealth aliases are always EARLY_ACCESS, so the internal gate covers them.
     models = [*MODEL_REGISTRY, *stealth_entries(settings)]
     stt_map = _build_provider_map(models, Benchmark.STT, internal)
     tts_map = _build_provider_map(models, Benchmark.TTS, internal)

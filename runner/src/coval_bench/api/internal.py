@@ -3,14 +3,10 @@
 
 """Internal (benchmarking-team) access to early-access models.
 
-``EARLY_ACCESS`` models are benchmarked on the normal schedule but are under
-embargo: their existence and results must not reach the public API surface.
-Every data endpoint strips them from its response unless the request presents
-the internal API key in the ``X-Internal-Key`` header, in which case the full
-data set is served.
-
-An unset ``internal_api_key`` or a wrong key silently yields the public view —
-the endpoints stay public either way, so there is nothing to 404.
+``EARLY_ACCESS`` models run on the normal schedule but are under embargo:
+every data endpoint strips them unless the request presents the internal key
+in the ``X-Internal-Key`` header. A missing or wrong key silently yields the
+public view — the endpoints stay public either way, so there is nothing to 404.
 """
 
 from __future__ import annotations

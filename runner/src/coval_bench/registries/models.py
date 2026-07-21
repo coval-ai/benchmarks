@@ -3,11 +3,10 @@
 """Registry of benchmarked models — identity, run config, and status.
 
 One entry per model, keyed by ``(benchmark, provider, model)``. The
-orchestrator runs every ``ACTIVE`` and ``EARLY_ACCESS`` entry; the API serves
-all entries except ``EARLY_ACCESS`` ones (confidential until launch — public
-responses omit them entirely) and marks ``RETIRED`` and ``PENDING`` ones
-disabled so the frontend keeps them off the site even when historical result
-rows exist for them.
+orchestrator runs every ``ACTIVE`` and ``EARLY_ACCESS`` entry; the API omits
+``EARLY_ACCESS`` entries from public responses and marks ``RETIRED``/``PENDING``
+ones disabled so the frontend keeps them off the site even when historical
+result rows exist for them.
 """
 
 from __future__ import annotations
@@ -28,11 +27,7 @@ class ModelStatus(StrEnum):
     PAUSED = "paused"  # shown, not currently benchmarked
     RETIRED = "retired"  # not benchmarked, hidden even if old data exists
     PENDING = "pending"  # implemented but waiting on credits; hidden like retired
-    # Pre-launch model under embargo: benchmarked on the normal schedule, but
-    # its existence and results are served only to requests presenting the
-    # internal API key (see coval_bench.api.internal). When even the identity
-    # must stay out of this repo, define the model via the STEALTH_MODELS env
-    # var instead of the registry (see coval_bench.registries.stealth).
+    # Pre-launch embargo: run normally, served only to internal-key requests.
     EARLY_ACCESS = "early-access"
 
 
