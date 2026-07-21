@@ -69,6 +69,26 @@ const LatencyAccuracySection: React.FC = () => {
   useEffect(() => setActiveIdx(-1), [sortedData]);
   const activePoint = sortedData[activeIdx];
 
+  // Keyboard access uses one focusable container plus aria-activedescendant
+  // instead of focusing the circles: Recharts recreates the shape nodes when
+  // the selection re-renders, so DOM focus placed on a circle dies silently
+  // with it. Focus never leaves the container; arrows move the selection and
+  // the active option id, which survives any node swap. Handlers ignore keys
+  // bubbling from the focused chart surface so its arrow navigation stays
+  // independent.
+  const onPlotKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || sortedData.length === 0) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.min(i + 1, sortedData.length - 1));
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Escape") {
+      setActiveIdx(-1);
+    }
+  };
+
   useEffect(() => {
     if (!activePoint) return;
     const dismiss = (e: Event) => {
@@ -224,6 +244,13 @@ const LatencyAccuracySection: React.FC = () => {
           ref={chartRef}
           data-export-frame
           className="relative h-64 select-none"
+          role="listbox"
+          aria-label={`Models by ${latencyLabel} and WER; arrow keys move between points`}
+          tabIndex={0}
+          aria-activedescendant={
+            activeIdx >= 0 ? `latency-scatter-point-${activeIdx}` : undefined
+          }
+          onKeyDown={onPlotKeyDown}
           onMouseEnter={trackChartHover}
           onPointerDown={isMobile ? scrub : undefined}
           onPointerMove={
@@ -332,28 +359,26 @@ const LatencyAccuracySection: React.FC = () => {
                   fill={getModelColor(model)}
                   name={model}
                   isAnimationActive={false}
-                  shape={(props: { cx?: number; cy?: number; fill?: string; payload?: ScatterDataPoint }) => (
-                    <circle
-                      data-export-point
-                      cx={props.cx}
-                      cy={props.cy}
-                      r={props.payload === activePoint ? 8 : 6}
-                      fill={props.fill}
-                      fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
-                      stroke={props.payload === activePoint ? themeColors.axisText : undefined}
-                      strokeWidth={2}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER`}
-                      onClick={() => setActiveIdx(sortedData.indexOf(props.payload!))}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setActiveIdx(sortedData.indexOf(props.payload!));
-                        }
-                      }}
-                    />
-                  )}
+                  shape={(props: { cx?: number; cy?: number; fill?: string; payload?: ScatterDataPoint }) => {
+                    const idx = sortedData.indexOf(props.payload!);
+                    return (
+                      <circle
+                        data-export-point
+                        id={`latency-scatter-point-${idx}`}
+                        cx={props.cx}
+                        cy={props.cy}
+                        r={props.payload === activePoint ? 8 : 6}
+                        fill={props.fill}
+                        fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
+                        stroke={props.payload === activePoint ? themeColors.axisText : undefined}
+                        strokeWidth={2}
+                        role="option"
+                        aria-selected={props.payload === activePoint}
+                        aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER`}
+                        onClick={() => setActiveIdx(idx)}
+                      />
+                    );
+                  }}
                 />
               ))}
             </ScatterChart>
