@@ -19,11 +19,13 @@ import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
   buildTagIndex,
+  dedicatedModelKeys,
   filterModelsByFacets,
   getTagCategories,
   hasAnySelection,
   restrictToModelKeys,
   toggleFacetValue,
+  DEDICATED_INFERENCE_BLURB,
   MODEL_FACET_CATEGORY,
   MODEL_EXCLUDE_CATEGORY,
   type FacetSelection,
@@ -134,7 +136,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   // so window-derived rendering must follow the data, not the toggle.
   const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
   const windowDataStale = aggregatesQuery.isPlaceholderData;
-  const loadError = aggregatesQuery.isError;
+  // Providers metadata classifies dedicated endpoints; without it the charts
+  // would misrepresent them as shared, so its failure is a load failure too.
+  const loadError = aggregatesQuery.isError || providersQuery.isError;
 
   const modelStats = useMemo<ModelStats[]>(
     () => aggregatesQuery.data?.model_stats ?? [],
@@ -157,6 +161,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     () => getTagCategories(providersQuery.data),
     [providersQuery.data]
   );
+  const dedicatedModels = useMemo(() => dedicatedModelKeys(tagIndex), [tagIndex]);
 
   // Facets are driven only by models that actually have data to plot. A
   // catalogue model without stats (e.g. a batch-only or not-yet-benchmarked
@@ -510,10 +515,14 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [dataBackedByProvider, tagIndex, selectedFacets, tagCategories, normalizeProviderName]
   );
 
+  const hasDedicatedBoxes = selectedModels.some((m) => dedicatedModels.has(m));
   const boxPlotDescription = {
     short: `Distribution of ${latencyLabel} values across all runs`,
     detailed:
-      "Narrow distributions indicate reliable, predictable response times, while wide distributions show erratic performance that may frustrate users despite good average speeds. A model with moderate median latency and tight distribution often provides superior user experience compared to a faster median model with high variability.",
+      "Narrow distributions indicate reliable, predictable response times, while wide distributions show erratic performance that may frustrate users despite good average speeds. A model with moderate median latency and tight distribution often provides superior user experience compared to a faster median model with high variability." +
+      (hasDedicatedBoxes
+        ? ` Endpoints marked with a server icon use dedicated inference. ${DEDICATED_INFERENCE_BLURB}`
+        : ""),
   };
 
   const werDescription = page === "tts"
@@ -551,6 +560,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
           detail: fastestPrimary.fastestProvider
             ? normalizeProviderName(fastestPrimary.fastestProvider)
             : undefined,
+          dedicated: dedicatedModels.has(fastestPrimary.fastestModel),
         }
       : undefined,
   };
@@ -568,6 +578,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
                 detail: lowestWERProvider
                   ? normalizeProviderName(lowestWERProvider)
                   : undefined,
+                dedicated: dedicatedModels.has(lowestWERModel),
               }
             : undefined,
         };
@@ -630,6 +641,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     hasActiveFacets,
     legendModels,
     toggleLegendModel,
+    dedicatedModels,
 
     // UI state
     isMobile,

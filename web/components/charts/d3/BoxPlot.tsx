@@ -7,6 +7,10 @@ import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import * as d3 from "d3";
 import { BoxPlotProps } from "@/types/chart.types";
 import { BoxPlotDataPoint } from "@/types/benchmark.types";
+import {
+  DedicatedBadge,
+  useDedicatedInfoTip,
+} from "@/components/shared/DedicatedInferenceInfo";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
 // Match the text sizes on the timeline chart above: 14px axis labels, 12px
@@ -16,7 +20,9 @@ const providerFontSize = 12;
 const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
-const margin = { top: 20, right: 8, bottom: 80, left: 40 };
+// Bottom holds up to three label lines, the provider, the dedicated-inference
+// marker, and the axis caption — 80px stacked marker over caption.
+const margin = { top: 20, right: 8, bottom: 88, left: 40 };
 const minSlotWidth = 48;
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
@@ -26,6 +32,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   getModelColor,
   getProviderForModel,
   normalizeModelName,
+  dedicatedModels,
   isMobile = false
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -41,6 +48,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     yTop: number;
     pinned: boolean;
   } | null>(null);
+  // Explainer for the dedicated-inference marker under a model's axis label.
+  const {
+    iconHandlers: dedicatedIcon,
+    overlay: dedicatedOverlay,
+    dismiss: dismissDedicated,
+  } = useDedicatedInfoTip(containerRef);
   const [scrollX, setScrollX] = useState(0);
   const themeColors = useThemeColors();
 
@@ -108,6 +121,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     if (!svgRef.current || data.data.length === 0) return;
 
     setTip(null);
+    dismissDedicated();
 
     const chartWidth = svgWidth - margin.left - margin.right;
     const chartHeight = dimensions.height - margin.top - margin.bottom;
@@ -200,6 +214,39 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     xAxisGroup.select(".domain").remove();
     xAxisGroup.selectAll("text").remove();
 
+    // Lucide's Server icon, drawn inline: it must live inside the axis SVG
+    // (an HTML overlay would detach when the plot scrolls) and always show —
+    // it is the dedicated-endpoint marker. Hovering or tapping it opens the
+    // explainer, so the wrapper carries a generous transparent hit rect.
+    const drawServerIcon = (x: number, y: number, size: number) => {
+      const wrap = g
+        .append("g")
+        .attr("transform", `translate(${x},${y})`)
+        .attr("role", "button")
+        .attr("tabindex", 0)
+        .attr("aria-label", "About dedicated inference");
+      const icon = wrap
+        .append("g")
+        .attr("transform", `scale(${size / 24})`)
+        .attr("stroke", themeColors.label)
+        .attr("fill", "none")
+        .attr("stroke-width", 2.4)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round");
+      icon.append("rect").attr("x", 2).attr("y", 2).attr("width", 20).attr("height", 8).attr("rx", 2);
+      icon.append("rect").attr("x", 2).attr("y", 14).attr("width", 20).attr("height", 8).attr("rx", 2);
+      icon.append("line").attr("x1", 6).attr("y1", 6).attr("x2", 6.01).attr("y2", 6);
+      icon.append("line").attr("x1", 6).attr("y1", 18).attr("x2", 6.01).attr("y2", 18);
+      wrap
+        .append("rect")
+        .attr("x", -10)
+        .attr("y", -10)
+        .attr("width", size + 20)
+        .attr("height", size + 20)
+        .attr("fill", "transparent");
+      return wrap;
+    };
+
     // Create custom wrapped text with model first
     {
       const labelMaxWidth = xScale.step() * 0.82;
@@ -272,9 +319,24 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .attr("y", yPosition + lineIndex * lineHeight);
         });
 
+        const providerY = yPosition + modelLines.length * lineHeight + 1;
         providerNode
           .attr("font-size", `${providerFontSize * scale}px`)
-          .attr("y", yPosition + modelLines.length * lineHeight + 1);
+          .attr("y", providerY);
+
+        // Dedicated endpoints carry the server icon on its own line beneath
+        // the label, centered in the slot; hover or tap opens the explainer.
+        // Fixed size on purpose: crowded views shrink the label text, and the
+        // marker must stay legible — it is the only dedicated cue at a glance.
+        if (dedicatedModels?.has(model)) {
+          const iconSize = 15;
+          drawServerIcon(xPosition - iconSize / 2, providerY + 4, iconSize)
+            .style("cursor", "help")
+            .on("mouseenter", (e: React.MouseEvent) => dedicatedIcon.onMouseEnter(e))
+            .on("mouseleave", dedicatedIcon.onMouseLeave)
+            .on("click", (e: React.MouseEvent) => dedicatedIcon.onClick(e))
+            .on("keydown", (e: React.KeyboardEvent) => dedicatedIcon.onKeyDown(e));
+        }
       });
     }
 
@@ -283,7 +345,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     g.append("text")
       .attr(
         "transform",
-        `translate(${chartWidth / 2}, ${chartHeight + margin.bottom - 10})`
+        `translate(${chartWidth / 2}, ${chartHeight + margin.bottom - 6})`
       )
       .style("text-anchor", "middle")
       .attr("fill", themeColors.axisText)
@@ -305,7 +367,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       const centerX = (xScale(modelData.model) ?? 0) + xScale.bandwidth() / 2;
       const boxWidth = Math.min(xScale.bandwidth() * 0.5, 48);
 
-      // Main box (IQR)
+      // Main box (IQR). Dedicated endpoints get a dashed border — the visual
+      // cue that this box runs on reserved capacity, not the shared fleet.
       boxGroup
         .append("rect")
         .attr("x", centerX - boxWidth / 2)
@@ -316,6 +379,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         .attr("fill-opacity", 0.3)
         .attr("stroke", color)
         .attr("stroke-width", 2)
+        .attr("stroke-dasharray", dedicatedModels?.has(modelData.model) ? "5 3" : null)
         .attr("rx", 2);
 
       // Median line
@@ -426,7 +490,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, isMobile, themeColors]);
+  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -517,8 +581,10 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
               color: "var(--color-text-on-tooltip)"
             }}
           >
-            {tip.point.model}
+            {getProviderForModel(tip.point.model)}{" "}
+            {normalizeModelName(tip.point.model)}
           </p>
+          {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
           {(tip.pinned
             ? [
                 ["Max", `${tip.point.stats.max.toFixed(0)}ms`],
@@ -547,6 +613,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           ))}
         </div>
       )}
+      {dedicatedOverlay}
     </div>
   );
 };

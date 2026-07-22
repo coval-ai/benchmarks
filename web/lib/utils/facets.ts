@@ -19,6 +19,33 @@ export type FacetSelection = Record<string, string[]>;
 export const MODEL_FACET_CATEGORY = "model";
 export const MODEL_EXCLUDE_CATEGORY = "model_hidden";
 
+/**
+ * Source facet identifiers, mirroring runner registries/tags.py. Shared by the
+ * filter chips, the shared-graph exclusion below, and the dedicated-endpoint
+ * chart styling.
+ */
+export const SOURCE_CATEGORY = "source";
+export const DEDICATED_INFERENCE = "dedicated-inference";
+
+export const DEDICATED_INFERENCE_LABEL = "Dedicated inference";
+// Balanced by design: Baseten flagged fairness, so the shared side's
+// advantages are stated alongside dedicated's. One string, every surface.
+export const DEDICATED_INFERENCE_BLURB =
+  "Shared endpoints serve many customers on the same infrastructure, while dedicated endpoints run on hardware reserved for a single customer. Since these represent different deployment configurations, we distinguish them separately.";
+
+/** Whether a model's tags mark it as a dedicated-inference endpoint. */
+export const isDedicated = (tags: ModelTagOut[]): boolean =>
+  tags.some((t) => t.category === SOURCE_CATEGORY && t.value === DEDICATED_INFERENCE);
+
+/** The composite keys of every dedicated-inference model in the catalogue. */
+export function dedicatedModelKeys(tagIndex: Map<string, ModelTagOut[]>): Set<string> {
+  const keys = new Set<string>();
+  for (const [key, tags] of tagIndex) {
+    if (isDedicated(tags)) keys.add(key);
+  }
+  return keys;
+}
+
 export interface FacetOption {
   value: string;
   label: string;
@@ -106,6 +133,8 @@ export function restrictToModelKeys(
  * Narrow modelsByProvider to the models passing the current facet selection.
  * Legend model picks broaden an active tag filter (union) but stand alone
  * when no tag category is selected; excludes hide single models from either.
+ * Dedicated-inference endpoints pass like any other model — only the latency
+ * timeline excludes them, at the chart level.
  */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,
@@ -159,12 +188,20 @@ export function buildFacetGroups(
 
   for (const { category, label, provider_valued } of tagCategories) {
     const valueLabels = new Map<string, string>();
+    const sharedValues = new Set<string>();
     for (const key of visibleKeys) {
-      for (const tag of tagIndex.get(key) ?? []) {
-        if (tag.category === category) valueLabels.set(tag.value, tag.label);
+      const tags = tagIndex.get(key) ?? [];
+      for (const tag of tags) {
+        if (tag.category !== category) continue;
+        valueLabels.set(tag.value, tag.label);
+        if (!isDedicated(tags)) sharedValues.add(tag.value);
       }
     }
-    if (valueLabels.size < 2) continue;
+    // A dedicated endpoint never mints a new filter group on its own: aside
+    // from Source (the shared/dedicated axis itself), a category becomes a
+    // facet only once shared endpoints hold two distinct values for it.
+    if ((category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) < 2)
+      continue;
 
     const others: FacetSelection = { ...tagSelected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]

@@ -4,7 +4,8 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { useAggregatesQuery } from "@/lib/api/queries";
+import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { buildTagIndex, dedicatedModelKeys } from "@/lib/utils/facets";
 import {
   normalizeModelName,
   normalizeSTTProviderName,
@@ -25,11 +26,16 @@ function toRows(
   metricType: string,
   rankField: "p50" | "avg_value",
   normalizeProvider: (p: string) => string,
-  formatValue: (value: number) => string
+  formatValue: (value: number) => string,
+  exclude: Set<string>
 ): LeaderboardRow[] {
   if (!stats) return [];
   return stats
-    .filter((s) => s.metric_type === metricType)
+    .filter(
+      (s) =>
+        s.metric_type === metricType &&
+        !exclude.has(toModelKey(s.provider, s.model))
+    )
     .sort((a, b) => a[rankField] - b[rankField])
     .slice(0, TOP_N)
     .map((s) => ({
@@ -49,30 +55,40 @@ const OverviewLeaderboards: React.FC = () => {
   // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  const providersQuery = useProvidersQuery();
   const windowDataStale = ttsQuery.isPlaceholderData || sttQuery.isPlaceholderData;
 
+  // These cards rank shared latency, so dedicated-inference endpoints stay
+  // off them — same rule as the dashboards' latency timeline. Rankings are
+  // never built without the provider metadata that classifies endpoints.
   const ttsRows = useMemo(
     () =>
-      toRows(
-        ttsQuery.data?.model_stats,
-        "TTFA",
-        "p50",
-        normalizeTTSProviderName,
-        (value) => `${Math.round(value)} ms`
-      ),
-    [ttsQuery.data]
+      providersQuery.data
+        ? toRows(
+            ttsQuery.data?.model_stats,
+            "TTFA",
+            "p50",
+            normalizeTTSProviderName,
+            (value) => `${Math.round(value)} ms`,
+            dedicatedModelKeys(buildTagIndex("TTS", providersQuery.data))
+          )
+        : [],
+    [ttsQuery.data, providersQuery.data]
   );
 
   const sttRows = useMemo(
     () =>
-      toRows(
-        sttQuery.data?.model_stats,
-        "TTFS",
-        "p50",
-        normalizeSTTProviderName,
-        (value) => `${Math.round(value * 1000)} ms`
-      ),
-    [sttQuery.data]
+      providersQuery.data
+        ? toRows(
+            sttQuery.data?.model_stats,
+            "TTFS",
+            "p50",
+            normalizeSTTProviderName,
+            (value) => `${Math.round(value * 1000)} ms`,
+            dedicatedModelKeys(buildTagIndex("STT", providersQuery.data))
+          )
+        : [],
+    [sttQuery.data, providersQuery.data]
   );
 
   return (
@@ -92,15 +108,18 @@ const OverviewLeaderboards: React.FC = () => {
         />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Providers metadata drives the dedicated exclusion, so these cards
+            wait for it (and surface its failure) rather than momentarily
+            ranking a dedicated endpoint as shared. */}
         <LeaderboardCard
           title="Text-to-Speech"
           metricLabel="Time to First Audio"
           windowLabel={windowBadge(ttsQuery.data?.window ?? timeWindow)}
           rows={ttsRows}
           href="/tts"
-          loading={ttsQuery.isLoading}
+          loading={ttsQuery.isLoading || providersQuery.isLoading}
           stale={ttsQuery.isPlaceholderData}
-          error={ttsQuery.isError}
+          error={ttsQuery.isError || providersQuery.isError}
         />
         <LeaderboardCard
           title="Speech-to-Text"
@@ -108,9 +127,9 @@ const OverviewLeaderboards: React.FC = () => {
           windowLabel={windowBadge(sttQuery.data?.window ?? timeWindow)}
           rows={sttRows}
           href="/stt"
-          loading={sttQuery.isLoading}
+          loading={sttQuery.isLoading || providersQuery.isLoading}
           stale={sttQuery.isPlaceholderData}
-          error={sttQuery.isError}
+          error={sttQuery.isError || providersQuery.isError}
         />
       </div>
     </div>
