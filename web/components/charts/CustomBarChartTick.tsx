@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React from "react";
+import { Server } from "lucide-react";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
@@ -17,6 +18,10 @@ const CustomBarChartTick: React.FC<{
   visibleTicksCount?: number;
   payload?: { value: string };
   getProviderForModel: (model: string) => string;
+  /** Dedicated-inference endpoints carry the server marker beside the label. */
+  dedicatedModels?: Set<string>;
+  /** Hover/tap handlers for the marker, from useDedicatedInfoTip. */
+  dedicatedIconHandlers?: React.DOMAttributes<SVGGElement>;
   isMobile?: boolean;
 }> = ({
   x = 0,
@@ -25,6 +30,8 @@ const CustomBarChartTick: React.FC<{
   visibleTicksCount = 1,
   payload,
   getProviderForModel,
+  dedicatedModels,
+  dedicatedIconHandlers,
   isMobile = false,
 }) => {
   const themeColors = useThemeColors();
@@ -77,6 +84,32 @@ const CustomBarChartTick: React.FC<{
           >
             {provider}
           </text>
+        )}
+        {dedicatedModels?.has(model) && (
+          // Sits just past the label's anchor, nearest the bar, so the marker
+          // reads at a glance even when labels fan out at 45°.
+          <g
+            {...dedicatedIconHandlers}
+            role="img"
+            aria-label="Dedicated inference"
+            style={{ cursor: "help" }}
+          >
+            <Server
+              x={4}
+              y={showProvider ? 18 : 4}
+              size={12}
+              color={themeColors.label}
+              strokeWidth={2.4}
+              aria-hidden
+            />
+            <rect
+              x={-2}
+              y={showProvider ? 12 : -2}
+              width={24}
+              height={24}
+              fill="transparent"
+            />
+          </g>
         )}
       </g>
     </g>

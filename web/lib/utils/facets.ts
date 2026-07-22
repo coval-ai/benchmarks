@@ -19,6 +19,33 @@ export type FacetSelection = Record<string, string[]>;
 export const MODEL_FACET_CATEGORY = "model";
 export const MODEL_EXCLUDE_CATEGORY = "model_hidden";
 
+/**
+ * Source facet identifiers, mirroring runner registries/tags.py. Shared by the
+ * filter chips, the shared-graph exclusion below, and the dedicated-endpoint
+ * chart styling.
+ */
+export const SOURCE_CATEGORY = "source";
+export const DEDICATED_INFERENCE = "dedicated-inference";
+
+export const DEDICATED_INFERENCE_LABEL = "Dedicated inference";
+// Balanced by design: Baseten flagged fairness, so the shared side's
+// advantages are stated alongside dedicated's. One string, every surface.
+export const DEDICATED_INFERENCE_BLURB =
+  "These endpoints run on capacity reserved for a single customer, so they appear on every chart except the shared latency timeline. Dedicated capacity typically delivers steadier response times, while shared endpoints serve many tenants, scale instantly, and reflect the out-of-the-box experience most users get.";
+
+/** Whether a model's tags mark it as a dedicated-inference endpoint. */
+export const isDedicated = (tags: ModelTagOut[]): boolean =>
+  tags.some((t) => t.category === SOURCE_CATEGORY && t.value === DEDICATED_INFERENCE);
+
+/** The composite keys of every dedicated-inference model in the catalogue. */
+export function dedicatedModelKeys(tagIndex: Map<string, ModelTagOut[]>): Set<string> {
+  const keys = new Set<string>();
+  for (const [key, tags] of tagIndex) {
+    if (isDedicated(tags)) keys.add(key);
+  }
+  return keys;
+}
+
 export interface FacetOption {
   value: string;
   label: string;
@@ -106,6 +133,8 @@ export function restrictToModelKeys(
  * Narrow modelsByProvider to the models passing the current facet selection.
  * Legend model picks broaden an active tag filter (union) but stand alone
  * when no tag category is selected; excludes hide single models from either.
+ * Dedicated-inference endpoints pass like any other model — only the latency
+ * timeline excludes them, at the chart level.
  */
 export function filterModelsByFacets(
   modelsByProvider: ModelsByProvider,

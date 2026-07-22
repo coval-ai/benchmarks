@@ -10,5 +10,7 @@ export interface BoxPlotProps {
   getModelColor: (model: string) => string;
   getProviderForModel: (model: string) => string;
   normalizeModelName: (model: string) => string;
+  /** Dedicated-inference endpoints: dashed box border + server icon by the label. */
+  dedicatedModels?: Set<string>;
   isMobile?: boolean;
 }

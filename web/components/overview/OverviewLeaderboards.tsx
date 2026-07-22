@@ -4,7 +4,8 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { useAggregatesQuery } from "@/lib/api/queries";
+import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { buildTagIndex, dedicatedModelKeys } from "@/lib/utils/facets";
 import {
   normalizeModelName,
   normalizeSTTProviderName,
@@ -25,11 +26,16 @@ function toRows(
   metricType: string,
   rankField: "p50" | "avg_value",
   normalizeProvider: (p: string) => string,
-  formatValue: (value: number) => string
+  formatValue: (value: number) => string,
+  exclude: Set<string>
 ): LeaderboardRow[] {
   if (!stats) return [];
   return stats
-    .filter((s) => s.metric_type === metricType)
+    .filter(
+      (s) =>
+        s.metric_type === metricType &&
+        !exclude.has(toModelKey(s.provider, s.model))
+    )
     .sort((a, b) => a[rankField] - b[rankField])
     .slice(0, TOP_N)
     .map((s) => ({
@@ -49,8 +55,11 @@ const OverviewLeaderboards: React.FC = () => {
   // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  const providersQuery = useProvidersQuery();
   const windowDataStale = ttsQuery.isPlaceholderData || sttQuery.isPlaceholderData;
 
+  // These cards rank shared latency, so dedicated-inference endpoints stay
+  // off them — same rule as the dashboards' latency timeline.
   const ttsRows = useMemo(
     () =>
       toRows(
@@ -58,9 +67,10 @@ const OverviewLeaderboards: React.FC = () => {
         "TTFA",
         "p50",
         normalizeTTSProviderName,
-        (value) => `${Math.round(value)} ms`
+        (value) => `${Math.round(value)} ms`,
+        dedicatedModelKeys(buildTagIndex("TTS", providersQuery.data))
       ),
-    [ttsQuery.data]
+    [ttsQuery.data, providersQuery.data]
   );
 
   const sttRows = useMemo(
@@ -70,9 +80,10 @@ const OverviewLeaderboards: React.FC = () => {
         "TTFS",
         "p50",
         normalizeSTTProviderName,
-        (value) => `${Math.round(value * 1000)} ms`
+        (value) => `${Math.round(value * 1000)} ms`,
+        dedicatedModelKeys(buildTagIndex("STT", providersQuery.data))
       ),
-    [sttQuery.data]
+    [sttQuery.data, providersQuery.data]
   );
 
   return (

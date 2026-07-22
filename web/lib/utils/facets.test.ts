@@ -7,10 +7,13 @@ import type { ModelsByProvider } from "../../types/benchmark.types";
 import {
   buildFacetGroups,
   buildTagIndex,
+  dedicatedModelKeys,
   filterModelsByFacets,
   getTagCategories,
   restrictToModelKeys,
   toggleFacetValue,
+  DEDICATED_INFERENCE,
+  SOURCE_CATEGORY,
 } from "./facets";
 
 // Four STT models: every mode is streaming (single-value → not a facet); host
@@ -157,5 +160,30 @@ describe("toggleFacetValue", () => {
     const added = toggleFacetValue({}, "host", "openai");
     expect(added).toEqual({ host: ["openai"] });
     expect(toggleFacetValue(added, "host", "openai")).toEqual({});
+  });
+});
+
+// Dedicated endpoints filter like any other model; the timeline excludes them
+// at the chart level using this helper's keys.
+describe("dedicatedModelKeys", () => {
+  it("collects the composite keys carrying the dedicated-inference source tag", () => {
+    const DEDICATED = tag(SOURCE_CATEGORY, DEDICATED_INFERENCE, "Dedicated inference");
+    const providers = {
+      stt: [
+        {
+          provider: "deepgram",
+          models: [{ model: "nova-2", tags: [TYPE, host("deepgram"), MULTI] }],
+        },
+        {
+          provider: "baseten",
+          models: [{ model: "whisper-large-v3", tags: [TYPE, host("baseten"), DEDICATED] }],
+        },
+      ],
+      tts: [],
+      tag_categories: TAG_CATEGORIES,
+    } as unknown as ProvidersApiResponse;
+    expect(dedicatedModelKeys(buildTagIndex("STT", providers))).toEqual(
+      new Set(["baseten:whisper-large-v3"])
+    );
   });
 });

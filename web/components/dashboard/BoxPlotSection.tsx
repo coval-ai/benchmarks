@@ -22,6 +22,7 @@ const BoxPlotSection: React.FC = () => {
     getBoxPlotData,
     getAvgLatencyMs,
     getProviderForModel,
+    dedicatedModels,
     isMobile,
     activeMetric,
   } = useDashboard();
@@ -70,6 +71,7 @@ const BoxPlotSection: React.FC = () => {
           getModelColor={getModelColor}
           getProviderForModel={getProviderForModel}
           normalizeModelName={normalizeModelName}
+          dedicatedModels={dedicatedModels}
           isMobile={isMobile}
         />
       </Card>

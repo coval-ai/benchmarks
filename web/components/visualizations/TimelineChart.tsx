@@ -16,6 +16,7 @@ import {
   type TooltipPayloadEntry,
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
+import { DedicatedInfoIcon } from "@/components/shared/DedicatedInferenceInfo";
 import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import {
@@ -41,6 +42,7 @@ interface LegendEntry {
   value: string;
   color?: string;
   dataKey?: string;
+  dedicated?: boolean;
 }
 
 // Custom legend: names are rendered in black (recharts colors them per-series
@@ -85,8 +87,10 @@ export const TimelineLegend: React.FC<{
         id={panelId}
         className={`grid transition-[grid-template-rows,visibility] duration-300 ease-in-out ${open ? "visible grid-rows-[1fr]" : "invisible grid-rows-[0fr]"} sm:visible sm:grid-rows-[1fr]`}
       >
-        <div className="overflow-hidden">
-          <ul className="grid auto-cols-max grid-flow-col grid-rows-4 gap-x-4 overflow-x-auto px-2 pb-1 sm:block sm:columns-3 sm:gap-x-6 sm:pt-5 lg:columns-4">
+        {/* The clip only matters for the mobile collapse animation and scroll;
+            above sm it would cut off the dedicated-inference popover. */}
+        <div className="overflow-hidden sm:overflow-visible">
+          <ul className="grid auto-cols-max grid-flow-col grid-rows-4 gap-x-4 overflow-x-auto px-2 pb-1 sm:block sm:columns-3 sm:gap-x-6 sm:overflow-visible sm:pt-5 lg:columns-4">
     {[...(payload ?? [])]
       .sort(
         (a, b) =>
@@ -100,13 +104,13 @@ export const TimelineLegend: React.FC<{
           <li
             key={entry.dataKey ?? entry.value}
             data-dimmed={dimmed || undefined}
-            className="mb-0.5 break-inside-avoid"
+            className="mb-0.5 flex items-start break-inside-avoid"
           >
             <button
               type="button"
               aria-pressed={!hidden}
               onClick={() => onToggle?.(entry.dataKey ?? "")}
-              className={`flex min-h-11 w-full items-center gap-1.5 rounded-md px-1 py-2 text-left text-xs leading-tight text-text-primary transition-opacity hover:bg-surface-toggle-inactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 sm:min-h-0 sm:items-start sm:py-1${dimmed ? " opacity-35" : ""}`}
+              className={`flex min-h-11 flex-1 items-center gap-1.5 rounded-md px-1 py-2 text-left text-xs leading-tight text-text-primary transition-opacity hover:bg-surface-toggle-inactive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40 sm:min-h-0 sm:items-start sm:py-1${dimmed ? " opacity-35" : ""}`}
             >
               <span
                 className="mt-0.5 inline-block w-3 h-3 shrink-0 rounded-[2px]"
@@ -115,6 +119,9 @@ export const TimelineLegend: React.FC<{
               />
               <span>{entry.value}</span>
             </button>
+            {entry.dedicated && (
+              <DedicatedInfoIcon className="min-h-11 w-8 sm:min-h-0 sm:py-1" />
+            )}
           </li>
         );
       })}
@@ -256,6 +263,8 @@ const TimelineChart: React.FC = () => {
     dataTimeWindow,
     legendModels,
     toggleLegendModel,
+    dedicatedModels,
+    selectedModels,
     page,
     requestS2SPlay,
   } = useDashboard();
@@ -372,9 +381,12 @@ const TimelineChart: React.FC = () => {
   }, [isMobile, hasMobileMeasurement, updateMobileScrub]);
 
   const themeColors = useThemeColors();
+  // Dedicated endpoints chart in Latency Variation, never as timeline lines —
+  // a line here would read as the shared fleet's polling cadence.
   const modelsWithData = useMemo(
-    () => getModelsWithTimelineData(metric),
-    [getModelsWithTimelineData, metric]
+    () =>
+      getModelsWithTimelineData(metric).filter((m) => !dedicatedModels.has(m)),
+    [getModelsWithTimelineData, metric, dedicatedModels]
   );
   const windowedTimelineData = useMemo(
     () => getWindowedTimelineData(metric),
@@ -780,7 +792,10 @@ const TimelineChart: React.FC = () => {
     value: formatChartLabel(model, getProviderForModel(model)),
     color: getModelColor(model),
     dataKey: `${model}_value`,
+    dedicated: dedicatedModels.has(model),
   }));
+  // Dedicated models never draw here, so their entry reads permanently
+  // "off" — they live on every other chart instead.
   const plottedKeys = new Set(modelsWithData);
   const legendHiddenKeys = new Set<string>();
   for (const model of legendModelList) {
@@ -1064,6 +1079,13 @@ const TimelineChart: React.FC = () => {
               )}
             </LineChart>
           </ResponsiveContainer>
+          {modelsWithData.length === 0 &&
+            selectedModels.some((m) => dedicatedModels.has(m)) && (
+              <p className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-8 text-center text-sm text-text-secondary">
+                Dedicated inference endpoints do not show on the shared
+                timeline. See Latency Variation below.
+              </p>
+            )}
           <div
             ref={boxRef}
             className="pointer-events-none absolute z-10 hidden rounded-sm border border-dashed border-text-secondary/50 bg-text-secondary/10"

@@ -3,7 +3,9 @@
 
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import { Server } from "lucide-react";
+import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
@@ -14,6 +16,8 @@ import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 interface ModelComparisonTableProps {
   data: ModelHeatmapData[];
   getProviderForModel: (model: string) => string;
+  /** Dedicated-inference endpoints carry the server marker beside the name. */
+  dedicatedModels?: Set<string>;
   percentileIdx: number;
   onPercentileChange: (idx: number) => void;
   werLabel?: string;
@@ -49,12 +53,18 @@ const COLUMNS: {
 const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel,
+  dedicatedModels,
   percentileIdx,
   onPercentileChange,
   werLabel,
   werLoading
 }) => {
   const activeTab = useActiveTab();
+  // The table scrolls horizontally, which clips anchored popovers, so the
+  // dedicated explainer renders as an overlay on this unclipped wrapper.
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const { iconHandlers: dedicatedIconHandlers, overlay: dedicatedOverlay } =
+    useDedicatedInfoTip(tableWrapRef);
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
@@ -198,7 +208,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         <WerDatasetSelect className="ml-auto" />
       </div>
 
-      <div className="overflow-x-auto">
+      <div ref={tableWrapRef} className="relative">
+        {dedicatedOverlay}
+        <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
@@ -249,8 +261,18 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
                 <td className="py-3 pr-4 align-top">
-                  <div className="font-medium text-text-primary">
+                  <div className="flex items-center gap-1.5 font-medium text-text-primary">
                     {normalizeModelName(row.model)}
+                    {dedicatedModels?.has(row.model) && (
+                      <button
+                        type="button"
+                        aria-label="About dedicated inference"
+                        className="flex shrink-0 cursor-help items-center rounded-md p-1 -m-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+                        {...dedicatedIconHandlers}
+                      >
+                        <Server size={13} aria-hidden />
+                      </button>
+                    )}
                   </div>
                   <div className="text-xs text-text-tertiary">
                     {getProviderForModel(row.model)}
@@ -298,6 +320,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

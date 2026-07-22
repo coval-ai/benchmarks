@@ -5,6 +5,7 @@
 
 import React from "react";
 import Card from "@/components/shared/Card";
+import { DedicatedInfoIcon } from "@/components/shared/DedicatedInferenceInfo";
 import { useDashboard } from "@/contexts/DashboardContext";
 
 export interface KeyMetricData {
@@ -13,6 +14,7 @@ export interface KeyMetricData {
   subtitle?: {
     name?: string;
     detail?: string;
+    dedicated?: boolean;
   };
 }
 
@@ -41,7 +43,12 @@ const KeyMetrics: React.FC = () => {
           {metric.subtitle && (
             <div className="text-text-secondary flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-2">
               {metric.subtitle.name && (
-                <span className="font-medium">{metric.subtitle.name}</span>
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  {metric.subtitle.name}
+                  {metric.subtitle.dedicated && (
+                    <DedicatedInfoIcon size={14} className="-m-1 p-1" />
+                  )}
+                </span>
               )}
               {metric.subtitle.detail && (
                 <span className="text-sm text-text-tertiary">

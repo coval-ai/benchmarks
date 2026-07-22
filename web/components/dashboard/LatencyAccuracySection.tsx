@@ -46,7 +46,7 @@ const HUMAN_WER_CEILING = 4;
 const HUMAN_LATENCY_MS = 200;
 
 const LatencyAccuracySection: React.FC = () => {
-  const { selectedModels, getScatterData, activeMetric: metric } = useDashboard();
+  const { selectedModels, getScatterData, activeMetric: metric, dedicatedModels } = useDashboard();
 
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
@@ -287,6 +287,7 @@ const LatencyAccuracySection: React.FC = () => {
                 }]}
                 activeTab={activeTab}
                 metric={metric}
+                dedicatedModels={dedicatedModels}
               />
             </div>
           )}
@@ -340,7 +341,13 @@ const LatencyAccuracySection: React.FC = () => {
               />
               {!isMobile && (
                 <Tooltip
-                  content={<CustomScatterTooltip activeTab={activeTab} metric={metric} />}
+                  content={
+                    <CustomScatterTooltip
+                      activeTab={activeTab}
+                      metric={metric}
+                      dedicatedModels={dedicatedModels}
+                    />
+                  }
                   isAnimationActive={false}
                 />
               )}

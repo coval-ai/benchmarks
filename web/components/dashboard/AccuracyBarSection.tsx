@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useRef } from "react";
 import {
   BarChart,
   Bar,
@@ -20,6 +20,7 @@ import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import CustomBarChartTick from "@/components/charts/CustomBarChartTick";
 import Card from "@/components/shared/Card";
+import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
 import WerBarViewToggle from "@/components/dashboard/WerBarViewToggle";
 import { useDashboard } from "@/contexts/DashboardContext";
@@ -39,6 +40,7 @@ const AccuracyBarSection: React.FC = () => {
     availableWerBarViews,
     werBarDataWithColors,
     getProviderForModel,
+    dedicatedModels,
     isMobile,
     clickedWERBars,
     handleWERBarClick,
@@ -50,6 +52,9 @@ const AccuracyBarSection: React.FC = () => {
   const themeColors = useThemeColors();
   const mode = useActiveTab();
   const trackChartHover = useChartHoverTracking("wer_bar");
+  const chartWrapRef = useRef<HTMLDivElement>(null);
+  const { iconHandlers: dedicatedIconHandlers, overlay: dedicatedOverlay } =
+    useDedicatedInfoTip(chartWrapRef);
 
   const handleWERBarClickTracked = (
     data: Parameters<typeof handleWERBarClick>[0]
@@ -182,7 +187,8 @@ const AccuracyBarSection: React.FC = () => {
           </div>
         )}
         <div
-          className={`flex h-96 transition-opacity ${werBarLoading ? "opacity-40" : ""}`}
+          ref={chartWrapRef}
+          className={`relative flex h-96 transition-opacity ${werBarLoading ? "opacity-40" : ""}`}
           onMouseEnter={trackChartHover}
           data-export-frame
         >
@@ -248,6 +254,8 @@ const AccuracyBarSection: React.FC = () => {
                   tick={
                     <CustomBarChartTick
                       getProviderForModel={getProviderForModel}
+                      dedicatedModels={dedicatedModels}
+                      dedicatedIconHandlers={dedicatedIconHandlers}
                       isMobile={isMobile}
                     />
                   }
@@ -257,7 +265,12 @@ const AccuracyBarSection: React.FC = () => {
                 />
                 <YAxis hide />
                 <Tooltip
-                  content={<CustomBarTooltip getProviderForModel={getProviderForModel} />}
+                  content={
+                    <CustomBarTooltip
+                      getProviderForModel={getProviderForModel}
+                      dedicatedModels={dedicatedModels}
+                    />
+                  }
                   cursor={false}
                   active={isMobile ? false : undefined}
                   isAnimationActive={false}
@@ -295,6 +308,7 @@ const AccuracyBarSection: React.FC = () => {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          {dedicatedOverlay}
         </div>
       </Card>
     </div>

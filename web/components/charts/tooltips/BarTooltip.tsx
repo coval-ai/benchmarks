@@ -3,6 +3,7 @@
 
 import React from "react";
 import type { TooltipContentProps } from "recharts";
+import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
 import { normalizeModelName } from "@/lib/utils/formatters";
 
 interface CustomBarTooltipProps extends Partial<Pick<
@@ -10,13 +11,16 @@ interface CustomBarTooltipProps extends Partial<Pick<
   "active" | "payload" | "label"
 >> {
   getProviderForModel?: (model: string) => string;
+  /** Dedicated-inference endpoints carry the badge in their tooltip. */
+  dedicatedModels?: Set<string>;
 }
 
 const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   active,
   payload,
   label,
-  getProviderForModel
+  getProviderForModel,
+  dedicatedModels
 }) => {
   if (active && payload && payload.length > 0) {
     const item = payload[0];
@@ -39,6 +43,7 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
         <p
           style={{ margin: 0, fontWeight: "bold", color: "var(--color-text-on-tooltip)" }}
         >{`Model: ${modelLabel}`}</p>
+        {dedicatedModels?.has(modelKey) && <DedicatedBadge />}
         <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`Average WER: ${Number(
           value
         ).toFixed(1)}%`}</p>
