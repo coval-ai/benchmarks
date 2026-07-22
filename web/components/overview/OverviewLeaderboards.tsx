@@ -59,30 +59,35 @@ const OverviewLeaderboards: React.FC = () => {
   const windowDataStale = ttsQuery.isPlaceholderData || sttQuery.isPlaceholderData;
 
   // These cards rank shared latency, so dedicated-inference endpoints stay
-  // off them — same rule as the dashboards' latency timeline.
+  // off them — same rule as the dashboards' latency timeline. Rankings are
+  // never built without the provider metadata that classifies endpoints.
   const ttsRows = useMemo(
     () =>
-      toRows(
-        ttsQuery.data?.model_stats,
-        "TTFA",
-        "p50",
-        normalizeTTSProviderName,
-        (value) => `${Math.round(value)} ms`,
-        dedicatedModelKeys(buildTagIndex("TTS", providersQuery.data))
-      ),
+      providersQuery.data
+        ? toRows(
+            ttsQuery.data?.model_stats,
+            "TTFA",
+            "p50",
+            normalizeTTSProviderName,
+            (value) => `${Math.round(value)} ms`,
+            dedicatedModelKeys(buildTagIndex("TTS", providersQuery.data))
+          )
+        : [],
     [ttsQuery.data, providersQuery.data]
   );
 
   const sttRows = useMemo(
     () =>
-      toRows(
-        sttQuery.data?.model_stats,
-        "TTFS",
-        "p50",
-        normalizeSTTProviderName,
-        (value) => `${Math.round(value * 1000)} ms`,
-        dedicatedModelKeys(buildTagIndex("STT", providersQuery.data))
-      ),
+      providersQuery.data
+        ? toRows(
+            sttQuery.data?.model_stats,
+            "TTFS",
+            "p50",
+            normalizeSTTProviderName,
+            (value) => `${Math.round(value * 1000)} ms`,
+            dedicatedModelKeys(buildTagIndex("STT", providersQuery.data))
+          )
+        : [],
     [sttQuery.data, providersQuery.data]
   );
 
