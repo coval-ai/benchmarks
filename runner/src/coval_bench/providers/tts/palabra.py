@@ -9,9 +9,9 @@ import base64
 import json
 import time
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
-import httpx
 import structlog
 import websockets.asyncio.client as ws_client
 
@@ -23,7 +23,6 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("palabra-tts-v1",)
 _VALID_VOICES = ("default_low", "default_high")
-_SESSION_URL = "https://api.palabra.ai/session-storage/session"
 _WS_URL = "wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream"
 _SAMPLE_RATE = 24000
 
@@ -52,31 +51,14 @@ class PalabraTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
-    async def _get_session_token(self) -> str:
-        """POST /session-storage/session -> the session auth token."""
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            try:
-                client_id, client_secret = self._api_key.split("_", 1)
-            except ValueError as exc:
-                raise ValueError("palabra_api_key must be '<client_id>_<client_secret>'") from exc
-            resp = await client.post(
-                _SESSION_URL,
-                headers={"ClientID": client_id, "ClientSecret": client_secret},
-                json={"data": {}},
-            )
-            resp.raise_for_status()
-            token: str = resp.json()["data"]["publisher"]
-        return token
-
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
         start: float | None = None
         first_chunk_at: float | None = None
 
         try:
-            # Pre-t0: get auth token
-            token = await self._get_session_token()
-
+            # Platform auth: the API key authenticates the WebSocket directly.
+            token = quote(self._api_key, safe="")
             async with ws_client.connect(f"{_WS_URL}?token={token}") as ws:
                 # Pre-t0: session init
                 await ws.send(
