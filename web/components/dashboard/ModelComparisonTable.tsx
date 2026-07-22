@@ -79,38 +79,21 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   );
 
   // One pass per (data, percentile, sort) change: pull the selected latency
-  // percentile, precompute the relative bar fractions, sort, and note the best
-  // value per column.
+  // percentile, sort, and note the best value per column.
   const { rows, best } = useMemo(() => {
-    const span = (values: number[]): [number, number] => {
-      const min = Math.min(...values);
-      return [min, Math.max(...values) - min];
-    };
     const latencyValues = data
       .map((d) => d.latency?.[percentile.key])
       .filter((v): v is number => v !== undefined);
-    const [latencyMin, latencySpan] =
-      latencyValues.length > 0 ? span(latencyValues) : [0, 0];
+    const latencyMin = Math.min(...latencyValues);
     const werValues = data
       .map((d) => d.avgWER)
       .filter((v): v is number => v !== undefined);
-    const [werMin, werSpan] = werValues.length > 0 ? span(werValues) : [0, 0];
-    const rel = (v: number, min: number, s: number) =>
-      s === 0 ? 1 : (min + s - v) / s;
+    const werMin = Math.min(...werValues);
 
     const rows = data
       .map((d) => {
         const latency = d.latency?.[percentile.key];
-        return {
-          ...d,
-          latency,
-          latencyRel:
-            latency !== undefined ? rel(latency, latencyMin, latencySpan) : 1,
-          werRel:
-            hasWER && d.avgWER !== undefined
-              ? rel(d.avgWER, werMin, werSpan)
-              : 1
-        };
+        return { ...d, latency };
       })
       .sort((a, b) => {
         const [av, bv] = [a[sort.key], b[sort.key]];
@@ -128,7 +111,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         sampleCount: Math.max(...data.map((d) => d.sampleCount))
       }
     };
-  }, [data, percentile.key, sort, hasWER]);
+  }, [data, percentile.key, sort]);
 
   type Row = (typeof rows)[number];
 
@@ -159,18 +142,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     );
   }
 
-  const bar = (fraction: number) => (
-    <div className="mt-1.5 h-1 w-full min-w-16 rounded-full bg-surface-secondary">
-      <div
-        className="h-full rounded-full bg-accent-blue"
-        style={{ width: `${Math.max(2, fraction * 100)}%` }}
-      />
-    </div>
-  );
-
   const cell = (row: Row, key: ColumnKey, content: React.ReactNode) => (
     <td
-      className={`py-3 pl-6 text-right align-top tabular-nums ${
+      className={`px-3 py-3 text-right align-middle tabular-nums ${
         row[key] === best[key]
           ? "font-semibold text-text-primary"
           : "text-text-secondary"
@@ -183,7 +157,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
-        <label htmlFor="latency-percentile" className="text-text-secondary">
+        <label htmlFor="latency-percentile" className="font-medium text-text-primary">
           Latency percentile
         </label>
         <input
@@ -194,17 +168,15 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           step={1}
           value={percentileIdx}
           onChange={(e) => onPercentileChange(Number(e.target.value))}
-          className="h-11 w-44 accent-accent-blue lg:h-auto"
+          className="h-11 w-48 cursor-pointer appearance-none bg-transparent focus:outline-none [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-text-primary [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-sm [&::-moz-range-track]:bg-text-tertiary [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-sm [&::-webkit-slider-runnable-track]:bg-text-tertiary [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-text-primary focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-text-primary focus-visible:[&::-moz-range-thumb]:ring-offset-2 focus-visible:[&::-moz-range-thumb]:ring-offset-surface-primary focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-text-primary focus-visible:[&::-webkit-slider-thumb]:ring-offset-2 focus-visible:[&::-webkit-slider-thumb]:ring-offset-surface-primary"
           aria-valuetext={percentile.key}
         />
-        <span className="tabular-nums font-medium text-text-primary">
+        <span className="min-w-8 font-mono text-xs font-medium text-text-tertiary">
           {percentile.key}
-          {percentile.hint && (
-            <span className="ml-1 font-normal text-text-tertiary">
-              ({percentile.hint})
-            </span>
-          )}
         </span>
+        {percentile.hint && (
+          <span className="text-xs text-text-tertiary">{percentile.hint}</span>
+        )}
         <WerDatasetSelect className="ml-auto" />
       </div>
 
@@ -225,7 +197,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         : "descending"
                       : undefined
                   }
-                  className="py-2 pl-6 text-right font-medium"
+                  className="px-3 py-2 text-right font-medium"
                 >
                   <button
                     type="button"
@@ -237,15 +209,13 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     {column.key === "latency"
                       ? `Latency (${percentile.key})`
                       : column.label}
-                    <span className="inline-block w-3 text-xs">
-                      {sort.key === column.key
-                        ? sort.direction === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </span>
+                    {sort.key === column.key && (
+                      <span className="text-xs">
+                        {sort.direction === "asc" ? "↑" : "↓"}
+                      </span>
+                    )}
                     {column.key === "avgWER" && werLabel && (
-                      <span className="block text-[10px] font-normal normal-case text-text-tertiary">
+                      <span className="block font-mono text-[10px] font-normal normal-case text-text-tertiary">
                         {werLabel}
                       </span>
                     )}
@@ -260,7 +230,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 key={row.model}
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
-                <td className="py-3 pr-4 align-top">
+                <td className="py-3 pr-4 align-middle">
                   <div className="flex items-center gap-1.5 font-medium text-text-primary">
                     {normalizeModelName(row.model)}
                     {dedicatedModels?.has(row.model) && (
@@ -285,7 +255,6 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     <>
                       {Math.round(row.latency)}
                       <span className="text-xs text-text-tertiary"> ms</span>
-                      {bar(row.latencyRel)}
                     </>
                   ) : (
                     <span className="text-text-tertiary">Not applicable</span>
@@ -300,11 +269,15 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     >
                       {row.avgWER !== undefined ? (
                         <>
-                          {row.avgWER.toFixed(1)}
-                          <span className="text-xs text-text-tertiary">
-                            % ± {(row.werStdDev ?? 0).toFixed(1)}
+                          <span className="font-mono text-base text-text-primary">
+                            {row.avgWER.toFixed(1)}
+                            <span className="text-xs">%</span>
                           </span>
-                          {bar(row.werRel)}
+                          {row.werStdDev !== undefined && (
+                            <span className="ml-1.5 font-mono text-xs text-text-tertiary">
+                              ± {row.werStdDev.toFixed(1)}
+                            </span>
+                          )}
                         </>
                       ) : (
                         <span className="text-text-tertiary">—</span>
