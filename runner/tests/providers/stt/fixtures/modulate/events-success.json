@@ -1,0 +1,6 @@
+[
+  {"type": "partial_utterance", "partial_utterance": {"text": "hello", "is_final": false}},
+  {"type": "partial_utterance", "partial_utterance": {"text": "hello world how", "is_final": false}},
+  {"type": "utterance", "utterance": {"text": "hello world how are you", "is_final": true}},
+  {"type": "done", "duration_ms": 3000}
+]
