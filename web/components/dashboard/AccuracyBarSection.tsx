@@ -4,6 +4,7 @@
 "use client";
 
 import React, { useCallback, useMemo, useRef } from "react";
+import { Server } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -53,8 +54,11 @@ const AccuracyBarSection: React.FC = () => {
   const mode = useActiveTab();
   const trackChartHover = useChartHoverTracking("wer_bar");
   const chartWrapRef = useRef<HTMLDivElement>(null);
-  const { iconHandlers: dedicatedIconHandlers, overlay: dedicatedOverlay } =
-    useDedicatedInfoTip(chartWrapRef);
+  const {
+    iconHandlers: dedicatedIconHandlers,
+    overlay: dedicatedOverlay,
+    open: dedicatedTipOpen,
+  } = useDedicatedInfoTip(chartWrapRef);
 
   const handleWERBarClickTracked = (
     data: Parameters<typeof handleWERBarClick>[0]
@@ -93,19 +97,48 @@ const AccuracyBarSection: React.FC = () => {
   }: LabelProps) => {
     const entry = werBarDataWithColors[index];
     if (Number(width) < 28 && !(entry && clickedWERBars.has(entry.model))) return <g />;
+    const cx = Number(x) + Number(width) / 2;
     return (
-      <text
-        x={Number(x) + Number(width) / 2}
-        y={Number(y) - 8}
-        textAnchor="middle"
-        fill={themeColors.label}
-        fillOpacity={entry?.fillOpacity}
-        fontSize={12}
-      >
-        {`${Number(value).toFixed(1)}%`}
-      </text>
+      <g opacity={entry?.fillOpacity}>
+        <text
+          x={cx}
+          y={Number(y) - 8}
+          textAnchor="middle"
+          fill={themeColors.label}
+          fontSize={12}
+        >
+          {`${Number(value).toFixed(1)}%`}
+        </text>
+        {entry && dedicatedModels.has(entry.model) && (
+          // The dedicated marker rides the top of the bar, under the value;
+          // hover or tap opens the explainer.
+          <g
+            {...dedicatedIconHandlers}
+            role="button"
+            tabIndex={0}
+            aria-label="About dedicated inference"
+            style={{ cursor: "help" }}
+          >
+            <Server
+              x={cx - 6}
+              y={Number(y) + 5}
+              size={12}
+              color={themeColors.label}
+              strokeWidth={2.4}
+              aria-hidden
+            />
+            <rect
+              x={cx - 12}
+              y={Number(y) - 1}
+              width={24}
+              height={24}
+              fill="transparent"
+            />
+          </g>
+        )}
+      </g>
     );
-  }, [werBarDataWithColors, clickedWERBars, themeColors.label]);
+  }, [werBarDataWithColors, clickedWERBars, themeColors.label, dedicatedModels, dedicatedIconHandlers]);
 
   // WER-based: never rendered on S2S (no WER metric).
   if (mode === "s2s") return null;
@@ -254,8 +287,6 @@ const AccuracyBarSection: React.FC = () => {
                   tick={
                     <CustomBarChartTick
                       getProviderForModel={getProviderForModel}
-                      dedicatedModels={dedicatedModels}
-                      dedicatedIconHandlers={dedicatedIconHandlers}
                       isMobile={isMobile}
                     />
                   }
@@ -272,7 +303,9 @@ const AccuracyBarSection: React.FC = () => {
                     />
                   }
                   cursor={false}
-                  active={isMobile ? false : undefined}
+                  // The dedicated marker sits inside the plot, so its open
+                  // explainer silences the bar tooltip instead of overlapping it.
+                  active={isMobile || dedicatedTipOpen ? false : undefined}
                   isAnimationActive={false}
                   // Recharts defaults the wrapper to pointer-events: none,
                   // which would make the dedicated badge's explainer inert.
@@ -295,6 +328,8 @@ const AccuracyBarSection: React.FC = () => {
                       key={`wer-cell-${entry.model}`}
                       fill={entry.fill}
                       fillOpacity={entry.fillOpacity}
+                      stroke={dedicatedModels.has(entry.model) ? themeColors.label : undefined}
+                      strokeWidth={dedicatedModels.has(entry.model) ? 1.5 : undefined}
                       role="button"
                       tabIndex={0}
                       aria-label={`${normalizeModelName(entry.model)}: ${entry.averageWER.toFixed(1)}% WER${clickedWERBars.has(entry.model) ? ", selected" : ""}`}

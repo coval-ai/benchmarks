@@ -94,6 +94,7 @@ const WerRadarSection: React.FC = () => {
     selectedModels,
     legendModels,
     toggleLegendModel,
+    dedicatedModels,
     getProviderForModel,
     formatChartLabel,
     availableWerDatasets,
@@ -269,6 +270,7 @@ const WerRadarSection: React.FC = () => {
     value: formatChartLabel(model, getProviderForModel(model)),
     color: getModelColor(model),
     dataKey: model,
+    dedicated: dedicatedModels.has(model),
   }));
   const plottedSet = new Set(plotted);
   const legendHiddenKeys = new Set(

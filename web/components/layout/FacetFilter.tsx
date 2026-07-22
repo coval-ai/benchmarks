@@ -4,7 +4,8 @@
 "use client";
 
 import React from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Server } from "lucide-react";
+import { DEDICATED_INFERENCE, SOURCE_CATEGORY } from "@/lib/utils/facets";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
@@ -126,6 +127,10 @@ const FacetFilter: React.FC = () => {
                             : "border-border-primary text-text-secondary hover:border-text-tertiary/50 hover:text-text-primary"
                       }`}
                     >
+                      {group.category === SOURCE_CATEGORY &&
+                        option.value === DEDICATED_INFERENCE && (
+                          <Server size={12} aria-hidden className="shrink-0" />
+                        )}
                       <span>{option.label}</span>
                       <span
                         style={{

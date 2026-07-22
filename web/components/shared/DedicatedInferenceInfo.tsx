@@ -140,5 +140,7 @@ export function useDedicatedInfoTip(containerRef: RefObject<HTMLElement | null>)
     </div>
   ) : null;
 
-  return { iconHandlers, overlay, dismiss };
+  // `open` lets hosts silence competing hover chrome (e.g. a recharts
+  // tooltip) while the explainer is showing.
+  return { iconHandlers, overlay, dismiss, open: tip !== null };
 }
