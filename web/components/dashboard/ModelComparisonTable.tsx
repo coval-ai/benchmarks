@@ -144,7 +144,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
 
   const cell = (row: Row, key: ColumnKey, content: React.ReactNode) => (
     <td
-      className={`py-3 pl-6 text-right align-top tabular-nums ${
+      className={`px-3 py-3 text-right align-middle tabular-nums ${
         row[key] === best[key]
           ? "font-semibold text-text-primary"
           : "text-text-secondary"
@@ -197,7 +197,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         : "descending"
                       : undefined
                   }
-                  className="py-2 pl-6 text-right font-medium"
+                  className="px-3 py-2 text-right font-medium"
                 >
                   <button
                     type="button"
@@ -209,13 +209,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                     {column.key === "latency"
                       ? `Latency (${percentile.key})`
                       : column.label}
-                    <span className="inline-block w-3 text-xs">
-                      {sort.key === column.key
-                        ? sort.direction === "asc"
-                          ? "↑"
-                          : "↓"
-                        : ""}
-                    </span>
+                    {sort.key === column.key && (
+                      <span className="text-xs">
+                        {sort.direction === "asc" ? "↑" : "↓"}
+                      </span>
+                    )}
                     {column.key === "avgWER" && werLabel && (
                       <span className="block font-mono text-[10px] font-normal normal-case text-text-tertiary">
                         {werLabel}
@@ -232,7 +230,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 key={row.model}
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
-                <td className="py-3 pr-4 align-top">
+                <td className="py-3 pr-4 align-middle">
                   <div className="flex items-center gap-1.5 font-medium text-text-primary">
                     {normalizeModelName(row.model)}
                     {dedicatedModels?.has(row.model) && (
