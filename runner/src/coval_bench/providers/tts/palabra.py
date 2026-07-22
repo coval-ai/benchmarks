@@ -9,6 +9,7 @@ import base64
 import json
 import time
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import structlog
@@ -57,7 +58,8 @@ class PalabraTTSProvider(TTSProvider):
 
         try:
             # Platform auth: the API key authenticates the WebSocket directly.
-            async with ws_client.connect(f"{_WS_URL}?token={self._api_key}") as ws:
+            token = quote(self._api_key, safe="")
+            async with ws_client.connect(f"{_WS_URL}?token={token}") as ws:
                 # Pre-t0: session init
                 await ws.send(
                     json.dumps(
