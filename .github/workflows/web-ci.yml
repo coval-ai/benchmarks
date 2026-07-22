@@ -91,6 +91,14 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:8000
         run: pnpm codegen
 
+      - name: Check generated API types are up to date
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- lib/api/generated; then
+            echo "::error::Generated API types under web/lib/api/generated are stale — regenerate with \`pnpm codegen\` in web/ and commit the result."
+            exit 1
+          fi
+
       - name: Lint
         run: pnpm lint
 
