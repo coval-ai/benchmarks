@@ -115,9 +115,9 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             ("xai", "grok-stt"),
             ("openai", "gpt-4o-transcribe"),
             ("openai", "gpt-4o-mini-transcribe"),
-            # Modulate's english-fast endpoint emits partials on a fixed ~1.5s
+            # Modulate's English endpoint emits partials on a fixed ~1.5s
             # cadence, so first-token timing tracks the emission interval.
-            ("modulate", "english-fast-transcription-streaming"),
+            ("modulate", "velma-2-stt-streaming-english-v2"),
         }
     ),
     Metric.TTFS: frozenset(

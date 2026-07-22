@@ -356,21 +356,21 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         status=_ACTIVE,
     ),
-    # Modulate Velma-2 real-time streaming. The empty-frame EOS is a genuine
-    # finalize: the complete transcript lands ~150-300 ms after the last audio,
-    # so TTFS is comparable. English-fast's TTFT is cadence-floored and
-    # excluded in registries/metrics.py.
+    # Modulate Velma-2 real-time streaming; ids are the endpoint path segments.
+    # The empty-frame EOS is a genuine finalize: the complete transcript lands
+    # ~150-300 ms after the last audio, so TTFS is comparable. The English
+    # endpoint's TTFT is cadence-floored and excluded in registries/metrics.py.
     RegisteredModel(
         benchmark=_STT,
         provider="modulate",
-        model="english-fast-transcription-streaming",
+        model="velma-2-stt-streaming-english-v2",
         tags=(_STREAMING,),
         status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_STT,
         provider="modulate",
-        model="multilingual-transcription-streaming",
+        model="velma-2-stt-streaming",
         tags=(_STREAMING, _MULTI, _DIAR),
         status=_ACTIVE,
     ),
