@@ -46,6 +46,7 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
 )
+from coval_bench.api.internal import hidden_models, is_internal
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
 from coval_bench.config import DATASET_ALL
@@ -96,6 +97,7 @@ async def get_results_aggregates(
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
+    internal: bool = Depends(is_internal),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -108,6 +110,12 @@ async def get_results_aggregates(
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
+    hidden = frozenset() if internal else hidden_models()
+
+    def visible(row: dict[str, Any]) -> bool:
+        return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
+            row["provider"], row["model"], row["metric_type"]
+        )
 
     async def fill() -> AggregatesResponse:
         stats_sql = _STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
@@ -132,19 +140,12 @@ async def get_results_aggregates(
             window=window,
             dataset=dataset_key,
             datasets=[r["dataset_id"] for r in dataset_rows],
-            model_stats=[
-                ModelStatEntry.model_validate(r)
-                for r in stat_rows
-                if not is_metric_excluded(r["provider"], r["model"], r["metric_type"])
-            ],
-            series=[
-                SeriesPoint.model_validate(r)
-                for r in series_rows
-                if not is_metric_excluded(r["provider"], r["model"], r["metric_type"])
-            ],
+            model_stats=[ModelStatEntry.model_validate(r) for r in stat_rows if visible(r)],
+            series=[SeriesPoint.model_validate(r) for r in series_rows if visible(r)],
         )
 
-    cache_key = ("aggregates", benchmark, window, dataset_key)
+    # `internal` is part of the key: the two views must never share a cache entry.
+    cache_key = ("aggregates", benchmark, window, dataset_key, internal)
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(

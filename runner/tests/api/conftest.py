@@ -40,6 +40,7 @@ from coval_bench.api.app import create_app
 from coval_bench.config import Settings
 
 ARENA_LABELER_KEY = "test-labeler-key"
+INTERNAL_API_KEY = "test-internal-key"
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -176,6 +177,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
+    monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
 
     settings = Settings()
 

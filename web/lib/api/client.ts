@@ -5,6 +5,7 @@
 
 import type { components, paths } from "./generated/schema";
 import { buildQueryString } from "./url";
+import { getInternalKey } from "./internalKey";
 import { normalizePlaygroundError, type PlaygroundApiError } from "@/lib/playground/schemas";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -28,9 +29,15 @@ export class PlaygroundTtsError extends Error {
 }
 
 async function request<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
+  // Benchmarking-team key: unlocks early-access models server-side.
+  const internalKey = getInternalKey();
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { Accept: "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      Accept: "application/json",
+      ...(internalKey ? { "X-Internal-Key": internalKey } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   if (!res.ok) {
     let body: unknown = null;

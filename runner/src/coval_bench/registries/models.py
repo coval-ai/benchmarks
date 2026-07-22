@@ -3,9 +3,10 @@
 """Registry of benchmarked models — identity, run config, and status.
 
 One entry per model, keyed by ``(benchmark, provider, model)``. The
-orchestrator runs every ``ACTIVE`` entry; the API serves all entries and
-marks ``RETIRED`` and ``PENDING`` ones disabled so the frontend keeps them
-off the site even when historical result rows exist for them.
+orchestrator runs every ``ACTIVE`` and ``EARLY_ACCESS`` entry; the API omits
+``EARLY_ACCESS`` entries from public responses and marks ``RETIRED``/``PENDING``
+ones disabled so the frontend keeps them off the site even when historical
+result rows exist for them.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ class ModelStatus(StrEnum):
     PAUSED = "paused"  # shown, not currently benchmarked
     RETIRED = "retired"  # not benchmarked, hidden even if old data exists
     PENDING = "pending"  # implemented but waiting on credits; hidden like retired
+    # Pre-launch embargo: run normally, served only to internal-key requests.
+    EARLY_ACCESS = "early-access"
 
 
 class Source(StrEnum):
@@ -69,6 +72,7 @@ _S2S = Benchmark.S2S
 _ACTIVE = ModelStatus.ACTIVE
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
+_EARLY_ACCESS = ModelStatus.EARLY_ACCESS
 _STREAMING = ModelTag.STREAMING
 _MULTI = ModelTag.MULTILINGUAL
 _VAD = ModelTag.VAD
@@ -459,7 +463,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="default_low",
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         on_prem=True,
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
