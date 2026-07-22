@@ -275,7 +275,10 @@ async def test_modulate_server_error_surfaces(
 
 
 @pytest.mark.asyncio
-async def test_modulate_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_modulate_empty_stream_is_error(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A stream that closes without ``done`` is an error, not an empty success."""
     provider = ModulateSTTProvider(api_key=fake_api_key)
 
     with patch(
@@ -290,8 +293,37 @@ async def test_modulate_empty_stream(fake_api_key: SecretStr, audio_pcm_bytes: b
             realtime_resolution=0.5,
         )
 
+    assert result.error is not None
+    assert "done" in result.error
     assert result.complete_transcript is None
     assert result.ttft_seconds is None
+
+
+@pytest.mark.asyncio
+async def test_modulate_truncated_stream_is_error(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A close after a final but before ``done`` is flagged, not reported clean."""
+    events: list[Any] = [
+        {"type": "partial_utterance", "partial_utterance": {"text": "hello"}},
+        {"type": "utterance", "utterance": {"text": "hello world"}},
+    ]
+    provider = ModulateSTTProvider(api_key=fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.modulate.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is not None
+    assert "done" in result.error
 
 
 @pytest.mark.asyncio

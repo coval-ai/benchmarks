@@ -354,7 +354,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     # Modulate Velma-2 real-time streaming. The empty-frame EOS is a genuine
     # finalize: the complete transcript lands ~150-300 ms after the last audio,
-    # so TTFS is comparable and needs no exclusion.
+    # so TTFS is comparable. English-fast's TTFT is cadence-floored and
+    # excluded in registries/metrics.py.
     RegisteredModel(
         benchmark=_STT,
         provider="modulate",

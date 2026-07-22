@@ -18,6 +18,11 @@ Server messages (serialised JSON, keyed by ``type``):
 The multilingual endpoint needs ``partial_results=true`` to emit partials and
 runs with ``speaker_diarization=false`` so a single utterance is not split into
 per-speaker finals; the finals it does emit are concatenated in arrival order.
+
+``done`` is the completion contract: a stream that ends without it is recorded
+as an error, not a truncated success. The english-fast endpoint emits partials
+on a fixed ~1.5 s cadence, so its TTFT tracks the emission interval rather than
+engine latency and is excluded in ``registries/metrics.py``.
 """
 
 from __future__ import annotations
@@ -129,11 +134,13 @@ class ModulateSTTProvider(STTProvider):
                     for task in pending:
                         task.cancel()
                 outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                if result.error is None and result.audio_to_final_seconds is None:
+                if result.error is None:
                     for outcome in outcomes:
                         if isinstance(outcome, Exception):
                             result.error = str(outcome)
                             break
+                if result.error is None and outcomes[1] is not True:
+                    result.error = "stream closed before the done message"
 
         except Exception as exc:
             logger.warning(
@@ -170,9 +177,10 @@ class ModulateSTTProvider(STTProvider):
             )
             raise
 
-    async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
+    async def _receive(self, ws: Any, result: TranscriptionResult) -> bool:
         final_segments: list[str] = []
         last_final_time: float | None = None
+        done_seen = False
 
         try:
             async for raw in ws:
@@ -191,6 +199,7 @@ class ModulateSTTProvider(STTProvider):
                     break
 
                 if msg_type == "done":
+                    done_seen = True
                     break
 
                 payload = msg.get(msg_type)
@@ -211,10 +220,11 @@ class ModulateSTTProvider(STTProvider):
             logger.warning(
                 "modulate_receive_error", provider="modulate", model=self._model, exc_info=exc
             )
-            if result.error is None and last_final_time is None:
+            if result.error is None:
                 result.error = str(exc)
 
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
         finalize_transcript(result, final_segments=final_segments)
+        return done_seen
