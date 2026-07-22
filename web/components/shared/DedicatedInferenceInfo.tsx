@@ -73,23 +73,28 @@ export function useDedicatedInfoTip(containerRef: RefObject<HTMLElement | null>)
   );
   const dismiss = useCallback(() => setTip(null), []);
 
+  // A pinned overlay is pixel-anchored, so scrolling anywhere (page or the
+  // chart's own scroller) would detach it from its icon — dismiss instead,
+  // matching the pinned chart tooltips.
   useEffect(() => {
     if (!tip?.pinned) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && dismiss();
     document.addEventListener("click", dismiss);
     document.addEventListener("keydown", onKey);
+    document.addEventListener("scroll", dismiss, { capture: true, passive: true });
     return () => {
       document.removeEventListener("click", dismiss);
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", dismiss, { capture: true });
     };
   }, [tip, dismiss]);
 
   // Identity-stable so hosts can safely reference the handlers from redraw
   // effects (BoxPlot's d3 pass) without re-triggering them every render.
   const iconHandlers = useMemo(() => {
-    const anchor = (e: React.MouseEvent) => {
+    const anchor = (e: React.SyntheticEvent) => {
       const box = containerRef.current?.getBoundingClientRect();
-      const icon = (e.currentTarget as Element).getBoundingClientRect();
+      const icon = e.currentTarget.getBoundingClientRect();
       return {
         x: icon.x + icon.width / 2 - (box?.x ?? 0),
         yTop: icon.y - (box?.y ?? 0),
@@ -97,16 +102,23 @@ export function useDedicatedInfoTip(containerRef: RefObject<HTMLElement | null>)
     };
     // Anchors are computed before setTip: React may replay updater functions
     // on a later render, when the event's currentTarget is already null.
+    const togglePin = (e: React.SyntheticEvent) => {
+      e.stopPropagation();
+      const a = anchor(e);
+      setTip((t) => (t?.pinned ? null : { ...a, pinned: true }));
+    };
     return {
       onMouseEnter: (e: React.MouseEvent) => {
         const a = anchor(e);
         setTip((t) => (t?.pinned ? t : { ...a, pinned: false }));
       },
       onMouseLeave: () => setTip((t) => (t?.pinned ? t : null)),
-      onClick: (e: React.MouseEvent) => {
-        e.stopPropagation();
-        const a = anchor(e);
-        setTip((t) => (t?.pinned ? null : { ...a, pinned: true }));
+      onClick: togglePin,
+      // SVG triggers have no native button semantics, so Enter/Space pin here.
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        togglePin(e);
       },
     };
   }, [containerRef]);

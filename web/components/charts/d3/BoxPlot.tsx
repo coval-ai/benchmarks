@@ -222,8 +222,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       const wrap = g
         .append("g")
         .attr("transform", `translate(${x},${y})`)
-        .attr("role", "img")
-        .attr("aria-label", "Dedicated inference");
+        .attr("role", "button")
+        .attr("tabindex", 0)
+        .attr("aria-label", "About dedicated inference");
       const icon = wrap
         .append("g")
         .attr("transform", `scale(${size / 24})`)
@@ -333,7 +334,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             .style("cursor", "help")
             .on("mouseenter", (e: React.MouseEvent) => dedicatedIcon.onMouseEnter(e))
             .on("mouseleave", dedicatedIcon.onMouseLeave)
-            .on("click", (e: React.MouseEvent) => dedicatedIcon.onClick(e));
+            .on("click", (e: React.MouseEvent) => dedicatedIcon.onClick(e))
+            .on("keydown", (e: React.KeyboardEvent) => dedicatedIcon.onKeyDown(e));
         }
       });
     }

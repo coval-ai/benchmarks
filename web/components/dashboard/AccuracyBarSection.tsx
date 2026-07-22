@@ -274,6 +274,9 @@ const AccuracyBarSection: React.FC = () => {
                   cursor={false}
                   active={isMobile ? false : undefined}
                   isAnimationActive={false}
+                  // Recharts defaults the wrapper to pointer-events: none,
+                  // which would make the dedicated badge's explainer inert.
+                  wrapperStyle={{ pointerEvents: "auto" }}
                 />
                 <Bar
                   dataKey="averageWER"

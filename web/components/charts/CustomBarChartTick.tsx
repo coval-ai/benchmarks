@@ -90,8 +90,9 @@ const CustomBarChartTick: React.FC<{
           // reads at a glance even when labels fan out at 45°.
           <g
             {...dedicatedIconHandlers}
-            role="img"
-            aria-label="Dedicated inference"
+            role="button"
+            tabIndex={0}
+            aria-label="About dedicated inference"
             style={{ cursor: "help" }}
           >
             <Server

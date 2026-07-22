@@ -349,6 +349,9 @@ const LatencyAccuracySection: React.FC = () => {
                     />
                   }
                   isAnimationActive={false}
+                  // Recharts defaults the wrapper to pointer-events: none,
+                  // which would make the dedicated badge's explainer inert.
+                  wrapperStyle={{ pointerEvents: "auto" }}
                 />
               )}
               {activePoint && (
