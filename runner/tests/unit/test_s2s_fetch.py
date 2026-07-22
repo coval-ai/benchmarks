@@ -16,6 +16,7 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.db.models import ResultStatus, Run, RunStatus
+from coval_bench.registries import Metric
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
 
@@ -482,3 +483,102 @@ async def test_stale_provider_lends_no_sample_candidate() -> None:
         )
     assert status is RunStatus.FAILED
     assert sampled == []
+
+
+def test_instruction_verdict_classifies() -> None:
+    # The binary judge only ever emits canonical YES / NO / UNKNOWN (BinaryResult.parse
+    # normalizes case and maps anything missing/invalid to UNKNOWN server-side).
+    assert fetch_v2v._instruction_verdict("YES") is True
+    assert fetch_v2v._instruction_verdict("NO") is False
+    assert fetch_v2v._instruction_verdict("UNKNOWN") is None
+
+
+def test_instruction_rows_maps_verdicts() -> None:
+    values: list[dict[str, Any]] = [
+        {"simulation_output_id": "s1", "value": "YES"},
+        {"simulation_output_id": "s2", "value": "NO"},
+        {"simulation_output_id": "s3", "value": "UNKNOWN"},
+    ]
+    rows = fetch_v2v._instruction_rows(values, run_pk=1, coval_run_id="R1", spec=SPEC)
+    assert [r.metric_value for r in rows] == [100.0, 0.0, None]
+    assert [r.status for r in rows] == [
+        ResultStatus.SUCCESS,  # YES pass
+        ResultStatus.SUCCESS,  # NO counts against the rate
+        ResultStatus.FAILED,  # UNKNOWN excluded from the pool
+    ]
+    assert [r.audio_filename for r in rows] == ["R1/s1", "R1/s2", "R1/s3"]
+    assert all(
+        r.metric_type == Metric.INSTRUCTION_FOLLOWING and r.metric_units == "percent" for r in rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_writes_instruction_rows() -> None:
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(3)]
+    instruction = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"simulation_output_id": "s1", "value": "NO"},
+        {"simulation_output_id": "s2", "value": "UNKNOWN"},
+    ]
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {"metrics": {"MID": {"values": latency}, "IID": {"values": instruction}}},
+        }
+    }
+    async with _fake_client({}, run_json) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    # Run status reflects latency (all numeric) -> SUCCEEDED.
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    latency_rows = [r for r in rows if r.metric_type == Metric.V2V]
+    instr_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
+    assert len(latency_rows) == 3
+    assert len(instr_rows) == 3
+    by_sim = {r.audio_filename: (r.metric_value, r.status) for r in instr_rows}
+    assert by_sim["R1/s0"] == (100.0, ResultStatus.SUCCESS)
+    assert by_sim["R1/s1"] == (0.0, ResultStatus.SUCCESS)
+    assert by_sim["R1/s2"] == (None, ResultStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_without_instruction_metric_id() -> None:
+    # No instruction metric id -> only latency rows, no crash.
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": "s0", "value": 0.5}]
+    async with _fake_client({}, _run_json(latency)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert all(r.metric_type == Metric.V2V for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_recent_completed_runs_filters_by_test_set() -> None:
+    captured: list[httpx.Request] = []
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    async with _fake_client(list_json, {}, captured) as client:
+        await fetch_v2v.recent_completed_runs(
+            client, "a1", period_seconds=10_800, test_set_id="TS1"
+        )
+    filter_expr = captured[0].url.params["filter"]
+    assert 'test_set_id="TS1"' in filter_expr
+    assert 'agent_id="a1"' in filter_expr

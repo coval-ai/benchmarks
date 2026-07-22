@@ -115,19 +115,28 @@ def _bucket_start(at: datetime, period_seconds: int) -> datetime:
 
 
 async def recent_completed_runs(
-    client: httpx.AsyncClient, agent_id: str, *, period_seconds: int
+    client: httpx.AsyncClient,
+    agent_id: str,
+    *,
+    period_seconds: int,
+    test_set_id: str | None = None,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
     List returns the summary view newest-first; filter by agent_id + status
-    (tags are not filterable). Runs without a parseable create_time are kept:
-    better to ingest with a fetch-time slot than to drop data.
+    (tags are not filterable). ``test_set_id`` narrows to one test set so other
+    sims on the same agents (e.g. the single-turn set) are not ingested. Runs
+    without a parseable create_time are kept: better to ingest with a fetch-time
+    slot than to drop data.
     """
     window_seconds = max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
+    filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
+    if test_set_id:
+        filt += f' AND test_set_id="{test_set_id}"'
     resp = await client.get(
         "/runs",
         params={
-            "filter": f'status="COMPLETED" AND agent_id="{agent_id}"',
+            "filter": filt,
             "order_by": "-create_time",
             "page_size": WINDOW_PAGE_SIZE,
         },
@@ -187,6 +196,70 @@ def _result_rows(
     return rows
 
 
+def _instruction_verdict(raw: object) -> bool | None:
+    """Classify a binary judge's per-conversation value into pass/fail/excluded.
+
+    YES -> True (pass), explicit UNKNOWN -> None (excluded from the pool),
+    everything else -- NO, or a missing/unexpected value -> False (counts
+    against the rate). A binary judge's output type is string, so the run
+    endpoint returns the verdict verbatim; there is no numeric form to handle.
+    """
+    verdict = raw.strip().upper() if isinstance(raw, str) else None
+    if verdict == "YES":
+        return True
+    if verdict == "UNKNOWN":
+        return None
+    return False
+
+
+def _instruction_rows(
+    values: list[dict[str, Any]],
+    *,
+    run_pk: int,
+    coval_run_id: str,
+    spec: AgentSpec,
+) -> list[Result]:
+    """Map a run's per-conversation instruction verdicts to Result rows.
+
+    Pass is stored as 100.0 and fail as 0.0 (percent); an explicit UNKNOWN
+    becomes a FAILED row and drops out of the pool. The aggregate mean is then
+    the pass rate = YES / (total - UNKNOWN).
+    """
+    rows: list[Result] = []
+    for i, v in enumerate(values):
+        raw = v.get("value")
+        verdict = _instruction_verdict(raw)
+        if verdict is None:
+            metric_value: float | None = None
+            status = ResultStatus.FAILED
+        else:
+            metric_value = 100.0 if verdict else 0.0
+            status = ResultStatus.SUCCESS
+            if not verdict and not (isinstance(raw, str) and raw.strip().upper() == "NO"):
+                logger.warning(
+                    "instruction_unexpected_value",
+                    provider=spec.provider,
+                    coval_run_id=coval_run_id,
+                    value=raw,
+                )
+        sim_id = v.get("simulation_output_id")
+        clip_key = f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}"
+        rows.append(
+            Result(
+                run_id=run_pk,
+                provider=spec.provider,
+                model=spec.model,
+                benchmark=Benchmark.S2S,
+                metric_type=Metric.INSTRUCTION_FOLLOWING,
+                metric_units="percent",
+                metric_value=metric_value,
+                audio_filename=clip_key,
+                status=status,
+            )
+        )
+    return rows
+
+
 async def _ingest_run(
     client: httpx.AsyncClient,
     writer: RunWriter,
@@ -194,6 +267,7 @@ async def _ingest_run(
     spec: AgentSpec,
     coval_run: CovalRun,
     metric_id: str,
+    instruction_metric_id: str | None = None,
     runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
@@ -242,14 +316,42 @@ async def _ingest_run(
         run_pk = run_row.id
 
         rows = _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-        if rows:
-            await writer.record_results(rows)
+        instruction_rows: list[Result] = []
+        if instruction_metric_id:
+            instr = metrics.get(instruction_metric_id)
+            if instr is None:
+                logger.warning(
+                    "instruction_metric_absent",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric_id=instruction_metric_id,
+                )
+            else:
+                instr_values = cast("list[dict[str, Any]]", instr.get("values", []))
+                instruction_rows = _instruction_rows(
+                    instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
+                )
+                if len(instruction_rows) != len(rows):
+                    # Denominator should be the same conversation set as latency;
+                    # a mismatch means Coval graded a different count, so the pass
+                    # rate is no longer over the full sample.
+                    logger.warning(
+                        "instruction_count_mismatch",
+                        provider=spec.provider,
+                        coval_run_id=coval_run.run_id,
+                        latency=len(rows),
+                        instruction=len(instruction_rows),
+                    )
+        all_rows = rows + instruction_rows
+        if all_rows:
+            await writer.record_results(all_rows)
         logger.info(
             "fetched_clips",
             provider=spec.provider,
             coval_run_id=coval_run.run_id,
             slot=str(scheduled_at),
             clips=len(rows),
+            instruction=len(instruction_rows),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
         failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
@@ -290,6 +392,8 @@ async def _fetch_one_provider(
     spec: AgentSpec,
     agent_id: str,
     metric_id: str,
+    instruction_metric_id: str | None = None,
+    test_set_id: str | None = None,
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
@@ -323,7 +427,9 @@ async def _fetch_one_provider(
         )
 
     try:
-        runs = await recent_completed_runs(client, agent_id, period_seconds=period_seconds)
+        runs = await recent_completed_runs(
+            client, agent_id, period_seconds=period_seconds, test_set_id=test_set_id
+        )
 
         data_seen = False
         newest_data_at: datetime | None = None
@@ -352,6 +458,7 @@ async def _fetch_one_provider(
                 spec=spec,
                 coval_run=coval_run,
                 metric_id=metric_id,
+                instruction_metric_id=instruction_metric_id,
                 runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )
@@ -407,6 +514,8 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     metric_id = settings.coval_s2s_latency_metric_id
     if not metric_id:
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
+    instruction_metric_id = settings.coval_s2s_instruction_metric_id
+    test_set_id = settings.coval_s2s_test_set_id
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
@@ -424,6 +533,8 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 spec=spec,
                 agent_id=agent_id,
                 metric_id=metric_id,
+                instruction_metric_id=instruction_metric_id,
+                test_set_id=test_set_id,
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,

@@ -27,6 +27,7 @@ class Metric(StrEnum):
     RTF = "RTF"
     AUDIO_TO_FINAL = "AudioToFinal"
     V2V = "V2V"
+    INSTRUCTION_FOLLOWING = "InstructionFollowing"
 
 
 class MetricDirection(StrEnum):
@@ -96,6 +97,15 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="milliseconds",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=0,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.INSTRUCTION_FOLLOWING: MetricSpec(
+        display_name="Instruction Adherence",
+        # Per-conversation pass stored as 100.0 (YES) / 0.0 (NO); the aggregate
+        # average is the pass rate as a percentage, like WER.
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
 }
