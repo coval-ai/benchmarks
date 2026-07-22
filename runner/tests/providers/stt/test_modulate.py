@@ -21,10 +21,10 @@ from coval_bench.metrics.wer import compute_wer
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
 from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
 
-_MULTILINGUAL = "multilingual-transcription-streaming"
+_MULTILINGUAL = "velma-2-stt-streaming"
 
 
-def make_provider(model: str = "english-fast-transcription-streaming") -> ModulateSTTProvider:
+def make_provider(model: str = "velma-2-stt-streaming-english-v2") -> ModulateSTTProvider:
     return ModulateSTTProvider(api_key=SecretStr("test-key-modulate"), model=model)
 
 
@@ -201,12 +201,12 @@ def test_modulate_english_url_omits_partials(fake_api_key: SecretStr) -> None:
 
 
 def test_provider_name() -> None:
-    assert make_provider().name == "modulate-english-fast-transcription-streaming"
+    assert make_provider().name == "modulate-velma-2-stt-streaming-english-v2"
     assert make_provider(_MULTILINGUAL).name == f"modulate-{_MULTILINGUAL}"
 
 
 def test_provider_model() -> None:
-    assert make_provider().model == "english-fast-transcription-streaming"
+    assert make_provider().model == "velma-2-stt-streaming-english-v2"
 
 
 # ---------------------------------------------------------------------------

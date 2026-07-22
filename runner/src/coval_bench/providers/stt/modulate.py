@@ -3,7 +3,9 @@
 
 """Modulate (Velma-2) real-time streaming STT provider.
 
-Wire protocol: WebSocket, one endpoint per model.
+Wire protocol: WebSocket, one endpoint per model; the model id is the endpoint
+path segment (``velma-2-stt-streaming`` is multilingual,
+``velma-2-stt-streaming-english-v2`` is fast English-only).
 Auth: ``api_key`` query parameter (no header).
 Audio in: raw binary PCM frames; format declared via query params
   (``audio_format=s16le&sample_rate=<hz>&num_channels=1``).
@@ -19,9 +21,9 @@ The multilingual endpoint needs ``partial_results=true`` to emit partials and
 runs with ``speaker_diarization=false`` so a single utterance is not split into
 per-speaker finals; the finals it does emit are concatenated in arrival order.
 
-The english-fast endpoint emits partials on a fixed ~1.5 s cadence, so its
-TTFT tracks the emission interval rather than engine latency and is excluded
-in ``registries/metrics.py``.
+The English endpoint emits partials on a fixed ~1.5 s cadence, so its TTFT
+tracks the emission interval rather than engine latency and is excluded in
+``registries/metrics.py``.
 """
 
 from __future__ import annotations
@@ -49,22 +51,16 @@ logger = structlog.get_logger(__name__)
 _WS_BASE = "wss://platform.modulate.ai/api"
 _EOS = ""
 
-_MODEL_ENDPOINTS: dict[str, str] = {
-    "english-fast-transcription-streaming": "velma-2-stt-streaming-english-v2",
-    "multilingual-transcription-streaming": "velma-2-stt-streaming",
-}
-
-_MULTILINGUAL_MODEL = "multilingual-transcription-streaming"
+_MULTILINGUAL_MODEL = "velma-2-stt-streaming"
+_ENGLISH_MODEL = "velma-2-stt-streaming-english-v2"
 
 
 class ModulateSTTProvider(STTProvider):
     """Modulate streaming STT provider."""
 
-    _VALID_MODELS = frozenset(_MODEL_ENDPOINTS)
+    _VALID_MODELS = frozenset({_MULTILINGUAL_MODEL, _ENGLISH_MODEL})
 
-    def __init__(
-        self, api_key: SecretStr | None, model: str = "english-fast-transcription-streaming"
-    ) -> None:
+    def __init__(self, api_key: SecretStr | None, model: str = _ENGLISH_MODEL) -> None:
         if not self._model_supported(model):
             raise ValueError(
                 f"Invalid Modulate model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
@@ -92,7 +88,7 @@ class ModulateSTTProvider(STTProvider):
         if self._model == _MULTILINGUAL_MODEL:
             params["partial_results"] = "true"
             params["speaker_diarization"] = "false"
-        return f"{_WS_BASE}/{_MODEL_ENDPOINTS[self._model]}?{urlencode(params)}"
+        return f"{_WS_BASE}/{self._model}?{urlencode(params)}"
 
     async def measure_ttft(
         self,
