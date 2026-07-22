@@ -31,7 +31,7 @@ export const DEDICATED_INFERENCE_LABEL = "Dedicated inference";
 // Balanced by design: Baseten flagged fairness, so the shared side's
 // advantages are stated alongside dedicated's. One string, every surface.
 export const DEDICATED_INFERENCE_BLURB =
-  "These endpoints run on capacity reserved for a single customer, so they appear on every chart except the shared latency timeline. Dedicated capacity typically delivers steadier response times, while shared endpoints serve many tenants, scale instantly, and reflect the out-of-the-box experience most users get.";
+  "Shared endpoints serve every customer from the same servers, so latency reflects real multi-tenant load. Dedicated endpoints run on hardware reserved for one customer, so the two aren't ranked directly against each other.";
 
 /** Whether a model's tags mark it as a dedicated-inference endpoint. */
 export const isDedicated = (tags: ModelTagOut[]): boolean =>
