@@ -273,9 +273,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                             {row.avgWER.toFixed(1)}
                             <span className="text-xs">%</span>
                           </span>
-                          <span className="ml-1.5 font-mono text-xs text-text-tertiary">
-                            ± {(row.werStdDev ?? 0).toFixed(1)}
-                          </span>
+                          {row.werStdDev !== undefined && (
+                            <span className="ml-1.5 font-mono text-xs text-text-tertiary">
+                              ± {row.werStdDev.toFixed(1)}
+                            </span>
+                          )}
                         </>
                       ) : (
                         <span className="text-text-tertiary">—</span>
