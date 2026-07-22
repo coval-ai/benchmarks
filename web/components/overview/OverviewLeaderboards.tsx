@@ -103,15 +103,18 @@ const OverviewLeaderboards: React.FC = () => {
         />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Providers metadata drives the dedicated exclusion, so these cards
+            wait for it (and surface its failure) rather than momentarily
+            ranking a dedicated endpoint as shared. */}
         <LeaderboardCard
           title="Text-to-Speech"
           metricLabel="Time to First Audio"
           windowLabel={windowBadge(ttsQuery.data?.window ?? timeWindow)}
           rows={ttsRows}
           href="/tts"
-          loading={ttsQuery.isLoading}
+          loading={ttsQuery.isLoading || providersQuery.isLoading}
           stale={ttsQuery.isPlaceholderData}
-          error={ttsQuery.isError}
+          error={ttsQuery.isError || providersQuery.isError}
         />
         <LeaderboardCard
           title="Speech-to-Text"
@@ -119,9 +122,9 @@ const OverviewLeaderboards: React.FC = () => {
           windowLabel={windowBadge(sttQuery.data?.window ?? timeWindow)}
           rows={sttRows}
           href="/stt"
-          loading={sttQuery.isLoading}
+          loading={sttQuery.isLoading || providersQuery.isLoading}
           stale={sttQuery.isPlaceholderData}
-          error={sttQuery.isError}
+          error={sttQuery.isError || providersQuery.isError}
         />
       </div>
     </div>

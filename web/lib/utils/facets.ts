@@ -188,12 +188,20 @@ export function buildFacetGroups(
 
   for (const { category, label, provider_valued } of tagCategories) {
     const valueLabels = new Map<string, string>();
+    const sharedValues = new Set<string>();
     for (const key of visibleKeys) {
-      for (const tag of tagIndex.get(key) ?? []) {
-        if (tag.category === category) valueLabels.set(tag.value, tag.label);
+      const tags = tagIndex.get(key) ?? [];
+      for (const tag of tags) {
+        if (tag.category !== category) continue;
+        valueLabels.set(tag.value, tag.label);
+        if (!isDedicated(tags)) sharedValues.add(tag.value);
       }
     }
-    if (valueLabels.size < 2) continue;
+    // A dedicated endpoint never mints a new filter group on its own: aside
+    // from Source (the shared/dedicated axis itself), a category becomes a
+    // facet only once shared endpoints hold two distinct values for it.
+    if ((category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) < 2)
+      continue;
 
     const others: FacetSelection = { ...tagSelected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]

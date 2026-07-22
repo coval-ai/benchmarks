@@ -163,6 +163,69 @@ describe("toggleFacetValue", () => {
   });
 });
 
+// A dedicated endpoint never mints a new filter group on its own; Source (the
+// shared/dedicated axis itself) is the one category it may bring to life.
+describe("buildFacetGroups dedicated gating", () => {
+  const CATS: TagCategoryOut[] = [
+    ...TAG_CATEGORIES,
+    { category: "source", label: "Source", provider_valued: false },
+    { category: "licensing", label: "Licensing", provider_valued: false },
+  ];
+  const OFFICIAL = tag("source", "official-api", "Official API");
+  const DEDICATED = tag("source", DEDICATED_INFERENCE, "Dedicated inference");
+  const PROP = tag("licensing", "proprietary", "Proprietary");
+  const OPEN = tag("licensing", "open-weight", "Open-weight");
+  const providers = (sharedOpenWeight: boolean) =>
+    ({
+      stt: [
+        {
+          provider: "deepgram",
+          models: [{ model: "nova-2", tags: [TYPE, host("deepgram"), OFFICIAL, PROP] }],
+        },
+        {
+          provider: "openai",
+          models: [
+            {
+              model: "gpt-4o-transcribe",
+              tags: [TYPE, host("openai"), OFFICIAL, sharedOpenWeight ? OPEN : PROP],
+            },
+          ],
+        },
+        {
+          provider: "baseten",
+          models: [
+            { model: "whisper-large-v3", tags: [TYPE, host("baseten"), DEDICATED, OPEN] },
+          ],
+        },
+      ],
+      tts: [],
+      tag_categories: CATS,
+    }) as unknown as ProvidersApiResponse;
+  const all: ModelsByProvider = {
+    deepgram: ["deepgram:nova-2"],
+    openai: ["openai:gpt-4o-transcribe"],
+    baseten: ["baseten:whisper-large-v3"],
+  };
+  const groupsFor = (sharedOpenWeight: boolean) =>
+    buildFacetGroups(
+      all,
+      buildTagIndex("STT", providers(sharedOpenWeight)),
+      {},
+      CATS,
+      (s) => s
+    ).map((g) => g.category);
+
+  it("shows Source but not a licensing split only a dedicated endpoint carries", () => {
+    const categories = groupsFor(false);
+    expect(categories).toContain("source");
+    expect(categories).not.toContain("licensing");
+  });
+
+  it("shows licensing once shared endpoints split on it", () => {
+    expect(groupsFor(true)).toContain("licensing");
+  });
+});
+
 // Dedicated endpoints filter like any other model; the timeline excludes them
 // at the chart level using this helper's keys.
 describe("dedicatedModelKeys", () => {

@@ -136,7 +136,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   // so window-derived rendering must follow the data, not the toggle.
   const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
   const windowDataStale = aggregatesQuery.isPlaceholderData;
-  const loadError = aggregatesQuery.isError;
+  // Providers metadata classifies dedicated endpoints; without it the charts
+  // would misrepresent them as shared, so its failure is a load failure too.
+  const loadError = aggregatesQuery.isError || providersQuery.isError;
 
   const modelStats = useMemo<ModelStats[]>(
     () => aggregatesQuery.data?.model_stats ?? [],
