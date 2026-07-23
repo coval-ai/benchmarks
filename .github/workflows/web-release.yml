@@ -1,13 +1,14 @@
-name: Benchmarks Web Production Release
+name: Benchmarks Web Release
 run-name: >-
   ${{
     github.event_name == 'repository_dispatch' &&
     format(
-      'Switchboard benchmarks web release {0} {1}',
+      'Switchboard benchmarks web {0} release {1} {2}',
+      github.event.client_payload.environment || 'production',
       github.event.client_payload.deploy_ref || 'main',
       github.event.client_payload.switchboard_correlation_id || github.run_id
     ) ||
-    'Benchmarks Web Production Release'
+    format('Benchmarks Web {0} release', inputs.environment || 'production')
   }}
 
 on:
@@ -15,138 +16,169 @@ on:
     types: [switchboard_benchmarks_web_release]
   workflow_dispatch:
     inputs:
+      environment:
+        description: Vercel environment to release to.
+        required: true
+        default: staging
+        type: choice
+        options:
+          - staging
+          - production
       deploy_ref:
-        description: Branch, tag, or SHA to promote.
+        description: Branch, tag, or SHA to release.
         required: false
         default: main
         type: string
 
 concurrency:
-  group: benchmarks-web-production-release
+  group: benchmarks-web-${{ github.event.client_payload.environment || inputs.environment || 'production' }}-release
   cancel-in-progress: false
 
 permissions:
   contents: write
-
-env:
-  VERCEL_TEAM_SCOPE: covalai
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_BENCHMARKS_WEB_PROJECT_ID }}
+  deployments: write
 
 jobs:
-  promote:
-    name: Build and promote web production
+  context:
+    name: Resolve release request
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    defaults:
-      run:
-        working-directory: web
+    timeout-minutes: 5
+    outputs:
+      deploy_ref: ${{ steps.release.outputs.deploy_ref }}
+      environment: ${{ steps.release.outputs.environment }}
+      marker_branch: ${{ steps.release.outputs.marker_branch }}
 
     steps:
-      - name: Resolve deploy ref
-        id: context
+      - name: Resolve release request
+        id: release
         env:
+          DISPATCH_ENVIRONMENT: ${{ github.event.client_payload.environment }}
           DISPATCH_REF: ${{ github.event.client_payload.deploy_ref }}
+          MANUAL_ENVIRONMENT: ${{ inputs.environment }}
           MANUAL_REF: ${{ inputs.deploy_ref }}
         run: |
           set -euo pipefail
-          deploy_ref="${DISPATCH_REF:-${MANUAL_REF:-main}}"
-          echo "deploy_ref=${deploy_ref}" >> "$GITHUB_OUTPUT"
-          {
-            echo "## Benchmarks web production release"
-            echo ""
-            echo "- Deploy ref: \`${deploy_ref}\`"
-            echo "- Correlation: \`${{ github.event.client_payload.switchboard_correlation_id || 'manual' }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
-        working-directory: .
 
-      - name: Checkout repository
+          environment="${DISPATCH_ENVIRONMENT:-${MANUAL_ENVIRONMENT:-production}}"
+          deploy_ref="${DISPATCH_REF:-${MANUAL_REF:-main}}"
+
+          case "$environment" in
+            staging)
+              marker_branch=""
+              ;;
+            production)
+              marker_branch="production-web"
+              ;;
+            *)
+              echo "::error::environment must be staging or production."
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "environment=${environment}"
+            echo "deploy_ref=${deploy_ref}"
+            echo "marker_branch=${marker_branch}"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build and release Benchmarks Web
+    needs: context
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: ${{ needs.context.outputs.environment == 'staging' && 'Preview' || 'Production' }}
+      url: ${{ steps.release.outputs.deployment-url }}
+
+    steps:
+      - name: Checkout requested release
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ steps.context.outputs.deploy_ref }}
+          ref: ${{ needs.context.outputs.deploy_ref }}
 
-      - name: Skip if production-web already matches
-        id: up_to_date
+      - name: Resolve release SHA
+        id: revision
+        run: echo "resolved_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Check production marker
+        id: marker
+        env:
+          DEPLOY_ENVIRONMENT: ${{ needs.context.outputs.environment }}
+          MARKER_BRANCH: ${{ needs.context.outputs.marker_branch }}
+          RESOLVED_SHA: ${{ steps.revision.outputs.resolved_sha }}
         run: |
           set -euo pipefail
-          git fetch origin production-web:refs/remotes/origin/production-web 2>/dev/null || true
-          if git rev-parse --verify origin/production-web >/dev/null 2>&1 && [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/production-web)" ]; then
-            echo "production-web is already at $(git rev-parse HEAD); nothing to promote."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          skipped=false
+          if [ "$DEPLOY_ENVIRONMENT" = "production" ]; then
+            git fetch origin "${MARKER_BRANCH}:refs/remotes/origin/${MARKER_BRANCH}" 2>/dev/null || true
+            if git rev-parse --verify "origin/${MARKER_BRANCH}" >/dev/null 2>&1 &&
+              [ "$RESOLVED_SHA" = "$(git rev-parse "origin/${MARKER_BRANCH}")" ]; then
+              skipped=true
+              echo "${MARKER_BRANCH} already points to ${RESOLVED_SHA}; nothing to release."
+            fi
           fi
-        working-directory: .
+          echo "skipped=${skipped}" >> "$GITHUB_OUTPUT"
 
-      - name: Set up pnpm
-        if: steps.up_to_date.outputs.skip != 'true'
-        uses: pnpm/action-setup@v6
+      - name: Generate token for Switchboard
+        id: app_token
+        if: steps.marker.outputs.skipped != 'true'
+        uses: actions/create-github-app-token@v3
         with:
-          package_json_file: web/package.json
-          run_install: false
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: coval-ai
+          repositories: ci-cd-switchboard
+          permission-contents: read
 
-      - name: Set up Node.js
-        if: steps.up_to_date.outputs.skip != 'true'
-        uses: actions/setup-node@v7
+      - name: Checkout Switchboard release action
+        if: steps.marker.outputs.skipped != 'true'
+        uses: actions/checkout@v7
         with:
+          repository: coval-ai/ci-cd-switchboard
+          ref: ae141bd5ec23b7db37e41ff5783fe0c8341a5dcc
+          token: ${{ steps.app_token.outputs.token }}
+          path: switchboard-src
+          persist-credentials: false
+
+      - name: Run shared Vercel release
+        id: release
+        if: steps.marker.outputs.skipped != 'true'
+        uses: ./switchboard-src/.github/actions/vercel-release
+        with:
+          environment: ${{ needs.context.outputs.environment }}
+          resolved-sha: ${{ steps.revision.outputs.resolved_sha }}
+          marker-branch: ${{ needs.context.outputs.marker_branch }}
+          install-directory: web
+          vercel-directory: .
+          package-manager: pnpm
           node-version: "22"
-          cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
-
-      - name: Install dependencies
-        if: steps.up_to_date.outputs.skip != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Vercel artifact
-        if: steps.up_to_date.outputs.skip != 'true'
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          npx vercel pull --yes --environment=production --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN"
-          if [ -f .vercel/.env.production.local ]; then
+          pre-build-command: |
+            set -euo pipefail
+            environment_file=".vercel/.env.${VERCEL_ENVIRONMENT}.local"
+            if [ ! -f "$environment_file" ]; then
+              echo "::error::${environment_file} was not created by vercel pull."
+              exit 1
+            fi
             set -a
-            # shellcheck disable=SC1091
-            source .vercel/.env.production.local
+            source "$environment_file"
             set +a
-          fi
-          if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then
-            echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
-            exit 1
-          fi
-          (cd web && pnpm codegen)
-          npx vercel build --prod --token="$VERCEL_TOKEN"
-        working-directory: .
+            if [ -z "${NEXT_PUBLIC_API_URL:-}" ]; then
+              echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
+              exit 1
+            fi
+            cd web
+            pnpm codegen
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_BENCHMARKS_WEB_PROJECT_ID }}
 
-      - name: Deploy and promote
-        if: steps.up_to_date.outputs.skip != 'true'
-        id: vercel
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          deployment_url="$(npx vercel deploy --prebuilt --prod --skip-domain --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN")"
-          echo "deployment_url=${deployment_url}" >> "$GITHUB_OUTPUT"
-          npx vercel promote "$deployment_url" --scope="$VERCEL_TEAM_SCOPE" --token="$VERCEL_TOKEN" --yes
-        working-directory: .
-
-      - name: Fast-forward production-web marker
-        if: steps.up_to_date.outputs.skip != 'true'
-        run: |
-          set -euo pipefail
-          git push origin "HEAD:refs/heads/production-web"
-        working-directory: .
-
-      - name: Summarize release
-        if: always()
+      - name: Summarize skipped release
+        if: steps.marker.outputs.skipped == 'true'
         run: |
           {
+            echo "## Benchmarks Web ${{ needs.context.outputs.environment }} release"
             echo ""
-            echo "### Result"
-            echo "- Skipped: \`${{ steps.up_to_date.outputs.skip || 'false' }}\`"
-            echo "- Deployment URL: ${{ steps.vercel.outputs.deployment_url || 'n/a' }}"
+            echo "- Commit: \`${{ steps.revision.outputs.resolved_sha }}\`"
+            echo "- Skipped: \`true\`"
           } >> "$GITHUB_STEP_SUMMARY"
-        working-directory: .
