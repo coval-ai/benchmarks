@@ -52,7 +52,18 @@ def cli() -> None:
     default=False,
     help="Run a single dataset item — for local dev.",
 )
-def run(kind: str, smoke: bool) -> None:
+@click.option(
+    "--source",
+    type=click.Choice(["shared", "dedicated"]),
+    default="shared",
+    show_default=True,
+    help=(
+        "Which endpoints to run: 'shared' is every non-dedicated endpoint "
+        "(official APIs and shared inference); 'dedicated' is only "
+        "dedicated-inference endpoints, which run in their own scheduled job."
+    ),
+)
+def run(kind: str, smoke: bool, source: str) -> None:
     """Execute one benchmark run — invoked by Cloud Run Job."""
     from coval_bench.config import get_settings
     from coval_bench.db.models import RunStatus
@@ -60,7 +71,7 @@ def run(kind: str, smoke: bool) -> None:
 
     settings = get_settings()
     summary: RunSummary = asyncio.run(
-        run_benchmarks(settings=settings, benchmark_kind=kind, smoke=smoke)  # type: ignore[arg-type]
+        run_benchmarks(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
     )
     click.echo(summary.model_dump_json())
     if summary.status == str(RunStatus.FAILED):

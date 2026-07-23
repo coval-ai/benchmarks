@@ -59,6 +59,7 @@ from coval_bench.registries import (
     Metric,
     ModelStatus,
     RegisteredModel,
+    Source,
 )
 from coval_bench.runner.retry import with_retry
 
@@ -825,6 +826,7 @@ async def run_benchmarks(
     settings: Settings,
     benchmark_kind: Literal["stt", "tts", "both"] = "both",
     smoke: bool = False,
+    source: Literal["shared", "dedicated"] = "shared",
     matrix_overrides: list[RegisteredModel] | None = None,
 ) -> RunSummary:
     """Execute one complete benchmark run.
@@ -833,6 +835,9 @@ async def run_benchmarks(
         settings: Injected application settings (no global state).
         benchmark_kind: Which benchmark(s) to run.
         smoke: If True, process only the first dataset item (local dev mode).
+        source: ``shared`` runs every non-dedicated endpoint; ``dedicated``
+            runs only dedicated-inference endpoints. The two never mix in one
+            run — dedicated endpoints have their own scheduled job.
         matrix_overrides: Optional list of ``RegisteredModel`` objects that
             override the registry by ``(benchmark, provider, model)`` key.
 
@@ -885,8 +890,17 @@ async def run_benchmarks(
 
     # EARLY_ACCESS models run on the normal schedule; only the API hides them.
     scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
-    enabled_stt = [e for e in stt_matrix if e.status in scheduled]
-    enabled_tts = [e for e in tts_matrix if e.status in scheduled]
+    dedicated = source == "dedicated"
+    enabled_stt = [
+        e
+        for e in stt_matrix
+        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+    ]
+    enabled_tts = [
+        e
+        for e in tts_matrix
+        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+    ]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row
@@ -930,6 +944,7 @@ async def run_benchmarks(
             "benchmark_run_started",
             benchmark_kind=benchmark_kind,
             smoke=smoke,
+            source=source,
             runner_sha=settings.runner_sha,
         )
 

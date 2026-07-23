@@ -18,6 +18,8 @@ Test catalogue
 8.  test_audio_file_cleanup        — TTS audio deleted even when WER raises
 9.  test_matrix_overrides          — nova-3 disabled via override → not called
 10. test_disabled_providers_skipped — non-ACTIVE entries not instantiated
+11. test_shared_run_excludes_dedicated — default run never touches dedicated endpoints
+12. test_dedicated_run_only_dedicated  — source='dedicated' runs only dedicated endpoints
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel
+from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel, Source
 from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
 from coval_bench.runner.retry import with_retry
 
@@ -65,11 +67,18 @@ _TEST_SETTINGS = Settings(
 # ---------------------------------------------------------------------------
 
 
-def _stt_entry(provider: str, model: str, *, active: bool = True) -> RegisteredModel:
+def _stt_entry(
+    provider: str,
+    model: str,
+    *,
+    active: bool = True,
+    source: Source = Source.OFFICIAL_API,
+) -> RegisteredModel:
     return RegisteredModel(
         benchmark=Benchmark.STT,
         provider=provider,
         model=model,
+        source=source,
         status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
     )
 
@@ -1171,6 +1180,93 @@ async def test_disabled_providers_skipped(audio_file: Path, settings: Settings) 
 
     disabled_cls.assert_not_called()
     provider_cls.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# 11. test_shared_run_excludes_dedicated
+# ---------------------------------------------------------------------------
+
+
+def _source_split_matrix() -> list[RegisteredModel]:
+    """One shared and one dedicated ACTIVE entry on an otherwise paused registry."""
+    return [
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", "nova-2"),
+        _stt_entry(
+            "baseten",
+            "whisper-large-v3",
+            source=Source.DEDICATED_INFERENCE,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_shared_run_excludes_dedicated(audio_file: Path, settings: Settings) -> None:
+    """The default (shared) run never instantiates dedicated-inference entries."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    shared_cls = MagicMock(return_value=provider_inst)
+    dedicated_cls = MagicMock()
+
+    stt_providers = {"deepgram": shared_cls, "baseten": dedicated_cls}
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_source_split_matrix(),
+        )
+
+    dedicated_cls.assert_not_called()
+    shared_cls.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# 12. test_dedicated_run_only_dedicated
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dedicated_run_only_dedicated(audio_file: Path, settings: Settings) -> None:
+    """source='dedicated' runs only dedicated-inference entries."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+    dedicated_cls = MagicMock(return_value=provider_inst)
+    shared_cls = MagicMock()
+
+    stt_providers = {"deepgram": shared_cls, "baseten": dedicated_cls}
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            source="dedicated",
+            matrix_overrides=_source_split_matrix(),
+        )
+
+    shared_cls.assert_not_called()
+    dedicated_cls.assert_called()
+    assert summary.success_count == summary.total_results
 
 
 # ---------------------------------------------------------------------------
