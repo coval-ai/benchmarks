@@ -365,7 +365,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="velma-2-stt-streaming-english-v2",
         tags=(_STREAMING,),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_STT,
