@@ -92,8 +92,10 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     });
 
   const copyLink = () => {
+    // The utm params tag visitors who arrive through a copied link: PostHog
+    // reads utm_* from the landing URL, so these visits separate from $direct.
     navigator.clipboard.writeText(
-      `${window.location.origin}${window.location.pathname}#${anchorId}`
+      `${window.location.origin}${window.location.pathname}?utm_source=copy_link&utm_content=${anchorId}#${anchorId}`
     );
     window.history.replaceState(null, "", `#${anchorId}`);
     setCopied(true);
