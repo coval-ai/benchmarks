@@ -28,7 +28,7 @@ from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.samples import SampleRun, copy_tick_samples
+from coval_bench.s2s.samples import SampleRun, publish_tick_sample
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -62,6 +62,7 @@ class CovalRun:
     run_id: str
     create_time: datetime | None
     error_status: str | None
+    persona_id: str = ""
 
 
 # Agent ids resolved from Settings; model strings are display labels.
@@ -166,6 +167,7 @@ async def recent_completed_runs(
             run_id=cast("str", r["run_id"]),
             create_time=_parse_time(r.get("create_time")),
             error_status=_error_status(r.get("error_status")),
+            persona_id=cast("str", r.get("persona_id") or ""),
         )
         if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
             continue
@@ -478,22 +480,23 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
-    candidate: SampleRun | None = None
+    candidates: dict[str, SampleRun] = {}
 
     def note_sample_candidate(coval_run: CovalRun) -> None:
-        # Newest-first scan: the first eligible run per provider is its newest,
-        # whether it was ingested this tick or on an earlier one — staggered
-        # arrivals must not shrink the sample to one provider. Held locally and
-        # committed only after the staleness check, so a stale provider's old
-        # recording never ships under today's tick.
-        nonlocal candidate
-        if candidate is not None:
+        # Newest-first scan: keep the newest eligible run PER PERSONA. Multi-turn
+        # runs the same test set once per persona, so a provider yields one
+        # candidate per persona (single-turn has no persona -> a single "" key).
+        # Staggered arrivals must not shrink the sample; committed only after the
+        # staleness check so a stale provider's old recording never ships today.
+        if coval_run.persona_id in candidates:
             return
-        candidate = SampleRun(
+        candidates[coval_run.persona_id] = SampleRun(
             provider=spec.provider,
             model=spec.model,
             coval_run_id=coval_run.run_id,
             bucket_at=_bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds),
+            persona_id=coval_run.persona_id,
+            agent_id=agent_id,
         )
 
     try:
@@ -570,8 +573,8 @@ async def _fetch_one_provider(
             )
             return RunStatus.FAILED, len(statuses)
 
-        if sampled_runs is not None and candidate is not None:
-            sampled_runs.append(candidate)
+        if sampled_runs is not None:
+            sampled_runs.extend(candidates.values())
 
         if statuses:
             if all(s is RunStatus.FAILED for s in statuses):
@@ -648,16 +651,17 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
-        if settings.s2s_samples_bucket and sampled_runs:
+        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
             expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
             missing = expected - {r.provider for r in sampled_runs}
             if missing:
                 # Error level on purpose: this is the alert that a provider is
                 # absent from the day's sample; the tick still publishes the rest.
                 logger.error("samples_provider_missing", missing=sorted(missing))
-            await copy_tick_samples(
+            await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
+                test_set_id=test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
             )
