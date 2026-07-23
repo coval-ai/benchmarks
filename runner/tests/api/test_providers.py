@@ -9,6 +9,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from tests.api.conftest import INTERNAL_API_KEY
+
 
 async def test_providers_200(client: AsyncClient) -> None:
     """GET /v1/providers returns 200 with correct shape."""
@@ -140,7 +142,11 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     assert ("features", "emotion-control") in orpheus_facets
     assert labels[("features", "emotion-control")] == "Emotion control"
 
-    baseten = next(e for e in data["tts"] if e["provider"] == "baseten")
+    # Baseten's dedicated endpoints are EARLY_ACCESS, so their facets are only
+    # visible on the internal view.
+    internal = await client.get("/v1/providers", headers={"X-Internal-Key": INTERNAL_API_KEY})
+    internal_data = internal.json()
+    baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
     qwen_facets = {(t["category"], t["value"]) for t in qwen["tags"]}
     qwen_labels = {(t["category"], t["value"]): t["label"] for t in qwen["tags"]}

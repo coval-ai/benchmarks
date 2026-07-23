@@ -266,9 +266,9 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         status=_ACTIVE,
     ),
-    # Baseten dedicated endpoints (Whisper Large V3). PENDING: implemented and
-    # hidden while Baseten tunes the setup — kept off the scheduled runner and
-    # the public site, run manually during the daily test window.
+    # Baseten dedicated endpoint (Whisper Large V3). Benchmarked nightly by the
+    # dedicated runner job during Baseten's test window; EARLY_ACCESS keeps it
+    # off the public site until the dedicated-inference dashboards ship.
     RegisteredModel(
         benchmark=_STT,
         provider="baseten",
@@ -278,7 +278,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
         on_prem=True,
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
     RegisteredModel(
@@ -654,8 +654,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_PENDING,
         arena_enabled=False,
     ),
-    # Baseten dedicated endpoints (Qwen3-TTS 1.7B). PENDING for the same reason
-    # as the Whisper STT entry above — implemented, hidden, run manually.
+    # Baseten dedicated endpoint (Qwen3-TTS 1.7B). Same treatment as the
+    # Whisper STT entry above — nightly dedicated runner job, EARLY_ACCESS.
     RegisteredModel(
         benchmark=_TTS,
         provider="baseten",
@@ -666,7 +666,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
         on_prem=True,
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_TTS,
