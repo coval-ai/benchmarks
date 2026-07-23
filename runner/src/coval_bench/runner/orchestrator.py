@@ -19,7 +19,8 @@ Design notes
   call time, not at module load, which also lets tests patch ``sys.modules``
   without triggering import errors.  ``coval_bench.registries`` is the
   exception: dependency-light by design, imported eagerly.
-- Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections.
+- Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections;
+  dedicated runs use a cap of 1 so a single pinned replica is never contended.
 - Timeouts: ``asyncio.timeout(45)`` for STT, ``asyncio.timeout(60)`` for TTS.
 - Audio cleanup: TTS audio files are deleted in ``finally`` blocks; this module
   owns cleanup, NOT the provider.
@@ -69,6 +70,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
+_DEDICATED_CONCURRENCY_CAP = 1
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
@@ -949,7 +951,7 @@ async def run_benchmarks(
         )
 
         all_results: list[Any] = []
-        sem = asyncio.Semaphore(_CONCURRENCY_CAP)
+        sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
         # We catch it, cancel the in-flight gather, and finalize the run row as

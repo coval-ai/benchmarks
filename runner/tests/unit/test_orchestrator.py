@@ -20,6 +20,7 @@ Test catalogue
 10. test_disabled_providers_skipped — non-ACTIVE entries not instantiated
 11. test_shared_run_excludes_dedicated — default run never touches dedicated endpoints
 12. test_dedicated_run_only_dedicated  — source='dedicated' runs only dedicated endpoints
+13. test_dedicated_run_serialized      — source='dedicated' streams one clip at a time
 """
 
 from __future__ import annotations
@@ -1267,6 +1268,57 @@ async def test_dedicated_run_only_dedicated(audio_file: Path, settings: Settings
     shared_cls.assert_not_called()
     dedicated_cls.assert_called()
     assert summary.success_count == summary.total_results
+
+
+# ---------------------------------------------------------------------------
+# 13. test_dedicated_run_serialized
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dedicated_run_serialized(audio_file: Path, settings: Settings) -> None:
+    """source='dedicated' never runs more than one clip at a time."""
+    max_concurrent = 0
+    current_concurrent = 0
+    lock = asyncio.Lock()
+
+    async def tracked_measure_ttft(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        nonlocal max_concurrent, current_concurrent
+        async with lock:
+            current_concurrent += 1
+            max_concurrent = max(max_concurrent, current_concurrent)
+        await asyncio.sleep(0)
+        async with lock:
+            current_concurrent -= 1
+        return _good_transcription()
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = tracked_measure_ttft
+    dedicated_cls = MagicMock(return_value=provider_inst)
+
+    stt_providers = {"baseten": dedicated_cls}
+    items_10 = [_make_dataset_item(audio_file, f"item {i}") for i in range(10)]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=items_10,
+        stt_providers=stt_providers,
+        run=run,
+        writer=writer,
+    ) as _:
+        summary = await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=False,
+            source="dedicated",
+            matrix_overrides=_source_split_matrix(),
+        )
+
+    assert max_concurrent == 1, f"max concurrent was {max_concurrent}"
+    assert summary.total_results >= 10
 
 
 # ---------------------------------------------------------------------------
