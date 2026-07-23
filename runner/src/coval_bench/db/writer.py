@@ -270,6 +270,33 @@ class RunWriter:
             await conn.commit()
         return row is not None
 
+    async def coval_metric_ingested(
+        self, *, provider: str, coval_run_id: str, metric_type: str
+    ) -> bool:
+        """True if a succeeded/partial run already holds this Coval run's ``metric_type`` rows.
+
+        Metric-aware counterpart of :meth:`coval_run_ingested`: lets the fetch
+        backfill one metric (e.g. instruction) onto a run whose other metric
+        (latency) already landed, instead of skipping the whole run.
+        """
+        sql = """
+            SELECT 1
+            FROM benchmarks_v2.results r
+            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+            WHERE r.provider = %s
+              AND r.benchmark = 'S2S'
+              AND r.metric_type = %s
+              AND split_part(r.audio_filename, '/', 1) = %s
+              AND rn.status IN ('succeeded', 'partial')
+            LIMIT 1
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, (provider, metric_type, coval_run_id))
+                row = await cur.fetchone()
+            await conn.commit()
+        return row is not None
+
     async def refresh_stats_matviews(self) -> None:
         """Concurrently refresh the per-window stats materialized views.
 

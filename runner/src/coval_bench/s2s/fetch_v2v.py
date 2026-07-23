@@ -303,6 +303,8 @@ async def _ingest_run(
     instruction_metric_id: str | None = None,
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
+    want_latency: bool = True,
+    want_instruction: bool = True,
     runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
@@ -339,20 +341,11 @@ async def _ingest_run(
             return None
         values = cast("list[dict[str, Any]]", metric.get("values", []))
 
-        scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
-        run_row = await writer.start_run(
-            runner_sha=runner_sha,
-            dataset_id=dataset_id,
-            dataset_sha256=dataset_sha256 or _dataset_sha256(),
-            scheduled_at=scheduled_at,
-        )
-        if run_row.id is None:  # pragma: no cover -- start_run always returns an id
-            raise RuntimeError("start_run returned a run with no id")
-        run_pk = run_row.id
-
-        rows = _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-        instruction_rows: list[Result] = []
-        if instruction_metric_id:
+        # Decide instruction writability up front (pure) so a backfill with
+        # nothing to add creates no run row and stays retryable.
+        instr_values: list[dict[str, Any]] = []
+        write_instruction = False
+        if want_instruction and instruction_metric_id:
             instr = metrics.get(instruction_metric_id)
             if instr is None:
                 # Latency still lands; instruction stays retryable on a later scan.
@@ -376,19 +369,44 @@ async def _ingest_run(
                     )
                 else:
                     try:
-                        instruction_rows = _instruction_rows(
-                            instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
-                        )
+                        for v in instr_values:
+                            _instruction_verdict(v.get("value"))
+                        write_instruction = True
                     except InvalidInstructionVerdict as exc:
                         # Judge-contract violation: discard instruction for the
                         # whole run (keep latency); retryable on a later scan.
-                        instruction_rows = []
                         logger.warning(
                             "instruction_verdict_invalid",
                             provider=spec.provider,
                             coval_run_id=coval_run.run_id,
                             error=str(exc),
                         )
+
+        if not want_latency and not write_instruction:
+            # Backfill with nothing to add; leave it retryable, write no run row.
+            return None
+
+        scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
+        run_row = await writer.start_run(
+            runner_sha=runner_sha,
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_sha256 or _dataset_sha256(),
+            scheduled_at=scheduled_at,
+        )
+        if run_row.id is None:  # pragma: no cover -- start_run always returns an id
+            raise RuntimeError("start_run returned a run with no id")
+        run_pk = run_row.id
+
+        rows = (
+            _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
+            if want_latency
+            else []
+        )
+        instruction_rows = (
+            _instruction_rows(instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
+            if write_instruction
+            else []
+        )
         all_rows = rows + instruction_rows
         if all_rows:
             await writer.record_results(all_rows)
@@ -401,12 +419,17 @@ async def _ingest_run(
             instruction=len(instruction_rows),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
-        failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
-        if not rows or failed == len(rows):
-            status = RunStatus.FAILED
-        elif failed:
-            status = RunStatus.PARTIAL
+        if want_latency:
+            # Reliability is the latency signal (instruction lag never fails the run).
+            failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
+            if not rows or failed == len(rows):
+                status = RunStatus.FAILED
+            elif failed:
+                status = RunStatus.PARTIAL
+            else:
+                status = RunStatus.SUCCEEDED
         else:
+            # Instruction-only backfill onto an already-ingested run.
             status = RunStatus.SUCCEEDED
         await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
@@ -490,15 +513,24 @@ async def _fetch_one_provider(
                     error_status=coval_run.error_status,
                 )
                 continue
-            if await writer.coval_run_ingested(
-                provider=spec.provider, coval_run_id=coval_run.run_id
-            ):
-                logger.info(
-                    "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
-                )
+            latency_done = await writer.coval_metric_ingested(
+                provider=spec.provider, coval_run_id=coval_run.run_id, metric_type=Metric.V2V
+            )
+            instruction_done = instruction_metric_id is None or await writer.coval_metric_ingested(
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                metric_type=Metric.INSTRUCTION_FOLLOWING,
+            )
+            # A run whose latency already landed is fresh data + an eligible
+            # sample even if we still owe it an instruction backfill.
+            if latency_done:
                 note_sample_candidate(coval_run)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
+            if latency_done and instruction_done:
+                logger.info(
+                    "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
+                )
                 continue
             status = await _ingest_run(
                 client,
@@ -509,6 +541,8 @@ async def _fetch_one_provider(
                 instruction_metric_id=instruction_metric_id,
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
+                want_latency=not latency_done,
+                want_instruction=instruction_metric_id is not None and not instruction_done,
                 runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )

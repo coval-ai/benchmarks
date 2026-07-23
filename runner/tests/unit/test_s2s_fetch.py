@@ -78,6 +78,7 @@ def _stub_writer() -> MagicMock:
         )
     )
     writer.coval_run_ingested = AsyncMock(return_value=False)
+    writer.coval_metric_ingested = AsyncMock(return_value=False)
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_bucket = AsyncMock()
@@ -278,7 +279,7 @@ async def test_fetch_one_provider_ingests_every_new_run() -> None:
 @pytest.mark.asyncio
 async def test_fetch_one_provider_noop_when_fresh() -> None:
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=2))})
     async with _fake_client(list_json, {}) as client:
         status, ingested = await _fetch(client, writer)
@@ -290,7 +291,7 @@ async def test_fetch_one_provider_noop_when_fresh() -> None:
 async def test_fetch_one_provider_stale_fails() -> None:
     # Newest usable run is older than period + grace (4.5h) -> stale.
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=6))})
     async with _fake_client(list_json, {}) as client:
         status, ingested = await _fetch(client, writer)
@@ -319,7 +320,7 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
 async def test_fetch_one_provider_unknown_age_is_stale() -> None:
     # A usable run without a parseable create_time is no evidence of freshness.
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
     list_json = _list_json({"run_id": "R1"})
     async with _fake_client(list_json, {}) as client:
         status, ingested = await _fetch(client, writer)
@@ -389,7 +390,7 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     )
 
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)  # nothing new this tick
+    writer.coval_metric_ingested = AsyncMock(return_value=True)  # nothing new this tick
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     client = _fake_client(list_json, {})
 
@@ -412,7 +413,7 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
     from coval_bench.s2s.samples import SampleRun
 
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
     list_json = _list_json(
         {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "SUCCESS"}
     )
@@ -464,7 +465,7 @@ async def test_stale_provider_lends_no_sample_candidate() -> None:
     from coval_bench.s2s.samples import SampleRun
 
     writer = _stub_writer()
-    writer.coval_run_ingested = AsyncMock(return_value=True)
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
     list_json = _list_json(
         {"run_id": "R1", "create_time": _iso(timedelta(hours=5)), "error_status": "SUCCESS"}
     )
@@ -647,6 +648,54 @@ async def test_fetch_and_write_requires_id_pair(monkeypatch: pytest.MonkeyPatch)
     )
     with pytest.raises(RuntimeError, match="set together"):
         await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_backfill_instruction_only() -> None:
+    # Latency already ingested (want_latency=False): backfill only instruction.
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": "s0", "value": 0.5}]
+    instruction = [{"simulation_output_id": "s0", "value": "YES"}]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            want_latency=False,
+            want_instruction=True,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert len(rows) == 1
+    assert all(r.metric_type == Metric.INSTRUCTION_FOLLOWING for r in rows)  # no latency rewrite
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
+    # Backfill wanted but the instruction metric isn't on the run yet -> retryable no-op.
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": "s0", "value": 0.5}]
+    async with _fake_client({}, _run_json(latency)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            want_latency=False,
+            want_instruction=True,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is None  # nothing to write -> no run row, stays retryable
+    writer.start_run.assert_not_awaited()
+    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
