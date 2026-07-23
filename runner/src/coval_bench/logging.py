@@ -73,16 +73,25 @@ def configure_logging(
 _run_logger = structlog.get_logger("coval_bench.run")
 
 
-def log_run_failed(error: str, exc: BaseException | None = None) -> None:
-    """Emit the single log line the infra alert metric greps for.
+def _emit_run_event(event: str, error: str, exc: BaseException | None = None) -> None:
+    """Emit one structured run-status line the infra alert metrics grep for.
 
-    The literal ``event="RUN_FAILED"`` triggers the ``benchmark_run_failure``
-    Cloud Logging metric in benchmark-infra. Centralized here so every
-    entrypoint (the STT/TTS orchestrator, the S2S fetch job) emits the identical
-    contract string and they can't drift. structlog uses the first positional
-    arg as the ``event`` key.
+    The literal ``event`` value (``RUN_FAILED`` / ``RUN_PARTIAL``) is the contract
+    each Cloud Logging metric in benchmark-infra filters on. Centralized here so
+    every entrypoint emits the identical string and they can't drift. structlog
+    uses the first positional arg as the ``event`` key.
     """
-    _run_logger.error("RUN_FAILED", error=error, exc_info=exc)
+    _run_logger.error(event, error=error, exc_info=exc)
+
+
+def log_run_failed(error: str, exc: BaseException | None = None) -> None:
+    """Total run failure -> ``RUN_FAILED`` (fails the job; used by all modalities)."""
+    _emit_run_event("RUN_FAILED", error, exc)
+
+
+def log_run_partial(error: str, exc: BaseException | None = None) -> None:
+    """Partial run -> ``RUN_PARTIAL`` (some providers failed; the job still exits 0)."""
+    _emit_run_event("RUN_PARTIAL", error, exc)
 
 
 def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:

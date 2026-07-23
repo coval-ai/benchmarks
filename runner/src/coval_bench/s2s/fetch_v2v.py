@@ -676,7 +676,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
 @click.command(name="fetch-s2s")
 def fetch_s2s() -> None:
     """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job)."""
-    from coval_bench.logging import configure_logging, log_run_failed
+    from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
@@ -687,16 +687,17 @@ def fetch_s2s() -> None:
         log_run_failed(str(exc), exc)
         raise
 
-    # Alert if any provider has no fresh data. The succeeding providers' rows
-    # are already committed, so a partial run still exits 0 — only a total
-    # loss fails the job (non-zero exit).
+    # Healthy providers' rows are already committed, so a PARTIAL run alerts but
+    # still exits 0 (no Cloud Run retry). Only a total loss fails the job.
     failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
-    if not statuses:
-        log_run_failed("s2s fetch ran no providers (none configured)")
-    elif failed:
-        log_run_failed(f"s2s fetch has no fresh data from: {', '.join(failed)}")
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
+        if statuses:
+            log_run_failed(f"s2s fetch failed for all providers: {', '.join(failed)}")
+        else:
+            log_run_failed("s2s fetch ran no providers (none configured)")
         raise click.ClickException("s2s fetch failed for all providers")
+    if failed:
+        log_run_partial(f"s2s fetch has no fresh data from: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
