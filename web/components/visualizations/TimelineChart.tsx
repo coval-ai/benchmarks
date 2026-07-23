@@ -1021,6 +1021,7 @@ const TimelineChart: React.FC = () => {
                     showDate={dateScale}
                     dimmedKeys={dimmedLegendKeys}
                     compact
+                    timeZone={displayTz}
                   />
                 }
                 active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
@@ -1177,6 +1178,7 @@ const TimelineChart: React.FC = () => {
                 dimmedKeys={dimmedLegendKeys}
                 compact
                 interactionHint="tap axis to see all"
+                timeZone={displayTz}
               />
             </div>
           )}
@@ -1213,6 +1215,7 @@ const TimelineChart: React.FC = () => {
                 showDate={dateScale}
                 dimmedKeys={dimmedLegendKeys}
                 maxHeight={isMobile ? 106 : undefined}
+                timeZone={displayTz}
                 onModelClick={
                   page === "s2s"
                     ? (model, label) =>

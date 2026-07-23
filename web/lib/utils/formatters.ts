@@ -35,12 +35,13 @@ export function formatDate(timestamp: number, timeZone?: string): string {
  * Same as {@link formatTime} but includes seconds — used in tooltips where
  * the user is hovering a specific data point and wants higher precision.
  */
-export function formatTimeWithSeconds(timestamp: number): string {
+export function formatTimeWithSeconds(timestamp: number, timeZone?: string): string {
   return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false
+    hour12: false,
+    timeZone
   });
 }
 
