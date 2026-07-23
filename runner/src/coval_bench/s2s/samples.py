@@ -1,21 +1,21 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Copy one shared utterance's conversation recordings into the samples bucket.
+"""Publish one multi-turn conversation sample per fetch tick.
 
-Each fetch tick picks ONE dataset clip present in every provider's newest
-ingested run and copies that clip's reconstructed conversation recording from
-each provider into the public samples bucket, next to a ``manifest.json``
-keyed by the timeline bucket timestamp. The dashboard reads the manifests
-directly (public bucket, no API hop); a rolling ``index.json`` lists the
-available ticks newest-first. The bucket's 30-day TTL prunes old ticks.
+Each tick picks ONE (scenario, persona) present for every provider, uploads
+each provider's full-conversation recording plus its per-agent transcript into
+the public samples bucket, and writes a ``manifest.json`` keyed by the timeline
+bucket timestamp. Only a fully-complete sample (audio + transcript for every
+provider) is published; otherwise the tick is skipped. The dashboard reads the
+manifests directly (public bucket, no API hop); a rolling ``index.json`` lists
+the available ticks newest-first. The bucket's 30-day TTL prunes old ticks.
 
 Sampling failures never fail the fetch — the metric rows are the product.
 """
 
 from __future__ import annotations
 
-import importlib.resources
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -38,47 +38,51 @@ logger = structlog.get_logger("coval_bench.s2s.samples")
 PREFIX = "s2s-samples"
 INDEX_KEY = f"{PREFIX}/index.json"
 _INDEX_MAX_ENTRIES = 60
-_PUBLIC_DATASET_BASE = "https://storage.googleapis.com/coval-benchmarks-datasets/s2s-v1"
 _DOWNLOAD_TIMEOUT = 120.0
+
+# Multi-turn bench personas, matched by id — raw Coval names are unreliable (the
+# male persona's name carries a trailing space). If the personas churn, update
+# here (or lift into Settings).
+_PERSONA_LABELS: dict[str, str] = {
+    "PN3xgmsqeLDjsNNEA2e55e": "Standard Female",
+    "9ATy64zKXxSUaVWb5YnQtd": "Standard Male",
+}
+
+
+def _persona_label(persona_id: str) -> str:
+    return _PERSONA_LABELS.get(persona_id, persona_id)
 
 
 @dataclass(frozen=True)
 class SampleRun:
-    """One provider's newest ingested run, eligible for this tick's sample."""
+    """One provider's ingested run, eligible for this tick's sample.
+
+    ``persona_id``/``agent_id`` are populated for multi-turn (where a provider
+    has one run per persona); the single-turn path leaves them empty.
+    """
 
     provider: str
     model: str
     coval_run_id: str
     bucket_at: datetime
+    persona_id: str = ""
+    agent_id: str = ""
 
 
-def _norm(text: str) -> str:
-    return " ".join(text.split()).casefold()
+def _conversation_turns(sim: dict[str, Any]) -> list[dict[str, Any]]:
+    """Full ordered conversation as ``{index, role, content}`` turns.
 
-
-def _clips_by_transcript() -> dict[str, str]:
-    """Packaged-manifest transcript -> public dataset clip path, unambiguous only.
-
-    Several transcripts appear on multiple clips (different speakers); those
-    can't be resolved by text, so they're dropped and the sample ships with
-    input_audio_url = null rather than possibly the wrong recording.
+    Non-string content is skipped so a malformed message can't poison the
+    manifest; an empty list means the transcript couldn't be resolved and the
+    sample is treated as incomplete.
     """
-    ref = importlib.resources.files("coval_bench.datasets.manifests").joinpath("s2s-v1.json")
-    manifest = json.loads(ref.read_bytes())
-    paths_by_transcript: dict[str, set[str]] = {}
-    for item in manifest["items"]:
-        if item.get("transcript") and item.get("path"):
-            paths_by_transcript.setdefault(_norm(item["transcript"]), set()).add(item["path"])
-    return {t: next(iter(paths)) for t, paths in paths_by_transcript.items() if len(paths) == 1}
-
-
-def _input_transcript(sim: dict[str, Any]) -> str | None:
-    """First user turn of the conversation — the utterance the model heard."""
+    turns: list[dict[str, Any]] = []
     for message in cast("list[dict[str, Any]]", sim.get("transcript") or []):
-        if message.get("role") == "user":
-            content = message.get("content")
-            return content if isinstance(content, str) else None
-    return None
+        role = message.get("role")
+        content = message.get("content")
+        if isinstance(role, str) and isinstance(content, str):
+            turns.append({"index": len(turns), "role": role, "content": content})
+    return turns
 
 
 async def _fetch_retry[T](fn: Callable[[], Awaitable[T]], *, provider: str, what: str) -> T:
@@ -159,28 +163,29 @@ def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
     _upload(bucket, INDEX_KEY, json.dumps(ticks).encode(), "application/json")
 
 
-async def copy_tick_samples(
+async def publish_tick_sample(
     client: httpx.AsyncClient,
     *,
     bucket_name: str,
+    test_set_id: str,
     runs: list[SampleRun],
     rng: Random,
     storage_client: storage.Client | None = None,
     download_client: httpx.AsyncClient | None = None,
 ) -> int:
-    """Copy this tick's shared-clip recordings; return how many were stored.
+    """Copy one multi-turn conversation (every provider, one persona) as a v2 sample.
 
-    Never raises: any failure is logged and the tick is simply skipped or
-    shipped with fewer providers.
+    Never raises: any failure is logged and the tick is simply skipped.
     """
     if not bucket_name or not runs:
         return 0
     try:
         async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as default_download:
-            return await _copy_tick_samples(
+            return await _publish_tick_sample(
                 client,
                 download_client or default_download,
                 bucket_name=bucket_name,
+                test_set_id=test_set_id,
                 runs=runs,
                 rng=rng,
                 storage_client=storage_client,
@@ -190,37 +195,54 @@ async def copy_tick_samples(
         return 0
 
 
-async def _copy_tick_samples(
+async def _publish_tick_sample(
     client: httpx.AsyncClient,
     download_client: httpx.AsyncClient,
     *,
     bucket_name: str,
+    test_set_id: str,
     runs: list[SampleRun],
     rng: Random,
     storage_client: storage.Client | None,
 ) -> int:
-    sims_per_run: dict[str, dict[str, str]] = {}
+    providers = {r.provider for r in runs}
+
+    # A "conversation" is one (test_case, persona) pair — the same scenario and
+    # the same simulated caller, which is what makes the sample comparable across
+    # providers. Group runs by persona; only a persona present for EVERY provider
+    # can yield a conversation. sims[(persona, provider)] = {test_case_id: sim_id}.
+    runs_by_persona: dict[str, dict[str, SampleRun]] = {}
     for run in runs:
+        runs_by_persona.setdefault(run.persona_id, {})[run.provider] = run
 
-        async def list_sims(run: SampleRun = run) -> dict[str, str]:
-            return await _sims_by_test_case(client, run.coval_run_id)
-
-        try:
-            sims_per_run[run.coval_run_id] = await _fetch_retry(
-                list_sims, provider=run.provider, what="sims_list"
+    sims: dict[tuple[str, str], dict[str, str]] = {}
+    pool: list[tuple[str, str]] = []
+    for persona_id, prov_runs in runs_by_persona.items():
+        if set(prov_runs) != providers:
+            logger.error(
+                "samples_persona_incomplete",
+                persona=persona_id,
+                missing=sorted(providers - set(prov_runs)),
             )
-        except Exception:
-            logger.error("samples_provider_missing", missing=[run.provider], exc_info=True)
+            continue
+        for provider, run in prov_runs.items():
 
-    runs = [run for run in runs if run.coval_run_id in sims_per_run]
-    if not runs:
-        return 0
+            async def list_sims(run: SampleRun = run) -> dict[str, str]:
+                return await _sims_by_test_case(client, run.coval_run_id)
 
-    shared = set.intersection(*(set(m) for m in sims_per_run.values()))
-    if not shared:
+            try:
+                sims[(persona_id, provider)] = await _fetch_retry(
+                    list_sims, provider=provider, what="sims_list"
+                )
+            except Exception:
+                logger.error("samples_provider_missing", missing=[provider], exc_info=True)
+                sims[(persona_id, provider)] = {}
+        shared = set.intersection(*(set(sims[(persona_id, p)]) for p in providers))
+        pool.extend((persona_id, tc) for tc in sorted(shared))
+
+    if not pool:
         logger.error("samples_no_shared_clip", runs=[r.coval_run_id for r in runs])
         return 0
-    test_case_id = rng.choice(sorted(shared))
 
     if storage_client is None:  # pragma: no cover -- real client only outside tests
         from google.cloud import storage as gcs
@@ -228,72 +250,86 @@ async def _copy_tick_samples(
         storage_client = gcs.Client()
     bucket = storage_client.bucket(bucket_name)
 
-    # Providers of one Coval round land in the same daily bucket; if they ever
-    # straddle midnight, key the folder by the newest so the timeline join
-    # points at data that exists.
-    tick_key = max(r.bucket_at for r in runs).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
-    if bucket.blob(manifest_key).exists():
-        # Idempotent repair: a prior run may have published the manifest but
-        # failed the index update, leaving the tick invisible.
-        _update_index(bucket, tick_key)
-        logger.info("samples_tick_exists", tick=tick_key)
-        return 0
-
-    transcript: str | None = None
-    recordings: list[dict[str, Any]] = []
-    for run in runs:
-        sim_id = sims_per_run[run.coval_run_id][test_case_id]
-        try:
-            if transcript is None:
+    # Uniform draw over the shared conversations of both personas; repick on any
+    # incomplete provider so only a fully-complete conversation (audio + turns for
+    # EVERY provider) is ever surfaced.
+    rng.shuffle(pool)
+    for persona_id, test_case_id in pool:
+        prov_runs = runs_by_persona[persona_id]
+        # Key the sample by the CHOSEN conversation's own bucket, not the max across
+        # all personas: personas can straddle bucket boundaries, and the global max
+        # would store this sample under an unrelated (newer) tick and mislabel it.
+        tick_key = max(prov_runs[p].bucket_at for p in providers).strftime("%Y-%m-%dT%H:%M:%SZ")
+        manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+        if bucket.blob(manifest_key).exists():
+            # Idempotent repair: manifest published but the index update failed.
+            _update_index(bucket, tick_key)
+            logger.info("samples_tick_exists", tick=tick_key)
+            return 0
+        staged: list[tuple[SampleRun, str, bytes, list[dict[str, Any]]]] = []
+        for provider in sorted(providers):
+            run = prov_runs[provider]
+            sim_id = sims[(persona_id, provider)][test_case_id]
+            audio: bytes | None = None
+            turns: list[dict[str, Any]] = []
+            try:
 
                 async def fetch_detail(sim_id: str = sim_id) -> httpx.Response:
                     resp = await client.get(f"/simulations/{sim_id}")
                     resp.raise_for_status()
                     return resp
 
-                detail = await _fetch_retry(fetch_detail, provider=run.provider, what="sim_detail")
-                transcript = _input_transcript(cast("dict[str, Any]", detail.json()))
+                detail = await _fetch_retry(fetch_detail, provider=provider, what="sim_detail")
+                turns = _conversation_turns(cast("dict[str, Any]", detail.json()))
 
-            async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
-                return await _download_recording(client, download_client, sim_id)
+                async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
+                    return await _download_recording(client, download_client, sim_id)
 
-            audio = await _fetch_retry(fetch_recording, provider=run.provider, what="recording")
-            if audio is None:
-                logger.error("sample_audio_missing", provider=run.provider, sim_id=sim_id)
-                continue
-            key = f"{PREFIX}/{tick_key}/{run.provider}.wav"
-            _upload(bucket, key, audio, "audio/wav")
+                audio = await _fetch_retry(fetch_recording, provider=provider, what="recording")
+            except Exception:
+                logger.error("sample_copy_failed", provider=provider, sim_id=sim_id, exc_info=True)
+            if audio is None or not turns:
+                break
+            staged.append((run, sim_id, audio, turns))
+
+        if len(staged) != len(providers):
+            logger.info("sample_incomplete_skipped", persona=persona_id, test_case_id=test_case_id)
+            continue
+
+        recordings: list[dict[str, Any]] = []
+        for s_run, s_sim_id, s_audio, s_turns in staged:
+            key = f"{PREFIX}/{tick_key}/{s_run.provider}.wav"
+            _upload(bucket, key, s_audio, "audio/wav")
             recordings.append(
                 {
-                    "provider": run.provider,
-                    "model": run.model,
+                    "provider": s_run.provider,
+                    "model": s_run.model,
                     "object": key,
-                    "coval_run_id": run.coval_run_id,
-                    "sim_id": sim_id,
+                    "coval_run_id": s_run.coval_run_id,
+                    "sim_id": s_sim_id,
+                    "agent_id": s_run.agent_id,
+                    "turns": s_turns,
                 }
             )
-        except Exception:
-            logger.error("sample_copy_failed", provider=run.provider, sim_id=sim_id, exc_info=True)
+        manifest = {
+            "schema_version": 2,
+            "bucket_at": tick_key,
+            "test_set_id": test_set_id,
+            "test_case_id": test_case_id,
+            "persona_name": _persona_label(persona_id),
+            "input_audio_url": None,
+            "recordings": recordings,
+        }
+        _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")
+        _update_index(bucket, tick_key)
+        logger.info(
+            "samples_tick_stored",
+            tick=tick_key,
+            recordings=len(recordings),
+            persona=persona_id,
+            test_case_id=test_case_id,
+        )
+        return len(recordings)
 
-    if not recordings:
-        return 0
-
-    clip_path = _clips_by_transcript().get(_norm(transcript)) if transcript else None
-    manifest = {
-        "bucket_at": tick_key,
-        "test_case_id": test_case_id,
-        "transcript": transcript,
-        "input_audio_url": f"{_PUBLIC_DATASET_BASE}/{clip_path}" if clip_path else None,
-        "recordings": recordings,
-    }
-    _upload(
-        bucket,
-        f"{PREFIX}/{tick_key}/manifest.json",
-        json.dumps(manifest).encode(),
-        "application/json",
-    )
-    _update_index(bucket, tick_key)
-    logger.info("samples_tick_stored", tick=tick_key, recordings=len(recordings))
-    return len(recordings)
+    logger.error("samples_no_complete_sample")
+    return 0

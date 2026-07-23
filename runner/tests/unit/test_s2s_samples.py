@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for the S2S sample-recording copier."""
+"""Unit tests for the multi-turn S2S sample publisher."""
 
 from __future__ import annotations
 
@@ -16,14 +16,38 @@ import pytest
 from google.api_core.exceptions import NotFound
 
 from coval_bench.s2s import samples
-from coval_bench.s2s.samples import PREFIX, SampleRun, copy_tick_samples
+from coval_bench.s2s.samples import PREFIX, SampleRun, publish_tick_sample
 
 BUCKET_AT = datetime(2026, 7, 17, tzinfo=UTC)
+TICK = "2026-07-17T00:00:00Z"
+TEST_SET = "DvAqQ4md"
 
-RUNS = [
-    SampleRun(provider="openai", model="gpt-realtime", coval_run_id="RO", bucket_at=BUCKET_AT),
-    SampleRun(provider="google", model="gemini-live", coval_run_id="RG", bucket_at=BUCKET_AT),
-]
+# Real bench persona ids so the label map is exercised too.
+FEMALE = "PN3xgmsqeLDjsNNEA2e55e"
+MALE = "9ATy64zKXxSUaVWb5YnQtd"
+
+
+def _run(provider: str, model: str, run_id: str, persona_id: str, agent_id: str) -> SampleRun:
+    return SampleRun(
+        provider=provider,
+        model=model,
+        coval_run_id=run_id,
+        bucket_at=BUCKET_AT,
+        persona_id=persona_id,
+        agent_id=agent_id,
+    )
+
+
+# Two providers, each run once per persona (mirrors run = agent + persona + test_set).
+def _runs(*, include_google_male: bool = True) -> list[SampleRun]:
+    runs = [
+        _run("openai", "gpt-realtime", "RO_F", FEMALE, "AO"),
+        _run("openai", "gpt-realtime", "RO_M", MALE, "AO"),
+        _run("google", "gemini-live", "RG_F", FEMALE, "AG"),
+    ]
+    if include_google_male:
+        runs.append(_run("google", "gemini-live", "RG_M", MALE, "AG"))
+    return runs
 
 
 def _sims_payload(run_id: str, test_cases: list[str]) -> dict[str, Any]:
@@ -38,25 +62,31 @@ def _fake_client(
     test_cases_by_run: dict[str, list[str]],
     *,
     audio_404: frozenset[str] = frozenset(),
-    transcript: str = "is my alarm set for tomorrow morning",
+    empty_turns: frozenset[str] = frozenset(),
 ) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/simulations"):
-            flt = request.url.params["filter"]
-            run_id = flt.split('"')[1]
+            run_id = request.url.params["filter"].split('"')[1]
             return httpx.Response(200, json=_sims_payload(run_id, test_cases_by_run[run_id]))
+        if "blobs.test" in str(request.url):
+            return httpx.Response(200, content=b"RIFFfake")
         if path.endswith("/audio"):
             sim_id = path.rsplit("/", 2)[-2]
             if sim_id in audio_404:
                 return httpx.Response(404)
             return httpx.Response(200, json={"audio_url": "https://blobs.test/x.wav"})
-        if "blobs.test" in str(request.url):
-            return httpx.Response(200, content=b"RIFFfake")
-        return httpx.Response(
-            200,
-            json={"transcript": [{"role": "user", "content": transcript}], "test_case_id": "tc"},
+        # sim detail: /simulations/{sim_id}
+        sim_id = path.rsplit("/", 1)[-1]
+        turns = (
+            []
+            if sim_id in empty_turns
+            else [
+                {"role": "user", "content": "hi there"},
+                {"role": "assistant", "content": "how can i help"},
+            ]
         )
+        return httpx.Response(200, json={"transcript": turns})
 
     return httpx.AsyncClient(base_url="https://api.test/v1", transport=httpx.MockTransport(handler))
 
@@ -91,127 +121,157 @@ def _fake_storage() -> tuple[MagicMock, _FakeBucket]:
     return client, bucket
 
 
+async def _publish(
+    client: httpx.AsyncClient,
+    storage_client: MagicMock,
+    runs: list[SampleRun],
+    *,
+    rng_seed: int = 0,
+) -> int:
+    return await publish_tick_sample(
+        client,
+        bucket_name="bkt",
+        test_set_id=TEST_SET,
+        runs=runs,
+        rng=random.Random(rng_seed),
+        storage_client=storage_client,
+        download_client=client,
+    )
+
+
 @pytest.mark.asyncio
-async def test_copies_shared_clip_for_all_providers() -> None:
+async def test_publishes_complete_conversation_for_all_providers() -> None:
     storage_client, bucket = _fake_storage()
-    async with _fake_client({"RO": ["a", "b", "c"], "RG": ["b", "c", "d"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(7),
-            storage_client=storage_client,
-            download_client=client,
-        )
+    cases = {"RO_F": ["b", "c"], "RG_F": ["b", "c"], "RO_M": ["b", "c"], "RG_M": ["b", "c"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    tick = "2026-07-17T00:00:00Z"
-    assert f"{PREFIX}/{tick}/openai.wav" in bucket.objects
-    assert f"{PREFIX}/{tick}/google.wav" in bucket.objects
+    assert f"{PREFIX}/{TICK}/openai.wav" in bucket.objects
+    assert f"{PREFIX}/{TICK}/google.wav" in bucket.objects
 
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{tick}/manifest.json"])
-    assert manifest["bucket_at"] == tick
-    assert manifest["test_case_id"] in {"b", "c"}  # only shared clips eligible
-    assert manifest["transcript"] == "is my alarm set for tomorrow morning"
-    assert manifest["input_audio_url"].endswith("/s2s-v1/audio/s2s-v1-0001.wav")
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert manifest["schema_version"] == 2
+    assert manifest["bucket_at"] == TICK
+    assert manifest["test_set_id"] == TEST_SET
+    assert manifest["persona_name"] in {"Standard Female", "Standard Male"}
+    assert manifest["input_audio_url"] is None
+    assert "transcript" not in manifest  # dropped in v2
+    assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
+    for rec in manifest["recordings"]:
+        assert rec["agent_id"] in {"AO", "AG"}
+        assert [t["index"] for t in rec["turns"]] == [0, 1]
+        assert [t["role"] for t in rec["turns"]] == ["user", "assistant"]
+
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
+
+
+@pytest.mark.asyncio
+async def test_conversation_key_never_mixes_personas() -> None:
+    # Female shares only "b"; male shares only "d" — the pick must stay within one persona.
+    storage_client, bucket = _fake_storage()
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["d"], "RG_M": ["d"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 2
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert (manifest["persona_name"], manifest["test_case_id"]) in {
+        ("Standard Female", "b"),
+        ("Standard Male", "d"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_incomplete_persona_is_skipped_and_other_is_published() -> None:
+    # Female's openai audio is missing → female can never complete → male is published.
+    storage_client, bucket = _fake_storage()
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
+    async with _fake_client(cases, audio_404=frozenset({"RO_F-b"})) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 2
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert manifest["persona_name"] == "Standard Male"
+    assert manifest["test_case_id"] == "c"
     assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
 
-    index = json.loads(bucket.objects[samples.INDEX_KEY])
-    assert index == [tick]
-
 
 @pytest.mark.asyncio
-async def test_deterministic_pick_under_seeded_rng() -> None:
-    picks = set()
-    for _ in range(3):
-        storage_client, bucket = _fake_storage()
-        async with _fake_client({"RO": ["a", "b", "c"], "RG": ["a", "b", "c"]}) as client:
-            await copy_tick_samples(
-                client,
-                bucket_name="bkt",
-                runs=RUNS,
-                rng=random.Random(42),
-                storage_client=storage_client,
-                download_client=client,
-            )
-        manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
-        picks.add(manifest["test_case_id"])
-    assert len(picks) == 1
-
-
-@pytest.mark.asyncio
-async def test_no_shared_clip_stores_nothing() -> None:
+async def test_no_complete_conversation_publishes_nothing() -> None:
+    # Every candidate has a provider missing audio → no partial sample, nothing stored.
     storage_client, bucket = _fake_storage()
-    async with _fake_client({"RO": ["a"], "RG": ["b"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
+    async with _fake_client(cases, audio_404=frozenset({"RO_F-b", "RO_M-c"})) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 0
+    assert f"{PREFIX}/{TICK}/manifest.json" not in bucket.objects
+
+
+@pytest.mark.asyncio
+async def test_empty_transcript_counts_as_incomplete() -> None:
+    # Only the female persona is eligible, but one provider's transcript is empty → skip.
+    storage_client, bucket = _fake_storage()
+    runs = [
+        _run("openai", "gpt-realtime", "RO_F", FEMALE, "AO"),
+        _run("google", "gemini-live", "RG_F", FEMALE, "AG"),
+    ]
+    async with _fake_client(
+        {"RO_F": ["b"], "RG_F": ["b"]}, empty_turns=frozenset({"RO_F-b"})
+    ) as client:
+        stored = await _publish(client, storage_client, runs)
+
     assert stored == 0
     assert bucket.objects == {}
 
 
 @pytest.mark.asyncio
-async def test_missing_audio_ships_partial_manifest() -> None:
+async def test_persona_missing_a_provider_is_skipped() -> None:
+    # No google male run → male persona lacks a provider → only female is eligible.
     storage_client, bucket = _fake_storage()
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}, audio_404=frozenset({"RO-b"})) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 1
-    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
-    assert [r["provider"] for r in manifest["recordings"]] == ["google"]
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, _runs(include_google_male=False))
+
+    assert stored == 2
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert manifest["persona_name"] == "Standard Female"
 
 
 @pytest.mark.asyncio
-async def test_unknown_transcript_omits_input_audio_url() -> None:
+async def test_no_shared_conversation_stores_nothing() -> None:
     storage_client, bucket = _fake_storage()
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}, transcript="not in the manifest") as client:
-        await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
-    assert manifest["input_audio_url"] is None
-    assert manifest["transcript"] == "not in the manifest"
+    cases = {"RO_F": ["a"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["d"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 0
+    assert bucket.objects == {}
 
 
 @pytest.mark.asyncio
-async def test_index_prepends_and_dedupes() -> None:
+async def test_existing_manifest_is_never_overwritten() -> None:
+    storage_client, bucket = _fake_storage()
+    bucket.objects[f"{PREFIX}/{TICK}/manifest.json"] = b'{"sentinel": true}'
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"], "RG_M": ["b"]}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 0
+    assert bucket.objects[f"{PREFIX}/{TICK}/manifest.json"] == b'{"sentinel": true}'
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]  # index repaired
+
+
+@pytest.mark.asyncio
+async def test_index_prepends_existing_history() -> None:
     storage_client, bucket = _fake_storage()
     bucket.objects[samples.INDEX_KEY] = json.dumps(["2026-07-16T00:00:00Z"]).encode()
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
-        await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-        await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    index = json.loads(bucket.objects[samples.INDEX_KEY])
-    assert index == ["2026-07-17T00:00:00Z", "2026-07-16T00:00:00Z"]
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"], "RG_M": ["b"]}
+    async with _fake_client(cases) as client:
+        await _publish(client, storage_client, _runs())
+
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK, "2026-07-16T00:00:00Z"]
 
 
 @pytest.mark.asyncio
@@ -219,177 +279,11 @@ async def test_never_raises_on_total_failure() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
 
-    storage_client, _ = _fake_storage()
-    async with httpx.AsyncClient(
-        base_url="https://api.test/v1", transport=httpx.MockTransport(handler)
-    ) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 0
-
-
-@pytest.mark.asyncio
-async def test_existing_manifest_is_never_overwritten() -> None:
-    storage_client, bucket = _fake_storage()
-    tick = "2026-07-17T00:00:00Z"
-    bucket.objects[f"{PREFIX}/{tick}/manifest.json"] = b'{"sentinel": true}'
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 0
-    assert bucket.objects[f"{PREFIX}/{tick}/manifest.json"] == b'{"sentinel": true}'
-
-
-@pytest.mark.asyncio
-async def test_ambiguous_transcript_omits_input_audio_url() -> None:
-    storage_client, bucket = _fake_storage()
-    async with _fake_client(
-        {"RO": ["b"], "RG": ["b"]}, transcript="what is the weather now"
-    ) as client:
-        await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
-    assert manifest["input_audio_url"] is None
-
-
-@pytest.mark.asyncio
-async def test_index_read_failure_preserves_history() -> None:
-    storage_client, bucket = _fake_storage()
-    bucket.objects[samples.INDEX_KEY] = json.dumps(["2026-07-16T00:00:00Z"]).encode()
-    bucket.fail_reads.add(samples.INDEX_KEY)
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 2
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == ["2026-07-16T00:00:00Z"]
-    assert f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json" in bucket.objects
-
-
-@pytest.mark.asyncio
-async def test_fetch_failure_retries_once_and_succeeds() -> None:
-    attempts = {"audio": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path.endswith("/simulations"):
-            run_id = request.url.params["filter"].split('"')[1]
-            return httpx.Response(200, json=_sims_payload(run_id, ["b"]))
-        if path.endswith("/audio"):
-            attempts["audio"] += 1
-            if attempts["audio"] == 1:
-                return httpx.Response(500)
-            return httpx.Response(200, json={"audio_url": "https://blobs.test/x.wav"})
-        if "blobs.test" in str(request.url):
-            return httpx.Response(200, content=b"RIFFfake")
-        return httpx.Response(
-            200, json={"transcript": [{"role": "user", "content": "hi"}], "test_case_id": "b"}
-        )
-
     storage_client, bucket = _fake_storage()
     async with httpx.AsyncClient(
         base_url="https://api.test/v1", transport=httpx.MockTransport(handler)
     ) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 2
-    assert attempts["audio"] == 3  # provider one: fail+retry; provider two: first try
+        stored = await _publish(client, storage_client, _runs())
 
-
-@pytest.mark.asyncio
-async def test_tick_exists_repairs_missing_index() -> None:
-    storage_client, bucket = _fake_storage()
-    tick = "2026-07-17T00:00:00Z"
-    bucket.objects[f"{PREFIX}/{tick}/manifest.json"] = b'{"sentinel": true}'
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
     assert stored == 0
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [tick]
-    assert bucket.objects[f"{PREFIX}/{tick}/manifest.json"] == b'{"sentinel": true}'
-
-
-@pytest.mark.asyncio
-async def test_malformed_index_is_preserved() -> None:
-    storage_client, bucket = _fake_storage()
-    bucket.objects[samples.INDEX_KEY] = b'{"not": "a list"}'
-    async with _fake_client({"RO": ["b"], "RG": ["b"]}) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 2
-    assert bucket.objects[samples.INDEX_KEY] == b'{"not": "a list"}'
-
-
-@pytest.mark.asyncio
-async def test_sims_list_failure_drops_only_that_provider() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        path = request.url.path
-        if path.endswith("/simulations"):
-            run_id = request.url.params["filter"].split('"')[1]
-            if run_id == "RO":
-                return httpx.Response(500)
-            return httpx.Response(200, json=_sims_payload(run_id, ["b"]))
-        if path.endswith("/audio"):
-            return httpx.Response(200, json={"audio_url": "https://blobs.test/x.wav"})
-        if "blobs.test" in str(request.url):
-            return httpx.Response(200, content=b"RIFFfake")
-        return httpx.Response(
-            200, json={"transcript": [{"role": "user", "content": "hi"}], "test_case_id": "b"}
-        )
-
-    storage_client, bucket = _fake_storage()
-    async with httpx.AsyncClient(
-        base_url="https://api.test/v1", transport=httpx.MockTransport(handler)
-    ) as client:
-        stored = await copy_tick_samples(
-            client,
-            bucket_name="bkt",
-            runs=RUNS,
-            rng=random.Random(0),
-            storage_client=storage_client,
-            download_client=client,
-        )
-    assert stored == 1
-    manifest = json.loads(bucket.objects[f"{PREFIX}/2026-07-17T00:00:00Z/manifest.json"])
-    assert [r["provider"] for r in manifest["recordings"]] == ["google"]
+    assert bucket.objects == {}
