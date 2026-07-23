@@ -374,6 +374,21 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _DIAR),
         status=_ACTIVE,
     ),
+    # Pre-Velma-2 ids; retired so their orphaned result rows stay off the site.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="modulate",
+        model="english-fast-transcription-streaming",
+        tags=(_STREAMING,),
+        status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="modulate",
+        model="multilingual-transcription-streaming",
+        tags=(_STREAMING, _MULTI, _DIAR),
+        status=_RETIRED,
+    ),
     #######
     # TTS #
     #######
