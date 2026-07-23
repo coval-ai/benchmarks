@@ -61,6 +61,7 @@ from coval_bench.registries import (
     RegisteredModel,
     Source,
 )
+from coval_bench.runner.artifacts import write_run_artifact
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -821,6 +822,46 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
             return
 
 
+async def _write_run_artifact_if_enabled(
+    *,
+    settings: Settings,
+    run_id: int,
+    runner_sha: str,
+    dataset_id: str,
+    dataset_sha256: str,
+    benchmark_kind: str,
+    smoke: bool,
+    scheduled_at: datetime | None,
+    started_at: datetime,
+    finished_at: datetime,
+    status: str,
+    results: list[Any],
+) -> None:
+    """Best-effort local artifact write; DB writes remain the source of truth."""
+    if settings.run_artifact_dir is None:
+        return
+    try:
+        artifact_path = await asyncio.to_thread(
+            write_run_artifact,
+            artifact_dir=settings.run_artifact_dir,
+            run_id=run_id,
+            runner_sha=runner_sha,
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_sha256,
+            benchmark_kind=benchmark_kind,
+            smoke=smoke,
+            scheduled_at=scheduled_at,
+            started_at=started_at,
+            finished_at=finished_at,
+            status=status,
+            results=results,
+        )
+    except Exception:
+        logger.warning("run_artifact_write_failed", exc_info=True)
+    else:
+        logger.info("run_artifact_written", path=str(artifact_path))
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -1138,6 +1179,20 @@ async def run_benchmarks(
                 success_count=success_count,
                 fail_count=fail_count,
             )
+            await _write_run_artifact_if_enabled(
+                settings=settings,
+                run_id=run_id,
+                runner_sha=settings.runner_sha,
+                dataset_id=run_dataset_id,
+                dataset_sha256=dataset_sha256,
+                benchmark_kind=benchmark_kind,
+                smoke=smoke,
+                scheduled_at=scheduled_at,
+                started_at=started_at,
+                finished_at=finished_at,
+                status=str(final_status),
+                results=typed_results,
+            )
 
             duration_s = (finished_at - started_at).total_seconds()
             logger.info(
@@ -1194,6 +1249,20 @@ async def run_benchmarks(
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
+            await _write_run_artifact_if_enabled(
+                settings=settings,
+                run_id=run_id,
+                runner_sha=settings.runner_sha,
+                dataset_id=run_dataset_id,
+                dataset_sha256=dataset_sha256,
+                benchmark_kind=benchmark_kind,
+                smoke=smoke,
+                scheduled_at=scheduled_at,
+                started_at=started_at,
+                finished_at=finished_at,
+                status=str(RunStatus.PARTIAL),
+                results=typed_results,
+            )
             logger.warning(
                 "benchmark_run_finished_early_sigterm",
                 status=str(RunStatus.PARTIAL),
@@ -1232,6 +1301,7 @@ async def run_benchmarks(
             # metric), update run row, then re-raise so the job exits non-zero.
             err_msg = _truncate(str(exc))
             log_run_failed(err_msg, exc)
+            typed_results = [r for r in all_results if isinstance(r, Result)]
             try:
                 await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
             except Exception as write_exc:
@@ -1239,6 +1309,20 @@ async def run_benchmarks(
                     "run_row_update_failed_after_failure",
                     exc_info=write_exc,
                 )
+            await _write_run_artifact_if_enabled(
+                settings=settings,
+                run_id=run_id,
+                runner_sha=settings.runner_sha,
+                dataset_id=run_dataset_id,
+                dataset_sha256=dataset_sha256,
+                benchmark_kind=benchmark_kind,
+                smoke=smoke,
+                scheduled_at=scheduled_at,
+                started_at=started_at,
+                finished_at=datetime.now(tz=UTC),
+                status=str(RunStatus.FAILED),
+                results=typed_results,
+            )
             _emit_posthog(
                 posthog_client,
                 "benchmark_run_failed",
