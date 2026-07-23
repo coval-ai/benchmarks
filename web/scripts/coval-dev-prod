@@ -83,16 +83,11 @@ else
   fi
 fi
 
-# --- 3. install deps only when they're stale or missing ---
-if [ ! -d node_modules ] \
-  || [ pnpm-lock.yaml -nt node_modules ] \
-  || [ package.json -nt node_modules ] \
-  || { [ -f pnpm-workspace.yaml ] && [ pnpm-workspace.yaml -nt node_modules ]; }; then
-  echo "▶ deps     : installing (node_modules missing or a manifest changed)"
-  pnpm install
-else
-  echo "▶ deps     : up to date, skipping install"
-fi
+# --- 3. install deps — mtime heuristics are unreliable across branch switches,
+# so let pnpm decide: `pnpm install` is a fast no-op when the lockfile and
+# node_modules already match, and it installs whenever they don't. ---
+echo "▶ deps     : pnpm install"
+pnpm install
 
 # --- 4. start the dev server ---
 echo "▶ starting : pnpm dev"
