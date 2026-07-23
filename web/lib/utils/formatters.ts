@@ -6,25 +6,28 @@
  */
 
 /**
- * Format a timestamp as HH:MM in the viewer's local timezone (24-hour).
+ * Format a timestamp as HH:MM (24-hour). Defaults to the viewer's local timezone;
+ * pass `timeZone` (e.g. "UTC") to render in a fixed zone instead.
  *
- * `Intl.DateTimeFormat` defaults to the runtime timezone when none is given,
- * so chart axes always reflect what time the viewer was looking at the page —
- * not UTC, not the server's TZ.
+ * `Intl.DateTimeFormat` defaults to the runtime timezone when none is given, so
+ * axes reflect the viewer's local time unless a `timeZone` is supplied.
  */
-export function formatTime(timestamp: number): string {
+export function formatTime(timestamp: number, timeZone?: string): string {
   return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false
+    hour12: false,
+    timeZone
   });
 }
 
-/** Short month-day label (e.g. "Jun 5") for date-scale axis ticks. */
-export function formatDate(timestamp: number): string {
+/** Short month-day label (e.g. "Jun 5") for date-scale axis ticks. Defaults to the
+ * viewer's local timezone; pass `timeZone` (e.g. "UTC") to render in a fixed zone. */
+export function formatDate(timestamp: number, timeZone?: string): string {
   return new Date(timestamp).toLocaleDateString(undefined, {
     month: "short",
-    day: "numeric"
+    day: "numeric",
+    timeZone
   });
 }
 
@@ -32,12 +35,13 @@ export function formatDate(timestamp: number): string {
  * Same as {@link formatTime} but includes seconds — used in tooltips where
  * the user is hovering a specific data point and wants higher precision.
  */
-export function formatTimeWithSeconds(timestamp: number): string {
+export function formatTimeWithSeconds(timestamp: number, timeZone?: string): string {
   return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false
+    hour12: false,
+    timeZone
   });
 }
 

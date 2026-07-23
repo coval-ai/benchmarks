@@ -34,9 +34,11 @@ interface TimelineTooltipProps extends Partial<Pick<
   labelText?: string;
   /** Non-latency values: overrides the default "123ms" rendering. */
   formatValue?: (value: number) => string;
+  /** IANA timezone (e.g. "UTC") for the timestamp label; defaults to the viewer's local zone. */
+  timeZone?: string;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, labelText, formatValue }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, labelText, formatValue, timeZone }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -87,8 +89,8 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
       >
         {labelText ??
           (showDate
-            ? `${formatDate(Number(label))} ${formatTimeWithSeconds(Number(label))}`
-            : formatTimeWithSeconds(Number(label)))}
+            ? `${formatDate(Number(label), timeZone)} ${formatTimeWithSeconds(Number(label), timeZone)}`
+            : formatTimeWithSeconds(Number(label), timeZone))}
       </p>
       <div
         className="tooltip-scroll"

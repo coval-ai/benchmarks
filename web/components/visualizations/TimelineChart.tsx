@@ -410,7 +410,12 @@ const TimelineChart: React.FC = () => {
         .filter((m) => m.ts >= windowStart && m.ts <= windowEnd),
     [activeMetricKey, windowStart, windowEnd]
   );
-  const tzAbbr = getLocalTimeZoneAbbr();
+  // S2S buckets are stored in UTC (runner + infra convention), so render the S2S
+  // timeline in UTC -- a midnight-UTC point rendered in a local zone behind UTC
+  // would slip to the previous day. STT/TTS keep the viewer's local time.
+  const isS2S = activeTab === "s2s";
+  const displayTz = isS2S ? "UTC" : undefined;
+  const tzAbbr = isS2S ? "UTC" : getLocalTimeZoneAbbr();
   const zoomX = zoom?.x;
   const zoomY = zoom?.y;
 
@@ -983,7 +988,7 @@ const TimelineChart: React.FC = () => {
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
                 tickFormatter={(value) =>
-                  dateTicks ? formatDate(value) : formatTime(value)
+                  dateTicks ? formatDate(value, displayTz) : formatTime(value, displayTz)
                 }
                 label={{
                   value: xAxisLabel,
@@ -1016,6 +1021,7 @@ const TimelineChart: React.FC = () => {
                     showDate={dateScale}
                     dimmedKeys={dimmedLegendKeys}
                     compact
+                    timeZone={displayTz}
                   />
                 }
                 active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
@@ -1172,6 +1178,7 @@ const TimelineChart: React.FC = () => {
                 dimmedKeys={dimmedLegendKeys}
                 compact
                 interactionHint="tap axis to see all"
+                timeZone={displayTz}
               />
             </div>
           )}
@@ -1208,6 +1215,7 @@ const TimelineChart: React.FC = () => {
                 showDate={dateScale}
                 dimmedKeys={dimmedLegendKeys}
                 maxHeight={isMobile ? 106 : undefined}
+                timeZone={displayTz}
                 onModelClick={
                   page === "s2s"
                     ? (model, label) =>
@@ -1233,7 +1241,7 @@ const TimelineChart: React.FC = () => {
                 >
                   <p className="font-semibold">{hoveredMarker.change.title}</p>
                   <p className="mt-0.5 text-[10px] text-[var(--color-text-on-tooltip-secondary)]">
-                    Methodology change · {formatDate(hoveredMarker.ts)}
+                    Methodology change · {formatDate(hoveredMarker.ts, displayTz)}
                   </p>
                   <p className="mt-1.5">{hoveredMarker.change.detail}</p>
                 </div>
