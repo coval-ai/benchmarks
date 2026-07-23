@@ -481,7 +481,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="default_low",
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         on_prem=True,
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
