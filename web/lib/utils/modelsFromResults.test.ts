@@ -105,6 +105,47 @@ describe("buildModelsByProvider", () => {
     expect(out.openai).toEqual(["openai:gpt-realtime-whisper"]);
   });
 
+  it("does not include dedicated-inference catalogue models or data-backed entries", () => {
+    const catalogue = {
+      tts: [
+        {
+          provider: "baseten",
+          models: [
+            {
+              model: "qwen3-tts-1.7b",
+              disabled: false,
+              tags: [
+                {
+                  category: "source",
+                  value: "dedicated-inference",
+                  label: "Dedicated inference",
+                },
+              ],
+            },
+          ],
+        },
+        {
+          provider: "openai",
+          models: [{ model: "gpt-4o-mini-tts", disabled: false }],
+        },
+      ],
+      stt: [],
+      s2s: [],
+    };
+
+    const out = buildModelsByProvider(
+      [
+        entry("baseten", "qwen3-tts-1.7b"),
+        entry("openai", "gpt-4o-mini-tts"),
+      ],
+      "TTS",
+      catalogue as never
+    );
+
+    expect(out.baseten).toBeUndefined();
+    expect(out.openai).toEqual(["openai:gpt-4o-mini-tts"]);
+  });
+
   it("adds data-backed TTS models alongside catalogue models", () => {
     const catalogue = {
       stt: [],

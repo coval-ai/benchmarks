@@ -3,6 +3,7 @@
 
 import type { ProvidersApiResponse } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
+import { isDedicated } from "./facets";
 import { toModelKey } from "./formatters";
 
 /** Anything that names a (provider, model) pair — e.g. a ModelStatEntry. */
@@ -29,7 +30,8 @@ function modelIsEnabled(
   if (!providerInfo) return true;
 
   const modelInfo = providerInfo.models.find((item) => item.model === model);
-  return modelInfo?.disabled !== true;
+  if (!modelInfo) return true;
+  return modelInfo.disabled !== true && !isDedicated(modelInfo.tags ?? []);
 }
 
 function addModel(
@@ -60,7 +62,7 @@ function buildModelsByProviderFromCatalogue(
         : providers.tts) ?? [];
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
-      if (modelInfo.disabled) continue;
+      if (modelInfo.disabled || isDedicated(modelInfo.tags ?? [])) continue;
       addModel(modelsByProvider, providerInfo.provider, modelInfo.model);
     }
   }
