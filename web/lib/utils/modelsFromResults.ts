@@ -31,6 +31,8 @@ function modelIsEnabled(
 
   const modelInfo = providerInfo.models.find((item) => item.model === model);
   if (!modelInfo) return true;
+  // Dedicated endpoints stay off public dashboards even if result rows exist.
+  // The frontend never substitutes or surfaces synthetic benchmark values.
   return modelInfo.disabled !== true && !isDedicated(modelInfo.tags ?? []);
 }
 
@@ -62,6 +64,7 @@ function buildModelsByProviderFromCatalogue(
         : providers.tts) ?? [];
   for (const providerInfo of catalogue) {
     for (const modelInfo of providerInfo.models) {
+      // Apply the same rule before aggregate rows are merged below.
       if (modelInfo.disabled || isDedicated(modelInfo.tags ?? [])) continue;
       addModel(modelsByProvider, providerInfo.provider, modelInfo.model);
     }

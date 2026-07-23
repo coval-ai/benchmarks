@@ -105,7 +105,12 @@ describe("buildModelsByProvider", () => {
     expect(out.openai).toEqual(["openai:gpt-realtime-whisper"]);
   });
 
-  it("does not include dedicated-inference catalogue models or data-backed entries", () => {
+  it("does not include dedicated STT or TTS models even when aggregate entries exist", () => {
+    const dedicatedTag = {
+      category: "source",
+      value: "dedicated-inference",
+      label: "Dedicated inference",
+    };
     const catalogue = {
       tts: [
         {
@@ -114,13 +119,7 @@ describe("buildModelsByProvider", () => {
             {
               model: "qwen3-tts-1.7b",
               disabled: false,
-              tags: [
-                {
-                  category: "source",
-                  value: "dedicated-inference",
-                  label: "Dedicated inference",
-                },
-              ],
+              tags: [dedicatedTag],
             },
           ],
         },
@@ -129,11 +128,26 @@ describe("buildModelsByProvider", () => {
           models: [{ model: "gpt-4o-mini-tts", disabled: false }],
         },
       ],
-      stt: [],
+      stt: [
+        {
+          provider: "baseten",
+          models: [
+            {
+              model: "whisper-large-v3",
+              disabled: false,
+              tags: [dedicatedTag],
+            },
+          ],
+        },
+        {
+          provider: "deepgram",
+          models: [{ model: "nova-3", disabled: false }],
+        },
+      ],
       s2s: [],
     };
 
-    const out = buildModelsByProvider(
+    const tts = buildModelsByProvider(
       [
         entry("baseten", "qwen3-tts-1.7b"),
         entry("openai", "gpt-4o-mini-tts"),
@@ -142,8 +156,19 @@ describe("buildModelsByProvider", () => {
       catalogue as never
     );
 
-    expect(out.baseten).toBeUndefined();
-    expect(out.openai).toEqual(["openai:gpt-4o-mini-tts"]);
+    const stt = buildModelsByProvider(
+      [
+        entry("baseten", "whisper-large-v3"),
+        entry("deepgram", "nova-3"),
+      ],
+      "STT",
+      catalogue as never
+    );
+
+    expect(tts.baseten).toBeUndefined();
+    expect(tts.openai).toEqual(["openai:gpt-4o-mini-tts"]);
+    expect(stt.baseten).toBeUndefined();
+    expect(stt.deepgram).toEqual(["deepgram:nova-3"]);
   });
 
   it("adds data-backed TTS models alongside catalogue models", () => {
