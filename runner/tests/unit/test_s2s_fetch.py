@@ -500,16 +500,42 @@ def test_instruction_rows_maps_verdicts() -> None:
         {"simulation_output_id": "s3", "value": "UNKNOWN"},
     ]
     rows = fetch_v2v._instruction_rows(values, run_pk=1, coval_run_id="R1", spec=SPEC)
-    assert [r.metric_value for r in rows] == [100.0, 0.0, None]
-    assert [r.status for r in rows] == [
-        ResultStatus.SUCCESS,  # YES pass
-        ResultStatus.SUCCESS,  # NO counts against the rate
-        ResultStatus.FAILED,  # UNKNOWN excluded from the pool
-    ]
-    assert [r.audio_filename for r in rows] == ["R1/s1", "R1/s2", "R1/s3"]
+    # UNKNOWN produces no row (excluded from the pool); only YES/NO are written.
+    assert [r.metric_value for r in rows] == [100.0, 0.0]
+    assert [r.status for r in rows] == [ResultStatus.SUCCESS, ResultStatus.SUCCESS]
+    assert [r.audio_filename for r in rows] == ["R1/s1", "R1/s2"]
     assert all(
         r.metric_type == Metric.INSTRUCTION_FOLLOWING and r.metric_units == "percent" for r in rows
     )
+
+
+def test_instruction_verdict_raises_on_unexpected() -> None:
+    with pytest.raises(fetch_v2v.InvalidInstructionVerdict):
+        fetch_v2v._instruction_verdict("MAYBE")
+    with pytest.raises(fetch_v2v.InvalidInstructionVerdict):
+        fetch_v2v._instruction_verdict(None)
+
+
+def test_instruction_id_mismatch() -> None:
+    lat = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s2"}]
+    assert fetch_v2v._instruction_id_mismatch(lat, lat) is None
+    # different population (same count) -> diff reported
+    ins = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s3"}]
+    diff = fetch_v2v._instruction_id_mismatch(lat, ins)
+    assert diff == {
+        "missing_instruction_ids": ["s2"],
+        "extra_instruction_ids": ["s3"],
+        "duplicate_instruction_ids": False,
+    }
+    # duplicate id
+    dup = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s1"}]
+    assert fetch_v2v._instruction_id_mismatch(lat, dup)["duplicate_instruction_ids"] is True
+
+
+def test_dataset_identity() -> None:
+    assert fetch_v2v._dataset_identity("TS1") == ("s2s-multiturn-v1", "TS1")
+    dataset_id, _sha = fetch_v2v._dataset_identity(None)
+    assert dataset_id == "s2s-v1"
 
 
 @pytest.mark.asyncio
@@ -544,11 +570,83 @@ async def test_ingest_run_writes_instruction_rows() -> None:
     latency_rows = [r for r in rows if r.metric_type == Metric.V2V]
     instr_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(latency_rows) == 3
-    assert len(instr_rows) == 3
+    assert len(instr_rows) == 2  # UNKNOWN (s2) excluded from the pool
     by_sim = {r.audio_filename: (r.metric_value, r.status) for r in instr_rows}
     assert by_sim["R1/s0"] == (100.0, ResultStatus.SUCCESS)
     assert by_sim["R1/s1"] == (0.0, ResultStatus.SUCCESS)
-    assert by_sim["R1/s2"] == (None, ResultStatus.FAILED)
+    assert "R1/s2" not in by_sim  # UNKNOWN produced no row
+
+
+def _multi_metric_run(
+    latency: list[dict[str, Any]], instruction: list[dict[str, Any]]
+) -> dict[str, Any]:
+    return {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {"metrics": {"MID": {"values": latency}, "IID": {"values": instruction}}},
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_id_mismatch_keeps_latency() -> None:
+    writer = _stub_writer()
+    latency = [
+        {"simulation_output_id": "s0", "value": 0.5},
+        {"simulation_output_id": "s1", "value": 0.5},
+    ]
+    instruction = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"simulation_output_id": "s2", "value": "YES"},  # s2 not in latency -> mismatch
+    ]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED  # latency intact
+    rows = writer.record_results.await_args.args[0]
+    assert all(r.metric_type == Metric.V2V for r in rows)  # instruction skipped on mismatch
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": "s0", "value": 0.5}]
+    instruction = [{"simulation_output_id": "s0", "value": "GARBAGE"}]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED  # latency kept
+    rows = writer.record_results.await_args.args[0]
+    assert all(r.metric_type == Metric.V2V for r in rows)  # instruction discarded
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_requires_id_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    # instruction id set but test-set id missing -> startup failure (must be paired).
+    settings = Settings(
+        runner_sha="test",
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_instruction_metric_id="IID",
+    )
+    with pytest.raises(RuntimeError, match="set together"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
 
 
 @pytest.mark.asyncio

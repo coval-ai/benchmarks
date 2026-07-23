@@ -34,6 +34,9 @@ logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
 # The dataset the S2S sims run against (matches the packaged manifest name).
 DATASET_ID = "s2s-v1"
+# Multi-turn runs have no local manifest -- they're keyed to the Coval test set --
+# so they use a distinct dataset id and never pool with single-turn s2s-v1.
+DATASET_ID_MULTITURN = "s2s-multiturn-v1"
 
 # Ingest window: how far back one tick looks for not-yet-ingested runs, and
 # how many list results that scan reads. Two periods (with a one-day floor)
@@ -91,6 +94,19 @@ def _dataset_sha256() -> str:
     except Exception:
         logger.warning("dataset_sha256_failed", dataset_id=DATASET_ID, exc_info=True)
         return "unknown"
+
+
+def _dataset_identity(test_set_id: str | None) -> tuple[str, str]:
+    """Dataset id + provenance for the fetched rows.
+
+    Multi-turn runs are keyed to their Coval test set, not the single-turn SLURP
+    manifest, so they get their own dataset id (never pooling with s2s-v1) and
+    record the test-set id as provenance. Without a test set (legacy latency-only
+    mode) the rows stay under the packaged s2s-v1 manifest.
+    """
+    if test_set_id:
+        return DATASET_ID_MULTITURN, test_set_id
+    return DATASET_ID, _dataset_sha256()
 
 
 def _parse_time(raw: object) -> datetime | None:
@@ -196,20 +212,49 @@ def _result_rows(
     return rows
 
 
-def _instruction_verdict(raw: object) -> bool | None:
-    """Classify a binary judge's per-conversation value into pass/fail/excluded.
+class InvalidInstructionVerdict(Exception):
+    """A run's instruction metric returned a value outside YES/NO/UNKNOWN."""
 
-    YES -> True (pass), explicit UNKNOWN -> None (excluded from the pool),
-    everything else -- NO, or a missing/unexpected value -> False (counts
-    against the rate). A binary judge's output type is string, so the run
-    endpoint returns the verdict verbatim; there is no numeric form to handle.
+
+def _instruction_verdict(raw: object) -> bool | None:
+    """Classify a binary judge verdict: YES -> True, NO -> False, UNKNOWN -> None.
+
+    UNKNOWN (None) is excluded from the pass rate. A binary judge only ever emits
+    canonical YES/NO/UNKNOWN, so anything else violates the contract and raises,
+    rather than being silently scored as a miss.
     """
-    verdict = raw.strip().upper() if isinstance(raw, str) else None
-    if verdict == "YES":
+    normalized = raw.strip().upper() if isinstance(raw, str) else raw
+    if normalized == "YES":
         return True
-    if verdict == "UNKNOWN":
+    if normalized == "NO":
+        return False
+    if normalized == "UNKNOWN":
         return None
-    return False
+    raise InvalidInstructionVerdict(f"unexpected instruction verdict: {raw!r}")
+
+
+def _instruction_id_mismatch(
+    latency_values: list[dict[str, Any]], instruction_values: list[dict[str, Any]]
+) -> dict[str, object] | None:
+    """None if instruction's sim-id set matches latency exactly; else the diff.
+
+    Equal counts can still be different conversations, so compare the id sets and
+    reject duplicates. A mismatch means the pass rate would not be over the same
+    population as latency, so instruction is skipped for the run.
+    """
+    lat_ids = [v.get("simulation_output_id") for v in latency_values]
+    ins_ids = [v.get("simulation_output_id") for v in instruction_values]
+    lat_set, ins_set = set(lat_ids), set(ins_ids)
+    duplicate = len(ins_ids) != len(ins_set)
+    missing = sorted(str(x) for x in lat_set - ins_set)
+    extra = sorted(str(x) for x in ins_set - lat_set)
+    if not duplicate and not missing and not extra:
+        return None
+    return {
+        "missing_instruction_ids": missing,
+        "extra_instruction_ids": extra,
+        "duplicate_instruction_ids": duplicate,
+    }
 
 
 def _instruction_rows(
@@ -219,29 +264,17 @@ def _instruction_rows(
     coval_run_id: str,
     spec: AgentSpec,
 ) -> list[Result]:
-    """Map a run's per-conversation instruction verdicts to Result rows.
+    """Map a run's per-conversation verdicts to instruction Result rows.
 
-    Pass is stored as 100.0 and fail as 0.0 (percent); an explicit UNKNOWN
-    becomes a FAILED row and drops out of the pool. The aggregate mean is then
-    the pass rate = YES / (total - UNKNOWN).
+    YES -> 100.0, NO -> 0.0 (both SUCCESS, both in the pool); UNKNOWN produces no
+    row (excluded), so the aggregate mean is YES / (YES + NO). Raises
+    InvalidInstructionVerdict on any value outside the contract.
     """
     rows: list[Result] = []
     for i, v in enumerate(values):
-        raw = v.get("value")
-        verdict = _instruction_verdict(raw)
-        if verdict is None:
-            metric_value: float | None = None
-            status = ResultStatus.FAILED
-        else:
-            metric_value = 100.0 if verdict else 0.0
-            status = ResultStatus.SUCCESS
-            if not verdict and not (isinstance(raw, str) and raw.strip().upper() == "NO"):
-                logger.warning(
-                    "instruction_unexpected_value",
-                    provider=spec.provider,
-                    coval_run_id=coval_run_id,
-                    value=raw,
-                )
+        verdict = _instruction_verdict(v.get("value"))
+        if verdict is None:  # UNKNOWN: excluded from the pool, no row written
+            continue
         sim_id = v.get("simulation_output_id")
         clip_key = f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}"
         rows.append(
@@ -252,9 +285,9 @@ def _instruction_rows(
                 benchmark=Benchmark.S2S,
                 metric_type=Metric.INSTRUCTION_FOLLOWING,
                 metric_units="percent",
-                metric_value=metric_value,
+                metric_value=100.0 if verdict else 0.0,
                 audio_filename=clip_key,
-                status=status,
+                status=ResultStatus.SUCCESS,
             )
         )
     return rows
@@ -268,6 +301,8 @@ async def _ingest_run(
     coval_run: CovalRun,
     metric_id: str,
     instruction_metric_id: str | None = None,
+    dataset_id: str = DATASET_ID,
+    dataset_sha256: str = "",
     runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
@@ -307,8 +342,8 @@ async def _ingest_run(
         scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         run_row = await writer.start_run(
             runner_sha=runner_sha,
-            dataset_id=DATASET_ID,
-            dataset_sha256=_dataset_sha256(),
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_sha256 or _dataset_sha256(),
             scheduled_at=scheduled_at,
         )
         if run_row.id is None:  # pragma: no cover -- start_run always returns an id
@@ -320,6 +355,7 @@ async def _ingest_run(
         if instruction_metric_id:
             instr = metrics.get(instruction_metric_id)
             if instr is None:
+                # Latency still lands; instruction stays retryable on a later scan.
                 logger.warning(
                     "instruction_metric_absent",
                     provider=spec.provider,
@@ -328,20 +364,31 @@ async def _ingest_run(
                 )
             else:
                 instr_values = cast("list[dict[str, Any]]", instr.get("values", []))
-                instruction_rows = _instruction_rows(
-                    instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
-                )
-                if len(instruction_rows) != len(rows):
-                    # Denominator should be the same conversation set as latency;
-                    # a mismatch means Coval graded a different count, so the pass
-                    # rate is no longer over the full sample.
+                mismatch = _instruction_id_mismatch(values, instr_values)
+                if mismatch is not None:
+                    # Different conversation population than latency -> skip
+                    # instruction (keep latency) so the rate stays comparable.
                     logger.warning(
-                        "instruction_count_mismatch",
+                        "instruction_id_mismatch",
                         provider=spec.provider,
                         coval_run_id=coval_run.run_id,
-                        latency=len(rows),
-                        instruction=len(instruction_rows),
+                        **mismatch,
                     )
+                else:
+                    try:
+                        instruction_rows = _instruction_rows(
+                            instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
+                        )
+                    except InvalidInstructionVerdict as exc:
+                        # Judge-contract violation: discard instruction for the
+                        # whole run (keep latency); retryable on a later scan.
+                        instruction_rows = []
+                        logger.warning(
+                            "instruction_verdict_invalid",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                            error=str(exc),
+                        )
         all_rows = rows + instruction_rows
         if all_rows:
             await writer.record_results(all_rows)
@@ -430,6 +477,7 @@ async def _fetch_one_provider(
         runs = await recent_completed_runs(
             client, agent_id, period_seconds=period_seconds, test_set_id=test_set_id
         )
+        dataset_id, dataset_sha256 = _dataset_identity(test_set_id)
 
         data_seen = False
         newest_data_at: datetime | None = None
@@ -459,6 +507,8 @@ async def _fetch_one_provider(
                 coval_run=coval_run,
                 metric_id=metric_id,
                 instruction_metric_id=instruction_metric_id,
+                dataset_id=dataset_id,
+                dataset_sha256=dataset_sha256,
                 runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )
@@ -514,8 +564,24 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     metric_id = settings.coval_s2s_latency_metric_id
     if not metric_id:
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
-    instruction_metric_id = settings.coval_s2s_instruction_metric_id
-    test_set_id = settings.coval_s2s_test_set_id
+    # Instruction ingestion and the test-set filter go together: instruction
+    # without the filter would pool other sims on the same agents into the S2S
+    # rows. Reject a blank (misconfigured) value and require the pair; both
+    # absent keeps the legacy latency-only behavior.
+    raw_instr = settings.coval_s2s_instruction_metric_id
+    raw_test_set = settings.coval_s2s_test_set_id
+    if (raw_instr is not None and not raw_instr.strip()) or (
+        raw_test_set is not None and not raw_test_set.strip()
+    ):
+        raise RuntimeError(
+            "coval_s2s_instruction_metric_id / coval_s2s_test_set_id must not be blank"
+        )
+    instruction_metric_id = raw_instr or None
+    test_set_id = raw_test_set or None
+    if bool(instruction_metric_id) != bool(test_set_id):
+        raise RuntimeError(
+            "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
+        )
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
