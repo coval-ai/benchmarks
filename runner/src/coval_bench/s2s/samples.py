@@ -250,20 +250,22 @@ async def _publish_tick_sample(
         storage_client = gcs.Client()
     bucket = storage_client.bucket(bucket_name)
 
-    tick_key = max(r.bucket_at for r in runs).strftime("%Y-%m-%dT%H:%M:%SZ")
-    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
-    if bucket.blob(manifest_key).exists():
-        # Idempotent repair: manifest published but the index update failed.
-        _update_index(bucket, tick_key)
-        logger.info("samples_tick_exists", tick=tick_key)
-        return 0
-
     # Uniform draw over the shared conversations of both personas; repick on any
     # incomplete provider so only a fully-complete conversation (audio + turns for
     # EVERY provider) is ever surfaced.
     rng.shuffle(pool)
     for persona_id, test_case_id in pool:
         prov_runs = runs_by_persona[persona_id]
+        # Key the sample by the CHOSEN conversation's own bucket, not the max across
+        # all personas: personas can straddle bucket boundaries, and the global max
+        # would store this sample under an unrelated (newer) tick and mislabel it.
+        tick_key = max(prov_runs[p].bucket_at for p in providers).strftime("%Y-%m-%dT%H:%M:%SZ")
+        manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+        if bucket.blob(manifest_key).exists():
+            # Idempotent repair: manifest published but the index update failed.
+            _update_index(bucket, tick_key)
+            logger.info("samples_tick_exists", tick=tick_key)
+            return 0
         staged: list[tuple[SampleRun, str, bytes, list[dict[str, Any]]]] = []
         for provider in sorted(providers):
             run = prov_runs[provider]
@@ -329,5 +331,5 @@ async def _publish_tick_sample(
         )
         return len(recordings)
 
-    logger.error("samples_no_complete_sample", tick=tick_key)
+    logger.error("samples_no_complete_sample")
     return 0
