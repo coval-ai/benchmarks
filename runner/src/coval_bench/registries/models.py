@@ -365,7 +365,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="english-fast-transcription-streaming",
         tags=(_STREAMING,),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_STT,
