@@ -739,6 +739,22 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="speechify",
+        model="simba-3.2",
+        voice="geffen_32",
+        tags=(_STREAMING, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="speechify",
+        model="simba-3.0",
+        voice="geffen_32",
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
