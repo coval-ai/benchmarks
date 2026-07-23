@@ -530,7 +530,9 @@ def test_instruction_id_mismatch() -> None:
     }
     # duplicate id
     dup = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s1"}]
-    assert fetch_v2v._instruction_id_mismatch(lat, dup)["duplicate_instruction_ids"] is True
+    dup_diff = fetch_v2v._instruction_id_mismatch(lat, dup)
+    assert dup_diff is not None
+    assert dup_diff["duplicate_instruction_ids"] is True
 
 
 def test_dataset_identity() -> None:
