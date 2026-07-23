@@ -12,11 +12,15 @@ import {
 } from "@/hooks/useSequencedPlayback";
 import { getModelColor } from "@/lib/utils/colors";
 import { toModelKey } from "@/lib/utils/formatters";
+import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
+import { ConversationTurns } from "./ConversationTurns";
 
 export interface SampleOutputItem {
   provider: string;
   model: string;
   url: string;
+  // Multi-turn (v2) only: this provider's own conversation transcript.
+  turns?: S2STurn[];
 }
 
 // Left/right chevron/fade visibility from scroll extents; remeasures on scroll,
@@ -68,6 +72,9 @@ export function SampleOutputs({
     () => items.map((i) => ({ key: i.provider, url: i.url })),
     [items]
   );
+  // Multi-turn manifests carry per-provider turns; widen the panes and show the
+  // conversation. All items in a manifest share a shape, so a single flag holds.
+  const conversation = items.some((i) => (i.turns?.length ?? 0) > 0);
   const viewportRef = useRef<HTMLDivElement>(null);
   const paneRefs = useRef<(HTMLDivElement | null)[]>([]);
 
@@ -112,7 +119,7 @@ export function SampleOutputs({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
-          Responses
+          {conversation ? "Conversation" : "Responses"}
         </p>
         <button
           type="button"
@@ -156,6 +163,8 @@ export function SampleOutputs({
           {items.map((item, i) => {
             const active = i === activeIndex;
             const playingThis = active && isPlaying;
+            const color = getModelColor(toModelKey(item.provider, item.model));
+            const turns = item.turns ?? [];
             return (
               <div
                 key={item.provider}
@@ -163,7 +172,9 @@ export function SampleOutputs({
                   paneRefs.current[i] = el;
                 }}
                 role="listitem"
-                className={`flex w-[180px] min-w-[180px] shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
+                className={`flex shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
+                  conversation ? "w-[300px] min-w-[300px]" : "w-[180px] min-w-[180px]"
+                } ${
                   active
                     ? "border-text-primary/40 bg-surface-secondary"
                     : "border-border-primary bg-surface-secondary/60"
@@ -172,7 +183,7 @@ export function SampleOutputs({
                 <div className="flex items-center gap-1.5">
                   <span
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: getModelColor(toModelKey(item.provider, item.model)) }}
+                    style={{ backgroundColor: color }}
                   />
                   <span className="truncate text-xs font-medium text-text-primary">
                     {normalizeProvider(item.provider)}
@@ -184,12 +195,17 @@ export function SampleOutputs({
                 <button
                   type="button"
                   onClick={() => (playingThis ? toggle() : playFrom(i))}
-                  className="mt-auto flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary"
+                  className={`flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary ${
+                    turns.length ? "" : "mt-auto"
+                  }`}
                   aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
                 >
                   {playingThis ? <Pause className="size-3" /> : <Play className="size-3" />}
                   <span>{playingThis ? "Playing" : "Play"}</span>
                 </button>
+                {turns.length ? (
+                  <ConversationTurns turns={turns} accentColor={color} />
+                ) : null}
               </div>
             );
           })}
