@@ -34,6 +34,9 @@ logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
 # The dataset the S2S sims run against (matches the packaged manifest name).
 DATASET_ID = "s2s-v1"
+# Multi-turn runs have no local manifest -- they're keyed to the Coval test set --
+# so they use a distinct dataset id and never pool with single-turn s2s-v1.
+DATASET_ID_MULTITURN = "s2s-multiturn-v1"
 
 # Ingest window: how far back one tick looks for not-yet-ingested runs, and
 # how many list results that scan reads. Two periods (with a one-day floor)
@@ -93,6 +96,19 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
+def _dataset_identity(test_set_id: str | None) -> tuple[str, str]:
+    """Dataset id + provenance for the fetched rows.
+
+    Multi-turn runs are keyed to their Coval test set, not the single-turn SLURP
+    manifest, so they get their own dataset id (never pooling with s2s-v1) and
+    record the test-set id as provenance. Without a test set (legacy latency-only
+    mode) the rows stay under the packaged s2s-v1 manifest.
+    """
+    if test_set_id:
+        return DATASET_ID_MULTITURN, test_set_id
+    return DATASET_ID, _dataset_sha256()
+
+
 def _parse_time(raw: object) -> datetime | None:
     if not isinstance(raw, str):
         return None
@@ -115,19 +131,28 @@ def _bucket_start(at: datetime, period_seconds: int) -> datetime:
 
 
 async def recent_completed_runs(
-    client: httpx.AsyncClient, agent_id: str, *, period_seconds: int
+    client: httpx.AsyncClient,
+    agent_id: str,
+    *,
+    period_seconds: int,
+    test_set_id: str | None = None,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
     List returns the summary view newest-first; filter by agent_id + status
-    (tags are not filterable). Runs without a parseable create_time are kept:
-    better to ingest with a fetch-time slot than to drop data.
+    (tags are not filterable). ``test_set_id`` narrows to one test set so other
+    sims on the same agents (e.g. the single-turn set) are not ingested. Runs
+    without a parseable create_time are kept: better to ingest with a fetch-time
+    slot than to drop data.
     """
     window_seconds = max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
+    filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
+    if test_set_id:
+        filt += f' AND test_set_id="{test_set_id}"'
     resp = await client.get(
         "/runs",
         params={
-            "filter": f'status="COMPLETED" AND agent_id="{agent_id}"',
+            "filter": filt,
             "order_by": "-create_time",
             "page_size": WINDOW_PAGE_SIZE,
         },
@@ -187,6 +212,87 @@ def _result_rows(
     return rows
 
 
+class InvalidInstructionVerdict(Exception):
+    """A run's instruction metric returned a value outside YES/NO/UNKNOWN."""
+
+
+def _instruction_verdict(raw: object) -> bool | None:
+    """Classify a binary judge verdict: YES -> True, NO -> False, UNKNOWN -> None.
+
+    UNKNOWN (None) is excluded from the pass rate. A binary judge only ever emits
+    canonical YES/NO/UNKNOWN, so anything else violates the contract and raises,
+    rather than being silently scored as a miss.
+    """
+    normalized = raw.strip().upper() if isinstance(raw, str) else raw
+    if normalized == "YES":
+        return True
+    if normalized == "NO":
+        return False
+    if normalized == "UNKNOWN":
+        return None
+    raise InvalidInstructionVerdict(f"unexpected instruction verdict: {raw!r}")
+
+
+def _instruction_id_mismatch(
+    latency_values: list[dict[str, Any]], instruction_values: list[dict[str, Any]]
+) -> dict[str, object] | None:
+    """None if instruction's sim-id set matches latency exactly; else the diff.
+
+    Equal counts can still be different conversations, so compare the id sets and
+    reject duplicates. A mismatch means the pass rate would not be over the same
+    population as latency, so instruction is skipped for the run.
+    """
+    lat_ids = [v.get("simulation_output_id") for v in latency_values]
+    ins_ids = [v.get("simulation_output_id") for v in instruction_values]
+    lat_set, ins_set = set(lat_ids), set(ins_ids)
+    duplicate = len(ins_ids) != len(ins_set)
+    missing = sorted(str(x) for x in lat_set - ins_set)
+    extra = sorted(str(x) for x in ins_set - lat_set)
+    if not duplicate and not missing and not extra:
+        return None
+    return {
+        "missing_instruction_ids": missing,
+        "extra_instruction_ids": extra,
+        "duplicate_instruction_ids": duplicate,
+    }
+
+
+def _instruction_rows(
+    values: list[dict[str, Any]],
+    *,
+    run_pk: int,
+    coval_run_id: str,
+    spec: AgentSpec,
+) -> list[Result]:
+    """Map a run's per-conversation verdicts to instruction Result rows.
+
+    YES -> 100.0, NO -> 0.0 (both SUCCESS, both in the pool); UNKNOWN produces no
+    row (excluded), so the aggregate mean is YES / (YES + NO). Raises
+    InvalidInstructionVerdict on any value outside the contract.
+    """
+    rows: list[Result] = []
+    for i, v in enumerate(values):
+        verdict = _instruction_verdict(v.get("value"))
+        if verdict is None:  # UNKNOWN: excluded from the pool, no row written
+            continue
+        sim_id = v.get("simulation_output_id")
+        clip_key = f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}"
+        rows.append(
+            Result(
+                run_id=run_pk,
+                provider=spec.provider,
+                model=spec.model,
+                benchmark=Benchmark.S2S,
+                metric_type=Metric.INSTRUCTION_FOLLOWING,
+                metric_units="percent",
+                metric_value=100.0 if verdict else 0.0,
+                audio_filename=clip_key,
+                status=ResultStatus.SUCCESS,
+            )
+        )
+    return rows
+
+
 async def _ingest_run(
     client: httpx.AsyncClient,
     writer: RunWriter,
@@ -194,6 +300,11 @@ async def _ingest_run(
     spec: AgentSpec,
     coval_run: CovalRun,
     metric_id: str,
+    instruction_metric_id: str | None = None,
+    dataset_id: str = DATASET_ID,
+    dataset_sha256: str = "",
+    want_latency: bool = True,
+    want_instruction: bool = True,
     runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
@@ -230,34 +341,95 @@ async def _ingest_run(
             return None
         values = cast("list[dict[str, Any]]", metric.get("values", []))
 
+        # Decide instruction writability up front (pure) so a backfill with
+        # nothing to add creates no run row and stays retryable.
+        instr_values: list[dict[str, Any]] = []
+        write_instruction = False
+        if want_instruction and instruction_metric_id:
+            instr = metrics.get(instruction_metric_id)
+            if instr is None:
+                # Latency still lands; instruction stays retryable on a later scan.
+                logger.warning(
+                    "instruction_metric_absent",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric_id=instruction_metric_id,
+                )
+            else:
+                instr_values = cast("list[dict[str, Any]]", instr.get("values", []))
+                mismatch = _instruction_id_mismatch(values, instr_values)
+                if mismatch is not None:
+                    # Different conversation population than latency -> skip
+                    # instruction (keep latency) so the rate stays comparable.
+                    logger.warning(
+                        "instruction_id_mismatch",
+                        provider=spec.provider,
+                        coval_run_id=coval_run.run_id,
+                        **mismatch,
+                    )
+                else:
+                    try:
+                        for v in instr_values:
+                            _instruction_verdict(v.get("value"))
+                        write_instruction = True
+                    except InvalidInstructionVerdict as exc:
+                        # Judge-contract violation: discard instruction for the
+                        # whole run (keep latency); retryable on a later scan.
+                        logger.warning(
+                            "instruction_verdict_invalid",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                            error=str(exc),
+                        )
+
+        if not want_latency and not write_instruction:
+            # Backfill with nothing to add; leave it retryable, write no run row.
+            return None
+
         scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         run_row = await writer.start_run(
             runner_sha=runner_sha,
-            dataset_id=DATASET_ID,
-            dataset_sha256=_dataset_sha256(),
+            dataset_id=dataset_id,
+            dataset_sha256=dataset_sha256 or _dataset_sha256(),
             scheduled_at=scheduled_at,
         )
         if run_row.id is None:  # pragma: no cover -- start_run always returns an id
             raise RuntimeError("start_run returned a run with no id")
         run_pk = run_row.id
 
-        rows = _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-        if rows:
-            await writer.record_results(rows)
+        rows = (
+            _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
+            if want_latency
+            else []
+        )
+        instruction_rows = (
+            _instruction_rows(instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
+            if write_instruction
+            else []
+        )
+        all_rows = rows + instruction_rows
+        if all_rows:
+            await writer.record_results(all_rows)
         logger.info(
             "fetched_clips",
             provider=spec.provider,
             coval_run_id=coval_run.run_id,
             slot=str(scheduled_at),
             clips=len(rows),
+            instruction=len(instruction_rows),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
-        failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
-        if not rows or failed == len(rows):
-            status = RunStatus.FAILED
-        elif failed:
-            status = RunStatus.PARTIAL
+        if want_latency:
+            # Reliability is the latency signal (instruction lag never fails the run).
+            failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
+            if not rows or failed == len(rows):
+                status = RunStatus.FAILED
+            elif failed:
+                status = RunStatus.PARTIAL
+            else:
+                status = RunStatus.SUCCEEDED
         else:
+            # Instruction-only backfill onto an already-ingested run.
             status = RunStatus.SUCCEEDED
         await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
@@ -290,6 +462,8 @@ async def _fetch_one_provider(
     spec: AgentSpec,
     agent_id: str,
     metric_id: str,
+    instruction_metric_id: str | None = None,
+    test_set_id: str | None = None,
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
@@ -323,7 +497,10 @@ async def _fetch_one_provider(
         )
 
     try:
-        runs = await recent_completed_runs(client, agent_id, period_seconds=period_seconds)
+        runs = await recent_completed_runs(
+            client, agent_id, period_seconds=period_seconds, test_set_id=test_set_id
+        )
+        dataset_id, dataset_sha256 = _dataset_identity(test_set_id)
 
         data_seen = False
         newest_data_at: datetime | None = None
@@ -336,15 +513,24 @@ async def _fetch_one_provider(
                     error_status=coval_run.error_status,
                 )
                 continue
-            if await writer.coval_run_ingested(
-                provider=spec.provider, coval_run_id=coval_run.run_id
-            ):
-                logger.info(
-                    "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
-                )
+            latency_done = await writer.coval_metric_ingested(
+                provider=spec.provider, coval_run_id=coval_run.run_id, metric_type=Metric.V2V
+            )
+            instruction_done = instruction_metric_id is None or await writer.coval_metric_ingested(
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                metric_type=Metric.INSTRUCTION_FOLLOWING,
+            )
+            # A run whose latency already landed is fresh data + an eligible
+            # sample even if we still owe it an instruction backfill.
+            if latency_done:
                 note_sample_candidate(coval_run)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
+            if latency_done and instruction_done:
+                logger.info(
+                    "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
+                )
                 continue
             status = await _ingest_run(
                 client,
@@ -352,6 +538,11 @@ async def _fetch_one_provider(
                 spec=spec,
                 coval_run=coval_run,
                 metric_id=metric_id,
+                instruction_metric_id=instruction_metric_id,
+                dataset_id=dataset_id,
+                dataset_sha256=dataset_sha256,
+                want_latency=not latency_done,
+                want_instruction=instruction_metric_id is not None and not instruction_done,
                 runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )
@@ -407,6 +598,24 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     metric_id = settings.coval_s2s_latency_metric_id
     if not metric_id:
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
+    # Instruction ingestion and the test-set filter go together: instruction
+    # without the filter would pool other sims on the same agents into the S2S
+    # rows. Reject a blank (misconfigured) value and require the pair; both
+    # absent keeps the legacy latency-only behavior.
+    raw_instr = settings.coval_s2s_instruction_metric_id
+    raw_test_set = settings.coval_s2s_test_set_id
+    if (raw_instr is not None and not raw_instr.strip()) or (
+        raw_test_set is not None and not raw_test_set.strip()
+    ):
+        raise RuntimeError(
+            "coval_s2s_instruction_metric_id / coval_s2s_test_set_id must not be blank"
+        )
+    instruction_metric_id = raw_instr or None
+    test_set_id = raw_test_set or None
+    if bool(instruction_metric_id) != bool(test_set_id):
+        raise RuntimeError(
+            "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
+        )
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
@@ -424,6 +633,8 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 spec=spec,
                 agent_id=agent_id,
                 metric_id=metric_id,
+                instruction_metric_id=instruction_metric_id,
+                test_set_id=test_set_id,
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,

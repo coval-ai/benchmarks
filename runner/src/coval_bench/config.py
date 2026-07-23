@@ -125,6 +125,14 @@ class Settings(BaseSettings):
     coval_s2s_openai_agent_id: str | None = None
     coval_s2s_gemini_agent_id: str | None = None
     coval_s2s_xai_agent_id: str | None = None
+    # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
+    # fetch pulls its per-conversation scores only when set, so latency still
+    # ingests without it.
+    coval_s2s_instruction_metric_id: str | None = None
+    # Restrict the fetch to one Coval test set (the multi-turn set). Without it,
+    # other sims on the same agents (e.g. the single-turn set) would be ingested
+    # and pooled into the same provider. Opaque id, not secret.
+    coval_s2s_test_set_id: str | None = None
     # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
     # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)

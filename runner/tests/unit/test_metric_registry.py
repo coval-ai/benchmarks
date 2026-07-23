@@ -22,6 +22,7 @@ def test_metric_values_match_stored_strings() -> None:
         "RTF",
         "AudioToFinal",
         "V2V",
+        "InstructionFollowing",
     }
 
 
@@ -35,6 +36,7 @@ def test_units_match_stored_strings() -> None:
         Metric.RTF: "ratio",
         Metric.AUDIO_TO_FINAL: "seconds",
         Metric.V2V: "milliseconds",
+        Metric.INSTRUCTION_FOLLOWING: "percent",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
@@ -46,5 +48,12 @@ def test_benchmark_coverage() -> None:
         assert METRIC_SPECS[metric].benchmarks == {Benchmark.STT}
 
 
-def test_all_current_metrics_are_lower_is_better() -> None:
-    assert all(spec.direction is MetricDirection.LOWER_IS_BETTER for spec in METRIC_SPECS.values())
+def test_metric_directions() -> None:
+    # Instruction adherence is a pass rate: higher is better. Every other metric
+    # is a latency/error measure: lower is better.
+    assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].direction is MetricDirection.HIGHER_IS_BETTER
+    assert all(
+        spec.direction is MetricDirection.LOWER_IS_BETTER
+        for m, spec in METRIC_SPECS.items()
+        if m is not Metric.INSTRUCTION_FOLLOWING
+    )
