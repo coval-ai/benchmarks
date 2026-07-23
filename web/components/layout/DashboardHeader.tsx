@@ -8,6 +8,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React from "react";
 import ThemeSwitch from "@/components/layout/ThemeSwitch";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 // Benchmark sections, shown as tabs in the upper right of the top nav bar.
 const SECTIONS = [
@@ -50,6 +52,11 @@ const DashboardHeader: React.FC = () => {
             target="_blank"
             rel="noopener noreferrer"
             aria-label="By Coval"
+            onClick={() =>
+              capturePostHogEvent(POSTHOG_EVENTS.headerCovalLinkClicked, {
+                path: pathname
+              })
+            }
             className="flex items-center gap-1 text-[11px] text-text-tertiary transition-opacity hover:opacity-80"
           >
             By

@@ -21,7 +21,8 @@ export const POSTHOG_EVENTS = {
   dashboardChartShared: "dashboard_chart_shared",
   dashboardWerDatasetChanged: "dashboard_wer_dataset_changed",
   dashboardWerBarViewChanged: "dashboard_wer_bar_view_changed",
-  s2sSamplePlayRequested: "s2s_sample_play_requested"
+  s2sSamplePlayRequested: "s2s_sample_play_requested",
+  headerCovalLinkClicked: "header_coval_link_clicked"
 } as const;
 
 export type PostHogSurface =
