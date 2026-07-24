@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
-          ref: ae141bd5ec23b7db37e41ff5783fe0c8341a5dcc
+          ref: 9221d6f4ce20b7c253b46aa62aa9a807f4a1488d
           token: ${{ steps.app_token.outputs.token }}
           path: switchboard-src
           persist-credentials: false
