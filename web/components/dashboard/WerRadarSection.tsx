@@ -29,16 +29,16 @@ import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
 import { getModelColor } from "@/lib/utils/colors";
 import { normalizeModelName } from "@/lib/utils/formatters";
 
-// "WildASR reverb" → ["Reverb", "WildASR"]: the family drops to a second line
-// so ten axis labels stay legible on a phone-width radar.
+// "WildASR reverb" → ["Reverb", "WildASR"], "PipeCat (production)" →
+// ["Production", "PipeCat"]: every axis reads its condition first, with the
+// source family on a second line so ten labels stay legible on a phone-width
+// radar.
 function splitAxisLabel(label: string): [string, string?] {
-  if (label.startsWith("WildASR ")) {
-    const rest = label.slice(8);
-    return [rest.charAt(0).toUpperCase() + rest.slice(1), "WildASR"];
-  }
-  const paren = label.match(/^(.*?) \((.+)\)$/);
-  if (paren) return [paren[1]!, paren[2]!];
-  return [label];
+  const parts =
+    label.match(/^(WildASR) (.+)$/) ?? label.match(/^(.*?) \((.+)\)$/);
+  if (!parts) return [label];
+  const [, family, condition] = parts as [string, string, string];
+  return [condition.charAt(0).toUpperCase() + condition.slice(1), family];
 }
 
 const RadarAxisTick: React.FC<{
