@@ -31,7 +31,7 @@ import ChartInteractionLayer, {
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricInfo from "@/components/shared/MetricInfo";
-import MetricToggle from "@/components/dashboard/MetricToggle";
+import MetricToggle, { useMetricTab } from "@/components/dashboard/MetricToggle";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
@@ -249,6 +249,7 @@ function segmentIntersectsRect(
 
 const TimelineChart: React.FC = () => {
   const activeTab = useActiveTab();
+  const metricTab = useMetricTab();
   const isMobile = useMobileDetection();
   const {
     getModelsWithTimelineData,
@@ -829,6 +830,7 @@ const TimelineChart: React.FC = () => {
               ? "Drag chart to zoom · swipe axis for values"
               : undefined
           }
+          exportNote={metricTab}
           exportRows={() =>
             windowedTimelineData.map((point) => ({
               time: point.timestampLabel,

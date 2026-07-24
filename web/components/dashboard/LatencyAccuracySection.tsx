@@ -24,7 +24,7 @@ import { labelScatterDots } from "@/lib/utils/chartExport";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
-import MetricToggle from "@/components/dashboard/MetricToggle";
+import MetricToggle, { useMetricTab } from "@/components/dashboard/MetricToggle";
 import MetricInfo from "@/components/shared/MetricInfo";
 import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
@@ -51,6 +51,7 @@ const LatencyAccuracySection: React.FC = () => {
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
   const trackChartHover = useChartHoverTracking("scatter");
+  const metricTab = useMetricTab();
 
   const latencyLabel = metric;
   const scatterData = useMemo(
@@ -176,6 +177,7 @@ const LatencyAccuracySection: React.FC = () => {
           label="Latency vs Accuracy"
           description={description}
           note={metricAboutNote(metric)}
+          exportNote={metricTab}
           exportXLabel={`Average ${latencyLabel}`}
           exportAnnotate={(clone) => {
             const nameCounts = new Map<string, number>();
@@ -395,7 +397,7 @@ const LatencyAccuracySection: React.FC = () => {
           </ResponsiveContainer>
         </div>
         <div
-          className="mt-1 text-center text-sm"
+          className="mt-1 text-center font-mono text-sm"
           style={{ color: themeColors.axisText }}
         >
           <MetricInfo metric={metric}>{latencyLabel}</MetricInfo>

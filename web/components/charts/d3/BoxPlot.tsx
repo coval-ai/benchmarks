@@ -24,6 +24,31 @@ const modelLineHeight = 14;
 // marker, and the axis caption — 80px stacked marker over caption.
 const margin = { top: 20, right: 8, bottom: 88, left: 40 };
 const minSlotWidth = 48;
+/** Share of a slot the label block may occupy; the rest is breathing room. */
+const labelBandRatio = 0.82;
+/** Floor the label text shrinks to before a slot has to widen instead. */
+const minModelFont = 8;
+/** Geist Mono advances a fixed 0.6em, so label widths are predictable. */
+const monoAdvance = 0.6;
+const maxCharsPerLine = 8;
+
+// Model name wrapped onto label lines, rejoining words with hyphens while they
+// fit the budget. Slot sizing and the renderer share it so the width reserved
+// for a label is measured on the very lines that get drawn — note a rejoined
+// line runs one over the budget, since its new hyphen lands after the check.
+const modelLabelLines = (model: string) => {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of model.split(/[-_\s]/)) {
+    if ((line + word).length <= maxCharsPerLine) line += (line ? "-" : "") + word;
+    else if (line) {
+      lines.push(line);
+      line = word;
+    } else lines.push(word);
+  }
+  if (line) lines.push(line);
+  return lines;
+};
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -108,9 +133,26 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // chart) rather than crushing the axis labels into each other. This holds at
   // any viewport width — full screen, half, quarter, drag-resized, or mobile —
   // so wide desktops render flush while narrow ones scroll.
+  // A slot also has to hold the widest line of its label at the floor font —
+  // below that the text stops shrinking and spills into its neighbours.
+  const slotWidth = Math.ceil(
+    Math.max(
+      minSlotWidth,
+      ...data.data.map(
+        (d) =>
+          (Math.max(
+            getProviderForModel(d.model).length,
+            ...modelLabelLines(normalizeModelName(d.model)).map((l) => l.length)
+          ) *
+            minModelFont *
+            monoAdvance) /
+          labelBandRatio
+      )
+    )
+  );
   const svgWidth = Math.max(
     dimensions.width,
-    data.data.length * minSlotWidth + margin.left + margin.right
+    data.data.length * slotWidth + margin.left + margin.right
   );
   const scrollable = svgWidth > dimensions.width;
 
@@ -249,8 +291,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first
     {
-      const labelMaxWidth = xScale.step() * 0.82;
-      const minModelFont = 8;
+      const labelMaxWidth = xScale.step() * labelBandRatio;
 
       data.data.forEach((modelData) => {
         const model = modelData.model;
@@ -260,27 +301,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        const maxCharsPerLine = 8;
-        const modelWords = normalizedModel.split(/[-_\s]/);
-        const modelLines: string[] = [];
-        let currentLine = "";
-
-        modelWords.forEach((word) => {
-          if ((currentLine + word).length <= maxCharsPerLine) {
-            currentLine += (currentLine ? "-" : "") + word;
-          } else {
-            if (currentLine) {
-              modelLines.push(currentLine);
-              currentLine = word;
-            } else {
-              modelLines.push(word);
-            }
-          }
-        });
-
-        if (currentLine) {
-          modelLines.push(currentLine);
-        }
+        const modelLines = modelLabelLines(normalizedModel);
 
         const modelTextNodes = modelLines.map((line, lineIndex) =>
           g

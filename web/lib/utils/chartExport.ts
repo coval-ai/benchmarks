@@ -72,7 +72,55 @@ export interface ChartPNGHeader {
   axis?: SVGSVGElement;
 }
 
-const FONT = "ui-sans-serif, system-ui, sans-serif";
+// The export types with the brand faces the dashboard renders with: PP Mori for
+// headings, Geist Mono for captions, axis text and data readouts.
+const fontStack = (kind: "sans" | "mono") =>
+  `${getComputedStyle(document.body).getPropertyValue(`--font-${kind}`).trim()}, ${
+    kind === "mono" ? "ui-monospace, monospace" : "ui-sans-serif, system-ui, sans-serif"
+  }`;
+
+// Rasterizing loads the cloned SVG as an image, which can't fetch the page's
+// @font-face files — its text falls back to serif unless the faces travel with
+// it, so the mono ones are inlined as base64. Fetched once per page load.
+let monoFaceCSS: Promise<string> | undefined;
+const embedMonoFaces = () =>
+  (monoFaceCSS ??= Promise.all(
+    Array.from(document.styleSheets)
+      .flatMap((sheet) => {
+        try {
+          return Array.from(sheet.cssRules);
+        } catch {
+          return [];
+        }
+      })
+      // The CSS variable and the @font-face rule can quote the family
+      // differently, so match on the unquoted names.
+      .filter((rule): rule is CSSFontFaceRule => {
+        if (!(rule instanceof CSSFontFaceRule)) return false;
+        const unquoted = (value: string) => value.replace(/["']/g, "").trim();
+        return unquoted(fontStack("mono")).startsWith(
+          unquoted(rule.style.getPropertyValue("font-family"))
+        );
+      })
+      .map(async (rule) => {
+        const [, src] =
+          /url\("?([^")]+)"?\)/.exec(rule.style.getPropertyValue("src")) ?? [];
+        if (!src) return "";
+        const blob = await fetch(
+          new URL(src, rule.parentStyleSheet?.href ?? location.href)
+        ).then((res) => res.blob());
+        const data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        return `@font-face{font-family:${rule.style.getPropertyValue("font-family")};font-weight:${rule.style.getPropertyValue("font-weight")};unicode-range:${rule.style.getPropertyValue("unicode-range")};src:url(${data})}`;
+      })
+  )
+    .then((faces) => faces.join(""))
+    .catch(() => ""));
+
 /** Outer margin between the canvas edge and every piece of content. */
 const MARGIN = 24;
 const LEGEND_ROW_HEIGHT = 20;
@@ -85,7 +133,7 @@ function legendRows(
   legend: LegendItem[],
   maxWidth: number
 ) {
-  ctx.font = `12px ${FONT}`;
+  ctx.font = `12px ${fontStack("mono")}`;
   const rows: (LegendItem & { x: number })[][] = [];
   let row: (LegendItem & { x: number })[] = [];
   let x = 0;
@@ -103,7 +151,7 @@ function legendRows(
   return rows;
 }
 
-/** Height of one wrapped title line (600 20px). */
+/** Height of one wrapped title line (500 20px). */
 const TITLE_LINE_HEIGHT = 28;
 
 // Greedily wrap `text` into lines that fit `maxWidth` under the caller's current
@@ -195,7 +243,8 @@ export function labelScatterDots(
     if (!point) return;
     const cx = pos(circle, "cx");
     const cy = pos(circle, "cy");
-    const w = point.label.length * 6;
+    // Geist Mono advances 0.6em, so every glyph is 6.6px at the 11px below.
+    const w = point.label.length * 6.6;
     const box = (x: number, y: number, anchor: string): Box => {
       const x1 = anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2;
       return { x1, y1: y - 11, x2: x1 + w, y2: y + 3 };
@@ -261,7 +310,7 @@ export function labelScatterDots(
     text.setAttribute("y", `${y}`);
     if (anchor !== "start") text.setAttribute("text-anchor", anchor);
     text.setAttribute("font-size", "11");
-    text.setAttribute("font-family", FONT);
+    text.setAttribute("font-family", fontStack("mono"));
     text.setAttribute("font-weight", "500");
     text.setAttribute("fill", labelColor(point.color, dark));
     text.textContent = point.label;
@@ -279,6 +328,8 @@ export async function downloadChartPNG(
   colors: ThemeColors = LIGHT_CHART_COLORS
 ): Promise<boolean> {
   const dark = isDarkBg(colors.tooltipBg);
+  const sans = fontStack("sans");
+  const mono = fontStack("mono");
   const svgRect = svg.getBoundingClientRect();
   const { width, height } = svgRect;
   const axisWidth = header.axis?.getBoundingClientRect().width ?? 0;
@@ -318,6 +369,15 @@ export async function downloadChartPNG(
   let axisImg: HTMLImageElement | undefined;
   let logo: HTMLImageElement;
   try {
+    await document.fonts.ready;
+    const faces = await embedMonoFaces();
+    for (const target of [clone, axisClone]) {
+      if (!target) continue;
+      const style = document.createElementNS(SVG_NS, "style");
+      style.textContent = faces;
+      target.prepend(style);
+      target.setAttribute("font-family", mono);
+    }
     chart = await loadImage(
       `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(clone))}`
     );
@@ -339,9 +399,9 @@ export async function downloadChartPNG(
   // Measure the headline stat first so we know how much width it claims.
   let statW = 0;
   if (header.stat) {
-    measure.font = `13px ${FONT}`;
+    measure.font = `13px ${sans}`;
     const statLabelW = measure.measureText(header.stat.label).width;
-    measure.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    measure.font = `700 24px ${mono}`;
     statW = Math.max(statLabelW, measure.measureText(header.stat.value).width);
   }
   // On a narrow (mobile) export the left title and right-aligned stat collide,
@@ -351,7 +411,7 @@ export async function downloadChartPNG(
   const statFitsBeside = header.stat ? statW + 16 + 140 <= fullWidth : false;
   const availableTitleWidth =
     fullWidth - (header.stat && statFitsBeside ? statW + 16 : 0);
-  measure.font = `600 20px ${FONT}`;
+  measure.font = `500 20px ${sans}`;
   const titleLines = header.title
     ? wrapText(measure, header.title, availableTitleWidth)
     : [];
@@ -383,22 +443,22 @@ export async function downloadChartPNG(
   let y = MARGIN;
   if (header.stat && statFitsBeside) {
     ctx.textAlign = "right";
-    ctx.font = `13px ${FONT}`;
+    ctx.font = `13px ${sans}`;
     ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.stat.label, totalWidth - MARGIN, y + 13);
-    ctx.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.font = `700 24px ${mono}`;
     ctx.fillStyle = colors.textPrimary;
     ctx.fillText(header.stat.value, totalWidth - MARGIN, y + 44);
     ctx.textAlign = "left";
   }
   if (header.label) {
-    ctx.font = `13px ${FONT}`;
+    ctx.font = `13px ${sans}`;
     ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.label, MARGIN, y + 13);
     y += 20;
   }
   if (titleLines.length) {
-    ctx.font = `600 20px ${FONT}`;
+    ctx.font = `500 20px ${sans}`;
     ctx.fillStyle = colors.textPrimary;
     for (const line of titleLines) {
       ctx.fillText(line, MARGIN, y + 20);
@@ -406,16 +466,16 @@ export async function downloadChartPNG(
     }
   }
   if (header.stat && !statFitsBeside) {
-    ctx.font = `13px ${FONT}`;
+    ctx.font = `13px ${sans}`;
     ctx.fillStyle = colors.textSecondary;
     ctx.fillText(header.stat.label, MARGIN, y + 13);
-    ctx.font = `700 24px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.font = `700 24px ${mono}`;
     ctx.fillStyle = colors.textPrimary;
     ctx.fillText(header.stat.value, MARGIN, y + 40);
     y += 50;
   }
   y = MARGIN + titleBlock;
-  ctx.font = `12px ${FONT}`;
+  ctx.font = `12px ${mono}`;
   for (const row of rows) {
     for (const item of row) {
       ctx.globalAlpha = item.dimmed ? 0.35 : 1;
@@ -453,7 +513,7 @@ export async function downloadChartPNG(
     contentHeight
   );
   if (header.xLabel) {
-    ctx.font = `12px ${FONT}`;
+    ctx.font = `12px ${mono}`;
     ctx.fillStyle = colors.textSecondary;
     ctx.textAlign = "center";
     ctx.fillText(header.xLabel, totalWidth / 2, chartY + contentHeight + 16);
