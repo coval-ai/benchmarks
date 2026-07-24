@@ -245,39 +245,13 @@ class RunWriter:
                 await cur.execute(sql, (status, error, run_id))
             await conn.commit()
 
-    async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
-        """True if a succeeded or partial run already holds rows for this Coval run.
-
-        S2S rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
-        fetch job skip a re-pulled run so a retry or stale re-pull doesn't
-        double-write the day's bucket. Rows from failed runs don't count: they
-        never reach the bucket, so a retry must stay free to re-ingest the run.
-        """
-        sql = """
-            SELECT 1
-            FROM benchmarks_v2.results r
-            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-            WHERE r.provider = %s
-              AND r.benchmark = 'S2S'
-              AND split_part(r.audio_filename, '/', 1) = %s
-              AND rn.status IN ('succeeded', 'partial')
-            LIMIT 1
-        """
-        async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, coval_run_id))
-                row = await cur.fetchone()
-            await conn.commit()
-        return row is not None
-
     async def coval_metric_ingested(
         self, *, provider: str, coval_run_id: str, metric_type: str
     ) -> bool:
         """True if a succeeded/partial run already holds this Coval run's ``metric_type`` rows.
 
-        Metric-aware counterpart of :meth:`coval_run_ingested`: lets the fetch
-        backfill one metric (e.g. instruction) onto a run whose other metric
-        (latency) already landed, instead of skipping the whole run.
+        Lets the fetch backfill one metric (e.g. instruction) onto a run whose
+        other metric (latency) already landed, instead of skipping the whole run.
         """
         sql = """
             SELECT 1

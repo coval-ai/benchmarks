@@ -80,7 +80,6 @@ def _stub_writer() -> MagicMock:
             status=RunStatus.RUNNING,
         )
     )
-    writer.coval_run_ingested = AsyncMock(return_value=False)
     writer.coval_metric_ingested = AsyncMock(return_value=False)
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()

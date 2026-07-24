@@ -592,7 +592,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     """Ingest every provider's recent runs; return per-provider status.
 
     Each ingested Coval run gets its own run row slotted by its create_time,
-    and ``coval_run_ingested`` makes re-scans no-ops, so ticks are idempotent
+    and ``coval_metric_ingested`` makes re-scans no-ops, so ticks are idempotent
     and the fetch cadence only affects how soon data appears — the cron may
     run more often than the sims.
     """
