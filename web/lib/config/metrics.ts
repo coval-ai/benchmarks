@@ -47,6 +47,14 @@ export const metricDescriptions = {
     detailed:
       "The human-parity zone reframes the latency-accuracy trade-off around a human baseline instead of arbitrary thresholds. Human transcription accuracy is typically 2–4% WER under optimal conditions, and the median turn-taking gap in human conversation is roughly 200ms. A model inside the zone transcribes at least as accurately as a person and responds at least as fast as one."
   },
+  // Shared by the Latency Variation card's description and its headline tooltip.
+  iqr: {
+    short: "Interquartile Range",
+    tooltip:
+      "The width of the middle 50% of runs, p75 − p25 — the box drawn for each model. Narrow means predictable; wide means erratic even when the average looks good. Lower is better.",
+    detailed:
+      "IQR is the width of the middle 50% of runs, p75 − p25 — the box drawn for each model. Narrow distributions mean reliable, predictable response times; wide ones mean erratic performance despite good average speeds, so a moderate median with a tight box often beats a faster median with high variability. The headline averages it across the models shown."
+  },
   v2v: {
     short: "Voice-to-Voice Latency",
     detailed:
