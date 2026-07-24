@@ -36,7 +36,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
 };
 
 /** User-facing copy when the map is missing an id (prod only — never leak raw internal ids). */
-export const PLAYGROUND_PROVIDER_LABEL_FALLBACK_PROD = "Provider";
+const PLAYGROUND_PROVIDER_LABEL_FALLBACK_PROD = "Provider";
 
 /**
  * Human-readable provider label for playground UI. Keys must stay in lockstep with

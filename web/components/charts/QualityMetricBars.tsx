@@ -26,7 +26,7 @@ const CHART_BOTTOM_MARGIN = 80;
 // A row plotted as one bar. Callers pass the numeric value under `valueKey`
 // (e.g. "averageWER" or "instructionScore"); the extra keys ride along for the
 // tooltip/label without the chassis needing to know them.
-export type QualityBarRow = {
+type QualityBarRow = {
   model: string;
   provider: string;
   fill: string;

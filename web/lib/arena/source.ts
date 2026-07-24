@@ -13,5 +13,3 @@ export function getBattleSource(): BattleSource {
     process.env.NEXT_PUBLIC_ARENA_SOURCE === "api" ? new ApiBattleSource() : new MockBattleSource();
   return instance;
 }
-
-export type { BattleSource, BlindBattle, Outcome, Reveal, VoteInput, VoteResult } from "./types";

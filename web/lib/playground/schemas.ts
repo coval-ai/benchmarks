@@ -1,39 +1,8 @@
 // ---------------------------------------------------------------------------
-// STT WebSocket message types (server → browser)
-// ---------------------------------------------------------------------------
-
-/** Partial or final transcript forwarded by the STT proxy. */
-export type STTTranscriptMessage = {
-  type: "partial" | "final";
-  modelId: string;
-  text: string;
-  /** Server-side monotonic ms — for relative sequencing only, not absolute latency. */
-  timestampMs: number;
-};
-
-/** One provider failed to connect before the session started. */
-export type STTProviderFailedMessage = {
-  type: "PROVIDER_CONNECTION_FAILED";
-  modelId: string;
-  reason: string;
-};
-
-/** A previously-live provider disconnected mid-session. */
-export type STTProviderDisconnectedMessage = {
-  type: "PROVIDER_DISCONNECTED";
-  modelId: string;
-};
-
-export type STTServerMessage =
-  | STTTranscriptMessage
-  | STTProviderFailedMessage
-  | STTProviderDisconnectedMessage;
-
-// ---------------------------------------------------------------------------
 // TTS / generic playground error types
 // ---------------------------------------------------------------------------
 
-export type PlaygroundErrorCode =
+type PlaygroundErrorCode =
   | "INVALID_MODEL"
   | "TEXT_EMPTY"
   | "TEXT_TOO_LONG"

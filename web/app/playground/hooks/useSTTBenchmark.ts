@@ -5,9 +5,9 @@ import { startAudioCapture, type AudioCaptureHandle } from "@/lib/playground/aud
 import { getEnabledSttModels } from "@/lib/playground/providers";
 import { isSTTError, type STTResponse } from "@/lib/stt/types";
 
-export type BenchmarkPhase = "idle" | "recording" | "submitting" | "complete" | "error";
+type BenchmarkPhase = "idle" | "recording" | "submitting" | "complete" | "error";
 
-export type ModelResult = {
+type ModelResult = {
   transcript: string;
   ttfaMs: number | null;
   audioToFinalMs: number;
