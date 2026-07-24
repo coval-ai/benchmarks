@@ -280,7 +280,8 @@ async def _publish_tick_sample(
                     return resp
 
                 detail = await _fetch_retry(fetch_detail, provider=provider, what="sim_detail")
-                turns = _conversation_turns(cast("dict[str, Any]", detail.json()))
+                # /simulations/{id} wraps the object in a "simulation" envelope.
+                turns = _conversation_turns(cast("dict[str, Any]", detail.json()["simulation"]))
 
                 async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
                     return await _download_recording(client, download_client, sim_id)

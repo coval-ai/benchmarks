@@ -86,7 +86,7 @@ def _fake_client(
                 {"role": "assistant", "content": "how can i help"},
             ]
         )
-        return httpx.Response(200, json={"transcript": turns})
+        return httpx.Response(200, json={"simulation": {"transcript": turns}})
 
     return httpx.AsyncClient(base_url="https://api.test/v1", transport=httpx.MockTransport(handler))
 
