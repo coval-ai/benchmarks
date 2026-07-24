@@ -777,27 +777,29 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client).
+    # provider client). EARLY_ACCESS = pre-launch embargo: they run and fetch
+    # normally, but every data endpoint strips them for public callers and
+    # serves them only to X-Internal-Key requests until the benchmark launches.
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_STREAMING, _MULTI),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
 ]
 
