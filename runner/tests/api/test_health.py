@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
@@ -26,10 +25,9 @@ async def test_readyz_healthy_db(client: AsyncClient) -> None:
     assert response.json() == {"status": "ready"}
 
 
-async def test_readyz_closed_pool(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /readyz with a broken pool returns 503 and never raises."""
+async def test_readyz_closed_pool(app: FastAPI) -> None:
+    """GET /readyz with a broken pool returns 503 and leaks no error detail."""
 
-    # Replace the pool with one that always raises on connection()
     class BrokenPool:
         def connection(self) -> Any:
             raise RuntimeError("simulated DB failure")
@@ -46,9 +44,8 @@ async def test_readyz_closed_pool(app: FastAPI, monkeypatch: pytest.MonkeyPatch)
         app.state.pool = original_pool
 
     assert response.status_code == 503
-    data = response.json()
-    assert data["status"] == "not ready"
-    assert "error" in data
+    assert response.json() == {"status": "not ready"}
+    assert "simulated DB failure" not in response.text
 
 
 async def test_v1_health_healthy_db(client: AsyncClient) -> None:
@@ -78,3 +75,4 @@ async def test_v1_health_closed_pool(app: FastAPI) -> None:
 
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable"}
+    assert "simulated DB failure" not in response.text
