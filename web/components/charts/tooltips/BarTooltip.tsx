@@ -13,6 +13,12 @@ interface CustomBarTooltipProps extends Partial<Pick<
   getProviderForModel?: (model: string) => string;
   /** Dedicated-inference endpoints carry the badge in their tooltip. */
   dedicatedModels?: Set<string>;
+  /** Bar dataKey to read; defaults to WER so existing callers are unchanged. */
+  dataKey?: string;
+  /** Value caption; defaults to WER wording. */
+  valueLabel?: string;
+  /** Value formatter; defaults to one-decimal percent. */
+  formatValue?: (value: number) => string;
 }
 
 const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
@@ -20,11 +26,14 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   payload,
   label,
   getProviderForModel,
-  dedicatedModels
+  dedicatedModels,
+  dataKey = "averageWER",
+  valueLabel = "Average WER",
+  formatValue = (value) => `${value.toFixed(1)}%`
 }) => {
   if (active && payload && payload.length > 0) {
     const item = payload[0];
-    if (item?.dataKey !== "averageWER" || typeof item.value !== "number") return null;
+    if (item?.dataKey !== dataKey || typeof item.value !== "number") return null;
     const value = item.value;
     const modelKey = String(label ?? "");
     const provider = getProviderForModel?.(modelKey);
@@ -44,9 +53,9 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
           style={{ margin: 0, fontWeight: "bold", color: "var(--color-text-on-tooltip)" }}
         >{`Model: ${modelLabel}`}</p>
         {dedicatedModels?.has(modelKey) && <DedicatedBadge />}
-        <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`Average WER: ${Number(
+        <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`${valueLabel}: ${formatValue(
           value
-        ).toFixed(1)}%`}</p>
+        )}`}</p>
       </div>
     );
   }

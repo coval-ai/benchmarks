@@ -514,6 +514,19 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     }));
   }, [werBarData, clickedWERBars]);
 
+  // S2S instruction adherence bars (higher is better). No dataset override or
+  // click-to-compare selection — a lean, always-full-opacity mirror of WER.
+  const instructionBarData = chartData.getInstructionBarData();
+  const instructionBarDataWithColors = useMemo(
+    () =>
+      instructionBarData.map((item) => ({
+        ...item,
+        fill: getModelColor(item.model),
+        fillOpacity: 1,
+      })),
+    [instructionBarData]
+  );
+
   // Derived display values
   const latencyLabel = activeMetric;
   const modalityName = { stt: "Speech-to-Text", tts: "Text-to-Speech", s2s: "Speech-to-Speech" }[page];
@@ -706,6 +719,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     getScatterData: chartData.getScatterData,
     heatmapDisplayData,
     werBarDataWithColors,
+    instructionBarDataWithColors,
 
     // Bar interaction
     clickedWERBars,
