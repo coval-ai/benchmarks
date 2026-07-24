@@ -151,6 +151,12 @@ const AccuracyBarSection: React.FC = () => {
     availableWerBarViews.length > 1
       ? availableWerBarViews.find((view) => view.key === werBarView)
       : undefined;
+  // Room the diagonal tick labels need left of the first bar, measured on the
+  // providers actually on show since their line is never ellipsized.
+  const labelReach = tickLabelReach(
+    isMobile,
+    werBarDataWithColors.map(({ model }) => getProviderForModel(model))
+  );
 
   return (
     <div className="mb-4">
@@ -263,10 +269,7 @@ const AccuracyBarSection: React.FC = () => {
             <ResponsiveContainer
               width="100%"
               height="100%"
-              minWidth={
-                werBarDataWithColors.length * (isMobile ? 56 : 48) +
-                tickLabelReach(isMobile)
-              }
+              minWidth={werBarDataWithColors.length * (isMobile ? 56 : 48) + labelReach}
               debounce={200}
             >
               <BarChart
@@ -298,7 +301,7 @@ const AccuracyBarSection: React.FC = () => {
                   }
                   height={X_AXIS_HEIGHT}
                   interval={0}
-                  padding={{ left: tickLabelReach(isMobile) }}
+                  padding={{ left: labelReach }}
                 />
                 <YAxis hide />
                 <Tooltip

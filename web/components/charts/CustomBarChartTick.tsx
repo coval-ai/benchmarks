@@ -9,16 +9,23 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 const labelFontPx = 12;
 /** Longest label kept before it is ellipsized, per layout. */
 const maxLabelChars = { compact: 12, mobile: 14, desktop: 18 };
+/** Geist Mono advances a fixed 0.6em, so label widths are predictable. */
+const monoAdvance = 0.6;
 /**
  * Geist Mono advances 0.6em and the label hangs at 45°, so a label reaches this
  * far left of its own tick. The axis must reserve it as left padding or the
  * first label is clipped at the plot edge — it reads as cut off by the y-axis.
+ * The model line is ellipsized to the budget above but the provider line is
+ * not, so pass the providers on show: a longer one sets the reach.
  */
-export const tickLabelReach = (isMobile: boolean) =>
+export const tickLabelReach = (isMobile: boolean, providers: string[] = []) =>
   Math.ceil(
-    (isMobile ? maxLabelChars.mobile : maxLabelChars.desktop) *
+    Math.max(
+      isMobile ? maxLabelChars.mobile : maxLabelChars.desktop,
+      ...providers.map((provider) => provider.length)
+    ) *
       labelFontPx *
-      0.6 *
+      monoAdvance *
       Math.SQRT1_2
   );
 

@@ -30,6 +30,25 @@ const labelBandRatio = 0.82;
 const minModelFont = 8;
 /** Geist Mono advances a fixed 0.6em, so label widths are predictable. */
 const monoAdvance = 0.6;
+const maxCharsPerLine = 8;
+
+// Model name wrapped onto label lines, rejoining words with hyphens while they
+// fit the budget. Slot sizing and the renderer share it so the width reserved
+// for a label is measured on the very lines that get drawn — note a rejoined
+// line runs one over the budget, since its new hyphen lands after the check.
+const modelLabelLines = (model: string) => {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of model.split(/[-_\s]/)) {
+    if ((line + word).length <= maxCharsPerLine) line += (line ? "-" : "") + word;
+    else if (line) {
+      lines.push(line);
+      line = word;
+    } else lines.push(word);
+  }
+  if (line) lines.push(line);
+  return lines;
+};
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -123,7 +142,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         (d) =>
           (Math.max(
             getProviderForModel(d.model).length,
-            ...normalizeModelName(d.model).split(/[-_\s]/).map((w) => w.length)
+            ...modelLabelLines(normalizeModelName(d.model)).map((l) => l.length)
           ) *
             minModelFont *
             monoAdvance) /
@@ -282,27 +301,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        const maxCharsPerLine = 8;
-        const modelWords = normalizedModel.split(/[-_\s]/);
-        const modelLines: string[] = [];
-        let currentLine = "";
-
-        modelWords.forEach((word) => {
-          if ((currentLine + word).length <= maxCharsPerLine) {
-            currentLine += (currentLine ? "-" : "") + word;
-          } else {
-            if (currentLine) {
-              modelLines.push(currentLine);
-              currentLine = word;
-            } else {
-              modelLines.push(word);
-            }
-          }
-        });
-
-        if (currentLine) {
-          modelLines.push(currentLine);
-        }
+        const modelLines = modelLabelLines(normalizedModel);
 
         const modelTextNodes = modelLines.map((line, lineIndex) =>
           g
