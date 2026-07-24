@@ -30,7 +30,7 @@ logger = structlog.get_logger("coval_bench.api.access")
 _TRACE_HEADER = b"x-cloud-trace-context"
 _TRACE_ID_RE = re.compile(r"[0-9a-f]{32}", re.IGNORECASE)
 
-_QUIET_PATHS = frozenset({"/healthz", "/readyz"})
+_QUIET_PATHS = frozenset({"/healthz", "/readyz", "/v1/health"})
 
 
 class RequestLoggingMiddleware:

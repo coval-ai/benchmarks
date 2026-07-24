@@ -124,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Routers
     app.include_router(health.router)
+    app.include_router(health.v1_router, prefix="/v1")
     app.include_router(robots.router)
     app.include_router(runs.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")

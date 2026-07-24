@@ -17,7 +17,8 @@ Usage::
     app.add_middleware(SlowAPIMiddleware)
 
 All ``/v1/*`` endpoints are decorated with ``@limiter.limit("60/minute")``.
-``/healthz`` and ``/readyz`` are exempt (they are polled by GCP load balancers).
+``/healthz``, ``/readyz`` and ``/v1/health`` are exempt (they are polled by GCP
+load balancers and uptime monitors).
 """
 
 from __future__ import annotations
