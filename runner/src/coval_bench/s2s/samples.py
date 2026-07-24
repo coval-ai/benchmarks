@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import NotFound, PreconditionFailed
 
 from coval_bench.runner.retry import with_retry
 
@@ -38,6 +38,7 @@ logger = structlog.get_logger("coval_bench.s2s.samples")
 PREFIX = "s2s-samples"
 INDEX_KEY = f"{PREFIX}/index.json"
 _INDEX_MAX_ENTRIES = 60
+_INDEX_WRITE_ATTEMPTS = 5
 _PUBLIC_DATASET_BASE = "https://storage.googleapis.com/coval-benchmarks-datasets/s2s-v1"
 _DOWNLOAD_TIMEOUT = 120.0
 
@@ -137,26 +138,44 @@ def _upload(bucket: storage.Bucket, key: str, data: bytes, content_type: str) ->
 
 
 def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
-    """Prepend the tick to index.json (single daily writer — no race to guard).
+    """Prepend the tick to index.json under compare-and-swap.
 
-    Only a confirmed missing object starts an empty index; any other read
-    failure leaves the existing index untouched so a transient error can't
-    erase the history.
+    The daily fetch tick and the one-shot backfill can both write this object,
+    each as a read-modify-write, so the write is guarded with if_generation_match
+    (0 means require-absent): it only lands if index.json hasn't changed since it
+    was read. A lost race raises PreconditionFailed and re-runs the cycle on the
+    winner's version instead of clobbering their tick. Only a confirmed missing
+    object starts an empty index; any other read failure leaves the existing
+    index untouched so a transient error can't erase the history.
     """
     blob = bucket.blob(INDEX_KEY)
-    ticks: list[str]
-    try:
-        decoded = json.loads(blob.download_as_bytes())
-        if not isinstance(decoded, list) or not all(isinstance(t, str) for t in decoded):
-            raise ValueError("index.json must be a list of tick strings")
-        ticks = decoded
-    except NotFound:
-        ticks = []
-    except Exception:
-        logger.error("samples_index_read_failed", tick=tick_key, exc_info=True)
+    for _ in range(_INDEX_WRITE_ATTEMPTS):
+        ticks: list[str]
+        try:
+            data = blob.download_as_bytes()
+            generation = blob.generation
+            decoded = json.loads(data)
+            if not isinstance(decoded, list) or not all(isinstance(t, str) for t in decoded):
+                raise ValueError("index.json must be a list of tick strings")
+            ticks = decoded
+        except NotFound:
+            ticks = []
+            generation = 0
+        except Exception:
+            logger.error("samples_index_read_failed", tick=tick_key, exc_info=True)
+            return
+        ticks = [tick_key, *(t for t in ticks if t != tick_key)][:_INDEX_MAX_ENTRIES]
+        try:
+            blob.upload_from_string(
+                json.dumps(ticks).encode(),
+                content_type="application/json",
+                if_generation_match=generation,
+            )
+        except PreconditionFailed:
+            logger.info("samples_index_contended", tick=tick_key)
+            continue
         return
-    ticks = [tick_key, *(t for t in ticks if t != tick_key)][:_INDEX_MAX_ENTRIES]
-    _upload(bucket, INDEX_KEY, json.dumps(ticks).encode(), "application/json")
+    logger.error("samples_index_write_contended", tick=tick_key)
 
 
 async def copy_tick_samples(

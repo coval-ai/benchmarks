@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import NotFound, PreconditionFailed
 
 from coval_bench.s2s import samples
 from coval_bench.s2s.samples import PREFIX, SampleRun, copy_tick_samples
@@ -64,19 +64,44 @@ def _fake_client(
 class _FakeBucket:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.generations: dict[str, int] = {}
         self.fail_reads: set[str] = set()
+        # One-shot competing index write injected just before our next upload,
+        # to exercise the compare-and-swap retry in _update_index.
+        self.race_winner: str | None = None
+
+    def _current_gen(self, key: str) -> int:
+        if key in self.objects and key not in self.generations:
+            self.generations[key] = 1
+        return self.generations.get(key, 0)
+
+    def _store(self, key: str, data: bytes | str) -> None:
+        gen = self._current_gen(key)
+        self.objects[key] = data if isinstance(data, bytes) else data.encode()
+        self.generations[key] = gen + 1
 
     def blob(self, key: str) -> MagicMock:
         blob = MagicMock()
-        blob.upload_from_string = lambda data, content_type: self.objects.__setitem__(
-            key, data if isinstance(data, bytes) else data.encode()
-        )
+
+        def _upload(
+            data: bytes | str, content_type: str, if_generation_match: int | None = None
+        ) -> None:
+            if key == samples.INDEX_KEY and self.race_winner is not None:
+                winner, self.race_winner = self.race_winner, None
+                existing = json.loads(self.objects[key]) if key in self.objects else []
+                self._store(key, json.dumps([winner, *existing]))
+            if if_generation_match is not None and if_generation_match != self._current_gen(key):
+                raise PreconditionFailed("generation mismatch")  # type: ignore[no-untyped-call]
+            self._store(key, data)
+
+        blob.upload_from_string = _upload
 
         def _download() -> bytes:
             if key in self.fail_reads:
                 raise RuntimeError("transient read failure")
             if key not in self.objects:
                 raise NotFound(key)  # type: ignore[no-untyped-call]
+            blob.generation = self._current_gen(key)
             return self.objects[key]
 
         blob.download_as_bytes = _download
@@ -212,6 +237,24 @@ async def test_index_prepends_and_dedupes() -> None:
         )
     index = json.loads(bucket.objects[samples.INDEX_KEY])
     assert index == ["2026-07-17T00:00:00Z", "2026-07-16T00:00:00Z"]
+
+
+def test_index_write_retries_and_preserves_concurrent_tick() -> None:
+    _, bucket = _fake_storage()
+    bucket.objects[samples.INDEX_KEY] = json.dumps(["2026-07-15T00:00:00Z"]).encode()
+    # A competing writer lands its tick between our read and our write, so the
+    # first upload loses the compare-and-swap and we retry on its version.
+    bucket.race_winner = "2026-07-16T00:00:00Z"
+
+    samples._update_index(bucket, "2026-07-17T00:00:00Z")
+
+    assert bucket.race_winner is None
+    index = json.loads(bucket.objects[samples.INDEX_KEY])
+    assert index == [
+        "2026-07-17T00:00:00Z",
+        "2026-07-16T00:00:00Z",
+        "2026-07-15T00:00:00Z",
+    ]
 
 
 @pytest.mark.asyncio
