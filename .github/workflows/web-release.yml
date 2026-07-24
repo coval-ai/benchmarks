@@ -35,14 +35,14 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  deployments: write
+  contents: read
 
 jobs:
   context:
     name: Resolve release request
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions: {}
     outputs:
       deploy_ref: ${{ steps.release.outputs.deploy_ref }}
       environment: ${{ steps.release.outputs.environment }}
@@ -86,6 +86,9 @@ jobs:
     needs: context
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
+      deployments: write
     environment:
       name: ${{ needs.context.outputs.environment == 'staging' && 'Preview' || 'Production' }}
       url: ${{ steps.release.outputs.deployment-url }}
@@ -96,6 +99,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.context.outputs.deploy_ref }}
+          persist-credentials: ${{ needs.context.outputs.environment == 'production' }}
 
       - name: Resolve release SHA
         id: revision
