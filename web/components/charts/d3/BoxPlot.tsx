@@ -24,6 +24,12 @@ const modelLineHeight = 14;
 // marker, and the axis caption — 80px stacked marker over caption.
 const margin = { top: 20, right: 8, bottom: 88, left: 40 };
 const minSlotWidth = 48;
+/** Share of a slot the label block may occupy; the rest is breathing room. */
+const labelBandRatio = 0.82;
+/** Floor the label text shrinks to before a slot has to widen instead. */
+const minModelFont = 8;
+/** Geist Mono advances a fixed 0.6em, so label widths are predictable. */
+const monoAdvance = 0.6;
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -108,9 +114,26 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // chart) rather than crushing the axis labels into each other. This holds at
   // any viewport width — full screen, half, quarter, drag-resized, or mobile —
   // so wide desktops render flush while narrow ones scroll.
+  // A slot also has to hold the widest line of its label at the floor font —
+  // below that the text stops shrinking and spills into its neighbours.
+  const slotWidth = Math.ceil(
+    Math.max(
+      minSlotWidth,
+      ...data.data.map(
+        (d) =>
+          (Math.max(
+            getProviderForModel(d.model).length,
+            ...normalizeModelName(d.model).split(/[-_\s]/).map((w) => w.length)
+          ) *
+            minModelFont *
+            monoAdvance) /
+          labelBandRatio
+      )
+    )
+  );
   const svgWidth = Math.max(
     dimensions.width,
-    data.data.length * minSlotWidth + margin.left + margin.right
+    data.data.length * slotWidth + margin.left + margin.right
   );
   const scrollable = svgWidth > dimensions.width;
 
@@ -249,8 +272,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first
     {
-      const labelMaxWidth = xScale.step() * 0.82;
-      const minModelFont = 8;
+      const labelMaxWidth = xScale.step() * labelBandRatio;
 
       data.data.forEach((modelData) => {
         const model = modelData.model;

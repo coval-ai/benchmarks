@@ -10,7 +10,7 @@ import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricInfo from "@/components/shared/MetricInfo";
-import MetricToggle from "@/components/dashboard/MetricToggle";
+import MetricToggle, { useMetricTab } from "@/components/dashboard/MetricToggle";
 import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
@@ -27,6 +27,7 @@ const BoxPlotSection: React.FC = () => {
     activeMetric,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("box_plot");
+  const metricTab = useMetricTab();
 
   const boxPlotData = useMemo(
     () => getBoxPlotData(activeMetric),
@@ -42,6 +43,7 @@ const BoxPlotSection: React.FC = () => {
           label="Latency Variation"
           description={description}
           note={metricAboutNote(activeMetric)}
+          exportNote={metricTab}
           exportRows={() =>
             boxPlotData.data.map(({ model, quartiles, stats }) => ({
               model,
