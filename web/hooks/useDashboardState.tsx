@@ -557,7 +557,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const boxPlotDescription = {
     short: `Distribution of ${latencyLabel} values across all runs`,
     detailed:
-      "Narrow distributions indicate reliable, predictable response times, while wide distributions show erratic performance that may frustrate users despite good average speeds. A model with moderate median latency and tight distribution often provides superior user experience compared to a faster median model with high variability." +
+      metricDescriptions.iqr.detailed +
       (hasDedicatedBoxes
         ? ` Endpoints marked with a server icon use dedicated inference. ${DEDICATED_INFERENCE_BLURB}`
         : ""),
