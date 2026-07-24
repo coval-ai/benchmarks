@@ -58,3 +58,16 @@ async def test_healthz_exempt_from_ratelimit(app: FastAPI) -> None:
         responses = [await c.get("/healthz") for _ in range(100)]
 
     assert all(r.status_code == 200 for r in responses)
+
+
+async def test_v1_health_is_rate_limited(app: FastAPI) -> None:
+    """GET /v1/health carries the standard 60/minute limit — the 61st hit 429s."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as c:
+        allowed = [await c.get("/v1/health") for _ in range(60)]
+        blocked = await c.get("/v1/health")
+
+    assert all(r.status_code == 200 for r in allowed)
+    assert blocked.status_code == 429
