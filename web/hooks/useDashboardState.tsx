@@ -460,6 +460,28 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   const { avgSecondary, lowestWERModel, lowestWERProvider } = keyMetrics;
 
+  // S2S instruction-adherence headline: the model with the highest mean
+  // InstructionFollowing score (higher is better; value is already a percent).
+  // Mirrors the WER secondary tile but maximizes instead of minimizes.
+  const highestInstruction = useMemo(() => {
+    let best = -Infinity;
+    let bestModel = "";
+    let bestProvider = "";
+    deferredSelectedModels.forEach((model) => {
+      const stat = getStat(model, "InstructionFollowing");
+      if (stat && typeof stat.avg_value === "number" && stat.avg_value > best) {
+        best = stat.avg_value;
+        bestModel = model;
+        bestProvider = parseModelKey(model).provider;
+      }
+    });
+    return {
+      pct: best === -Infinity ? null : best,
+      bestModel,
+      bestProvider,
+    };
+  }, [getStat, deferredSelectedModels]);
+
   // Get computed data
   const cumulativeWerBarData = chartData.getWERBarData();
   const werBarData = useMemo<BarDataPoint[]>(() => {
@@ -568,10 +590,25 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       : undefined,
   };
 
-  // S2S has no WER, so it renders a single KeyMetric tile (no secondary).
+  // S2S shows instruction adherence as its secondary tile (higher is better);
+  // STT/TTS show WER. The tile is hidden until instruction data exists.
   const secondaryKeyMetric =
     page === "s2s"
-      ? undefined
+      ? highestInstruction.pct === null
+        ? undefined
+        : {
+            label: "Highest Instruction Adherence",
+            displayValue: `${highestInstruction.pct.toFixed(0)}%`,
+            subtitle: highestInstruction.bestModel
+              ? {
+                  name: normalizeModelName(highestInstruction.bestModel),
+                  detail: highestInstruction.bestProvider
+                    ? normalizeProviderName(highestInstruction.bestProvider)
+                    : undefined,
+                  dedicated: dedicatedModels.has(highestInstruction.bestModel),
+                }
+              : undefined,
+          }
       : {
           label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
           displayValue: `${avgSecondary.toFixed(1)}%`,
