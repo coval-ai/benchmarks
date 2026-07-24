@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { postPlaygroundTts, PlaygroundTtsError } from "@/lib/api/client";
 import type { PlaygroundApiError } from "@/lib/playground/schemas";
 
-export type TtsGenerationStatus = "idle" | "loading" | "success" | "error";
+type TtsGenerationStatus = "idle" | "loading" | "success" | "error";
 
 export type TtsGenerationRow = {
   status: TtsGenerationStatus;

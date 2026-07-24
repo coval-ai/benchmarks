@@ -1,4 +1,4 @@
-export type STTSuccess = {
+type STTSuccess = {
   modelId: string;
   transcript: string;
   ttfaMs: number | null;

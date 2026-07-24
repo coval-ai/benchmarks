@@ -43,4 +43,3 @@ export type DashboardChartId =
   | "performance_delta";
 export type PlaygroundRunTrigger = "button" | "keyboard";
 export type PlaygroundModeSwitchTrigger = "tab" | "keyboard";
-export type TranscriptBrowseMethod = "arrow" | "scroll";

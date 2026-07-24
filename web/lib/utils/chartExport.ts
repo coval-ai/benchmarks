@@ -51,7 +51,7 @@ export function downloadCSV(
   );
 }
 
-export interface LegendItem {
+interface LegendItem {
   label: string;
   color: string;
   /** Grayed out in the export, e.g. a series clipped off-chart by the zoom. */
