@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from click.testing import CliRunner
 from structlog.testing import capture_logs
 
 from coval_bench.config import Settings
@@ -747,3 +748,43 @@ def test_log_run_failed_emits_run_failed_event() -> None:
     with capture_logs() as logs:
         log_run_failed("s2s fetch failed for all providers")
     assert [entry["event"] for entry in logs] == ["RUN_FAILED"]
+
+
+def _run_fetch_cli(
+    monkeypatch: pytest.MonkeyPatch, statuses: dict[str, RunStatus]
+) -> tuple[int, list[str]]:
+    async def fake_fetch(_settings: Settings) -> dict[str, RunStatus]:
+        return statuses
+
+    settings = Settings.model_construct(log_level="INFO")
+    monkeypatch.setattr(fetch_v2v, "fetch_and_write_v2v", fake_fetch)
+    monkeypatch.setattr(fetch_v2v, "get_settings", lambda: settings)
+    monkeypatch.setattr("coval_bench.logging.configure_logging", lambda level: None)
+    with capture_logs() as logs:
+        result = CliRunner().invoke(fetch_v2v.fetch_s2s, [])
+    return result.exit_code, [str(entry.get("event")) for entry in logs]
+
+
+def test_cli_mixed_alerts_partial_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, events = _run_fetch_cli(
+        monkeypatch, {"openai": RunStatus.SUCCEEDED, "google": RunStatus.FAILED}
+    )
+    assert code == 0
+    assert "RUN_PARTIAL" in events
+    assert "RUN_FAILED" not in events
+
+
+def test_cli_all_failed_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, events = _run_fetch_cli(
+        monkeypatch, {"openai": RunStatus.FAILED, "google": RunStatus.FAILED}
+    )
+    assert code != 0
+    assert "RUN_FAILED" in events
+    assert "RUN_PARTIAL" not in events
+
+
+def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyPatch) -> None:
+    code, events = _run_fetch_cli(monkeypatch, {})
+    assert code != 0
+    assert "RUN_FAILED" in events
+    assert "RUN_PARTIAL" not in events
