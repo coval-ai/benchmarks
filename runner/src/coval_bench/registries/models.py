@@ -739,6 +739,21 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
+    # Fluxions hosted VUI. The render call takes no model id, only a voice, so
+    # "vui" is the bare surface name. Voices are the stable name half of the
+    # catalog's "<name>.<hash>" ids; the provider resolves the hash at runtime.
+    # Arena-disabled: built-in voices are public, so there is no API key env var
+    # for the key-parity gate to verify.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fluxions",
+        model="vui",
+        voice="maeve",
+        voices=("maeve", "abraham"),
+        tags=(_STREAMING, _CLONE, _EMOTION),
+        status=_ACTIVE,
+        arena_enabled=False,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
