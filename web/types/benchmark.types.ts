@@ -50,6 +50,12 @@ export interface BarDataPoint {
   provider: string;
 }
 
+export interface InstructionBarDataPoint {
+  model: string;
+  instructionScore: number;
+  provider: string;
+}
+
 export interface BoxPlotDataPoint {
   model: string;
   provider: string;

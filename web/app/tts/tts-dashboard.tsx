@@ -28,8 +28,8 @@ const LatencyAccuracySection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
-const AccuracyBarSection = dynamic(
-  () => import("@/components/dashboard/AccuracyBarSection"),
+const QualityBarSection = dynamic(
+  () => import("@/components/dashboard/QualityBarSection"),
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
@@ -46,7 +46,7 @@ export function TTSDashboard() {
           <KeyMetrics />
           <TimelineChart />
           <BoxPlotSection />
-          <AccuracyBarSection />
+          <QualityBarSection />
           <LatencyAccuracySection />
           <ModelComparisonSection />
         </DashboardLayout>

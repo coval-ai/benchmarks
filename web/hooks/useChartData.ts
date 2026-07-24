@@ -13,6 +13,7 @@ import type {
   BoxPlotDataPoint,
   ModelHeatmapData,
   BarDataPoint,
+  InstructionBarDataPoint,
   LatencyPercentile
 } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
@@ -397,6 +398,33 @@ export function useChartData({
     [werBarDataMemo]
   );
 
+  // S2S instruction adherence per model. Higher is better, so bars sort
+  // descending (best first) — the mirror of the ascending WER bars.
+  const instructionBarDataMemo = useMemo<InstructionBarDataPoint[]>(() => {
+    if (selectedModels.length === 0) {
+      return [];
+    }
+
+    return selectedModels
+      .map((model) => {
+        const stat = getStat(model, "InstructionFollowing");
+        if (!stat) return null;
+
+        return {
+          model,
+          instructionScore: stat.avg_value,
+          provider: stat.provider,
+        };
+      })
+      .filter((item): item is InstructionBarDataPoint => item !== null)
+      .sort((a, b) => b.instructionScore - a.instructionScore);
+  }, [selectedModels, getStat]);
+
+  const getInstructionBarData = useCallback(
+    (): InstructionBarDataPoint[] => instructionBarDataMemo,
+    [instructionBarDataMemo]
+  );
+
   // ─── Timeline window functions ───
 
   const currentTimeWindow = useMemo<[number, number]>(() => {
@@ -474,6 +502,7 @@ export function useChartData({
     getScatterData,
     getHeatmapData,
     getWERBarData,
+    getInstructionBarData,
     getCurrentTimeWindow,
     getTimelineTicks,
     getWindowedTimelineData,
