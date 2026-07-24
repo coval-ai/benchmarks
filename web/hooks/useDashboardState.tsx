@@ -68,9 +68,12 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const benchmarkParam =
     page === "s2s" ? "S2S" : page === "tts" ? "TTS" : "STT";
 
+  // S2S is a multi-turn-only board: pin its aggregates to the multi-turn dataset
+  // so legacy single-turn (s2s-v1) rows never pool into the V2V charts.
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
+    dataset: page === "s2s" ? "s2s-multiturn-v1" : undefined,
   });
   const providersQuery = useProvidersQuery();
 

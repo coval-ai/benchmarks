@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo } from "react";
 import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { SampleFetchError } from "@/lib/audioSamples/createSampleFeed";
-import { s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
+import { isMultiTurn, s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { usePlaybackCoordinator } from "@/hooks/useSequencedPlayback";
@@ -43,6 +43,7 @@ export function SamplesCard() {
   const effectiveTick = s2sPlayRequest?.tick ?? latestTick;
   const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
+  const multiTurn = manifest ? isMultiTurn(manifest) : false;
 
   const fetchError = manifestQuery.isError || indexQuery.isError;
   // Keep the failure cause internal (dev console only); public visitors just see
@@ -59,6 +60,7 @@ export function SamplesCard() {
       provider: r.provider,
       model: r.model,
       url: s2sSampleFeed.objectUrl(r.object),
+      turns: r.turns,
     }));
   }, [manifest, visibleProviders]);
 
@@ -84,8 +86,11 @@ export function SamplesCard() {
           Conversation samples
         </div>
         {manifest ? (
-          <span className="font-mono text-xs text-text-tertiary">
-            {tickLabel(manifest.bucket_at)}
+          <span className="flex items-baseline gap-2 font-mono text-xs text-text-tertiary">
+            {manifest.persona_name ? (
+              <span className="text-text-secondary">{manifest.persona_name}</span>
+            ) : null}
+            <span>{tickLabel(manifest.bucket_at)}</span>
           </span>
         ) : null}
       </div>
@@ -104,11 +109,13 @@ export function SamplesCard() {
         </p>
       ) : (
         <div className="flex flex-1 flex-col gap-4">
-          <SampleInput
-            transcript={manifest?.transcript ?? null}
-            inputAudioUrl={manifest?.input_audio_url ?? null}
-            coordinator={coordinator}
-          />
+          {!multiTurn ? (
+            <SampleInput
+              transcript={manifest?.transcript ?? null}
+              inputAudioUrl={manifest?.input_audio_url ?? null}
+              coordinator={coordinator}
+            />
+          ) : null}
           <SampleOutputs
             items={items}
             normalizeProvider={normalizeProviderName}
@@ -123,9 +130,11 @@ export function SamplesCard() {
         </div>
       )}
 
-      <p className="mt-4 text-[10px] text-text-tertiary">
-        Prompts from the SLURP dataset (CC BY-NC 4.0).
-      </p>
+      {!multiTurn ? (
+        <p className="mt-4 text-[10px] text-text-tertiary">
+          Prompts from the SLURP dataset (CC BY-NC 4.0).
+        </p>
+      ) : null}
     </Card>
   );
 }
