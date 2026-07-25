@@ -82,8 +82,8 @@ def _fake_client(
             []
             if sim_id in empty_turns
             else [
-                {"role": "user", "content": "hi there"},
-                {"role": "assistant", "content": "how can i help"},
+                {"role": "user", "content": "hi there", "start_offset": 1.5, "end_offset": 2.25},
+                {"role": "assistant", "content": "how can i help", "start_offset": 3.0},
             ]
         )
         return httpx.Response(200, json={"simulation": {"transcript": turns}})
@@ -155,13 +155,16 @@ async def test_publishes_complete_conversation_for_all_providers() -> None:
     assert manifest["bucket_at"] == TICK
     assert manifest["test_set_id"] == TEST_SET
     assert manifest["persona_name"] in {"Standard Female", "Standard Male"}
-    assert manifest["input_audio_url"] is None
+    assert "input_audio_url" not in manifest  # dropped in v2
     assert "transcript" not in manifest  # dropped in v2
     assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
     for rec in manifest["recordings"]:
         assert rec["agent_id"] in {"AO", "AG"}
         assert [t["index"] for t in rec["turns"]] == [0, 1]
         assert [t["role"] for t in rec["turns"]] == ["user", "assistant"]
+        # Per-agent offsets flow through; a missing offset coerces to None.
+        assert [t["start_offset"] for t in rec["turns"]] == [1.5, 3.0]
+        assert [t["end_offset"] for t in rec["turns"]] == [2.25, None]
 
     assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
 
@@ -287,3 +290,19 @@ async def test_never_raises_on_total_failure() -> None:
 
     assert stored == 0
     assert bucket.objects == {}
+
+
+def test_conversation_turns_coerces_offsets() -> None:
+    sim = {
+        "transcript": [
+            {"role": "user", "content": "a", "start_offset": 1, "end_offset": 2.5},
+            {"role": "assistant", "content": "b", "start_offset": "x", "end_offset": True},
+            {"role": "user", "content": "c"},
+        ]
+    }
+    turns = samples._conversation_turns(sim)
+    assert [(t["start_offset"], t["end_offset"]) for t in turns] == [
+        (1.0, 2.5),
+        (None, None),
+        (None, None),
+    ]
