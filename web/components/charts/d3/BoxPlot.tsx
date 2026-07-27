@@ -63,6 +63,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const axisRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const captionRef = useRef<SVGTextElement | null>(null);
   const [dimensions, setDimensions] = useState({
     width: width || 800,
     height
@@ -155,6 +156,8 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     data.data.length * slotWidth + margin.left + margin.right
   );
   const scrollable = svgWidth > dimensions.width;
+  // Shared by the draw and the scroll-tracking effects below.
+  const captionY = dimensions.height - margin.top - 6;
 
   // Layout effect so the d3 content redraws in the same frame the <svg>
   // resizes — the PNG export clones the SVG as soon as its width settles, and
@@ -363,15 +366,21 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // X-axis label (the Y axis title is omitted — it's redundant with the
     // card heading).
-    g.append("text")
-      .attr(
-        "transform",
-        `translate(${chartWidth / 2}, ${chartHeight + margin.bottom - 6})`
-      )
-      .style("text-anchor", "middle")
+    // Left-anchored once the plot scrolls: centering on the full canvas parks
+    // the caption off-screen, so on mobile it never reaches the reader. Phone
+    // widths can't fit the long form either.
+    captionRef.current = g
+      .append("text")
+      .attr("transform", `translate(${scrollable ? 0 : chartWidth / 2}, ${captionY})`)
+      .style("text-anchor", scrollable ? "start" : "middle")
       .attr("fill", themeColors.axisText)
       .attr("font-size", axisLabelFontSize)
-      .text("Ranked by IQR (tightest first)");
+      .text(
+        isMobile
+          ? "Fastest median first"
+          : "Ranked by median latency (fastest first)"
+      )
+      .node();
 
     // Render a box plot for each model
     data.data.forEach((modelData) => {
@@ -510,7 +519,18 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
+  }, [data, dimensions.height, svgWidth, scrollable, captionY, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
+
+  // The caption sits inside the scrolling plot so PNG exports capture it, which
+  // means panning would carry it off-screen; slide it back by the scroll offset
+  // so the ranking stays legible wherever the reader has swiped to.
+  useEffect(() => {
+    if (!captionRef.current || !scrollable) return;
+    captionRef.current.setAttribute(
+      "transform",
+      `translate(${scrollX}, ${captionY})`
+    );
+  }, [scrollX, scrollable, captionY, data]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -606,6 +626,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           </p>
           {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
           {[
+            ["Median", `${tip.point.quartiles.median.toFixed(0)}ms`],
             [
               "IQR",
               `${(tip.point.quartiles.q3 - tip.point.quartiles.q1).toFixed(0)}ms`
