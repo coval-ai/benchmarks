@@ -84,6 +84,8 @@ def _fake_client(
             else [
                 {"role": "user", "content": "hi there", "start_offset": 1.5, "end_offset": 2.25},
                 {"role": "assistant", "content": "how can i help", "start_offset": 3.0},
+                # The persona's end_conversation tool record, as Coval returns it.
+                {"role": "tool", "content": '{"function": "end_conversation"}'},
             ]
         )
         return httpx.Response(200, json={"simulation": {"transcript": turns}})

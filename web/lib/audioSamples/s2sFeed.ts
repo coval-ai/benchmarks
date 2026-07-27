@@ -63,23 +63,31 @@ function asOptionalString(v: unknown, field: string): string | undefined {
   return asString(v, field);
 }
 
+// Manifests written before the sampler filtered them carry the persona's
+// `end_conversation` tool record as a `role: "tool"` turn whose content is raw
+// JSON. Drop anything that isn't spoken dialogue so it can't render as a caller
+// turn — those manifests stay readable for their 30-day retention.
+const SPOKEN_ROLES: ReadonlySet<string> = new Set(["user", "assistant"]);
+
 function parseTurns(v: unknown, field: string): S2STurn[] | undefined {
   if (v === undefined) return undefined;
   if (!Array.isArray(v)) throw new Error(`${field} must be an array`);
-  return v.map((t, i): S2STurn => {
-    if (typeof t !== "object" || t === null) {
-      throw new Error(`${field}[${i}] must be an object`);
-    }
-    const turn = t as Record<string, unknown>;
-    if (typeof turn.index !== "number") {
-      throw new Error(`${field}[${i}].index must be a number`);
-    }
-    return {
-      index: turn.index,
-      role: asString(turn.role, `${field}[${i}].role`),
-      content: asString(turn.content, `${field}[${i}].content`),
-    };
-  });
+  return v
+    .map((t, i): S2STurn => {
+      if (typeof t !== "object" || t === null) {
+        throw new Error(`${field}[${i}] must be an object`);
+      }
+      const turn = t as Record<string, unknown>;
+      if (typeof turn.index !== "number") {
+        throw new Error(`${field}[${i}].index must be a number`);
+      }
+      return {
+        index: turn.index,
+        role: asString(turn.role, `${field}[${i}].role`),
+        content: asString(turn.content, `${field}[${i}].content`),
+      };
+    })
+    .filter((t) => SPOKEN_ROLES.has(t.role));
 }
 
 // Validate the full manifest shape before the UI touches it — a shallow object

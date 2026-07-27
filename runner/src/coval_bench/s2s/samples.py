@@ -69,6 +69,9 @@ class SampleRun:
     agent_id: str = ""
 
 
+_SPOKEN_ROLES = frozenset({"user", "assistant"})
+
+
 def _offset_seconds(value: object) -> float | None:
     """A Coval transcript offset as float seconds, or ``None`` when absent/non-numeric."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -77,19 +80,23 @@ def _offset_seconds(value: object) -> float | None:
 
 
 def _conversation_turns(sim: dict[str, Any]) -> list[dict[str, Any]]:
-    """Full ordered conversation as ``{index, role, content, start_offset, end_offset}`` turns.
+    """Spoken conversation as ``{index, role, content, start_offset, end_offset}`` turns.
 
-    Non-string content is skipped so a malformed message can't poison the
-    manifest; an empty list means the transcript couldn't be resolved and the
-    sample is treated as incomplete. ``start_offset``/``end_offset`` are
-    full-recording positions in seconds (``None`` when Coval omits them) that
-    the dashboard uses to sync the playhead to each turn.
+    Only ``user`` (the persona) and ``assistant`` (the agent) messages are
+    spoken. Coval's transcript also carries the persona's tool records — the
+    ``end_conversation`` call arrives as ``role="tool"`` with raw JSON content —
+    and those are dropped rather than rendered as a caller turn. Non-string
+    content is skipped so a malformed message can't poison the manifest; an
+    empty list means the transcript couldn't be resolved and the sample is
+    treated as incomplete. ``start_offset``/``end_offset`` are full-recording
+    positions in seconds (``None`` when Coval omits them) that the dashboard
+    uses to sync the playhead to each turn.
     """
     turns: list[dict[str, Any]] = []
     for message in cast("list[dict[str, Any]]", sim.get("transcript") or []):
         role = message.get("role")
         content = message.get("content")
-        if isinstance(role, str) and isinstance(content, str):
+        if role in _SPOKEN_ROLES and isinstance(content, str):
             turns.append(
                 {
                     "index": len(turns),
