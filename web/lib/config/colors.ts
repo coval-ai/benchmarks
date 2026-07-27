@@ -125,5 +125,10 @@ export const providerColors: Record<string, string> = {
   Smallest: "#d7a03d",
   Azure: "#3d7fd1",
   Alibaba: "#9c6c03",
-  "Together AI": "#4a9243"
+  "Together AI": "#4a9243",
+  // Baseten's own brand green, at their request. Sits above the categorical
+  // band's lightness ceiling (L 0.81) so it reads brighter than the palette's
+  // other greens — which is what keeps it clearly theirs next to Gradium,
+  // Together AI, and Rime.
+  Baseten: "#19E76E"
 };
