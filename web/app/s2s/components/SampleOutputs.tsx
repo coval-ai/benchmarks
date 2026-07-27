@@ -76,9 +76,8 @@ export function SampleOutputs({
   // conversation. All items in a manifest share a shape, so a single flag holds.
   const conversation = items.some((i) => (i.turns?.length ?? 0) > 0);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const paneRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const { audioRef, activeIndex, isPlaying, toggle, playFrom, handleEnded } = useSequencedPlayback(
+  const { audioRef, activeIndex, isPlaying, toggle, playFrom, stop } = useSequencedPlayback(
     tracks,
     (track) => onPlay?.(track.key),
     coordinator
@@ -96,16 +95,6 @@ export function SampleOutputs({
     playFrom(idx);
   }, [playRequest, items, playFrom]);
 
-  // Auto-scroll the active pane to center while a sequence is playing.
-  useEffect(() => {
-    if (!isPlaying) return;
-    const vp = viewportRef.current;
-    const pane = paneRefs.current[activeIndex];
-    if (!vp || !pane) return;
-    const target = pane.offsetLeft - (vp.clientWidth - pane.clientWidth) / 2;
-    vp.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
-  }, [activeIndex, isPlaying]);
-
   const hints = useScrollHints(viewportRef, `${items.length}:${items.map((i) => i.provider).join(",")}`);
 
   const step = (dir: -1 | 1) => {
@@ -117,20 +106,9 @@ export function SampleOutputs({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
-          {conversation ? "Conversation" : "Responses"}
-        </p>
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex items-center gap-1.5 rounded-full bg-text-primary px-3 py-1 text-[11px] font-medium text-surface-primary transition-opacity hover:opacity-90"
-          aria-label={isPlaying ? "Pause" : "Play all responses"}
-        >
-          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
-          <span>{isPlaying ? "Pause" : "Play all"}</span>
-        </button>
-      </div>
+      <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
+        {conversation ? "Conversation" : "Responses"}
+      </p>
 
       <div className="relative">
         {hints.left ? (
@@ -168,9 +146,6 @@ export function SampleOutputs({
             return (
               <div
                 key={item.provider}
-                ref={(el) => {
-                  paneRefs.current[i] = el;
-                }}
                 role="listitem"
                 className={`flex shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
                   conversation ? "w-[300px] min-w-[300px]" : "w-[180px] min-w-[180px]"
@@ -212,7 +187,7 @@ export function SampleOutputs({
         </div>
       </div>
 
-      <audio ref={audioRef} onEnded={handleEnded} hidden />
+      <audio ref={audioRef} onEnded={stop} hidden />
     </div>
   );
 }

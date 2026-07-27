@@ -11,14 +11,7 @@ import { isMultiTurn, s2sSampleFeed, visibleRecordings } from "@/lib/audioSample
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { usePlaybackCoordinator } from "@/hooks/useSequencedPlayback";
-import { SampleInput } from "./SampleInput";
 import { SampleOutputs, type SampleOutputItem } from "./SampleOutputs";
-
-function tickLabel(tick: string): string {
-  const d = new Date(tick);
-  if (Number.isNaN(d.getTime())) return tick;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 // Which failure case fired, for the console — network/http/parse vs an
 // unclassified error, with the status when we have one.
@@ -43,7 +36,7 @@ export function SamplesCard() {
   const effectiveTick = s2sPlayRequest?.tick ?? latestTick;
   const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
-  const multiTurn = manifest ? isMultiTurn(manifest) : false;
+  const hasNoConversation = manifest != null && !isMultiTurn(manifest);
 
   const fetchError = manifestQuery.isError || indexQuery.isError;
   // Keep the failure cause internal (dev console only); public visitors just see
@@ -55,14 +48,14 @@ export function SamplesCard() {
   }, [manifestQuery.error, indexQuery.error]);
 
   const items = useMemo<SampleOutputItem[]>(() => {
-    if (!manifest) return [];
+    if (!manifest || hasNoConversation) return [];
     return visibleRecordings(manifest, visibleProviders).map((r) => ({
       provider: r.provider,
       model: r.model,
       url: s2sSampleFeed.objectUrl(r.object),
       turns: r.turns,
     }));
-  }, [manifest, visibleProviders]);
+  }, [manifest, hasNoConversation, visibleProviders]);
 
   const handlePlay = useCallback(
     (provider: string) => {
@@ -81,18 +74,8 @@ export function SamplesCard() {
 
   return (
     <Card className="text-left min-w-0 h-full flex flex-col" padding="p-5 lg:p-8">
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <div className="text-[0.9rem] font-light text-text-secondary">
-          Conversation samples
-        </div>
-        {manifest ? (
-          <span className="flex items-baseline gap-2 font-mono text-xs text-text-tertiary">
-            {manifest.persona_name ? (
-              <span className="text-text-secondary">{manifest.persona_name}</span>
-            ) : null}
-            <span>{tickLabel(manifest.bucket_at)}</span>
-          </span>
-        ) : null}
+      <div className="mb-3 text-[0.9rem] font-light text-text-secondary">
+        Conversation samples
       </div>
 
       {loading ? (
@@ -103,19 +86,12 @@ export function SamplesCard() {
         </p>
       ) : items.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-tertiary">
-          {!manifest && s2sPlayRequest
-            ? "No sample recorded for this point."
+          {hasNoConversation || (!manifest && s2sPlayRequest)
+            ? "No conversation recorded for this point."
             : "Samples appear here after the next benchmark run."}
         </p>
       ) : (
         <div className="flex flex-1 flex-col gap-4">
-          {!multiTurn ? (
-            <SampleInput
-              transcript={manifest?.transcript ?? null}
-              inputAudioUrl={manifest?.input_audio_url ?? null}
-              coordinator={coordinator}
-            />
-          ) : null}
           <SampleOutputs
             items={items}
             normalizeProvider={normalizeProviderName}
@@ -129,12 +105,6 @@ export function SamplesCard() {
           />
         </div>
       )}
-
-      {!multiTurn ? (
-        <p className="mt-4 text-[10px] text-text-tertiary">
-          Prompts from the SLURP dataset (CC BY-NC 4.0).
-        </p>
-      ) : null}
     </Card>
   );
 }
