@@ -21,7 +21,7 @@ depends_on = None
 
 def upgrade() -> None:
     """Create the pg_stat_statements extension."""
-    op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements SCHEMA public")
 
 
 def downgrade() -> None:
