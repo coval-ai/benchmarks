@@ -371,7 +371,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       .style("text-anchor", "middle")
       .attr("fill", themeColors.axisText)
       .attr("font-size", axisLabelFontSize)
-      .text("Ranked by P50 latency");
+      .text("Ranked by IQR (tightest first)");
 
     // Render a box plot for each model
     data.data.forEach((modelData) => {

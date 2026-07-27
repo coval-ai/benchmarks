@@ -225,7 +225,7 @@ export function useChartData({
   }, [modelStats, toDisplayUnits]);
 
   // Box plot data for a given metric: the selected models' pieces, sorted by
-  // median, with the pooled axis bounds.
+  // IQR so the tightest models read left to right, with the pooled axis bounds.
   const getBoxPlotData = useCallback(
     (metric: string): BoxPlotData => {
       const byModel = boxByMetricModel[metric] ?? {};
@@ -247,7 +247,10 @@ export function useChartData({
         globalMax = 0;
       }
 
-      data.sort((a, b) => a.quartiles.median - b.quartiles.median);
+      data.sort(
+        (a, b) =>
+          a.quartiles.q3 - a.quartiles.q1 - (b.quartiles.q3 - b.quartiles.q1)
+      );
 
       return {
         data,
