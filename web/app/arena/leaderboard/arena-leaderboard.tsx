@@ -51,7 +51,7 @@ export function ArenaLeaderboardPage() {
                   <th className="py-2 pr-4 font-medium">#</th>
                   <th className="py-2 pr-4 font-medium">Model</th>
                   <th className="py-2 pr-4 font-medium">Provider</th>
-                  <th className="py-2 pr-4 text-right font-medium">Elo</th>
+                  <th className="whitespace-nowrap py-2 pr-4 text-right font-medium">Elo</th>
                 </tr>
               </thead>
               <tbody>
@@ -71,7 +71,7 @@ export function ArenaLeaderboardPage() {
                       <td className="py-2.5 pr-4 text-text-secondary">
                         {normalizeTTSProviderName(entry.provider)}
                       </td>
-                      <td className="py-2.5 pr-4 text-right tabular-nums">
+                      <td className="whitespace-nowrap py-2.5 pr-4 text-right tabular-nums">
                         {eloLabel(entry)}
                       </td>
                     </tr>

@@ -1,6 +1,5 @@
 export const runtime = "nodejs";
 
-import { arenaAccessOk } from "@/lib/arena/guard";
 import { arenaRunnerFetch } from "@/lib/arena/runner";
 import type { VoteResult } from "@/lib/arena/types";
 
@@ -10,7 +9,6 @@ interface VoteOut {
 }
 
 export async function POST(req: Request) {
-  if (!(await arenaAccessOk())) return new Response(null, { status: 404 });
   let body: { battleId?: string; outcome?: string; voterId?: string };
   try {
     body = await req.json();

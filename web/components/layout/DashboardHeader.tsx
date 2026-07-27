@@ -16,6 +16,7 @@ const SECTIONS = [
   { href: "/overview", label: "Overview", short: "Overview" },
   { href: "/tts", label: "Text-to-Speech", short: "TTS" },
   { href: "/stt", label: "Speech-to-Text", short: "STT" },
+  { href: "/arena", label: "Arena", short: "Arena" },
   { href: "/playground", label: "Playground", short: "Playground" }
 ];
 
@@ -77,7 +78,8 @@ const DashboardHeader: React.FC = () => {
           className="absolute left-1/2 top-0 hidden h-full -translate-x-1/2 items-center gap-1 lg:flex"
         >
           {SECTIONS.map((section) => {
-            const active = pathname === section.href;
+            const active =
+              pathname === section.href || pathname.startsWith(`${section.href}/`);
             return (
               <Link
                 key={section.href}
@@ -150,7 +152,8 @@ const DashboardHeader: React.FC = () => {
         }`}
       >
         {SECTIONS.map((section) => {
-          const active = pathname === section.href;
+          const active =
+            pathname === section.href || pathname.startsWith(`${section.href}/`);
           return (
             <Link
               key={section.href}

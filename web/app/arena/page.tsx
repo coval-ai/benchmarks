@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import DashboardHeader from "@/components/layout/DashboardHeader";
 import { ARENA_DOMAINS, type ArenaDomain } from "@/lib/arena/domains";
 import { getBattleSource } from "@/lib/arena/source";
 import type {
@@ -14,6 +16,11 @@ import { AudioPlayer } from "./components/AudioPlayer";
 
 const MIN_CHARS = 3;
 const MAX_CHARS = 500;
+
+// Post-vote only: standings shown before a vote anchor the judgment, and votes are what
+// tightens the provisional CIs. Flip to false to pull the link entirely — /arena/leaderboard
+// stays reachable by URL either way.
+const SHOW_LEADERBOARD_LINK = true;
 
 export default function ArenaPage() {
   const source = getBattleSource();
@@ -160,157 +167,158 @@ export default function ArenaPage() {
   const canVote = battle !== null && !recorded && !dirty;
 
   return (
-    <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
-      <div className="mx-auto flex max-w-[760px] flex-col gap-8">
-        <h1 className="text-center font-sans text-2xl">Which voice sounds more natural?</h1>
+    <>
+      <DashboardHeader />
+      <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
+        <div className="mx-auto flex max-w-[760px] flex-col gap-8">
+          <h1 className="text-center font-sans text-2xl">Which voice sounds more natural?</h1>
 
-        <section className="flex flex-col gap-3">
-          <select
-            value={domain}
-            onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
-            aria-label="Domain"
-            className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
-          >
-            <option value="" disabled>
-              Select a domain *
-            </option>
-            {ARENA_DOMAINS.map((d) => (
-              <option key={d.value} value={d.value}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-          <textarea
-            value={text}
-            maxLength={MAX_CHARS}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Describe a scenario or write text to synthesize…"
-            rows={4}
-            className="w-full resize-none rounded-xl border border-border-primary bg-surface-elevated p-4 font-sans text-base leading-relaxed outline-none focus:border-selected-border"
-          />
-          <div className="flex items-center justify-between text-sm text-text-tertiary">
-            <button
-              type="button"
-              onClick={() => void applyExample()}
-              className="font-sans underline underline-offset-2 hover:text-text-secondary"
+          <section className="flex flex-col gap-3">
+            <select
+              value={domain}
+              onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
+              aria-label="Domain"
+              className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
             >
-              Use an example
-            </button>
-            <span className="font-mono">
-              {text.length}/{MAX_CHARS}
-            </span>
-          </div>
-        </section>
-
-        <div
-          key={battle?.battleId ?? "pending"}
-          className="grid grid-cols-[1fr_44px_1fr] items-stretch"
-        >
-          <BattleCard
-            side="a"
-            blindTitle="Model A"
-            revealed={recorded && reveal ? reveal.a : null}
-            picked={recorded ? vote : null}
-            isActive={active === "a"}
-            src={battle?.audioA ?? null}
-            onActivate={() => setActive("a")}
-            autoPlay={autoPlay}
-            onEnded={() => chainEnded("a")}
-          />
-          <div className="flex items-center justify-center font-mono text-xs text-text-tertiary">
-            VS
-          </div>
-          <BattleCard
-            side="b"
-            blindTitle="Model B"
-            revealed={recorded && reveal ? reveal.b : null}
-            picked={recorded ? vote : null}
-            isActive={active === "b"}
-            src={battle?.audioB ?? null}
-            onActivate={() => setActive("b")}
-            autoPlay={autoPlay}
-            onEnded={() => chainEnded("b")}
-          />
-        </div>
-
-        <section className="flex min-h-[52px] flex-col gap-3" aria-live="polite">
-          {recorded && loading ? (
-            <div className="flex items-center justify-center gap-3">
-              <p className="font-mono text-sm text-text-secondary">
-                ✓ Recorded — loading the next battle…
-              </p>
+              <option value="" disabled>
+                Select a domain *
+              </option>
+              {ARENA_DOMAINS.map((d) => (
+                <option key={d.value} value={d.value}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={text}
+              maxLength={MAX_CHARS}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Describe a scenario or write text to synthesize…"
+              rows={4}
+              className="w-full resize-none rounded-xl border border-border-primary bg-surface-elevated p-4 font-sans text-base leading-relaxed outline-none focus:border-selected-border"
+            />
+            <div className="flex items-center justify-between text-sm text-text-tertiary">
               <button
                 type="button"
-                onClick={stopAutoAdvance}
-                className="rounded-full border border-border-primary px-4 py-1.5 font-mono text-xs text-text-secondary hover:bg-hover-bg"
+                onClick={() => void applyExample()}
+                className="flex min-h-11 items-center font-sans underline underline-offset-2 hover:text-text-secondary"
               >
-                Stop
+                Use an example
               </button>
+              <span className="font-mono">
+                {text.length}/{MAX_CHARS}
+              </span>
             </div>
-          ) : canVote && !loading ? (
-            <>
-              <div className="grid grid-cols-[1fr_0.7fr_1fr] gap-3">
-                <VoteButton label="Model A" onClick={() => castVote("A_WIN")} disabled={submitting} />
-                <VoteButton label="Tie" onClick={() => castVote("TIE")} disabled={submitting} />
-                <VoteButton label="Model B" onClick={() => castVote("B_WIN")} disabled={submitting} />
-              </div>
-              <label className="flex cursor-pointer items-center gap-2 self-center font-mono text-xs text-text-secondary">
-                <input
-                  type="checkbox"
-                  checked={autoAdvance}
-                  onChange={() => persistAutoAdvance(!autoAdvance)}
-                />
-                Auto-advance
-              </label>
-            </>
-          ) : recorded && !dirty && !loading ? (
-            <div className="flex flex-col items-center gap-4">
-              <p className="font-mono text-sm text-text-secondary">✓ Battle recorded</p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
+          </section>
+
+          <div
+            key={battle?.battleId ?? "pending"}
+            className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_44px_1fr] sm:gap-0 sm:items-stretch"
+          >
+            <BattleCard
+              side="a"
+              blindTitle="Model A"
+              revealed={recorded && reveal ? reveal.a : null}
+              picked={recorded ? vote : null}
+              isActive={active === "a"}
+              src={battle?.audioA ?? null}
+              onActivate={() => setActive("a")}
+              autoPlay={autoPlay}
+              onEnded={() => chainEnded("a")}
+            />
+            <div className="flex items-center justify-center font-mono text-xs text-text-tertiary">
+              VS
+            </div>
+            <BattleCard
+              side="b"
+              blindTitle="Model B"
+              revealed={recorded && reveal ? reveal.b : null}
+              picked={recorded ? vote : null}
+              isActive={active === "b"}
+              src={battle?.audioB ?? null}
+              onActivate={() => setActive("b")}
+              autoPlay={autoPlay}
+              onEnded={() => chainEnded("b")}
+            />
+          </div>
+
+          <section className="flex min-h-[52px] flex-col gap-3" aria-live="polite">
+            {recorded && loading ? (
+              <div className="flex items-center justify-center gap-3">
+                <p className="font-mono text-sm text-text-secondary">
+                  ✓ Recorded — loading the next battle…
+                </p>
                 <button
-                  ref={nextBattleRef}
                   type="button"
-                  onClick={() => void quickBattle()}
-                  className="rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active"
+                  onClick={stopAutoAdvance}
+                  className="min-h-11 rounded-full border border-border-primary px-4 font-mono text-xs text-text-secondary hover:bg-hover-bg"
                 >
-                  Another battle
+                  Stop
                 </button>
-                <label className="flex cursor-pointer items-center gap-2 font-mono text-xs text-text-secondary">
+              </div>
+            ) : canVote && !loading ? (
+              <>
+                <div className="grid grid-cols-[1fr_0.7fr_1fr] gap-3">
+                  <VoteButton label="Model A" onClick={() => castVote("A_WIN")} disabled={submitting} />
+                  <VoteButton label="Tie" onClick={() => castVote("TIE")} disabled={submitting} />
+                  <VoteButton label="Model B" onClick={() => castVote("B_WIN")} disabled={submitting} />
+                </div>
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 self-center font-mono text-xs text-text-secondary">
                   <input
                     type="checkbox"
+                    className="h-5 w-5"
                     checked={autoAdvance}
                     onChange={() => persistAutoAdvance(!autoAdvance)}
                   />
                   Auto-advance
                 </label>
-                <a
-                  href="/arena/leaderboard"
-                  className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
-                >
-                  View leaderboard
-                </a>
-                <a
-                  href="/arena/admin"
-                  className="rounded-full border border-border-primary px-6 py-2.5 font-mono text-sm text-text-secondary hover:bg-hover-bg"
-                >
-                  Monitoring
-                </a>
+              </>
+            ) : recorded && !dirty && !loading ? (
+              <div className="flex flex-col items-center gap-4">
+                <p className="font-mono text-sm text-text-secondary">✓ Battle recorded</p>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    ref={nextBattleRef}
+                    type="button"
+                    onClick={() => void quickBattle()}
+                    className="min-h-11 rounded-full bg-surface-toggle-active px-6 font-mono text-sm text-text-on-toggle-active"
+                  >
+                    Another battle
+                  </button>
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2 font-mono text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5"
+                      checked={autoAdvance}
+                      onChange={() => persistAutoAdvance(!autoAdvance)}
+                    />
+                    Auto-advance
+                  </label>
+                  {SHOW_LEADERBOARD_LINK && (
+                    <Link
+                      href="/arena/leaderboard"
+                      className="flex min-h-11 items-center rounded-full border border-border-primary px-6 font-mono text-sm text-text-secondary hover:bg-hover-bg"
+                    >
+                      View leaderboard
+                    </Link>
+                  )}
+                </div>
               </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void generate(text, domain)}
-              disabled={trimmed.length < MIN_CHARS || !domain || loading}
-              className="self-start rounded-full bg-surface-toggle-active px-6 py-2.5 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
-            >
-              {loading ? "Generating…" : "Generate speech"}
-            </button>
-          )}
-          {error && <p className="text-center font-sans text-sm text-accent-rust">{error}</p>}
-        </section>
-      </div>
-    </main>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void generate(text, domain)}
+                disabled={trimmed.length < MIN_CHARS || !domain || loading}
+                className="min-h-11 self-start rounded-full bg-surface-toggle-active px-6 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
+              >
+                {loading ? "Generating…" : "Generate speech"}
+              </button>
+            )}
+            {error && <p className="text-center font-sans text-sm text-accent-rust">{error}</p>}
+          </section>
+        </div>
+      </main>
+    </>
   );
 }
 
@@ -416,7 +424,7 @@ function VoteButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded-xl border border-border-primary bg-surface-elevated py-3 font-mono text-sm hover:border-selected-border hover:bg-selected-bg disabled:opacity-40"
+      className="min-h-11 rounded-xl border border-border-primary bg-surface-elevated py-3 font-mono text-sm hover:border-selected-border hover:bg-selected-bg disabled:opacity-40"
     >
       {label}
     </button>

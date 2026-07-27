@@ -84,7 +84,7 @@ export function AudioPlayer({ src, label, isActive, onActivate, autoPlay, onEnde
         onClick={toggle}
         disabled={disabled}
         aria-label={disabled ? `${label} — generate to enable` : `${playing ? "Pause" : "Play"} ${label}`}
-        className="shrink-0 rounded-full border border-border-primary bg-surface-primary px-4 py-2 font-mono text-sm text-text-primary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-border-primary bg-surface-primary font-mono text-sm text-text-primary hover:bg-hover-bg disabled:cursor-not-allowed disabled:opacity-40"
       >
         {playing ? "❚❚" : "▶"}
       </button>
