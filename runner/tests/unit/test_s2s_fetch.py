@@ -438,13 +438,45 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
 
 
 @pytest.mark.asyncio
-async def test_newest_run_is_the_sample_candidate_once() -> None:
+async def test_each_bucket_contributes_its_own_sample_candidate() -> None:
+    """Runs in different buckets are both candidates — this is what recovers a missed day."""
     from coval_bench.s2s.samples import SampleRun
 
     writer = _stub_writer()
+    # Exactly one period apart, so the two always floor to different buckets.
     list_json = _list_json(
         {"run_id": "R2", "create_time": _iso(timedelta(hours=1))},
         {"run_id": "R1", "create_time": _iso(timedelta(hours=4))},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert [r.coval_run_id for r in sampled] == ["R2", "R1"]
+    assert len({r.bucket_at for r in sampled}) == 2
+
+
+@pytest.mark.asyncio
+async def test_one_bucket_keeps_only_its_newest_candidate() -> None:
+    """Staggered arrivals within a bucket must not shrink that bucket's sample."""
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    # Same create_time, so both are certainly in one bucket; newest-first wins.
+    same_time = _iso(timedelta(hours=1))
+    list_json = _list_json(
+        {"run_id": "R2", "create_time": same_time},
+        {"run_id": "R1", "create_time": same_time},
     )
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     sampled: list[SampleRun] = []

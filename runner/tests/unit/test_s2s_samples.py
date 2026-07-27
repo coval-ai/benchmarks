@@ -20,6 +20,9 @@ from coval_bench.s2s.samples import PREFIX, SampleRun, publish_tick_sample
 
 BUCKET_AT = datetime(2026, 7, 17, tzinfo=UTC)
 TICK = "2026-07-17T00:00:00Z"
+# The fetch window spans two periods, so a run set can carry the previous day too.
+PREV_BUCKET_AT = datetime(2026, 7, 16, tzinfo=UTC)
+PREV_TICK = "2026-07-16T00:00:00Z"
 TEST_SET = "DvAqQ4md"
 
 # Real bench persona ids so the label map is exercised too.
@@ -27,15 +30,33 @@ FEMALE = "PN3xgmsqeLDjsNNEA2e55e"
 MALE = "9ATy64zKXxSUaVWb5YnQtd"
 
 
-def _run(provider: str, model: str, run_id: str, persona_id: str, agent_id: str) -> SampleRun:
+def _run(
+    provider: str,
+    model: str,
+    run_id: str,
+    persona_id: str,
+    agent_id: str,
+    bucket_at: datetime = BUCKET_AT,
+) -> SampleRun:
     return SampleRun(
         provider=provider,
         model=model,
         coval_run_id=run_id,
-        bucket_at=BUCKET_AT,
+        bucket_at=bucket_at,
         persona_id=persona_id,
         agent_id=agent_id,
     )
+
+
+# One day's worth: two providers x two personas, ids suffixed so each day's runs
+# stay distinct when a set spans two buckets.
+def _runs_on(bucket_at: datetime, suffix: str) -> list[SampleRun]:
+    return [
+        _run("openai", "gpt-realtime", f"RO_F{suffix}", FEMALE, "AO", bucket_at),
+        _run("openai", "gpt-realtime", f"RO_M{suffix}", MALE, "AO", bucket_at),
+        _run("google", "gemini-live", f"RG_F{suffix}", FEMALE, "AG", bucket_at),
+        _run("google", "gemini-live", f"RG_M{suffix}", MALE, "AG", bucket_at),
+    ]
 
 
 # Two providers, each run once per persona (mirrors run = agent + persona + test_set).
@@ -129,6 +150,7 @@ async def _publish(
     runs: list[SampleRun],
     *,
     rng_seed: int = 0,
+    expected_providers: set[str] | None = None,
 ) -> int:
     return await publish_tick_sample(
         client,
@@ -138,6 +160,7 @@ async def _publish(
         rng=random.Random(rng_seed),
         storage_client=storage_client,
         download_client=client,
+        expected_providers=expected_providers,
     )
 
 
@@ -269,14 +292,32 @@ async def test_existing_manifest_is_never_overwritten() -> None:
 
 
 @pytest.mark.asyncio
-async def test_index_prepends_existing_history() -> None:
+async def test_index_keeps_existing_history() -> None:
     storage_client, bucket = _fake_storage()
-    bucket.objects[samples.INDEX_KEY] = json.dumps(["2026-07-16T00:00:00Z"]).encode()
+    bucket.objects[samples.INDEX_KEY] = json.dumps([PREV_TICK]).encode()
     cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"], "RG_M": ["b"]}
     async with _fake_client(cases) as client:
         await _publish(client, storage_client, _runs())
 
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK, "2026-07-16T00:00:00Z"]
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK, PREV_TICK]
+
+
+@pytest.mark.asyncio
+async def test_index_stays_newest_first_when_an_older_day_lands_later() -> None:
+    """A recovered day is older than the history, and must not become index[0].
+
+    The dashboard treats index[0] as the latest tick, so ordering has to come
+    from the timestamps rather than from the order days happened to be written.
+    """
+    storage_client, bucket = _fake_storage()
+    newer = ["2026-07-27T00:00:00Z", TICK]
+    bucket.objects[samples.INDEX_KEY] = json.dumps(newer).encode()
+    runs = _runs_on(PREV_BUCKET_AT, "_Y")
+    cases = {r.coval_run_id: ["b"] for r in runs}
+    async with _fake_client(cases) as client:
+        await _publish(client, storage_client, runs)
+
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [*newer, PREV_TICK]
 
 
 @pytest.mark.asyncio
@@ -292,6 +333,88 @@ async def test_never_raises_on_total_failure() -> None:
 
     assert stored == 0
     assert bucket.objects == {}
+
+
+@pytest.mark.asyncio
+async def test_missed_day_publishes_alongside_the_current_tick() -> None:
+    """A run set spanning two buckets publishes BOTH — this is the day-gap recovery."""
+    storage_client, bucket = _fake_storage()
+    runs = _runs_on(PREV_BUCKET_AT, "_Y") + _runs_on(BUCKET_AT, "_T")
+    cases = {r.coval_run_id: ["b", "c"] for r in runs}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, runs)
+
+    assert stored == 4  # two providers x two days
+    for tick in (PREV_TICK, TICK):
+        manifest = json.loads(bucket.objects[f"{PREFIX}/{tick}/manifest.json"])
+        assert manifest["bucket_at"] == tick
+        assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
+        assert f"{PREFIX}/{tick}/openai.wav" in bucket.objects
+        assert f"{PREFIX}/{tick}/google.wav" in bucket.objects
+    # Published oldest-first, so the index ends up newest-first.
+    assert json.loads(bucket.objects[f"{PREFIX}/index.json"]) == [TICK, PREV_TICK]
+
+
+@pytest.mark.asyncio
+async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
+    """A provider can be present today and absent yesterday.
+
+    Completeness has to be judged against the configured provider set, not
+    against whichever providers happen to appear in that one bucket — otherwise
+    yesterday calls itself complete and ships a one-provider comparison.
+    """
+    storage_client, bucket = _fake_storage()
+    openai_only = [
+        _run("openai", "gpt-realtime", "RO_F_Y", FEMALE, "AO", PREV_BUCKET_AT),
+        _run("openai", "gpt-realtime", "RO_M_Y", MALE, "AO", PREV_BUCKET_AT),
+    ]
+    runs = openai_only + _runs_on(BUCKET_AT, "_T")
+    cases = {r.coval_run_id: ["b", "c"] for r in runs}
+    async with _fake_client(cases) as client:
+        stored = await _publish(
+            client, storage_client, runs, expected_providers={"openai", "google"}
+        )
+
+    # Today is complete and publishes; yesterday is refused outright.
+    assert stored == 2
+    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
+    assert f"{PREFIX}/{PREV_TICK}/manifest.json" not in bucket.objects
+    assert f"{PREFIX}/{PREV_TICK}/openai.wav" not in bucket.objects
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
+
+
+@pytest.mark.asyncio
+async def test_recovery_never_overwrites_an_existing_manifest() -> None:
+    storage_client, bucket = _fake_storage()
+    already_there = b'{"schema_version": 2, "bucket_at": "2026-07-16T00:00:00Z"}'
+    bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] = already_there
+    runs = _runs_on(PREV_BUCKET_AT, "_Y") + _runs_on(BUCKET_AT, "_T")
+    cases = {r.coval_run_id: ["b", "c"] for r in runs}
+    async with _fake_client(cases) as client:
+        stored = await _publish(client, storage_client, runs)
+
+    assert stored == 2  # only the current tick
+    assert bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] == already_there
+    assert f"{PREFIX}/{PREV_TICK}/openai.wav" not in bucket.objects
+    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
+    # The existing day is still repaired into the index.
+    assert PREV_TICK in json.loads(bucket.objects[f"{PREFIX}/index.json"])
+
+
+@pytest.mark.asyncio
+async def test_an_unusable_day_does_not_block_the_other() -> None:
+    storage_client, bucket = _fake_storage()
+    stale = _runs_on(PREV_BUCKET_AT, "_Y")
+    runs = stale + _runs_on(BUCKET_AT, "_T")
+    cases = {r.coval_run_id: ["b", "c"] for r in runs}
+    # Every recording for the previous day 404s.
+    gone = frozenset(f"{r.coval_run_id}-{tc}" for r in stale for tc in ("b", "c"))
+    async with _fake_client(cases, audio_404=gone) as client:
+        stored = await _publish(client, storage_client, runs)
+
+    assert stored == 2
+    assert f"{PREFIX}/{PREV_TICK}/manifest.json" not in bucket.objects
+    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
 
 
 def test_conversation_turns_coerces_offsets() -> None:

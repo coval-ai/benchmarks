@@ -37,6 +37,7 @@ logger = structlog.get_logger("coval_bench.s2s.samples")
 
 PREFIX = "s2s-samples"
 INDEX_KEY = f"{PREFIX}/index.json"
+_TICK_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _INDEX_MAX_ENTRIES = 60
 _DOWNLOAD_TIMEOUT = 120.0
 
@@ -165,7 +166,14 @@ def _upload(bucket: storage.Bucket, key: str, data: bytes, content_type: str) ->
 
 
 def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
-    """Prepend the tick to index.json (single daily writer — no race to guard).
+    """Add the tick to index.json, kept newest-first (single writer — no race to guard).
+
+    Sorted rather than prepended because ticks are not always written in
+    chronological order: one fetch publishes every day in its window oldest
+    first, and a recovery can add a day older than everything already there.
+    The dashboard reads index[0] as the latest tick, so write order must not
+    decide it. Fixed-width ISO-8601 UTC makes a reverse string sort
+    chronological, and it keeps the newest entries when truncating.
 
     Only a confirmed missing object starts an empty index; any other read
     failure leaves the existing index untouched so a transient error can't
@@ -183,7 +191,7 @@ def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
     except Exception:
         logger.error("samples_index_read_failed", tick=tick_key, exc_info=True)
         return
-    ticks = [tick_key, *(t for t in ticks if t != tick_key)][:_INDEX_MAX_ENTRIES]
+    ticks = sorted({tick_key, *ticks}, reverse=True)[:_INDEX_MAX_ENTRIES]
     _upload(bucket, INDEX_KEY, json.dumps(ticks).encode(), "application/json")
 
 
@@ -196,8 +204,13 @@ async def publish_tick_sample(
     rng: Random,
     storage_client: storage.Client | None = None,
     download_client: httpx.AsyncClient | None = None,
+    expected_providers: set[str] | None = None,
 ) -> int:
     """Copy one multi-turn conversation (every provider, one persona) as a v2 sample.
+
+    ``expected_providers`` is the configured provider set a sample must cover.
+    Pass it: without it completeness is judged against whichever providers turned
+    up, so a day one provider sat out would publish a lopsided comparison.
 
     Never raises: any failure is logged and the tick is simply skipped.
     """
@@ -213,6 +226,7 @@ async def publish_tick_sample(
                 runs=runs,
                 rng=rng,
                 storage_client=storage_client,
+                expected_providers=expected_providers,
             )
     except Exception:
         logger.error("samples_tick_failed", exc_info=True)
@@ -228,8 +242,68 @@ async def _publish_tick_sample(
     runs: list[SampleRun],
     rng: Random,
     storage_client: storage.Client | None,
+    expected_providers: set[str] | None,
 ) -> int:
-    providers = {r.provider for r in runs}
+    """Publish a sample for EVERY bucket present in ``runs``, oldest first.
+
+    The fetch window spans two periods, so a run set can carry both yesterday and
+    today. Publishing per bucket is what recovers a missed day: yesterday
+    republishes if it never landed, and is skipped cheaply if it did (the
+    manifest-exists check below). One bucket failing never blocks the others.
+
+    Each bucket must cover ``expected_providers`` on its own. A provider can be
+    present for today and absent for yesterday, and judging each bucket against
+    only its own runs would call that yesterday complete.
+    """
+    if storage_client is None:  # pragma: no cover -- real client only outside tests
+        from google.cloud import storage as gcs
+
+        storage_client = gcs.Client()
+    bucket = storage_client.bucket(bucket_name)
+
+    by_bucket: dict[datetime, list[SampleRun]] = {}
+    for run in runs:
+        by_bucket.setdefault(run.bucket_at, []).append(run)
+
+    published = 0
+    for bucket_at in sorted(by_bucket):
+        try:
+            published += await _publish_one_bucket(
+                client,
+                download_client,
+                bucket=bucket,
+                test_set_id=test_set_id,
+                runs=by_bucket[bucket_at],
+                bucket_at=bucket_at,
+                rng=rng,
+                expected_providers=expected_providers,
+            )
+        except Exception:
+            logger.error(
+                "samples_bucket_failed",
+                tick=bucket_at.strftime(_TICK_FORMAT),
+                exc_info=True,
+            )
+    return published
+
+
+async def _publish_one_bucket(
+    client: httpx.AsyncClient,
+    download_client: httpx.AsyncClient,
+    *,
+    bucket: storage.Bucket,
+    test_set_id: str,
+    runs: list[SampleRun],
+    bucket_at: datetime,
+    rng: Random,
+    expected_providers: set[str] | None,
+) -> int:
+    tick_key = bucket_at.strftime(_TICK_FORMAT)
+    providers = expected_providers or {r.provider for r in runs}
+    absent = providers - {r.provider for r in runs}
+    if absent:
+        logger.error("samples_bucket_provider_absent", tick=tick_key, absent=sorted(absent))
+        return 0
 
     # A "conversation" is one (test_case, persona) pair — the same scenario and
     # the same simulated caller, which is what makes the sample comparable across
@@ -265,31 +339,30 @@ async def _publish_tick_sample(
         pool.extend((persona_id, tc) for tc in sorted(shared))
 
     if not pool:
-        logger.error("samples_no_shared_clip", runs=[r.coval_run_id for r in runs])
+        logger.error(
+            "samples_no_shared_clip",
+            tick=tick_key,
+            providers=sorted(providers),
+            personas=sorted(runs_by_persona),
+            runs=[r.coval_run_id for r in runs],
+        )
         return 0
-
-    if storage_client is None:  # pragma: no cover -- real client only outside tests
-        from google.cloud import storage as gcs
-
-        storage_client = gcs.Client()
-    bucket = storage_client.bucket(bucket_name)
 
     # Uniform draw over the shared conversations of both personas; repick on any
     # incomplete provider so only a fully-complete conversation (audio + turns for
     # EVERY provider) is ever surfaced.
     rng.shuffle(pool)
+    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+    if bucket.blob(manifest_key).exists():
+        # Idempotent repair: manifest published but the index update failed. This
+        # is also what makes replaying an already-published day cheap.
+        _update_index(bucket, tick_key)
+        logger.info("samples_tick_exists", tick=tick_key)
+        return 0
+
     for persona_id, test_case_id in pool:
         prov_runs = runs_by_persona[persona_id]
-        # Key the sample by the CHOSEN conversation's own bucket, not the max across
-        # all personas: personas can straddle bucket boundaries, and the global max
-        # would store this sample under an unrelated (newer) tick and mislabel it.
-        tick_key = max(prov_runs[p].bucket_at for p in providers).strftime("%Y-%m-%dT%H:%M:%SZ")
-        manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
-        if bucket.blob(manifest_key).exists():
-            # Idempotent repair: manifest published but the index update failed.
-            _update_index(bucket, tick_key)
-            logger.info("samples_tick_exists", tick=tick_key)
-            return 0
+        blocked_by: str | None = None
         staged: list[tuple[SampleRun, str, bytes, list[dict[str, Any]]]] = []
         for provider in sorted(providers):
             run = prov_runs[provider]
@@ -314,11 +387,18 @@ async def _publish_tick_sample(
             except Exception:
                 logger.error("sample_copy_failed", provider=provider, sim_id=sim_id, exc_info=True)
             if audio is None or not turns:
+                blocked_by = provider
                 break
             staged.append((run, sim_id, audio, turns))
 
         if len(staged) != len(providers):
-            logger.info("sample_incomplete_skipped", persona=persona_id, test_case_id=test_case_id)
+            logger.info(
+                "sample_incomplete_skipped",
+                tick=tick_key,
+                persona=persona_id,
+                test_case_id=test_case_id,
+                provider=blocked_by,
+            )
             continue
 
         recordings: list[dict[str, Any]] = []
@@ -355,5 +435,11 @@ async def _publish_tick_sample(
         )
         return len(recordings)
 
-    logger.error("samples_no_complete_sample")
+    logger.error(
+        "samples_no_complete_sample",
+        tick=tick_key,
+        providers=sorted(providers),
+        attempted=len(pool),
+        test_case_ids=sorted({tc for _, tc in pool}),
+    )
     return 0
