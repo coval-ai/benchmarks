@@ -12,6 +12,7 @@ const FOOTER_LINKS = [
   { href: "/overview", label: "Overview" },
   { href: "/tts", label: "Text-to-Speech" },
   { href: "/stt", label: "Speech-to-Text" },
+  { href: "/arena", label: "Arena" },
   { href: "/playground", label: "Playground" }
 ];
 
