@@ -480,21 +480,26 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
-    candidates: dict[str, SampleRun] = {}
+    candidates: dict[tuple[datetime, str], SampleRun] = {}
 
     def note_sample_candidate(coval_run: CovalRun) -> None:
-        # Newest-first scan: keep the newest eligible run PER PERSONA. Multi-turn
-        # runs the same test set once per persona, so a provider yields one
-        # candidate per persona (single-turn has no persona -> a single "" key).
-        # Staggered arrivals must not shrink the sample; committed only after the
-        # staleness check so a stale provider's old recording never ships today.
-        if coval_run.persona_id in candidates:
+        # Newest-first scan: keep the newest eligible run PER (BUCKET, PERSONA).
+        # Multi-turn runs the same test set once per persona, so a provider yields
+        # one candidate per persona per day (single-turn has no persona -> a "" key).
+        # Keying on the bucket too is what lets a missed day still be published: the
+        # window spans two periods, and keying on persona alone let today's run evict
+        # yesterday's before the sampler ever saw it. Staggered arrivals must not
+        # shrink the sample; committed only after the staleness check so a stale
+        # provider's old recording never ships today.
+        bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
+        key = (bucket_at, coval_run.persona_id)
+        if key in candidates:
             return
-        candidates[coval_run.persona_id] = SampleRun(
+        candidates[key] = SampleRun(
             provider=spec.provider,
             model=spec.model,
             coval_run_id=coval_run.run_id,
-            bucket_at=_bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds),
+            bucket_at=bucket_at,
             persona_id=coval_run.persona_id,
             agent_id=agent_id,
         )
@@ -656,7 +661,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             missing = expected - {r.provider for r in sampled_runs}
             if missing:
                 # Error level on purpose: this is the alert that a provider is
-                # absent from the day's sample; the tick still publishes the rest.
+                # absent from the window, so no day in it can publish a sample.
                 logger.error("samples_provider_missing", missing=sorted(missing))
             await publish_tick_sample(
                 client,
@@ -664,6 +669,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 test_set_id=test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
+                expected_providers=expected,
             )
         logger.info(
             "s2s_fetch_done",
