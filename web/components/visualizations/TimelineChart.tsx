@@ -462,9 +462,12 @@ const TimelineChart: React.FC = () => {
   const zoomTicks = useMemo(
     () =>
       zoomX &&
+      // Inset off the domain edges: a label centred on zoomX[0] hangs half its
+      // width left of the plot, over the Y axis labels. Five ticks keep the
+      // same spacing the edge-to-edge six had, without the crowding.
       Array.from(
-        { length: 6 },
-        (_, i) => zoomX[0] + ((zoomX[1] - zoomX[0]) * i) / 5
+        { length: 5 },
+        (_, i) => zoomX[0] + ((zoomX[1] - zoomX[0]) * (i + 0.5)) / 5
       ),
     [zoomX]
   );
@@ -1004,7 +1007,7 @@ const TimelineChart: React.FC = () => {
                 }}
               />
               <YAxis
-                width={40}
+                width={48}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
@@ -1133,11 +1136,14 @@ const TimelineChart: React.FC = () => {
                 }}
               />
               <div
-                className="absolute z-[15] border-t border-dashed border-text-secondary/40 bg-surface-toggle-inactive/35 touch-pan-y md:hidden"
+                className="absolute z-[15] touch-pan-y md:hidden"
                 style={{
-                  left: interactionBox.left,
+                  // Full-width hit area: scrubDateAxis clamps into the plot box,
+                  // so the Y axis gutter and right margin scrub to the end
+                  // values instead of being dead zones.
+                  left: 0,
                   top: interactionBox.top + interactionBox.height,
-                  width: interactionBox.width,
+                  right: 0,
                   bottom: 0,
                 }}
                 onPointerDown={(e) => {
@@ -1157,6 +1163,15 @@ const TimelineChart: React.FC = () => {
                   cancelAxisScrub();
                 }}
               >
+                {/* Band stays plot-aligned so its rule never runs into the Y
+                    axis labels. */}
+                <div
+                  className="absolute inset-y-0 border-t border-dashed border-text-secondary/40 bg-surface-toggle-inactive/35"
+                  style={{
+                    left: interactionBox.left,
+                    width: interactionBox.width,
+                  }}
+                />
               </div>
             </>
           )}
