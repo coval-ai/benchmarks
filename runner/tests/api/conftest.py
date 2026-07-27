@@ -178,6 +178,9 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
+    # Battle generation screens prompts through the moderation API. Without this the
+    # suite would reach the network on any machine that has the key exported.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     settings = Settings()
 

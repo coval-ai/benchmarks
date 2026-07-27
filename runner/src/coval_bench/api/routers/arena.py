@@ -53,6 +53,7 @@ from coval_bench.api.schemas import (
 )
 from coval_bench.arena.audio_store import clip_url
 from coval_bench.arena.generate import generate_battle
+from coval_bench.arena.moderation import moderation_verdict, pii_match
 from coval_bench.arena.monitoring import (
     build_convergence,
     build_cooccurrence,
@@ -332,16 +333,36 @@ async def create_battle(
 
     Pairing weights informative matchups from the latest ratings, falling back to
     uniform at cold start. Returns 502 if either side fails to synthesize (no battle
-    is written). Guarded by a global daily cap (``arena_daily_battle_cap``, ``<= 0``
-    disables), checked before synthesis so a tripped cap spends nothing (429). Known
-    limits: it counts successful battles only (a failed one still costs ~2 calls,
-    uncounted but logged), and the non-transactional check may overshoot slightly
-    under concurrency (no data is overwritten).
+    is written).
+
+    The prompt is screened before anything is spent: personal data locally, then
+    content via the moderation API (422 either way). Screening precedes the cap so a
+    rejected prompt costs neither money nor anyone's quota.
+
+    Then a global daily cap (``arena_daily_battle_cap``, ``<= 0`` disables), also
+    checked before synthesis so a tripped cap spends nothing (429). Known limits: it
+    counts successful battles only (a failed one still costs ~2 calls, uncounted but
+    logged), and the non-transactional check may overshoot slightly under concurrency
+    (no data is overwritten).
     """
     store = ArenaStore(pool)
     prompt = body.prompt.strip()
     if not prompt:
         raise HTTPException(422, "prompt must not be empty")
+
+    pii = pii_match(prompt)
+    if pii is not None:
+        logger.info("arena_prompt_rejected", reason="pii", kind=pii)
+        raise HTTPException(422, "prompt must not contain payment card or national id numbers")
+
+    flagged, category_scores = await moderation_verdict(settings, prompt)
+    if flagged:
+        logger.info(
+            "arena_prompt_rejected",
+            reason="moderation",
+            categories=sorted(name for name, score in category_scores.items() if score >= 0.5),
+        )
+        raise HTTPException(422, "prompt rejected by content moderation")
 
     cap = settings.arena_daily_battle_cap
     if cap > 0 and await store.count_battles_today() >= cap:
