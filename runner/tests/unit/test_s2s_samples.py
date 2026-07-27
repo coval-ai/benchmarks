@@ -384,6 +384,31 @@ async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
 
 
 @pytest.mark.asyncio
+async def test_published_day_is_reindexed_even_when_a_provider_is_absent() -> None:
+    """An index write that once failed must still be repairable.
+
+    A published day whose current runs no longer cover every provider still owns
+    its manifest, so it has to be put back in the index. Checking completeness
+    first would strand it: its runs age out of the window, and no later fetch
+    would revisit the bucket.
+    """
+    storage_client, bucket = _fake_storage()
+    already_there = b'{"schema_version": 2, "bucket_at": "2026-07-16T00:00:00Z"}'
+    bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] = already_there
+    # Only openai remains for that day, so the provider gate would otherwise fire.
+    openai_only = [_run("openai", "gpt-realtime", "RO_F_Y", FEMALE, "AO", PREV_BUCKET_AT)]
+    cases = {r.coval_run_id: ["b"] for r in openai_only}
+    async with _fake_client(cases) as client:
+        stored = await _publish(
+            client, storage_client, openai_only, expected_providers={"openai", "google"}
+        )
+
+    assert stored == 0
+    assert bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] == already_there
+    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [PREV_TICK]
+
+
+@pytest.mark.asyncio
 async def test_recovery_never_overwrites_an_existing_manifest() -> None:
     storage_client, bucket = _fake_storage()
     already_there = b'{"schema_version": 2, "bucket_at": "2026-07-16T00:00:00Z"}'

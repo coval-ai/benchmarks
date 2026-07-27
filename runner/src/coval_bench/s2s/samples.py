@@ -299,6 +299,16 @@ async def _publish_one_bucket(
     expected_providers: set[str] | None,
 ) -> int:
     tick_key = bucket_at.strftime(_TICK_FORMAT)
+    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+    # Ahead of every other gate: an already-published day needs no runs at all,
+    # only its index entry restored if that write once failed. Gating this behind
+    # the checks below would strand such a day for good — its runs age out of the
+    # window, so no later fetch would revisit the bucket to repair it.
+    if bucket.blob(manifest_key).exists():
+        _update_index(bucket, tick_key)
+        logger.info("samples_tick_exists", tick=tick_key)
+        return 0
+
     providers = expected_providers or {r.provider for r in runs}
     absent = providers - {r.provider for r in runs}
     if absent:
@@ -352,14 +362,6 @@ async def _publish_one_bucket(
     # incomplete provider so only a fully-complete conversation (audio + turns for
     # EVERY provider) is ever surfaced.
     rng.shuffle(pool)
-    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
-    if bucket.blob(manifest_key).exists():
-        # Idempotent repair: manifest published but the index update failed. This
-        # is also what makes replaying an already-published day cheap.
-        _update_index(bucket, tick_key)
-        logger.info("samples_tick_exists", tick=tick_key)
-        return 0
-
     for persona_id, test_case_id in pool:
         prov_runs = runs_by_persona[persona_id]
         blocked_by: str | None = None
