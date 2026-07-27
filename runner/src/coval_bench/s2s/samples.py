@@ -69,19 +69,36 @@ class SampleRun:
     agent_id: str = ""
 
 
+def _offset_seconds(value: object) -> float | None:
+    """A Coval transcript offset as float seconds, or ``None`` when absent/non-numeric."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _conversation_turns(sim: dict[str, Any]) -> list[dict[str, Any]]:
-    """Full ordered conversation as ``{index, role, content}`` turns.
+    """Full ordered conversation as ``{index, role, content, start_offset, end_offset}`` turns.
 
     Non-string content is skipped so a malformed message can't poison the
     manifest; an empty list means the transcript couldn't be resolved and the
-    sample is treated as incomplete.
+    sample is treated as incomplete. ``start_offset``/``end_offset`` are
+    full-recording positions in seconds (``None`` when Coval omits them) that
+    the dashboard uses to sync the playhead to each turn.
     """
     turns: list[dict[str, Any]] = []
     for message in cast("list[dict[str, Any]]", sim.get("transcript") or []):
         role = message.get("role")
         content = message.get("content")
         if isinstance(role, str) and isinstance(content, str):
-            turns.append({"index": len(turns), "role": role, "content": content})
+            turns.append(
+                {
+                    "index": len(turns),
+                    "role": role,
+                    "content": content,
+                    "start_offset": _offset_seconds(message.get("start_offset")),
+                    "end_offset": _offset_seconds(message.get("end_offset")),
+                }
+            )
     return turns
 
 
@@ -280,7 +297,8 @@ async def _publish_tick_sample(
                     return resp
 
                 detail = await _fetch_retry(fetch_detail, provider=provider, what="sim_detail")
-                turns = _conversation_turns(cast("dict[str, Any]", detail.json()))
+                # /simulations/{id} wraps the object in a "simulation" envelope.
+                turns = _conversation_turns(cast("dict[str, Any]", detail.json()["simulation"]))
 
                 async def fetch_recording(sim_id: str = sim_id) -> bytes | None:
                     return await _download_recording(client, download_client, sim_id)
@@ -317,7 +335,6 @@ async def _publish_tick_sample(
             "test_set_id": test_set_id,
             "test_case_id": test_case_id,
             "persona_name": _persona_label(persona_id),
-            "input_audio_url": None,
             "recordings": recordings,
         }
         _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")

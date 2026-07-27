@@ -467,10 +467,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           .attr("fill", "transparent");
       }
 
-      // Hover shows a compact name + median tooltip above the whiskers;
-      // clicking pins that same tooltip and populates it with the full
-      // stats so it never chases the cursor or blocks neighboring boxes.
-      // On mobile there is no hover: a tap pins the full stats directly.
+      // Hover shows the model's name and IQR above the whiskers; clicking pins
+      // that same tooltip so it never chases the cursor or blocks neighboring
+      // boxes. On mobile there is no hover: a tap pins it directly.
       const anchor = {
         point: modelData,
         x: margin.left + centerX,
@@ -606,22 +605,12 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             {normalizeModelName(tip.point.model)}
           </p>
           {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
-          {(tip.pinned
-            ? [
-                ["Max", `${tip.point.stats.max.toFixed(0)}ms`],
-                ["P95", `${tip.point.stats.p95.toFixed(0)}ms`],
-                ["P75", `${tip.point.quartiles.q3.toFixed(0)}ms`],
-                ["P50", `${tip.point.quartiles.median.toFixed(0)}ms`],
-                ["P25", `${tip.point.quartiles.q1.toFixed(0)}ms`],
-                ["Count", `${tip.point.stats.count}`]
-              ]
-            : [
-                [
-                  "Median",
-                  `${tip.point.quartiles.median.toFixed(0)}ms · click for details`
-                ]
-              ]
-          ).map(([label, value]) => (
+          {[
+            [
+              "IQR",
+              `${(tip.point.quartiles.q3 - tip.point.quartiles.q1).toFixed(0)}ms`
+            ]
+          ].map(([label, value]) => (
             <p
               key={label}
               style={{
