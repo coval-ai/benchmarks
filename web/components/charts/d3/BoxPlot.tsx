@@ -523,14 +523,18 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
   // The caption sits inside the scrolling plot so PNG exports capture it, which
   // means panning would carry it off-screen; slide it back by the scroll offset
-  // so the ranking stays legible wherever the reader has swiped to.
-  useEffect(() => {
+  // so the ranking stays legible wherever the reader has swiped to. Deliberately
+  // unconditional: the redraw above rebuilds the caption at x=0 on any of its
+  // deps, so this has to re-run after every one of them, not just after a
+  // scroll. It follows the redraw in the same commit, so the caption never
+  // paints at the stale offset.
+  useLayoutEffect(() => {
     if (!captionRef.current || !scrollable) return;
     captionRef.current.setAttribute(
       "transform",
       `translate(${scrollX}, ${captionY})`
     );
-  }, [scrollX, scrollable, captionY, data]);
+  });
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
