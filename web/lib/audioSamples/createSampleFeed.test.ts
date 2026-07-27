@@ -132,6 +132,23 @@ describe("parseS2SManifest", () => {
     expect(m.input_audio_url).toBe("u");
   });
 
+  it("drops non-spoken turns from an already-published manifest", () => {
+    const m = parseS2SManifest({
+      ...validManifest,
+      recordings: [
+        {
+          ...validManifest.recordings[0]!,
+          turns: [
+            { index: 0, role: "user", content: "hi" },
+            { index: 1, role: "assistant", content: "hello" },
+            { index: 2, role: "tool", content: '{"function": "end_conversation"}' },
+          ],
+        },
+      ],
+    });
+    expect(m.recordings[0]!.turns?.map((t) => t.role)).toEqual(["user", "assistant"]);
+  });
+
   it.each([
     ["null", null],
     ["missing recordings", { bucket_at: "x", test_case_id: "y", transcript: null, input_audio_url: null }],
