@@ -13,11 +13,10 @@ import {
 } from "@/components/shared/DedicatedInferenceInfo";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
-// Match the text sizes on the timeline chart above: 14px axis labels, 12px
-// tick/legend/category text.
+// Match the text sizes on the timeline chart above: 12px tick/legend/category
+// text.
 const modelFontSize = 12;
 const providerFontSize = 12;
-const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
 // Bottom holds up to three label lines, the provider, the dedicated-inference
@@ -63,7 +62,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const axisRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const captionRef = useRef<SVGTextElement | null>(null);
   const [dimensions, setDimensions] = useState({
     width: width || 800,
     height
@@ -156,8 +154,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     data.data.length * slotWidth + margin.left + margin.right
   );
   const scrollable = svgWidth > dimensions.width;
-  // Shared by the draw and the scroll-tracking effects below.
-  const captionY = dimensions.height - margin.top - 6;
 
   // Layout effect so the d3 content redraws in the same frame the <svg>
   // resizes — the PNG export clones the SVG as soon as its width settles, and
@@ -364,24 +360,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       });
     }
 
-    // X-axis label (the Y axis title is omitted — it's redundant with the
-    // card heading).
-    // Left-anchored once the plot scrolls: centering on the full canvas parks
-    // the caption off-screen, so on mobile it never reaches the reader. Phone
-    // widths can't fit the long form either.
-    captionRef.current = g
-      .append("text")
-      .attr("transform", `translate(${scrollable ? 0 : chartWidth / 2}, ${captionY})`)
-      .style("text-anchor", scrollable ? "start" : "middle")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", axisLabelFontSize)
-      .text(
-        isMobile
-          ? "Fastest median first"
-          : "Ranked by median latency (fastest first)"
-      )
-      .node();
-
     // Render a box plot for each model
     data.data.forEach((modelData) => {
       const color = getModelColor(modelData.model);
@@ -519,22 +497,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions.height, svgWidth, scrollable, captionY, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
-
-  // The caption sits inside the scrolling plot so PNG exports capture it, which
-  // means panning would carry it off-screen; slide it back by the scroll offset
-  // so the ranking stays legible wherever the reader has swiped to. Deliberately
-  // unconditional: the redraw above rebuilds the caption at x=0 on any of its
-  // deps, so this has to re-run after every one of them, not just after a
-  // scroll. It follows the redraw in the same commit, so the caption never
-  // paints at the stale offset.
-  useLayoutEffect(() => {
-    if (!captionRef.current || !scrollable) return;
-    captionRef.current.setAttribute(
-      "transform",
-      `translate(${scrollX}, ${captionY})`
-    );
-  });
+  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -572,6 +535,20 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             />
           </div>
         </div>
+      )}
+      {/* The x-axis caption (the y-axis title is omitted — it's redundant with
+          the card heading). It sits outside the scroller, over the bottom band
+          the plot's margin already reserves, so panning can't carry it away and
+          nothing has to reposition it; the PNG export draws it from the section
+          header's exportXLabel. Phone widths can't fit the long form. */}
+      {data.data.length > 0 && (
+        <p
+          className={`pointer-events-none absolute bottom-0 left-10 right-2 font-mono text-sm text-text-secondary ${scrollable ? "text-left" : "text-center"}`}
+        >
+          {isMobile
+            ? "Fastest median first"
+            : "Ranked by median latency (fastest first)"}
+        </p>
       )}
       {tip && (
         <div
