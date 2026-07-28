@@ -33,8 +33,7 @@ MODERATION_TIMEOUT_S = 4.0
 _CARD_CANDIDATE = re.compile(r"(?:\d[ -]?){12,18}\d")
 _NATIONAL_ID = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
-_client: AsyncOpenAI | None = None
-_client_fingerprint: str | None = None
+_clients: dict[str, AsyncOpenAI] = {}
 
 
 @dataclass(frozen=True)
@@ -90,27 +89,29 @@ def pii_match(prompt: str) -> str | None:
     return None
 
 
-async def _get_client(settings: Settings) -> AsyncOpenAI | None:
-    """Return a client for the configured key, rebuilding it when the key changes.
+def _get_client(settings: Settings) -> AsyncOpenAI | None:
+    """Return the client for the configured key, building it on first use.
 
-    The superseded client is closed, otherwise each rotation leaks its connection pool.
+    One client per key, keyed by a digest so no plaintext copy is kept. Clients are
+    never replaced or closed: the instance is shared across concurrent requests, so
+    closing one on rotation would abort whichever requests are mid-flight on it, which
+    reads as a moderation outage. Distinct keys therefore each keep their own client
+    rather than taking turns over a single mutable slot.
     """
-    global _client, _client_fingerprint
     key = settings.openai_api_key
     if key is None:
         return None
     secret = key.get_secret_value()
     fingerprint = hashlib.sha256(secret.encode()).hexdigest()
-    if _client is None or _client_fingerprint != fingerprint:
-        if _client is not None:
-            await _client.close()
-        _client = AsyncOpenAI(
+    client = _clients.get(fingerprint)
+    if client is None:
+        client = AsyncOpenAI(
             api_key=secret,
             timeout=MODERATION_TIMEOUT_S,
             max_retries=0,
         )
-        _client_fingerprint = fingerprint
-    return _client
+        _clients[fingerprint] = client
+    return client
 
 
 async def moderation_verdict(settings: Settings, prompt: str) -> ModerationResult:
@@ -120,7 +121,7 @@ async def moderation_verdict(settings: Settings, prompt: str) -> ModerationResul
     later without re-calling. Parsing sits inside the guard: a malformed response is an
     unavailable moderator, not a 500.
     """
-    client = await _get_client(settings)
+    client = _get_client(settings)
     if client is None:
         logger.warning("arena_moderation_unconfigured")
         return ModerationResult(flagged=False, available=False)
