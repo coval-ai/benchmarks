@@ -33,6 +33,7 @@ import {
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
+import { werBreakdownOf } from "@/lib/utils/werBreakdown";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
@@ -503,10 +504,15 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const werBarData = useMemo<BarDataPoint[]>(() => {
     if (!werBarDatasetStats) return cumulativeWerBarData;
     return deferredSelectedModels
-      .map((model) => {
+      .map((model): BarDataPoint | null => {
         const hit = werBarDatasetStats.get(model);
         return hit
-          ? { model, averageWER: hit.avg_value, provider: hit.provider }
+          ? {
+              model,
+              averageWER: hit.avg_value,
+              provider: hit.provider,
+              breakdown: werBreakdownOf(hit),
+            }
           : null;
       })
       .filter((b): b is BarDataPoint => b !== null)

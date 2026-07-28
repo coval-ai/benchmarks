@@ -14,6 +14,7 @@ import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo"
 import SectionHeader from "@/components/shared/SectionHeader";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { datasetLabel } from "@/lib/config/datasets";
+import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -325,7 +326,14 @@ const QualityBarSection: React.FC = () => {
                 strokeWidth={dedicatedModels.has(entry.model) ? 1.5 : undefined}
                 role="button"
                 tabIndex={0}
-                aria-label={`${normalizeModelName(entry.model)}: ${entry.averageWER.toFixed(1)}% WER${clickedWERBars.has(entry.model) ? ", selected" : ""}`}
+                aria-label={`${normalizeModelName(entry.model)}: ${entry.averageWER.toFixed(1)}% WER${
+                  entry.breakdown
+                    ? ` (${WER_BREAKDOWN_LABELS.map(
+                        ([key, text]) =>
+                          `${text} ${entry.breakdown![key].toFixed(1)}`
+                      ).join(", ")})`
+                    : ""
+                }${clickedWERBars.has(entry.model) ? ", selected" : ""}`}
                 onKeyDown={(e: React.KeyboardEvent) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();

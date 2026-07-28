@@ -1,6 +1,8 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+import type { WerBreakdown } from "@/lib/utils/werBreakdown";
+
 export interface ModelsByProvider {
   [provider: string]: string[];
 }
@@ -48,6 +50,8 @@ export interface BarDataPoint {
   model: string;
   averageWER: number;
   provider: string;
+  /** Absent when the API reports no error-type split for this group. */
+  breakdown?: WerBreakdown;
 }
 
 export interface InstructionBarDataPoint {

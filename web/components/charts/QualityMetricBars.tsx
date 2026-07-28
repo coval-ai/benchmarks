@@ -31,7 +31,7 @@ type QualityBarRow = {
   provider: string;
   fill: string;
   fillOpacity: number;
-} & Record<string, string | number>;
+} & Record<string, unknown>;
 
 interface QualityMetricBarsProps {
   /** Rows to plot; each carries its numeric value under `valueKey`. */

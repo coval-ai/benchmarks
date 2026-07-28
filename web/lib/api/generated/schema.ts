@@ -69,6 +69,12 @@ export interface components {
       min_value: number;
       max_value: number;
       sample_count: number;
+      /** WER only: avg_value split by error type, in percentage points summing
+       *  to avg_value. Null on other metrics and on WER groups whose rows
+       *  predate the breakdown. */
+      wer_insertions_pct?: number | null;
+      wer_deletions_pct?: number | null;
+      wer_substitutions_pct?: number | null;
     };
     ModelTagOut: {
       category: components["schemas"]["TagCategory"];
