@@ -739,11 +739,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
-    # Fluxions hosted VUI. The render call takes no model id, only a voice, so
-    # "vui" is the bare surface name. Voices are the stable name half of the
-    # catalog's "<name>.<hash>" ids; the provider resolves the hash at runtime.
-    # Arena-disabled: built-in voices are public, so there is no API key env var
-    # for the key-parity gate to verify.
+    # No model id on the wire, only a voice, so "vui" is the bare surface name.
+    # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
     RegisteredModel(
         benchmark=_TTS,
         provider="fluxions",

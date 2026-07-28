@@ -7,21 +7,11 @@ Wire protocol on wss://api.fluxions.ai/vui/v1/tts/ws:
   connect → send speak(voice, input) → recv {"type": "start"}
   → recv binary s16le PCM @ 24 kHz frames → recv {"type": "done"}
 
-Built-in voices are public: the render path takes no credential, so there is no
-API key in ``Settings`` for this provider and nothing for infra to mount. The
-request carries no model identifier either, only a voice, so the registry entry
-is the bare surface name ``vui``.
-
-``verify_chunks`` is sent as ``False``. The server default (``True``) re-checks
-every rendered chunk with an STT pass and re-renders any that misread the text.
-Measured over two 10-prompt A/B samples on ``tts-v1`` it raised median TTFA from
-~295 ms to ~1.4 s (worst row 8.5 s) without improving WER, so the unverified
-stream is both the faster and the comparable configuration.
-
-Voice ids are ``<name>.<catalog-hash>`` and the hash rotates when Fluxions
-republishes the catalog, so the registry pins the stable bare name and this
-module resolves it against ``GET /vui/voices``. Resolution is cached process-wide
-and always happens before the TTFA clock starts.
+Built-in voices are public, so the render path takes no credential and there is
+no ``Settings`` key for this provider. ``verify_chunks`` is disabled: the
+server's STT re-render pass multiplies TTFA without improving WER. Voice ids
+are ``<name>.<catalog-hash>`` with a rotating hash, so the registry pins the
+bare name and this module resolves it against ``GET /vui/voices`` before t0.
 """
 
 from __future__ import annotations
@@ -44,8 +34,7 @@ _BASE_URL = "https://api.fluxions.ai"
 _WS_URL = "wss://api.fluxions.ai/vui/v1/tts/ws"
 _SAMPLE_RATE = 24000
 
-# name → full "<name>.<hash>" voice id, from GET /vui/voices. Process-wide: the
-# catalog is public and identical for every model entry in a run.
+# name → "<name>.<hash>" catalog id, shared process-wide
 _VOICE_IDS: dict[str, str] = {}
 
 
@@ -91,12 +80,10 @@ class FluxionsTTSProvider(TTSProvider):
         )
 
     async def _resolve_voice(self) -> str:
-        """Map the registry's bare voice name to the catalog's hashed voice id.
+        """Map the bare registry voice name to the hashed catalog id.
 
-        A voice already carrying a hash suffix passes through untouched, so a
-        fully-qualified id in the registry still works. An unknown name also
-        passes through, letting the server reject it with a real error rather
-        than guessing a substitute voice.
+        Hashed ids and unknown names pass through so the server reports
+        the real error instead of us guessing a substitute.
         """
         if "." in self._voice:
             return self._voice
