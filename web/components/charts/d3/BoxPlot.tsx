@@ -19,11 +19,8 @@ const modelFontSize = 12;
 const providerFontSize = 12;
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
-// Bottom holds the whole label stack: 15px clear of the plot, the label lines
-// (four of them for a name like Voxtral-Mini-Transcribe-2602), the provider,
-// then the dedicated-inference marker, 15px tall and 4px under the provider.
-// The caption is not in here — it gets the container's own bottom padding, so
-// the deepest stack can never land on it however the labels wrap.
+// Bottom fits the deepest label stack: four label lines, the provider, then the
+// dedicated-inference marker. The caption sits below it, in the container's pad.
 const margin = { top: 20, right: 8, bottom: 100, left: 40 };
 const minSlotWidth = 48;
 /** Share of a slot the label block may occupy; the rest is breathing room. */
@@ -539,13 +536,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           </div>
         </div>
       )}
-      {/* The x-axis caption (the y-axis title is omitted — it's redundant with
-          the card heading). It sits outside the scroller, in the bottom padding
-          below the plot, so panning can't carry it away, nothing has to
-          reposition it, and no label stack can reach it; the PNG export draws it
-          from the section header's exportXLabel. Phone widths can't fit the long
-          form. The padding is on the container, so the empty state reserves the
-          same strip and toggling metrics doesn't shift the sections below. */}
       {data.data.length > 0 && (
         <p
           className={`pointer-events-none absolute bottom-0 left-10 right-2 font-mono text-sm text-text-secondary ${scrollable ? "text-left" : "text-center"}`}
