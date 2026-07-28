@@ -162,13 +162,15 @@ export default function ArenaPage() {
   };
 
   const chainEnded = (side: "a" | "b") => {
-    if (!autoPlay) return;
-    if (side === "a") {
+    // Hand A off to B only while auto-playing. Every other ending releases focus, because
+    // `active` also drives the per-card playing dot — leaving it set kept a card lit with
+    // nothing playing once a manual listen finished.
+    if (autoPlay && side === "a") {
       setActive("b");
-    } else {
-      setAutoPlay(false);
-      setActive(null);
+      return;
     }
+    setAutoPlay(false);
+    setActive(null);
   };
 
   const trimmed = text.trim();
