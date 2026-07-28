@@ -60,6 +60,10 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const requestS2SPlay = useCallback((tick: string, provider: string) => {
     setS2sPlayRequest((prev) => ({ tick, provider, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
+  // Releasing the request hands the card back to the newest tick. Without this a
+  // single click pins it forever, so landing on a day that has metrics but no
+  // recording leaves the card empty with no way back.
+  const clearS2SPlay = useCallback(() => setS2sPlayRequest(null), []);
   const { timeWindow, changeTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
@@ -644,6 +648,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     // S2S samples card <-> timeline tooltip bridge
     s2sPlayRequest,
     requestS2SPlay,
+    clearS2SPlay,
 
     // Display strings
     pageTitle,
