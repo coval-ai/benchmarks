@@ -52,6 +52,7 @@ const BoxPlotSection: React.FC = () => {
           description={description}
           note={metricAboutNote(activeMetric)}
           exportNote={metricTab}
+          exportXLabel="Ranked by median latency (fastest first)"
           exportRows={() =>
             boxPlotData.data.map(({ model, quartiles, stats }) => ({
               model,
