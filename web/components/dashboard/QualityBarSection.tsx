@@ -12,7 +12,8 @@ import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import Card from "@/components/shared/Card";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
-import WerBarViewToggle from "@/components/dashboard/WerBarViewToggle";
+import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
+import { datasetLabel } from "@/lib/config/datasets";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
@@ -33,8 +34,8 @@ const INSTRUCTION_DESCRIPTION = {
 const QualityBarSection: React.FC = () => {
   const {
     werDescription,
-    werBarView,
-    availableWerBarViews,
+    werBarDataset,
+    changeWerBarDataset,
     werBarDataWithColors,
     instructionBarDataWithColors,
     getProviderForModel,
@@ -168,12 +169,8 @@ const QualityBarSection: React.FC = () => {
     [themeColors.label]
   );
 
-  // The toggle buttons carry no tooltips; the active WER view's blurb rides
-  // along in the "About this benchmark" tooltip instead (only when it shows).
-  const activeWerView =
-    availableWerBarViews.length > 1
-      ? availableWerBarViews.find((view) => view.key === werBarView)
-      : undefined;
+  // The select carries its own explainer, so the header only names the scope.
+  const werScopeLabel = werBarDataset ? datasetLabel(werBarDataset) : undefined;
 
   return (
     <div className="mb-4">
@@ -202,12 +199,7 @@ const QualityBarSection: React.FC = () => {
           <SectionHeader
             label="Accuracy by Model"
             description={werDescription}
-            note={
-              activeWerView
-                ? { term: `${activeWerView.label} view`, text: activeWerView.tooltip }
-                : undefined
-            }
-            exportNote={activeWerView?.label}
+            exportNote={werScopeLabel}
             hint="Click bar to compare models"
             exportXLabel="Model"
             exportRows={() =>
@@ -231,7 +223,14 @@ const QualityBarSection: React.FC = () => {
             }}
           />
         )}
-        {!isS2S && <WerBarViewToggle />}
+        {!isS2S && (
+          <WerDatasetSelect
+            className="mb-4"
+            label="Chart dataset"
+            value={werBarDataset}
+            onChange={changeWerBarDataset}
+          />
+        )}
         {!isS2S && selectedBars.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
             {selectedBars.map((item) => (

@@ -6,16 +6,24 @@
 import React from "react";
 import { Info } from "lucide-react";
 import { useDashboard } from "@/contexts/DashboardContext";
-import { useActiveTab } from "@/hooks/useActiveTab";
 import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
 import MetricInfo from "@/components/shared/MetricInfo";
 
-const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
-  const activeTab = useActiveTab();
+// Drives the WER-column scope by default; pass value/onChange to point it at
+// another surface's dataset state (e.g. the accuracy bar chart). Options come
+// from whatever datasets the active benchmark's window carries.
+const WerDatasetSelect: React.FC<{
+  className?: string;
+  label?: string;
+  value?: string | null;
+  onChange?: (dataset: string | null) => void;
+}> = ({ className, label = "WER dataset", value, onChange }) => {
   const { werDataset, changeWerDataset, availableWerDatasets, isMobile } =
     useDashboard();
+  const selected = value !== undefined ? value : werDataset;
+  const select = onChange ?? changeWerDataset;
 
-  if (activeTab !== "stt" || availableWerDatasets.length === 0) return null;
+  if (availableWerDatasets.length === 0) return null;
 
   const fullSets = availableWerDatasets.filter((d) => !isPerturbationDataset(d));
   const perturbations = availableWerDatasets.filter(isPerturbationDataset);
@@ -33,17 +41,21 @@ const WerDatasetSelect: React.FC<{ className?: string }> = ({ className }) => {
       }`}
     >
       <MetricInfo
-        content="Scopes the WER column to one evaluation set. Full datasets are distinct recordings; WildASR perturbations replay the clean utterances with one degradation applied. Pooled blends every dataset in the window."
+        content={`Scopes WER to one evaluation set.${
+          perturbations.length > 0
+            ? " Full datasets are distinct recordings; WildASR perturbations replay the clean utterances with one degradation applied."
+            : ""
+        } Pooled blends every dataset in the window.`}
         align={isMobile ? "left" : "right"}
       >
-        WER dataset{" "}
+        {label}{" "}
         <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
       </MetricInfo>
       <span className="relative inline-flex">
         <select
-          aria-label="WER dataset"
-          value={werDataset ?? ""}
-          onChange={(e) => changeWerDataset(e.target.value || null)}
+          aria-label={label}
+          value={selected ?? ""}
+          onChange={(e) => select(e.target.value || null)}
           className="h-11 appearance-none rounded-lg border border-border-primary bg-surface-elevated pl-2.5 pr-7 text-xs font-medium text-text-primary outline-none transition-colors hover:border-selected-border focus:border-selected-border lg:h-auto lg:py-1.5"
         >
           <option value="">All datasets (pooled)</option>

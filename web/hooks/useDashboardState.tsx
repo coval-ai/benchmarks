@@ -34,7 +34,7 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
-import { S2S_MULTITURN_DATASET, WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
+import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
@@ -120,19 +120,17 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
-  // STT only: the accuracy bar chart switches between the pooled WER
-  // (cumulative) and the easy/hard single-dataset views.
-  const [werBarView, setWerBarView] = useState<WerBarView>("cumulative");
-  const activeWerBarView = page === "stt" ? werBarView : "cumulative";
-  const werBarDatasetId =
-    WER_BAR_VIEWS.find((v) => v.key === activeWerBarView)?.dataset ?? null;
-  const changeWerBarView = useCallback(
-    (view: WerBarView) => {
-      setWerBarView(view);
+  // The accuracy bar chart scopes to any one dataset the window carries, or
+  // pools them all (null). Every WER page gets this; S2S has no WER chart.
+  const [werBarDataset, setWerBarDataset] = useState<string | null>(null);
+  const werBarDatasetId = page === "s2s" ? null : werBarDataset;
+  const changeWerBarDataset = useCallback(
+    (dataset: string | null) => {
+      setWerBarDataset(dataset);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardWerBarViewChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        view,
+        view: dataset ?? "cumulative",
       });
     },
     [page]
@@ -149,7 +147,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       setWerDataset(null);
     }
     if (werBarDatasetId && !availableWerDatasets.includes(werBarDatasetId)) {
-      setWerBarView("cumulative");
+      setWerBarDataset(null);
     }
   }, [availableWerDatasets, werDataset, werBarDatasetId]);
 
@@ -515,14 +513,6 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       .sort((a, b) => a.averageWER - b.averageWER);
   }, [werBarDatasetStats, cumulativeWerBarData, deferredSelectedModels]);
 
-  const availableWerBarViews = useMemo(() => {
-    if (page !== "stt") return [];
-    const available = new Set(availableWerDatasets);
-    return WER_BAR_VIEWS.filter(
-      (v) => v.dataset === null || available.has(v.dataset)
-    );
-  }, [page, availableWerDatasets]);
-
   const werBarDataWithColors = useMemo(() => {
     const hasSelection = werBarData.some((item) => clickedWERBars.has(item.model));
     return werBarData.map((item) => ({
@@ -686,10 +676,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     availableWerDatasets,
     werDatasetLoading,
 
-    // WER bar chart view (STT accuracy card)
-    werBarView: activeWerBarView,
-    changeWerBarView,
-    availableWerBarViews,
+    // WER bar chart dataset scope (TTS + STT accuracy card)
+    werBarDataset: werBarDatasetId,
+    changeWerBarDataset,
     werBarLoading,
 
     // Key metrics
