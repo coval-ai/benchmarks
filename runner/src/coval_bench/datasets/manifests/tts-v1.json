@@ -1,7 +1,7 @@
 {
   "_license": "Apache-2.0",
   "id": "tts-v1",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "license": "Apache-2.0",
   "source": "Coval TTS test cases",
   "items": [
@@ -107,7 +107,7 @@
     },
     {
       "testcase_id": "A26",
-      "transcript": "Password reset complete: your temporary password is NewPass2024! Please change it within 24 hours."
+      "transcript": "Password reset complete: your temporary password was sent to your email. Please change it within 24 hours."
     },
     {
       "testcase_id": "A27",
