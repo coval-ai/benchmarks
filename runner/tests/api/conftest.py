@@ -37,6 +37,7 @@ from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
+from coval_bench.arena.moderation import ModerationResult
 from coval_bench.config import Settings
 
 ARENA_LABELER_KEY = "test-labeler-key"
@@ -178,6 +179,9 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
+    # Battle generation screens prompts through the moderation API. Without this the
+    # suite would reach the network on any machine that has the key exported.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     settings = Settings()
 
@@ -205,6 +209,21 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     test_app = create_app(settings)
     async with LifespanManager(test_app):
         yield test_app
+
+
+@pytest.fixture(autouse=True)
+def moderation_allows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every test to a reachable moderator that flags nothing.
+
+    Battle generation fails closed when moderation is unavailable, and the suite has no
+    API key, so without this every create-battle test would 503 regardless of subject.
+    Tests about screening override it.
+    """
+
+    async def _clean(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=True)
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _clean)
 
 
 @pytest.fixture

@@ -17,6 +17,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.arena.domains import ArenaDomain
 from coval_bench.registries import TagCategory
 
 
@@ -203,11 +204,6 @@ class BattleOut(BaseModel):
     domain: str | None
     audio_a_url: str
     audio_b_url: str
-
-
-ArenaDomain = Literal["customer-service", "healthcare", "sales", "receptionist-booking", "other"]
-"""Domains a battle can be tagged with. Each doubles as a leaderboard key, so the set is
-closed and excludes ``all`` — that key is reserved for the aggregate board."""
 
 
 class BattleCreate(BaseModel):
