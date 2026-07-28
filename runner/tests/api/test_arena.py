@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.providers.base import TTSResult
@@ -812,8 +813,8 @@ async def test_create_battle_rejects_flagged_prompt(
     """A prompt the moderation API flags is rejected, and synthesis never runs."""
     await _apply_arena_schema(_make_db_url(postgresql))
 
-    async def _flagged(*args: Any, **kwargs: Any) -> tuple[bool, dict[str, float]]:
-        return True, {"hate": 0.97}
+    async def _flagged(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=True, available=True, scores={"hate": 0.97})
 
     async def _no_synth(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("generate_battle must not run for a flagged prompt")
@@ -829,18 +830,42 @@ async def test_create_battle_rejects_flagged_prompt(
     assert response.status_code == 422
 
 
-async def test_create_battle_proceeds_when_moderation_unavailable(
+async def test_create_battle_503_when_moderation_unavailable(
     client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Screening fails open: a moderation outage must not block generation."""
+    """Fail closed by default: an unreachable moderator blocks synthesis with 503."""
     await _apply_arena_schema(_make_db_url(postgresql))
+
+    async def _unavailable(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=False)
+
+    async def _no_synth(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("generate_battle must not run while moderation is down")
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _unavailable)
+    monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
+
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 503
+
+
+async def test_create_battle_proceeds_when_configured_to_fail_open(
+    client: AsyncClient, app: FastAPI, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With fail-closed disabled, an outage trades safety for availability."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    app.state.settings = app.state.settings.model_copy(
+        update={"arena_moderation_fail_closed": False}
+    )
     monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
     monkeypatch.setattr(
         "coval_bench.arena.audio_store.store_clip", lambda *a, **k: "clips/stub.wav"
     )
 
-    async def _unavailable(*args: Any, **kwargs: Any) -> tuple[bool, dict[str, float]]:
-        return False, {}
+    async def _unavailable(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=False)
 
     monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _unavailable)
 

@@ -40,7 +40,6 @@ from starlette.requests import Request
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
-    ArenaDomain,
     ArenaLeaderboardResponse,
     BattleCreate,
     BattleOut,
@@ -52,6 +51,7 @@ from coval_bench.api.schemas import (
     VoteOut,
 )
 from coval_bench.arena.audio_store import clip_url
+from coval_bench.arena.domains import ArenaDomain
 from coval_bench.arena.generate import generate_battle
 from coval_bench.arena.moderation import moderation_verdict, pii_match
 from coval_bench.arena.monitoring import (
@@ -335,15 +335,15 @@ async def create_battle(
     uniform at cold start. Returns 502 if either side fails to synthesize (no battle
     is written).
 
-    The prompt is screened before anything is spent: personal data locally, then
-    content via the moderation API (422 either way). Screening precedes the cap so a
-    rejected prompt costs neither money nor anyone's quota.
+    Prompts are screened before anything is spent — personal data locally, then content
+    via the moderation API (422), and 503 if the moderator is unreachable while
+    ``arena_moderation_fail_closed``. Screening precedes the cap so a rejected prompt
+    costs neither money nor quota.
 
-    Then a global daily cap (``arena_daily_battle_cap``, ``<= 0`` disables), also
-    checked before synthesis so a tripped cap spends nothing (429). Known limits: it
-    counts successful battles only (a failed one still costs ~2 calls, uncounted but
-    logged), and the non-transactional check may overshoot slightly under concurrency
-    (no data is overwritten).
+    Then a global daily cap (``arena_daily_battle_cap``, ``<= 0`` disables), also checked
+    before synthesis (429). Known limits: it counts successful battles only (a failed one
+    still costs ~2 calls, uncounted but logged), and the non-transactional check may
+    overshoot slightly under concurrency (no data is overwritten).
     """
     store = ArenaStore(pool)
     prompt = body.prompt.strip()
@@ -355,14 +355,17 @@ async def create_battle(
         logger.info("arena_prompt_rejected", reason="pii", kind=pii)
         raise HTTPException(422, "prompt must not contain payment card or national id numbers")
 
-    flagged, category_scores = await moderation_verdict(settings, prompt)
-    if flagged:
+    verdict = await moderation_verdict(settings, prompt)
+    if verdict.flagged:
         logger.info(
             "arena_prompt_rejected",
             reason="moderation",
-            categories=sorted(name for name, score in category_scores.items() if score >= 0.5),
+            categories=sorted(name for name, score in verdict.scores.items() if score >= 0.5),
         )
         raise HTTPException(422, "prompt rejected by content moderation")
+    if not verdict.available and settings.arena_moderation_fail_closed:
+        logger.warning("arena_prompt_rejected", reason="moderation_unavailable")
+        raise HTTPException(503, "content moderation is unavailable, please retry")
 
     cap = settings.arena_daily_battle_cap
     if cap > 0 and await store.count_battles_today() >= cap:

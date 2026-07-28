@@ -16,7 +16,7 @@ the arena votes on naturalness, so expressive delivery is the biggest test surfa
 
 from __future__ import annotations
 
-from coval_bench.api.schemas import ArenaDomain
+from coval_bench.arena.domains import ArenaDomain
 
 EXAMPLE_PROMPTS: dict[ArenaDomain, list[str]] = {
     "customer-service": [
