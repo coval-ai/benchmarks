@@ -1,18 +1,33 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 const SECRET_ENV = "ARENA_SESSION_SECRET";
+const SECRET_PREVIOUS_ENV = "ARENA_SESSION_SECRET_PREVIOUS";
 const TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days of inactivity before lock-out
 const REFRESH_AFTER_MS = 24 * 60 * 60 * 1000; // re-issue at most once/day (sliding window)
 
 export const ACCESS_COOKIE_NAME = "arena_access";
 export const ACCESS_COOKIE_MAX_AGE_S = TTL_MS / 1000;
 
-export type AccessPayload = { iat: number; exp: number };
+// Disjoint paths, so a request matches exactly one and the browser never holds two
+// cookies of this name. Cookies issued before scoping used "/" and are expired on sight.
+export const ACCESS_COOKIE_PATHS = ["/arena", "/api/arena"] as const;
+
+export type ArenaRole = "labeler" | "external";
+
+/** A verified cookie. `sid`/`role` are absent on cookies minted before identity existed. */
+export type AccessPayload = { sid?: string; role?: ArenaRole; iat: number; exp: number };
+
+/** A cookie carrying identity — what the BFF requires before attributing a vote. */
+export type IdentifiedAccess = { sid: string; role: ArenaRole; iat: number; exp: number };
 
 function requireSecret(): string {
   const value = process.env[SECRET_ENV];
   if (!value) throw new Error(`${SECRET_ENV} is not configured`);
   return value;
+}
+
+export function accessSecretConfigured(): boolean {
+  return Boolean(process.env[SECRET_ENV]);
 }
 
 function b64url(buf: Buffer): string {
@@ -35,8 +50,19 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
-export function mintAccess(now: number = Date.now()): string {
-  const payload: AccessPayload = { iat: now, exp: now + TTL_MS };
+/**
+ * Issue a cookie for `role`, reusing `sid` when refreshing an existing one.
+ *
+ * Passing the previous `sid` is what keeps a voter recognisable across the sliding
+ * refresh — minting a fresh one every 24h would weaken vote dedupe and strip any
+ * cross-day signal from later scoring.
+ */
+export function mintAccess(
+  role: ArenaRole,
+  sid: string = randomUUID(),
+  now: number = Date.now(),
+): string {
+  const payload: IdentifiedAccess = { sid, role, iat: now, exp: now + TTL_MS };
   const body = b64url(Buffer.from(JSON.stringify(payload)));
   return `${body}.${sign(body, requireSecret())}`;
 }
@@ -49,7 +75,10 @@ export function verifyAccess(
   const parts = token.split(".");
   if (parts.length !== 2) return null;
   const [body, sig] = parts as [string, string];
-  if (!safeEqual(sig, sign(body, requireSecret()))) return null;
+
+  const previous = process.env[SECRET_PREVIOUS_ENV];
+  const secrets = previous ? [requireSecret(), previous] : [requireSecret()];
+  if (!secrets.some((secret) => safeEqual(sig, sign(body, secret)))) return null;
 
   let payload: AccessPayload;
   try {
@@ -59,7 +88,17 @@ export function verifyAccess(
   }
   if (typeof payload?.iat !== "number" || typeof payload?.exp !== "number") return null;
   if (now > payload.exp) return null;
+  if (payload.sid !== undefined && typeof payload.sid !== "string") return null;
+  if (payload.role !== undefined && payload.role !== "labeler" && payload.role !== "external") {
+    return null;
+  }
   return payload;
+}
+
+/** Narrow a verified cookie to one that actually carries identity. */
+export function identified(payload: AccessPayload): IdentifiedAccess | null {
+  if (!payload.sid || !payload.role) return null;
+  return { sid: payload.sid, role: payload.role, iat: payload.iat, exp: payload.exp };
 }
 
 export function needsRefresh(payload: AccessPayload, now: number = Date.now()): boolean {
