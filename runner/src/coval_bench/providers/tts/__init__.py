@@ -22,6 +22,7 @@ from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
+from coval_bench.providers.tts.fluxions import FluxionsTTSProvider
 from coval_bench.providers.tts.gradium import GradiumTTSProvider
 from coval_bench.providers.tts.groq import GroqTTSProvider
 from coval_bench.providers.tts.inworld import InworldTTSProvider
@@ -67,6 +68,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "minimax": MinimaxTTSProvider,
     "palabra": PalabraTTSProvider,
     "speechify": SpeechifyTTSProvider,
+    "fluxions": FluxionsTTSProvider,
 }
 
 if HumeTTSProvider is not None:
@@ -83,6 +85,7 @@ __all__ = [
     "AzureTTSProvider",
     "BasetenTTSProvider",
     "FishAudioTTSProvider",
+    "FluxionsTTSProvider",
     "GradiumTTSProvider",
     "MinimaxTTSProvider",
     "SmallestTTSProvider",
