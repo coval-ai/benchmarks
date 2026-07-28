@@ -81,6 +81,11 @@ class Result(BaseModel):
     error: str | None = None
     http_version: str | None = None
     submit_to_headers_ms: float | None = None
+    # WER rows only: metric_value split by error type, in percentage points.
+    # Null on every other metric and on rows written before migration 0013.
+    wer_insertions_pct: float | None = None
+    wer_deletions_pct: float | None = None
+    wer_substitutions_pct: float | None = None
 
 
 class VoteOutcome(StrEnum):

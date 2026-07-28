@@ -83,6 +83,70 @@ async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any
     assert s["sample_count"] == 1
 
 
+async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgresql: Any) -> None:
+    """Each error type averages independently, and the three sum to avg_value."""
+    run_id = await _insert_run(postgresql)
+    for ins, dele, sub in ((1.0, 2.0, 3.0), (3.0, 4.0, 11.0)):
+        await _insert_result(
+            postgresql,
+            run_id,
+            metric_value=ins + dele + sub,
+            wer_insertions_pct=ins,
+            wer_deletions_pct=dele,
+            wer_substitutions_pct=sub,
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] == pytest.approx(2.0)
+    assert s["wer_deletions_pct"] == pytest.approx(3.0)
+    assert s["wer_substitutions_pct"] == pytest.approx(7.0)
+    assert s["avg_value"] == pytest.approx(12.0)
+    parts = ("wer_insertions_pct", "wer_deletions_pct", "wer_substitutions_pct")
+    assert sum(s[k] for k in parts) == pytest.approx(s["avg_value"])
+
+
+async def test_wer_breakdown_null_when_any_row_lacks_it(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A group mixing scored and pre-migration rows reports no breakdown.
+
+    Averaging only the scored rows would no longer reconcile with avg_value
+    over all of them, so it is better to report nothing than a split that
+    does not add up.
+    """
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=3.0,
+    )
+    await _insert_result(postgresql, run_id, metric_value=10.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["avg_value"] == pytest.approx(8.0)
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
+async def test_non_wer_metric_has_no_breakdown(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, metric_type="TTFA", metric_value=120.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["metric_type"] == "TTFA"
+    assert s["wer_insertions_pct"] is None
+
+
 async def test_excludes_failed_null_and_other_benchmark(
     client: AsyncClient, postgresql: Any
 ) -> None:
