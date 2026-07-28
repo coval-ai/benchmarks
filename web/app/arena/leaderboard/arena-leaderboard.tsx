@@ -19,20 +19,30 @@ export function ArenaLeaderboardPage() {
   const entries = data?.entries ?? [];
   const isEmpty = !isLoading && !isError && entries.length === 0;
 
+  // Every live rating is currently "preliminary", so a per-row badge fires on all 27 and
+  // greying by status drains the whole table to tertiary. Both only carry meaning once the
+  // board actually spans tiers; until then the state is stated once, above the table.
+  const statuses = new Set(entries.map((e) => e.status));
+  const mixedStatus = statuses.size > 1;
+  const allProvisional = statuses.size === 1 && statuses.has("preliminary");
+
   return (
     <div className="relative flex min-h-screen flex-col bg-background text-text-primary">
       <DashboardHeader />
       <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-[84px] sm:px-6 md:pt-[96px]">
         <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
         <p className="mt-2 text-sm text-text-secondary">
-          Models ranked by Elo rating from blind A/B votes. Ratings marked
-          provisional have too few votes to separate them yet — their confidence
-          interval is still wide.
+          Models ranked by Elo rating from blind A/B votes. The ± figure is the
+          confidence interval — the fewer votes a model has, the wider it runs.
+          {allProvisional && " Every rating is still provisional at these vote counts."}
+          {mixedStatus && " Ratings marked provisional have too few votes to separate them yet."}
         </p>
 
         {isLoading && (
-          <div className="mt-8 flex justify-center">
+          <div role="status" className="mt-8 flex justify-center">
+            {/* CymaticLoader is aria-hidden, so the spinner alone announces nothing. */}
             <CymaticLoader size={40} animated className="text-text-primary" />
+            <span className="sr-only">Loading the leaderboard…</span>
           </div>
         )}
         {(isError || isEmpty) && (
@@ -70,11 +80,7 @@ export function ArenaLeaderboardPage() {
                       {/* Provider stacks under the model instead of taking its own column, so the
                           table fits a phone without horizontal scroll. */}
                       <td className="py-3 pr-4 align-top">
-                        <div
-                          className={`font-medium ${
-                            preliminary ? "text-text-tertiary" : "text-text-primary"
-                          }`}
-                        >
+                        <div className="font-medium text-text-primary">
                           {normalizeModelName(toModelKey(entry.provider, entry.model))}
                         </div>
                         <div className="text-xs text-text-tertiary">
@@ -85,19 +91,16 @@ export function ArenaLeaderboardPage() {
                             {" · "}
                             {entry.votes_total.toLocaleString()} votes
                           </span>
-                          {/* Provisional was greying alone — a colour-only signal. */}
-                          {preliminary && <span className="font-mono uppercase"> provisional</span>}
+                          {mixedStatus && preliminary && (
+                            <span className="font-mono uppercase"> provisional</span>
+                          )}
                         </div>
                       </td>
                       <td className="hidden py-3 pr-4 text-right align-top font-mono text-xs tabular-nums text-text-tertiary sm:table-cell">
                         {entry.votes_total.toLocaleString()}
                       </td>
                       <td className="whitespace-nowrap py-3 text-right align-top">
-                        <span
-                          className={`font-mono text-base tabular-nums ${
-                            preliminary ? "text-text-tertiary" : "text-text-primary"
-                          }`}
-                        >
+                        <span className="font-mono text-base tabular-nums text-text-primary">
                           {Math.round(entry.rating_elo)}
                         </span>{" "}
                         {entry.ci_half_width != null && (
