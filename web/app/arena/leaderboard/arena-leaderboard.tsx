@@ -36,13 +36,11 @@ export function ArenaLeaderboardPage() {
           </div>
         )}
         {(isError || isEmpty) && (
-          <Card padding="p-4 sm:p-6 md:p-8" className="mt-6">
-            <p className="py-10 text-center text-sm text-text-tertiary">
-              {isError
-                ? "Couldn’t load the leaderboard. Try again."
-                : "No ratings yet. Vote to populate."}
-            </p>
-          </Card>
+          <p className="mt-8 text-sm text-text-tertiary">
+            {isError
+              ? "Couldn’t load the leaderboard. Try again."
+              : "No ratings yet. Vote to populate."}
+          </p>
         )}
 
         {entries.length > 0 && (
