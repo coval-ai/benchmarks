@@ -23,6 +23,13 @@ export interface SampleOutputItem {
   turns?: S2STurn[];
 }
 
+// Elapsed position as m:ss. The existing formatTime helpers render wall-clock
+// timestamps, which is a different thing.
+function elapsed(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
 // Left/right chevron/fade visibility from scroll extents; remeasures on scroll,
 // resize, and when the item set changes.
 function useScrollHints(
@@ -77,11 +84,8 @@ export function SampleOutputs({
   const conversation = items.some((i) => (i.turns?.length ?? 0) > 0);
   const viewportRef = useRef<HTMLDivElement>(null);
 
-  const { audioRef, activeIndex, isPlaying, toggle, playFrom, stop } = useSequencedPlayback(
-    tracks,
-    (track) => onPlay?.(track.key),
-    coordinator
-  );
+  const { audioRef, activeIndex, isPlaying, toggle, playFrom, stop, currentTime, duration, seek } =
+    useSequencedPlayback(tracks, (track) => onPlay?.(track.key), coordinator);
 
   // A timeline-tooltip click plays a specific provider. Wait until that tick's
   // items have loaded (provider present) before playing, then mark the request
@@ -147,9 +151,7 @@ export function SampleOutputs({
               <div
                 key={item.provider}
                 role="listitem"
-                className={`flex shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
-                  conversation ? "w-[300px] min-w-[300px]" : "w-[180px] min-w-[180px]"
-                } ${
+                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
                   active
                     ? "border-text-primary/40 bg-surface-secondary"
                     : "border-border-primary bg-surface-secondary/60"
@@ -178,8 +180,33 @@ export function SampleOutputs({
                   {playingThis ? <Pause className="size-3" /> : <Play className="size-3" />}
                   <span>{playingThis ? "Playing" : "Play"}</span>
                 </button>
+                {/* One <audio> is shared, so the playhead belongs to the active
+                    pane alone; other panes keep their turns static. */}
+                {active && duration > 0 ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration}
+                      step={0.1}
+                      value={Math.min(currentTime, duration)}
+                      onChange={(e) => seek(Number(e.target.value))}
+                      aria-label={`Seek ${normalizeProvider(item.provider)} recording`}
+                      className="h-1 w-full cursor-pointer"
+                      style={{ accentColor: color }}
+                    />
+                    <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
+                      {elapsed(currentTime)}/{elapsed(duration)}
+                    </span>
+                  </div>
+                ) : null}
                 {turns.length ? (
-                  <ConversationTurns turns={turns} accentColor={color} />
+                  <ConversationTurns
+                    turns={turns}
+                    accentColor={color}
+                    currentTime={active ? currentTime : 0}
+                    onSeek={active ? seek : undefined}
+                  />
                 ) : null}
               </div>
             );

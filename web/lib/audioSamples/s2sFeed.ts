@@ -7,10 +7,16 @@ import { createSampleFeed } from "./createSampleFeed";
 
 // One turn of a multi-turn conversation (v2 manifests). `role` is "user"
 // (the persona) or "assistant" (the agent); `index` is the turn's position.
+// The offsets are positions in the full recording, in seconds, and map 1:1 to
+// audio.currentTime. They are optional: manifests published before the sampler
+// captured them omit the keys, and Coval itself sometimes omits an offset on a
+// turn, which the runner writes as null.
 export interface S2STurn {
   index: number;
   role: string;
   content: string;
+  start_offset?: number;
+  end_offset?: number;
 }
 
 export interface S2SSampleRecording {
@@ -63,6 +69,18 @@ function asOptionalString(v: unknown, field: string): string | undefined {
   return asString(v, field);
 }
 
+// A turn offset in seconds. Absent and null both collapse to undefined: the key
+// is missing on manifests written before offsets were captured, and null when
+// Coval omitted it for that turn. Non-finite is rejected rather than coerced,
+// so a bad value can't silently become a playhead position.
+function asOptionalSeconds(v: unknown, field: string): number | undefined {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v !== "number" || !Number.isFinite(v)) {
+    throw new Error(`${field} must be a finite number`);
+  }
+  return v;
+}
+
 // Manifests written before the sampler filtered them carry the persona's
 // `end_conversation` tool record as a `role: "tool"` turn whose content is raw
 // JSON. Drop anything that isn't spoken dialogue so it can't render as a caller
@@ -85,6 +103,8 @@ function parseTurns(v: unknown, field: string): S2STurn[] | undefined {
         index: turn.index,
         role: asString(turn.role, `${field}[${i}].role`),
         content: asString(turn.content, `${field}[${i}].content`),
+        start_offset: asOptionalSeconds(turn.start_offset, `${field}[${i}].start_offset`),
+        end_offset: asOptionalSeconds(turn.end_offset, `${field}[${i}].end_offset`),
       };
     })
     .filter((t) => SPOKEN_ROLES.has(t.role));

@@ -43,6 +43,11 @@ export interface SequencedPlayback {
   playFrom: (index: number) => void;
   handleEnded: () => void;
   stop: () => void;
+  // Playhead in seconds, and the loaded track's length (0 until known). `seek`
+  // moves within the current track — unlike playFrom, which restarts at 0.
+  currentTime: number;
+  duration: number;
+  seek: (seconds: number) => void;
 }
 
 // A playlist over one <audio> element: one click plays the active track, and
@@ -57,6 +62,8 @@ export function useSequencedPlayback(
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   // Bumped by every operation that supersedes playback (new play, pause, stop,
   // unmount, track swap) so a late play() rejection can't clear a newer state.
@@ -89,6 +96,16 @@ export function useSequencedPlayback(
     }
     playingIdRef.current = null;
     setIsPlaying(false);
+    setCurrentTime(0);
+  }, []);
+
+  const seek = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const limit = Number.isFinite(audio.duration) ? audio.duration : seconds;
+    const target = Math.min(Math.max(seconds, 0), limit);
+    audio.currentTime = target;
+    setCurrentTime(target);
   }, []);
 
   const playFrom = useCallback(
@@ -102,6 +119,8 @@ export function useSequencedPlayback(
       onActivate?.(track, index);
       audio.src = track.url;
       audio.currentTime = 0;
+      setCurrentTime(0);
+      setDuration(0);
       requestPlay();
     },
     [tracks, onActivate, coordinator, pauseSelf, requestPlay]
@@ -151,6 +170,23 @@ export function useSequencedPlayback(
     }
   }, [tracks, activeIndex, stop]);
 
+  // Mirror the element's clock into state so a slider and the turn list can
+  // follow it. timeupdate fires a few times a second, enough for both.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrentTime(audio.currentTime);
+    const onMeta = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("loadedmetadata", onMeta);
+    audio.addEventListener("durationchange", onMeta);
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("loadedmetadata", onMeta);
+      audio.removeEventListener("durationchange", onMeta);
+    };
+  }, []);
+
   useEffect(
     () => () => {
       genRef.current++;
@@ -159,5 +195,16 @@ export function useSequencedPlayback(
     []
   );
 
-  return { audioRef, activeIndex, isPlaying, toggle, playFrom, handleEnded, stop };
+  return {
+    audioRef,
+    activeIndex,
+    isPlaying,
+    toggle,
+    playFrom,
+    handleEnded,
+    stop,
+    currentTime,
+    duration,
+    seek,
+  };
 }
