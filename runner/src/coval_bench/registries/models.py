@@ -745,7 +745,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="simba-3.2",
         voice="geffen_32",
         tags=(_STREAMING, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -753,7 +753,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="simba-3.0",
         voice="geffen_32",
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
