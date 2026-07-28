@@ -764,7 +764,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="maeve",
         voices=("maeve", "abraham"),
         tags=(_STREAMING, _CLONE, _EMOTION),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
         arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
