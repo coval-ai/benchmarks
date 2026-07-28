@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import DashboardHeader from "@/components/layout/DashboardHeader";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import { ARENA_DOMAINS, type ArenaDomain } from "@/lib/arena/domains";
 import { getBattleSource } from "@/lib/arena/source";
 import type {
@@ -16,6 +17,14 @@ import { AudioPlayer } from "./components/AudioPlayer";
 
 const MIN_CHARS = 3;
 const MAX_CHARS = 500;
+
+// Brand focus state — the app-wide ring, so nothing here falls back to the
+// browser's off-palette blue outline.
+const FOCUS = "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40";
+const FIELD =
+  "w-full rounded-xl border border-border-primary bg-surface-elevated outline-none transition-colors focus:border-selected-border focus:ring-2 focus:ring-text-tertiary/40";
+// b1: PP Mori Semibold, 14px, 1% letter spacing (500 is the heaviest PP Mori weight we self-host).
+const BTN = `min-h-11 font-sans text-sm font-medium tracking-[0.01em] ${FOCUS}`;
 
 // Post-vote only: standings shown before a vote anchor the judgment, and votes are what
 // tightens the provisional CIs. Flip to false to pull the link entirely — /arena/leaderboard
@@ -171,37 +180,55 @@ export default function ArenaPage() {
       <DashboardHeader />
       <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
         <div className="mx-auto flex max-w-[760px] flex-col gap-8">
-          <h1 className="text-center font-sans text-2xl">Which voice sounds more natural?</h1>
+          <h1 className="text-center font-sans text-2xl font-medium tracking-tight sm:text-3xl">
+            Which voice sounds more natural?
+          </h1>
 
           <section className="flex flex-col gap-3">
-            <select
-              value={domain}
-              onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
-              aria-label="Domain"
-              className="w-full appearance-none rounded-xl border border-border-primary bg-surface-elevated px-4 py-3 font-sans text-sm outline-none focus:border-selected-border"
-            >
-              <option value="" disabled>
-                Select a domain *
-              </option>
-              {ARENA_DOMAINS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
+            <div className="relative">
+              <select
+                value={domain}
+                onChange={(e) => setDomain(e.target.value as ArenaDomain | "")}
+                aria-label="Domain"
+                className={`${FIELD} appearance-none px-4 py-3 pr-10 font-mono text-sm`}
+              >
+                <option value="" disabled>
+                  Select a domain *
                 </option>
-              ))}
-            </select>
+                {ARENA_DOMAINS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+              <svg
+                aria-hidden
+                viewBox="0 0 12 12"
+                className="pointer-events-none absolute right-4 top-1/2 h-3 w-3 -translate-y-1/2 text-text-tertiary"
+              >
+                <path
+                  d="M2.5 4.5 6 8l3.5-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
             <textarea
               value={text}
               maxLength={MAX_CHARS}
               onChange={(e) => setText(e.target.value)}
               placeholder="Describe a scenario or write text to synthesize…"
               rows={4}
-              className="w-full resize-none rounded-xl border border-border-primary bg-surface-elevated p-4 font-sans text-base leading-relaxed outline-none focus:border-selected-border"
+              className={`${FIELD} resize-none p-4 font-sans text-base leading-relaxed`}
             />
             <div className="flex items-center justify-between text-sm text-text-tertiary">
               <button
                 type="button"
                 onClick={() => void applyExample()}
-                className="flex min-h-11 items-center font-sans underline underline-offset-2 hover:text-text-secondary"
+                className={`${BTN} flex items-center rounded-md underline underline-offset-2 hover:text-text-secondary`}
               >
                 Use an example
               </button>
@@ -251,7 +278,7 @@ export default function ArenaPage() {
                 <button
                   type="button"
                   onClick={stopAutoAdvance}
-                  className="min-h-11 rounded-full border border-border-primary px-4 font-mono text-xs text-text-secondary hover:bg-hover-bg"
+                  className={`${BTN} rounded-full border border-border-primary px-4 text-text-secondary hover:bg-hover-bg`}
                 >
                   Stop
                 </button>
@@ -266,7 +293,7 @@ export default function ArenaPage() {
                 <label className="flex min-h-11 cursor-pointer items-center gap-2 self-center font-mono text-xs text-text-secondary">
                   <input
                     type="checkbox"
-                    className="h-5 w-5"
+                    className={`h-5 w-5 accent-text-primary ${FOCUS}`}
                     checked={autoAdvance}
                     onChange={() => persistAutoAdvance(!autoAdvance)}
                   />
@@ -281,14 +308,14 @@ export default function ArenaPage() {
                     ref={nextBattleRef}
                     type="button"
                     onClick={() => void quickBattle()}
-                    className="min-h-11 rounded-full bg-surface-toggle-active px-6 font-mono text-sm text-text-on-toggle-active"
+                    className={`${BTN} rounded-full bg-surface-toggle-active px-6 text-text-on-toggle-active`}
                   >
                     Another battle
                   </button>
                   <label className="flex min-h-11 cursor-pointer items-center gap-2 font-mono text-xs text-text-secondary">
                     <input
                       type="checkbox"
-                      className="h-5 w-5"
+                      className={`h-5 w-5 accent-text-primary ${FOCUS}`}
                       checked={autoAdvance}
                       onChange={() => persistAutoAdvance(!autoAdvance)}
                     />
@@ -297,7 +324,7 @@ export default function ArenaPage() {
                   {SHOW_LEADERBOARD_LINK && (
                     <Link
                       href="/arena/leaderboard"
-                      className="flex min-h-11 items-center rounded-full border border-border-primary px-6 font-mono text-sm text-text-secondary hover:bg-hover-bg"
+                      className={`${BTN} flex items-center rounded-full border border-border-primary px-6 text-text-secondary hover:bg-hover-bg`}
                     >
                       View leaderboard
                     </Link>
@@ -309,8 +336,9 @@ export default function ArenaPage() {
                 type="button"
                 onClick={() => void generate(text, domain)}
                 disabled={trimmed.length < MIN_CHARS || !domain || loading}
-                className="min-h-11 self-start rounded-full bg-surface-toggle-active px-6 font-mono text-sm text-text-on-toggle-active disabled:opacity-40"
+                className={`${BTN} inline-flex items-center gap-2 self-start rounded-full bg-surface-toggle-active px-6 text-text-on-toggle-active disabled:opacity-40`}
               >
+                {loading && <CymaticLoader size={16} animated />}
                 {loading ? "Generating…" : "Generate speech"}
               </button>
             )}
@@ -382,14 +410,19 @@ function BattleCard({
     >
       <div className="flex items-start justify-between gap-2">
         <span className="flex items-center gap-2">
-          <span className="mt-1 h-2 w-2 shrink-0 self-start rounded-full bg-text-tertiary" />
+          {/* Doubles as the playing indicator — the only cue outside the play glyph itself. */}
+          <span
+            className={`mt-1 h-2 w-2 shrink-0 self-start rounded-full ${
+              isActive ? "bg-text-primary" : "bg-text-tertiary"
+            }`}
+          />
           {revealed ? (
             <span className="flex flex-col leading-tight">
               <span className="font-sans text-sm text-text-primary">{revealed.model}</span>
               <span className="font-mono text-xs text-text-tertiary">{revealed.provider}</span>
             </span>
           ) : (
-            <span className="font-sans text-sm">{blindTitle}</span>
+            <span className="font-mono text-sm">{blindTitle}</span>
           )}
         </span>
         {picked !== null && (
@@ -424,7 +457,7 @@ function VoteButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="min-h-11 rounded-xl border border-border-primary bg-surface-elevated py-3 font-mono text-sm hover:border-selected-border hover:bg-selected-bg disabled:opacity-40"
+      className={`${BTN} rounded-xl border border-border-primary bg-surface-elevated py-3 hover:border-selected-border hover:bg-selected-bg disabled:opacity-40`}
     >
       {label}
     </button>

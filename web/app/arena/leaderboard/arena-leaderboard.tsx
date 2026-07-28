@@ -47,7 +47,7 @@ export function ArenaLeaderboardPage() {
           <div className="mt-6 overflow-x-auto">
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-border-primary text-left text-text-tertiary">
+                <tr className="border-b border-border-primary text-left font-mono text-xs text-text-tertiary">
                   <th className="py-2 pr-4 font-medium">#</th>
                   <th className="py-2 pr-4 font-medium">Model</th>
                   <th className="py-2 pr-4 font-medium">Provider</th>
@@ -64,14 +64,14 @@ export function ArenaLeaderboardPage() {
                         preliminary ? "text-text-tertiary" : "text-text-primary"
                       }`}
                     >
-                      <td className="py-2.5 pr-4 tabular-nums">{i + 1}</td>
+                      <td className="py-2.5 pr-4 font-mono tabular-nums">{i + 1}</td>
                       <td className="py-2.5 pr-4">
                         {normalizeModelName(toModelKey(entry.provider, entry.model))}
                       </td>
                       <td className="py-2.5 pr-4 text-text-secondary">
                         {normalizeTTSProviderName(entry.provider)}
                       </td>
-                      <td className="whitespace-nowrap py-2.5 pr-4 text-right tabular-nums">
+                      <td className="whitespace-nowrap py-2.5 pr-4 text-right font-mono tabular-nums">
                         {eloLabel(entry)}
                       </td>
                     </tr>
