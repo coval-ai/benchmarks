@@ -12,11 +12,22 @@ import {
 } from "@/hooks/useSequencedPlayback";
 import { getModelColor } from "@/lib/utils/colors";
 import { toModelKey } from "@/lib/utils/formatters";
+import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
+import { ConversationTurns } from "./ConversationTurns";
 
 export interface SampleOutputItem {
   provider: string;
   model: string;
   url: string;
+  // Multi-turn (v2) only: this provider's own conversation transcript.
+  turns?: S2STurn[];
+}
+
+// Elapsed position as m:ss. The existing formatTime helpers render wall-clock
+// timestamps, which is a different thing.
+function elapsed(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 // Left/right chevron/fade visibility from scroll extents; remeasures on scroll,
@@ -68,14 +79,13 @@ export function SampleOutputs({
     () => items.map((i) => ({ key: i.provider, url: i.url })),
     [items]
   );
+  // Multi-turn manifests carry per-provider turns; widen the panes and show the
+  // conversation. All items in a manifest share a shape, so a single flag holds.
+  const conversation = items.some((i) => (i.turns?.length ?? 0) > 0);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const paneRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const { audioRef, activeIndex, isPlaying, toggle, playFrom, handleEnded } = useSequencedPlayback(
-    tracks,
-    (track) => onPlay?.(track.key),
-    coordinator
-  );
+  const { audioRef, activeIndex, isPlaying, toggle, playFrom, stop, currentTime, duration, seek } =
+    useSequencedPlayback(tracks, (track) => onPlay?.(track.key), coordinator);
 
   // A timeline-tooltip click plays a specific provider. Wait until that tick's
   // items have loaded (provider present) before playing, then mark the request
@@ -89,16 +99,6 @@ export function SampleOutputs({
     playFrom(idx);
   }, [playRequest, items, playFrom]);
 
-  // Auto-scroll the active pane to center while a sequence is playing.
-  useEffect(() => {
-    if (!isPlaying) return;
-    const vp = viewportRef.current;
-    const pane = paneRefs.current[activeIndex];
-    if (!vp || !pane) return;
-    const target = pane.offsetLeft - (vp.clientWidth - pane.clientWidth) / 2;
-    vp.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
-  }, [activeIndex, isPlaying]);
-
   const hints = useScrollHints(viewportRef, `${items.length}:${items.map((i) => i.provider).join(",")}`);
 
   const step = (dir: -1 | 1) => {
@@ -110,20 +110,9 @@ export function SampleOutputs({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
-          Responses
-        </p>
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex items-center gap-1.5 rounded-full bg-text-primary px-3 py-1 text-[11px] font-medium text-surface-primary transition-opacity hover:opacity-90"
-          aria-label={isPlaying ? "Pause" : "Play all responses"}
-        >
-          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
-          <span>{isPlaying ? "Pause" : "Play all"}</span>
-        </button>
-      </div>
+      <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
+        {conversation ? "Conversation" : "Responses"}
+      </p>
 
       <div className="relative">
         {hints.left ? (
@@ -156,14 +145,13 @@ export function SampleOutputs({
           {items.map((item, i) => {
             const active = i === activeIndex;
             const playingThis = active && isPlaying;
+            const color = getModelColor(toModelKey(item.provider, item.model));
+            const turns = item.turns ?? [];
             return (
               <div
                 key={item.provider}
-                ref={(el) => {
-                  paneRefs.current[i] = el;
-                }}
                 role="listitem"
-                className={`flex w-[180px] min-w-[180px] shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
+                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
                   active
                     ? "border-text-primary/40 bg-surface-secondary"
                     : "border-border-primary bg-surface-secondary/60"
@@ -172,7 +160,7 @@ export function SampleOutputs({
                 <div className="flex items-center gap-1.5">
                   <span
                     className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: getModelColor(toModelKey(item.provider, item.model)) }}
+                    style={{ backgroundColor: color }}
                   />
                   <span className="truncate text-xs font-medium text-text-primary">
                     {normalizeProvider(item.provider)}
@@ -184,19 +172,49 @@ export function SampleOutputs({
                 <button
                   type="button"
                   onClick={() => (playingThis ? toggle() : playFrom(i))}
-                  className="mt-auto flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary"
+                  className={`flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary ${
+                    turns.length ? "" : "mt-auto"
+                  }`}
                   aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
                 >
                   {playingThis ? <Pause className="size-3" /> : <Play className="size-3" />}
                   <span>{playingThis ? "Playing" : "Play"}</span>
                 </button>
+                {/* One <audio> is shared, so the playhead belongs to the active
+                    pane alone; other panes keep their turns static. */}
+                {active && duration > 0 ? (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration}
+                      step={0.1}
+                      value={Math.min(currentTime, duration)}
+                      onChange={(e) => seek(Number(e.target.value))}
+                      aria-label={`Seek ${normalizeProvider(item.provider)} recording`}
+                      className="h-1 w-full cursor-pointer"
+                      style={{ accentColor: color }}
+                    />
+                    <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
+                      {elapsed(currentTime)}/{elapsed(duration)}
+                    </span>
+                  </div>
+                ) : null}
+                {turns.length ? (
+                  <ConversationTurns
+                    turns={turns}
+                    accentColor={color}
+                    currentTime={active ? currentTime : 0}
+                    onSeek={active ? seek : undefined}
+                  />
+                ) : null}
               </div>
             );
           })}
         </div>
       </div>
 
-      <audio ref={audioRef} onEnded={handleEnded} hidden />
+      <audio ref={audioRef} onEnded={stop} hidden />
     </div>
   );
 }

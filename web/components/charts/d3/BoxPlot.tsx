@@ -13,17 +13,41 @@ import {
 } from "@/components/shared/DedicatedInferenceInfo";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
-// Match the text sizes on the timeline chart above: 14px axis labels, 12px
-// tick/legend/category text.
+// Match the text sizes on the timeline chart above: 12px tick/legend/category
+// text.
 const modelFontSize = 12;
 const providerFontSize = 12;
-const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
-// Bottom holds up to three label lines, the provider, the dedicated-inference
-// marker, and the axis caption — 80px stacked marker over caption.
-const margin = { top: 20, right: 8, bottom: 88, left: 40 };
+// Bottom fits the deepest label stack: four label lines, the provider, then the
+// dedicated-inference marker. The caption sits below it, in the container's pad.
+const margin = { top: 20, right: 8, bottom: 100, left: 40 };
 const minSlotWidth = 48;
+/** Share of a slot the label block may occupy; the rest is breathing room. */
+const labelBandRatio = 0.82;
+/** Floor the label text shrinks to before a slot has to widen instead. */
+const minModelFont = 8;
+/** Geist Mono advances a fixed 0.6em, so label widths are predictable. */
+const monoAdvance = 0.6;
+const maxCharsPerLine = 8;
+
+// Model name wrapped onto label lines, rejoining words with hyphens while they
+// fit the budget. Slot sizing and the renderer share it so the width reserved
+// for a label is measured on the very lines that get drawn — note a rejoined
+// line runs one over the budget, since its new hyphen lands after the check.
+const modelLabelLines = (model: string) => {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of model.split(/[-_\s]/)) {
+    if ((line + word).length <= maxCharsPerLine) line += (line ? "-" : "") + word;
+    else if (line) {
+      lines.push(line);
+      line = word;
+    } else lines.push(word);
+  }
+  if (line) lines.push(line);
+  return lines;
+};
 
 const BoxPlot: React.FC<BoxPlotProps> = ({
   data,
@@ -108,9 +132,26 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // chart) rather than crushing the axis labels into each other. This holds at
   // any viewport width — full screen, half, quarter, drag-resized, or mobile —
   // so wide desktops render flush while narrow ones scroll.
+  // A slot also has to hold the widest line of its label at the floor font —
+  // below that the text stops shrinking and spills into its neighbours.
+  const slotWidth = Math.ceil(
+    Math.max(
+      minSlotWidth,
+      ...data.data.map(
+        (d) =>
+          (Math.max(
+            getProviderForModel(d.model).length,
+            ...modelLabelLines(normalizeModelName(d.model)).map((l) => l.length)
+          ) *
+            minModelFont *
+            monoAdvance) /
+          labelBandRatio
+      )
+    )
+  );
   const svgWidth = Math.max(
     dimensions.width,
-    data.data.length * minSlotWidth + margin.left + margin.right
+    data.data.length * slotWidth + margin.left + margin.right
   );
   const scrollable = svgWidth > dimensions.width;
 
@@ -249,8 +290,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
 
     // Create custom wrapped text with model first
     {
-      const labelMaxWidth = xScale.step() * 0.82;
-      const minModelFont = 8;
+      const labelMaxWidth = xScale.step() * labelBandRatio;
 
       data.data.forEach((modelData) => {
         const model = modelData.model;
@@ -260,27 +300,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         const xPosition = (xScale(model) ?? 0) + xScale.bandwidth() / 2;
         const yPosition = chartHeight + 15; // Base position
 
-        const maxCharsPerLine = 8;
-        const modelWords = normalizedModel.split(/[-_\s]/);
-        const modelLines: string[] = [];
-        let currentLine = "";
-
-        modelWords.forEach((word) => {
-          if ((currentLine + word).length <= maxCharsPerLine) {
-            currentLine += (currentLine ? "-" : "") + word;
-          } else {
-            if (currentLine) {
-              modelLines.push(currentLine);
-              currentLine = word;
-            } else {
-              modelLines.push(word);
-            }
-          }
-        });
-
-        if (currentLine) {
-          modelLines.push(currentLine);
-        }
+        const modelLines = modelLabelLines(normalizedModel);
 
         const modelTextNodes = modelLines.map((line, lineIndex) =>
           g
@@ -339,18 +359,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         }
       });
     }
-
-    // X-axis label (the Y axis title is omitted — it's redundant with the
-    // card heading).
-    g.append("text")
-      .attr(
-        "transform",
-        `translate(${chartWidth / 2}, ${chartHeight + margin.bottom - 6})`
-      )
-      .style("text-anchor", "middle")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", axisLabelFontSize)
-      .text("Ranked by P50 latency");
 
     // Render a box plot for each model
     data.data.forEach((modelData) => {
@@ -446,10 +454,9 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           .attr("fill", "transparent");
       }
 
-      // Hover shows a compact name + median tooltip above the whiskers;
-      // clicking pins that same tooltip and populates it with the full
-      // stats so it never chases the cursor or blocks neighboring boxes.
-      // On mobile there is no hover: a tap pins the full stats directly.
+      // Hover shows the model's name and IQR above the whiskers; clicking pins
+      // that same tooltip so it never chases the cursor or blocks neighboring
+      // boxes. On mobile there is no hover: a tap pins it directly.
       const anchor = {
         point: modelData,
         x: margin.left + centerX,
@@ -496,7 +503,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
   // dimensions at their initial value once data arrives.
   return (
-    <div ref={containerRef} className="relative w-full" data-export-frame>
+    <div ref={containerRef} className="relative w-full pb-5" data-export-frame>
       {data.data.length === 0 ? (
         // Same height as the populated chart so toggling to a model with no
         // latency runs doesn't shift the sections below.
@@ -528,6 +535,15 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             />
           </div>
         </div>
+      )}
+      {data.data.length > 0 && (
+        <p
+          className={`pointer-events-none absolute bottom-0 left-10 right-2 font-mono text-sm text-text-secondary ${scrollable ? "text-left" : "text-center"}`}
+        >
+          {isMobile
+            ? "Fastest median first"
+            : "Ranked by median latency (fastest first)"}
+        </p>
       )}
       {tip && (
         <div
@@ -585,22 +601,13 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             {normalizeModelName(tip.point.model)}
           </p>
           {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
-          {(tip.pinned
-            ? [
-                ["Max", `${tip.point.stats.max.toFixed(0)}ms`],
-                ["P95", `${tip.point.stats.p95.toFixed(0)}ms`],
-                ["P75", `${tip.point.quartiles.q3.toFixed(0)}ms`],
-                ["P50", `${tip.point.quartiles.median.toFixed(0)}ms`],
-                ["P25", `${tip.point.quartiles.q1.toFixed(0)}ms`],
-                ["Count", `${tip.point.stats.count}`]
-              ]
-            : [
-                [
-                  "Median",
-                  `${tip.point.quartiles.median.toFixed(0)}ms · click for details`
-                ]
-              ]
-          ).map(([label, value]) => (
+          {[
+            ["Median", `${tip.point.quartiles.median.toFixed(0)}ms`],
+            [
+              "IQR",
+              `${(tip.point.quartiles.q3 - tip.point.quartiles.q1).toFixed(0)}ms`
+            ]
+          ].map(([label, value]) => (
             <p
               key={label}
               style={{

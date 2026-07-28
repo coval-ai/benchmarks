@@ -10,14 +10,14 @@
  * `_VALID_MODELS`; the runner may support more models than the playground exposes.
  */
 
-export type TtsProviderId =
+type TtsProviderId =
   | "cartesia"
   | "elevenlabs"
   | "deepgram"
   | "rime"
   | "gradium";
 
-export type SttProviderId =
+type SttProviderId =
   | "deepgram"
   | "assemblyai"
   | "elevenlabs"
@@ -42,7 +42,7 @@ export type SttModelConfig = {
   enabled: boolean;
 };
 
-export const ttsModels: TtsModelConfig[] = [
+const ttsModels: TtsModelConfig[] = [
   {
     id: "elevenlabs:eleven_flash_v2_5:default",
     provider: "elevenlabs",
@@ -109,7 +109,7 @@ export const ttsModels: TtsModelConfig[] = [
   }
 ];
 
-export const sttModels: SttModelConfig[] = [
+const sttModels: SttModelConfig[] = [
   {
     id: "deepgram:nova-2",
     provider: "deepgram",
@@ -186,8 +186,4 @@ export function getEnabledSttModels(): SttModelConfig[] {
 
 export function getTtsModelById(id: string): TtsModelConfig | undefined {
   return ttsModels.find((m) => m.id === id);
-}
-
-export function getSttModelById(id: string): SttModelConfig | undefined {
-  return sttModels.find((m) => m.id === id);
 }

@@ -1,6 +1,5 @@
 export const runtime = "nodejs";
 
-import { arenaAccessOk } from "@/lib/arena/guard";
 import { arenaRunnerFetch } from "@/lib/arena/runner";
 import type { ExamplePrompt } from "@/lib/arena/types";
 
@@ -10,7 +9,6 @@ interface ExamplePromptOut {
 }
 
 export async function GET(req: Request) {
-  if (!(await arenaAccessOk())) return new Response(null, { status: 404 });
   let res: Response;
   try {
     res = await arenaRunnerFetch(

@@ -10,7 +10,7 @@ import { normalizePlaygroundError, type PlaygroundApiError } from "@/lib/playgro
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export class ApiError extends Error {
+class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly statusText: string,
@@ -53,14 +53,8 @@ async function request<T>(path: string, init?: Parameters<typeof fetch>[1]): Pro
 
 // Response and row types from codegen
 export type ProvidersApiResponse = components["schemas"]["ProvidersResponse"];
-export type ProviderInfo = components["schemas"]["ProviderInfo"];
-export type ModelInfo = components["schemas"]["ModelInfo"];
 export type ModelTagOut = components["schemas"]["ModelTagOut"];
 export type TagCategoryOut = components["schemas"]["TagCategoryOut"];
-export type LeaderboardApiResponse = components["schemas"]["LeaderboardResponse"];
-export type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
-export type RunRow = components["schemas"]["RunOut"];
-export type RunsApiResponse = components["schemas"]["RunsResponse"];
 export type AggregatesApiResponse = components["schemas"]["AggregatesResponse"];
 export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
 export type SeriesPoint = components["schemas"]["SeriesPoint"];

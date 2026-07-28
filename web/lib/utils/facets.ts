@@ -34,7 +34,7 @@ export const DEDICATED_INFERENCE_BLURB =
   "Shared endpoints serve many customers on the same infrastructure, while dedicated endpoints run on hardware reserved for a single customer. Since these represent different deployment configurations, we distinguish them separately.";
 
 /** Whether a model's tags mark it as a dedicated-inference endpoint. */
-export const isDedicated = (tags: ModelTagOut[]): boolean =>
+const isDedicated = (tags: ModelTagOut[]): boolean =>
   tags.some((t) => t.category === SOURCE_CATEGORY && t.value === DEDICATED_INFERENCE);
 
 /** The composite keys of every dedicated-inference model in the catalogue. */
@@ -46,7 +46,7 @@ export function dedicatedModelKeys(tagIndex: Map<string, ModelTagOut[]>): Set<st
   return keys;
 }
 
-export interface FacetOption {
+interface FacetOption {
   value: string;
   label: string;
   count: number;

@@ -75,9 +75,34 @@ function playgroundSession(req: NextRequest): NextResponse {
   return response;
 }
 
+// Exactly two arena surfaces are public — the voting page and the leaderboard — plus
+// the endpoints they call. The arena needs traffic to tighten its provisional
+// confidence intervals, and the runner caps every arena endpoint at 60/minute.
+//
+// This is an allowlist on purpose: anything else under /arena or /api/arena stays
+// behind the access token, so a route added later is gated by default rather than
+// published by omission. /arena/admin and /api/arena/admin/* are the current such
+// routes — convergence and Elo pairing internals, with no auth of their own.
+const PUBLIC_ARENA_PAGES = new Set(["/arena", "/arena/leaderboard"]);
+const PUBLIC_ARENA_API_PREFIXES = [
+  "/api/arena/battle", // create a battle, and /battle/<id>/reveal after the vote
+  "/api/arena/vote",
+  "/api/arena/example-prompt",
+  "/api/arena/leaderboard",
+];
+
+function isPublicArenaPath(pathname: string): boolean {
+  if (PUBLIC_ARENA_PAGES.has(pathname)) return true;
+  return PUBLIC_ARENA_API_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
 export function middleware(req: NextRequest): NextResponse {
-  if (req.nextUrl.pathname.startsWith("/api/arena")) return arenaGate(req);
-  if (req.nextUrl.pathname.startsWith("/arena")) return arenaGate(req);
+  const { pathname } = req.nextUrl;
+  if (pathname.startsWith("/arena") || pathname.startsWith("/api/arena")) {
+    return isPublicArenaPath(pathname) ? NextResponse.next() : arenaGate(req);
+  }
   return playgroundSession(req);
 }
 

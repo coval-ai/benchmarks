@@ -36,10 +36,10 @@ export type DashboardChartId =
   | "timeline"
   | "scatter"
   | "wer_bar"
+  | "instruction_bar"
   | "wer_radar"
   | "box_plot"
   | "heatmap"
   | "performance_delta";
 export type PlaygroundRunTrigger = "button" | "keyboard";
 export type PlaygroundModeSwitchTrigger = "tab" | "keyboard";
-export type TranscriptBrowseMethod = "arrow" | "scroll";

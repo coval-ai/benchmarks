@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     minimax_api_key: SecretStr | None = None
     palabra_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
+    speechify_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
@@ -173,6 +174,10 @@ class Settings(BaseSettings):
     # Must match the GCS bucket's object-deletion lifecycle (set in benchmark-infra).
     arena_clip_retention_days: int = 30
     arena_daily_battle_cap: int = 500
+    # When the moderator cannot be reached, reject rather than synthesize: the local PII
+    # check is not a content-safety fallback, and the arena publishes its audio. Flip to
+    # false to trade safety for availability during a prolonged provider outage.
+    arena_moderation_fail_closed: bool = True
 
 
 @functools.lru_cache(maxsize=1)

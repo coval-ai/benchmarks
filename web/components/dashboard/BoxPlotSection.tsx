@@ -10,7 +10,7 @@ import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
 import MetricInfo from "@/components/shared/MetricInfo";
-import MetricToggle from "@/components/dashboard/MetricToggle";
+import MetricToggle, { useMetricTab } from "@/components/dashboard/MetricToggle";
 import { metricAboutNote } from "@/lib/config/metrics";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
@@ -20,20 +20,29 @@ const BoxPlotSection: React.FC = () => {
     boxPlotDescription: description,
     latencyLabel,
     getBoxPlotData,
-    getAvgLatencyMs,
     getProviderForModel,
     dedicatedModels,
     isMobile,
     activeMetric,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("box_plot");
+  const metricTab = useMetricTab();
 
   const boxPlotData = useMemo(
     () => getBoxPlotData(activeMetric),
     [getBoxPlotData, activeMetric]
   );
-  // Run-weighted average latency across all selected models.
-  const avgLatency = getAvgLatencyMs(activeMetric);
+
+  // Headline: mean IQR across the models on the chart — how predictable the
+  // field is, which is what this card is for, rather than how fast it is.
+  const avgIqrMs = useMemo(() => {
+    const widths = boxPlotData.data
+      .map(({ quartiles }) => quartiles.q3 - quartiles.q1)
+      .filter((width) => Number.isFinite(width) && width >= 0);
+    return widths.length > 0
+      ? widths.reduce((sum, width) => sum + width, 0) / widths.length
+      : undefined;
+  }, [boxPlotData]);
 
   return (
     <div className="mb-4">
@@ -42,6 +51,8 @@ const BoxPlotSection: React.FC = () => {
           label="Latency Variation"
           description={description}
           note={metricAboutNote(activeMetric)}
+          exportNote={metricTab}
+          exportXLabel="Ranked by median latency (fastest first)"
           exportRows={() =>
             boxPlotData.data.map(({ model, quartiles, stats }) => ({
               model,
@@ -52,16 +63,25 @@ const BoxPlotSection: React.FC = () => {
               median_ms: quartiles.median,
               q3_ms: quartiles.q3,
               whisker_high_ms: quartiles.max,
+              iqr_ms: quartiles.q3 - quartiles.q1,
+              iqr_pct_of_median:
+                quartiles.median > 0
+                  ? ((quartiles.q3 - quartiles.q1) / quartiles.median) * 100
+                  : undefined,
               mean_ms: stats.mean,
               runs: stats.count,
             }))
           }
-          stat={{
-            label: (
-              <MetricInfo metric={activeMetric} align="right">{`Average ${latencyLabel}`}</MetricInfo>
-            ),
-            value: `${avgLatency.toFixed(0)} ms`,
-          }}
+          stat={
+            avgIqrMs === undefined
+              ? undefined
+              : {
+                  label: (
+                    <MetricInfo metric="iqr" align="right">{`Average ${latencyLabel} IQR`}</MetricInfo>
+                  ),
+                  value: `${avgIqrMs.toFixed(0)} ms`,
+                }
+          }
         />
 
         <MetricToggle />

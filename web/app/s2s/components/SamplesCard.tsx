@@ -11,14 +11,7 @@ import { s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { usePlaybackCoordinator } from "@/hooks/useSequencedPlayback";
-import { SampleInput } from "./SampleInput";
 import { SampleOutputs, type SampleOutputItem } from "./SampleOutputs";
-
-function tickLabel(tick: string): string {
-  const d = new Date(tick);
-  if (Number.isNaN(d.getTime())) return tick;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 // Which failure case fired, for the console — network/http/parse vs an
 // unclassified error, with the status when we have one.
@@ -29,8 +22,15 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// Day of a pinned tick, for the "showing an older day" control only.
+function pinnedDayLabel(tick: string): string {
+  const d = new Date(tick);
+  if (Number.isNaN(d.getTime())) return tick;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 export function SamplesCard() {
-  const { modelsByProvider, normalizeProviderName, s2sPlayRequest } = useDashboard();
+  const { modelsByProvider, normalizeProviderName, s2sPlayRequest, clearS2SPlay } = useDashboard();
   const coordinator = usePlaybackCoordinator();
   const visibleProviders = useMemo(
     () => new Set(Object.keys(modelsByProvider)),
@@ -53,14 +53,28 @@ export function SamplesCard() {
     if (err) console.error(`[s2s-samples] fetch failed: ${describeError(err)}`, err);
   }, [manifestQuery.error, indexQuery.error]);
 
+  // Every tick with recordings is playable, including the pre-multi-turn ones
+  // that carry no transcript — those render as panes with a play button and no
+  // turn list, so a timeline click always reaches its audio.
   const items = useMemo<SampleOutputItem[]>(() => {
     if (!manifest) return [];
     return visibleRecordings(manifest, visibleProviders).map((r) => ({
       provider: r.provider,
       model: r.model,
       url: s2sSampleFeed.objectUrl(r.object),
+      turns: r.turns,
     }));
   }, [manifest, visibleProviders]);
+
+  // A timeline row can name a provider this bucket never recorded — an older
+  // tick from before that model was benchmarked, or one absent from the page's
+  // catalogue. Autoplay then finds no matching pane and stays quiet, so the
+  // click reads as broken unless we say what happened.
+  const requestedProvider = s2sPlayRequest?.provider;
+  const requestedProviderMissing =
+    requestedProvider !== undefined &&
+    manifest !== null &&
+    !items.some((i) => i.provider === requestedProvider);
 
   const handlePlay = useCallback(
     (provider: string) => {
@@ -83,10 +97,17 @@ export function SamplesCard() {
         <div className="text-[0.9rem] font-light text-text-secondary">
           Conversation samples
         </div>
-        {manifest ? (
-          <span className="font-mono text-xs text-text-tertiary">
-            {tickLabel(manifest.bucket_at)}
-          </span>
+        {/* A timeline click pins the card to that day. Without a way back, a day
+            holding metrics but no recording would trap the card on an empty
+            state. */}
+        {s2sPlayRequest ? (
+          <button
+            type="button"
+            onClick={clearS2SPlay}
+            className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-border-primary px-2 py-0.5 font-mono text-[10px] text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-0"
+          >
+            {pinnedDayLabel(s2sPlayRequest.tick)} · show latest
+          </button>
         ) : null}
       </div>
 
@@ -104,11 +125,11 @@ export function SamplesCard() {
         </p>
       ) : (
         <div className="flex flex-1 flex-col gap-4">
-          <SampleInput
-            transcript={manifest?.transcript ?? null}
-            inputAudioUrl={manifest?.input_audio_url ?? null}
-            coordinator={coordinator}
-          />
+          {requestedProviderMissing && requestedProvider ? (
+            <p className="text-[11px] text-text-tertiary">
+              No recording for {normalizeProviderName(requestedProvider)} at this point.
+            </p>
+          ) : null}
           <SampleOutputs
             items={items}
             normalizeProvider={normalizeProviderName}
@@ -122,10 +143,6 @@ export function SamplesCard() {
           />
         </div>
       )}
-
-      <p className="mt-4 text-[10px] text-text-tertiary">
-        Prompts from the SLURP dataset (CC BY-NC 4.0).
-      </p>
     </Card>
   );
 }

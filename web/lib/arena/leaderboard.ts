@@ -3,7 +3,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-export type ArenaStatus = "preliminary" | "usable" | "established";
+type ArenaStatus = "preliminary" | "usable" | "established";
 
 export interface ArenaLeaderboardEntry {
   provider: string;
@@ -28,7 +28,7 @@ export interface ArenaLeaderboard {
   entries: ArenaLeaderboardEntry[];
 }
 
-export async function getArenaLeaderboard(signal?: AbortSignal): Promise<ArenaLeaderboard> {
+async function getArenaLeaderboard(signal?: AbortSignal): Promise<ArenaLeaderboard> {
   const res = await fetch("/api/arena/leaderboard", {
     headers: { Accept: "application/json" },
     signal,

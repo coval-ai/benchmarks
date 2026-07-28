@@ -40,7 +40,7 @@ export const LIGHT_CHART_COLORS: ThemeColors = {
   zoneStroke: "rgba(26, 44, 54, 0.2)",
 };
 
-export const DARK_CHART_COLORS: ThemeColors = {
+const DARK_CHART_COLORS: ThemeColors = {
   grid: "#292720",
   axisText: "#dbdbd3",
   label: "#f9faf8",

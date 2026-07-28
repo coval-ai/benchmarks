@@ -60,6 +60,10 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const requestS2SPlay = useCallback((tick: string, provider: string) => {
     setS2sPlayRequest((prev) => ({ tick, provider, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
+  // Releasing the request hands the card back to the newest tick. Without this a
+  // single click pins it forever, so landing on a day that has metrics but no
+  // recording leaves the card empty with no way back.
+  const clearS2SPlay = useCallback(() => setS2sPlayRequest(null), []);
   const { timeWindow, changeTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
@@ -68,9 +72,12 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const benchmarkParam =
     page === "s2s" ? "S2S" : page === "tts" ? "TTS" : "STT";
 
+  // S2S is a multi-turn-only board: pin its aggregates to the multi-turn dataset
+  // so legacy single-turn (s2s-v1) rows never pool into the V2V charts.
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
+    dataset: page === "s2s" ? "s2s-multiturn-v1" : undefined,
   });
   const providersQuery = useProvidersQuery();
 
@@ -457,6 +464,28 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   const { avgSecondary, lowestWERModel, lowestWERProvider } = keyMetrics;
 
+  // S2S instruction-adherence headline: the model with the highest mean
+  // InstructionFollowing score (higher is better; value is already a percent).
+  // Mirrors the WER secondary tile but maximizes instead of minimizes.
+  const highestInstruction = useMemo(() => {
+    let best = -Infinity;
+    let bestModel = "";
+    let bestProvider = "";
+    deferredSelectedModels.forEach((model) => {
+      const stat = getStat(model, "InstructionFollowing");
+      if (stat && typeof stat.avg_value === "number" && stat.avg_value > best) {
+        best = stat.avg_value;
+        bestModel = model;
+        bestProvider = parseModelKey(model).provider;
+      }
+    });
+    return {
+      pct: best === -Infinity ? null : best,
+      bestModel,
+      bestProvider,
+    };
+  }, [getStat, deferredSelectedModels]);
+
   // Get computed data
   const cumulativeWerBarData = chartData.getWERBarData();
   const werBarData = useMemo<BarDataPoint[]>(() => {
@@ -489,6 +518,19 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     }));
   }, [werBarData, clickedWERBars]);
 
+  // S2S instruction adherence bars (higher is better). No dataset override or
+  // click-to-compare selection — a lean, always-full-opacity mirror of WER.
+  const instructionBarData = chartData.getInstructionBarData();
+  const instructionBarDataWithColors = useMemo(
+    () =>
+      instructionBarData.map((item) => ({
+        ...item,
+        fill: getModelColor(item.model),
+        fillOpacity: 1,
+      })),
+    [instructionBarData]
+  );
+
   // Derived display values
   const latencyLabel = activeMetric;
   const modalityName = { stt: "Speech-to-Text", tts: "Text-to-Speech", s2s: "Speech-to-Speech" }[page];
@@ -519,7 +561,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const boxPlotDescription = {
     short: `Distribution of ${latencyLabel} values across all runs`,
     detailed:
-      "Narrow distributions indicate reliable, predictable response times, while wide distributions show erratic performance that may frustrate users despite good average speeds. A model with moderate median latency and tight distribution often provides superior user experience compared to a faster median model with high variability." +
+      metricDescriptions.iqr.detailed +
       (hasDedicatedBoxes
         ? ` Endpoints marked with a server icon use dedicated inference. ${DEDICATED_INFERENCE_BLURB}`
         : ""),
@@ -565,10 +607,25 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       : undefined,
   };
 
-  // S2S has no WER, so it renders a single KeyMetric tile (no secondary).
+  // S2S shows instruction adherence as its secondary tile (higher is better);
+  // STT/TTS show WER. The tile is hidden until instruction data exists.
   const secondaryKeyMetric =
     page === "s2s"
-      ? undefined
+      ? highestInstruction.pct === null
+        ? undefined
+        : {
+            label: "Highest Instruction Adherence",
+            displayValue: `${highestInstruction.pct.toFixed(0)}%`,
+            subtitle: highestInstruction.bestModel
+              ? {
+                  name: normalizeModelName(highestInstruction.bestModel),
+                  detail: highestInstruction.bestProvider
+                    ? normalizeProviderName(highestInstruction.bestProvider)
+                    : undefined,
+                  dedicated: dedicatedModels.has(highestInstruction.bestModel),
+                }
+              : undefined,
+          }
       : {
           label: `${deferredSelectedModels.length > 1 ? "Lowest" : "Average"} Word Error Rate`,
           displayValue: `${avgSecondary.toFixed(1)}%`,
@@ -591,6 +648,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     // S2S samples card <-> timeline tooltip bridge
     s2sPlayRequest,
     requestS2SPlay,
+    clearS2SPlay,
 
     // Display strings
     pageTitle,
@@ -666,6 +724,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     getScatterData: chartData.getScatterData,
     heatmapDisplayData,
     werBarDataWithColors,
+    instructionBarDataWithColors,
 
     // Bar interaction
     clickedWERBars,

@@ -212,6 +212,14 @@ body {
     sans-serif;
 }
 
+/* Brand rule: captions and data readouts are Geist Mono, which is what chart
+   chrome is — axis ticks, axis titles and legends. Body copy stays PP Mori. */
+[data-export-frame] text,
+[data-chart-axis] text,
+[data-chart-legend] {
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
 @layer utilities {
   .scrollbar-hide::-webkit-scrollbar {
     display: none;

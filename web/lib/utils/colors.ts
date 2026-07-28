@@ -151,17 +151,3 @@ export function getProviderColor(provider: string): string {
   const hash = hashCode(provider);
   return fallbackColors[Math.abs(hash) % fallbackColors.length] ?? "#70a6f5";
 }
-
-/**
- * Pick a light or dark foreground for a solid hex fill so text stays WCAG-AA
- * legible, using the relative-luminance crossover between black and white.
- */
-export function getReadableTextColor(hex: string): string {
-  const h = hex.replace("#", "");
-  const channel = (i: number) => {
-    const c = parseInt(h.slice(i, i + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
-  return luminance > 0.179 ? "#0f0c0a" : "#ffffff";
-}

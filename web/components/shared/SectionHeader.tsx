@@ -32,6 +32,9 @@ interface SectionHeaderProps {
   note?: { term: string; text: string };
   /** When false, the detailed text shows inline instead of behind a toggle. */
   expandable?: boolean;
+  /** Active toggle state, captioned into the export — the PNG can't show the
+   *  toggle itself, so a reader has no other way to tell which view it is. */
+  exportNote?: string;
   /** Rows for the Download Data (CSV) button; must reflect the active filters. */
   exportRows?: () => Record<string, unknown>[];
   /** Set false for sections without a chart SVG to hide Download Image. */
@@ -49,6 +52,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   hint,
   note,
   expandable = true,
+  exportNote,
   exportRows,
   exportImage = true,
   exportXLabel,
@@ -162,7 +166,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
         .forEach((el) => el.remove());
     }
     const capture = downloadChartPNG(svg, `${anchorId}.png`, {
-      label,
+      label: exportNote ? `${label} · ${exportNote}` : label,
       title: description.short,
       xLabel: exportXLabel,
       stat: stat && {

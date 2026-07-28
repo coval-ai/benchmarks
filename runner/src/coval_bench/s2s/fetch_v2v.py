@@ -28,7 +28,7 @@ from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.samples import SampleRun, copy_tick_samples
+from coval_bench.s2s.samples import SampleRun, publish_tick_sample
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -62,6 +62,7 @@ class CovalRun:
     run_id: str
     create_time: datetime | None
     error_status: str | None
+    persona_id: str = ""
 
 
 # Agent ids resolved from Settings; model strings are display labels.
@@ -166,6 +167,7 @@ async def recent_completed_runs(
             run_id=cast("str", r["run_id"]),
             create_time=_parse_time(r.get("create_time")),
             error_status=_error_status(r.get("error_status")),
+            persona_id=cast("str", r.get("persona_id") or ""),
         )
         if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
             continue
@@ -478,22 +480,28 @@ async def _fetch_one_provider(
     caught here so one provider can't abort others.
     """
     statuses: list[RunStatus] = []
-    candidate: SampleRun | None = None
+    candidates: dict[tuple[datetime, str], SampleRun] = {}
 
     def note_sample_candidate(coval_run: CovalRun) -> None:
-        # Newest-first scan: the first eligible run per provider is its newest,
-        # whether it was ingested this tick or on an earlier one — staggered
-        # arrivals must not shrink the sample to one provider. Held locally and
-        # committed only after the staleness check, so a stale provider's old
-        # recording never ships under today's tick.
-        nonlocal candidate
-        if candidate is not None:
+        # Newest-first scan: keep the newest eligible run PER (BUCKET, PERSONA).
+        # Multi-turn runs the same test set once per persona, so a provider yields
+        # one candidate per persona per day (single-turn has no persona -> a "" key).
+        # Keying on the bucket too is what lets a missed day still be published: the
+        # window spans two periods, and keying on persona alone let today's run evict
+        # yesterday's before the sampler ever saw it. Staggered arrivals must not
+        # shrink the sample; committed only after the staleness check so a stale
+        # provider's old recording never ships today.
+        bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
+        key = (bucket_at, coval_run.persona_id)
+        if key in candidates:
             return
-        candidate = SampleRun(
+        candidates[key] = SampleRun(
             provider=spec.provider,
             model=spec.model,
             coval_run_id=coval_run.run_id,
-            bucket_at=_bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds),
+            bucket_at=bucket_at,
+            persona_id=coval_run.persona_id,
+            agent_id=agent_id,
         )
 
     try:
@@ -570,8 +578,8 @@ async def _fetch_one_provider(
             )
             return RunStatus.FAILED, len(statuses)
 
-        if sampled_runs is not None and candidate is not None:
-            sampled_runs.append(candidate)
+        if sampled_runs is not None:
+            sampled_runs.extend(candidates.values())
 
         if statuses:
             if all(s is RunStatus.FAILED for s in statuses):
@@ -648,18 +656,20 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
-        if settings.s2s_samples_bucket and sampled_runs:
+        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
             expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
             missing = expected - {r.provider for r in sampled_runs}
             if missing:
                 # Error level on purpose: this is the alert that a provider is
-                # absent from the day's sample; the tick still publishes the rest.
+                # absent from the window, so no day in it can publish a sample.
                 logger.error("samples_provider_missing", missing=sorted(missing))
-            await copy_tick_samples(
+            await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
+                test_set_id=test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
+                expected_providers=expected,
             )
         logger.info(
             "s2s_fetch_done",
@@ -672,7 +682,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
 @click.command(name="fetch-s2s")
 def fetch_s2s() -> None:
     """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job)."""
-    from coval_bench.logging import configure_logging, log_run_failed
+    from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
@@ -683,16 +693,17 @@ def fetch_s2s() -> None:
         log_run_failed(str(exc), exc)
         raise
 
-    # Alert if any provider has no fresh data. The succeeding providers' rows
-    # are already committed, so a partial run still exits 0 — only a total
-    # loss fails the job (non-zero exit).
+    # Healthy providers' rows are already committed, so a PARTIAL run alerts but
+    # still exits 0 (no Cloud Run retry). Only a total loss fails the job.
     failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
-    if not statuses:
-        log_run_failed("s2s fetch ran no providers (none configured)")
-    elif failed:
-        log_run_failed(f"s2s fetch has no fresh data from: {', '.join(failed)}")
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
+        if statuses:
+            log_run_failed(f"s2s fetch failed for all providers: {', '.join(failed)}")
+        else:
+            log_run_failed("s2s fetch ran no providers (none configured)")
         raise click.ClickException("s2s fetch failed for all providers")
+    if failed:
+        log_run_partial(f"s2s fetch has no fresh data from: {', '.join(failed)}")
 
 
 if __name__ == "__main__":

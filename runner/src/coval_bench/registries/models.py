@@ -739,6 +739,22 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="speechify",
+        model="simba-3.2",
+        voice="geffen_32",
+        tags=(_STREAMING, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="speechify",
+        model="simba-3.0",
+        voice="geffen_32",
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+    ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
     # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
     RegisteredModel(
@@ -773,30 +789,29 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client).
+    # provider client). EARLY_ACCESS = pre-launch embargo: they run and fetch
+    # normally, but every data endpoint strips them for public callers and
+    # serves them only to X-Internal-Key requests until the benchmark launches.
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_STREAMING, _MULTI),
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-realtime",
         tags=(_STREAMING, _MULTI),
-        # hidden from the site for launch while xAI capacity issues distort
-        # latency; the fetch job doesn't read this registry, so data keeps
-        # accruing for the flip back to active.
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
 ]
 
