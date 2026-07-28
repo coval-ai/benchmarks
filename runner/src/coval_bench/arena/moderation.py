@@ -90,8 +90,11 @@ def pii_match(prompt: str) -> str | None:
     return None
 
 
-def _get_client(settings: Settings) -> AsyncOpenAI | None:
-    """Return a client for the configured key, rebuilding it when the key changes."""
+async def _get_client(settings: Settings) -> AsyncOpenAI | None:
+    """Return a client for the configured key, rebuilding it when the key changes.
+
+    The superseded client is closed, otherwise each rotation leaks its connection pool.
+    """
     global _client, _client_fingerprint
     key = settings.openai_api_key
     if key is None:
@@ -99,6 +102,8 @@ def _get_client(settings: Settings) -> AsyncOpenAI | None:
     secret = key.get_secret_value()
     fingerprint = hashlib.sha256(secret.encode()).hexdigest()
     if _client is None or _client_fingerprint != fingerprint:
+        if _client is not None:
+            await _client.close()
         _client = AsyncOpenAI(
             api_key=secret,
             timeout=MODERATION_TIMEOUT_S,
@@ -115,7 +120,7 @@ async def moderation_verdict(settings: Settings, prompt: str) -> ModerationResul
     later without re-calling. Parsing sits inside the guard: a malformed response is an
     unavailable moderator, not a 500.
     """
-    client = _get_client(settings)
+    client = await _get_client(settings)
     if client is None:
         logger.warning("arena_moderation_unconfigured")
         return ModerationResult(flagged=False, available=False)

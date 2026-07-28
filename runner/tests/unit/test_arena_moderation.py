@@ -53,14 +53,22 @@ def _install_stub(monkeypatch: pytest.MonkeyPatch, create: Any) -> None:
             pass
 
     _Stub.moderations.create = staticmethod(create)  # type: ignore[attr-defined]
-    monkeypatch.setattr(moderation, "_get_client", lambda _settings: _Stub())
+
+    async def _stub_get_client(_settings: Any) -> Any:
+        return _Stub()
+
+    monkeypatch.setattr(moderation, "_get_client", _stub_get_client)
 
 
 async def test_verdict_unavailable_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With no API key the moderator is unavailable, and no client is built."""
+    """With no API key the moderator is unavailable, and no client is built.
+
+    ``_env_file=None`` matters: ``Settings`` otherwise reads ``.env``, so a key sitting
+    there would build a real client and send this prompt to OpenAI.
+    """
     monkeypatch.setattr(moderation, "_client", None)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    verdict = await moderation_verdict(Settings(), "hello")
+    verdict = await moderation_verdict(Settings(_env_file=None), "hello")
     assert verdict.available is False
     assert verdict.flagged is False
 
@@ -141,14 +149,16 @@ async def test_verdict_does_not_outlive_the_request_budget(
     assert verdict.available is False
 
 
-def test_client_is_rebuilt_when_the_key_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_client_is_rebuilt_when_the_key_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     """A rotated key must not keep moderating under the previous credential."""
     monkeypatch.setattr(moderation, "_client", None)
     monkeypatch.setattr(moderation, "_client_fingerprint", None)
 
     monkeypatch.setenv("OPENAI_API_KEY", "first-key")
-    first = moderation._get_client(Settings())
-    assert first is moderation._get_client(Settings())
+    first = await moderation._get_client(Settings())
+    assert first is await moderation._get_client(Settings())
 
     monkeypatch.setenv("OPENAI_API_KEY", "second-key")
-    assert moderation._get_client(Settings()) is not first
+    second = await moderation._get_client(Settings())
+    assert second is not first
+    assert first is not None and first.is_closed()
