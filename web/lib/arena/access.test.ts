@@ -9,6 +9,7 @@ import {
   accessSecretConfigured,
   gateAllows,
   identified,
+  legacyLabeler,
   mintAccess,
   needsRefresh,
   verifyAccess,
@@ -116,8 +117,18 @@ describe("arena identity", () => {
     expect(identified(verified(old, NOW + 1))?.sid).toBe("sid-9");
   });
 
-  it("rejects an empty sid instead of reading it as a pre-identity cookie", () => {
-    const forged = signed(encode({ sid: "", iat: NOW, exp: NOW + 30 * DAY }));
+  it("rejects an empty sid", () => {
+    const forged = signed(encode({ sid: "", role: "labeler", iat: NOW, exp: NOW + 30 * DAY }));
+    expect(verifyAccess(forged, NOW)).toBeNull();
+  });
+
+  it("rejects a payload carrying a role but no sid", () => {
+    const forged = signed(encode({ role: "external", iat: NOW, exp: NOW + 30 * DAY }));
+    expect(verifyAccess(forged, NOW)).toBeNull();
+  });
+
+  it("rejects a payload carrying a sid but no role", () => {
+    const forged = signed(encode({ sid: "sid-1", iat: NOW, exp: NOW + 30 * DAY }));
     expect(verifyAccess(forged, NOW)).toBeNull();
   });
 
@@ -138,6 +149,13 @@ describe("arena gate", () => {
   it("honours a pre-identity cookie until the migration cutoff", () => {
     const legacy = signed(encode({ iat: NOW, exp: NOW + 30 * DAY }));
     expect(gateAllows(verified(legacy, NOW), NOW)).toBe(true);
+  });
+
+  // Verification rejects these outright, so this guards the second layer on its own: were
+  // that check ever loosened, a half-filled payload still must not read as pre-identity.
+  it("does not read a half-filled payload as a pre-identity cookie", () => {
+    expect(legacyLabeler({ role: "external", iat: NOW, exp: NOW + 30 * DAY }, NOW)).toBe(false);
+    expect(legacyLabeler({ sid: "sid-1", iat: NOW, exp: NOW + 30 * DAY }, NOW)).toBe(false);
   });
 
   it("stops honouring a pre-identity cookie once the cutoff passes", () => {

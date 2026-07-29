@@ -94,14 +94,14 @@ export function verifyAccess(
   }
   if (typeof payload?.iat !== "number" || typeof payload?.exp !== "number") return null;
   if (now >= payload.exp) return null;
-  // An empty sid would pass a bare string check and then fail `identified`, landing on the
-  // legacy branch below — i.e. reading as a labeler. Reject it here instead.
-  if (payload.sid !== undefined && (typeof payload.sid !== "string" || payload.sid === "")) {
-    return null;
-  }
-  if (payload.role !== undefined && payload.role !== "labeler" && payload.role !== "external") {
-    return null;
-  }
+  // Identity is both fields or neither. Nothing mints a half-filled payload, and one that
+  // arrives fails `identified` and so reads as a cookie predating identity — which the gate
+  // honours as a labeler. An explicit `role: "external"` would then arrive as a grant.
+  const hasSid = payload.sid !== undefined;
+  const hasRole = payload.role !== undefined;
+  if (hasSid !== hasRole) return null;
+  if (hasSid && (typeof payload.sid !== "string" || payload.sid === "")) return null;
+  if (hasRole && payload.role !== "labeler" && payload.role !== "external") return null;
   return payload;
 }
 
@@ -123,7 +123,9 @@ export function identified(payload: AccessPayload): IdentifiedAccess | null {
 export const LEGACY_LABELER_UNTIL = Date.UTC(2026, 8, 1);
 
 export function legacyLabeler(payload: AccessPayload, now: number = Date.now()): boolean {
-  return identified(payload) === null && now < LEGACY_LABELER_UNTIL;
+  // Both fields absent, not merely `identified` returning null — that is also true of a
+  // half-filled payload, which is a different thing and must not be honoured.
+  return payload.sid === undefined && payload.role === undefined && now < LEGACY_LABELER_UNTIL;
 }
 
 /**
