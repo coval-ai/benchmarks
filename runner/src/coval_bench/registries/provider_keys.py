@@ -38,4 +38,5 @@ PROVIDER_ENV: dict[str, str] = {
     "minimax": "MINIMAX_API_KEY",
     "palabra": "PALABRA_API_KEY",
     "speechify": "SPEECHIFY_API_KEY",
+    "lmnt": "LMNT_API_KEY",
 }
