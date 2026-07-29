@@ -21,9 +21,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
 DATASET_ALL = "__all__"
 
-# The stub Terraform seeds into every Secret Manager secret (benchmark-infra
-# modules/secret_manager). A mount whose version was never rotated with
-# `gcloud secrets versions add` delivers this literal string.
+# Terraform's Secret Manager stub; a mount that was never rotated delivers it verbatim.
 SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
 
 
@@ -187,14 +185,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _placeholder_secrets_are_unset(self) -> Settings:
-        """Treat unrotated Secret Manager stubs as unset, loudly.
-
-        Sent as a credential, the placeholder fails as a confusing provider
-        401 at request time; nulling the field routes providers to their
-        explicit missing-key errors instead. Non-nullable fields (e.g.
-        database_url) keep the placeholder so the downstream failure still
-        names it; the warning is the signal either way.
-        """
+        """Warn on unrotated Secret Manager stubs and null the nullable ones."""
         logger = structlog.get_logger("coval_bench.config")
         for name, field in type(self).model_fields.items():
             value = getattr(self, name)

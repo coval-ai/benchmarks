@@ -27,8 +27,6 @@ def test_placeholder_plain_str_treated_as_unset() -> None:
 
 
 def test_placeholder_database_url_kept() -> None:
-    # database_url is not nullable; the value survives so the connect failure
-    # still names the placeholder.
     settings = _settings(database_url=SECRET_PLACEHOLDER)
     assert settings.database_url == SECRET_PLACEHOLDER
 
