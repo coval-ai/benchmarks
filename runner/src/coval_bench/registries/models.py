@@ -755,17 +755,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_EARLY_ACCESS,
     ),
-    # LMNT speech sessions run Blizzard (the only model) over WebSocket.
-    # PENDING until LMNT_API_KEY is mounted in prod (Secret Manager + runner
-    # job env + benchmarks-api for the arena); on activation add the
-    # ("leah", "caleb") voice pool.
     RegisteredModel(
         benchmark=_TTS,
         provider="lmnt",
         model="blizzard",
         voice="leah",
+        voices=("leah", "caleb"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        status=_PENDING,
+        status=_ACTIVE,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never

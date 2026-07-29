@@ -27,8 +27,6 @@ SAMPLE_RATE = 24000
 class LmntTTSProvider(TTSProvider):
     """LMNT TTS provider using the speech sessions WebSocket API."""
 
-    # Speech sessions take no model parameter — every session runs Blizzard,
-    # LMNT's only model. The id exists for registry identity and naming.
     _VALID_MODELS = frozenset({"blizzard"})
 
     def __init__(self, settings: Settings, model: str, voice: str | None) -> None:
@@ -80,16 +78,11 @@ class LmntTTSProvider(TTSProvider):
         try:
             async with ws_client.connect(_WS_URL) as ws:
                 await ws.send(json.dumps(init_msg))
-                # The server acks the init with a `ready` message. Waiting for it
-                # keeps session setup (auth, voice load) out of TTFA: sessions are
-                # long-lived in real use, with text streamed into an established
-                # session.
+                # Wait for the server's `ready` ack so session setup stays out of TTFA.
                 _check_error(json.loads(await ws.recv()))
 
                 start = time.monotonic()
                 await ws.send(json.dumps({"type": "text", "text": text}))
-                # `finish` flushes the buffered text and closes the session once
-                # all audio has been dispatched, ending the receive loop.
                 await ws.send(json.dumps({"type": "finish"}))
 
                 async for msg in ws:
