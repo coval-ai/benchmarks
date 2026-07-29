@@ -10,7 +10,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -35,15 +34,6 @@ import { useMobileDetection } from "@/hooks/useMobileDetection";
 import ChartInteractionLayer, {
   type ChartInteractionHandle,
 } from "@/components/charts/ChartInteractionLayer";
-
-// Human transcription accuracy is 2–4% WER under optimal conditions (per our
-// ASR benchmarks doc); the band's ceiling puts human-level-or-better inside
-// the zone. Y axis is whole percent.
-const HUMAN_WER_CEILING = 4;
-// Median human conversational turn-taking gap. X axis is ms. Only meaningful
-// against TTFS — humans have no token-streaming analogue, so the zone hides
-// on TTFT. TODO(bench-405): confirm the canonical figure with product.
-const HUMAN_LATENCY_MS = 200;
 
 // The frontier's plot-edge extensions meet the fastest/most-accurate models
 // at up to a right angle, which no x-monotone curve interpolation can round —
@@ -297,22 +287,6 @@ const LatencyAccuracySection: React.FC = () => {
         <div className="flex flex-wrap items-center">
           <MetricToggle />
           <ul data-chart-legend className="mb-4 ml-auto flex items-center gap-4">
-            {activeTab === "stt" && metric === "TTFS" && (
-              <li
-                className="flex items-center gap-1.5 whitespace-nowrap text-xs"
-                style={{ color: themeColors.textSecondary }}
-              >
-                <span
-                  className="inline-block h-3 w-3 rounded-[2px]"
-                  style={{ backgroundColor: themeColors.zoneStroke }}
-                  aria-hidden="true"
-                />
-                <MetricInfo metric="human-parity" align="right">
-                  Human-parity zone{" "}
-                  <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
-                </MetricInfo>
-              </li>
-            )}
             <li
               className="flex items-center gap-1.5 whitespace-nowrap text-xs"
               style={{ color: themeColors.textSecondary }}
@@ -393,19 +367,6 @@ const LatencyAccuracySection: React.FC = () => {
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
               />
-              {activeTab === "stt" && metric === "TTFS" && (
-                <ReferenceArea
-                  x1={0}
-                  x2={HUMAN_LATENCY_MS}
-                  y1={0}
-                  y2={HUMAN_WER_CEILING}
-                  fill={themeColors.zoneFill}
-                  fillOpacity={1}
-                  stroke={themeColors.zoneStroke}
-                  strokeWidth={1}
-                  ifOverflow="hidden"
-                />
-              )}
               <XAxis
                 dataKey="x"
                 type="number"
