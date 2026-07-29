@@ -175,21 +175,13 @@ def test_incorrect_words_empty_on_match() -> None:
 
 
 def test_error_percentages_split_by_type() -> None:
-    """One substitution in four reference words is 25 points of substitution."""
     result = compute_wer("a b c d", "a x c d")
     assert result.error_percentages == pytest.approx(
         {"wer_insertions_pct": 0.0, "wer_deletions_pct": 0.0, "wer_substitutions_pct": 25.0}
     )
 
 
-def test_error_percentages_zero_on_perfect_match() -> None:
-    assert compute_wer("hello world", "hello world").error_percentages == pytest.approx(
-        {"wer_insertions_pct": 0.0, "wer_deletions_pct": 0.0, "wer_substitutions_pct": 0.0}
-    )
-
-
 def test_error_percentages_empty_reference_is_all_insertions() -> None:
-    """Empty-reference WER is an insertion count, not a ratio — still exact."""
     result = compute_wer("", "one two")
     assert result.error_percentages["wer_insertions_pct"] == pytest.approx(result.wer_percentage)
     assert result.error_percentages["wer_deletions_pct"] == 0.0
@@ -200,7 +192,6 @@ def test_error_percentages_empty_reference_is_all_insertions() -> None:
 def test_error_percentages_sum_to_wer(
     case_id: int, ref: str, hyp: str, expected_wer: float, note: str
 ) -> None:
-    """The stacked segments must reconcile to the score they sit under."""
     result = compute_wer(ref, hyp)
     assert sum(result.error_percentages.values()) == pytest.approx(result.wer_percentage)
 

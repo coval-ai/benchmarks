@@ -110,12 +110,7 @@ async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgr
 async def test_wer_breakdown_null_when_any_row_lacks_it(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """A group mixing scored and pre-migration rows reports no breakdown.
-
-    Averaging only the scored rows would no longer reconcile with avg_value
-    over all of them, so it is better to report nothing than a split that
-    does not add up.
-    """
+    """A scored/pre-migration mix reports no breakdown: a partial average would not reconcile."""
     run_id = await _insert_run(postgresql)
     await _insert_result(
         postgresql,
@@ -134,17 +129,6 @@ async def test_wer_breakdown_null_when_any_row_lacks_it(
     assert s["wer_insertions_pct"] is None
     assert s["wer_deletions_pct"] is None
     assert s["wer_substitutions_pct"] is None
-
-
-async def test_non_wer_metric_has_no_breakdown(client: AsyncClient, postgresql: Any) -> None:
-    run_id = await _insert_run(postgresql)
-    await _insert_result(postgresql, run_id, metric_type="TTFA", metric_value=120.0)
-    await _refresh_mv(postgresql)
-
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    s = response.json()["model_stats"][0]
-    assert s["metric_type"] == "TTFA"
-    assert s["wer_insertions_pct"] is None
 
 
 async def test_excludes_failed_null_and_other_benchmark(

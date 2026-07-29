@@ -352,9 +352,7 @@ async def _insert_result(
         if created_at is not None:
             defaults["created_at"] = created_at
 
-        # Columns come from the dict keys, so any nullable column (created_at,
-        # the wer_*_pct breakdown) is reachable as a kwarg. S608 false-positive:
-        # the names are dict keys set here, never caller-supplied values.
+        # S608 false-positive: column names are dict keys set here, never caller values.
         columns = ", ".join(defaults)
         placeholders = ", ".join(f"%({c})s" for c in defaults)
         row = await aconn.execute(

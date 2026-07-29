@@ -1,8 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the one-shot WER error-type backfill."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -25,7 +23,7 @@ _REFERENCE = _ITEM.transcript
 _FILENAME = Path(_ITEM.path).name
 _WORDS = normalize_text(_REFERENCE).split()
 
-# One hypothesis per error type, derived from the real manifest transcript.
+# One hypothesis per error type.
 _HYPOTHESES = {
     "deletion": " ".join(_WORDS[1:]),
     "insertion": " ".join([*_WORDS, "orange"]),
@@ -34,7 +32,6 @@ _HYPOTHESES = {
 
 
 async def _insert_legacy_wer(postgresql: Any, run_id: int, hypothesis: str, **kwargs: Any) -> int:
-    """A pre-0013 row: scored transcript present, split columns null."""
     defaults: dict[str, Any] = {
         "audio_filename": _FILENAME,
         "transcript": hypothesis,

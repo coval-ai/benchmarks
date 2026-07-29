@@ -3,14 +3,10 @@
 
 """One-shot backfill of the WER error-type split from stored transcripts.
 
-Rows written before migration 20260728_0013 carry the hypothesis transcript
-but a null split. The reference transcript lives in the packaged dataset
-manifest, and :func:`compute_wer` is deterministic, so the split the runner
-would have persisted can be recomputed exactly. Rows whose recomputed score
-does not match the stored ``metric_value`` (older normalizer, truncated
-transcript) keep their null split — the dashboard's split-sums-to-total
-invariant outranks coverage. TTS rows are never touched: their synthesized
-audio filename does not identify the prompt item.
+Recomputes pre-0013 rows from the stored hypothesis + the packaged manifest
+reference. Rows whose recomputed score doesn't match ``metric_value`` (older
+normalizer) keep their null split — split-sums-to-total outranks coverage.
+STT only: a TTS synth filename doesn't identify the prompt item.
 """
 
 from __future__ import annotations

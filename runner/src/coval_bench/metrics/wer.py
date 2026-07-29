@@ -48,15 +48,10 @@ class WERResult(BaseModel):
 
     @property
     def error_percentages(self) -> dict[str, float]:
-        """Split ``wer_percentage`` into per-error-type percentage points.
-
-        Every error costs the same 1/N of the score, so splitting the total by
-        error share yields the same value as ``count / N * 100`` — but stays
-        exact even for the empty-reference convention (where the score is an
-        insertion count, not a ratio) and sums back to ``wer_percentage`` by
-        construction. The dashboard relies on that: stacked segments have to
-        reconcile to the WER they sit under.
-        """
+        """Split ``wer_percentage`` into per-error-type points that sum back to
+        it by construction — the dashboard's split must reconcile to the total.
+        Splitting by error share (not count/N) stays exact even for the
+        empty-reference convention, where the score is a count, not a ratio."""
         share = self.wer_percentage / len(self.incorrect_words) if self.incorrect_words else 0.0
         counts = Counter(e.type for e in self.incorrect_words)
         return {f"wer_{t}s_pct": counts[t] * share for t in WORD_ERROR_TYPES}

@@ -143,9 +143,8 @@ class ModelStatEntry(BaseModel):
     min_value: float
     max_value: float
     sample_count: int
-    # WER only: avg_value split by error type, in percentage points, summing to
-    # avg_value. Null on other metrics and on WER groups whose rows predate the
-    # breakdown (migration 0013) — clients fall back to the total alone.
+    # WER only, percentage points summing to avg_value; null pre-0013 rows —
+    # clients fall back to the total alone.
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None

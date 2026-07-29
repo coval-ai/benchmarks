@@ -3,25 +3,12 @@
 
 """Carry the WER error-type breakdown through to the stats matviews.
 
-A WER score says how wrong a transcript is, not *how* it is wrong. The runner
-already classifies every incorrect word as an insertion, deletion or
-substitution; it just threw the classification away. ``results`` now keeps it
-as three percentage-point columns that sum to ``metric_value``, and the
-per-window matviews average each one alongside ``avg_value``.
-
-Storing percentage points rather than raw counts is what makes the dashboard's
-stacked segments reconcile: the mean is linear, so AVG of the three parts sums
-to AVG(metric_value) exactly. Raw counts would only reconcile against a
-corpus-level WER (SUM(errors)/SUM(ref_words)), which is not the number the
-charts display.
-
-Nullable, with no backfill: the component split is not recoverable from a
-stored score, so rows written before this migration keep NULL and the matviews
-surface NULL for any group without a single scored row. The API and dashboard
-treat that as "no breakdown available" and fall back to the plain total.
-
-The matviews are dropped and recreated (a matview's SELECT cannot be altered);
-otherwise their definition is unchanged from migration 0010.
+Stored as percentage points of ``metric_value`` (not raw counts) so AVG of the
+three parts sums to ``avg_value`` exactly — the dashboard's split must
+reconcile to the total it sits under. Nullable, no backfill: pre-migration rows
+keep NULL and clients fall back to the plain total. The matviews are dropped
+and recreated (a matview's SELECT cannot be altered); otherwise unchanged from
+migration 0010.
 """
 
 from __future__ import annotations
@@ -49,15 +36,10 @@ _DATASET_CASE = "CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id 
 
 
 def _view_sql(name: str, interval: str, *, breakdown: bool) -> str:
-    """Render the per-window matview, optionally carrying the breakdown columns.
-
-    ``breakdown=False`` reproduces migration 0010's definition verbatim so
-    ``downgrade`` restores the prior shape.
-    """
+    """Render the per-window matview; ``breakdown=False`` is 0010's shape for downgrade."""
     outer = "".join(f", {c}" for c in _COLUMNS) if breakdown else ""
-    # AVG skips NULLs, so a group with a mix of scored and legacy rows averages
-    # only the scored ones — which no longer reconciles with avg_value over all
-    # of them. Guarded here so a partial group reports no breakdown at all.
+    # COUNT guard: AVG over a scored/legacy mix wouldn't reconcile with
+    # avg_value, so a partial group reports no breakdown at all.
     inner = (
         "".join(
             f", CASE WHEN COUNT(r.{c}) = COUNT(*) THEN AVG(r.{c})::float8 END AS {c}"
@@ -110,14 +92,12 @@ def _rebuild_views(*, breakdown: bool) -> None:
 
 
 def upgrade() -> None:
-    """Add the breakdown columns and rebuild the matviews to average them."""
     for column in _COLUMNS:
         op.execute(f"ALTER TABLE benchmarks_v2.results ADD COLUMN {column} DOUBLE PRECISION")
     _rebuild_views(breakdown=True)
 
 
 def downgrade() -> None:
-    """Restore migration 0010's matviews and drop the breakdown columns."""
     _rebuild_views(breakdown=False)
     for column in _COLUMNS:
         op.execute(f"ALTER TABLE benchmarks_v2.results DROP COLUMN {column}")
