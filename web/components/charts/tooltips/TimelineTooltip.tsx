@@ -30,7 +30,7 @@ interface TimelineTooltipProps extends Partial<Pick<
    * static and unchanged.
    */
   onModelClick?: (model: string, label: number) => void;
-  hasRecording?: (label: number) => boolean | undefined;
+  hasRecording?: (label: number, provider: string) => boolean | undefined;
   /** Non-timeline charts: shown verbatim instead of the timestamp label. */
   labelText?: string;
   /** Non-latency values: overrides the default "123ms" rendering. */
@@ -73,7 +73,18 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
   // Emphasize the first row shown — the fastest in-view model — rather than the
   // global #1, which a Y-zoom can push into the dimmed group at the bottom.
   const leaderKey = rows[0]?.dataKey;
-  const recordingAvailable = hasRecording?.(Number(label));
+  const recordingAvailability = new Map(
+    rows.map((item) => {
+      const model = item.dataKey.replace(/_value$/, "");
+      return [
+        item.dataKey,
+        hasRecording?.(Number(label), getProviderForModel(model)),
+      ];
+    })
+  );
+  const noRecordings =
+    hasRecording != null &&
+    [...recordingAvailability.values()].every((available) => available === false);
 
   return (
     <div
@@ -94,7 +105,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
             ? `${formatDate(Number(label), timeZone)} ${formatTimeWithSeconds(Number(label), timeZone)}`
             : formatTimeWithSeconds(Number(label), timeZone))}
       </p>
-      {recordingAvailable === false && (
+      {noRecordings && (
         <p
           style={{
             margin: "0 0 8px",
@@ -126,7 +137,10 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
           const isLeader = item.dataKey === leaderKey;
-          const clickable = onModelClick != null && recordingAvailable !== false;
+          const recordingAvailable = recordingAvailability.get(item.dataKey);
+          const clickable =
+            onModelClick != null &&
+            (hasRecording == null || recordingAvailable === true);
 
           return (
             <div
@@ -193,6 +207,9 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                 }}
               >
                 {formatValue ? formatValue(item.value) : `${item.value.toFixed(0)}ms`}
+                {recordingAvailable === false && !noRecordings ? (
+                  <span style={{ marginLeft: "6px" }}>· no sample</span>
+                ) : null}
                 {clickable ? <span style={{ marginLeft: "6px" }} aria-hidden>▶</span> : null}
               </span>
             </div>

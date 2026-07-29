@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { SampleFetchError } from "@/lib/audioSamples/createSampleFeed";
@@ -30,7 +31,13 @@ function pinnedDayLabel(tick: string): string {
 }
 
 export function SamplesCard() {
-  const { modelsByProvider, normalizeProviderName, s2sPlayRequest, clearS2SPlay } = useDashboard();
+  const {
+    modelsByProvider,
+    normalizeProviderName,
+    s2sPlayRequest,
+    selectS2SSample,
+    getCurrentTimeWindow,
+  } = useDashboard();
   const coordinator = usePlaybackCoordinator();
   const visibleProviders = useMemo(
     () => new Set(Object.keys(modelsByProvider)),
@@ -38,9 +45,27 @@ export function SamplesCard() {
   );
 
   const indexQuery = s2sSampleFeed.useIndexQuery();
-  const latestTick = indexQuery.data?.[0] ?? null;
+  const [windowStart, windowEnd] = getCurrentTimeWindow();
+  const sampleTicks = useMemo(
+    () =>
+      (indexQuery.data ?? [])
+        .filter((tick) => {
+          const timestamp = new Date(tick).getTime();
+          return timestamp >= windowStart && timestamp <= windowEnd;
+        })
+        .reverse(),
+    [indexQuery.data, windowStart, windowEnd]
+  );
+  const latestTick = sampleTicks.at(-1) ?? null;
   // A timeline-tooltip click pins the card to that bucket; otherwise show latest.
   const effectiveTick = s2sPlayRequest?.tick ?? latestTick;
+  const effectiveTime = effectiveTick ? new Date(effectiveTick).getTime() : NaN;
+  const olderTick = [...sampleTicks]
+    .reverse()
+    .find((tick) => new Date(tick).getTime() < effectiveTime);
+  const newerTick = sampleTicks.find(
+    (tick) => new Date(tick).getTime() > effectiveTime
+  );
   const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
 
@@ -71,10 +96,18 @@ export function SamplesCard() {
   // catalogue. Autoplay then finds no matching pane and stays quiet, so the
   // click reads as broken unless we say what happened.
   const requestedProvider = s2sPlayRequest?.provider;
+  const requestedItem = requestedProvider
+    ? items.find(
+        (item) =>
+          normalizeProviderName(item.provider) ===
+          normalizeProviderName(requestedProvider)
+      )
+    : undefined;
   const requestedProviderMissing =
     requestedProvider !== undefined &&
     manifest !== null &&
-    !items.some((i) => i.provider === requestedProvider);
+    !manifestQuery.isPlaceholderData &&
+    requestedItem === undefined;
 
   const handlePlay = useCallback(
     (provider: string) => {
@@ -92,7 +125,7 @@ export function SamplesCard() {
     indexQuery.isLoading || (effectiveTick != null && manifestQuery.isLoading);
 
   useEffect(() => {
-    if (s2sPlayRequest) {
+    if (s2sPlayRequest?.source === "timeline") {
       document.getElementById("s2s-samples")?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   }, [s2sPlayRequest]);
@@ -103,19 +136,45 @@ export function SamplesCard() {
         <h2 className="text-xl font-medium text-text-primary">
           Conversation samples
         </h2>
-        {/* A timeline click pins the card to that day. Without a way back, a day
-            holding metrics but no recording would trap the card on an empty
-            state. */}
-        {s2sPlayRequest ? (
-          <button
-            type="button"
-            onClick={clearS2SPlay}
-            className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-border-primary px-2 py-0.5 font-mono text-[10px] text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-0"
-          >
-            {pinnedDayLabel(s2sPlayRequest.tick)} · show latest
-          </button>
-        ) : null}
       </div>
+
+      {effectiveTick && sampleTicks.length > 1 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="flex w-fit items-center gap-2 rounded-lg border border-border-secondary bg-surface-secondary/40 p-1">
+            <button
+              type="button"
+              aria-label="Show older conversation sample"
+              disabled={!olderTick}
+              onClick={() => olderTick && selectS2SSample(olderTick)}
+              className="flex size-11 items-center justify-center rounded-md border border-border-secondary text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 disabled:cursor-default disabled:text-text-tertiary disabled:opacity-30 lg:size-8"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="min-w-28 text-center font-mono text-xs text-text-secondary">
+              {pinnedDayLabel(effectiveTick)}
+              {effectiveTick === latestTick ? " · latest" : ""}
+            </span>
+            <button
+              type="button"
+              aria-label="Show newer conversation sample"
+              disabled={!newerTick}
+              onClick={() => newerTick && selectS2SSample(newerTick)}
+              className="flex size-11 items-center justify-center rounded-md border border-border-secondary text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 disabled:cursor-default disabled:text-text-tertiary disabled:opacity-30 lg:size-8"
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+          {effectiveTick !== latestTick ? (
+            <button
+              type="button"
+              onClick={() => latestTick && selectS2SSample(latestTick)}
+              className="min-h-11 rounded-full border border-border-primary px-3 text-xs text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-8"
+            >
+              Return to latest
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="h-40 animate-pulse rounded-lg bg-surface-secondary" />
@@ -141,8 +200,8 @@ export function SamplesCard() {
             normalizeProvider={normalizeProviderName}
             onPlay={handlePlay}
             playRequest={
-              s2sPlayRequest
-                ? { provider: s2sPlayRequest.provider, nonce: s2sPlayRequest.nonce }
+              requestedItem && !manifestQuery.isPlaceholderData
+                ? { provider: requestedItem.provider, nonce: s2sPlayRequest!.nonce }
                 : null
             }
             coordinator={coordinator}

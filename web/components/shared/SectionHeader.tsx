@@ -99,16 +99,22 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
     // The utm params tag visitors who arrive through a copied link: PostHog
     // reads utm_* from the landing URL, so these visits separate from $direct.
     const url = `${window.location.origin}${window.location.pathname}?utm_source=copy_link&utm_content=${anchorId}#${anchorId}`;
+    let copiedSuccessfully = false;
     try {
       await navigator.clipboard.writeText(url);
+      copiedSuccessfully = true;
     } catch {
       const input = document.createElement("textarea");
-      input.value = url;
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand("copy");
-      input.remove();
+      try {
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        copiedSuccessfully = document.execCommand("copy");
+      } finally {
+        input.remove();
+      }
     }
+    if (!copiedSuccessfully) return;
     window.history.replaceState(null, "", `#${anchorId}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);

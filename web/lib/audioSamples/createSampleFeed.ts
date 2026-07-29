@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 // Generic reader for a modality's public sample bucket. The fetch job publishes
 // one folder per tick (keyed by the timeline bucket timestamp) with a
@@ -129,6 +129,7 @@ export function createSampleFeed<TManifest>(
       queryKey: [config.name, "manifest", tick],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchManifest(tick!, signal),
       enabled: tick != null,
+      placeholderData: keepPreviousData,
       ...cadence,
     });
 
