@@ -18,7 +18,19 @@ export const WER_BREAKDOWN_LABELS: [keyof WerBreakdown, string][] = [
   ["insertions", "Insertions"],
 ];
 
-export function werBreakdownOf(stat: ModelStatEntry): WerBreakdown | undefined {
+// Declared here (not read off ModelStatEntry) so the web build never depends
+// on the deployed API's schema: Vercel regenerates schema.ts from the live
+// openapi.json at build time, and an API that doesn't serve the split yet
+// must degrade the tooltip, not fail the build.
+export type WerBreakdownFields = {
+  wer_substitutions_pct?: number | null;
+  wer_deletions_pct?: number | null;
+  wer_insertions_pct?: number | null;
+};
+
+export function werBreakdownOf(
+  stat: ModelStatEntry & WerBreakdownFields
+): WerBreakdown | undefined {
   const { wer_substitutions_pct, wer_deletions_pct, wer_insertions_pct } = stat;
   if (
     wer_substitutions_pct == null ||

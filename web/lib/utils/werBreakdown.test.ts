@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { werBreakdownOf } from "./werBreakdown";
+import { werBreakdownOf, type WerBreakdownFields } from "./werBreakdown";
 import type { ModelStatEntry } from "../api/client";
 
-const stat = (over: Partial<ModelStatEntry> = {}): ModelStatEntry =>
+type StatOverrides = Partial<ModelStatEntry> & WerBreakdownFields;
+
+const stat = (over: StatOverrides = {}): ModelStatEntry & WerBreakdownFields =>
   ({
     provider: "deepgram",
     model: "nova-3",
@@ -22,7 +24,7 @@ const stat = (over: Partial<ModelStatEntry> = {}): ModelStatEntry =>
     max_value: 0,
     sample_count: 1,
     ...over,
-  }) as ModelStatEntry;
+  }) as ModelStatEntry & WerBreakdownFields;
 
 describe("werBreakdownOf", () => {
   it("maps the three components and reconciles to avg_value", () => {
