@@ -18,7 +18,7 @@ import {
 import { Info } from "lucide-react";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import { labelScatterDots } from "@/lib/utils/chartExport";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
@@ -278,7 +278,7 @@ const LatencyAccuracySection: React.FC = () => {
           }}
           exportRows={() =>
             scatterData.map(({ model, provider, benchmark, x, y, count }) => ({
-              model,
+              model: parseModelKey(model).model,
               provider,
               benchmark,
               [`avg_${metric}_ms`]: x,

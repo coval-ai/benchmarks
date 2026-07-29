@@ -8,7 +8,7 @@ import { Server } from "lucide-react";
 import { Cell, type LabelProps } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import QualityMetricBars from "@/components/charts/QualityMetricBars";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import Card from "@/components/shared/Card";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -184,7 +184,7 @@ const QualityBarSection: React.FC = () => {
             exportXLabel="Model"
             exportRows={() =>
               instructionBarDataWithColors.map(({ model, instructionScore }) => ({
-                model,
+                model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
                 instruction_adherence_percent: instructionScore,
               }))
@@ -211,8 +211,10 @@ const QualityBarSection: React.FC = () => {
             exportXLabel="Model"
             exportRows={() =>
               werBarDataWithColors.map(({ model, averageWER }) => ({
-                model,
+                model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
+                wer_view: werBarView,
+                wer_dataset: activeWerView?.dataset ?? "all",
                 avg_wer_percent: averageWER,
               }))
             }

@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 // Generic reader for a modality's public sample bucket. The fetch job publishes
 // one folder per tick (keyed by the timeline bucket timestamp) with a
@@ -116,10 +116,11 @@ export function createSampleFeed<TManifest>(
     refetchInterval: config.refetchMs,
   } as const;
 
-  const useIndexQuery = () =>
+  const useIndexQuery = (enabled = true) =>
     useQuery({
       queryKey: [config.name, "index"],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchIndex(signal),
+      enabled,
       ...cadence,
     });
 
@@ -128,6 +129,7 @@ export function createSampleFeed<TManifest>(
       queryKey: [config.name, "manifest", tick],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchManifest(tick!, signal),
       enabled: tick != null,
+      placeholderData: keepPreviousData,
       ...cadence,
     });
 

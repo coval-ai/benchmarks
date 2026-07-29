@@ -10,10 +10,12 @@ import {
   type PostHogMode,
   type PostHogSurface,
 } from "@/lib/posthog/events";
-import type { TimeWindow } from "@/lib/config/timeWindows";
+import { timeWindowsFor, type TimeWindow } from "@/lib/config/timeWindows";
 
 export function useTimeWindow(surface: PostHogSurface, mode?: PostHogMode) {
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>(
+    () => timeWindowsFor(mode)[0] ?? "24h"
+  );
 
   const changeTimeWindow = useCallback(
     (next: TimeWindow) => {

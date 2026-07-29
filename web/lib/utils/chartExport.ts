@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { LIGHT_CHART_COLORS, type ThemeColors } from "@/hooks/useThemeColors";
+import { serializeCSV } from "@/lib/utils/csv";
 
 // The export mirrors the on-screen theme. Chrome colours come from the same
 // chart-* palette the charts render with; the shared light palette is the
@@ -16,7 +17,9 @@ const triggerDownload = (href: string, filename: string) => {
   const a = document.createElement("a");
   a.href = href;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   // Browsers may read the blob URL after click() returns; revoking in the same
   // tick can abort the download, so defer it.
   window.setTimeout(() => URL.revokeObjectURL(href), 0);
@@ -33,22 +36,20 @@ const loadImage = (src: string) =>
 export function downloadCSV(
   rows: Record<string, unknown>[],
   filename: string
-) {
-  const [first] = rows;
-  if (!first) return;
-  const headers = Object.keys(first);
-  const escape = (value: unknown) => {
-    const s = String(value ?? "");
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const csv = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ].join("\n");
-  triggerDownload(
-    URL.createObjectURL(new Blob([csv], { type: "text/csv" })),
-    filename
-  );
+): boolean {
+  const csv = serializeCSV(rows);
+  if (!csv) return false;
+  try {
+    triggerDownload(
+      URL.createObjectURL(
+        new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" })
+      ),
+      filename
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 interface LegendItem {
@@ -584,8 +585,15 @@ export async function downloadChartPNG(
     logoWidth,
     logoHeight
   );
-  canvas.toBlob((blob) => {
-    if (blob) triggerDownload(URL.createObjectURL(blob), filename);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      try {
+        if (!blob) return resolve(false);
+        triggerDownload(URL.createObjectURL(blob), filename);
+        resolve(true);
+      } catch {
+        resolve(false);
+      }
+    });
   });
-  return true;
 }

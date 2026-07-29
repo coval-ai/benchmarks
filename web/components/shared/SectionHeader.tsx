@@ -95,12 +95,26 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       format,
     });
 
-  const copyLink = () => {
+  const copyLink = async () => {
     // The utm params tag visitors who arrive through a copied link: PostHog
     // reads utm_* from the landing URL, so these visits separate from $direct.
-    navigator.clipboard.writeText(
-      `${window.location.origin}${window.location.pathname}?utm_source=copy_link&utm_content=${anchorId}#${anchorId}`
-    );
+    const url = `${window.location.origin}${window.location.pathname}?utm_source=copy_link&utm_content=${anchorId}#${anchorId}`;
+    let copiedSuccessfully = false;
+    try {
+      await navigator.clipboard.writeText(url);
+      copiedSuccessfully = true;
+    } catch {
+      const input = document.createElement("textarea");
+      try {
+        input.value = url;
+        document.body.appendChild(input);
+        input.select();
+        copiedSuccessfully = document.execCommand("copy");
+      } finally {
+        input.remove();
+      }
+    }
+    if (!copiedSuccessfully) return;
     window.history.replaceState(null, "", `#${anchorId}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -209,21 +223,20 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   const downloadData = () => {
     const rows = exportRows?.() ?? [];
     if (rows.length === 0) return;
-    downloadCSV(rows, `${anchorId}.csv`);
-    trackShare("csv");
+    if (downloadCSV(rows, `${anchorId}.csv`)) trackShare("csv");
   };
 
   return (
     <div id={anchorId} className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 sm:gap-8 mb-4 scroll-mt-24">
       <div className="w-full sm:w-3/4 min-w-0">
-        <h2 className="flex items-center gap-2 text-[0.9rem] font-light text-text-secondary mb-2">
-          {label}
+        <h2 className="mb-2 flex items-start gap-2 text-[0.9rem] font-light text-text-secondary">
+          <span className="min-w-0 flex-1 pt-3 lg:pt-1">{label}</span>
           <button
             type="button"
-            onClick={copyLink}
+            onClick={() => void copyLink()}
             aria-label="Copy link to this chart"
             title="Copy link"
-            className={iconButtonClass}
+            className={`${iconButtonClass} shrink-0`}
           >
             {copied ? <Check size={14} /> : <Link2 size={14} />}
           </button>
@@ -233,7 +246,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
               onClick={() => void downloadImage()}
               aria-label="Download chart as image"
               title="Download image"
-              className={iconButtonClass}
+              className={`${iconButtonClass} shrink-0`}
             >
               <ImageDown size={14} />
             </button>
@@ -244,7 +257,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
               onClick={downloadData}
               aria-label="Download chart data"
               title="Download data"
-              className={iconButtonClass}
+              className={`${iconButtonClass} shrink-0`}
             >
               <Table size={14} />
             </button>
