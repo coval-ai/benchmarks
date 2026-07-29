@@ -170,6 +170,10 @@ class Settings(BaseSettings):
     # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
     # models on the data endpoints. Unset means no request is internal.
     internal_api_key: SecretStr | None = None
+    # Key the web BFF presents (X-EA-Key) alongside a scope naming the embargoed
+    # providers one caller may see. Separate from the key above so a scoped
+    # caller can never reach unrestricted access. Unset means no scope is honoured.
+    early_access_bff_key: SecretStr | None = None
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
