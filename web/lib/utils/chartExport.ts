@@ -54,6 +54,8 @@ export function downloadCSV(
 interface LegendItem {
   label: string;
   color: string;
+  /** Swatch drawn as a dashed line (e.g. the Pareto frontier) instead of a filled square. */
+  dashed?: boolean;
   /** Grayed out in the export, e.g. a series clipped off-chart by the zoom. */
   dimmed?: boolean;
 }
@@ -230,6 +232,20 @@ export function labelScatterDots(
     boxes.some(
       (b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1
     );
+  // Overlay lines (e.g. the Pareto frontier) are obstacles too, or labels land
+  // on top of them. Their paths are absolute M/L/Q commands, so the coordinate
+  // pairs walked as a polyline track the drawn curve closely enough.
+  clone.querySelectorAll(".recharts-scatter-line path").forEach((path) => {
+    const nums = (path.getAttribute("d") ?? "").match(/-?\d*\.?\d+/g)?.map(Number) ?? [];
+    for (let i = 3; i < nums.length; i += 2) {
+      const [ax, ay, bx, by] = [nums[i - 3]!, nums[i - 2]!, nums[i - 1]!, nums[i]!];
+      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 8));
+      for (let s = 0; s <= steps; s++) {
+        const [px, py] = [ax + ((bx - ax) * s) / steps, ay + ((by - ay) * s) / steps];
+        boxes.push({ x1: px - 3, y1: py - 3, x2: px + 3, y2: py + 3 });
+      }
+    }
+  });
   // Stacked dots hide each other completely on screen; a rim in the canvas
   // color splits them into visible crescents so every label has a referent.
   circles.forEach((circle) => {
@@ -262,7 +278,7 @@ export function labelScatterDots(
     // In dense clusters, spiral outward in small rings so a squeezed-out label
     // still sits near its dot (its color keeps it attributable) rather than at
     // the end of a hard-to-follow leader line.
-    for (let r = 22; r <= 58; r += 12) {
+    for (let r = 22; r <= 94; r += 12) {
       for (let deg = 0; deg < 360; deg += 30) {
         const dx = Math.cos((deg * Math.PI) / 180);
         const dy = Math.sin((deg * Math.PI) / 180);
@@ -479,8 +495,19 @@ export async function downloadChartPNG(
   for (const row of rows) {
     for (const item of row) {
       ctx.globalAlpha = item.dimmed ? 0.35 : 1;
-      ctx.fillStyle = item.color;
-      ctx.fillRect(MARGIN + item.x, y + 5, 12, 12);
+      if (item.dashed) {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(MARGIN + item.x, y + 11);
+        ctx.lineTo(MARGIN + item.x + 12, y + 11);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(MARGIN + item.x, y + 5, 12, 12);
+      }
       ctx.fillStyle = colors.textPrimary;
       ctx.fillText(item.label, MARGIN + item.x + 18, y + 15);
     }

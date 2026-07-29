@@ -47,6 +47,13 @@ export const metricDescriptions = {
     detailed:
       "The human-parity zone reframes the latency-accuracy trade-off around a human baseline instead of arbitrary thresholds. Human transcription accuracy is typically 2–4% WER under optimal conditions, and the median turn-taking gap in human conversation is roughly 200ms. A model inside the zone transcribes at least as accurately as a person and responds at least as fast as one."
   },
+  pareto: {
+    short: "Pareto frontier",
+    tooltip:
+      "The dashed line traces the best WER you can get at each latency budget. Bright dots earn their spot: nothing beats them on speed and accuracy at once. Every faded dot loses on both counts to some bright one.",
+    detailed:
+      "Speed and accuracy pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency budget. Bright models set that boundary — nothing beats them on both axes at once. Faded models are beaten outright by a bright one, so picking them only makes sense for reasons this chart can't see, like price or language coverage."
+  },
   // Shared by the Latency Variation card's description and its headline tooltip.
   iqr: {
     short: "Interquartile Range",
