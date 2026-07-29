@@ -2,16 +2,18 @@
 # SPDX-License-Identifier: Apache-2.0
 """Assert arena roster and benchmarks-api key mounts agree, in both directions.
 
-Reads the ``coval-ai/benchmark-infra`` Cloud Run service module (passed as a
-path; the CI workflow fetches it) and structurally extracts the env-var names it
-mounts from Secret Manager. Fails if any provider the arena would synthesize
-lacks its key on the service (the cross-repo parity gate), and also fails when
-an ACTIVE provider is opted out with ``arena_enabled=False`` even though its key
-IS mounted — a stale opt-out that silently keeps the provider off the arena.
-Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g. ADC-authenticated
-ones) are skipped: there is no key mount to check them against.
+Reads ``envs/prod/provider_keys.tf`` from ``coval-ai/benchmark-infra`` (passed
+as a path; the CI workflow fetches it) — the single place provider keys are
+declared — and extracts the env-var names mounted on the benchmarks-api
+service (entries with ``api = true``). Fails if any provider the arena would
+synthesize lacks its key on the service (the cross-repo parity gate), and also
+fails when an ACTIVE provider is opted out with ``arena_enabled=False`` even
+though its key IS mounted — a stale opt-out that silently keeps the provider
+off the arena. Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g.
+ADC-authenticated ones) are skipped: there is no key mount to check them
+against.
 
-Usage: python scripts/check_arena_keys.py <path-to-cloud_run_service/main.tf>
+Usage: python scripts/check_arena_keys.py <path-to-envs/prod/provider_keys.tf>
 """
 
 from __future__ import annotations
@@ -26,36 +28,34 @@ from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
-def _has_secret_ref(node: object) -> bool:
-    if isinstance(node, dict):
-        if "secret_key_ref" in node:
-            return True
-        return any(_has_secret_ref(v) for v in node.values())
-    if isinstance(node, list):
-        return any(_has_secret_ref(item) for item in node)
-    return False
-
-
-def _secret_backed_env_names(node: object) -> set[str]:
-    """Env-var names bound to a Secret Manager secret, found anywhere in the tree."""
+def _api_mounted_env_names(node: object) -> set[str]:
+    """Env-var names of ``provider_keys`` entries with ``api = true``, found anywhere."""
     found: set[str] = set()
     if isinstance(node, dict):
-        name = node.get("name")
-        if isinstance(name, str) and _has_secret_ref(node.get("value_source")):
-            # python-hcl2 preserves literal quotes on string values, e.g. '"OPENAI_API_KEY"'.
-            found.add(name.strip('"'))
-        for value in node.values():
-            found |= _secret_backed_env_names(value)
+        for key, value in node.items():
+            if key == "provider_keys" and isinstance(value, dict):
+                for entry in value.values():
+                    env = entry.get("env") if isinstance(entry, dict) else None
+                    if isinstance(env, str) and entry.get("api") is True:
+                        # python-hcl2 preserves literal quotes on string values,
+                        # e.g. '"OPENAI_API_KEY"'.
+                        found.add(env.strip('"'))
+            else:
+                found |= _api_mounted_env_names(value)
     elif isinstance(node, list):
         for item in node:
-            found |= _secret_backed_env_names(item)
+            found |= _api_mounted_env_names(item)
     return found
 
 
 def main(tf_path: str) -> int:
     with open(tf_path) as fp:
         tree = hcl2.load(fp)
-    mounted = _secret_backed_env_names(tree)
+    mounted = _api_mounted_env_names(tree)
+
+    if not mounted:
+        print(f"ERROR: no api = true provider_keys entries found in {tf_path}")
+        return 1
 
     required: set[str] = set()
     unmapped: set[str] = set()
@@ -78,10 +78,8 @@ def main(tf_path: str) -> int:
     if missing:
         print(
             f"ERROR: arena-eligible but NOT mounted on benchmarks-api: {missing}\n"
-            "Mount them in coval-ai/benchmark-infra "
-            "(modules/cloud_run_service/main.tf env{} block + "
-            "envs/prod/cloud_run_service.tf secret_ids + the secret_manager secret), "
-            "then re-run this check."
+            "Declare them in coval-ai/benchmark-infra envs/prod/provider_keys.tf "
+            "with api = true, then re-run this check."
         )
         return 1
 

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Cross-repo parity gate: when a PR changes the TTS provider registry, every
-# arena-eligible provider's API key must be mounted on the benchmarks-api Cloud
-# Run service in coval-ai/benchmark-infra. Path-filtered so it only runs on
+# arena-eligible provider's API key must be declared api = true in
+# coval-ai/benchmark-infra envs/prod/provider_keys.tf (which mounts it on the
+# benchmarks-api Cloud Run service). Path-filtered so it only runs on
 # provider-addition PRs — never on unrelated branches or already-merged work.
 name: Arena key parity
 
@@ -44,7 +45,7 @@ jobs:
         working-directory: runner
         run: uv sync --frozen --dev
 
-      - name: Fetch infra Cloud Run service module
+      - name: Fetch infra provider key declarations
         id: fetch_infra
         env:
           GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
@@ -58,8 +59,8 @@ jobs:
             echo "verified=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! gh api repos/coval-ai/benchmark-infra/contents/modules/cloud_run_service/main.tf \
-               -H "Accept: application/vnd.github.raw" > infra_cloud_run_service.tf; then
+          if ! gh api repos/coval-ai/benchmark-infra/contents/envs/prod/provider_keys.tf \
+               -H "Accept: application/vnd.github.raw" > infra_provider_keys.tf; then
             echo "::warning::skipping arena key parity — could not read benchmark-infra (token scope/expiry or infra perms); could not verify, not a parity failure."
             echo "verified=false" >> "$GITHUB_OUTPUT"
             exit 0
@@ -69,4 +70,4 @@ jobs:
       - name: Check arena provider key parity
         if: steps.fetch_infra.outputs.verified == 'true'
         working-directory: runner
-        run: uv run --with 'python-hcl2==8.1.2' python scripts/check_arena_keys.py ../infra_cloud_run_service.tf
+        run: uv run --with 'python-hcl2==8.1.2' python scripts/check_arena_keys.py ../infra_provider_keys.tf
