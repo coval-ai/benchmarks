@@ -121,8 +121,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
-  // The accuracy bar chart scopes to any one dataset the window carries, or
-  // pools them all (null). Every WER page gets this; S2S has no WER chart.
+  // Accuracy bar chart scope: one dataset, or null to pool them all.
   const [werBarDataset, setWerBarDataset] = useState<string | null>(null);
   const werBarDatasetId = page === "s2s" ? null : werBarDataset;
   const changeWerBarDataset = useCallback(

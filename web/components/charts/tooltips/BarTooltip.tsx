@@ -60,8 +60,6 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
           value
         )}`}</p>
         {breakdown &&
-          // Where the error goes. The three add up to the value above, so the
-          // split can be checked against the total just read.
           WER_BREAKDOWN_LABELS.map(([key, text]) => (
             <p
               key={key}

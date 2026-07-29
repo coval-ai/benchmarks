@@ -3,10 +3,8 @@
 
 import type { ModelStatEntry } from "@/lib/api/client";
 
-// WER splits into insertions, deletions and substitutions. The API sends each
-// as percentage points of the model's average WER, so the three sum back to the
-// total — see runner migration 20260728_0013. A group whose rows predate that
-// migration sends nulls, and every surface falls back to the total alone.
+// Percentage points of the model's average WER; the three sum back to the
+// total. Null (pre-migration rows) means fall back to the total alone.
 export interface WerBreakdown {
   substitutions: number;
   deletions: number;

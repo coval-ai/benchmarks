@@ -10,8 +10,7 @@ import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
 import MetricInfo from "@/components/shared/MetricInfo";
 
 // Drives the WER-column scope by default; pass value/onChange to point it at
-// another surface's dataset state (e.g. the accuracy bar chart). Options come
-// from whatever datasets the active benchmark's window carries.
+// another surface's dataset state (e.g. the accuracy bar chart).
 const WerDatasetSelect: React.FC<{
   className?: string;
   label?: string;

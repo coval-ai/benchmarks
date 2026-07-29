@@ -177,8 +177,6 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         {percentile.hint && (
           <span className="text-xs text-text-tertiary">{percentile.hint}</span>
         )}
-        {/* The WER-column pin stays an STT-only affordance; the select itself
-            is tab-agnostic since the accuracy chart reuses it everywhere. */}
         {activeTab === "stt" && <WerDatasetSelect className="ml-auto" />}
       </div>
 

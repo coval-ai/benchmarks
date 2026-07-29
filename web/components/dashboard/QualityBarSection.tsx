@@ -170,7 +170,6 @@ const QualityBarSection: React.FC = () => {
     [themeColors.label]
   );
 
-  // The select carries its own explainer, so the header only names the scope.
   const werScopeLabel = werBarDataset ? datasetLabel(werBarDataset) : undefined;
 
   return (

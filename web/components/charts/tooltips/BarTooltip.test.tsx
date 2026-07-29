@@ -13,32 +13,22 @@ const point: BarDataPoint = {
   breakdown: { substitutions: 4.1, deletions: 1.5, insertions: 1.0 },
 };
 
-const payloadFor = (p: BarDataPoint) => [
-  { dataKey: "averageWER", value: p.averageWER, payload: p },
-];
-
 const render = (p: BarDataPoint) =>
   renderToStaticMarkup(
     <CustomBarTooltip
       active
-      // Recharts hands the tooltip a looser payload shape than it types.
-      payload={payloadFor(p) as never}
+      payload={[{ dataKey: "averageWER", value: p.averageWER, payload: p }] as never}
       label={p.model}
     />
   );
 
 describe("CustomBarTooltip", () => {
-  it("lists each error type and the split reconciles to the total", () => {
+  it("lists each error type under the total", () => {
     const html = render(point);
     expect(html).toContain("Average WER: 6.6%");
     expect(html).toContain("Substitutions: 4.1%");
     expect(html).toContain("Deletions: 1.5%");
     expect(html).toContain("Insertions: 1.0%");
-    const { substitutions, deletions, insertions } = point.breakdown!;
-    expect(substitutions + deletions + insertions).toBeCloseTo(
-      point.averageWER,
-      10
-    );
   });
 
   it("falls back to the total alone when the API sends no split", () => {

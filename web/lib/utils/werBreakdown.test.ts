@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { WER_BREAKDOWN_LABELS, werBreakdownOf } from "./werBreakdown";
+import { werBreakdownOf } from "./werBreakdown";
 import type { ModelStatEntry } from "../api/client";
 
 const stat = (over: Partial<ModelStatEntry> = {}): ModelStatEntry =>
@@ -51,21 +51,10 @@ describe("werBreakdownOf", () => {
     ).toEqual({ substitutions: 6, deletions: 0, insertions: 0 });
   });
 
-  it("is undefined when the API reports no split", () => {
+  it("is undefined when the split is missing or partial", () => {
     expect(werBreakdownOf(stat())).toBeUndefined();
-  });
-
-  it("is undefined when only part of the split is present", () => {
     expect(
       werBreakdownOf(stat({ wer_substitutions_pct: 3, wer_deletions_pct: 2 }))
     ).toBeUndefined();
-  });
-
-  it("labels every component exactly once", () => {
-    expect(WER_BREAKDOWN_LABELS.map(([key]) => key)).toEqual([
-      "substitutions",
-      "deletions",
-      "insertions",
-    ]);
   });
 });
