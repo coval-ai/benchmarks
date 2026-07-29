@@ -5,6 +5,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const TIME_WINDOWS = ["24h", "7d", "30d"] as const;
 export type TimeWindow = (typeof TIME_WINDOWS)[number];
+export const S2S_24H_ENABLED = false;
+
+export const timeWindowsFor = (mode?: "tts" | "stt" | "s2s") =>
+  mode === "s2s" && !S2S_24H_ENABLED
+    ? TIME_WINDOWS.filter((window) => window !== "24h")
+    : TIME_WINDOWS;
 
 // Values mirror the API's window literals; "1d" is display-only.
 export const WINDOW_LABELS: Record<TimeWindow, string> = {

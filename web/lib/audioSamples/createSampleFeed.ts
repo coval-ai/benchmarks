@@ -116,10 +116,11 @@ export function createSampleFeed<TManifest>(
     refetchInterval: config.refetchMs,
   } as const;
 
-  const useIndexQuery = () =>
+  const useIndexQuery = (enabled = true) =>
     useQuery({
       queryKey: [config.name, "index"],
       queryFn: ({ signal }: { signal: AbortSignal }) => fetchIndex(signal),
+      enabled,
       ...cadence,
     });
 

@@ -16,7 +16,9 @@ const triggerDownload = (href: string, filename: string) => {
   const a = document.createElement("a");
   a.href = href;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   // Browsers may read the blob URL after click() returns; revoking in the same
   // tick can abort the download, so defer it.
   window.setTimeout(() => URL.revokeObjectURL(href), 0);
@@ -36,7 +38,7 @@ export function downloadCSV(
 ) {
   const [first] = rows;
   if (!first) return;
-  const headers = Object.keys(first);
+  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const escape = (value: unknown) => {
     const s = String(value ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -584,8 +586,10 @@ export async function downloadChartPNG(
     logoWidth,
     logoHeight
   );
-  canvas.toBlob((blob) => {
-    if (blob) triggerDownload(URL.createObjectURL(blob), filename);
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (blob) triggerDownload(URL.createObjectURL(blob), filename);
+      resolve(!!blob);
+    });
   });
-  return true;
 }

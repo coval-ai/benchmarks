@@ -37,6 +37,7 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
+import { s2sSampleFeed } from "@/lib/audioSamples/s2sFeed";
 
 interface LegendEntry {
   value: string;
@@ -269,6 +270,11 @@ const TimelineChart: React.FC = () => {
     page,
     requestS2SPlay,
   } = useDashboard();
+  const s2sSampleIndex = s2sSampleFeed.useIndexQuery(page === "s2s").data;
+  const hasS2SRecording = useCallback(
+    (label: number) => s2sSampleIndex?.includes(bucketTickKey(label)),
+    [s2sSampleIndex]
+  );
   const trackChartHover = useChartHoverTracking("timeline");
 
   const chartRef = useRef<HTMLDivElement>(null);
@@ -471,7 +477,12 @@ const TimelineChart: React.FC = () => {
       ),
     [zoomX]
   );
-  const timelineTicks = useMemo(getTimelineTicks, [getTimelineTicks]);
+  const timelineTicks = useMemo(() => {
+    const ticks = getTimelineTicks();
+    return isMobile && isS2S && ticks.length > 4
+      ? ticks.filter((_, index) => index % 2 === 0)
+      : ticks;
+  }, [getTimelineTicks, isMobile, isS2S]);
   const dateScale = dataTimeWindow !== "24h";
   const dateTicks =
     dateScale && !(zoomX && zoomX[1] - zoomX[0] <= 48 * 60 * 60 * 1000);
@@ -835,15 +846,23 @@ const TimelineChart: React.FC = () => {
           }
           exportNote={metricTab}
           exportRows={() =>
-            windowedTimelineData.map((point) => ({
-              time: point.timestampLabel,
-              ...Object.fromEntries(
-                modelsWithData.map((model) => [
-                  `${model}_${metric}_ms`,
-                  point[`${model}_value`],
-                ])
-              ),
-            }))
+            windowedTimelineData.flatMap((point) =>
+              modelsWithData.flatMap((model) => {
+                const value = point[`${model}_value`];
+                return typeof value === "number"
+                  ? [{
+                      timestamp: point.timestampLabel,
+                      model,
+                      provider: getProviderForModel(model),
+                      metric,
+                      latency_ms: value,
+                      ...(page === "s2s"
+                        ? { conversation_sample_recorded: hasS2SRecording(point.timestamp) ?? false }
+                        : {}),
+                    }]
+                  : [];
+              })
+            )
           }
           stat={{
             label: (
@@ -1027,6 +1046,7 @@ const TimelineChart: React.FC = () => {
                     dimmedKeys={dimmedLegendKeys}
                     compact
                     timeZone={displayTz}
+                    hasRecording={page === "s2s" ? hasS2SRecording : undefined}
                   />
                 }
                 active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
@@ -1196,6 +1216,7 @@ const TimelineChart: React.FC = () => {
                 compact
                 interactionHint="tap axis to see all"
                 timeZone={displayTz}
+                hasRecording={page === "s2s" ? hasS2SRecording : undefined}
               />
             </div>
           )}
@@ -1233,6 +1254,7 @@ const TimelineChart: React.FC = () => {
                 dimmedKeys={dimmedLegendKeys}
                 maxHeight={isMobile ? 106 : undefined}
                 timeZone={displayTz}
+                hasRecording={page === "s2s" ? hasS2SRecording : undefined}
                 onModelClick={
                   page === "s2s"
                     ? (model, label) =>

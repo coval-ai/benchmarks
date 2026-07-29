@@ -30,6 +30,7 @@ interface TimelineTooltipProps extends Partial<Pick<
    * static and unchanged.
    */
   onModelClick?: (model: string, label: number) => void;
+  hasRecording?: (label: number) => boolean | undefined;
   /** Non-timeline charts: shown verbatim instead of the timestamp label. */
   labelText?: string;
   /** Non-latency values: overrides the default "123ms" rendering. */
@@ -38,7 +39,7 @@ interface TimelineTooltipProps extends Partial<Pick<
   timeZone?: string;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, labelText, formatValue, timeZone }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, hasRecording, labelText, formatValue, timeZone }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -72,6 +73,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
   // Emphasize the first row shown — the fastest in-view model — rather than the
   // global #1, which a Y-zoom can push into the dimmed group at the bottom.
   const leaderKey = rows[0]?.dataKey;
+  const recordingAvailable = hasRecording?.(Number(label));
 
   return (
     <div
@@ -92,6 +94,17 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
             ? `${formatDate(Number(label), timeZone)} ${formatTimeWithSeconds(Number(label), timeZone)}`
             : formatTimeWithSeconds(Number(label), timeZone))}
       </p>
+      {recordingAvailable === false && (
+        <p
+          style={{
+            margin: "0 0 8px",
+            fontSize: "10px",
+            color: "var(--color-text-on-tooltip-secondary)"
+          }}
+        >
+          No conversation sample recorded
+        </p>
+      )}
       <div
         className="tooltip-scroll"
         style={
@@ -113,7 +126,7 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
           const modelName = item.dataKey.replace(/_value$/, "");
           const provider = getProviderForModel(modelName);
           const isLeader = item.dataKey === leaderKey;
-          const clickable = onModelClick != null;
+          const clickable = onModelClick != null && recordingAvailable !== false;
 
           return (
             <div

@@ -97,6 +97,11 @@ export function SampleOutputs({
     if (idx < 0) return;
     consumedNonce.current = playRequest.nonce;
     playFrom(idx);
+    viewportRef.current?.children.item(idx)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "center",
+    });
   }, [playRequest, items, playFrom]);
 
   const hints = useScrollHints(viewportRef, `${items.length}:${items.map((i) => i.provider).join(",")}`);

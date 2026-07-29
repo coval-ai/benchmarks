@@ -91,12 +91,18 @@ export function SamplesCard() {
   const loading =
     indexQuery.isLoading || (effectiveTick != null && manifestQuery.isLoading);
 
+  useEffect(() => {
+    if (s2sPlayRequest) {
+      document.getElementById("s2s-samples")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [s2sPlayRequest]);
+
   return (
-    <Card className="text-left min-w-0 h-full flex flex-col" padding="p-5 lg:p-8">
-      <div className="mb-3 flex items-baseline justify-between gap-2">
-        <div className="text-[0.9rem] font-light text-text-secondary">
+    <Card id="s2s-samples" className="text-left min-w-0 h-full flex flex-col" padding="p-5 lg:p-8">
+      <div className="mb-4 flex items-baseline justify-between gap-2">
+        <h2 className="text-xl font-medium text-text-primary">
           Conversation samples
-        </div>
+        </h2>
         {/* A timeline click pins the card to that day. Without a way back, a day
             holding metrics but no recording would trap the card on an empty
             state. */}
