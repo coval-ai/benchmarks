@@ -63,6 +63,21 @@ function reissue(res: NextResponse, role: ArenaRole, sid?: string): void {
 }
 
 /**
+ * Say so when identity is off, rather than serving an arena that quietly attributes
+ * nothing. Once per instance: enough to alert on, without a line per request.
+ */
+let reportedMissingSecret = false;
+
+function reportIdentityDisabled(): void {
+  if (reportedMissingSecret || process.env.NODE_ENV !== "production") return;
+  reportedMissingSecret = true;
+  console.error(
+    "arena identity disabled: ARENA_SESSION_SECRET is not configured, so no visitor is " +
+      "issued a signed identity and no vote can be attributed",
+  );
+}
+
+/**
  * Give every visitor to a public arena surface a signed identity.
  *
  * Votes are attributed to the `sid` in this cookie, so a visitor without one cannot be
@@ -71,7 +86,12 @@ function reissue(res: NextResponse, role: ArenaRole, sid?: string): void {
  * `labeler`; everyone arriving since is `external`.
  */
 function ensureArenaIdentity(req: NextRequest): NextResponse {
-  if (!accessSecretConfigured()) return NextResponse.next();
+  // Serve the arena anyway — a misconfigured secret should not take the public page
+  // down — but never silently.
+  if (!accessSecretConfigured()) {
+    reportIdentityDisabled();
+    return NextResponse.next();
+  }
 
   const unlocked = unlockedAsLabeler(req);
   if (unlocked) return unlocked;
