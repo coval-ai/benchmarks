@@ -587,8 +587,13 @@ export async function downloadChartPNG(
   );
   return new Promise((resolve) => {
     canvas.toBlob((blob) => {
-      if (blob) triggerDownload(URL.createObjectURL(blob), filename);
-      resolve(!!blob);
+      try {
+        if (!blob) return resolve(false);
+        triggerDownload(URL.createObjectURL(blob), filename);
+        resolve(true);
+      } catch {
+        resolve(false);
+      }
     });
   });
 }

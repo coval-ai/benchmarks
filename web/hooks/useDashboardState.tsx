@@ -55,20 +55,21 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     nonce: number;
     source: "timeline" | "samples";
   } | null>(null);
+  const s2sPlayNonceRef = useRef(0);
   const requestS2SPlay = useCallback((tick: string, provider: string) => {
-    setS2sPlayRequest((prev) => ({
+    setS2sPlayRequest({
       tick,
       provider,
-      nonce: (prev?.nonce ?? 0) + 1,
+      nonce: ++s2sPlayNonceRef.current,
       source: "timeline",
-    }));
+    });
   }, []);
   const selectS2SSample = useCallback((tick: string) => {
-    setS2sPlayRequest((prev) => ({
+    setS2sPlayRequest({
       tick,
-      nonce: (prev?.nonce ?? 0) + 1,
+      nonce: ++s2sPlayNonceRef.current,
       source: "samples",
-    }));
+    });
   }, []);
   const { timeWindow, changeTimeWindow: setTimeWindow } = useTimeWindow(
     `${page}_dashboard`,

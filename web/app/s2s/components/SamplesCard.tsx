@@ -68,6 +68,10 @@ export function SamplesCard() {
   );
   const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
+  const displayedTick =
+    manifestQuery.isPlaceholderData && manifest?.bucket_at
+      ? manifest.bucket_at
+      : effectiveTick;
 
   const fetchError = manifestQuery.isError || indexQuery.isError;
   // Keep the failure cause internal (dev console only); public visitors just see
@@ -151,8 +155,8 @@ export function SamplesCard() {
               <ChevronLeft className="size-4" />
             </button>
             <span className="min-w-28 text-center font-mono text-xs text-text-secondary">
-              {pinnedDayLabel(effectiveTick)}
-              {effectiveTick === latestTick ? " · latest" : ""}
+              {pinnedDayLabel(displayedTick ?? effectiveTick)}
+              {displayedTick === latestTick ? " · latest" : ""}
             </span>
             <button
               type="button"

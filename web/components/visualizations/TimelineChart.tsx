@@ -288,6 +288,7 @@ const TimelineChart: React.FC = () => {
   const surfaceRef = useRef<SVGSVGElement>(null);
   const interactionRef = useRef<ChartInteractionHandle>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
+  const handledS2SPlayNonceRef = useRef<number | null>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
   const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
   const inspectedLabel = pinned?.label ?? mobileScrub?.label;
@@ -642,19 +643,36 @@ const TimelineChart: React.FC = () => {
 
   useEffect(() => {
     if (page !== "s2s" || !s2sPlayRequest) return;
+    if (handledS2SPlayNonceRef.current === s2sPlayRequest.nonce) return;
     const timestamp = new Date(s2sPlayRequest.tick).getTime();
-    if (!Number.isFinite(timestamp)) return;
+    if (!Number.isFinite(timestamp)) {
+      handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+      setPinned(null);
+      return;
+    }
     if (timestamp < xDomain[0] || timestamp > xDomain[1]) {
-      setZoom(null);
+      if (zoom) setZoom(null);
+      else {
+        handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+        setPinned(null);
+      }
       return;
     }
     const point = windowedTimelineData.find(
       (candidate) => candidate.timestamp === timestamp
     );
     const box = interactionBox ?? plotBox();
-    if (!point || !box) return;
+    if (!point || !box) {
+      handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+      setPinned(null);
+      return;
+    }
     const payload = tooltipPayload(point);
-    if (payload.length === 0) return;
+    handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+    if (payload.length === 0) {
+      setPinned(null);
+      return;
+    }
     const pointX =
       box.left +
       ((timestamp - xDomain[0]) / (xDomain[1] - xDomain[0])) * box.width;
@@ -670,6 +688,7 @@ const TimelineChart: React.FC = () => {
     page,
     s2sPlayRequest,
     xDomain,
+    zoom,
     windowedTimelineData,
     interactionBox,
     plotBox,
