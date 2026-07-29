@@ -70,9 +70,16 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       source: "samples",
     }));
   }, []);
-  const { timeWindow, changeTimeWindow } = useTimeWindow(
+  const { timeWindow, changeTimeWindow: setTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
+  );
+  const changeTimeWindow = useCallback(
+    (next: typeof timeWindow) => {
+      if (next !== timeWindow) setS2sPlayRequest(null);
+      setTimeWindow(next);
+    },
+    [setTimeWindow, timeWindow]
   );
 
   const benchmarkParam =
