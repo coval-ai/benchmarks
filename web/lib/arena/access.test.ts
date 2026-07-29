@@ -3,7 +3,16 @@
 
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type AccessPayload, identified, mintAccess, needsRefresh, verifyAccess } from "./access";
+import {
+  type AccessPayload,
+  LEGACY_LABELER_UNTIL,
+  accessSecretConfigured,
+  gateAllows,
+  identified,
+  mintAccess,
+  needsRefresh,
+  verifyAccess,
+} from "./access";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_000_000;
@@ -105,5 +114,52 @@ describe("arena identity", () => {
     process.env.ARENA_SESSION_SECRET_PREVIOUS = "test-arena-session-secret";
     process.env.ARENA_SESSION_SECRET = "rotated-secret";
     expect(identified(verified(old, NOW + 1))?.sid).toBe("sid-9");
+  });
+
+  it("rejects an empty sid instead of reading it as a pre-identity cookie", () => {
+    const forged = signed(encode({ sid: "", iat: NOW, exp: NOW + 30 * DAY }));
+    expect(verifyAccess(forged, NOW)).toBeNull();
+  });
+
+  it("rejects a token at the exact expiry instant", () => {
+    expect(verifyAccess(mintAccess("external", "sid-1", NOW), NOW + 30 * DAY)).toBeNull();
+  });
+});
+
+describe("arena gate", () => {
+  it("lets a labeler reach the gated surfaces", () => {
+    expect(gateAllows(verified(mintAccess("labeler", "sid-1", NOW)), NOW)).toBe(true);
+  });
+
+  it("keeps an external visitor out, signed cookie and all", () => {
+    expect(gateAllows(verified(mintAccess("external", "sid-1", NOW)), NOW)).toBe(false);
+  });
+
+  it("honours a pre-identity cookie until the migration cutoff", () => {
+    const legacy = signed(encode({ iat: NOW, exp: NOW + 30 * DAY }));
+    expect(gateAllows(verified(legacy, NOW), NOW)).toBe(true);
+  });
+
+  it("stops honouring a pre-identity cookie once the cutoff passes", () => {
+    const at = LEGACY_LABELER_UNTIL;
+    const legacy = signed(encode({ iat: at, exp: at + 30 * DAY }));
+    expect(gateAllows(verified(legacy, at), at)).toBe(false);
+  });
+});
+
+describe("arena session secret", () => {
+  it("treats a missing secret as unconfigured", () => {
+    delete process.env.ARENA_SESSION_SECRET;
+    expect(accessSecretConfigured()).toBe(false);
+  });
+
+  it("treats a secret shorter than 32 characters as unconfigured", () => {
+    process.env.ARENA_SESSION_SECRET = "x".repeat(31);
+    expect(accessSecretConfigured()).toBe(false);
+  });
+
+  it("accepts a secret of at least 32 characters", () => {
+    process.env.ARENA_SESSION_SECRET = "x".repeat(32);
+    expect(accessSecretConfigured()).toBe(true);
   });
 });

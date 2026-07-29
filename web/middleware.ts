@@ -5,7 +5,9 @@ import {
   ACCESS_COOKIE_PATHS,
   type ArenaRole,
   accessSecretConfigured,
+  gateAllows,
   identified,
+  legacyLabeler,
   mintAccess,
   needsRefresh,
   safeEqual,
@@ -64,16 +66,25 @@ function reissue(res: NextResponse, role: ArenaRole, sid?: string): void {
 
 /**
  * Say so when identity is off, rather than serving an arena that quietly attributes
- * nothing. Once per instance: enough to alert on, without a line per request.
+ * nothing.
+ *
+ * Rate-limited rather than once-per-instance: a warm instance would otherwise report the
+ * outage once and then go quiet for as long as it lives, which is the wrong shape for
+ * something you want to alert on.
  */
-let reportedMissingSecret = false;
+const IDENTITY_REPORT_INTERVAL_MS = 10 * 60 * 1000;
+let identityLastReportedAt = 0;
 
 function reportIdentityDisabled(): void {
-  if (reportedMissingSecret || process.env.NODE_ENV !== "production") return;
-  reportedMissingSecret = true;
+  if (process.env.NODE_ENV !== "production") return;
+  const now = Date.now();
+  if (identityLastReportedAt !== 0 && now - identityLastReportedAt < IDENTITY_REPORT_INTERVAL_MS) {
+    return;
+  }
+  identityLastReportedAt = now;
   console.error(
-    "arena identity disabled: ARENA_SESSION_SECRET is not configured, so no visitor is " +
-      "issued a signed identity and no vote can be attributed",
+    "arena identity disabled: ARENA_SESSION_SECRET is missing or shorter than the required " +
+      "32 characters, so no visitor is issued a signed identity and no vote can be attributed",
   );
 }
 
@@ -100,7 +111,8 @@ function ensureArenaIdentity(req: NextRequest): NextResponse {
   const payload = verifyAccess(req.cookies.get(ACCESS_COOKIE_NAME)?.value);
   const current = payload && identified(payload);
   if (!payload) reissue(res, "external");
-  else if (!current) reissue(res, "labeler");
+  else if (legacyLabeler(payload)) reissue(res, "labeler");
+  else if (!current) reissue(res, "external");
   else if (needsRefresh(current)) reissue(res, current.role, current.sid);
   return res;
 }
@@ -115,8 +127,11 @@ function arenaGate(req: NextRequest): NextResponse {
   const unlocked = unlockedAsLabeler(req);
   if (unlocked) return unlocked;
 
+  // A signature alone is not enough: every public visitor now holds a validly signed
+  // `external` cookie, and it is sent here because it is scoped to /arena. Only a labeler
+  // gets through.
   const payload = verifyAccess(req.cookies.get(ACCESS_COOKIE_NAME)?.value);
-  if (payload) {
+  if (payload && gateAllows(payload)) {
     const res = NextResponse.next();
     const current = identified(payload);
     if (!current) reissue(res, "labeler");
