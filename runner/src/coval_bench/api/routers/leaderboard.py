@@ -26,7 +26,7 @@ from starlette.requests import Request
 
 from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
-from coval_bench.api.internal import hidden_models, is_internal
+from coval_bench.api.internal import early_access_scope, hidden_models_for
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL
@@ -70,7 +70,7 @@ async def get_leaderboard(
     window: WindowLiteral = Query(default="24h"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
-    internal: bool = Depends(is_internal),
+    scope: frozenset[str] = Depends(early_access_scope),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
@@ -100,7 +100,7 @@ async def get_leaderboard(
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
 
-    hidden = frozenset() if internal else hidden_models()
+    hidden = hidden_models_for(scope)
     entries = [
         LeaderboardEntry.model_validate(r)
         for r in entry_rows

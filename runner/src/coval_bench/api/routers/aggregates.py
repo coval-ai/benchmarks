@@ -46,7 +46,7 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
 )
-from coval_bench.api.internal import hidden_models, is_internal
+from coval_bench.api.internal import early_access_scope, hidden_models_for
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
 from coval_bench.config import DATASET_ALL
@@ -97,7 +97,7 @@ async def get_results_aggregates(
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
-    internal: bool = Depends(is_internal),
+    scope: frozenset[str] = Depends(early_access_scope),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -110,7 +110,7 @@ async def get_results_aggregates(
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
-    hidden = frozenset() if internal else hidden_models()
+    hidden = hidden_models_for(scope)
 
     def visible(row: dict[str, Any]) -> bool:
         return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
@@ -144,8 +144,9 @@ async def get_results_aggregates(
             series=[SeriesPoint.model_validate(r) for r in series_rows if visible(r)],
         )
 
-    # `internal` is part of the key: the two views must never share a cache entry.
-    cache_key = ("aggregates", benchmark, window, dataset_key, internal)
+    # The scope is part of the key: two callers who can see different models must
+    # never share a cache entry, or one would be served the other's rows.
+    cache_key = ("aggregates", benchmark, window, dataset_key, tuple(sorted(scope)))
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
