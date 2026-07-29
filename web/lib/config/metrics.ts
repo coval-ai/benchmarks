@@ -45,7 +45,7 @@ export const metricDescriptions = {
     tooltip:
       "The dashed line traces the best WER you can get at each latency budget. Bright dots earn their spot: nothing beats them on speed and accuracy at once. Every faded dot loses on both counts to some bright one.",
     detailed:
-      "Speed and accuracy pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency budget. Bright models set that boundary — nothing beats them on both axes at once. Faded models are beaten outright by a bright one, so picking them only makes sense for reasons this chart can't see, like price or language coverage."
+      "Speed and accuracy pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency budget. A straight stretch of the line is reachable too — split traffic between the models at its two ends. Bright models are the ones nothing beats on both axes at once, even where the line cuts below them. Faded models are beaten outright by a bright one, so picking them only makes sense for reasons this chart can't see, like price or language coverage."
   },
   // Shared by the Latency Variation card's description and its headline tooltip.
   iqr: {

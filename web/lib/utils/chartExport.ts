@@ -233,17 +233,30 @@ export function labelScatterDots(
       (b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1
     );
   // Overlay lines (e.g. the Pareto frontier) are obstacles too, or labels land
-  // on top of them. Their paths are absolute M/L/Q commands, so the coordinate
-  // pairs walked as a polyline track the drawn curve closely enough.
+  // on top of them. Their paths are absolute M/L/Q commands; straight runs are
+  // sampled along the segment and rounded corners evaluate the quadratic
+  // itself, so the boxes hug the drawn curve rather than its control polygon.
   clone.querySelectorAll(".recharts-scatter-line path").forEach((path) => {
-    const nums = (path.getAttribute("d") ?? "").match(/-?\d*\.?\d+/g)?.map(Number) ?? [];
-    for (let i = 3; i < nums.length; i += 2) {
-      const [ax, ay, bx, by] = [nums[i - 3]!, nums[i - 2]!, nums[i - 1]!, nums[i]!];
-      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 8));
+    let cursor = { x: 0, y: 0 };
+    const sample = (to: { x: number; y: number }, at: (t: number) => [number, number]) => {
+      const steps = Math.max(1, Math.ceil(Math.hypot(to.x - cursor.x, to.y - cursor.y) / 8));
       for (let s = 0; s <= steps; s++) {
-        const [px, py] = [ax + ((bx - ax) * s) / steps, ay + ((by - ay) * s) / steps];
+        const [px, py] = at(s / steps);
         boxes.push({ x1: px - 3, y1: py - 3, x2: px + 3, y2: py + 3 });
       }
+      cursor = to;
+    };
+    for (const m of (path.getAttribute("d") ?? "").matchAll(/([MLQ])([^MLQ]*)/g)) {
+      const n = (m[2] ?? "").match(/-?\d*\.?\d+/g)?.map(Number) ?? [];
+      const end = { x: n[n.length - 2] ?? cursor.x, y: n[n.length - 1] ?? cursor.y };
+      const { x, y } = cursor;
+      if (m[1] === "M") cursor = end;
+      else if (m[1] === "L") sample(end, (t) => [x + (end.x - x) * t, y + (end.y - y) * t]);
+      else
+        sample(end, (t) => [
+          (1 - t) ** 2 * x + 2 * (1 - t) * t * n[0]! + t * t * end.x,
+          (1 - t) ** 2 * y + 2 * (1 - t) * t * n[1]! + t * t * end.y,
+        ]);
     }
   });
   // Stacked dots hide each other completely on screen; a rim in the canvas

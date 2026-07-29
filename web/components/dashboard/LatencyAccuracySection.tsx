@@ -78,9 +78,19 @@ const LatencyAccuracySection: React.FC = () => {
     () => [...scatterData].sort((a, b) => a.x - b.x || a.y - b.y),
     [scatterData]
   );
+  // Exact duplicates of a frontier point tie it rather than lose to it, so
+  // they stay on the frontier too (the sort keeps duplicates adjacent).
   const paretoData = useMemo(() => {
     let minY = Infinity;
-    return sortedData.filter((p) => (p.y < minY ? ((minY = p.y), true) : false));
+    let frontierX = NaN;
+    return sortedData.filter((p) => {
+      if (p.y < minY) {
+        minY = p.y;
+        frontierX = p.x;
+        return true;
+      }
+      return p.y === minY && p.x === frontierX;
+    });
   }, [sortedData]);
   const [activeIdx, setActiveIdx] = useState(-1);
   const chartRef = useRef<HTMLDivElement>(null);
