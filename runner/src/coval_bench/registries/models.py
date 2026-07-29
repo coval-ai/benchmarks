@@ -767,6 +767,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_EARLY_ACCESS,
         arena_enabled=False,
     ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="lmnt",
+        model="blizzard",
+        voice="leah",
+        voices=("leah", "caleb"),
+        tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
+        status=_ACTIVE,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept

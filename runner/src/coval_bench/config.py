@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     alibaba_api_key: SecretStr | None = None
     minimax_api_key: SecretStr | None = None
     palabra_api_key: SecretStr | None = None
+    lmnt_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
 
