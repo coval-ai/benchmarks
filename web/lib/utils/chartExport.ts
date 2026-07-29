@@ -54,6 +54,8 @@ export function downloadCSV(
 interface LegendItem {
   label: string;
   color: string;
+  /** Swatch drawn as a dashed line (e.g. the Pareto frontier) instead of a filled square. */
+  dashed?: boolean;
   /** Grayed out in the export, e.g. a series clipped off-chart by the zoom. */
   dimmed?: boolean;
 }
@@ -230,6 +232,33 @@ export function labelScatterDots(
     boxes.some(
       (b) => box.x1 < b.x2 && box.x2 > b.x1 && box.y1 < b.y2 && box.y2 > b.y1
     );
+  // Overlay lines (e.g. the Pareto frontier) are obstacles too, or labels land
+  // on top of them. Their paths are absolute M/L/Q commands; straight runs are
+  // sampled along the segment and rounded corners evaluate the quadratic
+  // itself, so the boxes hug the drawn curve rather than its control polygon.
+  clone.querySelectorAll(".recharts-scatter-line path").forEach((path) => {
+    let cursor = { x: 0, y: 0 };
+    const sample = (to: { x: number; y: number }, at: (t: number) => [number, number]) => {
+      const steps = Math.max(1, Math.ceil(Math.hypot(to.x - cursor.x, to.y - cursor.y) / 8));
+      for (let s = 0; s <= steps; s++) {
+        const [px, py] = at(s / steps);
+        boxes.push({ x1: px - 3, y1: py - 3, x2: px + 3, y2: py + 3 });
+      }
+      cursor = to;
+    };
+    for (const m of (path.getAttribute("d") ?? "").matchAll(/([MLQ])([^MLQ]*)/g)) {
+      const n = (m[2] ?? "").match(/-?\d*\.?\d+/g)?.map(Number) ?? [];
+      const end = { x: n[n.length - 2] ?? cursor.x, y: n[n.length - 1] ?? cursor.y };
+      const { x, y } = cursor;
+      if (m[1] === "M") cursor = end;
+      else if (m[1] === "L") sample(end, (t) => [x + (end.x - x) * t, y + (end.y - y) * t]);
+      else
+        sample(end, (t) => [
+          (1 - t) ** 2 * x + 2 * (1 - t) * t * n[0]! + t * t * end.x,
+          (1 - t) ** 2 * y + 2 * (1 - t) * t * n[1]! + t * t * end.y,
+        ]);
+    }
+  });
   // Stacked dots hide each other completely on screen; a rim in the canvas
   // color splits them into visible crescents so every label has a referent.
   circles.forEach((circle) => {
@@ -262,7 +291,7 @@ export function labelScatterDots(
     // In dense clusters, spiral outward in small rings so a squeezed-out label
     // still sits near its dot (its color keeps it attributable) rather than at
     // the end of a hard-to-follow leader line.
-    for (let r = 22; r <= 58; r += 12) {
+    for (let r = 22; r <= 94; r += 12) {
       for (let deg = 0; deg < 360; deg += 30) {
         const dx = Math.cos((deg * Math.PI) / 180);
         const dy = Math.sin((deg * Math.PI) / 180);
@@ -479,8 +508,19 @@ export async function downloadChartPNG(
   for (const row of rows) {
     for (const item of row) {
       ctx.globalAlpha = item.dimmed ? 0.35 : 1;
-      ctx.fillStyle = item.color;
-      ctx.fillRect(MARGIN + item.x, y + 5, 12, 12);
+      if (item.dashed) {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(MARGIN + item.x, y + 11);
+        ctx.lineTo(MARGIN + item.x + 12, y + 11);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        ctx.fillStyle = item.color;
+        ctx.fillRect(MARGIN + item.x, y + 5, 12, 12);
+      }
       ctx.fillStyle = colors.textPrimary;
       ctx.fillText(item.label, MARGIN + item.x + 18, y + 15);
     }

@@ -40,12 +40,12 @@ export const metricDescriptions = {
     detailed:
       "Ensuring accurate speech output is fundamental to user trust and comprehension in voice AI systems. We recognize that even minor pronunciation errors can undermine the entire conversation experience and our evaluation captures how faithfully text-to-speech systems pronounce complex terminology, proper nouns, and domain-specific vocabulary that matter most to your users."
   },
-  "human-parity": {
-    short: "Human-parity zone",
+  pareto: {
+    short: "Pareto frontier",
     tooltip:
-      "Models in this region match or beat a human on both axes: professional human transcribers achieve 2–4% WER under optimal conditions, and ~200ms is the median gap before a person replies in conversation. Anything inside the zone is at or beyond human performance.",
+      "The dashed line traces the best WER you can get at each latency budget. Bright dots earn their spot: nothing beats them on speed and accuracy at once. Every faded dot loses on both counts to some bright one.",
     detailed:
-      "The human-parity zone reframes the latency-accuracy trade-off around a human baseline instead of arbitrary thresholds. Human transcription accuracy is typically 2–4% WER under optimal conditions, and the median turn-taking gap in human conversation is roughly 200ms. A model inside the zone transcribes at least as accurately as a person and responds at least as fast as one."
+      "Speed and accuracy pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency budget. A straight stretch of the line is reachable too — split traffic between the models at its two ends. Bright models are the ones nothing beats on both axes at once, even where the line cuts below them. Faded models are beaten outright by a bright one, so picking them only makes sense for reasons this chart can't see, like price or language coverage."
   },
   // Shared by the Latency Variation card's description and its headline tooltip.
   iqr: {

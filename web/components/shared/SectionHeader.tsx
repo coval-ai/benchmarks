@@ -183,9 +183,14 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
       ).map((li) => {
         const entry = li.cloneNode(true) as HTMLElement;
         entry.querySelectorAll('[role="tooltip"]').forEach((el) => el.remove());
+        const swatch = li.querySelector("span");
         return {
           label: entry.textContent?.trim() ?? "",
-          color: li.querySelector("span")?.style.backgroundColor ?? "#0f0c0a",
+          color:
+            swatch?.style.backgroundColor ||
+            swatch?.style.borderColor ||
+            "#0f0c0a",
+          dashed: !swatch?.style.backgroundColor && !!swatch?.style.borderColor,
           dimmed: li.hasAttribute("data-dimmed"),
         };
       }),
