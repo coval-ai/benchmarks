@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import Field, SecretStr, field_validator
+import structlog
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
 DATASET_ALL = "__all__"
+
+# Terraform's Secret Manager stub; a mount that was never rotated delivers it verbatim.
+SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
 
 
 class Settings(BaseSettings):
@@ -179,6 +183,20 @@ class Settings(BaseSettings):
     # check is not a content-safety fallback, and the arena publishes its audio. Flip to
     # false to trade safety for availability during a prolonged provider outage.
     arena_moderation_fail_closed: bool = True
+
+    @model_validator(mode="after")
+    def _placeholder_secrets_are_unset(self) -> Settings:
+        """Warn on unrotated Secret Manager stubs and null the nullable ones."""
+        logger = structlog.get_logger("coval_bench.config")
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name)
+            raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if raw != SECRET_PLACEHOLDER:
+                continue
+            logger.warning("placeholder_secret", setting=name, env_var=name.upper())
+            if type(None) in get_args(field.annotation):
+                setattr(self, name, None)
+        return self
 
 
 @functools.lru_cache(maxsize=1)

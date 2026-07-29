@@ -755,6 +755,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_EARLY_ACCESS,
     ),
+    # No model id on the wire, only a voice, so "vui" is the bare surface name.
+    # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fluxions",
+        model="vui",
+        voice="maeve",
+        voices=("maeve", "abraham"),
+        tags=(_STREAMING, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+        arena_enabled=False,
+    ),
     RegisteredModel(
         benchmark=_TTS,
         provider="lmnt",

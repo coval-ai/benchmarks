@@ -1,13 +1,13 @@
 {
   "_license": "Apache-2.0",
   "id": "tts-v1",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "license": "Apache-2.0",
   "source": "Coval TTS test cases",
   "items": [
     {
       "testcase_id": "A1",
-      "transcript": "Your order #ORD-24589 shipped via UPS tracking 1Z999AA1234567890 and will arrive between 2:30 PM - 4:45 PM tomorrow."
+      "transcript": "Your order #ORD-24589 shipped via UPS tracking 1Z999AA1234567890 and will arrive between 2:30 PM and 4:45 PM tomorrow."
     },
     {
       "testcase_id": "A2",
@@ -23,7 +23,7 @@
     },
     {
       "testcase_id": "A5",
-      "transcript": "I can reschedule you to either 11:15 AM on Wednesday or - let me check - 2:45 PM on Thursday."
+      "transcript": "I can reschedule you to either 11:15 AM on Wednesday or, let me check, 2:45 PM on Thursday."
     },
     {
       "testcase_id": "A6",
@@ -35,11 +35,11 @@
     },
     {
       "testcase_id": "A8",
-      "transcript": "Your device is downloading update version 12.4.1 - about 250 MB remaining, roughly 8 minutes left."
+      "transcript": "Your device is downloading update version 12.4.1, about 250 MB remaining, roughly 8 minutes left."
     },
     {
       "testcase_id": "A9",
-      "transcript": "I'm seeing error code E-1047 here, which usually means - actually, let me guide you through the solution."
+      "transcript": "I'm seeing error code E-1047 here, which usually means, actually, let me guide you through the solution."
     },
     {
       "testcase_id": "A10",
@@ -55,7 +55,7 @@
     },
     {
       "testcase_id": "A13",
-      "transcript": "Hi David, your premium subscription renews in 5 days at $29.99 - would you like to continue or explore other options?"
+      "transcript": "Hi David, your premium subscription renews in 5 days at $29.99, would you like to continue or explore other options?"
     },
     {
       "testcase_id": "A14",
@@ -63,7 +63,7 @@
     },
     {
       "testcase_id": "A15",
-      "transcript": "I noticed you haven't logged in since January 15th - is there anything we can help you with?"
+      "transcript": "I noticed you haven't logged in since January 15th, is there anything we can help you with?"
     },
     {
       "testcase_id": "A16",
@@ -75,11 +75,11 @@
     },
     {
       "testcase_id": "A18",
-      "transcript": "Your auto-payment of $67.50 failed due to an expired card - would you like to update your payment method?"
+      "transcript": "Your auto-payment of $67.50 failed due to an expired card, would you like to update your payment method?"
     },
     {
       "testcase_id": "A19",
-      "transcript": "Thanks for your interest in our software - companies your size typically see 20-25% efficiency gains."
+      "transcript": "Thanks for your interest in our software, companies your size typically see 20-25% efficiency gains."
     },
     {
       "testcase_id": "A20",
@@ -87,7 +87,7 @@
     },
     {
       "testcase_id": "A21",
-      "transcript": "Great timing! We're offering 20% off annual plans - that saves you $359.88 for the first year."
+      "transcript": "Great timing! We're offering 20% off annual plans, that saves you $359.88 for the first year."
     },
     {
       "testcase_id": "A22",
@@ -103,11 +103,11 @@
     },
     {
       "testcase_id": "A25",
-      "transcript": "Your PTO request for December 20th through 24th has been approved - that's 3 business days."
+      "transcript": "Your PTO request for December 20th through 24th has been approved, that's 3 business days."
     },
     {
       "testcase_id": "A26",
-      "transcript": "Password reset complete: your temporary password is NewPass2024! Please change it within 24 hours."
+      "transcript": "Password reset complete: your temporary password was sent to your email. Please change it within 24 hours."
     },
     {
       "testcase_id": "A27",
@@ -119,7 +119,7 @@
     },
     {
       "testcase_id": "A29",
-      "transcript": "Hi Mr. O'Connor, I'm calling about your consultation - are you available for 20 minutes between 9 AM and noon?"
+      "transcript": "Hi Mr. O'Connor, I'm calling about your consultation, are you available for 20 minutes between 9 AM and noon?"
     },
     {
       "testcase_id": "A30",
