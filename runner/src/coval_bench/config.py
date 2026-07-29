@@ -12,13 +12,19 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import Field, SecretStr, field_validator
+import structlog
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
 DATASET_ALL = "__all__"
+
+# The stub Terraform seeds into every Secret Manager secret (benchmark-infra
+# modules/secret_manager). A mount whose version was never rotated with
+# `gcloud secrets versions add` delivers this literal string.
+SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
 
 
 class Settings(BaseSettings):
@@ -178,6 +184,27 @@ class Settings(BaseSettings):
     # check is not a content-safety fallback, and the arena publishes its audio. Flip to
     # false to trade safety for availability during a prolonged provider outage.
     arena_moderation_fail_closed: bool = True
+
+    @model_validator(mode="after")
+    def _placeholder_secrets_are_unset(self) -> Settings:
+        """Treat unrotated Secret Manager stubs as unset, loudly.
+
+        Sent as a credential, the placeholder fails as a confusing provider
+        401 at request time; nulling the field routes providers to their
+        explicit missing-key errors instead. Non-nullable fields (e.g.
+        database_url) keep the placeholder so the downstream failure still
+        names it; the warning is the signal either way.
+        """
+        logger = structlog.get_logger("coval_bench.config")
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name)
+            raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if raw != SECRET_PLACEHOLDER:
+                continue
+            logger.warning("placeholder_secret", setting=name, env_var=name.upper())
+            if type(None) in get_args(field.annotation):
+                setattr(self, name, None)
+        return self
 
 
 @functools.lru_cache(maxsize=1)
