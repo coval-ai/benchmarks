@@ -27,7 +27,7 @@ import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { MIN_RADAR_AXES, useWerDatasetMatrix } from "@/hooks/useWerDatasetMatrix";
 import { datasetLabel, isPerturbationDataset } from "@/lib/config/datasets";
 import { getModelColor } from "@/lib/utils/colors";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 
 // "WildASR reverb" → ["Reverb", "WildASR"], "PipeCat (production)" →
 // ["Production", "PipeCat"]: every axis reads its condition first, with the
@@ -295,8 +295,9 @@ const WerRadarSection: React.FC = () => {
           exportRows={() =>
             plotted.flatMap((model) =>
               effectiveAxes.map((dataset) => ({
+                dataset_id: dataset,
                 dataset: datasetLabel(dataset),
-                model,
+                model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
                 avg_wer_percent: werByDataset?.get(dataset)?.get(model),
               }))

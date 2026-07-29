@@ -17,7 +17,12 @@ import {
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
 import { DedicatedInfoIcon } from "@/components/shared/DedicatedInferenceInfo";
-import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
+import {
+  formatDate,
+  formatTime,
+  getLocalTimeZoneAbbr,
+  parseModelKey,
+} from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import {
   methodologyChanges,
@@ -942,12 +947,12 @@ const TimelineChart: React.FC = () => {
                 return typeof value === "number"
                   ? [{
                       timestamp: point.timestampLabel,
-                      model,
+                      model: parseModelKey(model).model,
                       provider: getProviderForModel(model),
                       metric,
                       latency_ms: value,
                       ...(page === "s2s"
-                        ? { conversation_sample_recorded: hasS2SBucketRecording(point.timestamp) ?? false }
+                        ? { conversation_bucket_has_sample: hasS2SBucketRecording(point.timestamp) }
                         : {}),
                     }]
                   : [];

@@ -223,8 +223,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   const downloadData = () => {
     const rows = exportRows?.() ?? [];
     if (rows.length === 0) return;
-    downloadCSV(rows, `${anchorId}.csv`);
-    trackShare("csv");
+    if (downloadCSV(rows, `${anchorId}.csv`)) trackShare("csv");
   };
 
   return (
