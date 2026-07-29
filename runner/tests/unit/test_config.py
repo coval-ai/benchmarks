@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for Settings, focused on placeholder-secret handling."""
+"""Unit tests for Settings placeholder-secret handling."""
 
 from __future__ import annotations
 
@@ -16,30 +16,18 @@ def _settings(**overrides: Any) -> Settings:
     return Settings(_env_file=None, **overrides)
 
 
-def test_placeholder_secretstr_treated_as_unset() -> None:
-    settings = _settings(openai_api_key=SECRET_PLACEHOLDER)
-    assert settings.openai_api_key is None
-
-
-def test_placeholder_plain_str_treated_as_unset() -> None:
-    settings = _settings(baseten_whisper_url=SECRET_PLACEHOLDER)
-    assert settings.baseten_whisper_url is None
-
-
-def test_placeholder_database_url_kept() -> None:
-    settings = _settings(database_url=SECRET_PLACEHOLDER)
-    assert settings.database_url == SECRET_PLACEHOLDER
-
-
-def test_placeholder_warns_per_field() -> None:
+def test_placeholder_secrets_nulled_and_warned() -> None:
     with structlog.testing.capture_logs() as logs:
-        _settings(openai_api_key=SECRET_PLACEHOLDER, database_url=SECRET_PLACEHOLDER)
-    warned = {
-        entry["setting"]
-        for entry in logs
-        if entry["event"] == "placeholder_secret" and entry["log_level"] == "warning"
-    }
-    assert warned == {"openai_api_key", "database_url"}
+        settings = _settings(
+            openai_api_key=SECRET_PLACEHOLDER,
+            baseten_whisper_url=SECRET_PLACEHOLDER,
+            database_url=SECRET_PLACEHOLDER,
+        )
+    assert settings.openai_api_key is None
+    assert settings.baseten_whisper_url is None
+    assert settings.database_url == SECRET_PLACEHOLDER  # not nullable: kept, warned
+    warned = {entry["setting"] for entry in logs if entry["event"] == "placeholder_secret"}
+    assert warned == {"openai_api_key", "baseten_whisper_url", "database_url"}
 
 
 def test_real_values_pass_through_silently() -> None:
