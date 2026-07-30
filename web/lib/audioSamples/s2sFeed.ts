@@ -4,6 +4,7 @@
 "use client";
 
 import { createSampleFeed } from "./createSampleFeed";
+import { toModelKey } from "../utils/formatters";
 
 // One turn of a multi-turn conversation (v2 manifests). `role` is "user"
 // (the persona) or "assistant" (the agent); `index` is the turn's position.
@@ -166,10 +167,11 @@ export function isMultiTurn(manifest: S2SSampleManifest): boolean {
   return (manifest.schema_version ?? 1) >= 2;
 }
 
-// Drop recordings whose provider isn't visible on the page (disabled catalogue).
+// Drop recordings whose model isn't visible on the page (disabled catalogue).
+// Keyed by (provider, model): one provider can carry several S2S models.
 export function visibleRecordings(
   manifest: S2SSampleManifest,
-  visibleProviders: ReadonlySet<string>
+  visibleModels: ReadonlySet<string>
 ): S2SSampleRecording[] {
-  return manifest.recordings.filter((r) => visibleProviders.has(r.provider));
+  return manifest.recordings.filter((r) => visibleModels.has(toModelKey(r.provider, r.model)));
 }

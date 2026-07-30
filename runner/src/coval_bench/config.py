@@ -131,6 +131,7 @@ class Settings(BaseSettings):
     coval_s2s_openai_agent_id: str | None = None
     coval_s2s_gemini_agent_id: str | None = None
     coval_s2s_xai_agent_id: str | None = None
+    coval_s2s_xai_think_fast_2_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.

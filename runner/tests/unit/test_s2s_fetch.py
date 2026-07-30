@@ -377,7 +377,7 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
     # only openai runs (gemini unset), and it fully succeeds.
-    assert statuses == {"openai": RunStatus.SUCCEEDED}
+    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_awaited_once()
 
 
@@ -407,7 +407,7 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    assert statuses == {"openai": RunStatus.SUCCEEDED}
+    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_not_awaited()
 
 
