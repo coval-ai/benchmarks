@@ -206,8 +206,7 @@ const QualityBarSection: React.FC = () => {
               werBarDataWithColors.map(({ model, averageWER }) => ({
                 model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
-                wer_view: werBarView,
-                wer_dataset: activeWerView?.dataset ?? "all",
+                wer_dataset: werBarDataset ?? "all",
                 avg_wer_percent: averageWER,
               }))
             }
