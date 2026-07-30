@@ -112,10 +112,10 @@ const WerRadarSection: React.FC = () => {
     [availableWerDatasets]
   );
 
-  const { werByDataset, loading } = useWerDatasetMatrix(
-    { benchmark: "STT", window: timeWindow },
-    axes
-  );
+  const { werByDataset, loading } = useWerDatasetMatrix({
+    benchmark: "STT",
+    window: timeWindow,
+  });
 
   const effectiveAxes = useMemo(
     () => axes.filter((d) => werByDataset?.has(d)),

@@ -23,10 +23,32 @@ export interface paths {
       };
     };
   };
+  "/v1/results/aggregates/by-dataset": {
+    get: {
+      parameters: {
+        query: {
+          benchmark: components["schemas"]["BenchmarkLiteral"];
+          window?: components["schemas"]["WindowLiteral"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["AggregatesByDatasetResponse"];
+          };
+        };
+      };
+    };
+  };
 }
 
 export interface components {
   schemas: {
+    AggregatesByDatasetResponse: {
+      benchmark: components["schemas"]["BenchmarkLiteral"];
+      window: components["schemas"]["WindowLiteral"];
+      blocks: components["schemas"]["DatasetAggregates"][];
+    };
     AggregatesResponse: {
       benchmark: components["schemas"]["BenchmarkLiteral"];
       window: components["schemas"]["WindowLiteral"];
@@ -36,6 +58,10 @@ export interface components {
       series: components["schemas"]["SeriesPoint"][];
     };
     BenchmarkLiteral: "STT" | "TTS" | "S2S";
+    DatasetAggregates: {
+      dataset: string;
+      model_stats: components["schemas"]["ModelStatEntry"][];
+    };
     LeaderboardEntry: {
       provider: string;
       model: string;
