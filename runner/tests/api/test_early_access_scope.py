@@ -1,179 +1,180 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for partner-scoped early access.
+"""Tests for partner early-access tokens.
 
-A scope names the embargoed providers one caller may see. Everything else under
-embargo stays hidden, so a grant for one vendor never reveals another's
-unreleased numbers — and a provider embargoed later is hidden from existing
-grants without anyone editing them.
+A token resolves server-side to an allowlist of the exact models it may see.
+Everything else under embargo stays hidden, so a grant for one vendor never
+reveals another's unreleased numbers, and a model embargoed later is hidden from
+existing grants without anyone editing them.
 
-Assertions derive the embargoed set from the registry rather than naming
-providers, so they keep holding as models change status.
+Assertions derive the embargoed set from the registry rather than naming models,
+so they keep holding as the roster changes status.
 """
 
 from __future__ import annotations
 
+import json
+from collections import Counter
+
 import pytest
+from fastapi import Response
 
 from coval_bench.api.internal import (
-    UNRESTRICTED,
-    early_access_scope,
-    embargoed_providers,
+    EA_STATUS_HEADER,
+    embargoed_pairs,
+    hidden_early_access,
     hidden_models,
-    hidden_models_for,
 )
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
 
-_BFF_KEY = "bff-key-for-tests"
-
-
-def _embargoed_pairs() -> frozenset[tuple[str, str]]:
-    return frozenset(
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-    )
+_TOKEN = "token-for-tests"  # noqa: S105 - fake grant token
+_OTHER_TOKEN = "another-token-for-tests"  # noqa: S105 - fake grant token
 
 
-def _one_embargoed_provider() -> str:
-    """Any embargoed provider, or skip.
-
-    At launch every model may be ACTIVE, and these cases are about the mechanism
-    rather than the roster — so an empty registry skips instead of erroring.
-    """
-    providers = sorted(embargoed_providers())
-    if not providers:
-        pytest.skip("no embargoed providers in the registry")
-    return providers[0]
-
-
-def _embargoed_in(benchmark: Benchmark) -> frozenset[str]:
-    return frozenset(
-        m.provider
-        for m in MODEL_REGISTRY
-        if m.status is ModelStatus.EARLY_ACCESS and m.benchmark is benchmark
-    )
-
-
-@pytest.fixture
-def settings(monkeypatch: pytest.MonkeyPatch) -> Settings:
-    """Settings with the BFF key configured and no internal key."""
+def _settings(monkeypatch: pytest.MonkeyPatch, tokens: object | None) -> Settings:
     monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "stt-v1")
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
     monkeypatch.delenv("INTERNAL_API_KEY", raising=False)
-    monkeypatch.setenv("EARLY_ACCESS_BFF_KEY", _BFF_KEY)
+    if tokens is None:
+        monkeypatch.delenv("EARLY_ACCESS_TOKENS", raising=False)
+    else:
+        raw = tokens if isinstance(tokens, str) else json.dumps(tokens)
+        monkeypatch.setenv("EARLY_ACCESS_TOKENS", raw)
     return Settings()
 
 
-def test_empty_scope_hides_every_embargoed_model() -> None:
-    """The public view: an anonymous caller sees none of them."""
-    assert hidden_models_for(frozenset()) == _embargoed_pairs()
-    assert hidden_models() == _embargoed_pairs()
+def _resolve(
+    settings: Settings, token: str | None, internal: bool = False
+) -> tuple[frozenset[tuple[str, str]], str]:
+    """Return this caller's hidden set and the status header the response carries."""
+    response = Response()
+    hidden = hidden_early_access(
+        response=response, internal=internal, x_ea_token=token, settings=settings
+    )
+    return hidden, response.headers[EA_STATUS_HEADER]
 
 
-def test_unrestricted_scope_hides_nothing() -> None:
-    assert hidden_models_for(UNRESTRICTED) == frozenset()
+def _hidden(settings: Settings, token: str | None) -> frozenset[tuple[str, str]]:
+    return _resolve(settings, token)[0]
 
 
-@pytest.mark.parametrize("provider", sorted(embargoed_providers()))
-def test_single_provider_scope_reveals_only_that_provider(provider: str) -> None:
-    """A narrow grant must stay narrow.
+def _some_pair() -> tuple[str, str]:
+    """Any embargoed pair, or skip.
 
-    Without this, a bug that reveals everything whenever *any* scope is present
-    would still pass the empty-scope and unrestricted cases.
+    At launch every model may be ACTIVE, and these cases are about the mechanism
+    rather than the roster — so an empty set skips instead of erroring.
     """
-    hidden = hidden_models_for(frozenset({provider}))
-
-    revealed = _embargoed_pairs() - hidden
-    assert revealed, f"{provider} should have at least one embargoed model revealed"
-    assert {p for p, _ in revealed} == {provider}
-    assert all(p != provider for p, _ in hidden)
+    pairs = sorted(embargoed_pairs())
+    if not pairs:
+        pytest.skip("no embargoed models in the registry")
+    return pairs[0]
 
 
-def test_s2s_scope_reveals_all_s2s_and_no_stt_or_tts() -> None:
-    """The partner case: every embargoed S2S model, nothing else under embargo."""
-    scope = _embargoed_in(Benchmark.S2S)
-    if not scope:
-        pytest.skip("no embargoed S2S providers in the registry")
-
-    hidden = hidden_models_for(scope)
-    hidden_benchmarks = {
-        m.benchmark
-        for m in MODEL_REGISTRY
-        if (m.provider, m.model) in hidden and m.status is ModelStatus.EARLY_ACCESS
-    }
-
-    assert Benchmark.S2S not in hidden_benchmarks
-    for m in MODEL_REGISTRY:
-        if m.status is ModelStatus.EARLY_ACCESS and m.benchmark is not Benchmark.S2S:
-            assert (m.provider, m.model) in hidden
+def _sibling_pair() -> tuple[tuple[str, str], tuple[str, str]]:
+    """Two embargoed models on the same provider, or skip."""
+    counts = Counter(provider for provider, _ in embargoed_pairs())
+    for provider, count in sorted(counts.items()):
+        if count >= 2:
+            models = sorted(m for p, m in embargoed_pairs() if p == provider)
+            return (provider, models[0]), (provider, models[1])
+    pytest.skip("no provider has two embargoed models")
 
 
-def test_scope_needs_the_bff_key(settings: Settings) -> None:
-    """A scope header alone grants nothing."""
-    named = ",".join(sorted(embargoed_providers()))
-
-    assert (
-        early_access_scope(internal=False, x_ea_key=None, x_ea_scope=named, settings=settings)
-        == frozenset()
-    )
-    assert (
-        early_access_scope(internal=False, x_ea_key="wrong", x_ea_scope=named, settings=settings)
-        == frozenset()
-    )
+def _entry(pair: tuple[str, str]) -> str:
+    return f"{pair[0]}/{pair[1]}"
 
 
-def test_scope_honoured_with_the_bff_key(settings: Settings) -> None:
-    provider = _one_embargoed_provider()
-
-    assert early_access_scope(
-        internal=False, x_ea_key=_BFF_KEY, x_ea_scope=provider, settings=settings
-    ) == frozenset({provider})
-
-
-def test_unknown_scope_names_are_dropped(settings: Settings) -> None:
-    """A malformed header is indistinguishable from an absent one."""
-    assert (
-        early_access_scope(
-            internal=False, x_ea_key=_BFF_KEY, x_ea_scope="not-a-provider,,", settings=settings
-        )
-        == frozenset()
-    )
+def test_no_token_hides_every_embargoed_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, {_TOKEN: []})
+    hidden, status = _resolve(settings, token=None)
+    assert hidden == embargoed_pairs()
+    assert status == "absent"
+    assert hidden_models() == embargoed_pairs()
 
 
-@pytest.mark.parametrize("widening", ["*", "\x00all", "ALL", "%2A"])
-def test_scope_cannot_widen_itself_to_unrestricted(settings: Settings, widening: str) -> None:
-    """No request value reaches full visibility, even with a valid key."""
-    scope = early_access_scope(
-        internal=False, x_ea_key=_BFF_KEY, x_ea_scope=widening, settings=settings
-    )
-
-    assert scope == frozenset()
-    assert hidden_models_for(scope) == _embargoed_pairs()
+def test_internal_caller_hides_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, {_TOKEN: []})
+    hidden, status = _resolve(settings, token=None, internal=True)
+    assert hidden == frozenset()
+    assert status == "internal"
 
 
-def test_internal_key_outranks_any_scope(settings: Settings) -> None:
-    assert (
-        early_access_scope(internal=True, x_ea_key=None, x_ea_scope=None, settings=settings)
-        == UNRESTRICTED
-    )
+def test_token_reveals_exactly_its_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    pair = _some_pair()
+    settings = _settings(monkeypatch, {_TOKEN: [_entry(pair)]})
+    hidden, status = _resolve(settings, token=_TOKEN)
+    assert status == "accepted"
+    assert hidden == embargoed_pairs() - {pair}
 
 
-def test_no_configured_bff_key_honours_no_scope(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset means no scope is honoured, whatever the request presents."""
-    monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
-    monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
-    monkeypatch.setenv("DATASET_ID", "stt-v1")
-    monkeypatch.setenv("RUNNER_SHA", "test-sha")
-    monkeypatch.delenv("EARLY_ACCESS_BFF_KEY", raising=False)
-    unconfigured = Settings()
+def test_one_token_never_reveals_anothers_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    mine, theirs = _sibling_pair()
+    settings = _settings(monkeypatch, {_TOKEN: [_entry(mine)], _OTHER_TOKEN: [_entry(theirs)]})
+    hidden = _hidden(settings, token=_TOKEN)
+    assert mine not in hidden
+    assert theirs in hidden
 
-    provider = _one_embargoed_provider()
-    assert (
-        early_access_scope(
-            internal=False, x_ea_key=None, x_ea_scope=provider, settings=unconfigured
-        )
-        == frozenset()
-    )
+
+def test_allowlist_is_per_model_not_per_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two embargoed models on one provider: naming one must not reveal the other."""
+    first, second = _sibling_pair()
+    settings = _settings(monkeypatch, {_TOKEN: [_entry(first)]})
+    hidden = _hidden(settings, token=_TOKEN)
+    assert first not in hidden
+    assert second in hidden
+
+
+def test_unknown_token_gets_the_public_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, {_TOKEN: [_entry(_some_pair())]})
+    hidden, status = _resolve(settings, token="not-a-configured-token")  # noqa: S106 - fake token
+    assert hidden == embargoed_pairs()
+    assert status == "unknown"
+
+
+def test_configured_token_with_an_empty_list_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, {_TOKEN: []})
+    hidden, status = _resolve(settings, token=_TOKEN)
+    assert status == "accepted"
+    assert hidden == embargoed_pairs()
+
+
+def test_no_configured_tokens_honours_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, None)
+    assert _hidden(settings, token=_TOKEN) == embargoed_pairs()
+
+
+def test_entry_naming_a_model_outside_the_embargo_is_inert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(monkeypatch, {_TOKEN: ["nobody/not-a-real-model"]})
+    assert _hidden(settings, token=_TOKEN) == embargoed_pairs()
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        "not json at all",
+        '["a", "list", "not", "an", "object"]',
+        '{"token": "a string, not a list"}',
+        '{"token": ["missing-the-slash"]}',
+        '{"token": ["/no-provider"]}',
+        '{"token": ["no-model/"]}',
+        '{"token": [42]}',
+    ],
+)
+def test_malformed_config_falls_back_to_the_public_view(
+    monkeypatch: pytest.MonkeyPatch, blob: str
+) -> None:
+    settings = _settings(monkeypatch, blob)
+    assert _hidden(settings, token="token") == embargoed_pairs()  # noqa: S106 - fake token
+
+
+def test_a_model_id_containing_a_slash_still_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, _ = _some_pair()
+    settings = _settings(monkeypatch, {_TOKEN: [f"{provider}/org/model"]})
+    # Split on the first slash, so the model is "org/model" — no such model is
+    # embargoed, so nothing is revealed, but the entry parsed rather than raised.
+    assert _hidden(settings, token=_TOKEN) == embargoed_pairs()

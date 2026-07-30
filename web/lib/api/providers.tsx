@@ -6,13 +6,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useState, type ReactNode } from "react";
-import { captureInternalKeyFromUrl, stripInternalKeyFromUrl } from "@/lib/api/internalKey";
+import { captureTokensFromUrl, stripTokensFromUrl } from "@/lib/api/accessTokens";
 
 export function ApiProviders({ children }: { children: ReactNode }) {
-  // Store ?internal=<key> before the first query fires (idempotent); the URL
-  // cleanup must wait until after hydration or the router restores the param.
-  if (typeof window !== "undefined") captureInternalKeyFromUrl();
-  useEffect(() => stripInternalKeyFromUrl(), []);
+  // Store ?internal=<key> / ?ea=<token> before the first query fires (idempotent);
+  // the URL cleanup must wait until after hydration or the router restores the param.
+  if (typeof window !== "undefined") captureTokensFromUrl();
+  useEffect(() => stripTokensFromUrl(), []);
   const [client] = useState(
     () =>
       new QueryClient({

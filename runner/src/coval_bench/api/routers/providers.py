@@ -21,7 +21,7 @@ from posthog import Posthog
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog
-from coval_bench.api.internal import early_access_scope, hidden_models_for
+from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ModelInfo,
@@ -80,13 +80,14 @@ def _tag_categories() -> list[TagCategoryOut]:
     ]
 
 
-def _build_provider_map(benchmark: Benchmark, scope: frozenset[str]) -> dict[str, list[ModelInfo]]:
+def _build_provider_map(
+    benchmark: Benchmark, hidden: frozenset[tuple[str, str]]
+) -> dict[str, list[ModelInfo]]:
     """Build an ordered {provider: [ModelInfo, ...]} map from the model registry.
 
     Registry order throughout; an EARLY_ACCESS model appears only for a caller
-    whose scope names its provider.
+    whose allowlist names it.
     """
-    hidden = hidden_models_for(scope)
     result: dict[str, list[ModelInfo]] = {}
     for m in MODEL_REGISTRY:
         if m.benchmark is not benchmark:
@@ -103,10 +104,10 @@ def _build_provider_map(benchmark: Benchmark, scope: frozenset[str]) -> dict[str
     return result
 
 
-def _describe(scope: frozenset[str]) -> ProvidersResponse:
-    stt_map = _build_provider_map(Benchmark.STT, scope)
-    tts_map = _build_provider_map(Benchmark.TTS, scope)
-    s2s_map = _build_provider_map(Benchmark.S2S, scope)
+def _describe(hidden: frozenset[tuple[str, str]]) -> ProvidersResponse:
+    stt_map = _build_provider_map(Benchmark.STT, hidden)
+    tts_map = _build_provider_map(Benchmark.TTS, hidden)
+    s2s_map = _build_provider_map(Benchmark.S2S, hidden)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
@@ -121,16 +122,16 @@ def _describe(scope: frozenset[str]) -> ProvidersResponse:
 async def get_providers(
     request: Request,
     posthog_client: Posthog | None = Depends(get_posthog),
-    scope: frozenset[str] = Depends(early_access_scope),
+    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
     Sourced from the model registry (all entries, not just actively run ones).
     Each model includes a ``disabled`` flag that the frontend can use to
     hide or grey out models that are known but not actively benchmarked.
-    An early-access model appears only for a caller whose scope names its provider.
+    An early-access model appears only for a caller whose allowlist names it.
     """
-    response = _describe(scope)
+    response = _describe(hidden)
     capture_api_event(
         posthog_client,
         "providers_listed",

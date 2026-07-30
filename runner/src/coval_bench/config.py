@@ -171,10 +171,12 @@ class Settings(BaseSettings):
     # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
     # models on the data endpoints. Unset means no request is internal.
     internal_api_key: SecretStr | None = None
-    # Key the web BFF presents (X-EA-Key) alongside a scope naming the embargoed
-    # providers one caller may see. Separate from the key above so a scoped
-    # caller can never reach unrestricted access. Unset means no scope is honoured.
-    early_access_bff_key: SecretStr | None = None
+    # Partner early-access tokens (X-EA-Token header), as a JSON object mapping
+    # each token to the "provider/model" entries that token may see under embargo:
+    # {"<token>": ["xai/grok-realtime"]}. The allowlist lives here, server-side,
+    # so a request carries only an opaque token and can never widen its own view.
+    # Unset means no token unlocks anything.
+    early_access_tokens: SecretStr | None = None
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
