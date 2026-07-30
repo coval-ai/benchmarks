@@ -14,7 +14,7 @@ a deliberately larger call deferred for now.
 
 One cache lives per app instance (see ``create_app``). Keys are namespaced
 tuples so the cache can be shared by more endpoints later without collisions;
-only ``/v1/results/aggregates`` reads it today.
+the two aggregates endpoints read it today.
 """
 
 from __future__ import annotations

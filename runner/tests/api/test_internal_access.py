@@ -158,6 +158,37 @@ async def test_aggregates_embargo_and_cache_isolation(client: AsyncClient, postg
 
 
 @pytest.mark.usefixtures("early_access_registry")
+async def test_aggregates_by_dataset_embargo_and_cache_isolation(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """/v1/results/aggregates/by-dataset: internal and public views never share
+    a cache entry.
+
+    The internal request goes first so a shared cache key would poison the
+    public response with the hidden model.
+    """
+    await _seed_ea_and_public_rows(postgresql)
+    await _refresh_mv(postgresql)
+
+    params = {"benchmark": "STT", "window": "24h"}
+
+    def stats_models(body: dict[str, Any]) -> set[tuple[str, str]]:
+        return _models_in([s for block in body["blocks"] for s in block["model_stats"]])
+
+    internal = await client.get(
+        "/v1/results/aggregates/by-dataset", params=params, headers=_INTERNAL_HEADERS
+    )
+    assert internal.status_code == 200
+    assert (_EA_PROVIDER, _EA_MODEL) in stats_models(internal.json())
+
+    public = await client.get("/v1/results/aggregates/by-dataset", params=params)
+    assert public.status_code == 200
+    public_models = stats_models(public.json())
+    assert ("deepgram", "nova-3") in public_models
+    assert (_EA_PROVIDER, _EA_MODEL) not in public_models
+
+
+@pytest.mark.usefixtures("early_access_registry")
 async def test_providers_omits_early_access_from_public(client: AsyncClient) -> None:
     """Public /v1/providers must not even reveal an EARLY_ACCESS model's existence."""
     response = await client.get("/v1/providers")
@@ -203,6 +234,7 @@ def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) ->
         ("/v1/results", None),
         ("/v1/leaderboard", {"metric": "WER", "benchmark": "STT"}),
         ("/v1/results/aggregates", {"benchmark": "STT"}),
+        ("/v1/results/aggregates/by-dataset", {"benchmark": "STT"}),
     ],
 )
 async def test_vary_lists_both_proof_headers(

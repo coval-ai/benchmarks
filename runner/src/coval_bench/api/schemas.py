@@ -181,6 +181,27 @@ class AggregatesResponse(BaseModel):
     series: list[SeriesPoint]
 
 
+class DatasetAggregates(BaseModel):
+    """Per-model stats for one dataset — one block of the by-dataset response."""
+
+    dataset: str
+    model_stats: list[ModelStatEntry]
+
+
+class AggregatesByDatasetResponse(BaseModel):
+    """Response schema for GET /v1/results/aggregates/by-dataset.
+
+    One block per dataset with data in the window, sorted by dataset id.
+    Series are deliberately absent: per-dataset timelines would multiply the
+    payload by the dataset count and nothing consumes them batched — the
+    single-dataset endpoint serves that long tail.
+    """
+
+    benchmark: BenchmarkLiteral
+    window: WindowLiteral
+    blocks: list[DatasetAggregates]
+
+
 class RunsResponse(BaseModel):
     """Response schema for GET /v1/runs."""
 
