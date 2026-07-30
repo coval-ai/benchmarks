@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
-from coval_bench.api.internal import is_internal
+from coval_bench.api.internal import VARY_HEADERS, is_internal
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from tests.api.conftest import (
@@ -182,3 +182,51 @@ def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) ->
     configured = Settings()
     assert is_internal(x_internal_key="k", settings=configured) is True
     assert is_internal(x_internal_key="wrong", settings=configured) is False
+
+
+@pytest.mark.parametrize(
+    ("path", "params"),
+    [
+        ("/v1/providers", None),
+        ("/v1/results", None),
+        ("/v1/leaderboard", {"metric": "WER", "benchmark": "STT"}),
+        ("/v1/results/aggregates", {"benchmark": "STT"}),
+    ],
+)
+async def test_vary_lists_both_proof_headers(
+    client: AsyncClient, path: str, params: dict[str, str] | None
+) -> None:
+    """Every embargo-gated endpoint must vary on both proofs.
+
+    Listing one and not the other is worse than listing neither: a cached internal
+    response carries no X-EA-Token, so it would match a public request.
+    """
+    response = await client.get(path, params=params)
+    assert response.status_code == 200
+    vary = response.headers["Vary"]
+    for header in VARY_HEADERS.split(", "):
+        assert header in vary, f"{header} missing from Vary: {vary!r}"
+
+
+async def test_vary_keeps_the_proof_headers_once_gzip_appends(client: AsyncClient) -> None:
+    """SelectiveGZipMiddleware appends Accept-Encoding after the route returns.
+
+    /v1/providers serves the whole registry, so it clears the 1024-byte gzip
+    threshold — an assignment in the dependency would be lost here.
+    """
+    response = await client.get("/v1/providers", headers={"Accept-Encoding": "gzip"})
+    assert response.status_code == 200
+    vary = response.headers["Vary"]
+    for header in (*VARY_HEADERS.split(", "), "Accept-Encoding"):
+        assert header in vary, f"{header} missing from Vary: {vary!r}"
+
+
+async def test_public_responses_are_cacheable_privileged_ones_are_not(
+    client: AsyncClient,
+) -> None:
+    """The embargo gate must mark a privileged response no-store."""
+    public = await client.get("/v1/providers")
+    assert public.headers.get("Cache-Control") is None
+
+    internal = await client.get("/v1/providers", headers=_INTERNAL_HEADERS)
+    assert internal.headers["Cache-Control"] == "private, no-store"

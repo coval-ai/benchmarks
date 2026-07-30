@@ -22,6 +22,7 @@ from fastapi import Response
 
 from coval_bench.api.internal import (
     EA_STATUS_HEADER,
+    VARY_HEADERS,
     embargoed_pairs,
     hidden_early_access,
     hidden_models,
@@ -49,12 +50,23 @@ def _settings(monkeypatch: pytest.MonkeyPatch, tokens: object | None) -> Setting
 def _resolve(
     settings: Settings, token: str | None, internal: bool = False
 ) -> tuple[frozenset[tuple[str, str]], str]:
-    """Return this caller's hidden set and the status header the response carries."""
+    """Return this caller's hidden set and the status header the response carries.
+
+    Every caller is varied on both proof headers, so that is asserted here rather
+    than repeated in each case.
+    """
     response = Response()
     hidden = hidden_early_access(
         response=response, internal=internal, x_ea_token=token, settings=settings
     )
+    assert response.headers["Vary"] == VARY_HEADERS
     return hidden, response.headers[EA_STATUS_HEADER]
+
+
+def _cache_control(settings: Settings, token: str | None, internal: bool = False) -> str | None:
+    response = Response()
+    hidden_early_access(response=response, internal=internal, x_ea_token=token, settings=settings)
+    return response.headers.get("Cache-Control")
 
 
 def _hidden(settings: Settings, token: str | None) -> frozenset[tuple[str, str]]:
@@ -178,3 +190,14 @@ def test_a_model_id_containing_a_slash_still_parses(monkeypatch: pytest.MonkeyPa
     # Split on the first slash, so the model is "org/model" — no such model is
     # embargoed, so nothing is revealed, but the entry parsed rather than raised.
     assert _hidden(settings, token=_TOKEN) == embargoed_pairs()
+
+
+def test_cache_control_is_private_only_when_a_proof_resolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A privileged response must never be stored; a public one is cacheable."""
+    settings = _settings(monkeypatch, {_TOKEN: [_entry(_some_pair())]})
+    assert _cache_control(settings, token=None, internal=True) == "private, no-store"
+    assert _cache_control(settings, token=_TOKEN) == "private, no-store"
+    assert _cache_control(settings, token=None) is None
+    assert _cache_control(settings, token="wrong") is None  # noqa: S106 - fake token
