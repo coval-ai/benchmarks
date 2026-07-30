@@ -9,6 +9,8 @@ import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import Card from "@/components/shared/Card";
 import { CymaticLoader } from "@/components/shared/CymaticLoader";
+import MetricInfo from "@/components/shared/MetricInfo";
+import { downloadCSV } from "@/lib/utils/chartExport";
 import {
   normalizeModelName,
   normalizeTTSProviderName,
@@ -18,31 +20,25 @@ import { useArenaLeaderboardQuery, type ArenaLeaderboard } from "@/lib/arena/lea
 
 const CAPTION = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-tertiary";
 
-const CSV_COLUMNS = [
-  "rank", "provider", "model", "rating_elo", "rating_bt", "ci_low", "ci_high",
-  "ci_half_width", "votes_total", "wins", "losses", "ties", "status",
-];
-
-function csvField(value: string | number): string {
-  const s = String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+const CI_TOOLTIP =
+  "The model's true rating most likely sits within this many points of the shown Elo. Fewer votes mean a wider margin.";
 
 function downloadCsv(board: ArenaLeaderboard): void {
-  const rows = board.entries.map((e, i) => [
-    i + 1, e.provider, e.model, e.rating_elo, e.rating_bt, e.ci_low ?? "",
-    e.ci_high ?? "", e.ci_half_width ?? "", e.votes_total, e.wins, e.losses,
-    e.ties, e.status,
-  ]);
-  const csv = [CSV_COLUMNS, ...rows]
-    .map((row) => row.map(csvField).join(","))
-    .join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `voice-arena-leaderboard-${board.metric}-${board.domain}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  downloadCSV(
+    board.entries.map((e, i) => ({
+      Rank: i + 1,
+      Provider: normalizeTTSProviderName(e.provider),
+      Model: normalizeModelName(toModelKey(e.provider, e.model)),
+      Rating: Math.round(e.rating_elo),
+      "Rating Margin (±)": e.ci_half_width == null ? "" : Math.round(e.ci_half_width),
+      Votes: e.votes_total,
+      Wins: e.wins,
+      Losses: e.losses,
+      Ties: e.ties,
+      Status: e.status,
+    })),
+    `voice-arena-leaderboard-${board.metric}-${board.domain}.csv`
+  );
 }
 
 export function ArenaLeaderboardPage() {
@@ -140,7 +136,9 @@ export function ArenaLeaderboardPage() {
                             {entry.votes_total.toLocaleString()} votes
                           </span>
                           {mixedStatus && preliminary && (
-                            <span className="font-mono uppercase"> provisional</span>
+                            <span className="ml-1.5 inline-block rounded-full border border-border-primary px-1.5 font-mono text-[10px] uppercase tracking-[0.08em]">
+                              provisional
+                            </span>
                           )}
                         </div>
                       </td>
@@ -153,7 +151,9 @@ export function ArenaLeaderboardPage() {
                         </span>{" "}
                         {entry.ci_half_width != null && (
                           <span className="font-mono text-xs tabular-nums text-text-tertiary">
-                            ± {Math.round(entry.ci_half_width)}
+                            <MetricInfo content={CI_TOOLTIP} align="right">
+                              {`± ${Math.round(entry.ci_half_width)}`}
+                            </MetricInfo>
                           </span>
                         )}
                       </td>
