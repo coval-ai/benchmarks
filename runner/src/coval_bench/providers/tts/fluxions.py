@@ -7,11 +7,12 @@ Wire protocol on wss://api.fluxions.ai/vui/v1/tts/ws:
   connect → send speak(voice, input) → recv {"type": "start"}
   → recv binary s16le PCM @ 24 kHz frames → recv {"type": "done"}
 
-Built-in voices are public, so the render path takes no credential and there is
-no ``Settings`` key for this provider. ``verify_chunks`` is disabled: the
-server's STT re-render pass multiplies TTFA without improving WER. Voice ids
-are ``<name>.<catalog-hash>`` with a rotating hash, so the registry pins the
-bare name and this module resolves it against ``GET /vui/voices`` before t0.
+The websocket requires an API key, sent as a bearer ``Authorization`` header
+on the handshake; unauthenticated connects are closed 1008 by a bot gate. The
+voice catalog endpoint is public. ``verify_chunks`` is disabled: the server's
+STT re-render pass multiplies TTFA without improving WER. Voice ids are
+``<name>.<catalog-hash>`` with a rotating hash, so the registry pins the bare
+name and this module resolves it against ``GET /vui/voices`` before t0.
 """
 
 from __future__ import annotations
@@ -57,6 +58,10 @@ class FluxionsTTSProvider(TTSProvider):
             raise ValueError(f"Invalid Fluxions TTS model {model!r}. Valid: {_VALID_MODELS}")
         if not voice:
             raise ValueError("Fluxions TTS requires a voice")
+        api_key_secret = settings.fluxions_api_key
+        if api_key_secret is None:
+            raise ValueError("fluxions_api_key is required in Settings")
+        self._api_key = api_key_secret.get_secret_value()
         self._model = model
         self._voice = voice
 
@@ -107,7 +112,9 @@ class FluxionsTTSProvider(TTSProvider):
 
         try:
             voice_id = await self._resolve_voice()
-            async with ws_client.connect(_WS_URL) as ws:
+            async with ws_client.connect(
+                _WS_URL, additional_headers={"Authorization": f"Bearer {self._api_key}"}
+            ) as ws:
                 start = time.monotonic()
                 await ws.send(
                     json.dumps(
