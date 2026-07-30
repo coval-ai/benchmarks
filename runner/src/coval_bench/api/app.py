@@ -40,6 +40,7 @@ from coval_bench.api.routers import (
     results,
     robots,
     runs,
+    s2s_samples,
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
@@ -131,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
+    app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
 
     # Serve locally-generated arena clips when no external audio host is set

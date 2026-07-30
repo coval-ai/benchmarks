@@ -19,13 +19,14 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
 from google.api_core.exceptions import NotFound
 
+from coval_bench.gcs import read_json
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -465,3 +466,59 @@ async def _publish_one_bucket(
         test_case_ids=sorted({tc for _, tc in pool}),
     )
     return 0
+
+
+AUDIO_URL_TTL = timedelta(minutes=30)
+
+
+def load_sample_ids(
+    bucket_name: str,
+    *,
+    storage_client: storage.Client | None = None,
+) -> list[str]:
+    raw = read_json(bucket_name, INDEX_KEY, storage_client=storage_client)
+    if not isinstance(raw, list):
+        return []
+    return sorted((s for s in raw if isinstance(s, str)), reverse=True)
+
+
+def load_sample(
+    bucket_name: str,
+    sample_id: str,
+    *,
+    hidden: frozenset[tuple[str, str]],
+    storage_client: storage.Client | None = None,
+) -> dict[str, Any] | None:
+    raw = read_json(
+        bucket_name,
+        f"{PREFIX}/{sample_id}/manifest.json",
+        storage_client=storage_client,
+    )
+    if not isinstance(raw, dict):
+        return None
+    recordings = [
+        rec
+        for rec in raw.get("recordings", [])
+        if isinstance(rec, dict)
+        and isinstance(rec.get("object"), str)
+        and (rec.get("provider"), rec.get("model")) not in hidden
+    ]
+    return {**raw, "recordings": recordings}
+
+
+def audio_object_key(
+    bucket_name: str,
+    sample_id: str,
+    provider: str,
+    model: str,
+    *,
+    hidden: frozenset[tuple[str, str]],
+    storage_client: storage.Client | None = None,
+) -> str | None:
+    sample = load_sample(bucket_name, sample_id, hidden=hidden, storage_client=storage_client)
+    if sample is None:
+        return None
+    for rec in sample["recordings"]:
+        if rec["provider"] == provider and rec["model"] == model:
+            return cast("str", rec["object"])
+    return None
