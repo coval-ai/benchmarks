@@ -88,7 +88,10 @@ export function ArenaLeaderboardPage() {
         )}
 
         {entries.length > 0 && (
-          <Card padding="p-4 sm:p-6 md:p-8" className="mt-6">
+          <Card
+            padding="p-0 sm:p-6 md:p-8"
+            className="mt-6 max-sm:border-0 max-sm:bg-transparent"
+          >
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
