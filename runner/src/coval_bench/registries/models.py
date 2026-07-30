@@ -813,22 +813,23 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI),
         status=_ACTIVE,
     ),
-    # xAI hidden for launch while they are unresponsive to outreach; the fetch
-    # job doesn't read this registry, so data keeps accruing for the flip back
-    # to active.
+    # xAI stays under the early-access embargo while they are unresponsive to
+    # outreach: runs and fetches normally, but every data endpoint strips both
+    # models for public callers (unlike PENDING, which only disables the
+    # catalogue entry and still serves their rows).
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
         model="grok-voice-think-fast-2.0",
         tags=(_STREAMING, _MULTI),
-        status=_PENDING,
+        status=_EARLY_ACCESS,
     ),
 ]
 
