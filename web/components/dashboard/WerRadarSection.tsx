@@ -97,30 +97,27 @@ const WerRadarSection: React.FC = () => {
     dedicatedModels,
     getProviderForModel,
     formatChartLabel,
-    availableWerDatasets,
     timeWindow,
     isMobile,
   } = useDashboard();
   const themeColors = useThemeColors();
   const trackChartHover = useChartHoverTracking("wer_radar");
 
-  const axes = useMemo(
-    () => [
-      ...availableWerDatasets.filter((d) => !isPerturbationDataset(d)),
-      ...availableWerDatasets.filter(isPerturbationDataset),
-    ],
-    [availableWerDatasets]
-  );
-
   const { werByDataset, loading } = useWerDatasetMatrix({
     benchmark: "STT",
     window: timeWindow,
   });
 
-  const effectiveAxes = useMemo(
-    () => axes.filter((d) => werByDataset?.has(d)),
-    [axes, werByDataset]
-  );
+  // Axes derive from the same batched response as the values, so membership
+  // and ordering can never disagree with what is plotted: plain datasets
+  // first, perturbations after, alphabetical within each group.
+  const effectiveAxes = useMemo(() => {
+    const datasets = [...(werByDataset?.keys() ?? [])];
+    return [
+      ...datasets.filter((d) => !isPerturbationDataset(d)),
+      ...datasets.filter(isPerturbationDataset),
+    ];
+  }, [werByDataset]);
 
   // Only models measured on every axis draw a closed shape; partial coverage
   // would render as a misleading dent.
