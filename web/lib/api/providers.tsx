@@ -6,13 +6,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useState, type ReactNode } from "react";
-import { captureTokensFromUrl, stripTokensFromUrl } from "@/lib/api/accessTokens";
+import { applyTokensFromUrl } from "@/lib/api/accessTokens";
 
 export function ApiProviders({ children }: { children: ReactNode }) {
-  // Store ?internal=<key> / ?ea=<token> before the first query fires (idempotent);
-  // the URL cleanup must wait until after hydration or the router restores the param.
-  const tokensChanged = typeof window === "undefined" ? false : captureTokensFromUrl();
-  useEffect(() => stripTokensFromUrl(), []);
   const [client] = useState(
     () =>
       new QueryClient({
@@ -26,11 +22,10 @@ export function ApiProviders({ children }: { children: ReactNode }) {
         },
       })
   );
-  // A different token is a different view of the embargo, so whatever is cached was
-  // fetched for someone else. Dropped rather than revalidated, and never in render.
-  useEffect(() => {
-    if (tokensChanged) client.clear();
-  }, [client, tokensChanged]);
+  // Adopting ?internal=<key> / ?ea=<token>, dropping a previous caller's cached rows,
+  // and cleaning the URL all happen here: one committed effect, so the identity change
+  // cannot be lost to a replayed render, and the router cannot restore the param.
+  useEffect(() => applyTokensFromUrl(() => client.clear()), [client]);
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
       <QueryClientProvider client={client}>{children}</QueryClientProvider>

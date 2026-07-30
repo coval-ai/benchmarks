@@ -42,9 +42,9 @@ export function tokenHeaders(): Record<string, string> {
 /**
  * Store any token present in the URL, returning true when a stored value changed.
  *
- * Safe to call during render (idempotent), but act on the return value from an
- * effect — a caller that changed identity has a stale cache to drop, and clearing
- * it during render is not allowed.
+ * Call from a committed effect, never from render: the change is reported once, so
+ * a replayed render would write the token on the first pass and report no change on
+ * the second, losing it. Prefer `applyTokensFromUrl`.
  */
 export function captureTokensFromUrl(): boolean {
   const params = new URL(window.location.href).searchParams;
@@ -76,4 +76,17 @@ export function stripTokensFromUrl(): void {
   if (present.length === 0) return;
   for (const { param } of present) url.searchParams.delete(param);
   window.history.replaceState(window.history.state, "", url.toString());
+}
+
+/**
+ * Adopt the URL's tokens, then clean the URL, calling `onIdentityChange` when the
+ * caller's identity actually changed.
+ *
+ * The whole sequence belongs in one committed effect. Running any of it in render
+ * makes the change flag depend on which render pass React keeps — Strict Mode
+ * replays the pass, and the second one sees the token already stored.
+ */
+export function applyTokensFromUrl(onIdentityChange: () => void): void {
+  if (captureTokensFromUrl()) onIdentityChange();
+  stripTokensFromUrl();
 }
