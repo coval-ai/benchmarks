@@ -482,6 +482,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="deepgram",
+        model="flux-haley-en",
+        voice="flux-haley-en",
+        tags=(_STREAMING, _STREAM),
+        on_prem=True,
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="gradium",
         model="default",
         voice="YTpq7expH9539ERJ",
