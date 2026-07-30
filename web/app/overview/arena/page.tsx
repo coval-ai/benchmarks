@@ -180,8 +180,14 @@ export default function ArenaPage() {
   return (
     <>
       <DashboardHeader />
-      <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
+      <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-28 text-text-primary">
         <div className="mx-auto flex max-w-[760px] flex-col gap-8">
+          <Link
+            href="/overview"
+            className={`inline-flex min-h-11 items-center self-start text-sm text-text-secondary transition-colors hover:text-text-primary ${FOCUS}`}
+          >
+            ← Overview
+          </Link>
           <h1 className="text-center font-sans text-2xl font-medium tracking-tight sm:text-3xl">
             Which voice sounds more natural?
           </h1>

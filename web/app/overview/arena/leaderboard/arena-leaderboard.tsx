@@ -3,6 +3,7 @@
 
 "use client";
 
+import Link from "next/link";
 import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import Card from "@/components/shared/Card";
@@ -30,7 +31,13 @@ export function ArenaLeaderboardPage() {
     <div className="relative flex min-h-screen flex-col bg-background text-text-primary">
       <DashboardHeader />
       <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-[84px] sm:px-6 md:pt-[96px]">
-        <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
+        <Link
+          href="/overview/arena"
+          className="inline-flex min-h-11 items-center text-sm text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+        >
+          ← Arena
+        </Link>
+        <h1 className="mt-1 text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
         <p className="mt-2 text-sm text-text-secondary">
           Models ranked by Elo rating from blind A/B votes. The ± figure is the
           confidence interval — the fewer votes a model has, the wider it runs.
