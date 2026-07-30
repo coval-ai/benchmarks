@@ -17,7 +17,7 @@ import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
 import type { ModelStatEntry, ProvidersApiResponse } from "@/lib/api/client";
 import { disabledModelKeys } from "@/lib/utils/modelsFromResults";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
-import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
+import { S2S_24H_ENABLED, WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
@@ -69,9 +69,12 @@ const OverviewLeaderboards: React.FC = () => {
   // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  // S2S ingests daily, so it has no 24h window — pin the card to 7d there.
+  const s2sWindow: TimeWindow =
+    timeWindow === "24h" && !S2S_24H_ENABLED ? "7d" : timeWindow;
   const s2sQuery = useAggregatesQuery({
     benchmark: "S2S",
-    window: timeWindow,
+    window: s2sWindow,
     dataset: S2S_MULTITURN_DATASET,
   });
   const providersQuery = useProvidersQuery();
@@ -171,7 +174,7 @@ const OverviewLeaderboards: React.FC = () => {
         <LeaderboardCard
           title="Speech-to-Speech"
           metricLabel="Voice-to-Voice Latency"
-          windowLabel={windowBadge(s2sQuery.data?.window ?? timeWindow)}
+          windowLabel={windowBadge(s2sQuery.data?.window ?? s2sWindow)}
           rows={s2sRows}
           href="/s2s"
           loading={s2sQuery.isLoading || providersQuery.isLoading}
