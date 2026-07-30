@@ -111,6 +111,7 @@ export function SamplesCard() {
         provider: recording.provider,
         model: recording.model,
         url: audioUrls.urls[position] ?? "",
+        audioPath: recording.audio_path,
         turns: spokenTurns(recording.turns),
       })),
     [recordings, audioUrls.urls]

@@ -44,10 +44,10 @@ export function useProvidersQuery() {
 // (s2s_fetch_period_seconds in config.py, default 10_800 = 3h).
 const S2S_FETCH_PERIOD_MS = 10_800 * 1000;
 
-// Signed audio URLs are minted for AUDIO_URL_TTL (10 minutes). Refresh well inside
-// that window: a URL has to be valid at the instant of a click, and the click can
-// never wait for one — a browser refuses to start playback that begins after an
-// await. So these are kept warm rather than fetched on demand.
+// Signed audio URLs are minted for AUDIO_URL_TTL (10 minutes). Treated as stale
+// before that so a returning tab replaces one, but deliberately NOT on a timer: a
+// URL has to be valid at the instant of a click, and the click can never wait for
+// one — a browser refuses to start playback that begins after an await.
 const S2S_AUDIO_URL_STALE_MS = 8 * 60 * 1000;
 
 export function useS2SSampleIdsQuery(enabled = true) {
@@ -92,7 +92,10 @@ export function useS2SSampleAudioUrls(recordings: readonly S2SSampleRecording[])
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         getS2SSampleAudio(recording.audio_path, { signal } satisfies FetchOptions),
       staleTime: S2S_AUDIO_URL_STALE_MS,
-      refetchInterval: S2S_AUDIO_URL_STALE_MS,
+      // Overrides the app-wide default: a tab left in the background outlives its
+      // URL, and refreshing on return replaces it before anyone presses play. A
+      // periodic refetch would instead swap URLs during playback.
+      refetchOnWindowFocus: true,
     })),
   });
 

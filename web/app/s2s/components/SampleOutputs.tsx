@@ -20,6 +20,8 @@ export interface SampleOutputItem {
   provider: string;
   model: string;
   url: string;
+  // Identifies the recording independently of its (re-mintable) signed URL.
+  audioPath: string;
   // Multi-turn (v2) only: this provider's own conversation transcript.
   turns?: S2STurn[];
 }
@@ -96,7 +98,7 @@ export function SampleOutputs({
   coordinator?: PlaybackCoordinator;
 }) {
   const tracks = useMemo<PlaybackTrack[]>(
-    () => items.map((i) => ({ key: i.provider, url: i.url })),
+    () => items.map((i) => ({ key: i.provider, url: i.url, id: i.audioPath })),
     [items]
   );
   // Multi-turn manifests carry per-provider turns; widen the panes and show the
