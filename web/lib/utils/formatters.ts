@@ -201,7 +201,7 @@ export function normalizeSTTProviderName(providerName: string): string {
   return mappings[lower] ?? capitalizeProviderSlug(providerName);
 }
 
-function normalizeS2SProviderName(providerName: string): string {
+export function normalizeS2SProviderName(providerName: string): string {
   const mappings: Record<string, string> = {
     google: "Google",
     openai: "OpenAI",

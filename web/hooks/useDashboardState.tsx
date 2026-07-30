@@ -34,7 +34,7 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
-import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
+import { S2S_MULTITURN_DATASET, WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
@@ -91,7 +91,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
-    dataset: page === "s2s" ? "s2s-multiturn-v1" : undefined,
+    dataset: page === "s2s" ? S2S_MULTITURN_DATASET : undefined,
   });
   const providersQuery = useProvidersQuery();
 
