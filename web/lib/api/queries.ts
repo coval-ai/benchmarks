@@ -4,8 +4,9 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { getAggregates, getProviders } from "./client";
+import { getAggregates, getAggregatesByDataset, getProviders } from "./client";
 import type {
+  AggregatesByDatasetQueryParams,
   AggregatesQueryParams,
   FetchOptions,
 } from "./client";
@@ -22,6 +23,18 @@ export function aggregatesQueryOptions(params: AggregatesQueryParams) {
 
 export function useAggregatesQuery(params: AggregatesQueryParams) {
   return useQuery(aggregatesQueryOptions(params));
+}
+
+export function useAggregatesByDatasetQuery(
+  params: AggregatesByDatasetQueryParams
+) {
+  return useQuery({
+    queryKey: ["aggregates-by-dataset", params],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      getAggregatesByDataset(params, { signal } satisfies FetchOptions),
+    // Toggling windows keeps the prior data up instead of flashing the skeleton.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useProvidersQuery() {
