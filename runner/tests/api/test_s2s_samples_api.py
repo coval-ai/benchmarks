@@ -10,6 +10,7 @@ rather than merely losing its audio link.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -20,6 +21,7 @@ from httpx import AsyncClient
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.s2s.samples import AUDIO_URL_TTL
 from tests.api.conftest import INTERNAL_API_KEY
 
 _BUCKET = "test-s2s-samples"
@@ -230,22 +232,26 @@ async def test_the_same_sample_is_served_to_a_caller_who_may_hear_it(
     assert _pairs(res.json()) == [_EMBARGOED]
 
 
-# --- the audio redirect -----------------------------------------------------
+# --- the audio url ----------------------------------------------------------
 
 
-async def test_audio_redirects_to_a_signed_url(samples_client: AsyncClient) -> None:
-    res = await samples_client.get(
-        f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio", follow_redirects=False
-    )
+async def test_audio_hands_back_a_signed_url_in_the_body(samples_client: AsyncClient) -> None:
+    """A body, not a redirect: a browser cannot carry its token through one."""
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio")
 
-    assert res.status_code == 302
-    assert res.headers["location"].startswith(_SIGNED)
+    assert res.status_code == 200
+    assert res.json()["url"].startswith(_SIGNED)
 
 
-async def test_audio_redirect_is_never_cached(samples_client: AsyncClient) -> None:
-    res = await samples_client.get(
-        f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio", follow_redirects=False
-    )
+async def test_audio_says_when_the_url_stops_working(samples_client: AsyncClient) -> None:
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio")
+
+    expires_at = datetime.fromisoformat(res.json()["expires_at"])
+    assert timedelta() < expires_at - datetime.now(UTC) <= AUDIO_URL_TTL
+
+
+async def test_audio_url_is_never_cached(samples_client: AsyncClient) -> None:
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio")
 
     assert res.headers["cache-control"] == "private, no-store"
     assert "X-EA-Token" in res.headers["vary"]
@@ -255,7 +261,6 @@ async def test_audio_redirect_is_never_cached(samples_client: AsyncClient) -> No
 async def test_audio_for_an_embargoed_model_is_refused(samples_client: AsyncClient) -> None:
     res = await samples_client.get(
         f"/v1/s2s/samples/{_SAMPLE}/{_EMBARGOED[0]}/{_EMBARGOED[1]}/audio",
-        follow_redirects=False,
     )
 
     assert res.status_code == 404
@@ -267,17 +272,14 @@ async def test_audio_for_an_embargoed_model_is_served_to_internal(
     res = await samples_client.get(
         f"/v1/s2s/samples/{_SAMPLE}/{_EMBARGOED[0]}/{_EMBARGOED[1]}/audio",
         headers=_INTERNAL,
-        follow_redirects=False,
     )
 
-    assert res.status_code == 302
+    assert res.status_code == 200
     assert res.headers["X-EA-Token-Status"] == "internal"
 
 
 async def test_audio_for_an_unknown_recording_is_a_404(samples_client: AsyncClient) -> None:
-    res = await samples_client.get(
-        f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/no-such-model/audio", follow_redirects=False
-    )
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/no-such-model/audio")
 
     assert res.status_code == 404
 
@@ -286,10 +288,9 @@ async def test_audio_for_an_unknown_recording_is_a_404(samples_client: AsyncClie
 
 
 async def test_a_refusal_is_never_cached(samples_client: AsyncClient) -> None:
-    """The public 404 and the partner's 302 share a URL, so no cache may reuse it."""
+    """The public 404 and the partner's signed URL share a route, so no cache may reuse it."""
     res = await samples_client.get(
         f"/v1/s2s/samples/{_SAMPLE}/{_EMBARGOED[0]}/{_EMBARGOED[1]}/audio",
-        follow_redirects=False,
     )
 
     assert res.status_code == 404

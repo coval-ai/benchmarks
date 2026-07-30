@@ -230,6 +230,19 @@ class S2SSampleOut(BaseModel):
     recordings: list[S2SSampleRecordingOut]
 
 
+class S2SSampleAudioOut(BaseModel):
+    """A freshly signed URL for one recording, with the moment it stops working.
+
+    Handed over as a body rather than a redirect: a browser cannot carry its
+    early-access header through a cross-origin redirect to storage, so the caller
+    fetches this with its proof and then points an audio element at ``url``.
+    ``expires_at`` lets the caller re-ask before playing rather than after failing.
+    """
+
+    url: str
+    expires_at: datetime
+
+
 class BattleOut(BaseModel):
     """A battle to vote on. Blind by design: no provider/model identities."""
 
