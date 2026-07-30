@@ -3,6 +3,8 @@
 
 "use client";
 
+import Link from "next/link";
+import { Download } from "lucide-react";
 import DashboardHeader from "@/components/layout/DashboardHeader";
 import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import Card from "@/components/shared/Card";
@@ -12,7 +14,36 @@ import {
   normalizeTTSProviderName,
   toModelKey,
 } from "@/lib/utils/formatters";
-import { useArenaLeaderboardQuery } from "@/lib/arena/leaderboard";
+import { useArenaLeaderboardQuery, type ArenaLeaderboard } from "@/lib/arena/leaderboard";
+
+const CAPTION = "font-mono text-[11px] uppercase tracking-[0.14em] text-text-tertiary";
+
+const CSV_COLUMNS = [
+  "rank", "provider", "model", "rating_elo", "rating_bt", "ci_low", "ci_high",
+  "ci_half_width", "votes_total", "wins", "losses", "ties", "status",
+];
+
+function csvField(value: string | number): string {
+  const s = String(value);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCsv(board: ArenaLeaderboard): void {
+  const rows = board.entries.map((e, i) => [
+    i + 1, e.provider, e.model, e.rating_elo, e.rating_bt, e.ci_low ?? "",
+    e.ci_high ?? "", e.ci_half_width ?? "", e.votes_total, e.wins, e.losses,
+    e.ties, e.status,
+  ]);
+  const csv = [CSV_COLUMNS, ...rows]
+    .map((row) => row.map(csvField).join(","))
+    .join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `voice-arena-leaderboard-${board.metric}-${board.domain}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function ArenaLeaderboardPage() {
   const { data, isLoading, isError } = useArenaLeaderboardQuery();
@@ -30,7 +61,14 @@ export function ArenaLeaderboardPage() {
     <div className="relative flex min-h-screen flex-col bg-background text-text-primary">
       <DashboardHeader />
       <main className="relative z-10 mx-auto w-full max-w-3xl flex-1 px-4 pb-10 pt-[84px] sm:px-6 md:pt-[96px]">
-        <h1 className="text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
+        <Link
+          href="/overview/arena"
+          className="inline-flex min-h-11 items-center text-sm text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+        >
+          ← Arena
+        </Link>
+        <p className={`mt-4 ${CAPTION}`}>Interactive benchmark</p>
+        <h1 className="mt-2 text-2xl font-medium tracking-tight sm:text-3xl">Voice Arena leaderboard</h1>
         <p className="mt-2 text-sm text-text-secondary">
           Models ranked by Elo rating from blind A/B votes. The ± figure is the
           confidence interval — the fewer votes a model has, the wider it runs.
@@ -55,15 +93,25 @@ export function ArenaLeaderboardPage() {
 
         {entries.length > 0 && (
           <Card padding="p-4 sm:p-6 md:p-8" className="mt-6">
+            <div className="mb-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => data && downloadCsv(data)}
+                className="inline-flex min-h-11 items-center gap-2 rounded-full border border-border-primary px-5 font-sans text-sm font-medium tracking-[0.01em] text-text-primary transition-colors hover:bg-hover-bg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+              >
+                <Download size={15} aria-hidden />
+                Download CSV
+              </button>
+            </div>
             <table className="w-full border-collapse text-sm">
               <thead>
-                <tr className="border-b border-border-primary text-left text-text-tertiary">
-                  <th className="w-8 py-2 pr-2 font-medium">#</th>
-                  <th className="py-2 pr-4 font-medium">Model</th>
-                  <th className="hidden whitespace-nowrap py-2 pr-4 text-right font-medium sm:table-cell">
+                <tr className={`border-b border-border-primary text-left ${CAPTION}`}>
+                  <th className="w-8 py-2 pr-2 font-normal">#</th>
+                  <th className="py-2 pr-4 font-normal">Model</th>
+                  <th className="hidden whitespace-nowrap py-2 pr-4 text-right font-normal sm:table-cell">
                     Votes
                   </th>
-                  <th className="whitespace-nowrap py-2 text-right font-medium">Elo</th>
+                  <th className="whitespace-nowrap py-2 text-right font-normal">Elo</th>
                 </tr>
               </thead>
               <tbody>

@@ -30,6 +30,15 @@ const nextConfig: NextConfig = {
         },
       }
     : {}),
+  // The arena pages moved under /overview. These fire before middleware and keep the
+  // query string, so shared links — including the labeler unlock link's ?access= token —
+  // land on the new paths intact. Temporary on purpose: browsers cache 308s forever.
+  async redirects() {
+    return [
+      { source: "/arena", destination: "/overview/arena", permanent: false },
+      { source: "/arena/:path*", destination: "/overview/arena/:path*", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

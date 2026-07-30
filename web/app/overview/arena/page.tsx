@@ -27,8 +27,8 @@ const FIELD =
 const BTN = `min-h-11 font-sans text-sm font-medium tracking-[0.01em] ${FOCUS}`;
 
 // Post-vote only: standings shown before a vote anchor the judgment, and votes are what
-// tightens the provisional CIs. Flip to false to pull the link entirely — /arena/leaderboard
-// stays reachable by URL either way.
+// tightens the provisional CIs. Flip to false to pull the link entirely —
+// /overview/arena/leaderboard stays reachable by URL either way.
 const SHOW_LEADERBOARD_LINK = true;
 
 export default function ArenaPage() {
@@ -180,8 +180,14 @@ export default function ArenaPage() {
   return (
     <>
       <DashboardHeader />
-      <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-32 text-text-primary">
+      <main className="min-h-screen bg-surface-primary px-6 pb-24 pt-28 text-text-primary">
         <div className="mx-auto flex max-w-[760px] flex-col gap-8">
+          <Link
+            href="/overview"
+            className={`inline-flex min-h-11 items-center self-start text-sm text-text-secondary transition-colors hover:text-text-primary ${FOCUS}`}
+          >
+            ← Overview
+          </Link>
           <h1 className="text-center font-sans text-2xl font-medium tracking-tight sm:text-3xl">
             Which voice sounds more natural?
           </h1>
@@ -325,7 +331,7 @@ export default function ArenaPage() {
                   </label>
                   {SHOW_LEADERBOARD_LINK && (
                     <Link
-                      href="/arena/leaderboard"
+                      href="/overview/arena/leaderboard"
                       className={`${BTN} flex items-center rounded-full border border-border-primary px-6 text-text-secondary hover:bg-hover-bg`}
                     >
                       View leaderboard

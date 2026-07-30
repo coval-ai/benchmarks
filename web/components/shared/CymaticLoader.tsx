@@ -132,7 +132,12 @@ export function CymaticLoader({
   }, []);
 
   useEffect(() => {
-    if (!animated || reduceMotion) return;
+    // Settle back onto the resting pattern instead of freezing wherever the
+    // last tick left the beads — hover-driven callers toggle `animated`.
+    if (!animated || reduceMotion) {
+      setStep(1);
+      return;
+    }
     setStep(0);
     const interval = window.setInterval(
       () => setStep((current) => (current + 1) % TARGETS.length),

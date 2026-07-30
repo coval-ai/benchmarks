@@ -9,8 +9,10 @@ export const ACCESS_COOKIE_NAME = "arena_access";
 export const ACCESS_COOKIE_MAX_AGE_S = TTL_MS / 1000;
 
 // Disjoint paths, so a request matches exactly one and the browser never holds two
-// cookies of this name. Cookies issued before scoping used "/" and are expired on sight.
-export const ACCESS_COOKIE_PATHS = ["/arena", "/api/arena"] as const;
+// cookies of this name. Cookies issued at the retired paths ("/" before scoping,
+// "/arena" before the pages moved under /overview) are expired on sight.
+export const ACCESS_COOKIE_PATHS = ["/overview/arena", "/api/arena"] as const;
+export const RETIRED_ACCESS_COOKIE_PATHS = ["/", "/arena"] as const;
 
 export type ArenaRole = "labeler" | "external";
 
@@ -132,8 +134,8 @@ export function legacyLabeler(payload: AccessPayload, now: number = Date.now()):
  * Whether a verified cookie may reach the gated arena surfaces.
  *
  * `external` is minted for anyone who merely loaded a public arena page, and its cookie is
- * path-scoped to /arena and /api/arena — so it is sent to the gated routes too, and the
- * role is the only thing keeping it out of them.
+ * path-scoped to /overview/arena and /api/arena — so it is sent to the gated routes too,
+ * and the role is the only thing keeping it out of them.
  */
 export function gateAllows(payload: AccessPayload, now: number = Date.now()): boolean {
   return identified(payload)?.role === "labeler" || legacyLabeler(payload, now);
