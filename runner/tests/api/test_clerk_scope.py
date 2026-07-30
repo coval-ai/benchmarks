@@ -197,6 +197,34 @@ def test_unset_authorized_parties_rejects_every_token(monkeypatch: pytest.Monkey
     assert hidden == embargoed_pairs()
 
 
+def _headers(settings: Settings, authorization: str) -> dict[str, str]:
+    response = Response()
+    hidden_early_access(
+        response=response,
+        internal=False,
+        x_ea_token=None,
+        authorization=authorization,
+        settings=settings,
+    )
+    return dict(response.headers)
+
+
+def test_accepted_bearer_response_is_never_stored_shared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(monkeypatch)
+    token = _mint({"benchmark_providers": "*"})
+    headers = _headers(settings, f"Bearer {token}")
+    assert headers["cache-control"] == "private, no-store"
+
+
+def test_bearer_responses_vary_on_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch)
+    token = _mint({"benchmark_providers": "*"})
+    headers = _headers(settings, f"Bearer {token}")
+    assert "Authorization" in headers["vary"]
+
+
 def test_bearer_is_ignored_when_clerk_is_not_configured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

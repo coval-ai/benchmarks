@@ -36,9 +36,9 @@ logger = structlog.get_logger("coval_bench.api.internal")
 # Which proof the response honoured: internal, accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
 
-# Both proof headers. Listing one is worse than listing none: a cached internal
-# response carries no X-EA-Token, so it would match a public request.
-VARY_HEADERS = "X-Internal-Key, X-EA-Token"
+# Every proof header. Listing a subset is worse than listing none: a cached
+# internal response carries no X-EA-Token, so it would match a public request.
+VARY_HEADERS = "X-Internal-Key, X-EA-Token, Authorization"
 
 
 def never_shared(response: Response) -> None:
@@ -48,7 +48,7 @@ def never_shared(response: Response) -> None:
     included: the same URL is a 404 for the public and a redirect for a partner,
     so a shared cache must never hand one caller's answer to another.
     """
-    response.headers.append("Vary", "X-Internal-Key, X-EA-Token")
+    response.headers.append("Vary", VARY_HEADERS)
     response.headers["Cache-Control"] = "private, no-store"
 
 
@@ -166,6 +166,7 @@ def hidden_early_access(
             response.headers[EA_STATUS_HEADER] = "unknown"
             return embargoed
         response.headers[EA_STATUS_HEADER] = "accepted"
+        response.headers["Cache-Control"] = "private, no-store"
         return embargoed - allowed
 
     if x_ea_token is None:
