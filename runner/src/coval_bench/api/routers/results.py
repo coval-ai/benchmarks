@@ -43,7 +43,7 @@ from coval_bench.api.common import (
     WindowLiteral,
 )
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
-from coval_bench.api.internal import hidden_models, is_internal
+from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
 from coval_bench.config import Settings
@@ -130,7 +130,7 @@ async def list_results(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
-    internal: bool = Depends(is_internal),
+    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> ResultsResponse:
     """Return a newest-first page of successful benchmark results.
 
@@ -202,13 +202,12 @@ async def list_results(
     if not include_failed:
         conditions.append("rn.status IN ('succeeded', 'partial')")
 
-    # -- Early-access embargo: exclude hidden models unless the caller is internal.
+    # -- Early-access embargo: exclude every model this caller may not see.
     # SQL-level (not post-read) so `limit` semantics stay exact.
-    if not internal:
-        for i, (ea_provider, ea_model) in enumerate(sorted(hidden_models())):
-            conditions.append(f"NOT (r.provider = %(ea_p{i})s AND r.model = %(ea_m{i})s)")
-            params[f"ea_p{i}"] = ea_provider
-            params[f"ea_m{i}"] = ea_model
+    for i, (ea_provider, ea_model) in enumerate(sorted(hidden)):
+        conditions.append(f"NOT (r.provider = %(ea_p{i})s AND r.model = %(ea_m{i})s)")
+        params[f"ea_p{i}"] = ea_provider
+        params[f"ea_m{i}"] = ea_model
 
     # -- Time window / since-until conditions
     if window is not None:
