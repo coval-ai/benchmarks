@@ -8,7 +8,8 @@ data endpoint strips them unless the caller proves it may see them. The
 benchmarking team presents ``X-Internal-Key`` and sees everything; a partner
 presents ``X-EA-Token``, which the server resolves to an allowlist of the models
 that token may see. The token is opaque and the allowlist lives in settings, so a
-request can never widen its own view.
+request can never widen its own view. A signed-in provider org presents a
+bearer Clerk session token instead (see ``clerk.py``).
 
 An absent or unknown proof yields the public view — the endpoints stay public
 either way, so there is nothing to 404 — and says so in ``X-EA-Token-Status``.
@@ -25,6 +26,7 @@ from collections.abc import Mapping
 import structlog
 from fastapi import Depends, Header, Response
 
+from coval_bench.api import clerk
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, ModelStatus
@@ -34,9 +36,9 @@ logger = structlog.get_logger("coval_bench.api.internal")
 # Which proof the response honoured: internal, accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
 
-# Both proof headers. Listing one is worse than listing none: a cached internal
-# response carries no X-EA-Token, so it would match a public request.
-VARY_HEADERS = "X-Internal-Key, X-EA-Token"
+# Every proof header. Listing a subset is worse than listing none: a cached
+# internal response carries no X-EA-Token, so it would match a public request.
+VARY_HEADERS = "X-Internal-Key, X-EA-Token, Authorization"
 
 
 def never_shared(response: Response) -> None:
@@ -46,7 +48,7 @@ def never_shared(response: Response) -> None:
     included: the same URL is a 404 for the public and a redirect for a partner,
     so a shared cache must never hand one caller's answer to another.
     """
-    response.headers.append("Vary", "X-Internal-Key, X-EA-Token")
+    response.headers.append("Vary", VARY_HEADERS)
     response.headers["Cache-Control"] = "private, no-store"
 
 
@@ -137,6 +139,7 @@ def hidden_early_access(
     response: Response,
     internal: bool = Depends(is_internal),
     x_ea_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
@@ -157,6 +160,15 @@ def hidden_early_access(
         return frozenset()
 
     embargoed = embargoed_pairs()
+    if x_ea_token is None and authorization is not None and settings.clerk_issuer is not None:
+        allowed = clerk.allowed_pairs(authorization, settings, embargoed)
+        if allowed is None:
+            response.headers[EA_STATUS_HEADER] = "unknown"
+            return embargoed
+        response.headers[EA_STATUS_HEADER] = "accepted"
+        response.headers["Cache-Control"] = "private, no-store"
+        return embargoed - allowed
+
     if x_ea_token is None:
         response.headers[EA_STATUS_HEADER] = "absent"
         return embargoed
