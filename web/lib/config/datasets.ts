@@ -14,6 +14,10 @@ const DATASET_LABELS: Record<string, string> = {
   "stt-wildasr-accent": "WildASR accents",
 };
 
+// S2S aggregates are pinned to the multi-turn dataset everywhere (dashboard
+// and overview) so legacy single-turn s2s-v1 rows never pool into V2V stats.
+export const S2S_MULTITURN_DATASET = "s2s-multiturn-v1";
+
 export function datasetLabel(id: string): string {
   return DATASET_LABELS[id] ?? id;
 }

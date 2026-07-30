@@ -96,8 +96,8 @@ export function OverviewPageClient() {
           </h1>
 
           <p className="mx-auto mt-3 max-w-md text-pretty text-center text-base leading-snug text-text-secondary">
-            Measuring the accuracy, latency, and quality of text-to-speech and
-            speech-to-text models.
+            Measuring the accuracy, latency, and quality of text-to-speech,
+            speech-to-text, and speech-to-speech models.
           </p>
 
           <div className="mt-6 md:mt-8">

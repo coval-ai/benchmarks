@@ -32,6 +32,31 @@ function modelIsEnabled(
   return modelInfo?.disabled !== true;
 }
 
+/**
+ * Composite keys of catalogue models flagged disabled (retired/pending
+ * server-side). Data endpoints still return rows for them — pending models
+ * keep ingesting — so rankings built from raw stats must exclude these.
+ */
+export function disabledModelKeys(
+  benchmark: "STT" | "TTS" | "S2S",
+  providers?: ProvidersApiResponse
+): Set<string> {
+  const keys = new Set<string>();
+  if (!providers) return keys;
+  const catalogue =
+    (benchmark === "STT"
+      ? providers.stt
+      : benchmark === "S2S"
+        ? providers.s2s
+        : providers.tts) ?? [];
+  for (const providerInfo of catalogue) {
+    for (const modelInfo of providerInfo.models) {
+      if (modelInfo.disabled) keys.add(toModelKey(providerInfo.provider, modelInfo.model));
+    }
+  }
+  return keys;
+}
+
 function addModel(
   modelsByProvider: ModelsByProvider,
   provider: string,
