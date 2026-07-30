@@ -18,6 +18,11 @@ from coval_bench.api.internal import VARY_HEADERS, is_internal
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from tests.api.conftest import (
+    EA_MODEL,
+    EA_MODEL_OTHER,
+    EA_PROVIDER,
+    EA_TOKEN,
+    EA_TOKEN_OTHER,
     INTERNAL_API_KEY,
     _fill_buckets,
     _insert_result,
@@ -28,20 +33,27 @@ from tests.api.conftest import (
 _INTERNAL_HEADERS = {"X-Internal-Key": INTERNAL_API_KEY}
 _WRONG_HEADERS = {"X-Internal-Key": "not-the-key"}
 
-_EA_PROVIDER = "acme"
-_EA_MODEL = "unreleased-stt"
+_EA_PROVIDER = EA_PROVIDER
+_EA_MODEL = EA_MODEL
 
 
 @pytest.fixture
 def early_access_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extend the registry with one EARLY_ACCESS STT model for the duration of a test."""
+    """Extend the registry with two EARLY_ACCESS STT models for the duration of a test.
+
+    Both sit on one provider so a per-model allowlist can be told apart from a
+    per-provider one.
+    """
     patched = [
         *MODEL_REGISTRY,
-        RegisteredModel(
-            benchmark=Benchmark.STT,
-            provider=_EA_PROVIDER,
-            model=_EA_MODEL,
-            status=ModelStatus.EARLY_ACCESS,
+        *(
+            RegisteredModel(
+                benchmark=Benchmark.STT,
+                provider=_EA_PROVIDER,
+                model=model,
+                status=ModelStatus.EARLY_ACCESS,
+            )
+            for model in (_EA_MODEL, EA_MODEL_OTHER)
         ),
     ]
     monkeypatch.setattr("coval_bench.api.internal.MODEL_REGISTRY", patched)
@@ -161,9 +173,9 @@ async def test_providers_serves_early_access_enabled_to_internal(client: AsyncCl
     assert response.status_code == 200
     by_provider = {p["provider"]: p["models"] for p in response.json()["stt"]}
     assert _EA_PROVIDER in by_provider
-    (model,) = by_provider[_EA_PROVIDER]
-    assert model["model"] == _EA_MODEL
-    assert model["disabled"] is False
+    models = {m["model"]: m for m in by_provider[_EA_PROVIDER]}
+    assert models.keys() == {_EA_MODEL, EA_MODEL_OTHER}
+    assert all(m["disabled"] is False for m in models.values())
 
 
 def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -230,3 +242,47 @@ async def test_public_responses_are_cacheable_privileged_ones_are_not(
 
     internal = await client.get("/v1/providers", headers=_INTERNAL_HEADERS)
     assert internal.headers["Cache-Control"] == "private, no-store"
+
+
+@pytest.mark.usefixtures("early_access_registry")
+async def test_two_partner_tokens_never_share_an_aggregates_cache_entry(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Token A then token B on the same cache: B must not see A's model.
+
+    This is the case that actually proves the cache key. Only /v1/results/aggregates
+    caches, and A goes first so a key that ignored the caller would serve A's rows
+    straight back to B.
+    """
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=_EA_MODEL)
+    await _insert_result(postgresql, run_id, provider=_EA_PROVIDER, model=EA_MODEL_OTHER)
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    params = {"benchmark": "STT", "window": "24h"}
+
+    first = await client.get(
+        "/v1/results/aggregates", params=params, headers={"X-EA-Token": EA_TOKEN}
+    )
+    assert first.status_code == 200
+    assert first.headers["X-EA-Token-Status"] == "accepted"
+    assert (_EA_PROVIDER, _EA_MODEL) in _models_in(first.json()["model_stats"])
+    assert (_EA_PROVIDER, EA_MODEL_OTHER) not in _models_in(first.json()["model_stats"])
+
+    second = await client.get(
+        "/v1/results/aggregates", params=params, headers={"X-EA-Token": EA_TOKEN_OTHER}
+    )
+    assert second.status_code == 200
+    stats = _models_in(second.json()["model_stats"])
+    assert (_EA_PROVIDER, EA_MODEL_OTHER) in stats
+    assert (_EA_PROVIDER, _EA_MODEL) not in stats, "token A's model leaked into token B's view"
+
+
+@pytest.mark.usefixtures("early_access_registry")
+async def test_partner_token_scopes_the_providers_catalogue(client: AsyncClient) -> None:
+    """A token reveals its own model and keeps the sibling on the same provider hidden."""
+    response = await client.get("/v1/providers", headers={"X-EA-Token": EA_TOKEN})
+    assert response.status_code == 200
+    by_provider = {p["provider"]: p["models"] for p in response.json()["stt"]}
+    assert {m["model"] for m in by_provider[_EA_PROVIDER]} == {_EA_MODEL}
