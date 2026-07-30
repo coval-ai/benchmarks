@@ -3,6 +3,7 @@ import {
   ACCESS_COOKIE_MAX_AGE_S,
   ACCESS_COOKIE_NAME,
   ACCESS_COOKIE_PATHS,
+  RETIRED_ACCESS_COOKIE_PATHS,
   type ArenaRole,
   accessSecretConfigured,
   gateAllows,
@@ -30,22 +31,26 @@ function buildCookieHeader(name: string, value: string, path: string, expires: D
 }
 
 /**
- * Issue the arena identity cookie over both scoped paths, retiring any unscoped one.
+ * Issue the arena identity cookie over both scoped paths, retiring cookies at any
+ * previous path.
  *
- * The pre-scoping cookie sat at "/" and still prefix-matches /arena, so leaving it in
- * place would have the browser send two cookies of the same name and pick between them
- * by path length. Expiring it in the same response keeps that from happening, and costs
- * the visitor nothing.
+ * The pre-scoping cookie sat at "/" and still prefix-matches every arena path, so
+ * leaving it in place would have the browser send two cookies of the same name and pick
+ * between them by path length. The "/arena" cookie predates the pages moving under
+ * /overview; it never reaches the new pages but expiring it keeps stale identities from
+ * lingering. Doing both in the same response costs the visitor nothing.
  */
 function setIdentityCookie(res: NextResponse, token: string): void {
   const expires = new Date(Date.now() + ACCESS_COOKIE_MAX_AGE_S * 1000);
   for (const path of ACCESS_COOKIE_PATHS) {
     res.headers.append("Set-Cookie", buildCookieHeader(ACCESS_COOKIE_NAME, token, path, expires));
   }
-  res.headers.append(
-    "Set-Cookie",
-    buildCookieHeader(ACCESS_COOKIE_NAME, "", "/", new Date(0)),
-  );
+  for (const path of RETIRED_ACCESS_COOKIE_PATHS) {
+    res.headers.append(
+      "Set-Cookie",
+      buildCookieHeader(ACCESS_COOKIE_NAME, "", path, new Date(0)),
+    );
+  }
 }
 
 /** The unlock link, when it carries the right token: mint a labeler and clean the URL. */
@@ -128,8 +133,8 @@ function arenaGate(req: NextRequest): NextResponse {
   if (unlocked) return unlocked;
 
   // A signature alone is not enough: every public visitor now holds a validly signed
-  // `external` cookie, and it is sent here because it is scoped to /arena. Only a labeler
-  // gets through.
+  // `external` cookie, and it is sent here because it is scoped to /overview/arena. Only
+  // a labeler gets through.
   const payload = verifyAccess(req.cookies.get(ACCESS_COOKIE_NAME)?.value);
   if (payload && gateAllows(payload)) {
     const res = NextResponse.next();
@@ -160,11 +165,11 @@ function playgroundSession(req: NextRequest): NextResponse {
 // the endpoints they call. The arena needs traffic to tighten its provisional
 // confidence intervals, and the runner caps every arena endpoint at 60/minute.
 //
-// This is an allowlist on purpose: anything else under /arena or /api/arena stays
-// behind the access token, so a route added later is gated by default rather than
-// published by omission. /arena/admin and /api/arena/admin/* are the current such
-// routes — convergence and Elo pairing internals, with no auth of their own.
-const PUBLIC_ARENA_PAGES = new Set(["/arena", "/arena/leaderboard"]);
+// This is an allowlist on purpose: anything else under /overview/arena or /api/arena
+// stays behind the access token, so a route added later is gated by default rather than
+// published by omission. /overview/arena/admin and /api/arena/admin/* are the current
+// such routes — convergence and Elo pairing internals, with no auth of their own.
+const PUBLIC_ARENA_PAGES = new Set(["/overview/arena", "/overview/arena/leaderboard"]);
 const PUBLIC_ARENA_API_PREFIXES = [
   "/api/arena/battle", // create a battle, and /battle/<id>/reveal after the vote
   "/api/arena/vote",
@@ -181,12 +186,17 @@ function isPublicArenaPath(pathname: string): boolean {
 
 export function middleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith("/arena") || pathname.startsWith("/api/arena")) {
+  if (pathname.startsWith("/overview/arena") || pathname.startsWith("/api/arena")) {
     return isPublicArenaPath(pathname) ? ensureArenaIdentity(req) : arenaGate(req);
   }
   return playgroundSession(req);
 }
 
 export const config = {
-  matcher: ["/playground", "/arena", "/arena/:path*", "/api/arena/:path*"],
+  matcher: [
+    "/playground",
+    "/overview/arena",
+    "/overview/arena/:path*",
+    "/api/arena/:path*",
+  ],
 };

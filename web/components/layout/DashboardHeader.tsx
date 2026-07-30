@@ -12,11 +12,12 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 
 // Benchmark sections, shown as tabs in the upper right of the top nav bar.
+// The arena has no tab of its own: it lives under /overview/arena, reached
+// from the card on the overview page.
 const SECTIONS = [
   { href: "/overview", label: "Overview", short: "Overview" },
   { href: "/tts", label: "Text-to-Speech", short: "TTS" },
   { href: "/stt", label: "Speech-to-Text", short: "STT" },
-  { href: "/arena", label: "Arena", short: "Arena" },
   { href: "/playground", label: "Playground", short: "Playground" }
 ];
 

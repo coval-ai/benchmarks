@@ -27,8 +27,8 @@ const FIELD =
 const BTN = `min-h-11 font-sans text-sm font-medium tracking-[0.01em] ${FOCUS}`;
 
 // Post-vote only: standings shown before a vote anchor the judgment, and votes are what
-// tightens the provisional CIs. Flip to false to pull the link entirely — /arena/leaderboard
-// stays reachable by URL either way.
+// tightens the provisional CIs. Flip to false to pull the link entirely —
+// /overview/arena/leaderboard stays reachable by URL either way.
 const SHOW_LEADERBOARD_LINK = true;
 
 export default function ArenaPage() {
@@ -325,7 +325,7 @@ export default function ArenaPage() {
                   </label>
                   {SHOW_LEADERBOARD_LINK && (
                     <Link
-                      href="/arena/leaderboard"
+                      href="/overview/arena/leaderboard"
                       className={`${BTN} flex items-center rounded-full border border-border-primary px-6 text-text-secondary hover:bg-hover-bg`}
                     >
                       View leaderboard
