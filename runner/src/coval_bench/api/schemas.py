@@ -196,6 +196,40 @@ class LeaderboardResponse(BaseModel):
     entries: list[LeaderboardEntry]
 
 
+class S2SSampleTurnOut(BaseModel):
+    """One spoken turn of a sampled conversation."""
+
+    index: int
+    role: str
+    content: str
+    start_offset: float | None = None
+    end_offset: float | None = None
+
+
+class S2SSampleRecordingOut(BaseModel):
+    """One model's recording. ``audio_path`` is an API route, not a storage URL."""
+
+    provider: str
+    model: str
+    audio_path: str
+    coval_run_id: str
+    sim_id: str
+    agent_id: str | None = None
+    turns: list[S2SSampleTurnOut] = Field(default_factory=list)
+
+
+class S2SSampleOut(BaseModel):
+    """One sample, filtered to the recordings this caller may see."""
+
+    schema_version: int | None = None
+    sample_id: str
+    test_case_id: str
+    test_set_id: str | None = None
+    persona_name: str | None = None
+    transcript: str | None = None
+    recordings: list[S2SSampleRecordingOut]
+
+
 class BattleOut(BaseModel):
     """A battle to vote on. Blind by design: no provider/model identities."""
 
