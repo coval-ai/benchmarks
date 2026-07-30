@@ -822,6 +822,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="xai",
+        model="grok-voice-think-fast-2.0",
+        tags=(_STREAMING, _MULTI),
+        status=_EARLY_ACCESS,
+    ),
 ]
 
 _key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)

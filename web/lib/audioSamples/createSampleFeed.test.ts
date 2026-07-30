@@ -194,17 +194,30 @@ describe("parseS2SManifest", () => {
 });
 
 describe("visibleRecordings", () => {
-  it("keeps only recordings whose provider is visible", () => {
+  it("keeps only recordings whose model is visible", () => {
     const manifest: S2SSampleManifest = {
       ...validManifest,
       recordings: [
-        { ...validManifest.recordings[0]!, provider: "openai" },
-        { ...validManifest.recordings[0]!, provider: "hidden" },
+        { ...validManifest.recordings[0]!, provider: "openai", model: "gpt-realtime" },
+        { ...validManifest.recordings[0]!, provider: "hidden", model: "hidden-model" },
       ],
     };
-    const out = visibleRecordings(manifest, new Set(["openai"]));
+    const out = visibleRecordings(manifest, new Set(["openai:gpt-realtime"]));
     expect(out).toHaveLength(1);
     expect(out[0]!.provider).toBe("openai");
+  });
+
+  it("distinguishes two models of the same provider", () => {
+    const manifest: S2SSampleManifest = {
+      ...validManifest,
+      recordings: [
+        { ...validManifest.recordings[0]!, provider: "xai", model: "grok-realtime" },
+        { ...validManifest.recordings[0]!, provider: "xai", model: "grok-voice-think-fast-2.0" },
+      ],
+    };
+    const out = visibleRecordings(manifest, new Set(["xai:grok-voice-think-fast-2.0"]));
+    expect(out).toHaveLength(1);
+    expect(out[0]!.model).toBe("grok-voice-think-fast-2.0");
   });
 });
 

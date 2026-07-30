@@ -39,8 +39,8 @@ export function SamplesCard() {
     getCurrentTimeWindow,
   } = useDashboard();
   const coordinator = usePlaybackCoordinator();
-  const visibleProviders = useMemo(
-    () => new Set(Object.keys(modelsByProvider)),
+  const visibleModels = useMemo(
+    () => new Set(Object.values(modelsByProvider).flat()),
     [modelsByProvider]
   );
 
@@ -87,13 +87,13 @@ export function SamplesCard() {
   // turn list, so a timeline click always reaches its audio.
   const items = useMemo<SampleOutputItem[]>(() => {
     if (!manifest) return [];
-    return visibleRecordings(manifest, visibleProviders).map((r) => ({
+    return visibleRecordings(manifest, visibleModels).map((r) => ({
       provider: r.provider,
       model: r.model,
       url: s2sSampleFeed.objectUrl(r.object),
       turns: r.turns,
     }));
-  }, [manifest, visibleProviders]);
+  }, [manifest, visibleModels]);
 
   // A timeline row can name a provider this bucket never recorded — an older
   // tick from before that model was benchmarked, or one absent from the page's
