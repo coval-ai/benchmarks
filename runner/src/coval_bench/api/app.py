@@ -18,17 +18,27 @@ from __future__ import annotations
 import atexit
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 
 import structlog
 from fastapi import FastAPI
+from fastapi.exception_handlers import (
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from posthog import Posthog
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.requests import Request
+from starlette.responses import Response
 
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.compression import SelectiveGZipMiddleware
+from coval_bench.api.internal import never_shared
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
@@ -47,6 +57,28 @@ from coval_bench.db.conn import lifespan_pool
 from coval_bench.logging import configure_logging
 
 logger = structlog.get_logger("coval_bench.api")
+
+
+async def _never_shared_http_error(request: Request, exc: Exception) -> Response:
+    """The stock HTTP error, marked as this caller's alone.
+
+    FastAPI builds an exception response from scratch, so the headers a route set
+    on its injected ``Response`` are gone by the time the error is rendered. An
+    embargoed recording answers 404 to the public and 302 to a partner at the very
+    same URL, and without this a shared cache could hand the 404 to the partner.
+    """
+    response = await http_exception_handler(request, cast("StarletteHTTPException", exc))
+    never_shared(response)
+    return response
+
+
+async def _never_shared_validation_error(request: Request, exc: Exception) -> Response:
+    """A rejected request parameter, under the same cache policy as every error."""
+    response = await request_validation_exception_handler(
+        request, cast("RequestValidationError", exc)
+    )
+    never_shared(response)
+    return response
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -115,6 +147,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.state.response_cache = new_response_cache()
     app.state.cache_locks = new_cache_locks()
+
+    # Error responses carry the same caller-scoped cache policy as successful ones.
+    app.add_exception_handler(StarletteHTTPException, _never_shared_http_error)
+    app.add_exception_handler(RequestValidationError, _never_shared_validation_error)
 
     # Rate limiting (ADR-013) — in-memory per-instance; see ratelimit.py for caveat.
     app.state.limiter = limiter

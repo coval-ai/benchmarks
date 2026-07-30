@@ -26,7 +26,7 @@ from posthog import Posthog
 from starlette.requests import Request
 
 from coval_bench.api.deps import capture_api_event, get_posthog, get_settings
-from coval_bench.api.internal import EA_STATUS_HEADER, hidden_early_access
+from coval_bench.api.internal import EA_STATUS_HEADER, hidden_early_access, never_shared
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import S2SSampleOut, S2SSampleRecordingOut
 from coval_bench.config import Settings
@@ -44,11 +44,6 @@ logger = structlog.get_logger("coval_bench.api.s2s_samples")
 router = APIRouter(tags=["s2s"])
 
 _SAMPLE_ID = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
-
-
-def _never_shared(response: Response) -> None:
-    response.headers.append("Vary", "X-Internal-Key, X-EA-Token")
-    response.headers["Cache-Control"] = "private, no-store"
 
 
 def _sees_any_s2s_model(hidden: frozenset[tuple[str, str]]) -> bool:
@@ -73,7 +68,7 @@ async def list_s2s_samples(
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> list[str]:
     """Sample ids newest-first, empty when the caller may see no S2S model at all."""
-    _never_shared(response)
+    never_shared(response)
     if not settings.s2s_samples_bucket or not _sees_any_s2s_model(hidden):
         return []
     return await asyncio.to_thread(load_sample_ids, settings.s2s_samples_bucket)
@@ -89,15 +84,20 @@ async def get_s2s_sample(
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     posthog_client: Posthog | None = Depends(get_posthog),
 ) -> S2SSampleOut:
-    """One sample's manifest, carrying only the recordings this caller may see."""
-    _never_shared(response)
+    """One sample's manifest, carrying only the recordings this caller may see.
+
+    A sample whose every recording is embargoed for this caller is a 404 rather
+    than an empty shell: the surrounding metadata would otherwise confirm that a
+    tick exists and name the scenario and persona behind it.
+    """
+    never_shared(response)
     if not settings.s2s_samples_bucket:
         raise HTTPException(404, "s2s samples are not configured")
 
     sample = await asyncio.to_thread(
         load_sample, settings.s2s_samples_bucket, sample_id, hidden=hidden
     )
-    if sample is None:
+    if sample is None or not sample["recordings"]:
         raise HTTPException(404, f"no s2s sample for {sample_id}")
 
     recordings = [
@@ -164,7 +164,7 @@ async def get_s2s_sample_audio(
 
     url = await asyncio.to_thread(signed_url, settings.s2s_samples_bucket, key, ttl=AUDIO_URL_TTL)
     redirect = RedirectResponse(url, status_code=302)
-    _never_shared(redirect)
+    never_shared(redirect)
     ea_status = response.headers.get(EA_STATUS_HEADER)
     if ea_status is not None:
         redirect.headers[EA_STATUS_HEADER] = ea_status

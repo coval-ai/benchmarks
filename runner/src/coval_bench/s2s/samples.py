@@ -468,7 +468,7 @@ async def _publish_one_bucket(
     return 0
 
 
-AUDIO_URL_TTL = timedelta(minutes=30)
+AUDIO_URL_TTL = timedelta(minutes=10)
 
 
 def load_sample_ids(
@@ -480,6 +480,23 @@ def load_sample_ids(
     if not isinstance(raw, list):
         return []
     return sorted((s for s in raw if isinstance(s, str)), reverse=True)
+
+
+def _own_audio_object(key: object, sample_id: str) -> bool:
+    """True only for a recording key that lives inside this sample's own directory.
+
+    The manifest is ours, but a stale or malformed one must not be able to steer
+    signing at some other object in the bucket. The stored key is checked rather
+    than rebuilt from ``provider``/``model``: ticks published before the per-model
+    layout store ``{PREFIX}/{tick}/{provider}.wav``, and both layouts sit in the
+    bucket together until the older ticks age out.
+    """
+    return (
+        isinstance(key, str)
+        and key.startswith(f"{PREFIX}/{sample_id}/")
+        and key.endswith(".wav")
+        and ".." not in key
+    )
 
 
 def load_sample(
@@ -500,7 +517,7 @@ def load_sample(
         rec
         for rec in raw.get("recordings", [])
         if isinstance(rec, dict)
-        and isinstance(rec.get("object"), str)
+        and _own_audio_object(rec.get("object"), sample_id)
         and (rec.get("provider"), rec.get("model")) not in hidden
     ]
     return {**raw, "recordings": recordings}

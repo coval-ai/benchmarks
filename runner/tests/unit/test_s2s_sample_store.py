@@ -138,6 +138,39 @@ def test_load_sample_drops_recordings_without_an_object() -> None:
     assert sample["recordings"] == []
 
 
+def test_load_sample_drops_an_object_from_another_sample() -> None:
+    strayed = _manifest(_recording("openai", "gpt-realtime"))
+    strayed["recordings"][0]["object"] = "s2s-samples/2026-01-01T00:00:00Z/openai.wav"
+    client = _FakeClient({_MANIFEST_KEY: strayed})
+
+    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+
+    assert sample is not None
+    assert sample["recordings"] == []
+
+
+def test_load_sample_drops_an_object_that_is_not_audio() -> None:
+    strayed = _manifest(_recording("openai", "gpt-realtime"))
+    strayed["recordings"][0]["object"] = _MANIFEST_KEY
+    client = _FakeClient({_MANIFEST_KEY: strayed})
+
+    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+
+    assert sample is not None
+    assert sample["recordings"] == []
+
+
+def test_load_sample_drops_a_traversing_object() -> None:
+    strayed = _manifest(_recording("openai", "gpt-realtime"))
+    strayed["recordings"][0]["object"] = f"s2s-samples/{_SAMPLE}/../../secrets/leak.wav"
+    client = _FakeClient({_MANIFEST_KEY: strayed})
+
+    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+
+    assert sample is not None
+    assert sample["recordings"] == []
+
+
 def test_load_sample_missing_manifest_is_none() -> None:
     assert load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=_FakeClient({})) is None
 
@@ -160,6 +193,23 @@ def test_audio_object_key_refuses_a_hidden_model() -> None:
 
     key = audio_object_key(
         _BUCKET, _SAMPLE, "xai", "grok-realtime", hidden=_HIDDEN, storage_client=client
+    )
+
+    assert key is None
+
+
+def test_audio_object_key_refuses_an_object_outside_the_sample() -> None:
+    strayed = _manifest(_recording("openai", "gpt-realtime"))
+    strayed["recordings"][0]["object"] = "s2s-samples/2026-01-01T00:00:00Z/openai.wav"
+    client = _FakeClient({_MANIFEST_KEY: strayed})
+
+    key = audio_object_key(
+        _BUCKET,
+        _SAMPLE,
+        "openai",
+        "gpt-realtime",
+        hidden=frozenset(),
+        storage_client=client,
     )
 
     assert key is None

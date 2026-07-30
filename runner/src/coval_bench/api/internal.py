@@ -35,6 +35,17 @@ logger = structlog.get_logger("coval_bench.api.internal")
 EA_STATUS_HEADER = "X-EA-Token-Status"
 
 
+def never_shared(response: Response) -> None:
+    """Mark a response as belonging to this caller alone.
+
+    Any response whose content depends on the presented proof needs this, errors
+    included: the same URL is a 404 for the public and a redirect for a partner,
+    so a shared cache must never hand one caller's answer to another.
+    """
+    response.headers.append("Vary", "X-Internal-Key, X-EA-Token")
+    response.headers["Cache-Control"] = "private, no-store"
+
+
 def embargoed_pairs() -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
     return frozenset(

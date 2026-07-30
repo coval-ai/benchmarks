@@ -37,11 +37,11 @@ _LIVE = ("openlab", "public-s2s")
 _EMBARGOED = ("acme", "secret-s2s")
 
 
-def _recording(provider: str, model: str) -> dict[str, Any]:
+def _recording(provider: str, model: str, sample_id: str = _SAMPLE) -> dict[str, Any]:
     return {
         "provider": provider,
         "model": model,
-        "object": f"s2s-samples/{_SAMPLE}/{provider}/{model}.wav",
+        "object": f"s2s-samples/{sample_id}/{provider}/{model}.wav",
         "coval_run_id": "run-1",
         "sim_id": "sim-1",
         "agent_id": "agent-1",
@@ -57,6 +57,14 @@ _OBJECTS: dict[str, Any] = {
         "test_case_id": "tc-1",
         "persona_name": "Standard Male",
         "recordings": [_recording(*_LIVE), _recording(*_EMBARGOED)],
+    },
+    # A tick whose only recording is embargoed: nothing about it may reach the public.
+    f"s2s-samples/{_OTHER_SAMPLE}/manifest.json": {
+        "schema_version": 2,
+        "bucket_at": _OTHER_SAMPLE,
+        "test_case_id": "tc-secret",
+        "persona_name": "Standard Female",
+        "recordings": [_recording(*_EMBARGOED, sample_id=_OTHER_SAMPLE)],
     },
 }
 
@@ -203,6 +211,25 @@ async def test_malformed_sample_id_is_rejected_before_any_read(
     assert res.status_code == 422
 
 
+async def test_a_wholly_embargoed_sample_is_a_404_not_an_empty_shell(
+    samples_client: AsyncClient,
+) -> None:
+    res = await samples_client.get(f"/v1/s2s/samples/{_OTHER_SAMPLE}")
+
+    assert res.status_code == 404
+    assert "tc-secret" not in res.text
+    assert "Standard Female" not in res.text
+
+
+async def test_the_same_sample_is_served_to_a_caller_who_may_hear_it(
+    samples_client: AsyncClient,
+) -> None:
+    res = await samples_client.get(f"/v1/s2s/samples/{_OTHER_SAMPLE}", headers=_PARTNER)
+
+    assert res.status_code == 200
+    assert _pairs(res.json()) == [_EMBARGOED]
+
+
 # --- the audio redirect -----------------------------------------------------
 
 
@@ -253,3 +280,34 @@ async def test_audio_for_an_unknown_recording_is_a_404(samples_client: AsyncClie
     )
 
     assert res.status_code == 404
+
+
+# --- errors are caller-scoped too -------------------------------------------
+
+
+async def test_a_refusal_is_never_cached(samples_client: AsyncClient) -> None:
+    """The public 404 and the partner's 302 share a URL, so no cache may reuse it."""
+    res = await samples_client.get(
+        f"/v1/s2s/samples/{_SAMPLE}/{_EMBARGOED[0]}/{_EMBARGOED[1]}/audio",
+        follow_redirects=False,
+    )
+
+    assert res.status_code == 404
+    assert res.headers["cache-control"] == "private, no-store"
+    assert "X-EA-Token" in res.headers["vary"]
+
+
+async def test_an_embargoed_manifest_404_is_never_cached(samples_client: AsyncClient) -> None:
+    res = await samples_client.get(f"/v1/s2s/samples/{_OTHER_SAMPLE}")
+
+    assert res.status_code == 404
+    assert res.headers["cache-control"] == "private, no-store"
+    assert "X-EA-Token" in res.headers["vary"]
+
+
+async def test_a_rejected_sample_id_is_never_cached(samples_client: AsyncClient) -> None:
+    res = await samples_client.get("/v1/s2s/samples/banana")
+
+    assert res.status_code == 422
+    assert res.headers["cache-control"] == "private, no-store"
+    assert "X-EA-Token" in res.headers["vary"]
