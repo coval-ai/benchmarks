@@ -39,22 +39,33 @@ export function tokenHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Store any token present in the URL. Safe to call during render (idempotent). */
-export function captureTokensFromUrl(): void {
+/**
+ * Store any token present in the URL, returning true when a stored value changed.
+ *
+ * Call from a committed effect, never from render: the change is reported once, so
+ * a replayed render would write the token on the first pass and report no change on
+ * the second, losing it. Prefer `applyTokensFromUrl`.
+ */
+export function captureTokensFromUrl(): boolean {
   const params = new URL(window.location.href).searchParams;
+  let changed = false;
   for (const { param, storage } of Object.values(TOKENS)) {
     const value = params.get(param);
     if (value === null) continue;
     try {
-      if (value === "") {
+      const next = value === "" ? null : value;
+      if (window.localStorage.getItem(storage) === next) continue;
+      if (next === null) {
         window.localStorage.removeItem(storage);
       } else {
-        window.localStorage.setItem(storage, value);
+        window.localStorage.setItem(storage, next);
       }
+      changed = true;
     } catch {
       // storage unavailable — requests just won't carry the token
     }
   }
+  return changed;
 }
 
 /** Remove token params from the URL. Call after hydration — during render the
@@ -65,4 +76,17 @@ export function stripTokensFromUrl(): void {
   if (present.length === 0) return;
   for (const { param } of present) url.searchParams.delete(param);
   window.history.replaceState(window.history.state, "", url.toString());
+}
+
+/**
+ * Adopt the URL's tokens, then clean the URL, calling `onIdentityChange` when the
+ * caller's identity actually changed.
+ *
+ * The whole sequence belongs in one committed effect. Running any of it in render
+ * makes the change flag depend on which render pass React keeps — Strict Mode
+ * replays the pass, and the second one sees the token already stored.
+ */
+export function applyTokensFromUrl(onIdentityChange: () => void): void {
+  if (captureTokensFromUrl()) onIdentityChange();
+  stripTokensFromUrl();
 }

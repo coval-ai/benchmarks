@@ -20,6 +20,7 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -42,6 +43,19 @@ from coval_bench.config import Settings
 
 ARENA_LABELER_KEY = "test-labeler-key"
 INTERNAL_API_KEY = "test-internal-key"
+
+# Two synthetic embargoed models on one provider, and a partner token entitled to
+# each. Same provider on purpose: it proves the allowlist separates callers by
+# model, not just by vendor.
+EA_PROVIDER = "acme"
+EA_MODEL = "unreleased-stt"
+EA_MODEL_OTHER = "unreleased-stt-2"
+EA_TOKEN = "test-ea-token"  # noqa: S105 - fake grant token
+EA_TOKEN_OTHER = "test-ea-token-other"  # noqa: S105 - fake grant token
+EARLY_ACCESS_TOKENS = {
+    EA_TOKEN: [f"{EA_PROVIDER}/{EA_MODEL}"],
+    EA_TOKEN_OTHER: [f"{EA_PROVIDER}/{EA_MODEL_OTHER}"],
+}
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -179,6 +193,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
+    monkeypatch.setenv("EARLY_ACCESS_TOKENS", json.dumps(EARLY_ACCESS_TOKENS))
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
