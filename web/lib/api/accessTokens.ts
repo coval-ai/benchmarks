@@ -39,22 +39,33 @@ export function tokenHeaders(): Record<string, string> {
   return headers;
 }
 
-/** Store any token present in the URL. Safe to call during render (idempotent). */
-export function captureTokensFromUrl(): void {
+/**
+ * Store any token present in the URL, returning true when a stored value changed.
+ *
+ * Safe to call during render (idempotent), but act on the return value from an
+ * effect — a caller that changed identity has a stale cache to drop, and clearing
+ * it during render is not allowed.
+ */
+export function captureTokensFromUrl(): boolean {
   const params = new URL(window.location.href).searchParams;
+  let changed = false;
   for (const { param, storage } of Object.values(TOKENS)) {
     const value = params.get(param);
     if (value === null) continue;
     try {
-      if (value === "") {
+      const next = value === "" ? null : value;
+      if (window.localStorage.getItem(storage) === next) continue;
+      if (next === null) {
         window.localStorage.removeItem(storage);
       } else {
-        window.localStorage.setItem(storage, value);
+        window.localStorage.setItem(storage, next);
       }
+      changed = true;
     } catch {
       // storage unavailable — requests just won't carry the token
     }
   }
+  return changed;
 }
 
 /** Remove token params from the URL. Call after hydration — during render the
