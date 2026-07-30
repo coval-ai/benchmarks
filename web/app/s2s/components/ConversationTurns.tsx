@@ -32,7 +32,7 @@ export function ConversationTurns({
   turns: S2STurn[];
   accentColor: string;
   currentTime?: number;
-  onSeek?: (seconds: number) => void;
+  onSeek?: (seconds: number, turn: { index: number; role: "caller" | "agent" }) => void;
 }) {
   const active = onSeek ? activeTurnIndex(turns, currentTime) : -1;
   // Only fade the others once something is genuinely highlighted. Without
@@ -68,7 +68,12 @@ export function ConversationTurns({
           <button
             key={t.index}
             type="button"
-            onClick={() => onSeek(t.start_offset as number)}
+            onClick={() =>
+              onSeek(t.start_offset as number, {
+                index: t.index,
+                role: agent ? "agent" : "caller",
+              })
+            }
             aria-current={isActive ? "true" : undefined}
             className={`${className} block w-full cursor-pointer text-left hover:opacity-100`}
             style={style}

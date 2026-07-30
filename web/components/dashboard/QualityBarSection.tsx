@@ -18,7 +18,7 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import { POSTHOG_EVENTS, type QualityBarMetric } from "@/lib/posthog/events";
 
 const INSTRUCTION_DESCRIPTION = {
   short: "Instruction adherence (%)",
@@ -68,6 +68,7 @@ const QualityBarSection: React.FC = () => {
         surface: `${mode}_dashboard`,
         mode,
         model_id: data.model,
+        metric: (isS2S ? "instruction" : "wer") satisfies QualityBarMetric,
       });
     }
     handleWERBarClick(data);

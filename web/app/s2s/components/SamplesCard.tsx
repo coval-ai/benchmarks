@@ -3,16 +3,25 @@
 
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { SampleFetchError } from "@/lib/audioSamples/createSampleFeed";
 import { s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
 import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import {
+  POSTHOG_EVENTS,
+  type S2SPlayTrigger,
+  type S2STickDirection,
+} from "@/lib/posthog/events";
 import { usePlaybackCoordinator } from "@/hooks/useSequencedPlayback";
-import { SampleOutputs, type SampleOutputItem } from "./SampleOutputs";
+import {
+  SampleOutputs,
+  type SampleListenInfo,
+  type SampleOutputItem,
+  type SampleSeekInfo,
+} from "./SampleOutputs";
 
 // Which failure case fired, for the console — network/http/parse vs an
 // unclassified error, with the status when we have one.
@@ -113,16 +122,77 @@ export function SamplesCard() {
     !manifestQuery.isPlaceholderData &&
     requestedItem === undefined;
 
+  // Bucket/model of the last activation: the listen-ended flush can arrive
+  // after a tick swap has already replaced the manifest, and must attribute to
+  // what actually played.
+  const playContextRef = useRef<{ bucket?: string; model?: string }>({});
+
   const handlePlay = useCallback(
-    (provider: string) => {
+    (provider: string, trigger: S2SPlayTrigger) => {
+      const position = items.findIndex((item) => item.provider === provider);
+      const item = position >= 0 ? items[position] : undefined;
+      playContextRef.current = { bucket: manifest?.bucket_at, model: item?.model };
       capturePostHogEvent(POSTHOG_EVENTS.s2sSamplePlayRequested, {
         surface: "s2s_dashboard",
         mode: "s2s",
         provider,
+        model_id: item?.model,
+        position: position >= 0 ? position : undefined,
+        has_transcript: (item?.turns?.length ?? 0) > 0,
+        trigger,
         bucket_at: manifest?.bucket_at,
       });
     },
-    [manifest?.bucket_at]
+    [items, manifest?.bucket_at]
+  );
+
+  const handlePlaybackEnded = useCallback(
+    (provider: string, listen: SampleListenInfo) => {
+      capturePostHogEvent(POSTHOG_EVENTS.s2sSamplePlaybackEnded, {
+        surface: "s2s_dashboard",
+        mode: "s2s",
+        provider,
+        model_id: playContextRef.current.model,
+        bucket_at: playContextRef.current.bucket,
+        trigger: listen.trigger,
+        listen_pct: listen.listenPct,
+        duration_seconds: listen.durationSeconds,
+        completed: listen.completed,
+      });
+    },
+    []
+  );
+
+  const handleSeeked = useCallback(
+    (provider: string, seek: SampleSeekInfo) => {
+      const item = items.find((i) => i.provider === provider);
+      capturePostHogEvent(POSTHOG_EVENTS.s2sSampleSeeked, {
+        surface: "s2s_dashboard",
+        mode: "s2s",
+        provider,
+        model_id: item?.model,
+        bucket_at: manifest?.bucket_at,
+        method: seek.method,
+        to_seconds: Math.round(seek.toSeconds),
+        turn_index: seek.turnIndex,
+        turn_role: seek.turnRole,
+      });
+    },
+    [items, manifest?.bucket_at]
+  );
+
+  const handleTickSelect = useCallback(
+    (direction: S2STickDirection, toTick: string) => {
+      capturePostHogEvent(POSTHOG_EVENTS.s2sSampleTickChanged, {
+        surface: "s2s_dashboard",
+        mode: "s2s",
+        direction,
+        from_bucket: displayedTick,
+        to_bucket: toTick,
+      });
+      selectS2SSample(toTick);
+    },
+    [displayedTick, selectS2SSample]
   );
 
   const loading =
@@ -149,7 +219,7 @@ export function SamplesCard() {
               type="button"
               aria-label="Show older conversation sample"
               disabled={!olderTick}
-              onClick={() => olderTick && selectS2SSample(olderTick)}
+              onClick={() => olderTick && handleTickSelect("older", olderTick)}
               className="flex size-11 items-center justify-center rounded-md border border-border-secondary text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 disabled:cursor-default disabled:text-text-tertiary disabled:opacity-30 lg:size-8"
             >
               <ChevronLeft className="size-4" />
@@ -162,7 +232,7 @@ export function SamplesCard() {
               type="button"
               aria-label="Show newer conversation sample"
               disabled={!newerTick}
-              onClick={() => newerTick && selectS2SSample(newerTick)}
+              onClick={() => newerTick && handleTickSelect("newer", newerTick)}
               className="flex size-11 items-center justify-center rounded-md border border-border-secondary text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 disabled:cursor-default disabled:text-text-tertiary disabled:opacity-30 lg:size-8"
             >
               <ChevronRight className="size-4" />
@@ -171,7 +241,7 @@ export function SamplesCard() {
           {effectiveTick !== latestTick ? (
             <button
               type="button"
-              onClick={() => latestTick && selectS2SSample(latestTick)}
+              onClick={() => latestTick && handleTickSelect("latest", latestTick)}
               className="min-h-11 rounded-full border border-border-primary px-3 text-xs text-text-secondary transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-text-tertiary/40 lg:min-h-8"
             >
               Return to latest
@@ -203,6 +273,8 @@ export function SamplesCard() {
             items={items}
             normalizeProvider={normalizeProviderName}
             onPlay={handlePlay}
+            onSeeked={handleSeeked}
+            onPlaybackEnded={handlePlaybackEnded}
             playRequest={
               requestedItem && !manifestQuery.isPlaceholderData
                 ? { provider: requestedItem.provider, nonce: s2sPlayRequest!.nonce }
