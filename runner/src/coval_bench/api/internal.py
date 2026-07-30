@@ -8,7 +8,8 @@ data endpoint strips them unless the caller proves it may see them. The
 benchmarking team presents ``X-Internal-Key`` and sees everything; a partner
 presents ``X-EA-Token``, which the server resolves to an allowlist of the models
 that token may see. The token is opaque and the allowlist lives in settings, so a
-request can never widen its own view.
+request can never widen its own view. A signed-in provider org presents a
+bearer Clerk session token instead (see ``clerk.py``).
 
 An absent or unknown proof yields the public view — the endpoints stay public
 either way, so there is nothing to 404 — and says so in ``X-EA-Token-Status``.
@@ -25,6 +26,7 @@ from collections.abc import Mapping
 import structlog
 from fastapi import Depends, Header, Response
 
+from coval_bench.api import clerk
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, ModelStatus
@@ -122,6 +124,7 @@ def hidden_early_access(
     response: Response,
     internal: bool = Depends(is_internal),
     x_ea_token: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
@@ -136,6 +139,14 @@ def hidden_early_access(
         return frozenset()
 
     embargoed = embargoed_pairs()
+    if x_ea_token is None and authorization is not None and settings.clerk_issuer is not None:
+        allowed = clerk.allowed_pairs(authorization, settings, embargoed)
+        if allowed is None:
+            response.headers[EA_STATUS_HEADER] = "unknown"
+            return embargoed
+        response.headers[EA_STATUS_HEADER] = "accepted"
+        return embargoed - allowed
+
     if x_ea_token is None:
         response.headers[EA_STATUS_HEADER] = "absent"
         return embargoed

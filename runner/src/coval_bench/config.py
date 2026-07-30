@@ -177,6 +177,11 @@ class Settings(BaseSettings):
     # so a request carries only an opaque token and can never widen its own view.
     # Unset means no token unlocks anything.
     early_access_tokens: SecretStr | None = None
+    # Clerk instance whose JWKS verifies provider-org session tokens.
+    # Unset means no bearer token unlocks anything.
+    clerk_issuer: str | None = None
+    # Allowed azp claim values; empty skips the check.
+    clerk_authorized_parties: list[str] = []
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

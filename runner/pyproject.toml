@@ -28,6 +28,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "slowapi>=0.1.9",
     "cachetools>=5.3",
+    "pyjwt[crypto]>=2.9",
     # WebSocket clients (STT providers)
     "websockets>=13,<14",
     # Fish Audio WS protocol serialization
