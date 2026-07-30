@@ -34,6 +34,10 @@ logger = structlog.get_logger("coval_bench.api.internal")
 # Which proof the response honoured: internal, accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
 
+# Both proof headers. Listing one is worse than listing none: a cached internal
+# response carries no X-EA-Token, so it would match a public request.
+VARY_HEADERS = "X-Internal-Key, X-EA-Token"
+
 
 def embargoed_pairs() -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
@@ -126,13 +130,19 @@ def hidden_early_access(
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
 
-    Only a presented-but-unknown token is logged; an absent one is ordinary public
-    traffic. Subtracting the allowlist means an entry naming a model that is no
-    longer embargoed is inert, and no token reveals what the registry does not
-    currently embargo.
+    Sets the cache headers here rather than per route, so no endpoint can serve
+    embargoed rows without them. Only a presented-but-unknown token is logged; an
+    absent one is ordinary public traffic. Subtracting the allowlist means an entry
+    naming a model that is no longer embargoed is inert, and no token reveals what
+    the registry does not currently embargo.
     """
+    # Appended, not assigned: SelectiveGZipMiddleware adds Accept-Encoding after
+    # the route returns, and assignment here would be overwritten.
+    response.headers.append("Vary", VARY_HEADERS)
+
     if internal:
         response.headers[EA_STATUS_HEADER] = "internal"
+        response.headers["Cache-Control"] = "private, no-store"
         return frozenset()
 
     embargoed = embargoed_pairs()
@@ -148,4 +158,5 @@ def hidden_early_access(
         return embargoed
 
     response.headers[EA_STATUS_HEADER] = "accepted"
+    response.headers["Cache-Control"] = "private, no-store"
     return embargoed - allowed
