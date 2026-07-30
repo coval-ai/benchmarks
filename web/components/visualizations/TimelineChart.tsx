@@ -42,7 +42,7 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
-import { s2sSampleFeed } from "@/lib/audioSamples/s2sFeed";
+import { useS2SSampleIdsQuery, useS2SSampleQuery } from "@/lib/api/queries";
 
 interface LegendEntry {
   value: string;
@@ -277,7 +277,7 @@ const TimelineChart: React.FC = () => {
     requestS2SPlay,
     normalizeProviderName,
   } = useDashboard();
-  const s2sSampleIndex = s2sSampleFeed.useIndexQuery(page === "s2s").data;
+  const s2sSampleIndex = useS2SSampleIdsQuery(page === "s2s").data;
   const hasS2SBucketRecording = useCallback(
     (label: number) => s2sSampleIndex?.includes(bucketTickKey(label)),
     [s2sSampleIndex]
@@ -300,7 +300,7 @@ const TimelineChart: React.FC = () => {
     inspectedKey && s2sSampleIndex?.includes(inspectedKey)
       ? inspectedKey
       : null;
-  const inspectedManifestQuery = s2sSampleFeed.useManifestQuery(inspectedTick);
+  const inspectedManifestQuery = useS2SSampleQuery(inspectedTick);
   const hasS2SProviderRecording = useCallback(
     (label: number, provider: string) => {
       const tick = bucketTickKey(label);
