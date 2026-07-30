@@ -28,7 +28,9 @@ def _jwks(issuer: str) -> jwt.PyJWKClient:
 def _claims(token: str, settings: Settings) -> dict[str, Any] | None:
     """Verified claims, or ``None`` if the token proves nothing."""
     issuer = settings.clerk_issuer
-    if issuer is None:
+    parties = settings.clerk_authorized_parties
+    if issuer is None or not parties:
+        logger.warning("clerk_token_rejected", error="clerk_authorized_parties unset")
         return None
     try:
         key = _jwks(issuer).get_signing_key_from_jwt(token).key
@@ -43,8 +45,7 @@ def _claims(token: str, settings: Settings) -> dict[str, Any] | None:
     except jwt.PyJWTError as exc:
         logger.warning("clerk_token_rejected", error=str(exc))
         return None
-    parties = settings.clerk_authorized_parties
-    if parties and claims.get("azp") not in parties:
+    if claims.get("azp") not in parties:
         logger.warning("clerk_token_rejected", error="azp not in clerk_authorized_parties")
         return None
     return claims

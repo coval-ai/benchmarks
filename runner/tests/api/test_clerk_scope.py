@@ -44,7 +44,7 @@ def _stub_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
 def _settings(
     monkeypatch: pytest.MonkeyPatch,
     issuer: str | None = _ISSUER,
-    parties: str | None = None,
+    parties: str | None = f'["{_PARTY}"]',
 ) -> Settings:
     monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
@@ -187,6 +187,14 @@ def test_azp_in_the_allowlist_is_accepted(monkeypatch: pytest.MonkeyPatch) -> No
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == frozenset()
+
+
+def test_unset_authorized_parties_rejects_every_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, parties=None)
+    token = _mint({"benchmark_providers": "*"})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "unknown"
+    assert hidden == embargoed_pairs()
 
 
 def test_bearer_is_ignored_when_clerk_is_not_configured(

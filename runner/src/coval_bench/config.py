@@ -180,7 +180,7 @@ class Settings(BaseSettings):
     # Clerk instance whose JWKS verifies provider-org session tokens.
     # Unset means no bearer token unlocks anything.
     clerk_issuer: str | None = None
-    # Allowed azp claim values; empty skips the check.
+    # Allowed azp claim values; bearer tokens are rejected while empty.
     clerk_authorized_parties: list[str] = []
 
     # --- Arena ---
