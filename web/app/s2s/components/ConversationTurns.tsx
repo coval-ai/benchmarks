@@ -40,13 +40,31 @@ export function ConversationTurns({
   // offsets nothing ever is, and dimming every turn would just look broken.
   const fadeInactive = active >= 0;
   const listRef = useRef<HTMLDivElement>(null);
+  // A manual scroll takes the list out of follow mode so playback stops
+  // yanking it back; tapping a turn is the explicit re-sync.
+  const detachedRef = useRef(false);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const detach = () => {
+      detachedRef.current = true;
+    };
+    el.addEventListener("wheel", detach, { passive: true });
+    el.addEventListener("touchmove", detach, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", detach);
+      el.removeEventListener("touchmove", detach);
+    };
+  }, []);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
     if (active < 0) {
+      detachedRef.current = false;
       el.scrollTo({ top: 0 });
       return;
     }
+    if (detachedRef.current) return;
     const turn = el.children.item(active) as HTMLElement | null;
     if (turn) {
       el.scrollTo({ top: Math.max(0, turn.offsetTop - el.offsetTop - 8), behavior: "smooth" });
@@ -84,12 +102,13 @@ export function ConversationTurns({
           <button
             key={t.index}
             type="button"
-            onClick={() =>
+            onClick={() => {
+              detachedRef.current = false;
               onSeek(t.start_offset as number, {
                 index: t.index,
                 role: agent ? "agent" : "caller",
-              })
-            }
+              });
+            }}
             aria-current={isActive ? "true" : undefined}
             className={`${className} block w-full cursor-pointer text-left hover:opacity-100`}
             style={style}
