@@ -371,6 +371,7 @@ export function SampleOutputs({
                 {turns.length ? (
                   <ConversationTurns
                     turns={turns}
+                    agentLabel={item.model}
                     accentColor={color}
                     currentTime={active ? currentTime : 0}
                     seeked={active ? sliderSeek : undefined}

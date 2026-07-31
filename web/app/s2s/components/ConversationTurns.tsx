@@ -26,12 +26,16 @@ export function activeTurnIndex(turns: S2STurn[], currentTime: number): number {
 // When `onSeek` is given, a turn carrying an offset jumps the playhead to it.
 export function ConversationTurns({
   turns,
+  agentLabel,
   accentColor,
   currentTime = 0,
   onSeek,
   seeked,
 }: {
   turns: S2STurn[];
+  // Model id from the pane header, so each agent turn stays attributed to the
+  // model being compared. The caller side is always Coval's simulated caller.
+  agentLabel: string;
   accentColor: string;
   currentTime?: number;
   onSeek?: (seconds: number, turn: { index: number; role: "caller" | "agent" }) => void;
@@ -115,7 +119,7 @@ export function ConversationTurns({
         const body = (
           <>
             <span className="font-mono text-[9px] uppercase tracking-wider text-text-tertiary">
-              {agent ? "Agent" : "Caller"}
+              {agent ? agentLabel : "Caller (simulated)"}
             </span>
             <p className={`text-[11px] leading-snug ${agent ? "text-text-primary" : "text-text-secondary"}`}>
               {t.content}
