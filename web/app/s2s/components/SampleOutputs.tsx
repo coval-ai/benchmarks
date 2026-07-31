@@ -287,7 +287,7 @@ export function SampleOutputs({
               <div
                 key={item.provider}
                 role="listitem"
-                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border bg-surface-elevated p-3 transition-colors ${
+                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border bg-surface-elevated p-3 ${
                   active ? "" : "border-border-secondary"
                 }`}
                 style={active ? { borderColor: color, boxShadow: `inset 2px 0 0 ${color}` } : undefined}
@@ -304,31 +304,36 @@ export function SampleOutputs({
                 <span className="truncate font-mono text-[11px] text-text-tertiary">
                   {item.model}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    triggerRef.current = "button";
-                    if (playingThis) toggle();
-                    else playFrom(i);
-                  }}
-                  className={`flex min-h-11 items-center gap-1.5 self-start rounded-full border border-border-primary px-3 text-[11px] text-text-secondary transition-colors hover:text-text-primary lg:min-h-8 ${
+                {/* One <audio> is shared, so the playhead belongs to the active
+                    pane alone; other panes keep their turns static. The slider
+                    shares the Play button's row, so a pane never resizes when
+                    playback starts or moves between panes. */}
+                <div
+                  className={`flex min-h-11 items-center gap-2 lg:min-h-8 ${
                     turns.length ? "" : "mt-auto"
                   }`}
-                  aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
                 >
-                  {playingThis ? (
-                    <span className="flex" style={{ color }}>
-                      <CymaticLoader size={16} animated />
-                    </span>
-                  ) : (
-                    <Play className="size-3" />
-                  )}
-                  <span>{playingThis ? "Playing" : "Play"}</span>
-                </button>
-                {/* One <audio> is shared, so the playhead belongs to the active
-                    pane alone; other panes keep their turns static. */}
-                {active && duration > 0 ? (
-                  <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerRef.current = "button";
+                      if (playingThis) toggle();
+                      else playFrom(i);
+                    }}
+                    className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-border-primary px-3 text-[11px] text-text-secondary transition-colors hover:text-text-primary lg:min-h-8"
+                    aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
+                  >
+                    {playingThis ? (
+                      <span className="flex" style={{ color }}>
+                        <CymaticLoader size={16} animated />
+                      </span>
+                    ) : (
+                      <Play className="size-3" />
+                    )}
+                    <span>{playingThis ? "Playing" : "Play"}</span>
+                  </button>
+                  {active && duration > 0 ? (
+                    <>
                     <input
                       type="range"
                       min={0}
@@ -347,7 +352,7 @@ export function SampleOutputs({
                         );
                       }}
                       aria-label={`Seek ${normalizeProvider(item.provider)} recording`}
-                      className="h-11 w-full cursor-pointer appearance-none bg-transparent focus:outline-none lg:h-8 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-sm [&::-moz-range-track]:[background:var(--progress)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-sm [&::-webkit-slider-runnable-track]:[background:var(--progress)] [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-text-primary focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-text-primary"
+                      className="h-11 min-w-0 flex-1 cursor-pointer appearance-none bg-transparent focus:outline-none lg:h-8 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-sm [&::-moz-range-track]:[background:var(--progress)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-sm [&::-webkit-slider-runnable-track]:[background:var(--progress)] [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-text-primary focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-text-primary"
                       style={
                         {
                           color,
@@ -357,11 +362,12 @@ export function SampleOutputs({
                         } as CSSProperties
                       }
                     />
-                    <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
-                      {elapsed(currentTime)}/{elapsed(duration)}
-                    </span>
-                  </div>
-                ) : null}
+                      <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
+                        {elapsed(currentTime)}/{elapsed(duration)}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
                 {turns.length ? (
                   <ConversationTurns
                     turns={turns}
