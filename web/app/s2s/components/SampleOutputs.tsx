@@ -17,6 +17,8 @@ import type { S2SPlayTrigger, S2SSeekMethod } from "@/lib/posthog/events";
 import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
 import { ConversationTurns } from "./ConversationTurns";
 
+type SliderSeek = { time: number; nonce: number };
+
 export interface SampleOutputItem {
   provider: string;
   model: string;
@@ -158,6 +160,11 @@ export function SampleOutputs({
       },
       coordinator
     );
+
+  const [sliderSeek, setSliderSeek] = useState<SliderSeek | undefined>(undefined);
+  useEffect(() => {
+    setSliderSeek(undefined);
+  }, [activeIndex]);
 
   // Mirror playhead progress into the session; maxTime survives backward seeks.
   useEffect(() => {
@@ -331,6 +338,7 @@ export function SampleOutputs({
                       onChange={(e) => {
                         const target = Number(e.target.value);
                         seek(target);
+                        setSliderSeek((s) => ({ time: target, nonce: (s?.nonce ?? 0) + 1 }));
                         reportSliderSeek(item.provider, () =>
                           onSeeked?.(item.provider, {
                             method: "slider",
@@ -359,6 +367,7 @@ export function SampleOutputs({
                     turns={turns}
                     accentColor={color}
                     currentTime={active ? currentTime : 0}
+                    seeked={active ? sliderSeek : undefined}
                     onSeek={
                       active
                         ? (seconds, turn) => {

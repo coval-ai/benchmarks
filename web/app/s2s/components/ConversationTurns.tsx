@@ -3,7 +3,7 @@
 
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
 
 // The turn holding the playhead, or -1. The latest turn started at or before
@@ -29,47 +29,83 @@ export function ConversationTurns({
   accentColor,
   currentTime = 0,
   onSeek,
+  seeked,
 }: {
   turns: S2STurn[];
   accentColor: string;
   currentTime?: number;
   onSeek?: (seconds: number, turn: { index: number; role: "caller" | "agent" }) => void;
+  // Slider scrubs, so the list can glide to the turn being scrubbed to. The
+  // list never follows playback on its own — only user gestures move it.
+  seeked?: { time: number; nonce: number };
 }) {
   const active = onSeek ? activeTurnIndex(turns, currentTime) : -1;
   // Only fade the others once something is genuinely highlighted. Without
   // offsets nothing ever is, and dimming every turn would just look broken.
   const fadeInactive = active >= 0;
   const listRef = useRef<HTMLDivElement>(null);
-  // A manual scroll takes the list out of follow mode so playback stops
-  // yanking it back; tapping a turn is the explicit re-sync.
-  const detachedRef = useRef(false);
-  useEffect(() => {
+  // One retargetable glide owns all list motion (the SectionHeader anchor
+  // pattern): each frame closes 15% of the gap, so a new target mid-flight
+  // bends the animation instead of restarting it, and rapid target changes
+  // can never fight each other. User wheel/touch input cancels it outright.
+  const targetRef = useRef<number | null>(null);
+  const rafRef = useRef(0);
+  const glideTo = useCallback((top: number) => {
     const el = listRef.current;
     if (!el) return;
-    const detach = () => {
-      detachedRef.current = true;
+    targetRef.current = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight));
+    if (rafRef.current) return;
+    const step = () => {
+      const list = listRef.current;
+      const target = targetRef.current;
+      if (!list || target == null) {
+        rafRef.current = 0;
+        return;
+      }
+      const delta = target - list.scrollTop;
+      if (Math.abs(delta) < 1) {
+        list.scrollTop = target;
+        targetRef.current = null;
+        rafRef.current = 0;
+        return;
+      }
+      list.scrollTop += delta * 0.15;
+      rafRef.current = requestAnimationFrame(step);
     };
-    el.addEventListener("wheel", detach, { passive: true });
-    el.addEventListener("touchmove", detach, { passive: true });
-    return () => {
-      el.removeEventListener("wheel", detach);
-      el.removeEventListener("touchmove", detach);
-    };
+    rafRef.current = requestAnimationFrame(step);
   }, []);
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
-    if (active < 0) {
-      detachedRef.current = false;
-      el.scrollTo({ top: 0 });
-      return;
-    }
-    if (detachedRef.current) return;
-    const turn = el.children.item(active) as HTMLElement | null;
-    if (turn) {
-      el.scrollTo({ top: Math.max(0, turn.offsetTop - el.offsetTop - 8), behavior: "smooth" });
-    }
-  }, [active]);
+    const cancel = () => {
+      targetRef.current = null;
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    };
+    el.addEventListener("wheel", cancel, { passive: true });
+    el.addEventListener("touchmove", cancel, { passive: true });
+    return () => {
+      cancel();
+      el.removeEventListener("wheel", cancel);
+      el.removeEventListener("touchmove", cancel);
+    };
+  }, []);
+  const turnTop = useCallback((index: number) => {
+    const el = listRef.current;
+    const turn = el?.children.item(index) as HTMLElement | null;
+    return el && turn ? turn.offsetTop - el.offsetTop : 0;
+  }, []);
+  const resting = active < 0;
+  useEffect(() => {
+    if (resting) glideTo(0);
+  }, [resting, glideTo]);
+  const seenSeek = useRef(seeked?.nonce ?? 0);
+  useEffect(() => {
+    if (!seeked || seeked.nonce === seenSeek.current) return;
+    seenSeek.current = seeked.nonce;
+    const idx = activeTurnIndex(turns, seeked.time);
+    if (idx >= 0) glideTo(turnTop(idx));
+  }, [seeked, turns, glideTo, turnTop]);
   return (
     <div ref={listRef} className="mt-1 max-h-56 space-y-2 overflow-y-auto pr-1">
       {turns.map((t, i) => {
@@ -103,7 +139,7 @@ export function ConversationTurns({
             key={t.index}
             type="button"
             onClick={() => {
-              detachedRef.current = false;
+              glideTo(turnTop(i));
               onSeek(t.start_offset as number, {
                 index: t.index,
                 role: agent ? "agent" : "caller",
