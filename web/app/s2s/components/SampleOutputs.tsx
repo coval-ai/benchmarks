@@ -3,8 +3,9 @@
 
 "use client";
 
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
-import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Play } from "lucide-react";
+import { type CSSProperties, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import {
   useSequencedPlayback,
   type PlaybackCoordinator,
@@ -248,7 +249,7 @@ export function SampleOutputs({
             type="button"
             onClick={() => step(-1)}
             aria-label="Scroll responses left"
-            className="absolute left-0.5 top-1/2 z-[3] flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px]"
+            className="absolute left-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] lg:size-8"
           >
             <ChevronLeft className="size-5" />
           </button>
@@ -258,7 +259,7 @@ export function SampleOutputs({
             type="button"
             onClick={() => step(1)}
             aria-label="Scroll responses right"
-            className="absolute right-0.5 top-1/2 z-[3] flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px]"
+            className="absolute right-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] lg:size-8"
           >
             <ChevronRight className="size-5" />
           </button>
@@ -279,11 +280,10 @@ export function SampleOutputs({
               <div
                 key={item.provider}
                 role="listitem"
-                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
-                  active
-                    ? "border-text-primary/40 bg-surface-secondary"
-                    : "border-border-primary bg-surface-secondary/60"
+                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border bg-surface-elevated p-3 transition-colors ${
+                  active ? "" : "border-border-secondary"
                 }`}
+                style={active ? { borderColor: color, boxShadow: `inset 2px 0 0 ${color}` } : undefined}
               >
                 <div className="flex items-center gap-1.5">
                   <span
@@ -304,12 +304,18 @@ export function SampleOutputs({
                     if (playingThis) toggle();
                     else playFrom(i);
                   }}
-                  className={`flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary ${
+                  className={`flex min-h-11 items-center gap-1.5 self-start rounded-full border border-border-primary px-3 text-[11px] text-text-secondary transition-colors hover:text-text-primary lg:min-h-8 ${
                     turns.length ? "" : "mt-auto"
                   }`}
                   aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
                 >
-                  {playingThis ? <Pause className="size-3" /> : <Play className="size-3" />}
+                  {playingThis ? (
+                    <span className="flex" style={{ color }}>
+                      <CymaticLoader size={16} animated />
+                    </span>
+                  ) : (
+                    <Play className="size-3" />
+                  )}
                   <span>{playingThis ? "Playing" : "Play"}</span>
                 </button>
                 {/* One <audio> is shared, so the playhead belongs to the active
@@ -333,8 +339,15 @@ export function SampleOutputs({
                         );
                       }}
                       aria-label={`Seek ${normalizeProvider(item.provider)} recording`}
-                      className="h-1 w-full cursor-pointer"
-                      style={{ accentColor: color }}
+                      className="h-11 w-full cursor-pointer appearance-none bg-transparent focus:outline-none lg:h-8 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-sm [&::-moz-range-track]:[background:var(--progress)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-sm [&::-webkit-slider-runnable-track]:[background:var(--progress)] [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-text-primary focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-text-primary"
+                      style={
+                        {
+                          color,
+                          "--progress": `linear-gradient(to right, currentColor ${
+                            (Math.min(currentTime, duration) / duration) * 100
+                          }%, var(--color-border-primary) 0)`,
+                        } as CSSProperties
+                      }
                     />
                     <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
                       {elapsed(currentTime)}/{elapsed(duration)}

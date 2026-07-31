@@ -3,6 +3,7 @@
 
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
 
 // The turn holding the playhead, or -1. The latest turn started at or before
@@ -38,8 +39,21 @@ export function ConversationTurns({
   // Only fade the others once something is genuinely highlighted. Without
   // offsets nothing ever is, and dimming every turn would just look broken.
   const fadeInactive = active >= 0;
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (active < 0) {
+      el.scrollTo({ top: 0 });
+      return;
+    }
+    const turn = el.children.item(active) as HTMLElement | null;
+    if (turn) {
+      el.scrollTo({ top: Math.max(0, turn.offsetTop - el.offsetTop - 8), behavior: "smooth" });
+    }
+  }, [active]);
   return (
-    <div className="mt-1 max-h-56 space-y-2 overflow-y-auto pr-1">
+    <div ref={listRef} className="mt-1 max-h-56 space-y-2 overflow-y-auto pr-1">
       {turns.map((t, i) => {
         const agent = t.role === "assistant";
         const seekable = onSeek !== undefined && t.start_offset !== undefined;
@@ -49,7 +63,9 @@ export function ConversationTurns({
             <span className="font-mono text-[9px] uppercase tracking-wider text-text-tertiary">
               {agent ? "Agent" : "Caller"}
             </span>
-            <p className="text-[11px] leading-snug text-text-primary">{t.content}</p>
+            <p className={`text-[11px] leading-snug ${agent ? "text-text-primary" : "text-text-secondary"}`}>
+              {t.content}
+            </p>
           </>
         );
         const className = `border-l-2 pl-2 transition-opacity ${
