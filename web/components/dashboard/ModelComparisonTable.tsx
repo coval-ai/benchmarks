@@ -185,11 +185,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         <p className="mb-2 text-right text-xs text-text-tertiary sm:hidden">
           Swipe table for more →
         </p>
-        <div className="overflow-x-auto">
+        <div className="max-h-[70vh] overflow-auto">
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
-              <th className="w-px py-2 pr-4 text-left font-medium">Model</th>
+              <th className="sticky top-0 z-10 w-px bg-surface-elevated py-2 pr-4 text-left font-medium">Model</th>
               {columns.map((column) => (
                 <th
                   key={column.key}
@@ -200,7 +200,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         : "descending"
                       : undefined
                   }
-                  className="px-3 py-2 text-right font-medium"
+                  className="sticky top-0 z-10 bg-surface-elevated px-3 py-2 text-right font-medium"
                 >
                   <button
                     type="button"
