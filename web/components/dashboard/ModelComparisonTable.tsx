@@ -186,10 +186,10 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
           Swipe table for more →
         </p>
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
-              <th className="sticky left-0 z-10 bg-surface-elevated py-2 pr-4 text-left font-medium">Model</th>
+              <th className="w-px py-2 pr-4 text-left font-medium">Model</th>
               {columns.map((column) => (
                 <th
                   key={column.key}
@@ -233,8 +233,8 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 key={row.model}
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
-                <td className="sticky left-0 z-[1] bg-surface-elevated py-3 pr-4 align-middle">
-                  <div className="flex items-center gap-1.5 font-medium text-text-primary">
+                <td className="py-3 pr-4 align-middle">
+                  <div className="flex items-center gap-1.5 whitespace-nowrap font-medium text-text-primary">
                     {normalizeModelName(row.model)}
                     {dedicatedModels?.has(row.model) && (
                       <button
