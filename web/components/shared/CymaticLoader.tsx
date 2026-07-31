@@ -593,7 +593,11 @@ export function CymaticLoader({
               ? "0ms"
               : animated
                 ? "420ms"
-                : "620ms",
+                : "300ms",
+            // Hold the swarm at full opacity while it settles back onto the
+            // logo figure, then cross-fade to the crisp SVG in sync with its
+            // fade-in — the mark reforms instead of evaporating mid-cloud.
+            transitionDelay: prefersReducedMotion || animated ? "0ms" : "430ms",
           }}
         >
           <CymaticLoaderCanvas
