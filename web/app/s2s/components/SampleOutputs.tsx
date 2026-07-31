@@ -285,7 +285,7 @@ export function SampleOutputs({
             const turns = item.turns ?? [];
             return (
               <div
-                key={item.provider}
+                key={item.audioPath}
                 role="listitem"
                 className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border bg-surface-elevated p-3 ${
                   active ? "" : "border-border-secondary"

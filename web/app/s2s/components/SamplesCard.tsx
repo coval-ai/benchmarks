@@ -210,12 +210,18 @@ export function SamplesCard() {
     [displayedTick, selectS2SSample]
   );
 
-  // Hold the skeleton until every signed URL is in: a pane whose URL is still in
-  // flight would hand the shared audio element an empty src.
+  // Hold the previous panes until every signed URL is in: a pane whose URL is
+  // still in flight would hand the shared audio element an empty src.
+  const pendingUrls = recordings.length > 0 && audioUrls.isPending;
+  const lastReadyItems = useRef<SampleOutputItem[]>([]);
+  if (!pendingUrls) lastReadyItems.current = items;
+  const displayItems = pendingUrls ? lastReadyItems.current : items;
+  const transitioning = manifestQuery.isPlaceholderData || pendingUrls;
+
   const loading =
     indexQuery.isLoading ||
     (effectiveTick != null && manifestQuery.isLoading) ||
-    (recordings.length > 0 && audioUrls.isPending);
+    (pendingUrls && displayItems.length === 0);
 
   useEffect(() => {
     if (s2sPlayRequest?.source === "timeline") {
@@ -283,27 +289,32 @@ export function SamplesCard() {
         <p className="py-8 text-center text-sm text-text-tertiary">
           Samples are temporarily unavailable.
         </p>
-      ) : items.length === 0 ? (
+      ) : displayItems.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-tertiary">
           {!manifest && s2sPlayRequest
             ? "No sample recorded for this point."
             : "Samples appear here after the next benchmark run."}
         </p>
       ) : (
-        <div className="flex flex-1 flex-col gap-4">
+        <div
+          aria-busy={transitioning}
+          className={`flex flex-1 flex-col gap-4 transition-opacity ${
+            transitioning ? "pointer-events-none opacity-50" : ""
+          }`}
+        >
           {requestedProviderMissing && requestedProvider ? (
             <p className="text-[11px] text-text-tertiary">
               No recording for {normalizeProviderName(requestedProvider)} at this point.
             </p>
           ) : null}
           <SampleOutputs
-            items={items}
+            items={displayItems}
             normalizeProvider={normalizeProviderName}
             onPlay={handlePlay}
             onSeeked={handleSeeked}
             onPlaybackEnded={handlePlaybackEnded}
             playRequest={
-              requestedItem && !manifestQuery.isPlaceholderData
+              requestedItem && !transitioning
                 ? { provider: requestedItem.provider, nonce: s2sPlayRequest!.nonce }
                 : null
             }
