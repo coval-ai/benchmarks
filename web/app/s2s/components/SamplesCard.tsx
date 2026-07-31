@@ -225,10 +225,18 @@ export function SamplesCard() {
 
   return (
     <Card id="s2s-samples" className="text-left min-w-0 h-full flex flex-col" padding="p-5 lg:p-8">
-      <div className="mb-4 flex items-baseline justify-between gap-2">
+      <div className="mb-4">
         <h2 className="text-xl font-medium text-text-primary">
           Conversation samples
         </h2>
+        <p className="mt-1 text-sm font-light text-text-tertiary">
+          Latency tells you when a model speaks; these recordings let you hear
+          how it handles the same scripted caller.
+          <span className="mt-1 block">
+            Play a model to follow its transcript. Tap a turn to jump the audio
+            there.
+          </span>
+        </p>
       </div>
 
       {effectiveTick && sampleTicks.length > 1 ? (
