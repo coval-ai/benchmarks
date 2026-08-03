@@ -52,25 +52,33 @@ def never_shared(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
 
-# Board keys an embargoed model used to be published under. Sample manifests
-# and result rows written before a rename still carry the old key, and the
-# embargo matches on the stored string, so dropping an entry here re-exposes
-# every recording and row published under that name. Retire one only once no
-# stored artefact can still name it.
-_RETIRED_EMBARGOED_KEYS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("xai", "grok-realtime"),
-    }
-)
+# Board keys an embargoed model used to be published under, mapped to the key it
+# uses now. Sample manifests and result rows written before a rename still carry
+# the old string and the embargo matches on what is stored, so a retired key stays
+# embargoed -- dropping an entry here re-exposes every artefact published under
+# that name. Retire one only once nothing stored can still name it.
+_RETIRED_BOARD_KEYS: dict[tuple[str, str], tuple[str, str]] = {
+    ("xai", "grok-realtime"): ("xai", "grok-voice-think-fast-1.0"),
+}
 
 
 def embargoed_pairs() -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
-    return (
-        frozenset(
-            (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-        )
-        | _RETIRED_EMBARGOED_KEYS
+    return frozenset(
+        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+    ) | frozenset(_RETIRED_BOARD_KEYS)
+
+
+def with_retired_keys(allowed: frozenset[tuple[str, str]]) -> frozenset[tuple[str, str]]:
+    """Extend an allowlist to the retired keys of the models it already names.
+
+    An allowlist names models, not the strings they were once published under, so
+    clearing a caller for a model clears them for its history too. Without this a
+    rename would silently narrow every partner's view to artefacts written after
+    it, and each operator would have to know to list both keys by hand.
+    """
+    return allowed | frozenset(
+        retired for retired, current in _RETIRED_BOARD_KEYS.items() if current in allowed
     )
 
 
@@ -182,7 +190,7 @@ def hidden_early_access(
             return embargoed
         response.headers[EA_STATUS_HEADER] = "accepted"
         response.headers["Cache-Control"] = "private, no-store"
-        return embargoed - allowed
+        return embargoed - with_retired_keys(allowed)
 
     if x_ea_token is None:
         response.headers[EA_STATUS_HEADER] = "absent"
@@ -197,4 +205,4 @@ def hidden_early_access(
 
     response.headers[EA_STATUS_HEADER] = "accepted"
     response.headers["Cache-Control"] = "private, no-store"
-    return embargoed - allowed
+    return embargoed - with_retired_keys(allowed)
