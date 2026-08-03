@@ -69,7 +69,11 @@ class CovalRun:
 AGENTS: tuple[AgentSpec, ...] = (
     AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
     AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
-    AgentSpec(agent_id_attr="coval_s2s_xai_agent_id", provider="xai", model="grok-realtime"),
+    AgentSpec(
+        agent_id_attr="coval_s2s_xai_agent_id",
+        provider="xai",
+        model="grok-voice-think-fast-1.0",
+    ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
         provider="xai",

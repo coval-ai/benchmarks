@@ -99,6 +99,17 @@ def _entry(pair: tuple[str, str]) -> str:
     return f"{pair[0]}/{pair[1]}"
 
 
+def test_retired_board_keys_stay_embargoed() -> None:
+    """A renamed embargoed model keeps hiding artefacts stored under its old key.
+
+    Sample manifests and result rows written before the rename still carry the
+    old string, and the embargo matches on what is stored -- so losing the old
+    key would publish every recording and row published under that name.
+    """
+    assert ("xai", "grok-realtime") in embargoed_pairs()
+    assert ("xai", "grok-voice-think-fast-1.0") in embargoed_pairs()
+
+
 def test_no_token_hides_every_embargoed_model(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch, {_TOKEN: []})
     hidden, status = _resolve(settings, token=None)

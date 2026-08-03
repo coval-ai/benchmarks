@@ -173,8 +173,9 @@ class Settings(BaseSettings):
     internal_api_key: SecretStr | None = None
     # Partner early-access tokens (X-EA-Token header), as a JSON object mapping
     # each token to the "provider/model" entries that token may see under embargo:
-    # {"<token>": ["xai/grok-realtime"]}. The allowlist lives here, server-side,
-    # so a request carries only an opaque token and can never widen its own view.
+    # {"<token>": ["xai/grok-voice-think-fast-1.0"]}. The allowlist lives here,
+    # server-side, so a request carries only an opaque token and can never
+    # widen its own view.
     # Unset means no token unlocks anything.
     early_access_tokens: SecretStr | None = None
     # Clerk instance whose JWKS verifies provider-org session tokens.

@@ -16,7 +16,7 @@ from coval_bench.s2s.samples import audio_object_key, load_sample, load_sample_i
 _BUCKET = "coval-benchmarks-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
 _MANIFEST_KEY = f"s2s-samples/{_SAMPLE}/manifest.json"
-_HIDDEN = frozenset({("xai", "grok-realtime")})
+_HIDDEN = frozenset({("xai", "grok-voice-think-fast-1.0")})
 
 
 def _recording(provider: str, model: str) -> dict[str, Any]:
@@ -64,7 +64,7 @@ def test_load_sample_strips_hidden_recordings() -> None:
     client = _FakeClient(
         {
             _MANIFEST_KEY: _manifest(
-                _recording("openai", "gpt-realtime"), _recording("xai", "grok-realtime")
+                _recording("openai", "gpt-realtime"), _recording("xai", "grok-voice-think-fast-1.0")
             )
         }
     )
@@ -78,7 +78,7 @@ def test_load_sample_strips_hidden_recordings() -> None:
 
 
 def test_load_sample_hidden_recording_takes_its_transcript_with_it() -> None:
-    client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-realtime"))})
+    client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-voice-think-fast-1.0"))})
 
     sample = load_sample(_BUCKET, _SAMPLE, hidden=_HIDDEN, storage_client=client)
 
@@ -91,7 +91,7 @@ def test_load_sample_keeps_everything_for_an_unrestricted_caller() -> None:
     client = _FakeClient(
         {
             _MANIFEST_KEY: _manifest(
-                _recording("openai", "gpt-realtime"), _recording("xai", "grok-realtime")
+                _recording("openai", "gpt-realtime"), _recording("xai", "grok-voice-think-fast-1.0")
             )
         }
     )
@@ -189,10 +189,10 @@ def test_audio_object_key_returns_the_stored_path() -> None:
 
 
 def test_audio_object_key_refuses_a_hidden_model() -> None:
-    client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-realtime"))})
+    client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-voice-think-fast-1.0"))})
 
     key = audio_object_key(
-        _BUCKET, _SAMPLE, "xai", "grok-realtime", hidden=_HIDDEN, storage_client=client
+        _BUCKET, _SAMPLE, "xai", "grok-voice-think-fast-1.0", hidden=_HIDDEN, storage_client=client
     )
 
     assert key is None

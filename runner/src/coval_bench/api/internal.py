@@ -52,10 +52,25 @@ def never_shared(response: Response) -> None:
     response.headers["Cache-Control"] = "private, no-store"
 
 
+# Board keys an embargoed model used to be published under. Sample manifests
+# and result rows written before a rename still carry the old key, and the
+# embargo matches on the stored string, so dropping an entry here re-exposes
+# every recording and row published under that name. Retire one only once no
+# stored artefact can still name it.
+_RETIRED_EMBARGOED_KEYS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("xai", "grok-realtime"),
+    }
+)
+
+
 def embargoed_pairs() -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
-    return frozenset(
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+    return (
+        frozenset(
+            (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+        )
+        | _RETIRED_EMBARGOED_KEYS
     )
 
 
