@@ -482,6 +482,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="deepgram",
+        model="flux-haley-en",
+        voice="flux-haley-en",
+        tags=(_STREAMING, _STREAM),
+        on_prem=True,
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="gradium",
         model="default",
         voice="YTpq7expH9539ERJ",
@@ -755,6 +764,27 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_ACTIVE,
     ),
+    # No model id on the wire, only a voice, so "vui" is the bare surface name.
+    # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="fluxions",
+        model="vui",
+        voice="maeve",
+        voices=("maeve", "abraham"),
+        tags=(_STREAMING, _CLONE, _EMOTION),
+        status=_EARLY_ACCESS,
+        arena_enabled=False,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="lmnt",
+        model="blizzard",
+        voice="leah",
+        voices=("leah", "caleb"),
+        tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
+        status=_ACTIVE,
+    ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
     # guarantees verbatim speech, so its metrics are incomparable here. Kept
@@ -777,27 +807,36 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client). EARLY_ACCESS = pre-launch embargo: they run and fetch
-    # normally, but every data endpoint strips them for public callers and
-    # serves them only to X-Internal-Key requests until the benchmark launches.
+    # provider client).
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_STREAMING, _MULTI),
+        status=_ACTIVE,
+    ),
+    # xAI stays under the early-access embargo while they are unresponsive to
+    # outreach: runs and fetches normally, but every data endpoint strips both
+    # models for public callers (unlike PENDING, which only disables the
+    # catalogue entry and still serves their rows).
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="xai",
+        model="grok-realtime",
+        tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
-        model="grok-realtime",
+        model="grok-voice-think-fast-2.0",
         tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),

@@ -13,16 +13,15 @@ import {
 } from "@/components/shared/DedicatedInferenceInfo";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
-// Match the text sizes on the timeline chart above: 14px axis labels, 12px
-// tick/legend/category text.
+// Match the text sizes on the timeline chart above: 12px tick/legend/category
+// text.
 const modelFontSize = 12;
 const providerFontSize = 12;
-const axisLabelFontSize = "14px";
 const yAxisTickFontSize = "12px";
 const modelLineHeight = 14;
-// Bottom holds up to three label lines, the provider, the dedicated-inference
-// marker, and the axis caption — 80px stacked marker over caption.
-const margin = { top: 20, right: 8, bottom: 88, left: 40 };
+// Bottom fits the deepest label stack: four label lines, the provider, then the
+// dedicated-inference marker. The caption sits below it, in the container's pad.
+const margin = { top: 20, right: 8, bottom: 100, left: 40 };
 const minSlotWidth = 48;
 /** Share of a slot the label block may occupy; the rest is breathing room. */
 const labelBandRatio = 0.82;
@@ -361,18 +360,6 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       });
     }
 
-    // X-axis label (the Y axis title is omitted — it's redundant with the
-    // card heading).
-    g.append("text")
-      .attr(
-        "transform",
-        `translate(${chartWidth / 2}, ${chartHeight + margin.bottom - 6})`
-      )
-      .style("text-anchor", "middle")
-      .attr("fill", themeColors.axisText)
-      .attr("font-size", axisLabelFontSize)
-      .text("Ranked by IQR (tightest first)");
-
     // Render a box plot for each model
     data.data.forEach((modelData) => {
       const color = getModelColor(modelData.model);
@@ -516,7 +503,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
   // dimensions at their initial value once data arrives.
   return (
-    <div ref={containerRef} className="relative w-full" data-export-frame>
+    <div ref={containerRef} className="relative w-full pb-5" data-export-frame>
       {data.data.length === 0 ? (
         // Same height as the populated chart so toggling to a model with no
         // latency runs doesn't shift the sections below.
@@ -548,6 +535,15 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             />
           </div>
         </div>
+      )}
+      {data.data.length > 0 && (
+        <p
+          className={`pointer-events-none absolute bottom-0 left-10 right-2 font-mono text-sm text-text-secondary ${scrollable ? "text-left" : "text-center"}`}
+        >
+          {isMobile
+            ? "Fastest median first"
+            : "Ranked by median latency (fastest first)"}
+        </p>
       )}
       {tip && (
         <div
@@ -606,6 +602,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
           </p>
           {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
           {[
+            ["Median", `${tip.point.quartiles.median.toFixed(0)}ms`],
             [
               "IQR",
               `${(tip.point.quartiles.q3 - tip.point.quartiles.q1).toFixed(0)}ms`

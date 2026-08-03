@@ -5,7 +5,7 @@
 
 import React, { useMemo } from "react";
 import { getModelColor } from "@/lib/utils/colors";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import BoxPlot from "@/components/charts/d3/BoxPlot";
 import Card from "@/components/shared/Card";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -52,9 +52,10 @@ const BoxPlotSection: React.FC = () => {
           description={description}
           note={metricAboutNote(activeMetric)}
           exportNote={metricTab}
+          exportXLabel="Ranked by median latency (fastest first)"
           exportRows={() =>
             boxPlotData.data.map(({ model, quartiles, stats }) => ({
-              model,
+              model: parseModelKey(model).model,
               provider: getProviderForModel(model),
               metric: activeMetric,
               whisker_low_ms: quartiles.min,
@@ -68,6 +69,9 @@ const BoxPlotSection: React.FC = () => {
                   ? ((quartiles.q3 - quartiles.q1) / quartiles.median) * 100
                   : undefined,
               mean_ms: stats.mean,
+              std_dev_ms: stats.std,
+              p95_ms: stats.p95,
+              max_ms: stats.max,
               runs: stats.count,
             }))
           }

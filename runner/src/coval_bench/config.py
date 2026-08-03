@@ -12,13 +12,17 @@ from __future__ import annotations
 
 import functools
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import Field, SecretStr, field_validator
+import structlog
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
 DATASET_ALL = "__all__"
+
+# Terraform's Secret Manager stub; a mount that was never rotated delivers it verbatim.
+SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
 
 
 class Settings(BaseSettings):
@@ -95,6 +99,7 @@ class Settings(BaseSettings):
     alibaba_api_key: SecretStr | None = None
     minimax_api_key: SecretStr | None = None
     palabra_api_key: SecretStr | None = None
+    lmnt_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
 
@@ -126,6 +131,7 @@ class Settings(BaseSettings):
     coval_s2s_openai_agent_id: str | None = None
     coval_s2s_gemini_agent_id: str | None = None
     coval_s2s_xai_agent_id: str | None = None
+    coval_s2s_xai_think_fast_2_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
@@ -165,6 +171,17 @@ class Settings(BaseSettings):
     # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
     # models on the data endpoints. Unset means no request is internal.
     internal_api_key: SecretStr | None = None
+    # Partner early-access tokens (X-EA-Token header), as a JSON object mapping
+    # each token to the "provider/model" entries that token may see under embargo:
+    # {"<token>": ["xai/grok-realtime"]}. The allowlist lives here, server-side,
+    # so a request carries only an opaque token and can never widen its own view.
+    # Unset means no token unlocks anything.
+    early_access_tokens: SecretStr | None = None
+    # Clerk instance whose JWKS verifies provider-org session tokens.
+    # Unset means no bearer token unlocks anything.
+    clerk_issuer: str | None = None
+    # Allowed azp claim values; bearer tokens are rejected while empty.
+    clerk_authorized_parties: list[str] = []
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
@@ -174,6 +191,24 @@ class Settings(BaseSettings):
     # Must match the GCS bucket's object-deletion lifecycle (set in benchmark-infra).
     arena_clip_retention_days: int = 30
     arena_daily_battle_cap: int = 500
+    # When the moderator cannot be reached, reject rather than synthesize: the local PII
+    # check is not a content-safety fallback, and the arena publishes its audio. Flip to
+    # false to trade safety for availability during a prolonged provider outage.
+    arena_moderation_fail_closed: bool = True
+
+    @model_validator(mode="after")
+    def _placeholder_secrets_are_unset(self) -> Settings:
+        """Warn on unrotated Secret Manager stubs and null the nullable ones."""
+        logger = structlog.get_logger("coval_bench.config")
+        for name, field in type(self).model_fields.items():
+            value = getattr(self, name)
+            raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+            if raw != SECRET_PLACEHOLDER:
+                continue
+            logger.warning("placeholder_secret", setting=name, env_var=name.upper())
+            if type(None) in get_args(field.annotation):
+                setattr(self, name, None)
+        return self
 
 
 @functools.lru_cache(maxsize=1)

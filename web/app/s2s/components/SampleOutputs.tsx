@@ -3,8 +3,9 @@
 
 "use client";
 
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Play } from "lucide-react";
+import { type CSSProperties, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import {
   useSequencedPlayback,
   type PlaybackCoordinator,
@@ -12,15 +13,42 @@ import {
 } from "@/hooks/useSequencedPlayback";
 import { getModelColor } from "@/lib/utils/colors";
 import { toModelKey } from "@/lib/utils/formatters";
+import type { S2SPlayTrigger, S2SSeekMethod } from "@/lib/posthog/events";
 import type { S2STurn } from "@/lib/audioSamples/s2sFeed";
 import { ConversationTurns } from "./ConversationTurns";
+
+type SliderSeek = { time: number; nonce: number };
 
 export interface SampleOutputItem {
   provider: string;
   model: string;
   url: string;
+  // Identifies the recording independently of its (re-mintable) signed URL.
+  audioPath: string;
   // Multi-turn (v2) only: this provider's own conversation transcript.
   turns?: S2STurn[];
+}
+
+export interface SampleSeekInfo {
+  method: S2SSeekMethod;
+  toSeconds: number;
+  // "turn" method only: which transcript turn was clicked.
+  turnIndex?: number;
+  turnRole?: "caller" | "agent";
+}
+
+export interface SampleListenInfo {
+  trigger: S2SPlayTrigger;
+  listenPct: number;
+  durationSeconds: number;
+  completed: boolean;
+}
+
+// Elapsed position as m:ss. The existing formatTime helpers render wall-clock
+// timestamps, which is a different thing.
+function elapsed(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 // Left/right chevron/fade visibility from scroll extents; remeasures on scroll,
@@ -59,30 +87,135 @@ export function SampleOutputs({
   items,
   normalizeProvider,
   onPlay,
+  onSeeked,
+  onPlaybackEnded,
   playRequest,
   coordinator,
 }: {
   items: SampleOutputItem[];
   normalizeProvider: (provider: string) => string;
-  onPlay?: (provider: string) => void;
+  onPlay?: (provider: string, trigger: S2SPlayTrigger) => void;
+  onSeeked?: (provider: string, seek: SampleSeekInfo) => void;
+  onPlaybackEnded?: (provider: string, listen: SampleListenInfo) => void;
   playRequest?: { provider: string; nonce: number } | null;
   coordinator?: PlaybackCoordinator;
 }) {
   const tracks = useMemo<PlaybackTrack[]>(
-    () => items.map((i) => ({ key: i.provider, url: i.url })),
+    () => items.map((i) => ({ key: i.provider, url: i.url, id: i.audioPath })),
     [items]
   );
   // Multi-turn manifests carry per-provider turns; widen the panes and show the
   // conversation. All items in a manifest share a shape, so a single flag holds.
   const conversation = items.some((i) => (i.turns?.length ?? 0) > 0);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const paneRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  const { audioRef, activeIndex, isPlaying, toggle, playFrom, handleEnded } = useSequencedPlayback(
-    tracks,
-    (track) => onPlay?.(track.key),
-    coordinator
+  // How the next playFrom was initiated: the Play buttons and the timeline
+  // effect each set this just before calling it. Panes never auto-advance
+  // (the <audio> stops on end), so no third path exists.
+  const triggerRef = useRef<S2SPlayTrigger>("button");
+
+  // One listen session per activation, flushed from cleanup paths that would
+  // otherwise capture a stale callback prop.
+  const callbacksRef = useRef({ onPlaybackEnded });
+  useEffect(() => {
+    callbacksRef.current = { onPlaybackEnded };
+  });
+  const listenRef = useRef<{
+    provider: string;
+    trigger: S2SPlayTrigger;
+    maxTime: number;
+    duration: number;
+    completed: boolean;
+  } | null>(null);
+
+  const flushListen = useCallback(() => {
+    const session = listenRef.current;
+    listenRef.current = null;
+    // duration 0 means metadata never loaded (or play() was rejected):
+    // nothing was heard, so there is no listen to report.
+    if (!session || session.duration <= 0) return;
+    callbacksRef.current.onPlaybackEnded?.(session.provider, {
+      trigger: session.trigger,
+      listenPct: session.completed
+        ? 100
+        : Math.min(100, Math.round((session.maxTime / session.duration) * 100)),
+      durationSeconds: Math.round(session.duration),
+      completed: session.completed,
+    });
+  }, []);
+
+  const { audioRef, activeIndex, isPlaying, toggle, playFrom, stop, currentTime, duration, seek } =
+    useSequencedPlayback(
+      tracks,
+      (track) => {
+        flushListen();
+        listenRef.current = {
+          provider: track.key,
+          trigger: triggerRef.current,
+          maxTime: 0,
+          duration: 0,
+          completed: false,
+        };
+        onPlay?.(track.key, triggerRef.current);
+      },
+      coordinator
+    );
+
+  const [sliderSeek, setSliderSeek] = useState<SliderSeek | undefined>(undefined);
+  useEffect(() => {
+    setSliderSeek(undefined);
+  }, [activeIndex]);
+
+  // Mirror playhead progress into the session; maxTime survives backward seeks.
+  useEffect(() => {
+    const session = listenRef.current;
+    if (!session) return;
+    if (duration > 0) session.duration = duration;
+    if (currentTime > session.maxTime) session.maxTime = currentTime;
+  }, [currentTime, duration]);
+
+  // Pause, stop (including a track-list swap under playback), and play()
+  // rejection all land here; a pane-to-pane switch flushes in onActivate above.
+  useEffect(() => {
+    if (!isPlaying) flushListen();
+  }, [isPlaying, flushListen]);
+
+  useEffect(() => () => flushListen(), [flushListen]);
+
+  // The slider's onChange fires for every step of a drag; report one seek per
+  // burst, at its final position. Each input captures its own emit closure so
+  // a burst that outlives a tick swap still reports the manifest it scrubbed.
+  const seekBurstRef = useRef<{
+    provider: string;
+    emit: () => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const flushSeekBurst = useCallback(() => {
+    const burst = seekBurstRef.current;
+    if (!burst) return;
+    seekBurstRef.current = null;
+    clearTimeout(burst.timer);
+    burst.emit();
+  }, []);
+  const reportSliderSeek = useCallback(
+    (provider: string, emit: () => void) => {
+      const burst = seekBurstRef.current;
+      // Another pane's pending seek is a separate gesture: emit it now rather
+      // than coalescing across providers.
+      if (burst && burst.provider !== provider) flushSeekBurst();
+      else if (burst) clearTimeout(burst.timer);
+      seekBurstRef.current = {
+        provider,
+        emit,
+        timer: setTimeout(() => {
+          seekBurstRef.current = null;
+          emit();
+        }, 1000),
+      };
+    },
+    [flushSeekBurst]
   );
+  useEffect(() => () => flushSeekBurst(), [flushSeekBurst]);
 
   // A timeline-tooltip click plays a specific provider. Wait until that tick's
   // items have loaded (provider present) before playing, then mark the request
@@ -93,18 +226,14 @@ export function SampleOutputs({
     const idx = items.findIndex((i) => i.provider === playRequest.provider);
     if (idx < 0) return;
     consumedNonce.current = playRequest.nonce;
+    triggerRef.current = "timeline";
     playFrom(idx);
+    viewportRef.current?.children.item(idx)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+      inline: "center",
+    });
   }, [playRequest, items, playFrom]);
-
-  // Auto-scroll the active pane to center while a sequence is playing.
-  useEffect(() => {
-    if (!isPlaying) return;
-    const vp = viewportRef.current;
-    const pane = paneRefs.current[activeIndex];
-    if (!vp || !pane) return;
-    const target = pane.offsetLeft - (vp.clientWidth - pane.clientWidth) / 2;
-    vp.scrollTo({ left: Math.max(0, target), behavior: "smooth" });
-  }, [activeIndex, isPlaying]);
 
   const hints = useScrollHints(viewportRef, `${items.length}:${items.map((i) => i.provider).join(",")}`);
 
@@ -117,20 +246,9 @@ export function SampleOutputs({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
-          {conversation ? "Conversation" : "Responses"}
-        </p>
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex items-center gap-1.5 rounded-full bg-text-primary px-3 py-1 text-[11px] font-medium text-surface-primary transition-opacity hover:opacity-90"
-          aria-label={isPlaying ? "Pause" : "Play all responses"}
-        >
-          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
-          <span>{isPlaying ? "Pause" : "Play all"}</span>
-        </button>
-      </div>
+      <p className="font-mono text-[10px] font-medium uppercase tracking-[0.28em] text-text-tertiary">
+        {conversation ? "Conversation" : "Responses"}
+      </p>
 
       <div className="relative">
         {hints.left ? (
@@ -138,7 +256,7 @@ export function SampleOutputs({
             type="button"
             onClick={() => step(-1)}
             aria-label="Scroll responses left"
-            className="absolute left-0.5 top-1/2 z-[3] flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px]"
+            className="absolute left-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] lg:size-8"
           >
             <ChevronLeft className="size-5" />
           </button>
@@ -148,7 +266,7 @@ export function SampleOutputs({
             type="button"
             onClick={() => step(1)}
             aria-label="Scroll responses right"
-            className="absolute right-0.5 top-1/2 z-[3] flex size-8 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px]"
+            className="absolute right-0.5 top-1/2 z-[3] flex size-11 -translate-y-1/2 items-center justify-center rounded-full bg-surface-secondary/90 text-text-primary shadow-md ring-1 ring-border-primary backdrop-blur-[1px] lg:size-8"
           >
             <ChevronRight className="size-5" />
           </button>
@@ -167,18 +285,12 @@ export function SampleOutputs({
             const turns = item.turns ?? [];
             return (
               <div
-                key={item.provider}
-                ref={(el) => {
-                  paneRefs.current[i] = el;
-                }}
+                key={item.audioPath}
                 role="listitem"
-                className={`flex shrink-0 snap-start flex-col gap-2 rounded-xl border p-3 transition-colors ${
-                  conversation ? "w-[300px] min-w-[300px]" : "w-[180px] min-w-[180px]"
-                } ${
-                  active
-                    ? "border-text-primary/40 bg-surface-secondary"
-                    : "border-border-primary bg-surface-secondary/60"
+                className={`flex w-[300px] min-w-[300px] shrink-0 snap-start flex-col gap-2 rounded-xl border bg-surface-elevated p-3 ${
+                  active ? "" : "border-border-secondary"
                 }`}
+                style={active ? { borderColor: color, boxShadow: `inset 2px 0 0 ${color}` } : undefined}
               >
                 <div className="flex items-center gap-1.5">
                   <span
@@ -192,19 +304,91 @@ export function SampleOutputs({
                 <span className="truncate font-mono text-[11px] text-text-tertiary">
                   {item.model}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => (playingThis ? toggle() : playFrom(i))}
-                  className={`flex items-center gap-1 self-start rounded-full border border-border-primary px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:text-text-primary ${
+                {/* One <audio> is shared, so the playhead belongs to the active
+                    pane alone; other panes keep their turns static. The slider
+                    shares the Play button's row, so a pane never resizes when
+                    playback starts or moves between panes. */}
+                <div
+                  className={`flex min-h-11 items-center gap-2 lg:min-h-8 ${
                     turns.length ? "" : "mt-auto"
                   }`}
-                  aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
                 >
-                  {playingThis ? <Pause className="size-3" /> : <Play className="size-3" />}
-                  <span>{playingThis ? "Playing" : "Play"}</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerRef.current = "button";
+                      if (playingThis) toggle();
+                      else playFrom(i);
+                    }}
+                    className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border border-border-primary px-3 text-[11px] text-text-secondary transition-colors hover:text-text-primary lg:min-h-8"
+                    aria-label={playingThis ? `Pause ${item.provider}` : `Play ${item.provider}`}
+                  >
+                    {playingThis ? (
+                      <span className="flex" style={{ color }}>
+                        <CymaticLoader size={16} animated />
+                      </span>
+                    ) : (
+                      <Play className="size-3" />
+                    )}
+                    <span>{playingThis ? "Playing" : "Play"}</span>
+                  </button>
+                  {active && duration > 0 ? (
+                    <>
+                    <input
+                      type="range"
+                      min={0}
+                      max={duration}
+                      step={0.1}
+                      value={Math.min(currentTime, duration)}
+                      onChange={(e) => {
+                        const target = Number(e.target.value);
+                        seek(target);
+                        setSliderSeek((s) => ({ time: target, nonce: (s?.nonce ?? 0) + 1 }));
+                        reportSliderSeek(item.provider, () =>
+                          onSeeked?.(item.provider, {
+                            method: "slider",
+                            toSeconds: target,
+                          })
+                        );
+                      }}
+                      aria-label={`Seek ${normalizeProvider(item.provider)} recording`}
+                      className="h-11 min-w-0 flex-1 cursor-pointer appearance-none bg-transparent focus:outline-none lg:h-8 [&::-moz-range-thumb]:h-3.5 [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-sm [&::-moz-range-track]:[background:var(--progress)] [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-sm [&::-webkit-slider-runnable-track]:[background:var(--progress)] [&::-webkit-slider-thumb]:-mt-[5px] [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current focus-visible:[&::-moz-range-thumb]:ring-2 focus-visible:[&::-moz-range-thumb]:ring-text-primary focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-text-primary"
+                      style={
+                        {
+                          color,
+                          "--progress": `linear-gradient(to right, currentColor ${
+                            (Math.min(currentTime, duration) / duration) * 100
+                          }%, var(--color-border-primary) 0)`,
+                        } as CSSProperties
+                      }
+                    />
+                      <span className="shrink-0 font-mono text-[9px] tabular-nums text-text-tertiary">
+                        {elapsed(currentTime)}/{elapsed(duration)}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
                 {turns.length ? (
-                  <ConversationTurns turns={turns} accentColor={color} />
+                  <ConversationTurns
+                    turns={turns}
+                    agentLabel={item.model}
+                    accentColor={color}
+                    currentTime={active ? currentTime : 0}
+                    seeked={active ? sliderSeek : undefined}
+                    onSeek={
+                      active
+                        ? (seconds, turn) => {
+                            seek(seconds);
+                            onSeeked?.(item.provider, {
+                              method: "turn",
+                              toSeconds: seconds,
+                              turnIndex: turn.index,
+                              turnRole: turn.role,
+                            });
+                          }
+                        : undefined
+                    }
+                  />
                 ) : null}
               </div>
             );
@@ -212,7 +396,20 @@ export function SampleOutputs({
         </div>
       </div>
 
-      <audio ref={audioRef} onEnded={handleEnded} hidden />
+      <audio
+        ref={audioRef}
+        onEnded={() => {
+          // Mark completion before stop() flushes: the last timeupdate can
+          // land short of the full duration.
+          const session = listenRef.current;
+          if (session) {
+            session.completed = true;
+            if (session.duration > 0) session.maxTime = session.duration;
+          }
+          stop();
+        }}
+        hidden
+      />
     </div>
   );
 }

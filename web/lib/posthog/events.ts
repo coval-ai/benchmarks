@@ -22,6 +22,9 @@ export const POSTHOG_EVENTS = {
   dashboardWerDatasetChanged: "dashboard_wer_dataset_changed",
   dashboardWerBarViewChanged: "dashboard_wer_bar_view_changed",
   s2sSamplePlayRequested: "s2s_sample_play_requested",
+  s2sSamplePlaybackEnded: "s2s_sample_playback_ended",
+  s2sSampleTickChanged: "s2s_sample_tick_changed",
+  s2sSampleSeeked: "s2s_sample_seeked",
   headerCovalLinkClicked: "header_coval_link_clicked"
 } as const;
 
@@ -43,3 +46,13 @@ export type DashboardChartId =
   | "performance_delta";
 export type PlaygroundRunTrigger = "button" | "keyboard";
 export type PlaygroundModeSwitchTrigger = "tab" | "keyboard";
+// The quality bar plots WER on STT/TTS and instruction adherence on S2S; the
+// dashboard_wer_bar_clicked event name predates S2S, so `metric` says which
+// was plotted. Only "wer" can fire today — S2S instruction bars aren't
+// clickable — but the tag keeps the event honest if they ever become so.
+export type QualityBarMetric = "wer" | "instruction";
+// Sample panes never auto-advance (their <audio> stops on end), so a play can
+// only start from the pane's Play button or a timeline-tooltip click.
+export type S2SPlayTrigger = "button" | "timeline";
+export type S2SSeekMethod = "slider" | "turn";
+export type S2STickDirection = "older" | "newer" | "latest";

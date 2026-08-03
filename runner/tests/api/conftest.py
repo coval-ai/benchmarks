@@ -20,6 +20,7 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -37,10 +38,24 @@ from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
+from coval_bench.arena.moderation import ModerationResult
 from coval_bench.config import Settings
 
 ARENA_LABELER_KEY = "test-labeler-key"
 INTERNAL_API_KEY = "test-internal-key"
+
+# Two synthetic embargoed models on one provider, and a partner token entitled to
+# each. Same provider on purpose: it proves the allowlist separates callers by
+# model, not just by vendor.
+EA_PROVIDER = "acme"
+EA_MODEL = "unreleased-stt"
+EA_MODEL_OTHER = "unreleased-stt-2"
+EA_TOKEN = "test-ea-token"  # noqa: S105 - fake grant token
+EA_TOKEN_OTHER = "test-ea-token-other"  # noqa: S105 - fake grant token
+EARLY_ACCESS_TOKENS = {
+    EA_TOKEN: [f"{EA_PROVIDER}/{EA_MODEL}"],
+    EA_TOKEN_OTHER: [f"{EA_PROVIDER}/{EA_MODEL_OTHER}"],
+}
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -178,6 +193,10 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
+    monkeypatch.setenv("EARLY_ACCESS_TOKENS", json.dumps(EARLY_ACCESS_TOKENS))
+    # Battle generation screens prompts through the moderation API. Without this the
+    # suite would reach the network on any machine that has the key exported.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     settings = Settings()
 
@@ -205,6 +224,21 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     test_app = create_app(settings)
     async with LifespanManager(test_app):
         yield test_app
+
+
+@pytest.fixture(autouse=True)
+def moderation_allows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default every test to a reachable moderator that flags nothing.
+
+    Battle generation fails closed when moderation is unavailable, and the suite has no
+    API key, so without this every create-battle test would 503 regardless of subject.
+    Tests about screening override it.
+    """
+
+    async def _clean(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=True)
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _clean)
 
 
 @pytest.fixture

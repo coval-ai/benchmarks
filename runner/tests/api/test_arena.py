@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.providers.base import TTSResult
@@ -785,6 +786,93 @@ async def test_reveal_requires_the_requesting_voters_own_vote(
         f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-2", headers=_LABELER_HEADERS
     )
     assert response.status_code == 409
+
+
+async def test_create_battle_rejects_personal_data(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prompt carrying a payment card is rejected before anything is spent."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+
+    async def _no_synth(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("generate_battle must not run for a rejected prompt")
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
+
+    response = await client.post(
+        "/v1/arena/battle",
+        json={"prompt": "Read back 4242 4242 4242 4242 please.", "domain": "other"},
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+async def test_create_battle_rejects_flagged_prompt(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prompt the moderation API flags is rejected, and synthesis never runs."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+
+    async def _flagged(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=True, available=True, scores={"hate": 0.97})
+
+    async def _no_synth(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("generate_battle must not run for a flagged prompt")
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _flagged)
+    monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
+
+    response = await client.post(
+        "/v1/arena/battle",
+        json={"prompt": "something vile", "domain": "other"},
+        headers=_LABELER_HEADERS,
+    )
+    assert response.status_code == 422
+
+
+async def test_create_battle_503_when_moderation_unavailable(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail closed by default: an unreachable moderator blocks synthesis with 503."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+
+    async def _unavailable(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=False)
+
+    async def _no_synth(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("generate_battle must not run while moderation is down")
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _unavailable)
+    monkeypatch.setattr("coval_bench.api.routers.arena.generate_battle", _no_synth)
+
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 503
+
+
+async def test_create_battle_proceeds_when_configured_to_fail_open(
+    client: AsyncClient, app: FastAPI, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With fail-closed disabled, an outage trades safety for availability."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    app.state.settings = app.state.settings.model_copy(
+        update={"arena_moderation_fail_closed": False}
+    )
+    monkeypatch.setattr("coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(set()))
+    monkeypatch.setattr(
+        "coval_bench.arena.audio_store.store_clip", lambda *a, **k: "clips/stub.wav"
+    )
+
+    async def _unavailable(*args: Any, **kwargs: Any) -> ModerationResult:
+        return ModerationResult(flagged=False, available=False)
+
+    monkeypatch.setattr("coval_bench.api.routers.arena.moderation_verdict", _unavailable)
+
+    response = await client.post(
+        "/v1/arena/battle", json={"prompt": "hello", "domain": "other"}, headers=_LABELER_HEADERS
+    )
+    assert response.status_code == 201
 
 
 async def test_create_battle_429_when_cap_reached(

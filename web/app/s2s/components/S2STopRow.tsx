@@ -41,21 +41,17 @@ function MetricTile({ metric }: { metric: KeyMetricData }) {
   );
 }
 
-// S2S headline row: the latency tile (and, when present, the instruction
-// adherence tile stacked below it) beside the samples card. The left column
-// stretches to the samples card's height; each stacked tile is flex-1 so the
-// two tiles plus the gap between them exactly fill that height.
 export function S2STopRow() {
   const { primaryKeyMetric, secondaryKeyMetric } = useDashboard();
 
   return (
-    <div className="mb-[0.8rem] grid grid-cols-1 items-stretch gap-[0.8rem] lg:grid-cols-2">
-      <div className="flex min-w-0 flex-col gap-[0.8rem]">
-        <Card className="text-left min-w-0 flex-1" padding="p-5 lg:p-8">
+    <div className="mb-[0.8rem] flex min-w-0 flex-col gap-[0.8rem]">
+      <div className={`grid min-w-0 gap-[0.8rem] ${secondaryKeyMetric ? "grid-cols-2" : "grid-cols-1"}`}>
+        <Card className="min-w-0 text-left" padding="p-4 sm:p-5 lg:p-6">
           <MetricTile metric={primaryKeyMetric} />
         </Card>
         {secondaryKeyMetric && (
-          <Card className="text-left min-w-0 flex-1" padding="p-5 lg:p-8">
+          <Card className="min-w-0 text-left" padding="p-4 sm:p-5 lg:p-6">
             <MetricTile metric={secondaryKeyMetric} />
           </Card>
         )}

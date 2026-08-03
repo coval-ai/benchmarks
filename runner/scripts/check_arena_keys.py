@@ -2,16 +2,20 @@
 # SPDX-License-Identifier: Apache-2.0
 """Assert arena roster and benchmarks-api key mounts agree, in both directions.
 
-Reads the ``coval-ai/benchmark-infra`` Cloud Run service module (passed as a
-path; the CI workflow fetches it) and structurally extracts the env-var names it
-mounts from Secret Manager. Fails if any provider the arena would synthesize
-lacks its key on the service (the cross-repo parity gate), and also fails when
-an ACTIVE provider is opted out with ``arena_enabled=False`` even though its key
-IS mounted — a stale opt-out that silently keeps the provider off the arena.
-Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g. ADC-authenticated
-ones) are skipped: there is no key mount to check them against.
+Reads a ``coval-ai/benchmark-infra`` file (passed as a path; the CI workflow
+fetches it) and structurally extracts the env-var names mounted on
+benchmarks-api from Secret Manager. Two infra layouts are understood:
+``envs/prod/provider_keys.tf`` (one map entry per key; ``api = true`` marks
+the mount) and the older ``modules/cloud_run_service/main.tf`` (inline env
+blocks with ``secret_key_ref``). Fails if any provider the arena would
+synthesize lacks its key on the service (the cross-repo parity gate), and also
+fails when an ACTIVE provider is opted out with ``arena_enabled=False`` even
+though its key IS mounted — a stale opt-out that silently keeps the provider
+off the arena. Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g.
+ADC-authenticated ones) are skipped: there is no key mount to check them
+against.
 
-Usage: python scripts/check_arena_keys.py <path-to-cloud_run_service/main.tf>
+Usage: python scripts/check_arena_keys.py <path-to-infra-tf-file>
 """
 
 from __future__ import annotations
@@ -52,10 +56,32 @@ def _secret_backed_env_names(node: object) -> set[str]:
     return found
 
 
+def _provider_map_env_names(node: object) -> set[str]:
+    """Env-var names of ``provider_keys`` map entries flagged ``api = true``."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        entries = node.get("provider_keys")
+        if isinstance(entries, dict):
+            for entry in entries.values():
+                if not isinstance(entry, dict):
+                    continue
+                env = entry.get("env")
+                # python-hcl2 preserves literal quotes on string values, and
+                # parses bare `true` as bool — normalise both.
+                if isinstance(env, str) and str(entry.get("api")).strip('"').lower() == "true":
+                    found.add(env.strip('"'))
+        for value in node.values():
+            found |= _provider_map_env_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            found |= _provider_map_env_names(item)
+    return found
+
+
 def main(tf_path: str) -> int:
     with open(tf_path) as fp:
         tree = hcl2.load(fp)
-    mounted = _secret_backed_env_names(tree)
+    mounted = _secret_backed_env_names(tree) | _provider_map_env_names(tree)
 
     required: set[str] = set()
     unmapped: set[str] = set()
@@ -78,10 +104,8 @@ def main(tf_path: str) -> int:
     if missing:
         print(
             f"ERROR: arena-eligible but NOT mounted on benchmarks-api: {missing}\n"
-            "Mount them in coval-ai/benchmark-infra "
-            "(modules/cloud_run_service/main.tf env{} block + "
-            "envs/prod/cloud_run_service.tf secret_ids + the secret_manager secret), "
-            "then re-run this check."
+            "Add the key to envs/prod/provider_keys.tf in coval-ai/benchmark-infra "
+            "with api = true, then re-run this check."
         )
         return 1
 

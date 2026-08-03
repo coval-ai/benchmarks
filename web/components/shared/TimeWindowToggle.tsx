@@ -13,6 +13,7 @@ import {
 interface TimeWindowToggleProps {
   value: TimeWindow;
   onChange: (window: TimeWindow) => void;
+  windows?: readonly TimeWindow[];
   loading?: boolean;
   className?: string;
 }
@@ -20,6 +21,7 @@ interface TimeWindowToggleProps {
 const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
   value,
   onChange,
+  windows = TIME_WINDOWS,
   loading,
   className = "",
 }) => {
@@ -34,10 +36,10 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
       return;
     }
     event.preventDefault();
-    const currentIndex = TIME_WINDOWS.indexOf(value);
+    const currentIndex = windows.indexOf(value);
     const nextIndex =
-      (currentIndex + step + TIME_WINDOWS.length) % TIME_WINDOWS.length;
-    onChange(TIME_WINDOWS[nextIndex] ?? value);
+      (currentIndex + step + windows.length) % windows.length;
+    onChange(windows[nextIndex] ?? value);
     const radios =
       event.currentTarget.querySelectorAll<HTMLButtonElement>("button");
     radios[nextIndex]?.focus();
@@ -51,7 +53,7 @@ const TimeWindowToggle: React.FC<TimeWindowToggleProps> = ({
       onKeyDown={handleKeyDown}
       className={`inline-flex h-[50px] items-center gap-0.5 rounded-md bg-surface-toggle-inactive p-[3px] lg:h-8 ${className}`}
     >
-      {TIME_WINDOWS.map((timeWindow) => {
+      {windows.map((timeWindow) => {
         const active = timeWindow === value;
         return (
           <button

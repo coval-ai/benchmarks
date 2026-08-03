@@ -8,7 +8,7 @@ import { Server } from "lucide-react";
 import { Cell, type LabelProps } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import QualityMetricBars from "@/components/charts/QualityMetricBars";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import Card from "@/components/shared/Card";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
@@ -18,7 +18,7 @@ import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { capturePostHogEvent } from "@/lib/posthog/client";
-import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import { POSTHOG_EVENTS, type QualityBarMetric } from "@/lib/posthog/events";
 
 const INSTRUCTION_DESCRIPTION = {
   short: "Instruction adherence (%)",
@@ -68,6 +68,7 @@ const QualityBarSection: React.FC = () => {
         surface: `${mode}_dashboard`,
         mode,
         model_id: data.model,
+        metric: (isS2S ? "instruction" : "wer") satisfies QualityBarMetric,
       });
     }
     handleWERBarClick(data);
@@ -184,7 +185,7 @@ const QualityBarSection: React.FC = () => {
             exportXLabel="Model"
             exportRows={() =>
               instructionBarDataWithColors.map(({ model, instructionScore }) => ({
-                model,
+                model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
                 instruction_adherence_percent: instructionScore,
               }))
@@ -211,8 +212,10 @@ const QualityBarSection: React.FC = () => {
             exportXLabel="Model"
             exportRows={() =>
               werBarDataWithColors.map(({ model, averageWER }) => ({
-                model,
+                model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
+                wer_view: werBarView,
+                wer_dataset: activeWerView?.dataset ?? "all",
                 avg_wer_percent: averageWER,
               }))
             }

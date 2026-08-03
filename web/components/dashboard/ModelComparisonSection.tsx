@@ -13,6 +13,7 @@ import SectionHeader from "@/components/shared/SectionHeader";
 import MetricToggle from "@/components/dashboard/MetricToggle";
 import { datasetLabel } from "@/lib/config/datasets";
 import { metricAboutNote } from "@/lib/config/metrics";
+import { parseModelKey } from "@/lib/utils/formatters";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 
@@ -42,14 +43,14 @@ const ModelComparisonSection: React.FC = () => {
           note={metricAboutNote(activeMetric)}
           exportRows={() =>
             data.map(({ model, latency, avgWER, werStdDev, sampleCount }) => ({
-              model,
+              model: parseModelKey(model).model,
               provider: getProviderForModel(model),
               metric: activeMetric,
               ...(latency
                 ? { [`latency_${percentile}_ms`]: latency[percentile] }
                 : {}),
               ...(avgWER !== undefined
-                ? { avg_wer_percent: avgWER, wer_std_dev: werStdDev }
+                ? { avg_wer_percent: avgWER, wer_std_dev_percent: werStdDev }
                 : {}),
               ...(werDataset ? { wer_dataset: werDataset } : {}),
               runs: sampleCount,

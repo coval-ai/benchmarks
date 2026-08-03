@@ -17,7 +17,12 @@ import {
 } from "recharts";
 import { getModelColor } from "@/lib/utils/colors";
 import { DedicatedInfoIcon } from "@/components/shared/DedicatedInferenceInfo";
-import { formatDate, formatTime, getLocalTimeZoneAbbr } from "@/lib/utils/formatters";
+import {
+  formatDate,
+  formatTime,
+  getLocalTimeZoneAbbr,
+  parseModelKey,
+} from "@/lib/utils/formatters";
 import { metricDescriptions } from "@/lib/config/metrics";
 import {
   methodologyChanges,
@@ -37,6 +42,7 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { useMobileDetection } from "@/hooks/useMobileDetection";
+import { useS2SSampleIdsQuery, useS2SSampleQuery } from "@/lib/api/queries";
 
 interface LegendEntry {
   value: string;
@@ -267,16 +273,63 @@ const TimelineChart: React.FC = () => {
     dedicatedModels,
     selectedModels,
     page,
+    s2sPlayRequest,
     requestS2SPlay,
+    normalizeProviderName,
   } = useDashboard();
+  const s2sSampleIndex = useS2SSampleIdsQuery(page === "s2s").data;
+  const hasS2SBucketRecording = useCallback(
+    (label: number) => s2sSampleIndex?.includes(bucketTickKey(label)),
+    [s2sSampleIndex]
+  );
   const trackChartHover = useChartHoverTracking("timeline");
 
   const chartRef = useRef<HTMLDivElement>(null);
   const surfaceRef = useRef<SVGSVGElement>(null);
   const interactionRef = useRef<ChartInteractionHandle>(null);
   const pinnedRef = useRef<HTMLDivElement>(null);
+  const handledS2SPlayNonceRef = useRef<number | null>(null);
   const [pinned, setPinned] = useState<PinnedTooltip | null>(null);
   const [mobileScrub, setMobileScrub] = useState<PinnedTooltip | null>(null);
+  const inspectedLabel = pinned?.label ?? mobileScrub?.label;
+  const inspectedKey =
+    page === "s2s" && inspectedLabel
+      ? bucketTickKey(Number(inspectedLabel))
+      : null;
+  const inspectedTick =
+    inspectedKey && s2sSampleIndex?.includes(inspectedKey)
+      ? inspectedKey
+      : null;
+  const inspectedManifestQuery = useS2SSampleQuery(inspectedTick);
+  const hasS2SProviderRecording = useCallback(
+    (label: number, provider: string) => {
+      const tick = bucketTickKey(label);
+      if (s2sSampleIndex && !s2sSampleIndex.includes(tick)) return false;
+      if (
+        tick !== inspectedTick ||
+        inspectedManifestQuery.isLoading ||
+        inspectedManifestQuery.isError ||
+        inspectedManifestQuery.isPlaceholderData
+      )
+        return undefined;
+      return (
+        inspectedManifestQuery.data?.recordings.some(
+          (recording) =>
+            normalizeProviderName(recording.provider) ===
+            normalizeProviderName(provider)
+        ) ?? false
+      );
+    },
+    [
+      inspectedManifestQuery.data,
+      inspectedManifestQuery.isError,
+      inspectedManifestQuery.isLoading,
+      inspectedManifestQuery.isPlaceholderData,
+      inspectedTick,
+      normalizeProviderName,
+      s2sSampleIndex,
+    ]
+  );
   // Synchronous mirror for the gesture handlers: a tap's pointerup must not
   // depend on the pointerdown's state update having committed.
   const mobileScrubRef = useRef<PinnedTooltip | null>(null);
@@ -471,7 +524,12 @@ const TimelineChart: React.FC = () => {
       ),
     [zoomX]
   );
-  const timelineTicks = useMemo(getTimelineTicks, [getTimelineTicks]);
+  const timelineTicks = useMemo(() => {
+    const ticks = getTimelineTicks();
+    return isMobile && isS2S && ticks.length > 4
+      ? ticks.filter((_, index) => index % 2 === 0)
+      : ticks;
+  }, [getTimelineTicks, isMobile, isS2S]);
   const dateScale = dataTimeWindow !== "24h";
   const dateTicks =
     dateScale && !(zoomX && zoomX[1] - zoomX[0] <= 48 * 60 * 60 * 1000);
@@ -544,6 +602,23 @@ const TimelineChart: React.FC = () => {
     };
   }, []);
 
+  const tooltipPayload = useCallback(
+    (point: (typeof windowedTimelineData)[number]) =>
+      modelsWithData.flatMap((model) => {
+        const value = point[`${model}_value`];
+        return typeof value === "number"
+          ? [{
+              dataKey: `${model}_value`,
+              graphicalItemId: `${model}_value`,
+              value,
+              name: formatChartLabel(model, getProviderForModel(model)),
+              color: getModelColor(model),
+            }]
+          : [];
+      }),
+    [modelsWithData, formatChartLabel, getProviderForModel]
+  );
+
   // Recharts owns the exact plot offset (including the Y axis). Mirror it so
   // the mobile touch overlays line up with the visible plot and date axis.
   const syncInteractionBox = useCallback(() => {
@@ -565,6 +640,60 @@ const TimelineChart: React.FC = () => {
     const frame = requestAnimationFrame(syncInteractionBox);
     return () => cancelAnimationFrame(frame);
   }, [isMobile, syncInteractionBox, windowedTimelineData, zoom, yAxisMax]);
+
+  useEffect(() => {
+    if (page !== "s2s" || !s2sPlayRequest) return;
+    if (handledS2SPlayNonceRef.current === s2sPlayRequest.nonce) return;
+    const timestamp = new Date(s2sPlayRequest.tick).getTime();
+    if (!Number.isFinite(timestamp)) {
+      handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+      setPinned(null);
+      return;
+    }
+    if (timestamp < xDomain[0] || timestamp > xDomain[1]) {
+      if (zoom) setZoom(null);
+      else {
+        handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+        setPinned(null);
+      }
+      return;
+    }
+    const point = windowedTimelineData.find(
+      (candidate) => candidate.timestamp === timestamp
+    );
+    const box = interactionBox ?? plotBox();
+    if (!point || !box) {
+      handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+      setPinned(null);
+      return;
+    }
+    const payload = tooltipPayload(point);
+    handledS2SPlayNonceRef.current = s2sPlayRequest.nonce;
+    if (payload.length === 0) {
+      setPinned(null);
+      return;
+    }
+    const pointX =
+      box.left +
+      ((timestamp - xDomain[0]) / (xDomain[1] - xDomain[0])) * box.width;
+    const onLeft = pointX < box.left + box.width / 2;
+    setPinned({
+      label: String(timestamp),
+      payload,
+      x: onLeft ? box.left + box.width : box.left,
+      y: box.top + box.height / 2,
+      flip: onLeft,
+    });
+  }, [
+    page,
+    s2sPlayRequest,
+    xDomain,
+    zoom,
+    windowedTimelineData,
+    interactionBox,
+    plotBox,
+    tooltipPayload,
+  ]);
 
   const endDrag = () => {
     dragRef.current = null;
@@ -690,18 +819,7 @@ const TimelineChart: React.FC = () => {
         ? candidate
         : nearest
     );
-    const payload = modelsWithData.flatMap((model) => {
-      const value = point[`${model}_value`];
-      return typeof value === "number"
-        ? [{
-            dataKey: `${model}_value`,
-            graphicalItemId: `${model}_value`,
-            value,
-            name: formatChartLabel(model, getProviderForModel(model)),
-            color: getModelColor(model),
-          }]
-        : [];
-    });
+    const payload = tooltipPayload(point);
     if (payload.length === 0) {
       updateMobileScrub(null);
       return;
@@ -814,9 +932,16 @@ const TimelineChart: React.FC = () => {
   // Mobile has no hover cursor, so a vertical playhead marks the instant being
   // scrubbed or pinned — the timestamp both the compact readout and the pinned
   // list are reading from.
-  const scrubMarkerTs = isMobile
-    ? Number(mobileScrub?.label ?? pinned?.label ?? NaN)
-    : NaN;
+  const selectedSampleTs =
+    page === "s2s"
+      ? new Date(s2sPlayRequest?.tick ?? s2sSampleIndex?.[0] ?? "").getTime()
+      : NaN;
+  const interactionMarkerTs = Number(
+    pinned?.label ?? (isMobile ? mobileScrub?.label : NaN)
+  );
+  const scrubMarkerTs = Number.isFinite(interactionMarkerTs)
+    ? interactionMarkerTs
+    : selectedSampleTs;
 
   return (
     <div className="mb-4">
@@ -835,15 +960,23 @@ const TimelineChart: React.FC = () => {
           }
           exportNote={metricTab}
           exportRows={() =>
-            windowedTimelineData.map((point) => ({
-              time: point.timestampLabel,
-              ...Object.fromEntries(
-                modelsWithData.map((model) => [
-                  `${model}_${metric}_ms`,
-                  point[`${model}_value`],
-                ])
-              ),
-            }))
+            windowedTimelineData.flatMap((point) =>
+              modelsWithData.flatMap((model) => {
+                const value = point[`${model}_value`];
+                return typeof value === "number"
+                  ? [{
+                      timestamp: point.timestampLabel,
+                      model: parseModelKey(model).model,
+                      provider: getProviderForModel(model),
+                      metric,
+                      latency_ms: value,
+                      ...(page === "s2s"
+                        ? { conversation_bucket_has_sample: hasS2SBucketRecording(point.timestamp) }
+                        : {}),
+                    }]
+                  : [];
+              })
+            )
           }
           stat={{
             label: (
@@ -935,20 +1068,7 @@ const TimelineChart: React.FC = () => {
                 const point = windowedTimelineData.find(
                   (candidate) => candidate.timestamp === Number(lbl)
                 );
-                const payload = point
-                  ? modelsWithData.flatMap((model) => {
-                      const value = point[`${model}_value`];
-                      return typeof value === "number"
-                        ? [{
-                            dataKey: `${model}_value`,
-                            graphicalItemId: `${model}_value`,
-                            value,
-                            name: formatChartLabel(model, getProviderForModel(model)),
-                            color: getModelColor(model),
-                          }]
-                        : [];
-                    })
-                  : [];
+                const payload = point ? tooltipPayload(point) : [];
                 const hasRows = payload.some(
                   (item) => typeof item?.value === "number" && item.value > 0
                 );
@@ -1027,6 +1147,7 @@ const TimelineChart: React.FC = () => {
                     dimmedKeys={dimmedLegendKeys}
                     compact
                     timeZone={displayTz}
+                    hasRecording={page === "s2s" ? hasS2SBucketRecording : undefined}
                   />
                 }
                 active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
@@ -1196,6 +1317,7 @@ const TimelineChart: React.FC = () => {
                 compact
                 interactionHint="tap axis to see all"
                 timeZone={displayTz}
+                hasRecording={page === "s2s" ? hasS2SProviderRecording : undefined}
               />
             </div>
           )}
@@ -1233,6 +1355,7 @@ const TimelineChart: React.FC = () => {
                 dimmedKeys={dimmedLegendKeys}
                 maxHeight={isMobile ? 106 : undefined}
                 timeZone={displayTz}
+                hasRecording={page === "s2s" ? hasS2SProviderRecording : undefined}
                 onModelClick={
                   page === "s2s"
                     ? (model, label) =>

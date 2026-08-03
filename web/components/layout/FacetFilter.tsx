@@ -10,12 +10,14 @@ import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import { CymaticLoader } from "@/components/shared/CymaticLoader";
+import { timeWindowsFor } from "@/lib/config/timeWindows";
 
 const COLLAPSE_THRESHOLD = 8;
 
 const FacetFilter: React.FC = () => {
   const {
     facetGroups,
+    page,
     toggleFacet,
     clearFacets,
     hasActiveFacets,
@@ -64,6 +66,7 @@ const FacetFilter: React.FC = () => {
         <TimeWindowToggle
           value={timeWindow}
           onChange={changeTimeWindow}
+          windows={timeWindowsFor(page)}
           loading={windowDataStale}
           className="mb-2 w-full"
         />

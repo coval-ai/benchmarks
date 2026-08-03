@@ -182,11 +182,14 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
 
       <div ref={tableWrapRef} className="relative">
         {dedicatedOverlay}
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
+        <p className="mb-2 text-right text-xs text-text-tertiary sm:hidden">
+          Swipe table for more →
+        </p>
+        <div className="max-h-[70vh] overflow-auto">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
-              <th className="py-2 pr-4 text-left font-medium">Model</th>
+              <th className="sticky top-0 z-10 w-px bg-surface-elevated py-2 pr-4 text-left font-medium">Model</th>
               {columns.map((column) => (
                 <th
                   key={column.key}
@@ -197,7 +200,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         : "descending"
                       : undefined
                   }
-                  className="px-3 py-2 text-right font-medium"
+                  className="sticky top-0 z-10 bg-surface-elevated px-3 py-2 text-right font-medium"
                 >
                   <button
                     type="button"
@@ -231,7 +234,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
                 <td className="py-3 pr-4 align-middle">
-                  <div className="flex items-center gap-1.5 font-medium text-text-primary">
+                  <div className="flex items-center gap-1.5 whitespace-nowrap font-medium text-text-primary">
                     {normalizeModelName(row.model)}
                     {dedicatedModels?.has(row.model) && (
                       <button

@@ -16,6 +16,10 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
 
 Both blocks are pre-aggregated from rows with status='success' and a non-null
 metric_value, from parent runs in (succeeded, partial) — read-only here.
+
+``/results/aggregates/by-dataset`` serves the per-dataset views (the WER
+radar): every dataset's ``model_stats`` in one response, so a window toggle
+costs one request instead of one per dataset. Series are not batched.
 """
 
 from __future__ import annotations
@@ -46,9 +50,15 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
 )
-from coval_bench.api.internal import hidden_models, is_internal
+from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import AggregatesResponse, ModelStatEntry, SeriesPoint
+from coval_bench.api.schemas import (
+    AggregatesByDatasetResponse,
+    AggregatesResponse,
+    DatasetAggregates,
+    ModelStatEntry,
+    SeriesPoint,
+)
 from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
 
@@ -82,6 +92,22 @@ _DATASETS_SQL_TEMPLATE = (
     " ORDER BY dataset_id"
 )
 
+_STATS_BY_DATASET_SQL_TEMPLATE = (
+    "SELECT dataset_id, provider, model, metric_type,"
+    " avg_value, stddev_value, p25, p50, p75, p90, p95, p99,"
+    " min_value, max_value, sample_count"
+    " FROM {view}"
+    " WHERE benchmark = %(benchmark)s"
+    " AND dataset_id <> %(sentinel)s"
+    " ORDER BY dataset_id, provider, model, metric_type"
+)
+
+
+def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
+    return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
+        row["provider"], row["model"], row["metric_type"]
+    )
+
 
 @router.get("/results/aggregates", response_model=AggregatesResponse)
 @limiter.limit("60/minute")
@@ -97,7 +123,7 @@ async def get_results_aggregates(
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
     cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
-    internal: bool = Depends(is_internal),
+    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> AggregatesResponse:
     """Return per-model stats and per-bucket series for one benchmark.
 
@@ -110,12 +136,6 @@ async def get_results_aggregates(
             behavior.
     """
     dataset_key = dataset or DATASET_ALL
-    hidden = frozenset() if internal else hidden_models()
-
-    def visible(row: dict[str, Any]) -> bool:
-        return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
-            row["provider"], row["model"], row["metric_type"]
-        )
 
     async def fill() -> AggregatesResponse:
         stats_sql = _STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
@@ -140,12 +160,15 @@ async def get_results_aggregates(
             window=window,
             dataset=dataset_key,
             datasets=[r["dataset_id"] for r in dataset_rows],
-            model_stats=[ModelStatEntry.model_validate(r) for r in stat_rows if visible(r)],
-            series=[SeriesPoint.model_validate(r) for r in series_rows if visible(r)],
+            model_stats=[
+                ModelStatEntry.model_validate(r) for r in stat_rows if _visible(r, hidden)
+            ],
+            series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
         )
 
-    # `internal` is part of the key: the two views must never share a cache entry.
-    cache_key = ("aggregates", benchmark, window, dataset_key, internal)
+    # The hidden set is part of the key: two callers who can see different models
+    # must never share a cache entry, or one would be served the other's rows.
+    cache_key = ("aggregates", benchmark, window, dataset_key, tuple(sorted(hidden)))
     response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
@@ -157,6 +180,68 @@ async def get_results_aggregates(
             "dataset": dataset_key,
             "model_stat_count": len(response.model_stats),
             "series_point_count": len(response.series),
+            "cache_hit": cache_status != "miss",
+            "cache_status": cache_status,
+            "$process_person_profile": False,
+        },
+    )
+    return response
+
+
+@router.get("/results/aggregates/by-dataset", response_model=AggregatesByDatasetResponse)
+@limiter.limit("60/minute")
+async def get_results_aggregates_by_dataset(
+    request: Request,  # required by slowapi
+    benchmark: BenchmarkLiteral = Query(...),
+    window: WindowLiteral = Query(default="24h"),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+    posthog_client: Posthog | None = Depends(get_posthog),
+    cache: TTLCache[Any, Any] = Depends(get_cache),
+    cache_locks: defaultdict[Any, asyncio.Lock] = Depends(get_cache_locks),
+    hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+) -> AggregatesByDatasetResponse:
+    """Return per-model stats for every dataset of one benchmark and window.
+
+    One block per dataset with data in the window, sorted by dataset id. The
+    pooled all-dataset rows are not repeated here — the plain aggregates
+    endpoint serves those.
+    """
+
+    async def fill() -> AggregatesByDatasetResponse:
+        stats_sql = _STATS_BY_DATASET_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+        params = {"benchmark": benchmark, "sentinel": DATASET_ALL}
+
+        async with pool.connection() as conn:
+            conn.row_factory = psycopg.rows.dict_row
+            rows = await (await conn.execute(stats_sql, params)).fetchall()
+
+        grouped: dict[str, list[ModelStatEntry]] = {}
+        for row in rows:
+            if _visible(row, hidden):
+                grouped.setdefault(row["dataset_id"], []).append(ModelStatEntry.model_validate(row))
+
+        return AggregatesByDatasetResponse(
+            benchmark=benchmark,
+            window=window,
+            blocks=[
+                DatasetAggregates(dataset=dataset, model_stats=stats)
+                for dataset, stats in grouped.items()
+            ],
+        )
+
+    # The hidden set is part of the key: two callers who can see different models
+    # must never share a cache entry, or one would be served the other's rows.
+    cache_key = ("aggregates_by_dataset", benchmark, window, tuple(sorted(hidden)))
+    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
+
+    capture_api_event(
+        posthog_client,
+        "results_aggregates_by_dataset_queried",
+        {
+            "benchmark": benchmark,
+            "window": window,
+            "dataset_count": len(response.blocks),
+            "model_stat_count": sum(len(b.model_stats) for b in response.blocks),
             "cache_hit": cache_status != "miss",
             "cache_status": cache_status,
             "$process_person_profile": False,

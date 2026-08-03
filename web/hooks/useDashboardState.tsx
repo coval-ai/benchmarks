@@ -34,7 +34,7 @@ import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
 import { metricDescriptions } from "@/lib/config/metrics";
-import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
+import { S2S_MULTITURN_DATASET, WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
@@ -49,20 +49,38 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const activeMetric =
     page === "s2s" ? "V2V" : page === "tts" ? "TTFA" : sttMetric;
 
-  // S2S only: a click on a model row in the pinned timeline tooltip asks the
-  // samples card to jump to that bucket + provider and play. nonce lets a repeat
-  // click on the same row replay.
   const [s2sPlayRequest, setS2sPlayRequest] = useState<{
     tick: string;
-    provider: string;
+    provider?: string;
     nonce: number;
+    source: "timeline" | "samples";
   } | null>(null);
+  const s2sPlayNonceRef = useRef(0);
   const requestS2SPlay = useCallback((tick: string, provider: string) => {
-    setS2sPlayRequest((prev) => ({ tick, provider, nonce: (prev?.nonce ?? 0) + 1 }));
+    setS2sPlayRequest({
+      tick,
+      provider,
+      nonce: ++s2sPlayNonceRef.current,
+      source: "timeline",
+    });
   }, []);
-  const { timeWindow, changeTimeWindow } = useTimeWindow(
+  const selectS2SSample = useCallback((tick: string) => {
+    setS2sPlayRequest({
+      tick,
+      nonce: ++s2sPlayNonceRef.current,
+      source: "samples",
+    });
+  }, []);
+  const { timeWindow, changeTimeWindow: setTimeWindow } = useTimeWindow(
     `${page}_dashboard`,
     page
+  );
+  const changeTimeWindow = useCallback(
+    (next: typeof timeWindow) => {
+      if (next !== timeWindow) setS2sPlayRequest(null);
+      setTimeWindow(next);
+    },
+    [setTimeWindow, timeWindow]
   );
 
   const benchmarkParam =
@@ -73,7 +91,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
-    dataset: page === "s2s" ? "s2s-multiturn-v1" : undefined,
+    dataset: page === "s2s" ? S2S_MULTITURN_DATASET : undefined,
   });
   const providersQuery = useProvidersQuery();
 
@@ -641,9 +659,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     page,
     latencyLabel,
 
-    // S2S samples card <-> timeline tooltip bridge
     s2sPlayRequest,
     requestS2SPlay,
+    selectS2SSample,
 
     // Display strings
     pageTitle,

@@ -10,7 +10,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -19,7 +18,7 @@ import {
 import { Info } from "lucide-react";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import { labelScatterDots } from "@/lib/utils/chartExport";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
@@ -36,14 +35,29 @@ import ChartInteractionLayer, {
   type ChartInteractionHandle,
 } from "@/components/charts/ChartInteractionLayer";
 
-// Human transcription accuracy is 2–4% WER under optimal conditions (per our
-// ASR benchmarks doc); the band's ceiling puts human-level-or-better inside
-// the zone. Y axis is whole percent.
-const HUMAN_WER_CEILING = 4;
-// Median human conversational turn-taking gap. X axis is ms. Only meaningful
-// against TTFS — humans have no token-streaming analogue, so the zone hides
-// on TTFT. TODO(bench-405): confirm the canonical figure with product.
-const HUMAN_LATENCY_MS = 200;
+// The frontier's plot-edge extensions meet the fastest/most-accurate models
+// at up to a right angle, which no x-monotone curve interpolation can round —
+// so the path is built by hand: straight runs with quadratic corners. The
+// radius is capped by the adjacent segments, so gentle interior bends read as
+// one smooth curve while a single dominant model gets a visibly rounded knee.
+const PARETO_CORNER_RADIUS = 16;
+const roundedFrontierPath = (points: { x: number; y: number }[]) => {
+  const pts = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  const first = pts[0];
+  if (!first || pts.length < 2) return "";
+  let d = `M${first.x},${first.y}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [a, p, b] = [pts[i - 1]!, pts[i]!, pts[i + 1]!];
+    const la = Math.hypot(p.x - a.x, p.y - a.y) || 1;
+    const lb = Math.hypot(b.x - p.x, b.y - p.y) || 1;
+    const r = Math.min(PARETO_CORNER_RADIUS, la / 2, lb / 2);
+    d +=
+      `L${p.x - ((p.x - a.x) / la) * r},${p.y - ((p.y - a.y) / la) * r}` +
+      `Q${p.x},${p.y} ${p.x + ((b.x - p.x) / lb) * r},${p.y + ((b.y - p.y) / lb) * r}`;
+  }
+  const last = pts[pts.length - 1]!;
+  return `${d}L${last.x},${last.y}`;
+};
 
 const LatencyAccuracySection: React.FC = () => {
   const { selectedModels, getScatterData, activeMetric: metric, dedicatedModels } = useDashboard();
@@ -61,9 +75,23 @@ const LatencyAccuracySection: React.FC = () => {
 
   const isMobile = useMobileDetection();
   const sortedData = useMemo(
-    () => [...scatterData].sort((a, b) => a.x - b.x),
+    () => [...scatterData].sort((a, b) => a.x - b.x || a.y - b.y),
     [scatterData]
   );
+  // Exact duplicates of a frontier point tie it rather than lose to it, so
+  // they stay on the frontier too (the sort keeps duplicates adjacent).
+  const paretoData = useMemo(() => {
+    let minY = Infinity;
+    let frontierX = NaN;
+    return sortedData.filter((p) => {
+      if (p.y < minY) {
+        minY = p.y;
+        frontierX = p.x;
+        return true;
+      }
+      return p.y === minY && p.x === frontierX;
+    });
+  }, [sortedData]);
   const [activeIdx, setActiveIdx] = useState(-1);
   const chartRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef<ChartInteractionHandle>(null);
@@ -151,6 +179,30 @@ const LatencyAccuracySection: React.FC = () => {
     return { xMax: max, xTicks: ticks };
   }, [scatterData]);
 
+  // The non-dominated set is rarely convex, so a curve through every one of
+  // its points would dip and flatten between them. The drawn curve is its
+  // lower convex hull instead — every chord point is achievable by splitting
+  // traffic between the two neighboring models, so the hull is the boundary
+  // of achievable trade-offs. Non-dominated models off the hull keep their
+  // full-opacity highlight.
+  const paretoLine = useMemo(() => {
+    const hull: ScatterDataPoint[] = [];
+    for (const p of paretoData) {
+      let a = hull[hull.length - 1];
+      let o = hull[hull.length - 2];
+      while (o && a && (a.x - o.x) * (p.y - o.y) - (a.y - o.y) * (p.x - o.x) <= 0) {
+        hull.pop();
+        a = hull[hull.length - 1];
+        o = hull[hull.length - 2];
+      }
+      hull.push(p);
+    }
+    const first = hull[0];
+    const last = hull[hull.length - 1];
+    if (!first || !last) return [];
+    return [{ ...first, y: yMax }, ...hull, { ...last, x: xMax }];
+  }, [paretoData, xMax, yMax]);
+
   const scrub = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!sortedData.length) return;
     const { relativeX } = getRelativeCoordinate(e);
@@ -180,6 +232,28 @@ const LatencyAccuracySection: React.FC = () => {
           exportNote={metricTab}
           exportXLabel={`Average ${latencyLabel}`}
           exportAnnotate={(clone) => {
+            // A tapped point leaves crosshairs, an enlarged dot and dimmed
+            // neighbors in the SVG; the export is selection-neutral, so strip
+            // that state and restore each dot's frontier opacity. Circles pair
+            // with data by (cx, cy) order, the same pairing labelScatterDots
+            // uses.
+            clone
+              .querySelectorAll(".recharts-reference-line")
+              .forEach((el) => el.remove());
+            const attr = (el: Element, name: string) => Number(el.getAttribute(name));
+            const byPosition = Array.from(
+              clone.querySelectorAll("[data-export-point]")
+            ).sort((a, b) => attr(a, "cx") - attr(b, "cx") || attr(a, "cy") - attr(b, "cy"));
+            const ordered = [...scatterData].sort((a, b) => a.x - b.x || b.y - a.y);
+            byPosition.forEach((circle, i) => {
+              circle.setAttribute("r", "6");
+              circle.removeAttribute("stroke");
+              const point = ordered[i];
+              circle.setAttribute(
+                "fill-opacity",
+                point && paretoData.includes(point) ? "1" : "0.5"
+              );
+            });
             const nameCounts = new Map<string, number>();
             for (const { model } of scatterData) {
               const name = normalizeModelName(model);
@@ -204,7 +278,7 @@ const LatencyAccuracySection: React.FC = () => {
           }}
           exportRows={() =>
             scatterData.map(({ model, provider, benchmark, x, y, count }) => ({
-              model,
+              model: parseModelKey(model).model,
               provider,
               benchmark,
               [`avg_${metric}_ms`]: x,
@@ -222,24 +296,22 @@ const LatencyAccuracySection: React.FC = () => {
 
         <div className="flex flex-wrap items-center">
           <MetricToggle />
-          {activeTab === "stt" && metric === "TTFS" && (
-            <ul data-chart-legend className="mb-4 ml-auto">
-              <li
-                className="flex items-center gap-1.5 text-xs"
-                style={{ color: themeColors.textSecondary }}
-              >
-                <span
-                  className="inline-block h-3 w-3 rounded-[2px]"
-                  style={{ backgroundColor: themeColors.zoneStroke }}
-                  aria-hidden="true"
-                />
-                <MetricInfo metric="human-parity" align="right">
-                  Human-parity zone{" "}
-                  <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
-                </MetricInfo>
-              </li>
-            </ul>
-          )}
+          <ul data-chart-legend className="mb-4 ml-auto flex items-center gap-4">
+            <li
+              className="flex items-center gap-1.5 whitespace-nowrap text-xs"
+              style={{ color: themeColors.textSecondary }}
+            >
+              <span
+                className="inline-block w-4 border-t-2 border-dashed"
+                style={{ borderColor: themeColors.axisText }}
+                aria-hidden="true"
+              />
+              <MetricInfo metric="pareto" align="right">
+                Pareto frontier{" "}
+                <Info size={12} aria-hidden="true" className="inline align-[-2px]" />
+              </MetricInfo>
+            </li>
+          </ul>
         </div>
 
         <div
@@ -305,19 +377,6 @@ const LatencyAccuracySection: React.FC = () => {
                 stroke={themeColors.grid}
                 strokeDasharray="2 2"
               />
-              {activeTab === "stt" && metric === "TTFS" && (
-                <ReferenceArea
-                  x1={0}
-                  x2={HUMAN_LATENCY_MS}
-                  y1={0}
-                  y2={HUMAN_WER_CEILING}
-                  fill={themeColors.zoneFill}
-                  fillOpacity={1}
-                  stroke={themeColors.zoneStroke}
-                  strokeWidth={1}
-                  ifOverflow="hidden"
-                />
-              )}
               <XAxis
                 dataKey="x"
                 type="number"
@@ -362,6 +421,23 @@ const LatencyAccuracySection: React.FC = () => {
               {activePoint && (
                 <ReferenceLine y={activePoint.y} stroke={themeColors.axisText} strokeDasharray="3 3" />
               )}
+              {paretoLine.length > 0 && (
+                <Scatter
+                  data={paretoLine}
+                  line={(props: { points: { x: number; y: number }[] }) => (
+                    <path
+                      d={roundedFrontierPath(props.points)}
+                      fill="none"
+                      stroke={themeColors.axisText}
+                      strokeWidth={1.5}
+                      strokeDasharray="4 4"
+                    />
+                  )}
+                  shape={() => <g />}
+                  tooltipType="none"
+                  isAnimationActive={false}
+                />
+              )}
               {selectedModels.map((model: string) => (
                 <Scatter
                   key={model}
@@ -381,12 +457,20 @@ const LatencyAccuracySection: React.FC = () => {
                         cy={props.cy}
                         r={props.payload === activePoint ? 8 : 6}
                         fill={props.fill}
-                        fillOpacity={activePoint && props.payload !== activePoint ? 0.35 : 1}
+                        fillOpacity={
+                          activePoint
+                            ? props.payload !== activePoint
+                              ? 0.35
+                              : 1
+                            : paretoData.includes(props.payload!)
+                              ? 1
+                              : 0.5
+                        }
                         stroke={props.payload === activePoint ? themeColors.axisText : undefined}
                         strokeWidth={2}
                         role="option"
                         aria-selected={props.payload === activePoint}
-                        aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER`}
+                        aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER${paretoData.includes(props.payload!) ? ", on Pareto frontier" : ""}`}
                         onClick={() => setActiveIdx(idx)}
                       />
                     );

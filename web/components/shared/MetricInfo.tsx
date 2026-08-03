@@ -83,7 +83,7 @@ const MetricInfo: React.FC<{
       <span
         id={id}
         role="tooltip"
-        className={`pointer-events-none absolute z-50 ${panelClassName} max-w-[calc(100vw-1.5rem)] rounded-lg border border-border-secondary bg-surface-tooltip px-3 py-2 text-left font-sans text-xs font-normal leading-snug text-[var(--color-text-on-tooltip)] shadow-md transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100 ${open ? "visible opacity-100" : "invisible opacity-0"} ${alignClasses[align]}`}
+        className={`pointer-events-none absolute z-50 ${panelClassName} max-w-[calc(100vw-1.5rem)] whitespace-normal rounded-lg border border-border-secondary bg-surface-tooltip px-3 py-2 text-left font-sans text-xs font-normal leading-snug text-[var(--color-text-on-tooltip)] shadow-md transition-opacity group-hover:visible group-hover:opacity-100 group-focus-visible:visible group-focus-visible:opacity-100 group-has-[:focus-visible]:visible group-has-[:focus-visible]:opacity-100 ${open ? "visible opacity-100" : "invisible opacity-0"} ${alignClasses[align]}`}
       >
         {body}
       </span>

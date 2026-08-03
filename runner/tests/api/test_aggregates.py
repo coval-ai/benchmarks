@@ -369,6 +369,99 @@ async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -
     ]
 
 
+async def test_by_dataset_empty_db_returns_no_blocks(client: AsyncClient) -> None:
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["benchmark"] == "STT"
+    assert body["window"] == "24h"
+    assert body["blocks"] == []
+
+
+async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgresql: Any) -> None:
+    """One block per dataset, sorted by dataset id; the pooled sentinel rows
+    never appear as a block of their own."""
+    run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_v1, metric_value=1.0)
+    run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
+    await _insert_result(postgresql, run_v3, metric_value=3.0)
+    await _insert_result(postgresql, run_v3, metric_value=5.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    blocks = response.json()["blocks"]
+    assert [b["dataset"] for b in blocks] == ["stt-v1", "stt-v3"]
+
+    v1, v3 = blocks
+    assert v1["model_stats"][0]["sample_count"] == 1
+    assert v1["model_stats"][0]["avg_value"] == pytest.approx(1.0)
+    assert v3["model_stats"][0]["sample_count"] == 2
+    assert v3["model_stats"][0]["avg_value"] == pytest.approx(4.0)
+
+
+async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    old = datetime.now(dt.UTC) - timedelta(days=10)
+    await _insert_result(postgresql, run_id, created_at=old, metric_value=1.0)
+    await _refresh_mv(postgresql)
+
+    response_24h = await client.get(
+        "/v1/results/aggregates/by-dataset", params={"benchmark": "STT"}
+    )
+    assert response_24h.json()["blocks"] == []
+
+    response_30d = await client.get(
+        "/v1/results/aggregates/by-dataset", params={"benchmark": "STT", "window": "30d"}
+    )
+    blocks = response_30d.json()["blocks"]
+    assert len(blocks) == 1
+    assert blocks[0]["model_stats"][0]["sample_count"] == 1
+
+
+async def test_by_dataset_hides_excluded_metric_rows(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="TTFS",
+        metric_value=0.4,
+    )
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="WER",
+        metric_value=5.0,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    blocks = response.json()["blocks"]
+    assert len(blocks) == 1
+    metric_types = {s["metric_type"] for s in blocks[0]["model_stats"]}
+    assert metric_types == {"WER"}
+
+
+async def test_by_dataset_cached_separately_from_plain_aggregates(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The two endpoints never share a cache entry despite identical params."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_id, metric_value=1.0)
+    await _refresh_mv(postgresql)
+
+    plain = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert plain.json()["model_stats"][0]["sample_count"] == 1
+
+    by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    blocks = by_dataset.json()["blocks"]
+    assert [b["dataset"] for b in blocks] == ["stt-v1"]
+
+
 async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:
     """METRIC_EXCLUSIONS pairs are hidden from stats and series for the excluded
     metric only — other metrics for the same model still show."""
