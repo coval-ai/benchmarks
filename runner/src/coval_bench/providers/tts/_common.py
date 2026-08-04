@@ -23,6 +23,7 @@ _PCM16_FRAME_BYTES = 2
 
 # Stable contract — matched by the reason classifier and the alerting log metric.
 _SILENT_FAILURE_PREFIX = "provider closed the stream without sending audio or an error"
+_SILENT_AUDIO_ERROR = "provider returned audio with no audible speech"
 _LAST_FRAMES_MAX_CHARS = 400
 
 
@@ -71,8 +72,12 @@ def finalize_tts_result(
         pcm = pcm[: len(pcm) - remainder]
 
     ttfa_ms: float | None = None
+    silent_audio = False
     if audio_synthesis_start is not None and first_audio_chunk_at is not None:
-        offset_ms = _safe_offset_ms(pcm, sample_rate, provider, model) if pcm else None
+        offset_ms: float | None = None
+        if pcm:
+            offset_ms, detection_ok = _safe_offset_ms(pcm, sample_rate, provider, model)
+            silent_audio = offset_ms is None and detection_ok
         ttfa_ms = compute_ttfa(
             audio_synthesis_start, first_audio_chunk_at, offset_ms if offset_ms is not None else 0.0
         )
@@ -89,6 +94,14 @@ def finalize_tts_result(
     if not pcm and error is None:
         error = _silent_failure_error(last_frames)
         logger.warning("tts_silent_failure", provider=provider, model=model, error=error)
+    elif silent_audio and error is None:
+        # Audio arrived but carries no audible speech. Without this the null offset
+        # collapses into 0.0 and TTFA becomes pure arrival time — a plausible number
+        # measured off silence, which then enters the aggregates. No output is a
+        # failure however much of it there is, so drop the value with the row.
+        error = _SILENT_AUDIO_ERROR
+        ttfa_ms = None
+        logger.warning("tts_silent_audio", provider=provider, model=model, bytes=len(pcm))
     return TTSResult(
         provider=provider,
         model=model,
@@ -118,17 +131,24 @@ def _silent_failure_error(last_frames: Sequence[str] | None) -> str:
     return f"{_SILENT_FAILURE_PREFIX}; last frames: {tail[:_LAST_FRAMES_MAX_CHARS]}"
 
 
-def _safe_offset_ms(pcm: bytes, sample_rate: int, provider: str, model: str) -> float | None:
-    """Leading-silence offset, swallowing any error to a ``None`` (arrival-only) result.
+def _safe_offset_ms(
+    pcm: bytes, sample_rate: int, provider: str, model: str
+) -> tuple[float | None, bool]:
+    """Leading-silence offset as ``(offset_ms, detection_ok)``.
 
     The offset is a latency metric, not load-bearing for the audio; a failure here
     must never propagate out of ``synthesize`` and discard the synthesized WAV.
+
+    ``detection_ok`` separates two states that both yield a ``None`` offset and must
+    not be conflated: detection ran and found no audible frame (the audio really is
+    silent — a synthesis failure), versus detection itself crashed (our problem, and
+    no reason to condemn the provider's audio).
     """
     try:
-        return first_audible_offset_ms(pcm, sample_rate)
+        return first_audible_offset_ms(pcm, sample_rate), True
     except Exception as exc:
         logger.warning("tts_offset_failed", provider=provider, model=model, exc_info=exc)
-        return None
+        return None, False
 
 
 def _write_wav(pcm: bytes, sample_rate: int) -> Path:

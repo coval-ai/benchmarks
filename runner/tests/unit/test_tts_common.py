@@ -240,3 +240,51 @@ def test_finalize_successful_audio_is_untouched() -> None:
 
     assert result.error is None
     assert result.audio_path is not None
+
+
+def test_finalize_all_silence_audio_fails_instead_of_reporting_ttfa() -> None:
+    """Silence-only audio is a synthesis failure, not a fast TTFA.
+
+    With no audible frame the offset is null, which used to collapse to 0.0 and make
+    TTFA pure arrival time — a plausible number measured off silence that then entered
+    the aggregates.
+    """
+    sr = 24000
+    result = finalize_tts_result(
+        provider="test",
+        model="m",
+        voice="v",
+        pcm=_silence_pcm(500, sr),
+        sample_rate=sr,
+        audio_synthesis_start=10.0,
+        first_audio_chunk_at=10.3,
+    )
+
+    assert result.error == "provider returned audio with no audible speech"
+    assert result.ttfa_ms is None
+
+
+def test_finalize_offset_detection_crash_does_not_condemn_the_audio() -> None:
+    """A crash in offset detection is our problem — keep the audio and the TTFA.
+
+    Distinct from genuine silence: both yield a null offset, and conflating them would
+    fail perfectly good audio whenever our own detection threw.
+    """
+    sr = 24000
+    with patch(
+        "coval_bench.providers.tts._common.first_audible_offset_ms",
+        side_effect=RuntimeError("detector exploded"),
+    ):
+        result = finalize_tts_result(
+            provider="test",
+            model="m",
+            voice="v",
+            pcm=_tone_pcm(300, sr),
+            sample_rate=sr,
+            audio_synthesis_start=10.0,
+            first_audio_chunk_at=10.3,
+        )
+
+    assert result.error is None
+    assert result.ttfa_ms == pytest.approx(300.0)
+    assert result.audio_path is not None
