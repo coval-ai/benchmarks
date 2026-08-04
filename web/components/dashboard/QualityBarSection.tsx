@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useCallback, useMemo, useRef } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { Server } from "lucide-react";
 import { Cell, type LabelProps } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
@@ -14,13 +14,58 @@ import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo"
 import SectionHeader from "@/components/shared/SectionHeader";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { datasetLabel } from "@/lib/config/datasets";
-import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
+import { WER_BREAKDOWN_LABELS, type WerBreakdown } from "@/lib/utils/werBreakdown";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useThemeColors } from "@/hooks/useThemeColors";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { useChartHoverTracking } from "@/hooks/useChartHoverTracking";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS, type QualityBarMetric } from "@/lib/posthog/events";
+
+// Order choices for the WER bars: the default best-first total, or worst-first
+// by one error type so the outliers lead.
+const BAR_SORTS: { key: "wer" | keyof WerBreakdown; label: string }[] = [
+  { key: "wer", label: "Lowest WER" },
+  { key: "substitutions", label: "Most substitutions" },
+  { key: "deletions", label: "Most deletions" },
+  { key: "insertions", label: "Most insertions" },
+];
+
+// The WerDatasetSelect chrome, reused for the chart's other dropdowns.
+const SelectControl: React.FC<{
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+}> = ({ label, value, onChange, children }) => (
+  <span className="inline-flex items-center gap-2 text-xs text-text-secondary">
+    {label}
+    <span className="relative inline-flex">
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-11 max-w-44 appearance-none truncate rounded-lg border border-border-primary bg-surface-elevated pl-2.5 pr-7 text-xs font-medium text-text-primary outline-none transition-colors hover:border-selected-border focus:border-selected-border lg:h-auto lg:py-1.5"
+      >
+        {children}
+      </select>
+      <svg
+        aria-hidden
+        viewBox="0 0 12 12"
+        className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-text-tertiary"
+      >
+        <path
+          d="M2.5 4.5 6 8l3.5-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  </span>
+);
 
 const INSTRUCTION_DESCRIPTION = {
   short: "Instruction adherence (%)",
@@ -36,6 +81,7 @@ const QualityBarSection: React.FC = () => {
   const {
     werDescription,
     werBarDataset,
+    werBarServedDataset,
     changeWerBarDataset,
     werBarDataWithColors,
     instructionBarDataWithColors,
@@ -76,6 +122,29 @@ const QualityBarSection: React.FC = () => {
     handleWERBarClick(data);
   };
 
+  const [barSort, setBarSort] = useState<(typeof BAR_SORTS)[number]["key"]>("wer");
+
+  // "wer" keeps the upstream best-first order; an error type leads with the
+  // worst offenders, models without a split trailing.
+  const displayBars = useMemo(() => {
+    if (barSort === "wer") return werBarDataWithColors;
+    return [...werBarDataWithColors].sort(
+      (a, b) => (b.breakdown?.[barSort] ?? -1) - (a.breakdown?.[barSort] ?? -1)
+    );
+  }, [werBarDataWithColors, barSort]);
+
+  // The summary sentence follows the click-selection like the radar's does:
+  // one model reads out its split, several compare among themselves, none
+  // describes the whole set. Filtering displayBars keeps the sort's leader.
+  const summaryPool = useMemo(
+    () =>
+      clickedWERBars.size > 0
+        ? displayBars.filter((item) => clickedWERBars.has(item.model))
+        : displayBars,
+    [displayBars, clickedWERBars]
+  );
+  const leadBar = summaryPool[0];
+
   const selectedBars = useMemo(
     () => werBarDataWithColors.filter((item) => clickedWERBars.has(item.model)),
     [werBarDataWithColors, clickedWERBars]
@@ -102,7 +171,7 @@ const QualityBarSection: React.FC = () => {
   // selected; the axis and tooltip still carry the value for the rest.
   const werBarLabel = useCallback(
     ({ x = 0, y = 0, width = 0, value, index = 0 }: LabelProps) => {
-      const entry = werBarDataWithColors[index];
+      const entry = displayBars[index];
       if (Number(width) < 28 && !(entry && clickedWERBars.has(entry.model)))
         return <g />;
       const cx = Number(x) + Number(width) / 2;
@@ -147,7 +216,7 @@ const QualityBarSection: React.FC = () => {
         </g>
       );
     },
-    [werBarDataWithColors, clickedWERBars, themeColors.label, dedicatedModels, dedicatedIconHandlers]
+    [displayBars, clickedWERBars, themeColors.label, dedicatedModels, dedicatedIconHandlers]
   );
 
   // Instruction labels are plain: value only, hidden on very thin bars.
@@ -170,7 +239,12 @@ const QualityBarSection: React.FC = () => {
     [themeColors.label]
   );
 
-  const werScopeLabel = werBarDataset ? datasetLabel(werBarDataset) : undefined;
+  // Labeled from the dataset the rows were actually served from, which lags
+  // the select while a switch is in flight — exports and the summary must
+  // describe the placeholder data on show, not the pending selection.
+  const werScopeLabel = werBarServedDataset
+    ? datasetLabel(werBarServedDataset)
+    : undefined;
 
   return (
     <div className="mb-4">
@@ -203,10 +277,10 @@ const QualityBarSection: React.FC = () => {
             hint="Click bar to compare models"
             exportXLabel="Model"
             exportRows={() =>
-              werBarDataWithColors.map(({ model, averageWER }) => ({
+              displayBars.map(({ model, averageWER }) => ({
                 model: parseModelKey(model).model,
                 provider: getProviderForModel(model),
-                wer_dataset: werBarDataset ?? "all",
+                wer_dataset: werBarServedDataset ?? "all",
                 avg_wer_percent: averageWER,
               }))
             }
@@ -223,12 +297,24 @@ const QualityBarSection: React.FC = () => {
           />
         )}
         {!isS2S && (
-          <WerDatasetSelect
-            className="mb-4"
-            label="Chart dataset"
-            value={werBarDataset}
-            onChange={changeWerBarDataset}
-          />
+          <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <WerDatasetSelect
+              label="Chart dataset"
+              value={werBarDataset}
+              onChange={changeWerBarDataset}
+            />
+            <SelectControl
+              label="Sort"
+              value={barSort}
+              onChange={(v) => setBarSort(v as typeof barSort)}
+            >
+              {BAR_SORTS.map(({ key, label }) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </SelectControl>
+          </div>
         )}
         {!isS2S && selectedBars.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -293,7 +379,7 @@ const QualityBarSection: React.FC = () => {
           </QualityMetricBars>
         ) : (
           <QualityMetricBars
-            data={werBarDataWithColors}
+            data={displayBars}
             valueKey="averageWER"
             yAxisLabel="WER % · lower is better"
             tooltip={
@@ -315,7 +401,7 @@ const QualityBarSection: React.FC = () => {
             wrapRef={chartWrapRef}
             overlay={dedicatedOverlay}
           >
-            {werBarDataWithColors.map((entry) => (
+            {displayBars.map((entry) => (
               <Cell
                 key={`wer-cell-${entry.model}`}
                 fill={entry.fill}
@@ -328,7 +414,7 @@ const QualityBarSection: React.FC = () => {
                   entry.breakdown
                     ? ` (${WER_BREAKDOWN_LABELS.map(
                         ([key, text]) =>
-                          `${text} ${entry.breakdown![key].toFixed(1)}`
+                          `${text} ${entry.breakdown![key].toFixed(1)}%`
                       ).join(", ")})`
                     : ""
                 }${clickedWERBars.has(entry.model) ? ", selected" : ""}`}
@@ -342,6 +428,31 @@ const QualityBarSection: React.FC = () => {
               />
             ))}
           </QualityMetricBars>
+        )}
+        {!isS2S && leadBar && (
+          <p className="mt-2 text-sm text-text-secondary">
+            <span className="font-medium text-text-primary">
+              {getProviderForModel(leadBar.model)}{" "}
+              {normalizeModelName(leadBar.model)}
+            </span>{" "}
+            {summaryPool.length === 1
+              ? `has a WER of ${leadBar.averageWER.toFixed(1)}%`
+              : barSort !== "wer" && leadBar.breakdown
+                ? `has the ${BAR_SORTS.find((s) => s.key === barSort)!.label.toLowerCase()} (${leadBar.breakdown[barSort].toFixed(1)}% of its ${leadBar.averageWER.toFixed(1)}% WER) of ${summaryPool.length}${clickedWERBars.size > 0 ? " selected" : ""} models`
+                : `has the lowest WER (${leadBar.averageWER.toFixed(1)}%) of ${summaryPool.length}${clickedWERBars.size > 0 ? " selected" : ""} models`}{" "}
+            {werScopeLabel ? `on ${werScopeLabel}` : "pooled across datasets"}
+            {(barSort === "wer" || summaryPool.length === 1) &&
+              leadBar.breakdown && (
+                <>
+                  {" — "}
+                  {WER_BREAKDOWN_LABELS.map(
+                    ([key, text]) =>
+                      `${text.toLowerCase()} ${leadBar.breakdown![key].toFixed(1)}%`
+                  ).join(", ")}
+                </>
+              )}
+            .
+          </p>
         )}
       </Card>
     </div>

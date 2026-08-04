@@ -111,8 +111,11 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [page]
   );
 
-  const { werByModel: werDatasetStats, loading: werDatasetLoading } =
-    useDatasetScopedWer(
+  const {
+    werByModel: werDatasetStats,
+    loading: werDatasetLoading,
+    servedDataset: werServedDataset,
+  } = useDatasetScopedWer(
       { benchmark: benchmarkParam, window: timeWindow },
       activeWerDataset
     );
@@ -135,8 +138,11 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     },
     [page]
   );
-  const { werByModel: werBarDatasetStats, loading: werBarLoading } =
-    useDatasetScopedWer(
+  const {
+    werByModel: werBarDatasetStats,
+    loading: werBarLoading,
+    servedDataset: werBarServedDataset,
+  } = useDatasetScopedWer(
       { benchmark: benchmarkParam, window: timeWindow },
       werBarDatasetId
     );
@@ -596,6 +602,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
         ...row,
         avgWER: wer?.avg_value,
         werStdDev: wer?.stddev_value,
+        werBreakdown: wer && werBreakdownOf(wer),
         sampleCount: wer?.sample_count ?? 0,
       };
     });
@@ -680,11 +687,13 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     changeWerDataset,
     availableWerDatasets,
     werDatasetLoading,
+    werServedDataset,
 
     // WER bar chart dataset scope (TTS + STT accuracy card)
     werBarDataset: werBarDatasetId,
     changeWerBarDataset,
     werBarLoading,
+    werBarServedDataset,
 
     // Key metrics
     primaryKeyMetric,

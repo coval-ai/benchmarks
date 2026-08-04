@@ -359,7 +359,11 @@ export function useChartData({
           model,
           ...(latency ? { latency } : {}),
           ...(werStat
-            ? { avgWER: werStat.avg_value, werStdDev: werStat.stddev_value }
+            ? {
+                avgWER: werStat.avg_value,
+                werStdDev: werStat.stddev_value,
+                werBreakdown: werBreakdownOf(werStat)
+              }
             : {}),
           sampleCount: latencySampleCount ?? werStat?.sample_count ?? 0
         });

@@ -43,6 +43,8 @@ export interface ModelHeatmapData {
   // pinned WER dataset.
   avgWER?: number;
   werStdDev?: number;
+  /** Absent when the API reports no error-type split for this group. */
+  werBreakdown?: WerBreakdown;
   sampleCount: number;
 }
 
