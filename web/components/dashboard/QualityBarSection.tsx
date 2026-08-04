@@ -296,26 +296,24 @@ const QualityBarSection: React.FC = () => {
             }}
           />
         )}
-        {!isS2S && (
+        {mode === "stt" && (
           <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
             <WerDatasetSelect
               label="Chart dataset"
               value={werBarDataset}
               onChange={changeWerBarDataset}
             />
-            {mode === "stt" && (
-              <SelectControl
-                label="Sort"
-                value={barSort}
-                onChange={(v) => setBarSort(v as typeof barSort)}
-              >
-                {BAR_SORTS.map(({ key, label }) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </SelectControl>
-            )}
+            <SelectControl
+              label="Sort"
+              value={barSort}
+              onChange={(v) => setBarSort(v as typeof barSort)}
+            >
+              {BAR_SORTS.map(({ key, label }) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </SelectControl>
           </div>
         )}
         {!isS2S && selectedBars.length > 0 && (

@@ -227,7 +227,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         {percentile.hint && (
           <span className="text-xs text-text-tertiary">{percentile.hint}</span>
         )}
-        {hasWER && <WerDatasetSelect className="ml-auto" />}
+        {hasWER && activeTab === "stt" && <WerDatasetSelect className="ml-auto" />}
       </div>
 
       <div ref={tableWrapRef} className="relative">
