@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from typing import Any
 from urllib.parse import urlencode
 
 import structlog
@@ -29,6 +30,31 @@ _WS_SESSION_TIMEOUT_S = 30.0
 _MODEL_TO_VERSION: dict[str, str] = {"octave-tts": "1", "octave-2": "2"}
 
 _DEFAULT_VOICE_ID = "176a55b1-4468-4736-8878-db82729667c1"
+
+# How many trailing text frames to retain for the silent-stream diagnostic.
+_LAST_FRAMES_KEPT = 3
+
+
+def _frame_error(msg: dict[str, Any]) -> str | None:
+    """Hume's error text for an error frame, or ``None`` when the frame is benign.
+
+    Hume nests the discriminator under ``details`` and sends no top-level ``type``,
+    so the original top-level check never matched and every error frame was dropped —
+    including "Exhausted credit balance", stated on every request for four and a half
+    days. ``status_code`` is checked too so an error shape we haven't seen still
+    registers rather than being silently ignored.
+    """
+    details = msg.get("details")
+    nested_type = details.get("type") if isinstance(details, dict) else None
+    status_code = msg.get("status_code")
+    is_error = (
+        msg.get("type") == "error"
+        or nested_type == "error"
+        or (isinstance(status_code, int) and status_code >= 400)
+    )
+    if not is_error:
+        return None
+    return str(msg.get("message") or msg)
 
 
 class HumeTTSProvider(TTSProvider):
@@ -72,6 +98,7 @@ class HumeTTSProvider(TTSProvider):
         version = _MODEL_TO_VERSION[self._model]
 
         audio_chunks: list[bytes] = []
+        last_frames: list[str] = []
         start: float | None = None
         first_chunk_at: float | None = None
 
@@ -111,12 +138,15 @@ class HumeTTSProvider(TTSProvider):
                                 first_chunk_at = time.monotonic()
                             audio_chunks.append(raw)
                         elif isinstance(raw, str):
+                            last_frames.append(raw)
+                            del last_frames[:-_LAST_FRAMES_KEPT]
                             try:
                                 msg = json.loads(raw)
-                                if msg.get("type") == "error":
-                                    raise RuntimeError(str(msg.get("message", msg)))
-                            except (json.JSONDecodeError, KeyError):
-                                pass
+                            except json.JSONDecodeError:
+                                continue
+                            failure = _frame_error(msg)
+                            if failure is not None:
+                                raise RuntimeError(failure)
 
         except TimeoutError:
             logger.warning(
@@ -133,6 +163,7 @@ class HumeTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
+                last_frames=last_frames,
                 error=f"Hume WebSocket session timed out after {_WS_SESSION_TIMEOUT_S}s",
             )
 
@@ -146,6 +177,7 @@ class HumeTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
+                last_frames=last_frames,
                 error=str(exc),
             )
 
@@ -157,4 +189,5 @@ class HumeTTSProvider(TTSProvider):
             sample_rate=SAMPLE_RATE,
             audio_synthesis_start=start,
             first_audio_chunk_at=first_chunk_at,
+            last_frames=last_frames,
         )

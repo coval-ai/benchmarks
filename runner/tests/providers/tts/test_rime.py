@@ -266,7 +266,7 @@ async def test_rime_empty_response(fake_settings: Settings) -> None:
     ):
         result = await provider.synthesize("silent test")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
@@ -332,7 +332,7 @@ async def test_rime_empty_chunk_not_counted(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.rime.ws_client.connect", return_value=_fake_connect(ws)):
         result = await provider.synthesize("test")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     # If the `if audio_bytes:` guard is removed, first_chunk_at gets stamped on the
     # empty chunk, so ttfa_ms is computed (non-None) — the assertion below would fail.
     assert result.ttfa_ms is None
