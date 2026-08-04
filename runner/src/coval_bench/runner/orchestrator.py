@@ -186,10 +186,10 @@ def _dead_providers(
 ) -> list[str]:
     """``benchmark:provider/model (reason)`` for each provider whose every row failed.
 
-    Keyed by benchmark as well as provider and model: openai and xai are registered
-    under both TTS and STT, so keying on the provider alone would let a dead TTS model
-    be masked by the same provider's healthy STT rows. The reason is the most common
-    error across that provider's rows, so the alert names a cause and not just a name.
+    Keyed by benchmark as well as provider and model, because a provider may be
+    registered under more than one modality; keying on the provider alone would let a
+    dead model be masked by that provider's healthy rows in the other benchmark. The
+    reason is the most common error across the rows, so the alert names a cause.
     """
     rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for r in results:
@@ -228,6 +228,13 @@ def _log_run_outcome(
     A total failure reports only ``RUN_FAILED``; the per-provider breakdown is
     skipped there because every provider is in it, and one incident must not page
     twice.
+
+    A partial run reports ``RUN_PARTIAL`` **only when some provider failed every one
+    of its items**, not on every partial run. Scattered item failures are normal —
+    providers routinely lose one clip out of thirty — so paging on those would bury
+    the signal and the alert would be muted. The consequence is deliberate: a run
+    where many providers fail most of their items without any single one being fully
+    dead stays silent here, and is caught only by the run's own metrics.
     """
     if final_status is run_status.FAILED:
         log_run_failed(
@@ -1205,6 +1212,12 @@ async def run_benchmarks(
             else:
                 final_status = RunStatus.PARTIAL
 
+            await writer.finish_run(run_id, status=final_status, error=None)
+
+            # After the row is stored, never before: if finish_run raises, the outer
+            # handler is the only thing that should report, otherwise a partial run
+            # pages RUN_PARTIAL and then RUN_FAILED for one incident. Everything
+            # below this point is best-effort and cannot raise.
             _log_run_outcome(
                 final_status,
                 typed_results,
@@ -1212,8 +1225,6 @@ async def run_benchmarks(
                 result_status=ResultStatus,
                 run_status=RunStatus,
             )
-
-            await writer.finish_run(run_id, status=final_status, error=None)
 
             # Refresh after finish_run: the view query only counts runs already
             # marked succeeded/partial. A failed refresh must not fail the run.
@@ -1292,6 +1303,19 @@ async def run_benchmarks(
             else:
                 # Run row is PARTIAL, so its bucket qualifies.
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
+                # A truncated run still alerts on any provider that failed everything
+                # it managed to run. Reach is limited: ``all_results`` is only extended
+                # after a phase's gather returns, so the cancelled phase contributes
+                # nothing and a single-kind run reports no dead providers at all. Only
+                # an earlier completed phase (kind="both") can be named here. Rows are
+                # already durable either way — each task persists its own.
+                _log_run_outcome(
+                    RunStatus.PARTIAL,
+                    typed_results,
+                    fail_count,
+                    result_status=ResultStatus,
+                    run_status=RunStatus,
+                )
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             logger.warning(
