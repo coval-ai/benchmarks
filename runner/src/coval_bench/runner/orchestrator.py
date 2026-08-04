@@ -1301,14 +1301,13 @@ async def run_benchmarks(
                     exc_info=write_exc,
                 )
             else:
-                # Run row is PARTIAL, so its bucket qualifies.
-                await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
-                # A truncated run still alerts on any provider that failed everything
-                # it managed to run. Reach is limited: ``all_results`` is only extended
-                # after a phase's gather returns, so the cancelled phase contributes
-                # nothing and a single-kind run reports no dead providers at all. Only
-                # an earlier completed phase (kind="both") can be named here. Rows are
-                # already durable either way — each task persists its own.
+                # Report before the bucket refresh, not after: SIGTERM gives ~10s
+                # before SIGKILL, and losing the page to a slow maintenance call is
+                # worse than losing the rollup. Reach is limited — ``all_results`` is
+                # only extended after a phase's gather returns, so the cancelled phase
+                # contributes nothing and a single-kind run names no dead provider.
+                # Only an earlier completed phase (kind="both") can be named here.
+                # Rows are durable either way; each task persists its own.
                 _log_run_outcome(
                     RunStatus.PARTIAL,
                     typed_results,
@@ -1316,6 +1315,8 @@ async def run_benchmarks(
                     result_status=ResultStatus,
                     run_status=RunStatus,
                 )
+                # Run row is PARTIAL, so its bucket qualifies.
+                await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             logger.warning(

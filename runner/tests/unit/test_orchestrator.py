@@ -2779,3 +2779,70 @@ async def test_sigterm_partial_does_not_report_a_dead_provider(
     assert summary.status == str(RunStatus.PARTIAL)
     assert _events(captured, "RUN_PARTIAL") == []
     assert _events(captured, "RUN_FAILED") == []
+
+
+@pytest.mark.asyncio
+async def test_sigterm_reports_dead_provider_from_a_completed_phase(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A phase that finished before SIGTERM still gets its dead provider reported.
+
+    kind="both" runs STT then TTS. STT completes with a provider that failed every
+    item, then TTS hangs until SIGTERM cancels it. The STT rows are already in
+    ``all_results``, so the truncated run can still name what died.
+    """
+    import os
+    import signal
+
+    stt_bad = MagicMock()
+    stt_bad.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    started = asyncio.Event()
+
+    async def _hang(*args: Any, **kwargs: Any) -> TTSResult:
+        started.set()
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable — SIGTERM cancels this")
+
+    tts_slow = MagicMock()
+    tts_slow.synthesize = _hang
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async def _send_sigterm_after_tts_starts() -> None:
+        await started.wait()
+        await asyncio.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    sigterm_task = asyncio.create_task(_send_sigterm_after_tts_starts())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        tts_items=[_make_tts_item("hello world")],
+        stt_providers={"elevenlabs": MagicMock(return_value=stt_bad)},
+        tts_providers={"cartesia": MagicMock(return_value=tts_slow)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="both",
+                smoke=True,
+                matrix_overrides=[
+                    *_paused_registry(Benchmark.STT),
+                    *_paused_registry(Benchmark.TTS),
+                    _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                    _tts_entry("cartesia", "sonic-3", "luna"),
+                ],
+            )
+
+    await sigterm_task
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    partial = _events(captured, "RUN_PARTIAL")
+    assert len(partial) == 1, "the completed phase's dead provider must still report"
+    assert "elevenlabs/scribe_v2_realtime" in partial[0]["error"]
+    assert "boom" in partial[0]["error"]
