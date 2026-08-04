@@ -55,12 +55,17 @@ export type ProvidersApiResponse = components["schemas"]["ProvidersResponse"];
 export type ModelTagOut = components["schemas"]["ModelTagOut"];
 export type TagCategoryOut = components["schemas"]["TagCategoryOut"];
 export type AggregatesApiResponse = components["schemas"]["AggregatesResponse"];
+export type AggregatesByDatasetApiResponse =
+  components["schemas"]["AggregatesByDatasetResponse"];
 export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
 export type SeriesPoint = components["schemas"]["SeriesPoint"];
 
 // Query-param types from codegen
 export type AggregatesQueryParams = NonNullable<
   paths["/v1/results/aggregates"]["get"]["parameters"]["query"]
+>;
+export type AggregatesByDatasetQueryParams = NonNullable<
+  paths["/v1/results/aggregates/by-dataset"]["get"]["parameters"]["query"]
 >;
 export interface FetchOptions {
   signal?: AbortSignal;
@@ -123,6 +128,19 @@ export async function getAggregates(
   return request<AggregatesApiResponse>(`/v1/results/aggregates${qs}`, {
     signal: opts?.signal,
   });
+}
+
+export async function getAggregatesByDataset(
+  params: AggregatesByDatasetQueryParams,
+  opts?: FetchOptions
+): Promise<AggregatesByDatasetApiResponse> {
+  const qs = buildQueryString(
+    params as Record<string, string | number | boolean | null | undefined>
+  );
+  return request<AggregatesByDatasetApiResponse>(
+    `/v1/results/aggregates/by-dataset${qs}`,
+    { signal: opts?.signal }
+  );
 }
 
 export async function getProviders(

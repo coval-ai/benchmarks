@@ -7,12 +7,14 @@ import { useMemo } from "react";
 import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import {
   getAggregates,
+  getAggregatesByDataset,
   getProviders,
   getS2SSample,
   getS2SSampleAudio,
   getS2SSampleIds,
 } from "./client";
 import type {
+  AggregatesByDatasetQueryParams,
   AggregatesQueryParams,
   FetchOptions,
   S2SSampleRecording,
@@ -30,6 +32,18 @@ export function aggregatesQueryOptions(params: AggregatesQueryParams) {
 
 export function useAggregatesQuery(params: AggregatesQueryParams) {
   return useQuery(aggregatesQueryOptions(params));
+}
+
+export function useAggregatesByDatasetQuery(
+  params: AggregatesByDatasetQueryParams
+) {
+  return useQuery({
+    queryKey: ["aggregates-by-dataset", params],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      getAggregatesByDataset(params, { signal } satisfies FetchOptions),
+    // Toggling windows keeps the prior data up instead of flashing the skeleton.
+    placeholderData: keepPreviousData,
+  });
 }
 
 export function useProvidersQuery() {
