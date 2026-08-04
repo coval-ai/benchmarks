@@ -22,7 +22,7 @@ const ModelComparisonSection: React.FC = () => {
     heatmapDisplayData: data,
     getProviderForModel,
     activeMetric,
-    werDataset,
+    werServedDataset,
     werDatasetLoading,
     dedicatedModels,
   } = useDashboard();
@@ -52,7 +52,7 @@ const ModelComparisonSection: React.FC = () => {
               ...(avgWER !== undefined
                 ? { avg_wer_percent: avgWER, wer_std_dev_percent: werStdDev }
                 : {}),
-              ...(werDataset ? { wer_dataset: werDataset } : {}),
+              ...(werServedDataset ? { wer_dataset: werServedDataset } : {}),
               runs: sampleCount,
             }))
           }
@@ -67,7 +67,7 @@ const ModelComparisonSection: React.FC = () => {
           dedicatedModels={dedicatedModels}
           percentileIdx={percentileIdx}
           onPercentileChange={setPercentileIdx}
-          werLabel={werDataset ? datasetLabel(werDataset) : undefined}
+          werLabel={werServedDataset ? datasetLabel(werServedDataset) : undefined}
           werLoading={werDatasetLoading}
         />
       </Card>

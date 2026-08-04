@@ -68,9 +68,13 @@ export const DedicatedBadge: React.FC = () => (
  * `containerRef` points at, and calls `dismiss` before repositioning content.
  */
 export function useDedicatedInfoTip(containerRef: RefObject<HTMLElement | null>) {
-  const [tip, setTip] = useState<{ x: number; yTop: number; pinned: boolean } | null>(
-    null
-  );
+  const [tip, setTip] = useState<{
+    x: number;
+    yTop: number;
+    yBottom: number;
+    pinned: boolean;
+    content: React.ReactNode;
+  } | null>(null);
   const dismiss = useCallback(() => setTip(null), []);
 
   // A pinned overlay is pixel-anchored, so scrolling anywhere (page or the
@@ -91,56 +95,70 @@ export function useDedicatedInfoTip(containerRef: RefObject<HTMLElement | null>)
 
   // Identity-stable so hosts can safely reference the handlers from redraw
   // effects (BoxPlot's d3 pass) without re-triggering them every render.
-  const iconHandlers = useMemo(() => {
-    const anchor = (e: React.SyntheticEvent) => {
-      const box = containerRef.current?.getBoundingClientRect();
-      const icon = e.currentTarget.getBoundingClientRect();
-      return {
-        x: icon.x + icon.width / 2 - (box?.x ?? 0),
-        yTop: icon.y - (box?.y ?? 0),
+  const handlersFor = useCallback(
+    (content: React.ReactNode) => {
+      const anchor = (e: React.SyntheticEvent) => {
+        const box = containerRef.current?.getBoundingClientRect();
+        const icon = e.currentTarget.getBoundingClientRect();
+        return {
+          x: icon.x + icon.width / 2 - (box?.x ?? 0),
+          yTop: icon.y - (box?.y ?? 0),
+          yBottom: icon.y + icon.height - (box?.y ?? 0),
+          content,
+        };
       };
-    };
-    // Anchors are computed before setTip: React may replay updater functions
-    // on a later render, when the event's currentTarget is already null.
-    const togglePin = (e: React.SyntheticEvent) => {
-      e.stopPropagation();
-      const a = anchor(e);
-      setTip((t) => (t?.pinned ? null : { ...a, pinned: true }));
-    };
-    return {
-      onMouseEnter: (e: React.MouseEvent) => {
+      // Anchors are computed before setTip: React may replay updater functions
+      // on a later render, when the event's currentTarget is already null.
+      const togglePin = (e: React.SyntheticEvent) => {
+        e.stopPropagation();
         const a = anchor(e);
-        setTip((t) => (t?.pinned ? t : { ...a, pinned: false }));
-      },
-      onMouseLeave: () => setTip((t) => (t?.pinned ? t : null)),
-      onClick: togglePin,
-      // SVG triggers have no native button semantics, so Enter/Space pin here.
-      onKeyDown: (e: React.KeyboardEvent) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.preventDefault();
-        togglePin(e);
-      },
-    };
-  }, [containerRef]);
+        setTip((t) => (t?.pinned ? null : { ...a, pinned: true }));
+      };
+      return {
+        onMouseEnter: (e: React.MouseEvent) => {
+          const a = anchor(e);
+          setTip((t) => (t?.pinned ? t : { ...a, pinned: false }));
+        },
+        onMouseLeave: () => setTip((t) => (t?.pinned ? t : null)),
+        onClick: togglePin,
+        // SVG triggers have no native button semantics, so Enter/Space pin here.
+        onKeyDown: (e: React.KeyboardEvent) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          togglePin(e);
+        },
+      };
+    },
+    [containerRef]
+  );
+  const iconHandlers = useMemo(() => handlersFor(CONTENT), [handlersFor]);
 
   const width = containerRef.current?.clientWidth ?? 0;
+  // Near the container's top edge the upward panel would collide with sticky
+  // table headers (which also paint over lower z-indexes), so it flips below
+  // the trigger; z-20 keeps it above those z-10 headers either way.
+  const flipBelow = tip !== null && tip.yTop < 150;
   const overlay = tip ? (
     <div
       role="tooltip"
       onClick={(e) => e.stopPropagation()}
-      className="absolute z-10 w-60 rounded-lg border border-border-secondary bg-surface-tooltip px-3 py-2 text-left text-xs font-normal leading-snug text-[var(--color-text-on-tooltip)] shadow-md"
+      className="absolute z-20 w-60 rounded-lg border border-border-secondary bg-surface-tooltip px-3 py-2 text-left text-xs font-normal leading-snug text-[var(--color-text-on-tooltip)] shadow-md"
       style={{
         left: width ? Math.min(Math.max(tip.x, 122), width - 122) : tip.x,
-        top: tip.yTop,
-        transform: "translate(-50%, calc(-100% - 8px))",
+        top: flipBelow ? tip.yBottom : tip.yTop,
+        transform: flipBelow
+          ? "translate(-50%, 8px)"
+          : "translate(-50%, calc(-100% - 8px))",
         pointerEvents: tip.pinned ? "auto" : "none",
       }}
     >
-      {CONTENT}
+      {tip.content}
     </div>
   ) : null;
 
   // `open` lets hosts silence competing hover chrome (e.g. a recharts
-  // tooltip) while the explainer is showing.
-  return { iconHandlers, overlay, dismiss, open: tip !== null };
+  // tooltip) while the explainer is showing. `handlersFor` anchors the same
+  // overlay to any trigger with its own content (the comparison table's
+  // per-row WER split).
+  return { iconHandlers, handlersFor, overlay, dismiss, open: tip !== null };
 }

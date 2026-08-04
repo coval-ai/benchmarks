@@ -141,7 +141,7 @@ export function normalizeModelName(modelKey: string): string {
     // S2S
     "gpt-realtime": "GPT Realtime 2",
     "gemini-live": "Gemini 3.1 Flash Live (Preview)",
-    "grok-realtime": "Grok Realtime",
+    "grok-voice-think-fast-1.0": "Grok Voice Think Fast 1.0",
     "grok-voice-think-fast-2.0": "Grok Voice Think Fast 2.0",
     default: "Default",
     enhanced: "Enhanced"

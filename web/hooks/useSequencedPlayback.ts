@@ -8,11 +8,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 export interface PlaybackTrack {
   key: string;
   url: string;
+  // What this track *is*, when the URL alone doesn't say. A signed URL is
+  // re-minted for the same recording, and identifying a track by it would read a
+  // refresh as a track swap and stop playback mid-clip.
+  id?: string;
 }
 
 // Stable identity of what's loaded into the <audio> element, so we can tell a
-// genuine track swap (key or url changed) from a same-index re-render.
-const trackId = (t: PlaybackTrack): string => JSON.stringify([t.key, t.url]);
+// genuine track swap from a same-index re-render or a re-minted URL.
+const trackId = (t: PlaybackTrack): string => JSON.stringify([t.key, t.id ?? t.url]);
 
 // Makes sibling players mutually exclusive: a player claims it before playing,
 // which pauses whoever held it. Share one per group; omit to run independent.

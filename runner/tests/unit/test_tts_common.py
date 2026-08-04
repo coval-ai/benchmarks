@@ -162,7 +162,11 @@ def test_finalize_offset_failure_falls_back_and_writes_wav() -> None:
 
 
 def test_finalize_no_audio_returns_none() -> None:
-    """No audio (first_audio_chunk_at unset) → ttfa None, no WAV."""
+    """No audio (first_audio_chunk_at unset) → ttfa None, no WAV, and a stamped reason.
+
+    Empty pcm with no error is a silent failure, not a success: the provider's receive
+    loop ended without synthesising anything and without recognising why.
+    """
     result = finalize_tts_result(
         provider="test",
         model="m",
@@ -175,4 +179,64 @@ def test_finalize_no_audio_returns_none() -> None:
 
     assert result.ttfa_ms is None
     assert result.audio_path is None
+    assert result.error == "provider closed the stream without sending audio or an error"
+
+
+def test_finalize_silent_failure_quotes_last_frames() -> None:
+    """Retained frames are appended verbatim, so an unmatched schema still explains itself.
+
+    This is the Hume case: it sent a plain-English billing message under a key the
+    integration didn't match. The wording must survive without provider-specific code.
+    """
+    hume_frame = (
+        '{"status_code":400,"message":"Exhausted credit balance.",'
+        '"details":{"type":"error","code":"E0300","slug":"zero_credits"}}'
+    )
+    result = finalize_tts_result(
+        provider="hume",
+        model="octave-2",
+        voice="v",
+        pcm=b"",
+        sample_rate=24000,
+        audio_synthesis_start=10.0,
+        first_audio_chunk_at=None,
+        last_frames=[hume_frame],
+    )
+
+    assert result.error is not None
+    assert result.error.startswith("provider closed the stream without sending audio or an error")
+    assert "Exhausted credit balance." in result.error
+
+
+def test_finalize_does_not_override_a_reported_error() -> None:
+    """A provider that did report a reason keeps its own wording."""
+    result = finalize_tts_result(
+        provider="test",
+        model="m",
+        voice="v",
+        pcm=b"",
+        sample_rate=24000,
+        audio_synthesis_start=None,
+        first_audio_chunk_at=None,
+        error="rate limited",
+        last_frames=["ignored"],
+    )
+
+    assert result.error == "rate limited"
+
+
+def test_finalize_successful_audio_is_untouched() -> None:
+    """Audio present → the guard stays out of the way."""
+    sr = 24000
+    result = finalize_tts_result(
+        provider="test",
+        model="m",
+        voice="v",
+        pcm=_tone_pcm(200, sr),
+        sample_rate=sr,
+        audio_synthesis_start=10.0,
+        first_audio_chunk_at=10.2,
+    )
+
     assert result.error is None
+    assert result.audio_path is not None

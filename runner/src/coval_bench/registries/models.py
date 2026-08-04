@@ -753,16 +753,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechify",
         model="simba-3.2",
         voice="geffen_32",
+        voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="speechify",
         model="simba-3.0",
         voice="geffen_32",
+        voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
     # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
@@ -829,7 +831,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
-        model="grok-realtime",
+        model="grok-voice-think-fast-1.0",
         tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),

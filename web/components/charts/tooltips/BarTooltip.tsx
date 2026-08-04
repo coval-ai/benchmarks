@@ -5,6 +5,8 @@ import React from "react";
 import type { TooltipContentProps } from "recharts";
 import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
 import { normalizeModelName } from "@/lib/utils/formatters";
+import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
+import type { BarDataPoint } from "@/types/benchmark.types";
 
 interface CustomBarTooltipProps extends Partial<Pick<
   TooltipContentProps<number, string>,
@@ -35,6 +37,7 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
     const item = payload[0];
     if (item?.dataKey !== dataKey || typeof item.value !== "number") return null;
     const value = item.value;
+    const breakdown = (item.payload as BarDataPoint | undefined)?.breakdown;
     const modelKey = String(label ?? "");
     const provider = getProviderForModel?.(modelKey);
     const modelLabel = provider
@@ -56,6 +59,18 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
         <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`${valueLabel}: ${formatValue(
           value
         )}`}</p>
+        {breakdown &&
+          WER_BREAKDOWN_LABELS.map(([key, text]) => (
+            <p
+              key={key}
+              style={{
+                margin: 0,
+                fontSize: 12,
+                color: "var(--color-text-on-tooltip)",
+                opacity: 0.8,
+              }}
+            >{`${text}: ${breakdown[key].toFixed(1)}%`}</p>
+          ))}
       </div>
     );
   }

@@ -55,10 +55,14 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
         </span>
       </div>
 
+      <div className="overflow-x-auto">
+      <div className="w-max min-w-full">
       <div className="grid grid-cols-[1.25rem_1fr_auto] items-center gap-x-2 gap-y-4 border-b border-border-secondary pb-2 text-[0.7rem] font-light tracking-wider text-text-secondary">
         <div>#</div>
         <div>Model</div>
-        <div className="text-right">{metricLabel}</div>
+        <div className="sticky right-0 bg-surface-elevated pl-2 text-right">
+          {metricLabel}
+        </div>
       </div>
 
       {loading && (
@@ -99,19 +103,19 @@ const LeaderboardCard: React.FC<LeaderboardCardProps> = ({
                 {index + 1}
               </span>
             </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">
-                {row.model}
-                <span className="ml-1 font-normal text-text-tertiary">
-                  {row.provider}
-                </span>
-              </div>
+            <div className="whitespace-nowrap text-sm font-medium">
+              {row.model}
+              <span className="ml-1 font-normal text-text-tertiary">
+                {row.provider}
+              </span>
             </div>
-            <div className="justify-self-end text-right font-mono text-lg">
+            <div className="sticky right-0 justify-self-end bg-surface-elevated pl-2 text-right font-mono text-lg">
               {row.value}
             </div>
           </div>
         ))}
+      </div>
+      </div>
 
       {!loading && !error && rows.length > 0 && (
         <Link

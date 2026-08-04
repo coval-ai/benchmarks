@@ -9,8 +9,9 @@ edit-distance is delegated to ``jiwer`` for correctness and speed.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, get_args
 
 import jiwer
 from pydantic import BaseModel
@@ -21,13 +22,18 @@ from whisper_normalizer.english import EnglishTextNormalizer
 # Documented in ``docs/methodology.md`` and ADR-021.
 NORM_VERSION: Literal["2"] = "2"
 
+WordErrorType = Literal["substitution", "insertion", "deletion"]
+
+# Fixes the order of the ``wer_*_pct`` columns and the stacked chart segments.
+WORD_ERROR_TYPES: tuple[WordErrorType, ...] = get_args(WordErrorType)
+
 # ---------------------------------------------------------------------------
 # Public data models
 # ---------------------------------------------------------------------------
 
 
 class WordError(BaseModel):
-    type: Literal["substitution", "insertion", "deletion"]
+    type: WordErrorType
     reference: str | None
     hypothesis: str | None
 
@@ -39,6 +45,16 @@ class WERResult(BaseModel):
     normalized_reference: str
     normalized_hypothesis: str
     norm_version: Literal["2"] = NORM_VERSION
+
+    @property
+    def error_percentages(self) -> dict[str, float]:
+        """Split ``wer_percentage`` into per-error-type points that sum back to
+        it by construction — the dashboard's split must reconcile to the total.
+        Splitting by error share (not count/N) stays exact even for the
+        empty-reference convention, where the score is a count, not a ratio."""
+        share = self.wer_percentage / len(self.incorrect_words) if self.incorrect_words else 0.0
+        counts = Counter(e.type for e in self.incorrect_words)
+        return {f"wer_{t}s_pct": counts[t] * share for t in WORD_ERROR_TYPES}
 
 
 # ---------------------------------------------------------------------------

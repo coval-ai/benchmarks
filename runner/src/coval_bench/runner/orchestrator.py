@@ -41,6 +41,7 @@ import importlib
 import random
 import signal
 import wave
+from collections import Counter, defaultdict
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -49,7 +50,7 @@ import structlog
 from posthog import Posthog
 from pydantic import BaseModel
 
-from coval_bench.logging import log_run_failed
+from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
 from coval_bench.registries import (
@@ -73,6 +74,10 @@ _CONCURRENCY_CAP = 8
 _DEDICATED_CONCURRENCY_CAP = 1
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
+# Stable contract — matched by the reason classifier and the alerting log metric.
+# Mirrors _SILENT_FAILURE_PREFIX in providers/tts/_common.py.
+_STT_SILENT_FAILURE = "provider closed the stream without sending a transcript or an error"
+
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
 # but huge stack traces choke log pipelines)
 
@@ -128,6 +133,26 @@ def _metric_outcome(
     return result_status.SUCCESS, None
 
 
+def _stt_silent_failure(result: Any) -> str | None:  # noqa: ANN401 — TranscriptionResult
+    """Diagnostic when a provider returned nothing at all and reported no reason.
+
+    The STT mirror of the TTS guard in ``providers/tts/_common.py``: every streaming
+    provider reaches its return by falling out of the receive loop, so an error frame
+    whose schema the integration failed to match leaves ``error`` unset and the row
+    lands on a generic "no <METRIC> produced".
+
+    Deliberately narrower than the TTS guard. A provider can deliver a final segment
+    with empty text, which still yields a legitimate TTFT/AudioToFinal measurement —
+    failing the item on an empty transcript alone would discard real latency data and
+    shrink sample counts. So this fires only when nothing whatsoever was produced.
+    """
+    if result.complete_transcript or result.partial_transcripts:
+        return None
+    if result.ttft_seconds is not None or result.audio_to_final_seconds is not None:
+        return None
+    return _STT_SILENT_FAILURE
+
+
 def _log_item_failures(
     event: str,
     results: list[Any],
@@ -153,6 +178,76 @@ def _log_item_failures(
     }
     if reasons:
         logger.warning(event, provider=provider, model=model, item=item, reasons=reasons)
+
+
+def _dead_providers(
+    results: list[Any],
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+) -> list[str]:
+    """``benchmark:provider/model (reason)`` for each provider whose every row failed.
+
+    Keyed by benchmark as well as provider and model, because a provider may be
+    registered under more than one modality; keying on the provider alone would let a
+    dead model be masked by that provider's healthy rows in the other benchmark. The
+    reason is the most common error across the rows, so the alert names a cause.
+    """
+    rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for r in results:
+        rows[(str(r.benchmark), r.provider, r.model)].append(r)
+
+    dead: list[str] = []
+    for (benchmark, provider, model), group in sorted(rows.items()):
+        if not all(row.status == result_status.FAILED for row in group):
+            continue
+        ranked = Counter(row.error for row in group if row.error).most_common(1)
+        reason = ranked[0][0] if ranked else "no reason reported"
+        dead.append(f"{benchmark}:{provider}/{model} ({_truncate(reason)})")
+    return dead
+
+
+def _log_run_outcome(
+    final_status: Any,  # noqa: ANN401 — RunStatus enum, lazy-imported by callers
+    results: list[Any],
+    fail_count: int,
+    *,
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+    run_status: Any,  # noqa: ANN401 — RunStatus enum, lazy-imported by callers
+) -> None:
+    """Emit the run-level event that the infra alert metrics filter on.
+
+    Storing the status on the run row is not enough to notify anyone: the Cloud
+    Logging metrics in benchmark-infra match on the literal ``RUN_FAILED`` /
+    ``RUN_PARTIAL`` event strings, so a run that ends badly and logs nothing is
+    invisible in Slack.
+
+    Deliberately log-only — it never raises. The runner job sets ``max_retries = 1``,
+    so exiting non-zero would re-run the whole benchmark, re-spending on every
+    provider and writing a duplicate run. Alerting keys off the log event, not the
+    exit code, so the page fires either way.
+
+    A total failure reports only ``RUN_FAILED``; the per-provider breakdown is
+    skipped there because every provider is in it, and one incident must not page
+    twice.
+
+    A partial run reports ``RUN_PARTIAL`` **only when some provider failed every one
+    of its items**, not on every partial run. Scattered item failures are normal —
+    providers routinely lose one clip out of thirty — so paging on those would bury
+    the signal and the alert would be muted. The consequence is deliberate: a run
+    where many providers fail most of their items without any single one being fully
+    dead stays silent here, and is caught only by the run's own metrics.
+    """
+    if final_status is run_status.FAILED:
+        log_run_failed(
+            f"all {fail_count} result rows failed"
+            if results
+            else "benchmark produced no results (no providers configured or dataset empty)"
+        )
+        return
+    if final_status is not run_status.PARTIAL:
+        return
+    dead = _dead_providers(results, result_status)
+    if dead:
+        log_run_partial(f"providers failed every item: {'; '.join(dead)}")
 
 
 async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
@@ -318,6 +413,8 @@ async def _run_stt_item(
         item_error = item_error or (
             transcription_result.error if transcription_result is not None else None
         )
+        if transcription_result is not None and item_error is None:
+            item_error = _stt_silent_failure(transcription_result)
         ttft_seconds = transcription_result.ttft_seconds if transcription_result else None
         audio_to_final = (
             transcription_result.audio_to_final_seconds if transcription_result else None
@@ -486,6 +583,7 @@ async def _run_stt_item(
                         transcript=complete_transcript,
                         status=ResultStatus.SUCCESS,
                         error=None,
+                        **wer_result.error_percentages,
                     )
                 )
                 logger.debug(
@@ -712,6 +810,7 @@ async def _run_tts_item(
                                 transcript=whisper_transcript,
                                 status=ResultStatus.SUCCESS,
                                 error=None,
+                                **wer_result.error_percentages,
                             )
                         )
                         logger.debug(
@@ -1117,6 +1216,18 @@ async def run_benchmarks(
 
             await writer.finish_run(run_id, status=final_status, error=None)
 
+            # After the row is stored, never before: if finish_run raises, the outer
+            # handler is the only thing that should report, otherwise a partial run
+            # pages RUN_PARTIAL and then RUN_FAILED for one incident. Everything
+            # below this point is best-effort and cannot raise.
+            _log_run_outcome(
+                final_status,
+                typed_results,
+                fail_count,
+                result_status=ResultStatus,
+                run_status=RunStatus,
+            )
+
             # Refresh after finish_run: the view query only counts runs already
             # marked succeeded/partial. A failed refresh must not fail the run.
             try:
@@ -1192,6 +1303,20 @@ async def run_benchmarks(
                     exc_info=write_exc,
                 )
             else:
+                # Report before the bucket refresh, not after: SIGTERM gives ~10s
+                # before SIGKILL, and losing the page to a slow maintenance call is
+                # worse than losing the rollup. Reach is limited — ``all_results`` is
+                # only extended after a phase's gather returns, so the cancelled phase
+                # contributes nothing and a single-kind run names no dead provider.
+                # Only an earlier completed phase (kind="both") can be named here.
+                # Rows are durable either way; each task persists its own.
+                _log_run_outcome(
+                    RunStatus.PARTIAL,
+                    typed_results,
+                    fail_count,
+                    result_status=ResultStatus,
+                    run_status=RunStatus,
+                )
                 # Run row is PARTIAL, so its bucket qualifies.
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
             finished_at = datetime.now(tz=UTC)

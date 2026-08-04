@@ -7,8 +7,13 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Card from "@/components/shared/Card";
 import { useDashboard } from "@/contexts/DashboardContext";
-import { SampleFetchError } from "@/lib/audioSamples/createSampleFeed";
-import { s2sSampleFeed, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
+import { ApiError } from "@/lib/api/client";
+import {
+  useS2SSampleAudioUrls,
+  useS2SSampleIdsQuery,
+  useS2SSampleQuery,
+} from "@/lib/api/queries";
+import { spokenTurns, visibleRecordings } from "@/lib/audioSamples/s2sFeed";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import {
   POSTHOG_EVENTS,
@@ -23,11 +28,11 @@ import {
   type SampleSeekInfo,
 } from "./SampleOutputs";
 
-// Which failure case fired, for the console — network/http/parse vs an
-// unclassified error, with the status when we have one.
+// Which failure case fired, for the console — the API's status when we have one,
+// otherwise whatever the thrown value says.
 function describeError(err: unknown): string {
-  if (err instanceof SampleFetchError) {
-    return err.status != null ? `${err.kind} (status ${err.status})` : err.kind;
+  if (err instanceof ApiError) {
+    return `status ${err.status} ${err.statusText}`;
   }
   return err instanceof Error ? err.message : String(err);
 }
@@ -53,7 +58,7 @@ export function SamplesCard() {
     [modelsByProvider]
   );
 
-  const indexQuery = s2sSampleFeed.useIndexQuery();
+  const indexQuery = useS2SSampleIdsQuery();
   const [windowStart, windowEnd] = getCurrentTimeWindow();
   const sampleTicks = useMemo(
     () =>
@@ -75,14 +80,13 @@ export function SamplesCard() {
   const newerTick = sampleTicks.find(
     (tick) => new Date(tick).getTime() > effectiveTime
   );
-  const manifestQuery = s2sSampleFeed.useManifestQuery(effectiveTick);
+  const manifestQuery = useS2SSampleQuery(effectiveTick);
   const manifest = manifestQuery.data ?? null;
   const displayedTick =
-    manifestQuery.isPlaceholderData && manifest?.bucket_at
-      ? manifest.bucket_at
+    manifestQuery.isPlaceholderData && manifest?.sample_id
+      ? manifest.sample_id
       : effectiveTick;
 
-  const fetchError = manifestQuery.isError || indexQuery.isError;
   // Keep the failure cause internal (dev console only); public visitors just see
   // the generic "temporarily unavailable" copy below.
   useEffect(() => {
@@ -94,15 +98,26 @@ export function SamplesCard() {
   // Every tick with recordings is playable, including the pre-multi-turn ones
   // that carry no transcript — those render as panes with a play button and no
   // turn list, so a timeline click always reaches its audio.
-  const items = useMemo<SampleOutputItem[]>(() => {
-    if (!manifest) return [];
-    return visibleRecordings(manifest, visibleModels).map((r) => ({
-      provider: r.provider,
-      model: r.model,
-      url: s2sSampleFeed.objectUrl(r.object),
-      turns: r.turns,
-    }));
-  }, [manifest, visibleModels]);
+  const recordings = useMemo(
+    () => (manifest ? visibleRecordings(manifest, visibleModels) : []),
+    [manifest, visibleModels]
+  );
+  // Signed URLs are fetched as soon as the sample lands, not on the play click: a
+  // browser will not start playback that begins after an await.
+  const audioUrls = useS2SSampleAudioUrls(recordings);
+  const items = useMemo<SampleOutputItem[]>(
+    () =>
+      recordings.map((recording, position) => ({
+        provider: recording.provider,
+        model: recording.model,
+        url: audioUrls.urls[position] ?? "",
+        audioPath: recording.audio_path,
+        turns: spokenTurns(recording.turns),
+      })),
+    [recordings, audioUrls.urls]
+  );
+
+  const fetchError = manifestQuery.isError || indexQuery.isError || audioUrls.isError;
 
   // A timeline row can name a provider this bucket never recorded — an older
   // tick from before that model was benchmarked, or one absent from the page's
@@ -131,7 +146,7 @@ export function SamplesCard() {
     (provider: string, trigger: S2SPlayTrigger) => {
       const position = items.findIndex((item) => item.provider === provider);
       const item = position >= 0 ? items[position] : undefined;
-      playContextRef.current = { bucket: manifest?.bucket_at, model: item?.model };
+      playContextRef.current = { bucket: manifest?.sample_id, model: item?.model };
       capturePostHogEvent(POSTHOG_EVENTS.s2sSamplePlayRequested, {
         surface: "s2s_dashboard",
         mode: "s2s",
@@ -140,10 +155,10 @@ export function SamplesCard() {
         position: position >= 0 ? position : undefined,
         has_transcript: (item?.turns?.length ?? 0) > 0,
         trigger,
-        bucket_at: manifest?.bucket_at,
+        bucket_at: manifest?.sample_id,
       });
     },
-    [items, manifest?.bucket_at]
+    [items, manifest?.sample_id]
   );
 
   const handlePlaybackEnded = useCallback(
@@ -171,14 +186,14 @@ export function SamplesCard() {
         mode: "s2s",
         provider,
         model_id: item?.model,
-        bucket_at: manifest?.bucket_at,
+        bucket_at: manifest?.sample_id,
         method: seek.method,
         to_seconds: Math.round(seek.toSeconds),
         turn_index: seek.turnIndex,
         turn_role: seek.turnRole,
       });
     },
-    [items, manifest?.bucket_at]
+    [items, manifest?.sample_id]
   );
 
   const handleTickSelect = useCallback(
@@ -195,8 +210,18 @@ export function SamplesCard() {
     [displayedTick, selectS2SSample]
   );
 
+  // Hold the previous panes until every signed URL is in: a pane whose URL is
+  // still in flight would hand the shared audio element an empty src.
+  const pendingUrls = recordings.length > 0 && audioUrls.isPending;
+  const lastReadyItems = useRef<SampleOutputItem[]>([]);
+  if (!pendingUrls) lastReadyItems.current = items;
+  const displayItems = pendingUrls ? lastReadyItems.current : items;
+  const transitioning = manifestQuery.isPlaceholderData || pendingUrls;
+
   const loading =
-    indexQuery.isLoading || (effectiveTick != null && manifestQuery.isLoading);
+    indexQuery.isLoading ||
+    (effectiveTick != null && manifestQuery.isLoading) ||
+    (pendingUrls && displayItems.length === 0);
 
   useEffect(() => {
     if (s2sPlayRequest?.source === "timeline") {
@@ -206,10 +231,18 @@ export function SamplesCard() {
 
   return (
     <Card id="s2s-samples" className="text-left min-w-0 h-full flex flex-col" padding="p-5 lg:p-8">
-      <div className="mb-4 flex items-baseline justify-between gap-2">
+      <div className="mb-4">
         <h2 className="text-xl font-medium text-text-primary">
           Conversation samples
         </h2>
+        <p className="mt-1 text-sm font-light text-text-tertiary">
+          Latency tells you when a model speaks; these recordings let you hear
+          how it handles the same scripted caller.
+          <span className="mt-1 block">
+            Play a model to follow its transcript. Tap a turn to jump the audio
+            there.
+          </span>
+        </p>
       </div>
 
       {effectiveTick && sampleTicks.length > 1 ? (
@@ -256,27 +289,32 @@ export function SamplesCard() {
         <p className="py-8 text-center text-sm text-text-tertiary">
           Samples are temporarily unavailable.
         </p>
-      ) : items.length === 0 ? (
+      ) : displayItems.length === 0 ? (
         <p className="py-8 text-center text-sm text-text-tertiary">
           {!manifest && s2sPlayRequest
             ? "No sample recorded for this point."
             : "Samples appear here after the next benchmark run."}
         </p>
       ) : (
-        <div className="flex flex-1 flex-col gap-4">
+        <div
+          aria-busy={transitioning}
+          className={`flex flex-1 flex-col gap-4 transition-opacity ${
+            transitioning ? "pointer-events-none opacity-50" : ""
+          }`}
+        >
           {requestedProviderMissing && requestedProvider ? (
             <p className="text-[11px] text-text-tertiary">
               No recording for {normalizeProviderName(requestedProvider)} at this point.
             </p>
           ) : null}
           <SampleOutputs
-            items={items}
+            items={displayItems}
             normalizeProvider={normalizeProviderName}
             onPlay={handlePlay}
             onSeeked={handleSeeked}
             onPlaybackEnded={handlePlaybackEnded}
             playRequest={
-              requestedItem && !manifestQuery.isPlaceholderData
+              requestedItem && !transitioning
                 ? { provider: requestedItem.provider, nonce: s2sPlayRequest!.nonce }
                 : null
             }
