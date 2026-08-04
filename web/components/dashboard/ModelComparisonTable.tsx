@@ -9,6 +9,7 @@ import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo"
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
+import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
@@ -50,6 +51,52 @@ const COLUMNS: {
   { key: "sampleCount", label: "Samples", bestDirection: "desc" }
 ];
 
+// WER value with the error-type split on hover/tap when the API serves one.
+const WerValue: React.FC<{
+  row: Pick<ModelHeatmapData, "model" | "avgWER" | "werStdDev" | "werBreakdown">;
+  handlersFor: (content: React.ReactNode) => React.DOMAttributes<HTMLElement>;
+  getProviderForModel: (model: string) => string;
+}> = ({ row, handlersFor, getProviderForModel }) => {
+  const value = (
+    <>
+      <span className="font-mono text-base text-text-primary">
+        {row.avgWER!.toFixed(1)}
+        <span className="text-xs">%</span>
+      </span>
+      {row.werStdDev !== undefined && (
+        <span className="ml-1.5 font-mono text-xs text-text-tertiary">
+          ± {row.werStdDev.toFixed(1)}
+        </span>
+      )}
+    </>
+  );
+  const breakdown = row.werBreakdown;
+  if (!breakdown) return value;
+  return (
+    <button
+      type="button"
+      aria-label={`${getProviderForModel(row.model)} ${normalizeModelName(row.model)}: ${row.avgWER!.toFixed(1)}% WER (${WER_BREAKDOWN_LABELS.map(
+        ([key, text]) => `${text.toLowerCase()} ${breakdown[key].toFixed(1)}%`
+      ).join(", ")})`}
+      className="cursor-help rounded-md p-1 -m-1 underline decoration-border-primary decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+      {...handlersFor(
+        <>
+          <span className="font-semibold">
+            {normalizeModelName(row.model)}: {row.avgWER!.toFixed(1)}% WER
+          </span>
+          {WER_BREAKDOWN_LABELS.map(([key, text]) => (
+            <span key={key} className="block opacity-80">
+              {text}: {breakdown[key].toFixed(1)}%
+            </span>
+          ))}
+        </>
+      )}
+    >
+      {value}
+    </button>
+  );
+};
+
 const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel,
@@ -63,8 +110,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   // The table scrolls horizontally, which clips anchored popovers, so the
   // dedicated explainer renders as an overlay on this unclipped wrapper.
   const tableWrapRef = useRef<HTMLDivElement>(null);
-  const { iconHandlers: dedicatedIconHandlers, overlay: dedicatedOverlay } =
-    useDedicatedInfoTip(tableWrapRef);
+  const {
+    iconHandlers: dedicatedIconHandlers,
+    handlersFor: infoTipHandlersFor,
+    overlay: infoTipOverlay
+  } = useDedicatedInfoTip(tableWrapRef);
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
@@ -177,11 +227,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         {percentile.hint && (
           <span className="text-xs text-text-tertiary">{percentile.hint}</span>
         )}
-        <WerDatasetSelect className="ml-auto" />
+        {hasWER && <WerDatasetSelect className="ml-auto" />}
       </div>
 
       <div ref={tableWrapRef} className="relative">
-        {dedicatedOverlay}
+        {infoTipOverlay}
         <p className="mb-2 text-right text-xs text-text-tertiary sm:hidden">
           Swipe table for more →
         </p>
@@ -271,17 +321,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                       className={`transition-opacity ${werLoading ? "opacity-40" : ""}`}
                     >
                       {row.avgWER !== undefined ? (
-                        <>
-                          <span className="font-mono text-base text-text-primary">
-                            {row.avgWER.toFixed(1)}
-                            <span className="text-xs">%</span>
-                          </span>
-                          {row.werStdDev !== undefined && (
-                            <span className="ml-1.5 font-mono text-xs text-text-tertiary">
-                              ± {row.werStdDev.toFixed(1)}
-                            </span>
-                          )}
-                        </>
+                        <WerValue
+                          row={row}
+                          handlersFor={infoTipHandlersFor}
+                          getProviderForModel={getProviderForModel}
+                        />
                       ) : (
                         <span className="text-text-tertiary">—</span>
                       )}

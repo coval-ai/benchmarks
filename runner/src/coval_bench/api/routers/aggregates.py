@@ -69,7 +69,8 @@ router = APIRouter(tags=["results"])
 _STATS_SQL_TEMPLATE = (
     "SELECT provider, model, metric_type,"
     " avg_value, stddev_value, p25, p50, p75, p90, p95, p99,"
-    " min_value, max_value, sample_count"
+    " min_value, max_value, sample_count,"
+    " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
     " FROM {view}"
     " WHERE benchmark = %(benchmark)s"
     " AND dataset_id = %(dataset)s"
@@ -95,7 +96,8 @@ _DATASETS_SQL_TEMPLATE = (
 _STATS_BY_DATASET_SQL_TEMPLATE = (
     "SELECT dataset_id, provider, model, metric_type,"
     " avg_value, stddev_value, p25, p50, p75, p90, p95, p99,"
-    " min_value, max_value, sample_count"
+    " min_value, max_value, sample_count,"
+    " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
     " FROM {view}"
     " WHERE benchmark = %(benchmark)s"
     " AND dataset_id <> %(sentinel)s"

@@ -512,6 +512,7 @@ async def _run_stt_item(
                         transcript=complete_transcript,
                         status=ResultStatus.SUCCESS,
                         error=None,
+                        **wer_result.error_percentages,
                     )
                 )
                 logger.debug(
@@ -738,6 +739,7 @@ async def _run_tts_item(
                                 transcript=whisper_transcript,
                                 status=ResultStatus.SUCCESS,
                                 error=None,
+                                **wer_result.error_percentages,
                             )
                         )
                         logger.debug(

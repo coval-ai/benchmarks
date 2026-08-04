@@ -83,6 +83,76 @@ async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any
     assert s["sample_count"] == 1
 
 
+async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgresql: Any) -> None:
+    """Each error type averages independently, and the three sum to avg_value."""
+    run_id = await _insert_run(postgresql)
+    for ins, dele, sub in ((1.0, 2.0, 3.0), (3.0, 4.0, 11.0)):
+        await _insert_result(
+            postgresql,
+            run_id,
+            metric_value=ins + dele + sub,
+            wer_insertions_pct=ins,
+            wer_deletions_pct=dele,
+            wer_substitutions_pct=sub,
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] == pytest.approx(2.0)
+    assert s["wer_deletions_pct"] == pytest.approx(3.0)
+    assert s["wer_substitutions_pct"] == pytest.approx(7.0)
+    assert s["avg_value"] == pytest.approx(12.0)
+    parts = ("wer_insertions_pct", "wer_deletions_pct", "wer_substitutions_pct")
+    assert sum(s[k] for k in parts) == pytest.approx(s["avg_value"])
+
+
+async def test_wer_breakdown_null_when_any_row_lacks_it(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A scored/pre-migration mix reports no breakdown: a partial average would not reconcile."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=3.0,
+    )
+    await _insert_result(postgresql, run_id, metric_value=10.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["avg_value"] == pytest.approx(8.0)
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
+async def test_wer_breakdown_null_when_any_component_missing(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A row carrying only some components nulls the whole split — two real
+    averages beside a null third could never reconcile with avg_value."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
 async def test_excludes_failed_null_and_other_benchmark(
     client: AsyncClient, postgresql: Any
 ) -> None:
@@ -384,8 +454,22 @@ async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgres
     run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
     await _insert_result(postgresql, run_v1, metric_value=1.0)
     run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
-    await _insert_result(postgresql, run_v3, metric_value=3.0)
-    await _insert_result(postgresql, run_v3, metric_value=5.0)
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=3.0,
+        wer_insertions_pct=0.5,
+        wer_deletions_pct=1.0,
+        wer_substitutions_pct=1.5,
+    )
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=5.0,
+        wer_insertions_pct=1.5,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=1.5,
+    )
     await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
@@ -396,8 +480,12 @@ async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgres
     v1, v3 = blocks
     assert v1["model_stats"][0]["sample_count"] == 1
     assert v1["model_stats"][0]["avg_value"] == pytest.approx(1.0)
+    assert v1["model_stats"][0]["wer_insertions_pct"] is None
     assert v3["model_stats"][0]["sample_count"] == 2
     assert v3["model_stats"][0]["avg_value"] == pytest.approx(4.0)
+    assert v3["model_stats"][0]["wer_insertions_pct"] == pytest.approx(1.0)
+    assert v3["model_stats"][0]["wer_deletions_pct"] == pytest.approx(1.5)
+    assert v3["model_stats"][0]["wer_substitutions_pct"] == pytest.approx(1.5)
 
 
 async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:

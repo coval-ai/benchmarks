@@ -170,6 +170,33 @@ def test_incorrect_words_empty_on_match() -> None:
 
 
 # ---------------------------------------------------------------------------
+# error_percentages breakdown
+# ---------------------------------------------------------------------------
+
+
+def test_error_percentages_split_by_type() -> None:
+    result = compute_wer("a b c d", "a x c d")
+    assert result.error_percentages == pytest.approx(
+        {"wer_insertions_pct": 0.0, "wer_deletions_pct": 0.0, "wer_substitutions_pct": 25.0}
+    )
+
+
+def test_error_percentages_empty_reference_is_all_insertions() -> None:
+    result = compute_wer("", "one two")
+    assert result.error_percentages["wer_insertions_pct"] == pytest.approx(result.wer_percentage)
+    assert result.error_percentages["wer_deletions_pct"] == 0.0
+    assert result.error_percentages["wer_substitutions_pct"] == 0.0
+
+
+@pytest.mark.parametrize(("case_id", "ref", "hyp", "expected_wer", "note"), _GOLDEN)
+def test_error_percentages_sum_to_wer(
+    case_id: int, ref: str, hyp: str, expected_wer: float, note: str
+) -> None:
+    result = compute_wer(ref, hyp)
+    assert sum(result.error_percentages.values()) == pytest.approx(result.wer_percentage)
+
+
+# ---------------------------------------------------------------------------
 # WordError model
 # ---------------------------------------------------------------------------
 

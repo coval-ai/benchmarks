@@ -19,6 +19,7 @@ import type {
 import type { SeriesPoint } from "@/lib/api/client";
 import { latencyToMs, normalizeModelName, normalizeProviderNameForTab, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { WINDOW_MS, type TimeWindow } from "@/lib/config/timeWindows";
+import { werBreakdownOf } from "@/lib/utils/werBreakdown";
 
 // Latency metrics share every chart's number machinery (box plot, scatter,
 // comparison table). Membership gates the builders so a new one (V2V for S2S)
@@ -358,7 +359,11 @@ export function useChartData({
           model,
           ...(latency ? { latency } : {}),
           ...(werStat
-            ? { avgWER: werStat.avg_value, werStdDev: werStat.stddev_value }
+            ? {
+                avgWER: werStat.avg_value,
+                werStdDev: werStat.stddev_value,
+                werBreakdown: werBreakdownOf(werStat)
+              }
             : {}),
           sampleCount: latencySampleCount ?? werStat?.sample_count ?? 0
         });
@@ -380,14 +385,15 @@ export function useChartData({
     }
 
     return selectedModels
-      .map((model) => {
+      .map((model): BarDataPoint | null => {
         const werStat = getStat(model, "WER");
         if (!werStat) return null;
 
         return {
           model,
           averageWER: werStat.avg_value,
-          provider: werStat.provider
+          provider: werStat.provider,
+          breakdown: werBreakdownOf(werStat)
         };
       })
       .filter((item): item is BarDataPoint => item !== null)

@@ -143,6 +143,11 @@ class ModelStatEntry(BaseModel):
     min_value: float
     max_value: float
     sample_count: int
+    # WER only, percentage points summing to avg_value; null pre-0014 rows —
+    # clients fall back to the total alone.
+    wer_insertions_pct: float | None = None
+    wer_deletions_pct: float | None = None
+    wer_substitutions_pct: float | None = None
 
 
 class SeriesPoint(BaseModel):
