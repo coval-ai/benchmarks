@@ -41,6 +41,7 @@ import importlib
 import random
 import signal
 import wave
+from collections import Counter, defaultdict
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -49,7 +50,7 @@ import structlog
 from posthog import Posthog
 from pydantic import BaseModel
 
-from coval_bench.logging import log_run_failed
+from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
 from coval_bench.registries import (
@@ -153,6 +154,69 @@ def _log_item_failures(
     }
     if reasons:
         logger.warning(event, provider=provider, model=model, item=item, reasons=reasons)
+
+
+def _dead_providers(
+    results: list[Any],
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+) -> list[str]:
+    """``benchmark:provider/model (reason)`` for each provider whose every row failed.
+
+    Keyed by benchmark as well as provider and model: openai and xai are registered
+    under both TTS and STT, so keying on the provider alone would let a dead TTS model
+    be masked by the same provider's healthy STT rows. The reason is the most common
+    error across that provider's rows, so the alert names a cause and not just a name.
+    """
+    rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for r in results:
+        rows[(str(r.benchmark), r.provider, r.model)].append(r)
+
+    dead: list[str] = []
+    for (benchmark, provider, model), group in sorted(rows.items()):
+        if not all(row.status == result_status.FAILED for row in group):
+            continue
+        ranked = Counter(row.error for row in group if row.error).most_common(1)
+        reason = ranked[0][0] if ranked else "no reason reported"
+        dead.append(f"{benchmark}:{provider}/{model} ({_truncate(reason)})")
+    return dead
+
+
+def _log_run_outcome(
+    final_status: Any,  # noqa: ANN401 — RunStatus enum, lazy-imported by callers
+    results: list[Any],
+    fail_count: int,
+    *,
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+    run_status: Any,  # noqa: ANN401 — RunStatus enum, lazy-imported by callers
+) -> None:
+    """Emit the run-level event that the infra alert metrics filter on.
+
+    Storing the status on the run row is not enough to notify anyone: the Cloud
+    Logging metrics in benchmark-infra match on the literal ``RUN_FAILED`` /
+    ``RUN_PARTIAL`` event strings, so a run that ends badly and logs nothing is
+    invisible in Slack.
+
+    Deliberately log-only — it never raises. The runner job sets ``max_retries = 1``,
+    so exiting non-zero would re-run the whole benchmark, re-spending on every
+    provider and writing a duplicate run. Alerting keys off the log event, not the
+    exit code, so the page fires either way.
+
+    A total failure reports only ``RUN_FAILED``; the per-provider breakdown is
+    skipped there because every provider is in it, and one incident must not page
+    twice.
+    """
+    if final_status is run_status.FAILED:
+        log_run_failed(
+            f"all {fail_count} result rows failed"
+            if results
+            else "benchmark produced no results (no providers configured or dataset empty)"
+        )
+        return
+    if final_status is not run_status.PARTIAL:
+        return
+    dead = _dead_providers(results, result_status)
+    if dead:
+        log_run_partial(f"providers failed every item: {'; '.join(dead)}")
 
 
 async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
@@ -1114,6 +1178,14 @@ async def run_benchmarks(
                 final_status = RunStatus.SUCCEEDED
             else:
                 final_status = RunStatus.PARTIAL
+
+            _log_run_outcome(
+                final_status,
+                typed_results,
+                fail_count,
+                result_status=ResultStatus,
+                run_status=RunStatus,
+            )
 
             await writer.finish_run(run_id, status=final_status, error=None)
 
