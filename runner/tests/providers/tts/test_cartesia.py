@@ -76,7 +76,7 @@ async def test_cartesia_no_audio_chunks(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.cartesia.AsyncCartesia", return_value=fake_client):
         result = await provider.synthesize("silence test")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

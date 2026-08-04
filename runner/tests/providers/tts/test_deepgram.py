@@ -131,7 +131,7 @@ async def test_deepgram_no_audio_chunks(fake_settings: Settings) -> None:
     ):
         result = await provider.synthesize("silent test")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

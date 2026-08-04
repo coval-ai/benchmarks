@@ -44,7 +44,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel, Source
-from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
+from coval_bench.runner.orchestrator import RunSummary, _stt_silent_failure, run_benchmarks
 from coval_bench.runner.retry import with_retry
 
 # ---------------------------------------------------------------------------
@@ -1633,7 +1633,9 @@ async def test_stt_empty_result_marked_failed(audio_file: Path, settings: Settin
     for mt in ("TTFT", "AudioToFinal", "RTF"):
         assert by_metric[mt].status == ResultStatus.FAILED
         error = by_metric[mt].error
-        assert error is not None and "produced" in error
+        # A silent return is diagnosed as such, not left on the generic
+        # "no <METRIC> produced" fallback that hides an unmatched error frame.
+        assert error == "provider closed the stream without sending a transcript or an error"
     assert "WER" not in by_metric  # no transcript → no WER row
     assert summary.success_count == 0
     assert summary.status == str(RunStatus.FAILED)
@@ -2098,7 +2100,10 @@ async def test_stt_empty_result_logs_item_failure(audio_file: Path, settings: Se
     assert event["item"] == "0001.wav"
     # Every silent FAILED metric is carried with its reason.
     assert {"TTFT", "AudioToFinal", "RTF"} <= set(event["reasons"])
-    assert all("produced" in reason for reason in event["reasons"].values())
+    assert all(
+        reason == "provider closed the stream without sending a transcript or an error"
+        for reason in event["reasons"].values()
+    )
 
 
 @pytest.mark.asyncio
@@ -2449,3 +2454,46 @@ async def test_posthog_capture_failure_does_not_fail_run(
 
     assert summary.status == str(RunStatus.SUCCEEDED)
     fake.capture.assert_called_once()
+
+
+def test_stt_silent_failure_stamps_a_reason_when_nothing_was_produced() -> None:
+    """Nothing at all returned and no reason given → a diagnostic replaces the generic row.
+
+    The STT mirror of the TTS guard: an error frame whose schema the integration failed
+    to match leaves ``error`` unset, and the row would otherwise read "no TTFS produced".
+    """
+    result = TranscriptionResult(provider="assemblyai")
+
+    assert (
+        _stt_silent_failure(result)
+        == "provider closed the stream without sending a transcript or an error"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ttft_seconds", 0.4),
+        ("audio_to_final_seconds", 1.2),
+        ("complete_transcript", "hello"),
+    ],
+)
+def test_stt_silent_failure_ignores_a_result_that_produced_something(
+    field: str, value: object
+) -> None:
+    """Any real measurement means the item is not a silent failure.
+
+    Deliberately narrow: a provider can send a final segment with empty text, which
+    still yields a valid TTFT/AudioToFinal. Failing the item on an empty transcript
+    alone would discard real latency data and shrink sample counts.
+    """
+    result = TranscriptionResult(provider="deepgram", **{field: value})  # type: ignore[arg-type]
+
+    assert _stt_silent_failure(result) is None
+
+
+def test_stt_silent_failure_ignores_partials_only() -> None:
+    """Partial transcripts arrived, so the stream was not silent."""
+    result = TranscriptionResult(provider="together", partial_transcripts=["par"])
+
+    assert _stt_silent_failure(result) is None
