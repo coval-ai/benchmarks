@@ -64,13 +64,15 @@ def test_no_pool_falls_back_to_pin() -> None:
 
 
 def test_registry_pools_are_f_m_pairs() -> None:
-    """Every ``voices`` pool is a distinct (female, male) pair on a benchmarked TTS entry."""
-    benchmarked = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
+    """Every ``voices`` pool is a distinct (female, male) pair on a live TTS entry.
+
+    PAUSED entries keep their pool so resuming them needs no re-research."""
+    live = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS, ModelStatus.PAUSED)
     pooled = [m for m in MODEL_REGISTRY if m.voices]
     assert pooled, "expected voice pools in the registry"
     for m in pooled:
         assert m.benchmark is Benchmark.TTS, f"{m.provider}/{m.model}: pool on non-TTS entry"
-        assert m.status in benchmarked, f"{m.provider}/{m.model}: pool on unbenchmarked entry"
+        assert m.status in live, f"{m.provider}/{m.model}: pool on dead entry"
         assert len(m.voices) == 2, f"{m.provider}/{m.model}: pool must be a (female, male) pair"
         assert len(set(m.voices)) == 2, f"{m.provider}/{m.model}: duplicate voice in pool"
 
