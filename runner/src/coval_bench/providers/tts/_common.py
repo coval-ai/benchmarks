@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+import math
 import os
 import tempfile
 import wave
 from collections.abc import Sequence
 from pathlib import Path
 
+import numpy as np
 import structlog
 
 from coval_bench.metrics import compute_ttfa, first_audible_offset_ms
@@ -23,7 +25,7 @@ _PCM16_FRAME_BYTES = 2
 
 # Stable contract — matched by the reason classifier and the alerting log metric.
 _SILENT_FAILURE_PREFIX = "provider closed the stream without sending audio or an error"
-_SILENT_AUDIO_ERROR = "provider returned audio with no audible speech"
+_INAUDIBLE_AUDIO_ERROR = "provider audio remained below the audibility threshold"
 _LAST_FRAMES_MAX_CHARS = 400
 
 
@@ -71,13 +73,18 @@ def finalize_tts_result(
     if remainder:
         pcm = pcm[: len(pcm) - remainder]
 
+    # Audibility is a property of the audio alone, so it is judged whenever there is
+    # audio — not only when both timestamps happen to be set. A provider that returned
+    # PCM but left a timestamp unset would otherwise skip the check entirely and fall
+    # through to the orchestrator's generic reason.
+    offset_ms: float | None = None
+    inaudible_audio = False
+    if pcm:
+        offset_ms, detection_ok = _safe_offset_ms(pcm, sample_rate, provider, model)
+        inaudible_audio = offset_ms is None and detection_ok
+
     ttfa_ms: float | None = None
-    silent_audio = False
     if audio_synthesis_start is not None and first_audio_chunk_at is not None:
-        offset_ms: float | None = None
-        if pcm:
-            offset_ms, detection_ok = _safe_offset_ms(pcm, sample_rate, provider, model)
-            silent_audio = offset_ms is None and detection_ok
         ttfa_ms = compute_ttfa(
             audio_synthesis_start, first_audio_chunk_at, offset_ms if offset_ms is not None else 0.0
         )
@@ -94,14 +101,26 @@ def finalize_tts_result(
     if not pcm and error is None:
         error = _silent_failure_error(last_frames)
         logger.warning("tts_silent_failure", provider=provider, model=model, error=error)
-    elif silent_audio and error is None:
-        # Audio arrived but carries no audible speech. Without this the null offset
-        # collapses into 0.0 and TTFA becomes pure arrival time — a plausible number
-        # measured off silence, which then enters the aggregates. No output is a
-        # failure however much of it there is, so drop the value with the row.
-        error = _SILENT_AUDIO_ERROR
+    elif inaudible_audio and error is None:
+        # Audio arrived but no frame cleared the audibility threshold. Without this the
+        # null offset collapses into 0.0 and TTFA becomes pure arrival time — a
+        # plausible number measured off silence, which then enters the aggregates.
+        #
+        # The wording claims only what a fixed RMS threshold can support: the audio was
+        # below it, not definitively that speech is absent. Unusually quiet or whispered
+        # output would land here too, so the peak and RMS are logged to make that case
+        # recognisable rather than indistinguishable from true silence.
+        error = _INAUDIBLE_AUDIO_ERROR
         ttfa_ms = None
-        logger.warning("tts_silent_audio", provider=provider, model=model, bytes=len(pcm))
+        peak, rms = _level_diagnostics(pcm)
+        logger.warning(
+            "tts_inaudible_audio",
+            provider=provider,
+            model=model,
+            bytes=len(pcm),
+            peak_dbfs=peak,
+            rms_dbfs=rms,
+        )
     return TTSResult(
         provider=provider,
         model=model,
@@ -129,6 +148,31 @@ def _silent_failure_error(last_frames: Sequence[str] | None) -> str:
     if not tail:
         return _SILENT_FAILURE_PREFIX
     return f"{_SILENT_FAILURE_PREFIX}; last frames: {tail[:_LAST_FRAMES_MAX_CHARS]}"
+
+
+def _level_diagnostics(pcm: bytes) -> tuple[float | None, float | None]:
+    """Peak and RMS of *pcm* in dBFS, or ``(None, None)`` when it can't be read.
+
+    Recorded alongside an inaudible-audio failure so quiet-but-real speech can be told
+    apart from true silence after the fact. Diagnostics only — never load-bearing, so
+    any failure degrades to ``None`` rather than propagating.
+    """
+    try:
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        if samples.size == 0:
+            return None, None
+        peak = float(np.max(np.abs(samples)))
+        rms = float(np.sqrt(np.mean(samples**2)))
+        return _to_dbfs(peak), _to_dbfs(rms)
+    except Exception:
+        return None, None
+
+
+def _to_dbfs(value: float) -> float | None:
+    """Linear amplitude in [0, 1] as dBFS, or ``None`` for digital silence."""
+    if value <= 0.0:
+        return None
+    return round(20.0 * math.log10(value), 1)
 
 
 def _safe_offset_ms(

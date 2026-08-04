@@ -242,7 +242,7 @@ def test_finalize_successful_audio_is_untouched() -> None:
     assert result.audio_path is not None
 
 
-def test_finalize_all_silence_audio_fails_instead_of_reporting_ttfa() -> None:
+def test_finalize_inaudible_audio_fails_instead_of_reporting_ttfa() -> None:
     """Silence-only audio is a synthesis failure, not a fast TTFA.
 
     With no audible frame the offset is null, which used to collapse to 0.0 and make
@@ -260,7 +260,7 @@ def test_finalize_all_silence_audio_fails_instead_of_reporting_ttfa() -> None:
         first_audio_chunk_at=10.3,
     )
 
-    assert result.error == "provider returned audio with no audible speech"
+    assert result.error == "provider audio remained below the audibility threshold"
     assert result.ttfa_ms is None
 
 
