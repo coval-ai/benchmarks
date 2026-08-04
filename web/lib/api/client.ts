@@ -146,7 +146,9 @@ export async function getAggregatesByDataset(
 }
 
 export async function getRuns(opts?: FetchOptions): Promise<RunsApiResponse> {
-  return request<RunsApiResponse>("/v1/runs", { signal: opts?.signal });
+  // Max page size: one page must reach back past a full day of per-dataset
+  // runs so every modality still has a completed run on it.
+  return request<RunsApiResponse>("/v1/runs?limit=200", { signal: opts?.signal });
 }
 
 export async function getProviders(
