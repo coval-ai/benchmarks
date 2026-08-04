@@ -157,6 +157,23 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     }
   }, [availableWerDatasets, werDataset, werBarDatasetId]);
 
+  // Freshness as the charts see it: the newest series bucket actually served
+  // (start, and end inferred from the bucket spacing). Deliberately not the
+  // runs table alone — a finished run can precede its aggregates.
+  const latestDataBucket = useMemo(() => {
+    const times = [
+      ...new Set(
+        (aggregatesQuery.data?.series ?? []).map((point) =>
+          Date.parse(point.scheduled_at)
+        )
+      ),
+    ].sort((a, b) => a - b);
+    if (times.length === 0) return null;
+    const start = times[times.length - 1]!;
+    const period = times.length > 1 ? start - times[times.length - 2]! : 0;
+    return { start, end: start + period };
+  }, [aggregatesQuery.data]);
+
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
   const dataTimeWindow = aggregatesQuery.data?.window ?? timeWindow;
@@ -703,6 +720,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     // Data loading
     loading,
     loadError,
+    latestDataBucket,
 
     // Model state
     selectedModels,
