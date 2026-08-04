@@ -59,6 +59,8 @@ export type AggregatesByDatasetApiResponse =
   components["schemas"]["AggregatesByDatasetResponse"];
 export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
 export type SeriesPoint = components["schemas"]["SeriesPoint"];
+export type RunsApiResponse = components["schemas"]["RunsResponse"];
+export type RunOut = components["schemas"]["RunOut"];
 
 // Query-param types from codegen
 export type AggregatesQueryParams = NonNullable<
@@ -141,6 +143,10 @@ export async function getAggregatesByDataset(
     `/v1/results/aggregates/by-dataset${qs}`,
     { signal: opts?.signal }
   );
+}
+
+export async function getRuns(opts?: FetchOptions): Promise<RunsApiResponse> {
+  return request<RunsApiResponse>("/v1/runs", { signal: opts?.signal });
 }
 
 export async function getProviders(
