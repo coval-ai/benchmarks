@@ -288,3 +288,5 @@ def test_finalize_offset_detection_crash_does_not_condemn_the_audio() -> None:
     assert result.error is None
     assert result.ttfa_ms == pytest.approx(300.0)
     assert result.audio_path is not None
+    assert result.audio_path.exists()
+    result.audio_path.unlink()
