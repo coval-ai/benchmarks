@@ -303,17 +303,19 @@ const QualityBarSection: React.FC = () => {
               value={werBarDataset}
               onChange={changeWerBarDataset}
             />
-            <SelectControl
-              label="Sort"
-              value={barSort}
-              onChange={(v) => setBarSort(v as typeof barSort)}
-            >
-              {BAR_SORTS.map(({ key, label }) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </SelectControl>
+            {mode === "stt" && (
+              <SelectControl
+                label="Sort"
+                value={barSort}
+                onChange={(v) => setBarSort(v as typeof barSort)}
+              >
+                {BAR_SORTS.map(({ key, label }) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </SelectControl>
+            )}
           </div>
         )}
         {!isS2S && selectedBars.length > 0 && (
