@@ -48,7 +48,7 @@ async def test_elevenlabs_happy_path(
     fake_settings: Settings,
     tmp_path: Path,
 ) -> None:
-    pcm = make_pcm_bytes(480) * 4  # ~80 ms of silence
+    pcm = make_pcm_bytes(480) * 4  # ~80 ms of audible tone
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
