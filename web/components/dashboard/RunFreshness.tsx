@@ -41,14 +41,16 @@ const RunFreshness: React.FC = () => {
 
   // "Updated" = the newest run the charts already include: runs finishing after
   // the served bucket ends are materialized later, and the bucket start alone
-  // undersells daily-bucketed boards. Chart bucket as fallback if runs fail.
+  // undersells daily-bucketed boards. Shown as the run's start (its schedule
+  // slot — what the chart's newest point is labeled with), not its finish.
+  // Chart bucket as fallback if runs fail.
   const included = runs.find(
     (run) =>
       run.status !== "FAILED" &&
       Date.parse(run.finished_at ?? run.started_at) <= latestDataBucket.end
   );
   const updatedAt = included
-    ? Date.parse(included.finished_at ?? included.started_at)
+    ? Date.parse(included.started_at)
     : latestDataBucket.start;
 
   return (
