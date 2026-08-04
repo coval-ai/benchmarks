@@ -131,6 +131,28 @@ async def test_wer_breakdown_null_when_any_row_lacks_it(
     assert s["wer_substitutions_pct"] is None
 
 
+async def test_wer_breakdown_null_when_any_component_missing(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A row carrying only some components nulls the whole split — two real
+    averages beside a null third could never reconcile with avg_value."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
 async def test_excludes_failed_null_and_other_benchmark(
     client: AsyncClient, postgresql: Any
 ) -> None:

@@ -145,10 +145,16 @@ def _load_schema(**connect_kwargs: Any) -> None:
                            MAX(r.metric_value)::float8 AS max_value,
                            COUNT(*)::int AS sample_count,
                            CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
                                THEN AVG(r.wer_insertions_pct)::float8 END AS wer_insertions_pct,
-                           CASE WHEN COUNT(r.wer_deletions_pct) = COUNT(*)
+                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
                                THEN AVG(r.wer_deletions_pct)::float8 END AS wer_deletions_pct,
-                           CASE WHEN COUNT(r.wer_substitutions_pct) = COUNT(*)
+                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
                                THEN AVG(r.wer_substitutions_pct)::float8
                                END AS wer_substitutions_pct
                     FROM benchmarks_v2.results r

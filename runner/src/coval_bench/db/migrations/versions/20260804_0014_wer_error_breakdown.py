@@ -39,12 +39,11 @@ def _view_sql(name: str, interval: str, *, breakdown: bool) -> str:
     """Render the per-window matview; ``breakdown=False`` is 0010's shape for downgrade."""
     outer = "".join(f", {c}" for c in _COLUMNS) if breakdown else ""
     # COUNT guard: AVG over a scored/legacy mix wouldn't reconcile with
-    # avg_value, so a partial group reports no breakdown at all.
+    # avg_value, so a group missing ANY component on ANY row reports no
+    # breakdown at all — three partial averages can't sum to the total either.
+    all_present = " AND ".join(f"COUNT(r.{c}) = COUNT(*)" for c in _COLUMNS)
     inner = (
-        "".join(
-            f", CASE WHEN COUNT(r.{c}) = COUNT(*) THEN AVG(r.{c})::float8 END AS {c}"
-            for c in _COLUMNS
-        )
+        "".join(f", CASE WHEN {all_present} THEN AVG(r.{c})::float8 END AS {c}" for c in _COLUMNS)
         if breakdown
         else ""
     )
