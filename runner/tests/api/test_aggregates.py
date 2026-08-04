@@ -432,8 +432,22 @@ async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgres
     run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
     await _insert_result(postgresql, run_v1, metric_value=1.0)
     run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
-    await _insert_result(postgresql, run_v3, metric_value=3.0)
-    await _insert_result(postgresql, run_v3, metric_value=5.0)
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=3.0,
+        wer_insertions_pct=0.5,
+        wer_deletions_pct=1.0,
+        wer_substitutions_pct=1.5,
+    )
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=5.0,
+        wer_insertions_pct=1.5,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=1.5,
+    )
     await _refresh_mv(postgresql)
 
     response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
@@ -444,8 +458,12 @@ async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgres
     v1, v3 = blocks
     assert v1["model_stats"][0]["sample_count"] == 1
     assert v1["model_stats"][0]["avg_value"] == pytest.approx(1.0)
+    assert v1["model_stats"][0]["wer_insertions_pct"] is None
     assert v3["model_stats"][0]["sample_count"] == 2
     assert v3["model_stats"][0]["avg_value"] == pytest.approx(4.0)
+    assert v3["model_stats"][0]["wer_insertions_pct"] == pytest.approx(1.0)
+    assert v3["model_stats"][0]["wer_deletions_pct"] == pytest.approx(1.5)
+    assert v3["model_stats"][0]["wer_substitutions_pct"] == pytest.approx(1.5)
 
 
 async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:

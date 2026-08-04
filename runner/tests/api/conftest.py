@@ -122,7 +122,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
         """)
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
-        # under the '__all__' sentinel, and 20260728_0013's WER breakdown.
+        # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
         # S608 false-positive: name and interval come from the _MV_WINDOWS constant.
         for name, interval in _MV_WINDOWS.items():
             conn.execute(f"""

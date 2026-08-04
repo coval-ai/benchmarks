@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "20260728_0013"
-down_revision = "20260727_0012"
+revision = "20260804_0014"
+down_revision = "20260803_0013"
 branch_labels = None
 depends_on = None
 
@@ -81,9 +81,13 @@ def _view_sql(name: str, interval: str, *, breakdown: bool) -> str:
     """  # noqa: S608
 
 
-def _rebuild_views(*, breakdown: bool) -> None:
-    for name, interval in _WINDOWS.items():
+def _drop_views() -> None:
+    for name in _WINDOWS:
         op.execute(f"DROP MATERIALIZED VIEW IF EXISTS benchmarks_v2.{name}")
+
+
+def _create_views(*, breakdown: bool) -> None:
+    for name, interval in _WINDOWS.items():
         op.execute(_view_sql(name, interval, breakdown=breakdown))
         op.execute(
             f"CREATE UNIQUE INDEX {name}_group_key "
@@ -91,13 +95,19 @@ def _rebuild_views(*, breakdown: bool) -> None:
         )
 
 
+# Lock order matters live: concurrent REFRESHes lock a matview first and then
+# read ``results``, so the views must be locked before ``results`` is altered
+# or the two lock orders deadlock (observed on prod). Downgrade already runs
+# views-first.
 def upgrade() -> None:
+    _drop_views()
     for column in _COLUMNS:
         op.execute(f"ALTER TABLE benchmarks_v2.results ADD COLUMN {column} DOUBLE PRECISION")
-    _rebuild_views(breakdown=True)
+    _create_views(breakdown=True)
 
 
 def downgrade() -> None:
-    _rebuild_views(breakdown=False)
+    _drop_views()
+    _create_views(breakdown=False)
     for column in _COLUMNS:
         op.execute(f"ALTER TABLE benchmarks_v2.results DROP COLUMN {column}")

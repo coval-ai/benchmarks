@@ -3,7 +3,7 @@
 
 """One-shot backfill of the WER error-type split from stored transcripts.
 
-Recomputes pre-0013 rows from the stored hypothesis + the packaged manifest
+Recomputes pre-0014 rows from the stored hypothesis + the packaged manifest
 reference. Rows whose recomputed score doesn't match ``metric_value`` (older
 normalizer) keep their null split — split-sums-to-total outranks coverage.
 STT only: a TTS synth filename doesn't identify the prompt item.
