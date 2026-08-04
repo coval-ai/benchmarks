@@ -73,6 +73,10 @@ _CONCURRENCY_CAP = 8
 _DEDICATED_CONCURRENCY_CAP = 1
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
+# Stable contract — matched by the reason classifier and the alerting log metric.
+# Mirrors _SILENT_FAILURE_PREFIX in providers/tts/_common.py.
+_STT_SILENT_FAILURE = "provider closed the stream without sending a transcript or an error"
+
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
 # but huge stack traces choke log pipelines)
 
@@ -126,6 +130,26 @@ def _metric_outcome(
     if metric_value is None:
         return result_status.FAILED, f"no {metric_label} produced"
     return result_status.SUCCESS, None
+
+
+def _stt_silent_failure(result: Any) -> str | None:  # noqa: ANN401 — TranscriptionResult
+    """Diagnostic when a provider returned nothing at all and reported no reason.
+
+    The STT mirror of the TTS guard in ``providers/tts/_common.py``: every streaming
+    provider reaches its return by falling out of the receive loop, so an error frame
+    whose schema the integration failed to match leaves ``error`` unset and the row
+    lands on a generic "no <METRIC> produced".
+
+    Deliberately narrower than the TTS guard. A provider can deliver a final segment
+    with empty text, which still yields a legitimate TTFT/AudioToFinal measurement —
+    failing the item on an empty transcript alone would discard real latency data and
+    shrink sample counts. So this fires only when nothing whatsoever was produced.
+    """
+    if result.complete_transcript or result.partial_transcripts:
+        return None
+    if result.ttft_seconds is not None or result.audio_to_final_seconds is not None:
+        return None
+    return _STT_SILENT_FAILURE
 
 
 def _log_item_failures(
@@ -318,6 +342,8 @@ async def _run_stt_item(
         item_error = item_error or (
             transcription_result.error if transcription_result is not None else None
         )
+        if transcription_result is not None and item_error is None:
+            item_error = _stt_silent_failure(transcription_result)
         ttft_seconds = transcription_result.ttft_seconds if transcription_result else None
         audio_to_final = (
             transcription_result.audio_to_final_seconds if transcription_result else None

@@ -177,7 +177,7 @@ async def test_hume_empty_response(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
         result = await provider.synthesize("silence")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
@@ -216,7 +216,7 @@ async def test_hume_empty_chunk_not_counted(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
         result = await provider.synthesize("empty chunk")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

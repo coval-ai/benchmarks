@@ -143,7 +143,7 @@ async def test_speechify_empty_response() -> None:
     provider = SpeechifyTTSProvider(_settings(), model="simba-3.2", voice=_VOICE)
     result = await provider.synthesize("silence")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

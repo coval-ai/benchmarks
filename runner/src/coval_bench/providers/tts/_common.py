@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import tempfile
 import wave
+from collections.abc import Sequence
 from pathlib import Path
 
 import structlog
@@ -19,6 +20,10 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 # Mono signed 16-bit PCM: 2 bytes per sample.
 _PCM16_FRAME_BYTES = 2
+
+# Stable contract — matched by the reason classifier and the alerting log metric.
+_SILENT_FAILURE_PREFIX = "provider closed the stream without sending audio or an error"
+_LAST_FRAMES_MAX_CHARS = 400
 
 
 def finalize_tts_result(
@@ -34,6 +39,7 @@ def finalize_tts_result(
     http_version: str | None = None,
     submit_to_headers_ms: float | None = None,
     connection_reused: bool | None = None,
+    last_frames: Sequence[str] | None = None,
 ) -> TTSResult:
     """Build a TTSResult with perceived TTFA from assembled PCM and timing.
 
@@ -47,6 +53,16 @@ def finalize_tts_result(
     the final stream frame) is dropped, and any failure in offset detection is
     swallowed and degrades TTFA to arrival-only — the WAV is still written either
     way.
+
+    Empty ``pcm`` with no ``error`` is never a success: it means the receive loop
+    ended without synthesising anything and without recognising why. Every provider
+    reaches its final ``finalize_tts_result`` by falling out of that loop, so
+    without this guard an error frame the provider *did* send but the integration
+    failed to match is discarded, and the row lands on the orchestrator's generic
+    "no TTFA produced". Naming the state here is what keeps it diagnosable, for
+    every provider at once. ``last_frames`` carries the last non-audio frames seen,
+    when the caller retains them, so the provider's own wording survives even
+    though its schema was never matched.
     """
     # Drop a dangling partial sample so neither offset detection (which rejects
     # frame-misaligned PCM) nor the WAV header chokes on a split final frame.
@@ -70,6 +86,9 @@ def finalize_tts_result(
         )
 
     audio_path = _write_wav(pcm, sample_rate) if pcm else None
+    if not pcm and error is None:
+        error = _silent_failure_error(last_frames)
+        logger.warning("tts_silent_failure", provider=provider, model=model, error=error)
     return TTSResult(
         provider=provider,
         model=model,
@@ -81,6 +100,22 @@ def finalize_tts_result(
         submit_to_headers_ms=submit_to_headers_ms,
         connection_reused=connection_reused,
     )
+
+
+def _silent_failure_error(last_frames: Sequence[str] | None) -> str:
+    """Diagnostic for a stream that ended with no audio and no reported error.
+
+    The prefix is a stable contract: the reason classifier and the Cloud Logging
+    metric both match on it, so it must not be reworded casually. When the caller
+    retained trailing frames they are appended verbatim — that text is the
+    provider's own explanation, which is exactly what an unmatched schema loses.
+    """
+    if not last_frames:
+        return _SILENT_FAILURE_PREFIX
+    tail = " | ".join(frame.strip() for frame in last_frames if frame.strip())
+    if not tail:
+        return _SILENT_FAILURE_PREFIX
+    return f"{_SILENT_FAILURE_PREFIX}; last frames: {tail[:_LAST_FRAMES_MAX_CHARS]}"
 
 
 def _safe_offset_ms(pcm: bytes, sample_rate: int, provider: str, model: str) -> float | None:
