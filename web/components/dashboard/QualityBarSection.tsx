@@ -296,7 +296,7 @@ const QualityBarSection: React.FC = () => {
             }}
           />
         )}
-        {!isS2S && (
+        {mode === "stt" && (
           <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
             <WerDatasetSelect
               label="Chart dataset"
