@@ -10,6 +10,8 @@ monkeypatched fake SDKs.
 
 from __future__ import annotations
 
+import math
+import struct
 import wave as _wave
 from collections.abc import AsyncIterator, Sequence
 from io import BytesIO
@@ -277,12 +279,25 @@ class FakeAiohttpSession:
 
 
 def make_pcm_bytes(duration_frames: int = 480, sample_rate: int = 24000) -> bytes:
-    """Generate a block of silence PCM frames (16-bit, mono)."""
-    return b"\x00" * (duration_frames * 2)  # 2 bytes per sample, 16-bit
+    """Generate a block of audible PCM frames (16-bit mono sine).
+
+    Audible rather than silence: ``finalize_tts_result`` treats audio containing no
+    audible frame as a synthesis failure, so a silent fixture would drive every
+    provider's happy-path test down that failure branch instead. Amplitude 0.3 sits
+    well clear of the detector's RMS threshold.
+    """
+    amplitude = 0.3
+    return b"".join(
+        struct.pack(
+            "<h",
+            int(amplitude * 32767 * math.sin(2.0 * math.pi * 220.0 * n / sample_rate)),
+        )
+        for n in range(duration_frames)
+    )
 
 
 def make_wav_bytes(duration_frames: int = 480, sample_rate: int = 24000) -> bytes:
-    """Wrap PCM silence in a proper WAV container."""
+    """Wrap audible PCM in a proper WAV container."""
     buf = BytesIO()
     with _wave.open(buf, "wb") as wf:
         wf.setnchannels(1)
