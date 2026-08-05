@@ -72,6 +72,7 @@ _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
 _ACTIVE = ModelStatus.ACTIVE
+_PAUSED = ModelStatus.PAUSED
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
 _EARLY_ACCESS = ModelStatus.EARLY_ACCESS
@@ -290,7 +291,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -636,7 +637,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -646,7 +647,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("en-US-Ava:DragonHDLatestNeural", "en-US-Andrew:DragonHDLatestNeural"),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _STREAM),
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -772,7 +773,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
-    # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
+    # Arena-disabled: FLUXIONS_API_KEY is not mounted on benchmarks-api yet.
     RegisteredModel(
         benchmark=_TTS,
         provider="fluxions",

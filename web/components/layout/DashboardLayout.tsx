@@ -13,6 +13,7 @@ import DashboardFooter from "@/components/dashboard/DashboardFooter";
 import MobileModelSheet from "@/components/layout/MobileModelSheet";
 import ModelSidebar from "@/components/layout/ModelSidebar";
 import DashboardSkeleton from "@/components/dashboard/DashboardSkeleton";
+import RunFreshness from "@/components/dashboard/RunFreshness";
 
 const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { loading, loadError, benchmarkTitle, windowDataStale } =
@@ -57,9 +58,12 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <div className="relative z-10 flex flex-1">
         <ModelSidebar />
         <div className="pt-20 px-3 py-8 sm:px-8 pb-24 lg:pb-8 overflow-x-hidden flex-1 min-w-0">
-          <h1 className="mb-6 text-2xl font-bold tracking-tight text-text-primary">
-            {benchmarkTitle}
-          </h1>
+          <div className="mb-6">
+            <h1 className="mb-1 text-2xl font-bold tracking-tight text-text-primary">
+              {benchmarkTitle}
+            </h1>
+            <RunFreshness />
+          </div>
 
           <div
             className={`transition-opacity duration-200 ${

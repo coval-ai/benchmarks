@@ -9,6 +9,7 @@ import {
   getAggregates,
   getAggregatesByDataset,
   getProviders,
+  getRuns,
   getS2SSample,
   getS2SSampleAudio,
   getS2SSampleIds,
@@ -51,6 +52,14 @@ export function useProvidersQuery() {
     queryKey: ["providers"],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       getProviders({ signal } satisfies FetchOptions),
+  });
+}
+
+export function useRunsQuery() {
+  return useQuery({
+    queryKey: ["runs"],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      getRuns({ signal } satisfies FetchOptions),
   });
 }
 

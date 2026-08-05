@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts import fluxions as fluxions_module
@@ -29,6 +30,7 @@ def _settings() -> Settings:
         dataset_id="stt-v1",
         runner_sha="test",
         log_level="DEBUG",
+        fluxions_api_key=SecretStr("test-api-key"),
     )
 
 
@@ -83,6 +85,7 @@ async def test_fluxions_tts_url_and_speak_frame(fluxions_settings: Settings) -> 
 
     def connect_side_effect(url: str, **kwargs: object) -> FakeWebSocket:
         captured["url"] = url
+        captured["headers"] = kwargs.get("additional_headers")
         return ws
 
     provider = FluxionsTTSProvider(fluxions_settings, model="vui", voice=_VOICE)
@@ -95,6 +98,7 @@ async def test_fluxions_tts_url_and_speak_frame(fluxions_settings: Settings) -> 
 
     assert result.error is None
     assert captured["url"] == "wss://api.fluxions.ai/vui/v1/tts/ws"
+    assert captured["headers"] == {"Authorization": "Bearer test-api-key"}
     sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
     assert sent == [
         {
@@ -242,6 +246,12 @@ def test_fluxions_tts_invalid_model_raises(fluxions_settings: Settings) -> None:
 def test_fluxions_tts_missing_voice_raises(fluxions_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         FluxionsTTSProvider(fluxions_settings, model="vui", voice="")
+
+
+def test_fluxions_tts_missing_api_key_raises(fluxions_settings: Settings) -> None:
+    fluxions_settings.fluxions_api_key = None
+    with pytest.raises(ValueError, match="fluxions_api_key"):
+        FluxionsTTSProvider(fluxions_settings, model="vui", voice=_VOICE)
 
 
 def test_fluxions_tts_provider_name(fluxions_settings: Settings) -> None:
