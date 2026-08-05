@@ -4,14 +4,13 @@
 "use client";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Globe, Server } from "lucide-react";
+import { Server } from "lucide-react";
 import { Cell, type LabelProps } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import QualityMetricBars from "@/components/charts/QualityMetricBars";
 import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import Card from "@/components/shared/Card";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
-import { REGION_CONTENT } from "@/components/shared/InferenceRegionInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { datasetLabel } from "@/lib/config/datasets";
@@ -88,7 +87,6 @@ const QualityBarSection: React.FC = () => {
     instructionBarDataWithColors,
     getProviderForModel,
     dedicatedModels,
-    crossRegionModels,
     isMobile,
     clickedWERBars,
     handleWERBarClick,
@@ -106,11 +104,9 @@ const QualityBarSection: React.FC = () => {
   const chartWrapRef = useRef<HTMLDivElement>(null);
   const {
     iconHandlers: dedicatedIconHandlers,
-    handlersFor,
     overlay: dedicatedOverlay,
     open: dedicatedTipOpen,
   } = useDedicatedInfoTip(chartWrapRef);
-  const regionIconHandlers = useMemo(() => handlersFor(REGION_CONTENT), [handlersFor]);
 
   const handleWERBarClickTracked = (
     data: Parameters<typeof handleWERBarClick>[0]
@@ -191,7 +187,7 @@ const QualityBarSection: React.FC = () => {
             {`${Number(value).toFixed(1)}%`}
           </text>
           {/* Caveat markers ride the top of the bar, under the value; hover or
-              tap opens the explainer. Two markers sit side by side. */}
+              tap opens the explainer. */}
           {entry &&
             [
               dedicatedModels.has(entry.model)
@@ -200,14 +196,6 @@ const QualityBarSection: React.FC = () => {
                     Icon: Server,
                     label: "About dedicated inference",
                     on: dedicatedIconHandlers,
-                  }
-                : null,
-              crossRegionModels.has(entry.model)
-                ? {
-                    key: "region",
-                    Icon: Globe,
-                    label: "About inference region",
-                    on: regionIconHandlers,
                   }
                 : null,
             ]
@@ -250,8 +238,6 @@ const QualityBarSection: React.FC = () => {
       themeColors.label,
       dedicatedModels,
       dedicatedIconHandlers,
-      crossRegionModels,
-      regionIconHandlers,
     ]
   );
 
@@ -397,7 +383,6 @@ const QualityBarSection: React.FC = () => {
                 dataKey="instructionScore"
                 valueLabel="Instruction adherence"
                 formatValue={(value) => `${value.toFixed(0)}%`}
-                crossRegionModels={crossRegionModels}
               />
             }
             isMobile={isMobile}
@@ -423,7 +408,6 @@ const QualityBarSection: React.FC = () => {
               <CustomBarTooltip
                 getProviderForModel={getProviderForModel}
                 dedicatedModels={dedicatedModels}
-                crossRegionModels={crossRegionModels}
               />
             }
             isMobile={isMobile}

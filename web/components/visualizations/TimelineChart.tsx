@@ -271,6 +271,7 @@ const TimelineChart: React.FC = () => {
     legendModels,
     toggleLegendModel,
     dedicatedModels,
+    crossRegionModels,
     selectedModels,
     page,
     s2sPlayRequest,
@@ -1148,6 +1149,7 @@ const TimelineChart: React.FC = () => {
                     compact
                     timeZone={displayTz}
                     hasRecording={page === "s2s" ? hasS2SBucketRecording : undefined}
+                    crossRegionModels={crossRegionModels}
                   />
                 }
                 active={pinned || dragging || hoveredMarker || isMobile ? false : undefined}
@@ -1318,6 +1320,7 @@ const TimelineChart: React.FC = () => {
                 interactionHint="tap axis to see all"
                 timeZone={displayTz}
                 hasRecording={page === "s2s" ? hasS2SProviderRecording : undefined}
+                crossRegionModels={crossRegionModels}
               />
             </div>
           )}
@@ -1356,6 +1359,7 @@ const TimelineChart: React.FC = () => {
                 maxHeight={isMobile ? 106 : undefined}
                 timeZone={displayTz}
                 hasRecording={page === "s2s" ? hasS2SProviderRecording : undefined}
+                crossRegionModels={crossRegionModels}
                 onModelClick={
                   page === "s2s"
                     ? (model, label) =>

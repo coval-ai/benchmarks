@@ -5,7 +5,6 @@ import React from "react";
 import type { TooltipContentProps } from "recharts";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
-import { RegionBadge } from "@/components/shared/InferenceRegionInfo";
 import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
 
 interface ScatterTooltipProps extends Partial<Pick<
@@ -16,11 +15,9 @@ interface ScatterTooltipProps extends Partial<Pick<
   metric: string;
   /** Dedicated-inference endpoints carry the server marker in their tooltip. */
   dedicatedModels?: Set<string>;
-  /** Model key -> inference region, for models served outside our worker's region. */
-  crossRegionModels?: Map<string, string>;
 }
 
-const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric, dedicatedModels, crossRegionModels }) => {
+const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric, dedicatedModels }) => {
   if (active && payload && payload.length > 0) {
     const item = payload[0];
     const point = item?.payload as ScatterDataPoint | undefined;
@@ -40,7 +37,6 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
         >{`Model: ${normalizeModelName(point.model)}`}</p>
         <p style={{ margin: 0 }}>{`Provider: ${activeTab === "stt" ? normalizeSTTProviderName(point.provider) : normalizeTTSProviderName(point.provider)}`}</p>
         {dedicatedModels?.has(point.model) && <DedicatedBadge />}
-        <RegionBadge region={crossRegionModels?.get(point.model)} />
         <p style={{ margin: 0 }}>{`Avg ${metric}: ${point.x.toFixed(0)}ms`}</p>
         <p style={{ margin: 0 }}>{`Avg WER: ${point.y.toFixed(1)}%`}</p>
         <p style={{ margin: 0 }}>{`Samples: ${point.count}`}</p>

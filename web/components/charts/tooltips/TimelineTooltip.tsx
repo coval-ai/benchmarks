@@ -3,6 +3,7 @@
 
 import React from "react";
 import type { TooltipContentProps } from "recharts";
+import { RegionBadge } from "@/components/shared/InferenceRegionInfo";
 import { formatDate, formatTimeWithSeconds, normalizeModelName } from "@/lib/utils/formatters";
 
 interface TimelineTooltipProps extends Partial<Pick<
@@ -37,9 +38,11 @@ interface TimelineTooltipProps extends Partial<Pick<
   formatValue?: (value: number) => string;
   /** IANA timezone (e.g. "UTC") for the timestamp label; defaults to the viewer's local zone. */
   timeZone?: string;
+  /** Model key -> inference region, for models served outside our worker's region. */
+  crossRegionModels?: Map<string, string>;
 }
 
-const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, hasRecording, labelText, formatValue, timeZone }) => {
+const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload, label, getProviderForModel, showDate, dimmedKeys, compact, interactionHint, maxHeight, onModelClick, hasRecording, labelText, formatValue, timeZone, crossRegionModels }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   // Filter out null/undefined values and sort by value (fastest to slowest)
@@ -191,10 +194,14 @@ const CustomTimelineTooltip: React.FC<TimelineTooltipProps> = ({ active, payload
                     style={{
                       color: "var(--color-text-on-tooltip-secondary)",
                       fontSize: "10px",
-                      marginTop: "1px"
+                      marginTop: "1px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px"
                     }}
                   >
                     {provider}
+                    <RegionBadge region={crossRegionModels?.get(modelName)} />
                   </div>
                 </div>
               </div>

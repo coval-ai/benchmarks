@@ -65,7 +65,6 @@ const LatencyAccuracySection: React.FC = () => {
     getScatterData,
     activeMetric: metric,
     dedicatedModels,
-    crossRegionModels,
   } = useDashboard();
 
   const activeTab = useActiveTab();
@@ -368,7 +367,6 @@ const LatencyAccuracySection: React.FC = () => {
                 activeTab={activeTab}
                 metric={metric}
                 dedicatedModels={dedicatedModels}
-                crossRegionModels={crossRegionModels}
               />
             </div>
           )}
@@ -414,7 +412,6 @@ const LatencyAccuracySection: React.FC = () => {
                       activeTab={activeTab}
                       metric={metric}
                       dedicatedModels={dedicatedModels}
-                      crossRegionModels={crossRegionModels}
                     />
                   }
                   isAnimationActive={false}

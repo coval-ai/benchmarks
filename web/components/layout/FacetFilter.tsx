@@ -4,8 +4,12 @@
 "use client";
 
 import React from "react";
-import { ChevronDown, Server } from "lucide-react";
-import { DEDICATED_INFERENCE, SOURCE_CATEGORY } from "@/lib/utils/facets";
+import { ChevronDown, Globe, Server } from "lucide-react";
+import {
+  DEDICATED_INFERENCE,
+  REGION_CATEGORY,
+  SOURCE_CATEGORY,
+} from "@/lib/utils/facets";
 import { useDashboard } from "@/contexts/DashboardContext";
 import { useSidebarMenu } from "@/contexts/SidebarMenuContext";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
@@ -134,6 +138,9 @@ const FacetFilter: React.FC = () => {
                         option.value === DEDICATED_INFERENCE && (
                           <Server size={12} aria-hidden className="shrink-0" />
                         )}
+                      {group.category === REGION_CATEGORY && (
+                        <Globe size={12} aria-hidden className="shrink-0" />
+                      )}
                       <span>{option.label}</span>
                       <span
                         style={{
