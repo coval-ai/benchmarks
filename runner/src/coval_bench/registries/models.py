@@ -793,8 +793,9 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="murf",
         model="falcon-2",
         voice="Natalie",
+        voices=("Natalie", "Gordon"),
         tags=(_STREAMING, _MULTI, _STREAM),
-        status=_PENDING,
+        status=_EARLY_ACCESS,
         arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
