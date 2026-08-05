@@ -788,6 +788,20 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
+    # Deepdub eTTS. Voices are preset voice-prompt ids from Deepdub's docs:
+    # the female sales-agent and male call-center-agent presets.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="deepdub",
+        model="dd-etts-3.0",
+        voice="02215cf5-04af-46f3-a061-48a4c81989bf",
+        voices=(
+            "02215cf5-04af-46f3-a061-48a4c81989bf",
+            "b2abb241-ac92-48bf-a890-fec03f43e209",
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_EARLY_ACCESS,
+    ),
     RegisteredModel(
         benchmark=_TTS,
         provider="murf",

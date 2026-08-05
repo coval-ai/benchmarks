@@ -19,6 +19,7 @@ from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
+from coval_bench.providers.tts.deepdub import DeepdubTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
@@ -72,6 +73,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "speechify": SpeechifyTTSProvider,
     "fluxions": FluxionsTTSProvider,
     "lmnt": LmntTTSProvider,
+    "deepdub": DeepdubTTSProvider,
     "murf": MurfTTSProvider,
 }
 
@@ -88,6 +90,7 @@ __all__ = [
     "AlibabaTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
+    "DeepdubTTSProvider",
     "FishAudioTTSProvider",
     "FluxionsTTSProvider",
     "GradiumTTSProvider",
