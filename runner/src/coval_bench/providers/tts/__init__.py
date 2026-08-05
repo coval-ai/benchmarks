@@ -19,6 +19,7 @@ from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
+from coval_bench.providers.tts.deepdub import DeepdubTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
@@ -28,6 +29,7 @@ from coval_bench.providers.tts.groq import GroqTTSProvider
 from coval_bench.providers.tts.inworld import InworldTTSProvider
 from coval_bench.providers.tts.lmnt import LmntTTSProvider
 from coval_bench.providers.tts.minimax import MinimaxTTSProvider
+from coval_bench.providers.tts.murf import MurfTTSProvider
 from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.palabra import PalabraTTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
@@ -71,6 +73,8 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "speechify": SpeechifyTTSProvider,
     "fluxions": FluxionsTTSProvider,
     "lmnt": LmntTTSProvider,
+    "deepdub": DeepdubTTSProvider,
+    "murf": MurfTTSProvider,
 }
 
 if HumeTTSProvider is not None:
@@ -86,11 +90,13 @@ __all__ = [
     "AlibabaTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
+    "DeepdubTTSProvider",
     "FishAudioTTSProvider",
     "FluxionsTTSProvider",
     "GradiumTTSProvider",
     "LmntTTSProvider",
     "MinimaxTTSProvider",
+    "MurfTTSProvider",
     "SmallestTTSProvider",
     "XaiTTSProvider",
     "GroqTTSProvider",

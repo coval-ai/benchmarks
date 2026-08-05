@@ -24,6 +24,8 @@ class Metric(StrEnum):
     TTFT = "TTFT"
     TTFS = "TTFS"
     TTFA = "TTFA"
+    TTFA_ROUNDTRIP = "TTFARoundtrip"
+    TTFA_LEADING_SILENCE = "TTFALeadingSilence"
     RTF = "RTF"
     AUDIO_TO_FINAL = "AudioToFinal"
     V2V = "V2V"
@@ -78,6 +80,23 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=0,
         benchmarks=frozenset({Benchmark.TTS}),
     ),
+    # Perceived TTFA split: roundtrip (send → first chunk) + leading silence
+    # (stream start → first audible sample). Written only when both are known,
+    # so the two rows always sum back to the TTFA row.
+    Metric.TTFA_ROUNDTRIP: MetricSpec(
+        display_name="TTFA Network Roundtrip",
+        units="milliseconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.TTS}),
+    ),
+    Metric.TTFA_LEADING_SILENCE: MetricSpec(
+        display_name="TTFA Leading Silence",
+        units="milliseconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.TTS}),
+    ),
     Metric.RTF: MetricSpec(
         display_name="Real-Time Factor",
         units="ratio",
@@ -113,6 +132,17 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
 if METRIC_SPECS.keys() != set(Metric):
     _missing = ", ".join(sorted(set(Metric) - METRIC_SPECS.keys()))
     raise RuntimeError(f"METRIC_SPECS is missing specs for: {_missing}")
+
+
+# Metrics kept out of the per-bucket series rollup (results_by_bucket) and
+# therefore out of every aggregates response's `series` array. The TTFA
+# components are consumed as window aggregates only (the Latency Variation
+# breakdown); TTS runs ~48x/day, so carrying them per bucket would double an
+# already multi-MB 30d series payload for rows nothing reads. Remove a metric
+# here if a per-run surface ever ships for it.
+SERIES_EXCLUDED_METRICS: frozenset[Metric] = frozenset(
+    {Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE}
+)
 
 
 # (provider, model) pairs whose metric is not comparable with the cohort:

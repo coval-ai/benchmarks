@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import { Server } from "lucide-react";
 import MetricInfo from "@/components/shared/MetricInfo";
+import TooltipBadge from "@/components/shared/TooltipBadge";
 import {
   DEDICATED_INFERENCE_BLURB,
   DEDICATED_INFERENCE_LABEL,
@@ -46,19 +47,7 @@ export const DedicatedInfoIcon: React.FC<{ size?: number; className?: string }> 
 
 /** "Dedicated inference" tooltip row; hover/tap opens the explainer. */
 export const DedicatedBadge: React.FC = () => (
-  <MetricInfo
-    content={CONTENT}
-    align="left"
-    panelClassName="top-full mt-1.5 w-60 whitespace-normal"
-  >
-    <button
-      type="button"
-      className="flex cursor-help items-center gap-1 border-0 bg-transparent p-0 text-[color:var(--color-text-on-tooltip-secondary)]"
-      style={{ font: "inherit" }}
-    >
-      <Server size={10} aria-hidden /> {DEDICATED_INFERENCE_LABEL}
-    </button>
-  </MetricInfo>
+  <TooltipBadge icon={Server} label={DEDICATED_INFERENCE_LABEL} content={CONTENT} />
 );
 
 /**

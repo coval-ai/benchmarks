@@ -19,6 +19,7 @@ import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
   buildTagIndex,
+  crossRegionByModelKey,
   dedicatedModelKeys,
   filterModelsByFacets,
   getTagCategories,
@@ -197,6 +198,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
+
   const allModelsByProvider = useMemo(
     () => buildModelsByProvider(modelStats, benchmarkParam, providersQuery.data),
     [providersQuery.data, modelStats, benchmarkParam]
@@ -210,6 +212,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [providersQuery.data]
   );
   const dedicatedModels = useMemo(() => dedicatedModelKeys(tagIndex), [tagIndex]);
+  const crossRegionModels = useMemo(() => crossRegionByModelKey(tagIndex), [tagIndex]);
 
   // Facets are driven only by models that actually have data to plot. A
   // catalogue model without stats (e.g. a batch-only or not-yet-benchmarked
@@ -436,7 +439,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   });
 
   // Calculate metrics
-  const { getStat, getHeatmapData } = chartData;
+  const { getStat, getHeatmapData, ttfaBreakdownBars } = chartData;
 
   // Run-weighted average latency across selected models, in display units:
   // Σ(avg·runs) / Σ(runs). Backs the box plot and timeline headlines.
@@ -633,7 +636,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = {
-    label: `Lowest Median ${activeMetric}`,
+    label: `Lowest Median ${latencyLabel}`,
     displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
     subtitle: fastestPrimary.fastestModel
       ? {
@@ -704,6 +707,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     sttMetric,
     setSttMetric,
     activeMetric,
+    ttfaBreakdownBars,
 
     // WER dataset pin (STT comparison card)
     werDataset: activeWerDataset,
@@ -740,6 +744,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     legendModels,
     toggleLegendModel,
     dedicatedModels,
+    crossRegionModels,
 
     // UI state
     isMobile,

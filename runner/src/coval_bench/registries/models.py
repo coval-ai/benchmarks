@@ -62,6 +62,8 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
+    # Provider's serving region in ``us-east-1`` form; set only when confirmed.
+    region: str | None = None
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -710,6 +712,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -719,6 +722,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -728,6 +732,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
@@ -787,6 +792,30 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("leah", "caleb"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
+    ),
+    # Deepdub eTTS. Voices are preset voice-prompt ids from Deepdub's docs:
+    # the female sales-agent and male call-center-agent presets.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="deepdub",
+        model="dd-etts-3.0",
+        voice="02215cf5-04af-46f3-a061-48a4c81989bf",
+        voices=(
+            "02215cf5-04af-46f3-a061-48a4c81989bf",
+            "b2abb241-ac92-48bf-a890-fec03f43e209",
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="murf",
+        model="falcon-2",
+        voice="Natalie",
+        voices=("Natalie", "Gordon"),
+        tags=(_STREAMING, _MULTI, _STREAM),
+        status=_EARLY_ACCESS,
+        arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never

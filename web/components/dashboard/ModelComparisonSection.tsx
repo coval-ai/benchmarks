@@ -25,6 +25,7 @@ const ModelComparisonSection: React.FC = () => {
     werServedDataset,
     werDatasetLoading,
     dedicatedModels,
+    crossRegionModels,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("heatmap");
   const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
@@ -65,6 +66,7 @@ const ModelComparisonSection: React.FC = () => {
           data={data}
           getProviderForModel={getProviderForModel}
           dedicatedModels={dedicatedModels}
+          crossRegionModels={crossRegionModels}
           percentileIdx={percentileIdx}
           onPercentileChange={setPercentileIdx}
           werLabel={werServedDataset ? datasetLabel(werServedDataset) : undefined}

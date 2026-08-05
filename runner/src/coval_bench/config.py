@@ -100,9 +100,11 @@ class Settings(BaseSettings):
     minimax_api_key: SecretStr | None = None
     palabra_api_key: SecretStr | None = None
     lmnt_api_key: SecretStr | None = None
+    murfai_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
+    deepdub_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.

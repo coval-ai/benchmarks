@@ -39,5 +39,7 @@ PROVIDER_ENV: dict[str, str] = {
     "palabra": "PALABRA_API_KEY",
     "speechify": "SPEECHIFY_API_KEY",
     "lmnt": "LMNT_API_KEY",
+    "murf": "MURFAI_API_KEY",
     "fluxions": "FLUXIONS_API_KEY",
+    "deepdub": "DEEPDUB_API_KEY",
 }

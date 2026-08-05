@@ -54,7 +54,7 @@ const SECTIONS: MethodologySection[] = [
     details: [
       "Latency metrics measure what a voice agent actually waits on. TTFA counts the delay a listener would notice, including any silence before the first audible sample, not just the moment the first bytes arrive. TTFS starts every provider from the same end-of-speech instant, picked by one shared voice-activity model, so no one gets an edge from where they decide the speaker stopped.",
       "Text-to-speech gets a WER too: we transcribe each provider's synthesized audio with one fixed ASR model (OpenAI's whisper-1) and score it against the input text, so the number measures whether the speech is intelligible and complete. The transcriber's own mistakes put a small floor under every provider equally, and both directions share one scoring pipeline.",
-      "We exclude connection setup (TCP, TLS, and protocol handshakes) the same way for every provider, so the numbers reflect the model and not the network. Aggregates show the full spread from p25 to p99 next to the mean, and leaderboards rank by the median.",
+      "We exclude connection setup (TCP, TLS, and protocol handshakes) the same way for every provider, so the numbers reflect the model and not the network. Our workers run in us-east-1, so a provider serving from elsewhere carries a round-trip in every measurement, and we label the region on the model when a provider region is confirmed. Aggregates show the full spread from p25 to p99 next to the mean, and leaderboards rank by the median.",
     ],
   },
   {
