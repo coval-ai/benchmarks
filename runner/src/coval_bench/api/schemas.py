@@ -72,6 +72,11 @@ class LeaderboardEntry(BaseModel):
     p50: float
     p95: float
     n: int
+    # True when ``n`` is under the modality's floor: the values are real but rest
+    # on too few samples to rank on, so clients render "n/a". Sent alongside the
+    # numbers rather than in place of them, so a caller that wants the raw
+    # measurement still has it.
+    insufficient_samples: bool = False
 
 
 class ModelTagOut(BaseModel):
@@ -143,6 +148,11 @@ class ModelStatEntry(BaseModel):
     min_value: float
     max_value: float
     sample_count: int
+    # True when sample_count is under the modality's floor: the values are real
+    # but rest on too few samples to present, so clients render "n/a". Sent
+    # alongside the numbers rather than in place of them, so a caller that wants
+    # the raw measurement still has it.
+    insufficient_samples: bool = False
     # WER only, percentage points summing to avg_value; null pre-0014 rows —
     # clients fall back to the total alone.
     wer_insertions_pct: float | None = None

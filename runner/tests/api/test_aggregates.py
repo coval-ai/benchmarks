@@ -15,7 +15,12 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.api.common import WINDOW_INTERVALS, WINDOW_VIEWS, WindowLiteral
+from coval_bench.api.common import (
+    MIN_SCORED_SAMPLES,
+    WINDOW_INTERVALS,
+    WINDOW_VIEWS,
+    WindowLiteral,
+)
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
 
 
@@ -580,3 +585,61 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert stat_keys == [("assemblyai", "universal-streaming", "WER")]
     series_keys = {(p["provider"], p["model"], p["metric_type"]) for p in body["series"]}
     assert series_keys == {("assemblyai", "universal-streaming", "WER")}
+
+
+async def test_thin_stat_flagged_but_series_untouched(client: AsyncClient, postgresql: Any) -> None:
+    """A thin model stat is flagged; its series points are not.
+
+    One bucket holds a single run's samples, so every point sits under the floor
+    by design — flagging them would blank every timeline.
+    """
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="hume",
+        model="octave-2",
+        metric_type="WER",
+        metric_value=0.0,
+        benchmark="TTS",
+    )
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "TTS", "window": "24h"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    stats = [s for s in data["model_stats"] if s["model"] == "octave-2"]
+    assert [s["insufficient_samples"] for s in stats] == [True]
+    # The value survives the flag — nothing is dropped or nulled.
+    assert stats[0]["sample_count"] == 1
+    assert stats[0]["avg_value"] == 0.0
+
+    points = [p for p in data["series"] if p["model"] == "octave-2"]
+    assert points, "expected the thin model to still draw a timeline"
+    assert all("insufficient_samples" not in p for p in points)
+
+
+async def test_well_sampled_stat_not_flagged(client: AsyncClient, postgresql: Any) -> None:
+    """A model above its modality's floor reports normally."""
+    run_id = await _insert_run(postgresql)
+    for _ in range(MIN_SCORED_SAMPLES["TTS"] + 1):
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="elevenlabs",
+            model="eleven_v3",
+            metric_type="WER",
+            metric_value=3.0,
+            benchmark="TTS",
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "TTS", "window": "24h"}
+    )
+    stats = [s for s in response.json()["model_stats"] if s["model"] == "eleven_v3"]
+    assert [s["insufficient_samples"] for s in stats] == [False]
