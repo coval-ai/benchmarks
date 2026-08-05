@@ -768,7 +768,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
-    # Arena-disabled: keyless, so no env var for the key-parity gate to verify.
+    # Arena-disabled: FLUXIONS_API_KEY is not mounted on benchmarks-api yet.
     RegisteredModel(
         benchmark=_TTS,
         provider="fluxions",
