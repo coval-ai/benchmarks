@@ -19,6 +19,7 @@ import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
   buildTagIndex,
+  crossRegionByModelKey,
   dedicatedModelKeys,
   filterModelsByFacets,
   getTagCategories,
@@ -210,6 +211,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [providersQuery.data]
   );
   const dedicatedModels = useMemo(() => dedicatedModelKeys(tagIndex), [tagIndex]);
+  const crossRegionModels = useMemo(() => crossRegionByModelKey(tagIndex), [tagIndex]);
 
   // Facets are driven only by models that actually have data to plot. A
   // catalogue model without stats (e.g. a batch-only or not-yet-benchmarked
@@ -740,6 +742,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     legendModels,
     toggleLegendModel,
     dedicatedModels,
+    crossRegionModels,
 
     // UI state
     isMobile,

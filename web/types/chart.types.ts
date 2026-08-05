@@ -12,5 +12,7 @@ export interface BoxPlotProps {
   normalizeModelName: (model: string) => string;
   /** Dedicated-inference endpoints: dashed box border + server icon by the label. */
   dedicatedModels?: Set<string>;
+  /** Model key -> inference region, only for models served outside our worker's region. */
+  crossRegionModels?: Map<string, string>;
   isMobile?: boolean;
 }

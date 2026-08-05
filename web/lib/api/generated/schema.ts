@@ -153,7 +153,8 @@ export interface components {
       | "features"
       | "source"
       | "licensing"
-      | "deployment";
+      | "deployment"
+      | "region";
     TagCategoryOut: {
       category: components["schemas"]["TagCategory"];
       label: string;

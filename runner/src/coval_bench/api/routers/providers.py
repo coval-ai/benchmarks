@@ -64,6 +64,7 @@ def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
         _tag(TagCategory.SOURCE, m.source),
         _tag(TagCategory.LICENSING, m.licensing),
         _tag(TagCategory.DEPLOYMENT, deployment),
+        *([_tag(TagCategory.REGION, m.region)] if m.region else []),
         *(_tag(TAG_CATEGORIES[t], t) for t in m.tags),
     ]
 

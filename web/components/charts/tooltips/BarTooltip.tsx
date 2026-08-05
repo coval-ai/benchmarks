@@ -4,6 +4,7 @@
 import React from "react";
 import type { TooltipContentProps } from "recharts";
 import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
+import { RegionBadge } from "@/components/shared/InferenceRegionInfo";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
 import type { BarDataPoint } from "@/types/benchmark.types";
@@ -15,6 +16,8 @@ interface CustomBarTooltipProps extends Partial<Pick<
   getProviderForModel?: (model: string) => string;
   /** Dedicated-inference endpoints carry the badge in their tooltip. */
   dedicatedModels?: Set<string>;
+  /** Model key -> inference region, for models served outside our worker's region. */
+  crossRegionModels?: Map<string, string>;
   /** Bar dataKey to read; defaults to WER so existing callers are unchanged. */
   dataKey?: string;
   /** Value caption; defaults to WER wording. */
@@ -29,6 +32,7 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
   label,
   getProviderForModel,
   dedicatedModels,
+  crossRegionModels,
   dataKey = "averageWER",
   valueLabel = "Average WER",
   formatValue = (value) => `${value.toFixed(1)}%`
@@ -56,6 +60,7 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
           style={{ margin: 0, fontWeight: "bold", color: "var(--color-text-on-tooltip)" }}
         >{`Model: ${modelLabel}`}</p>
         {dedicatedModels?.has(modelKey) && <DedicatedBadge />}
+        <RegionBadge region={crossRegionModels?.get(modelKey)} />
         <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>{`${valueLabel}: ${formatValue(
           value
         )}`}</p>

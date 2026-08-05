@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import type { ProvidersApiResponse, TagCategoryOut } from "../api/client";
+import type { ModelTagOut, ProvidersApiResponse, TagCategoryOut } from "../api/client";
 import type { ModelsByProvider } from "../../types/benchmark.types";
 import {
   buildFacetGroups,
@@ -248,5 +248,43 @@ describe("dedicatedModelKeys", () => {
     expect(dedicatedModelKeys(buildTagIndex("STT", providers))).toEqual(
       new Set(["baseten:whisper-large-v3"])
     );
+  });
+});
+
+describe("inference region facet", () => {
+  const id = (s: string) => s;
+  const REGION_CATS: TagCategoryOut[] = [
+    { category: "region", label: "Inference region", provider_valued: false },
+  ];
+  const MODELS: ModelsByProvider = {
+    fishaudio: ["fishaudio:s1"],
+    openai: ["openai:gpt-4o-mini-tts"],
+  };
+  const withRegions = (regions: Record<string, string>): Map<string, ModelTagOut[]> => {
+    const entries: [string, ModelTagOut[]][] = Object.values(MODELS)
+      .flat()
+      .map((key) => [
+        key,
+        regions[key] ? [tag("region", regions[key]!, regions[key]!) as ModelTagOut] : [],
+      ]);
+    return new Map(entries);
+  };
+
+  // Region is the one facet that shows with a single value: disclosing the
+  // handicap matters even when only one provider has confirmed a region.
+  it("shows the group when a single model reports a region", () => {
+    const groups = buildFacetGroups(
+      MODELS,
+      withRegions({ "fishaudio:s1": "us-west-1" }),
+      {},
+      REGION_CATS,
+      id
+    );
+    expect(groups.map((g) => g.category)).toEqual(["region"]);
+    expect(groups[0]!.options.map((o) => o.value)).toEqual(["us-west-1"]);
+  });
+
+  it("hides the group when no visible model reports a region", () => {
+    expect(buildFacetGroups(MODELS, withRegions({}), {}, REGION_CATS, id)).toEqual([]);
   });
 });

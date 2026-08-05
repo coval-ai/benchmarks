@@ -4,8 +4,9 @@
 "use client";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Server } from "lucide-react";
+import { Globe, Server } from "lucide-react";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
+import { REGION_CONTENT } from "@/components/shared/InferenceRegionInfo";
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
@@ -19,6 +20,8 @@ interface ModelComparisonTableProps {
   getProviderForModel: (model: string) => string;
   /** Dedicated-inference endpoints carry the server marker beside the name. */
   dedicatedModels?: Set<string>;
+  /** Model key -> inference region, for models served outside our worker's region. */
+  crossRegionModels?: Map<string, string>;
   percentileIdx: number;
   onPercentileChange: (idx: number) => void;
   werLabel?: string;
@@ -101,6 +104,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel,
   dedicatedModels,
+  crossRegionModels,
   percentileIdx,
   onPercentileChange,
   werLabel,
@@ -115,6 +119,10 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
     handlersFor: infoTipHandlersFor,
     overlay: infoTipOverlay
   } = useDedicatedInfoTip(tableWrapRef);
+  const regionIconHandlers = useMemo(
+    () => infoTipHandlersFor(REGION_CONTENT),
+    [infoTipHandlersFor]
+  );
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
@@ -294,6 +302,16 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         {...dedicatedIconHandlers}
                       >
                         <Server size={13} aria-hidden />
+                      </button>
+                    )}
+                    {crossRegionModels?.has(row.model) && (
+                      <button
+                        type="button"
+                        aria-label="About inference region"
+                        className="flex shrink-0 cursor-help items-center rounded-md p-1 -m-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+                        {...regionIconHandlers}
+                      >
+                        <Globe size={13} aria-hidden />
                       </button>
                     )}
                   </div>
