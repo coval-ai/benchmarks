@@ -7,6 +7,7 @@ import React, { type CSSProperties, type ReactElement, type ReactNode, type RefO
 import {
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -25,12 +26,13 @@ const CHART_BOTTOM_MARGIN = 80;
 
 // A row plotted as one bar. Callers pass the numeric value under `valueKey`
 // (e.g. "averageWER" or "instructionScore"); the extra keys ride along for the
-// tooltip/label without the chassis needing to know them.
+// tooltip/label without the chassis needing to know them. Stacked rows must
+// NOT carry `fill` — recharts prefers a row's own fill over the segment's.
 type QualityBarRow = {
   model: string;
   provider: string;
-  fill: string;
-  fillOpacity: number;
+  fill?: string;
+  fillOpacity?: number;
 } & Record<string, unknown>;
 
 interface QualityMetricBarsProps {
@@ -38,6 +40,21 @@ interface QualityMetricBarsProps {
   data: readonly QualityBarRow[];
   /** Which numeric field is the bar height (e.g. "averageWER"). */
   valueKey: string;
+  /**
+   * Stacked segments drawn instead of the single `valueKey` bar (whose key
+   * then only sizes the frozen y-axis). Order is bottom-up; the last segment
+   * gets the rounded top and the caller's `barLabel`. A function fill is
+   * resolved per row's model, so segments can follow the model palette.
+   */
+  stackSegments?: readonly {
+    dataKey: string;
+    fill: string | ((model: string) => string);
+    fillOpacity?: number;
+  }[];
+  /** Extra SVG defs (e.g. per-model hatch patterns for segment fills). */
+  svgDefs?: ReactNode;
+  /** Y-axis tick formatter; defaults to whole percent. */
+  tickFormatter?: (value: number) => string;
   /** Rotated y-axis caption, e.g. "WER % · lower is better". */
   yAxisLabel: string;
   /** Value tooltip element (caller owns its content/formatting). */
@@ -45,7 +62,7 @@ interface QualityMetricBarsProps {
   isMobile: boolean;
   getProviderForModel: (model: string) => string;
   /** The per-bar <Cell> list — callers own fill/interaction/aria per bar. */
-  children: ReactNode;
+  children?: ReactNode;
   /** Bar-top value labels; caller-provided so WER can add its markers. */
   barLabel?: BarProps["label"];
   onBarClick?: (bar: BarRectangleItem) => void;
@@ -67,6 +84,9 @@ interface QualityMetricBarsProps {
 const QualityMetricBars: React.FC<QualityMetricBarsProps> = ({
   data,
   valueKey,
+  stackSegments,
+  svgDefs,
+  tickFormatter = (value) => `${value}%`,
   yAxisLabel,
   tooltip,
   isMobile,
@@ -82,7 +102,10 @@ const QualityMetricBars: React.FC<QualityMetricBarsProps> = ({
   overlay,
 }) => {
   const themeColors = useThemeColors();
-  const activeOverride = tooltipActive ?? (isMobile ? false : undefined);
+  // Single-bar charts pair mobile taps with click-to-compare, so their tooltip
+  // is off there; stacked bars have no click action, so tap-to-inspect stays.
+  const activeOverride =
+    tooltipActive ?? (isMobile && !stackSegments ? false : undefined);
   // Room the diagonal tick labels need left of the first bar, measured on the
   // providers actually on show since their line is never ellipsized. Shared by
   // both charts, so the instruction bars get the same exact padding as WER.
@@ -115,7 +138,7 @@ const QualityMetricBars: React.FC<QualityMetricBarsProps> = ({
               axisLine={false}
               tickLine={false}
               tick={{ fill: themeColors.axisText, fontSize: 12 }}
-              tickFormatter={(value) => `${value}%`}
+              tickFormatter={tickFormatter}
               label={{
                 value: yAxisLabel,
                 angle: -90,
@@ -170,20 +193,51 @@ const QualityMetricBars: React.FC<QualityMetricBarsProps> = ({
               isAnimationActive={false}
               wrapperStyle={{ pointerEvents: "auto" }}
             />
-            <Bar
-              dataKey={valueKey}
-              radius={[4, 4, 0, 0]}
-              isAnimationActive={false}
-              onClick={
-                onBarClick
-                  ? (bar: BarRectangleItem) => onBarClick(bar)
-                  : undefined
-              }
-              label={barLabel}
-              style={barStyle}
-            >
-              {children}
-            </Bar>
+            {svgDefs}
+            {stackSegments ? (
+              stackSegments.map((segment, idx) => (
+                <Bar
+                  key={segment.dataKey}
+                  dataKey={segment.dataKey}
+                  stackId="stack"
+                  fill={
+                    typeof segment.fill === "string" ? segment.fill : undefined
+                  }
+                  fillOpacity={segment.fillOpacity}
+                  radius={
+                    idx === stackSegments.length - 1 ? [4, 4, 0, 0] : undefined
+                  }
+                  isAnimationActive={false}
+                  label={idx === stackSegments.length - 1 ? barLabel : undefined}
+                  style={barStyle}
+                >
+                  {typeof segment.fill === "function" &&
+                    data.map((row) => (
+                      <Cell
+                        key={`${segment.dataKey}-${row.model}`}
+                        fill={(segment.fill as (model: string) => string)(
+                          row.model
+                        )}
+                      />
+                    ))}
+                </Bar>
+              ))
+            ) : (
+              <Bar
+                dataKey={valueKey}
+                radius={[4, 4, 0, 0]}
+                isAnimationActive={false}
+                onClick={
+                  onBarClick
+                    ? (bar: BarRectangleItem) => onBarClick(bar)
+                    : undefined
+                }
+                label={barLabel}
+                style={barStyle}
+              >
+                {children}
+              </Bar>
+            )}
           </BarChart>
         </ResponsiveContainer>
       </div>

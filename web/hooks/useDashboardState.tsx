@@ -198,6 +198,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
+
   const allModelsByProvider = useMemo(
     () => buildModelsByProvider(modelStats, benchmarkParam, providersQuery.data),
     [providersQuery.data, modelStats, benchmarkParam]
@@ -438,7 +439,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   });
 
   // Calculate metrics
-  const { getStat, getHeatmapData } = chartData;
+  const { getStat, getHeatmapData, ttfaBreakdownBars } = chartData;
 
   // Run-weighted average latency across selected models, in display units:
   // Σ(avg·runs) / Σ(runs). Backs the box plot and timeline headlines.
@@ -635,7 +636,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = {
-    label: `Lowest Median ${activeMetric}`,
+    label: `Lowest Median ${latencyLabel}`,
     displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
     subtitle: fastestPrimary.fastestModel
       ? {
@@ -706,6 +707,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     sttMetric,
     setSttMetric,
     activeMetric,
+    ttfaBreakdownBars,
 
     // WER dataset pin (STT comparison card)
     werDataset: activeWerDataset,
