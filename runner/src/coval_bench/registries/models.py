@@ -70,6 +70,7 @@ _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
 _ACTIVE = ModelStatus.ACTIVE
+_PAUSED = ModelStatus.PAUSED
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
 _EARLY_ACCESS = ModelStatus.EARLY_ACCESS
@@ -288,7 +289,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -634,7 +635,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -644,7 +645,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("en-US-Ava:DragonHDLatestNeural", "en-US-Andrew:DragonHDLatestNeural"),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _STREAM),
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
