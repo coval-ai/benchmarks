@@ -75,6 +75,7 @@ class DeepdubTTSProvider(TTSProvider):
         last_frames: list[str] = []
         start: float | None = None
         first_chunk_at: float | None = None
+        finished = False
 
         request = {
             "action": "text-to-speech",
@@ -114,7 +115,13 @@ class DeepdubTTSProvider(TTSProvider):
                         last_frames.append(text_frame)
                         del last_frames[:-_LAST_FRAMES_KEPT]
                     if frame.get("isFinished"):
+                        finished = True
                         break
+
+                # A clean close before ``isFinished`` is a truncated stream; audio
+                # collected so far must not be scored as a complete synthesis.
+                if not finished:
+                    raise RuntimeError("connection closed before the isFinished frame")
 
         except Exception as exc:
             logger.warning("deepdub_tts_error", provider="deepdub", model=self._model, exc_info=exc)

@@ -184,6 +184,21 @@ async def test_deepdub_tts_ttfa_skips_empty_ack(deepdub_settings: Settings) -> N
 
 
 @pytest.mark.asyncio
+async def test_deepdub_tts_close_before_isfinished_fails(deepdub_settings: Settings) -> None:
+    """A clean close before the isFinished frame is truncation, never a scored result."""
+    events: list[str | bytes] = [_ack(), _chunk(make_pcm_bytes(240), 0)]
+    ws = FakeWebSocket(events)
+    provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
+
+    with patch("coval_bench.providers.tts.deepdub.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is not None
+    assert "isFinished" in result.error
+    assert result.audio_path is None
+
+
+@pytest.mark.asyncio
 async def test_deepdub_tts_silent_stream_is_a_failure(deepdub_settings: Settings) -> None:
     """A stream that finishes without audio or an error frame gets the stable reason."""
     events: list[str | bytes] = [
