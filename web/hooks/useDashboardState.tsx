@@ -158,20 +158,26 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   }, [availableWerDatasets, werDataset, werBarDatasetId]);
 
   // Freshness as the charts see it: the newest series bucket actually served
-  // (start, and end inferred from the bucket spacing). Deliberately not the
-  // runs table alone — a finished run can precede its aggregates.
+  // (start, end inferred from the bucket spacing, and the dataset scope the
+  // response covers). Deliberately not the runs table alone — a finished run
+  // can precede its aggregates.
   const latestDataBucket = useMemo(() => {
+    const data = aggregatesQuery.data;
     const times = [
-      ...new Set(
-        (aggregatesQuery.data?.series ?? []).map((point) =>
-          Date.parse(point.scheduled_at)
-        )
-      ),
+      ...new Set((data?.series ?? []).map((point) => Date.parse(point.scheduled_at))),
     ].sort((a, b) => a - b);
     if (times.length === 0) return null;
     const start = times[times.length - 1]!;
-    const period = times.length > 1 ? start - times[times.length - 2]! : 0;
-    return { start, end: start + period };
+    // Minimum spacing, not last spacing: a gap from a missed run would inflate
+    // the bucket and admit runs the charts don't serve yet. A single-point
+    // series degenerates to end === start, which only ever falls back to the
+    // bucket time itself.
+    let period = 0;
+    for (let i = 1; i < times.length; i++) {
+      const diff = times[i]! - times[i - 1]!;
+      if (period === 0 || diff < period) period = diff;
+    }
+    return { start, end: start + period, datasets: data?.datasets ?? [] };
   }, [aggregatesQuery.data]);
 
   // The charts keep showing the prior window's data while a new one loads,

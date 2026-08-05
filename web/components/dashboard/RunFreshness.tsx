@@ -31,24 +31,29 @@ const RunFreshness: React.FC = () => {
   // shifts as queries resolve (or silently fail).
   if (!latestDataBucket) return <div aria-hidden className="min-h-11 lg:min-h-7" />;
 
-  // Runs are per-dataset with modality-prefixed ids. PARTIAL is the norm with
-  // flaky providers — only FAILED matters.
-  const runs =
-    runsData?.runs.filter(
-      (run) => run.dataset_id.startsWith(`${page}-`) && run.status !== "RUNNING"
-    ) ?? [];
+  // Only runs from the datasets this board's aggregates actually cover (the
+  // pinned S2S board must ignore legacy s2s-v1 runs). Sorted locally rather
+  // than trusting response order. PARTIAL is the norm with flaky providers —
+  // only FAILED matters.
+  const runs = (runsData?.runs ?? [])
+    .filter(
+      (run) =>
+        latestDataBucket.datasets.includes(run.dataset_id) &&
+        run.status !== "RUNNING"
+    )
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
   const failed = runs[0]?.status === "FAILED";
 
-  // "Updated" = the newest run the charts already include: runs finishing after
-  // the served bucket ends are materialized later, and the bucket start alone
-  // undersells daily-bucketed boards. Shown as the run's start (its schedule
-  // slot — what the chart's newest point is labeled with), not its finish.
-  // Chart bucket as fallback if runs fail.
-  const included = runs.find(
-    (run) =>
-      run.status !== "FAILED" &&
-      Date.parse(run.finished_at ?? run.started_at) <= latestDataBucket.end
-  );
+  // "Updated" = the newest run the charts already include: one finishing inside
+  // the served bucket (later runs are materialized later, and the bucket start
+  // alone undersells daily-bucketed boards). Shown as the run's start (its
+  // schedule slot — what the chart's newest point is labeled with), not its
+  // finish. Chart bucket as fallback if runs fail.
+  const included = runs.find((run) => {
+    if (run.status === "FAILED") return false;
+    const finished = Date.parse(run.finished_at ?? run.started_at);
+    return finished >= latestDataBucket.start && finished <= latestDataBucket.end;
+  });
   const updatedAt = included
     ? Date.parse(included.started_at)
     : latestDataBucket.start;
