@@ -62,6 +62,8 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
+    # Provider's serving region in ``us-east-1`` form; set only when confirmed.
+    region: str | None = None
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -709,6 +711,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -718,6 +721,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -727,6 +731,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
