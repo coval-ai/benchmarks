@@ -42,6 +42,13 @@ describe("Benchmarks deployment-state workflows", () => {
     expect(runnerRelease).toContain("name: switchboard-deploy-result");
   });
 
+  it("builds the Vercel project from the Benchmarks Web package", () => {
+    expect(webRelease).toContain("install-directory: web");
+    expect(webRelease).toContain("vercel-directory: web");
+    expect(webRelease).toContain("pnpm codegen");
+    expect(webRelease).not.toContain("cd web\n            pnpm codegen");
+  });
+
   it("seeds state only after a successful manual deployment", () => {
     expect(webRelease).toContain(
       "needs.context.outputs.promotion_origin == 'manual'",

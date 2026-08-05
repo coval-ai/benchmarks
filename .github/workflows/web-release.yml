@@ -195,7 +195,7 @@ jobs:
           resolved-sha: ${{ steps.revision.outputs.resolved_sha }}
           marker-branch: ${{ needs.context.outputs.marker_branch }}
           install-directory: web
-          vercel-directory: .
+          vercel-directory: web
           package-manager: pnpm
           node-version: "22"
           pre-build-command: |
@@ -212,7 +212,6 @@ jobs:
               echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
               exit 1
             fi
-            cd web
             pnpm codegen
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
