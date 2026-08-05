@@ -864,6 +864,7 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
             error=None,
             http_version="HTTP/1.1",
             submit_to_headers_ms=210.0,
+            leading_silence_ms=45.0,
         )
 
         provider_inst = MagicMock()
@@ -943,6 +944,11 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
         assert ttfa_rows[0].metric_value is None
         assert "HTTP/1.1" in ttfa_rows[0].error
         assert ttfa_rows[0].http_version == "HTTP/1.1"
+
+        # A nulled TTFA writes no component rows either.
+        assert not [
+            r for r in recorded if r.metric_type.startswith("TTFA") and r.metric_type != "TTFA"
+        ]
 
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
@@ -1049,6 +1055,111 @@ async def test_tts_cold_connection_nulls_ttfa_row(settings: Settings) -> None:
 
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
+
+        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_tts_ttfa_component_rows_reconcile(settings: Settings) -> None:
+    """A comparable TTFA with a known split writes component rows that sum back to it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "synth.wav"
+        audio_path.write_bytes(b"\x00" * 512)
+
+        tts_result = TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="IKne3meq5aSn9XLyUdCD",
+            ttfa_ms=120.0,
+            audio_path=audio_path,
+            error=None,
+            http_version="HTTP/2",
+            submit_to_headers_ms=90.0,
+            connection_reused=True,
+            leading_silence_ms=45.0,
+        )
+
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=tts_result)
+        provider_cls = MagicMock(return_value=provider_inst)
+        provider_cls.warmup = AsyncMock(return_value=None)
+
+        tts_providers = {"elevenlabs": provider_cls}
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        tts_dataset = MagicMock()
+        tts_dataset.items = [_make_tts_item("hello world")]
+
+        def _load(
+            dataset_id: str, *, settings: Any, sample_size: int | None = None, rng: Any = None
+        ) -> Any:
+            return tts_dataset
+
+        fake_pool = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def _fake_pool(s: Any) -> AsyncIterator[MagicMock]:
+            yield fake_pool
+
+        models_mod = MagicMock()
+        models_mod.Benchmark = Benchmark
+        models_mod.Result = Result
+        models_mod.ResultStatus = ResultStatus
+        models_mod.RunStatus = RunStatus
+
+        def _fake_get_db_symbols() -> tuple[Any, Any, Any, Any]:
+            return _fake_pool, MagicMock(return_value=writer), RunStatus, models_mod
+
+        compute_wer_real = __import__("coval_bench.metrics", fromlist=["compute_wer"]).compute_wer
+        compute_rtf_real = __import__("coval_bench.metrics", fromlist=["compute_rtf"]).compute_rtf
+
+        matrix = [
+            *_paused_registry(Benchmark.TTS),
+            _tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD"),
+        ]
+
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._get_db_symbols",
+                side_effect=_fake_get_db_symbols,
+            ),
+            patch("coval_bench.runner.orchestrator._get_stt_providers", return_value={}),
+            patch(
+                "coval_bench.runner.orchestrator._get_tts_providers",
+                return_value=tts_providers,
+            ),
+            patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load),
+            patch(
+                "coval_bench.runner.orchestrator._get_metrics",
+                return_value=(compute_wer_real, compute_rtf_real),
+            ),
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                return_value="hello world",
+            ),
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+        recorded = [r for call in writer.record_results.call_args_list for r in call.args[0]]
+        ttfa = [r for r in recorded if r.metric_type == "TTFA"]
+        roundtrip = [r for r in recorded if r.metric_type == "TTFARoundtrip"]
+        silence = [r for r in recorded if r.metric_type == "TTFALeadingSilence"]
+
+        assert len(ttfa) == len(roundtrip) == len(silence) == 1
+        assert ttfa[0].metric_value == 120.0
+        assert roundtrip[0].metric_value == 75.0
+        assert silence[0].metric_value == 45.0
+        for row in (roundtrip[0], silence[0]):
+            assert row.status == ResultStatus.SUCCESS
+            assert row.metric_units == "milliseconds"
+            assert row.voice == "IKne3meq5aSn9XLyUdCD"
 
         assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
 

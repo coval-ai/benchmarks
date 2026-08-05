@@ -131,6 +131,7 @@ def finalize_tts_result(
         http_version=http_version,
         submit_to_headers_ms=submit_to_headers_ms,
         connection_reused=connection_reused,
+        leading_silence_ms=offset_ms if ttfa_ms is not None else None,
     )
 
 

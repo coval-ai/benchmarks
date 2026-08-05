@@ -775,6 +775,31 @@ async def _run_tts_item(
                 )
             )
 
+            # TTFA component rows, only when the split is known so the two
+            # always sum back to the TTFA row. A nulled TTFA (transport gate)
+            # or an arrival-only TTFA (offset detection failed) writes neither.
+            leading_silence_ms = tts_result.leading_silence_ms if tts_result else None
+            if ttfa_value is not None and leading_silence_ms is not None:
+                for component, value in (
+                    (Metric.TTFA_ROUNDTRIP, ttfa_value - leading_silence_ms),
+                    (Metric.TTFA_LEADING_SILENCE, leading_silence_ms),
+                ):
+                    results.append(
+                        Result(
+                            run_id=run_id,
+                            provider=entry.provider,
+                            model=entry.model,
+                            voice=voice,
+                            benchmark=Benchmark.TTS,
+                            metric_type=component,
+                            metric_value=value,
+                            metric_units=METRIC_SPECS[component].units,
+                            transcript=transcript,
+                            status=ResultStatus.SUCCESS,
+                            error=None,
+                        )
+                    )
+
             # 2. WER via Whisper transcription of synthesized audio (skip when synth errored)
             if item_error is None and audio_path is not None and audio_path.exists():
                 # Whisper transcription is our measurement instrument, not the provider under

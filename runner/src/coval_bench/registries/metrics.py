@@ -24,6 +24,8 @@ class Metric(StrEnum):
     TTFT = "TTFT"
     TTFS = "TTFS"
     TTFA = "TTFA"
+    TTFA_ROUNDTRIP = "TTFARoundtrip"
+    TTFA_LEADING_SILENCE = "TTFALeadingSilence"
     RTF = "RTF"
     AUDIO_TO_FINAL = "AudioToFinal"
     V2V = "V2V"
@@ -73,6 +75,23 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
     ),
     Metric.TTFA: MetricSpec(
         display_name="Time to First Audio",
+        units="milliseconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.TTS}),
+    ),
+    # Perceived TTFA split: roundtrip (send → first chunk) + leading silence
+    # (stream start → first audible sample). Written only when both are known,
+    # so the two rows always sum back to the TTFA row.
+    Metric.TTFA_ROUNDTRIP: MetricSpec(
+        display_name="TTFA Network Roundtrip",
+        units="milliseconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=0,
+        benchmarks=frozenset({Benchmark.TTS}),
+    ),
+    Metric.TTFA_LEADING_SILENCE: MetricSpec(
+        display_name="TTFA Leading Silence",
         units="milliseconds",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=0,
