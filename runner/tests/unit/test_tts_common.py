@@ -50,6 +50,8 @@ def test_finalize_adds_leading_silence_offset() -> None:
     assert result.ttfa_ms is not None
     assert result.ttfa_ms > arrival_ms
     assert result.ttfa_ms == pytest.approx(arrival_ms + lead_ms, abs=12.0)
+    assert result.leading_silence_ms is not None
+    assert result.ttfa_ms == arrival_ms + result.leading_silence_ms
 
     assert result.audio_path is not None
     assert result.audio_path.exists()
@@ -155,6 +157,7 @@ def test_finalize_offset_failure_falls_back_and_writes_wav() -> None:
         )
 
     assert result.ttfa_ms == pytest.approx(arrival_ms)  # arrival only, offset dropped
+    assert result.leading_silence_ms is None  # unknown split, not 0.0
     assert result.error is None
     assert result.audio_path is not None
     assert result.audio_path.exists()

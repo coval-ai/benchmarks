@@ -10,6 +10,7 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.metrics import (
     METRIC_EXCLUSIONS,
     METRIC_SPECS,
+    SERIES_EXCLUDED_METRICS,
     Metric,
     MetricDirection,
     MetricSpec,
@@ -35,6 +36,7 @@ __all__ = [
     "Benchmark",
     "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
+    "SERIES_EXCLUDED_METRICS",
     "MODEL_REGISTRY",
     "Metric",
     "MetricDirection",

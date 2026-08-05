@@ -1,10 +1,16 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+// Canonical results.metric_type strings for the perceived-TTFA split. The
+// runner writes the two component rows only when both are known, so they
+// always sum back to the TTFA row they sit under.
+export const TTFA_ROUNDTRIP = "TTFARoundtrip";
+export const TTFA_LEADING_SILENCE = "TTFALeadingSilence";
+
 // Definition of the active metric, shown as a bolded block inside the
 // "About this benchmark" tooltip on cards that carry the TTFS/TTFT toggle —
 // the toggle buttons themselves carry no tooltips. Metrics without a tooltip
-// (TTFA, V2V) resolve to undefined and add nothing.
+// (V2V) resolve to undefined and add nothing.
 export const metricAboutNote = (
   metric: string
 ): { term: string; text: string } | undefined => {
@@ -18,6 +24,8 @@ export const metricAboutNote = (
 export const metricDescriptions = {
   ttfa: {
     short: "Time to First Audio",
+    tooltip:
+      "Time from sending the text until the listener would first hear speech: network roundtrip plus any leading silence the provider front-loads. Lower is better.",
     detailed:
       "Delivering natural and responsive voice agents requires both speed and consistency. At Coval, we understand that latency is critical for realistic conversations, which is why we go beyond average measurements to track comprehensive percentile metrics with continuous 15-minute evaluation cycles. This rigorous approach ensures your voice AI maintains the reliable performance necessary for engaging user experiences."
   },

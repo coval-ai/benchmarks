@@ -48,6 +48,20 @@ export interface ModelHeatmapData {
   sampleCount: number;
 }
 
+/**
+ * One stacked bar of the TTFA breakdown view. All three values come straight
+ * from served averages over the same rows, so roundtrip + silence = ttfa
+ * exactly. A type alias (not an interface) so rows satisfy the bar chassis's
+ * Record<string, unknown> constraint via an implicit index signature.
+ */
+export type TtfaBreakdownBar = {
+  model: string;
+  provider: string;
+  roundtrip: number;
+  silence: number;
+  ttfa: number;
+};
+
 export interface BarDataPoint {
   model: string;
   averageWER: number;

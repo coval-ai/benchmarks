@@ -7,7 +7,7 @@ import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
 import { RegionBadge } from "@/components/shared/InferenceRegionInfo";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
-import type { BarDataPoint } from "@/types/benchmark.types";
+import type { BarDataPoint, TtfaBreakdownBar } from "@/types/benchmark.types";
 
 interface CustomBarTooltipProps extends Partial<Pick<
   TooltipContentProps<number, string>,
@@ -80,6 +80,57 @@ const CustomBarTooltip: React.FC<CustomBarTooltipProps> = ({
     );
   }
   return null;
+};
+
+// Tooltip for the stacked TTFA breakdown bars: the total leads, then the two
+// segments with their share of it, so the composition reads off the tooltip
+// the same way it reads off the bar.
+export const TtfaBreakdownTooltip: React.FC<
+  Partial<Pick<TooltipContentProps<number, string>, "active" | "payload" | "label">> & {
+    getProviderForModel?: (model: string) => string;
+  }
+> = ({ active, payload, label, getProviderForModel }) => {
+  const row = payload?.[0]?.payload as TtfaBreakdownBar | undefined;
+  if (!active || !row) return null;
+  const modelKey = String(label ?? "");
+  const provider = getProviderForModel?.(modelKey);
+  const modelLabel = provider
+    ? `${provider} ${normalizeModelName(modelKey)}`
+    : normalizeModelName(modelKey);
+  const parts: [string, number][] = [
+    ["Network roundtrip", row.roundtrip],
+    ["Leading silence", row.silence],
+  ];
+  return (
+    <div
+      style={{
+        backgroundColor: "var(--color-surface-tooltip)",
+        border: "1px solid var(--color-border-secondary)",
+        borderRadius: "8px",
+        padding: "8px 12px"
+      }}
+    >
+      <p
+        style={{ margin: 0, fontWeight: "bold", color: "var(--color-text-on-tooltip)" }}
+      >{`Model: ${modelLabel}`}</p>
+      <p style={{ margin: 0, color: "var(--color-text-on-tooltip)" }}>
+        {`Avg TTFA: ${Math.round(row.ttfa)} ms`}
+      </p>
+      {parts.map(([text, value]) => (
+        <p
+          key={text}
+          style={{
+            margin: 0,
+            fontSize: 12,
+            color: "var(--color-text-on-tooltip)",
+            opacity: 0.8,
+          }}
+        >{`${text}: ${Math.round(value)} ms${
+          row.ttfa > 0 ? ` (${Math.round((value / row.ttfa) * 100)}%)` : ""
+        }`}</p>
+      ))}
+    </div>
+  );
 };
 
 export default CustomBarTooltip;

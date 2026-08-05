@@ -3,8 +3,8 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { BarDataPoint } from "../../../types/benchmark.types";
-import CustomBarTooltip from "./BarTooltip";
+import type { BarDataPoint, TtfaBreakdownBar } from "../../../types/benchmark.types";
+import CustomBarTooltip, { TtfaBreakdownTooltip } from "./BarTooltip";
 
 const point: BarDataPoint = {
   model: "soniox/stt-rt-v5",
@@ -37,5 +37,47 @@ describe("CustomBarTooltip", () => {
     expect(html).not.toContain("Substitutions");
     expect(html).not.toContain("Deletions");
     expect(html).not.toContain("Insertions");
+  });
+});
+
+describe("TtfaBreakdownTooltip", () => {
+  it("leads with the total and gives each segment its share", () => {
+    const bar: TtfaBreakdownBar = {
+      model: "elevenlabs:eleven_flash_v2_5",
+      provider: "elevenlabs",
+      roundtrip: 160,
+      silence: 40,
+      ttfa: 200,
+    };
+    const html = renderToStaticMarkup(
+      <TtfaBreakdownTooltip
+        active
+        payload={[{ dataKey: "roundtrip", value: bar.roundtrip, payload: bar }] as never}
+        label={bar.model}
+      />
+    );
+    expect(html).toContain("Avg TTFA: 200 ms");
+    expect(html).toContain("Network roundtrip: 160 ms (80%)");
+    expect(html).toContain("Leading silence: 40 ms (20%)");
+  });
+
+  it("omits shares when the total is zero instead of rendering NaN%", () => {
+    const bar: TtfaBreakdownBar = {
+      model: "elevenlabs:eleven_flash_v2_5",
+      provider: "elevenlabs",
+      roundtrip: 0,
+      silence: 0,
+      ttfa: 0,
+    };
+    const html = renderToStaticMarkup(
+      <TtfaBreakdownTooltip
+        active
+        payload={[{ dataKey: "roundtrip", value: 0, payload: bar }] as never}
+        label={bar.model}
+      />
+    );
+    expect(html).toContain("Network roundtrip: 0 ms");
+    expect(html).not.toContain("NaN");
+    expect(html).not.toContain("%");
   });
 });

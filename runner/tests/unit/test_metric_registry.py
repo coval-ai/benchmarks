@@ -19,6 +19,8 @@ def test_metric_values_match_stored_strings() -> None:
         "TTFT",
         "TTFS",
         "TTFA",
+        "TTFARoundtrip",
+        "TTFALeadingSilence",
         "RTF",
         "AudioToFinal",
         "V2V",
@@ -33,6 +35,8 @@ def test_units_match_stored_strings() -> None:
         Metric.TTFT: "seconds",
         Metric.TTFS: "seconds",
         Metric.TTFA: "milliseconds",
+        Metric.TTFA_ROUNDTRIP: "milliseconds",
+        Metric.TTFA_LEADING_SILENCE: "milliseconds",
         Metric.RTF: "ratio",
         Metric.AUDIO_TO_FINAL: "seconds",
         Metric.V2V: "milliseconds",
@@ -43,7 +47,8 @@ def test_units_match_stored_strings() -> None:
 
 def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.WER].benchmarks == {Benchmark.STT, Benchmark.TTS}
-    assert METRIC_SPECS[Metric.TTFA].benchmarks == {Benchmark.TTS}
+    for metric in (Metric.TTFA, Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE):
+        assert METRIC_SPECS[metric].benchmarks == {Benchmark.TTS}
     for metric in (Metric.TTFT, Metric.TTFS, Metric.RTF, Metric.AUDIO_TO_FINAL):
         assert METRIC_SPECS[metric].benchmarks == {Benchmark.STT}
 
