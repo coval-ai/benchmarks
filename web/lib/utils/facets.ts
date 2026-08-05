@@ -229,13 +229,14 @@ export function buildFacetGroups(
     // A dedicated endpoint never mints a new filter group on its own: aside
     // from Source (the shared/dedicated axis itself), a category becomes a
     // facet only once shared endpoints hold two distinct values for it.
-    // Region is exempt: one labelled provider is the point, since the filter
-    // exists to disclose a measurement handicap rather than to slice the board.
-    if (
-      category !== REGION_CATEGORY &&
-      (category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) < 2
-    )
-      continue;
+    // Region settles for one, since the filter exists to disclose a
+    // measurement handicap rather than to slice the board — but never for
+    // zero, which is every benchmark whose models carry no region at all.
+    const enoughValues =
+      category === REGION_CATEGORY
+        ? valueLabels.size > 0
+        : (category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) >= 2;
+    if (!enoughValues) continue;
 
     const others: FacetSelection = { ...tagSelected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]
