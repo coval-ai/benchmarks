@@ -60,7 +60,13 @@ const roundedFrontierPath = (points: { x: number; y: number }[]) => {
 };
 
 const LatencyAccuracySection: React.FC = () => {
-  const { selectedModels, getScatterData, activeMetric: metric, dedicatedModels } = useDashboard();
+  const {
+    selectedModels,
+    getScatterData,
+    activeMetric: metric,
+    dedicatedModels,
+    crossRegionModels,
+  } = useDashboard();
 
   const activeTab = useActiveTab();
   const themeColors = useThemeColors();
@@ -362,6 +368,7 @@ const LatencyAccuracySection: React.FC = () => {
                 activeTab={activeTab}
                 metric={metric}
                 dedicatedModels={dedicatedModels}
+                crossRegionModels={crossRegionModels}
               />
             </div>
           )}
@@ -407,6 +414,7 @@ const LatencyAccuracySection: React.FC = () => {
                       activeTab={activeTab}
                       metric={metric}
                       dedicatedModels={dedicatedModels}
+                      crossRegionModels={crossRegionModels}
                     />
                   }
                   isAnimationActive={false}

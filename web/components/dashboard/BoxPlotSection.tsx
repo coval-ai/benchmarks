@@ -22,6 +22,7 @@ const BoxPlotSection: React.FC = () => {
     getBoxPlotData,
     getProviderForModel,
     dedicatedModels,
+    crossRegionModels,
     isMobile,
     activeMetric,
   } = useDashboard();
@@ -95,6 +96,7 @@ const BoxPlotSection: React.FC = () => {
           getProviderForModel={getProviderForModel}
           normalizeModelName={normalizeModelName}
           dedicatedModels={dedicatedModels}
+          crossRegionModels={crossRegionModels}
           isMobile={isMobile}
         />
       </Card>

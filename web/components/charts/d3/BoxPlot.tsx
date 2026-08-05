@@ -3,7 +3,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as d3 from "d3";
 import { BoxPlotProps } from "@/types/chart.types";
 import { BoxPlotDataPoint } from "@/types/benchmark.types";
@@ -11,6 +11,10 @@ import {
   DedicatedBadge,
   useDedicatedInfoTip,
 } from "@/components/shared/DedicatedInferenceInfo";
+import {
+  RegionBadge,
+  REGION_CONTENT,
+} from "@/components/shared/InferenceRegionInfo";
 import { useThemeColors } from "@/hooks/useThemeColors";
 
 // Match the text sizes on the timeline chart above: 12px tick/legend/category
@@ -57,6 +61,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
   getProviderForModel,
   normalizeModelName,
   dedicatedModels,
+  crossRegionModels,
   isMobile = false
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -72,12 +77,15 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     yTop: number;
     pinned: boolean;
   } | null>(null);
-  // Explainer for the dedicated-inference marker under a model's axis label.
+  // One overlay serves both axis markers (dedicated inference, inference
+  // region); each trigger anchors it with its own explainer body.
   const {
     iconHandlers: dedicatedIcon,
+    handlersFor,
     overlay: dedicatedOverlay,
     dismiss: dismissDedicated,
   } = useDedicatedInfoTip(containerRef);
+  const regionIcon = useMemo(() => handlersFor(REGION_CONTENT), [handlersFor]);
   const [scrollX, setScrollX] = useState(0);
   const themeColors = useThemeColors();
 
@@ -288,6 +296,35 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
       return wrap;
     };
 
+    // Lucide's globe, redrawn in d3 to match drawServerIcon's treatment.
+    const drawGlobeIcon = (x: number, y: number, size: number) => {
+      const wrap = g
+        .append("g")
+        .attr("transform", `translate(${x},${y})`)
+        .attr("role", "button")
+        .attr("tabindex", 0)
+        .attr("aria-label", "About inference region");
+      const icon = wrap
+        .append("g")
+        .attr("transform", `scale(${size / 24})`)
+        .attr("stroke", themeColors.label)
+        .attr("fill", "none")
+        .attr("stroke-width", 2.4)
+        .attr("stroke-linecap", "round")
+        .attr("stroke-linejoin", "round");
+      icon.append("circle").attr("cx", 12).attr("cy", 12).attr("r", 10);
+      icon.append("line").attr("x1", 2).attr("y1", 12).attr("x2", 22).attr("y2", 12);
+      icon.append("path").attr("d", "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20");
+      wrap
+        .append("rect")
+        .attr("x", -10)
+        .attr("y", -10)
+        .attr("width", size + 20)
+        .attr("height", size + 20)
+        .attr("fill", "transparent");
+      return wrap;
+    };
+
     // Create custom wrapped text with model first
     {
       const labelMaxWidth = xScale.step() * labelBandRatio;
@@ -348,15 +385,26 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
         // the label, centered in the slot; hover or tap opens the explainer.
         // Fixed size on purpose: crowded views shrink the label text, and the
         // marker must stay legible — it is the only dedicated cue at a glance.
+        const markers: { draw: typeof drawServerIcon; on: typeof dedicatedIcon }[] = [];
         if (dedicatedModels?.has(model)) {
-          const iconSize = 15;
-          drawServerIcon(xPosition - iconSize / 2, providerY + 4, iconSize)
-            .style("cursor", "help")
-            .on("mouseenter", (e: React.MouseEvent) => dedicatedIcon.onMouseEnter(e))
-            .on("mouseleave", dedicatedIcon.onMouseLeave)
-            .on("click", (e: React.MouseEvent) => dedicatedIcon.onClick(e))
-            .on("keydown", (e: React.KeyboardEvent) => dedicatedIcon.onKeyDown(e));
+          markers.push({ draw: drawServerIcon, on: dedicatedIcon });
         }
+        if (crossRegionModels?.has(model)) {
+          markers.push({ draw: drawGlobeIcon, on: regionIcon });
+        }
+        const iconSize = 15;
+        const iconGap = 4;
+        const markerRowWidth =
+          markers.length * iconSize + Math.max(markers.length - 1, 0) * iconGap;
+        markers.forEach(({ draw, on }, i) => {
+          const iconX = xPosition - markerRowWidth / 2 + i * (iconSize + iconGap);
+          draw(iconX, providerY + 4, iconSize)
+            .style("cursor", "help")
+            .on("mouseenter", (e: React.MouseEvent) => on.onMouseEnter(e))
+            .on("mouseleave", on.onMouseLeave)
+            .on("click", (e: React.MouseEvent) => on.onClick(e))
+            .on("keydown", (e: React.KeyboardEvent) => on.onKeyDown(e));
+        });
       });
     }
 
@@ -497,7 +545,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
     });
 
     svg.on("mouseleave", () => setTip((t) => (t?.pinned ? t : null)));
-  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, dismissDedicated, isMobile, themeColors]);
+  }, [data, dimensions.height, svgWidth, scrollable, getModelColor, getProviderForModel, normalizeModelName, dedicatedModels, dedicatedIcon, crossRegionModels, regionIcon, dismissDedicated, isMobile, themeColors]);
 
   // The measured container must always render — an early return here would
   // leave the sizing effect's ResizeObserver attached to nothing, freezing
@@ -601,6 +649,7 @@ const BoxPlot: React.FC<BoxPlotProps> = ({
             {normalizeModelName(tip.point.model)}
           </p>
           {dedicatedModels?.has(tip.point.model) && <DedicatedBadge />}
+          <RegionBadge region={crossRegionModels?.get(tip.point.model)} />
           {[
             ["Median", `${tip.point.quartiles.median.toFixed(0)}ms`],
             [

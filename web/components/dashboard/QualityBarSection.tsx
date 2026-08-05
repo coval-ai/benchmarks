@@ -4,13 +4,14 @@
 "use client";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Server } from "lucide-react";
+import { Globe, Server } from "lucide-react";
 import { Cell, type LabelProps } from "recharts";
 import CustomBarTooltip from "@/components/charts/tooltips/BarTooltip";
 import QualityMetricBars from "@/components/charts/QualityMetricBars";
 import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
 import Card from "@/components/shared/Card";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
+import { REGION_CONTENT } from "@/components/shared/InferenceRegionInfo";
 import SectionHeader from "@/components/shared/SectionHeader";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { datasetLabel } from "@/lib/config/datasets";
@@ -87,6 +88,7 @@ const QualityBarSection: React.FC = () => {
     instructionBarDataWithColors,
     getProviderForModel,
     dedicatedModels,
+    crossRegionModels,
     isMobile,
     clickedWERBars,
     handleWERBarClick,
@@ -104,9 +106,11 @@ const QualityBarSection: React.FC = () => {
   const chartWrapRef = useRef<HTMLDivElement>(null);
   const {
     iconHandlers: dedicatedIconHandlers,
+    handlersFor,
     overlay: dedicatedOverlay,
     open: dedicatedTipOpen,
   } = useDedicatedInfoTip(chartWrapRef);
+  const regionIconHandlers = useMemo(() => handlersFor(REGION_CONTENT), [handlersFor]);
 
   const handleWERBarClickTracked = (
     data: Parameters<typeof handleWERBarClick>[0]
@@ -186,37 +190,69 @@ const QualityBarSection: React.FC = () => {
           >
             {`${Number(value).toFixed(1)}%`}
           </text>
-          {entry && dedicatedModels.has(entry.model) && (
-            // The dedicated marker rides the top of the bar, under the value;
-            // hover or tap opens the explainer.
-            <g
-              {...dedicatedIconHandlers}
-              role="button"
-              tabIndex={0}
-              aria-label="About dedicated inference"
-              style={{ cursor: "help" }}
-            >
-              <Server
-                x={cx - 6}
-                y={Number(y) + 5}
-                size={12}
-                color={themeColors.label}
-                strokeWidth={2.4}
-                aria-hidden
-              />
-              <rect
-                x={cx - 12}
-                y={Number(y) - 1}
-                width={24}
-                height={24}
-                fill="transparent"
-              />
-            </g>
-          )}
+          {/* Caveat markers ride the top of the bar, under the value; hover or
+              tap opens the explainer. Two markers sit side by side. */}
+          {entry &&
+            [
+              dedicatedModels.has(entry.model)
+                ? {
+                    key: "dedicated",
+                    Icon: Server,
+                    label: "About dedicated inference",
+                    on: dedicatedIconHandlers,
+                  }
+                : null,
+              crossRegionModels.has(entry.model)
+                ? {
+                    key: "region",
+                    Icon: Globe,
+                    label: "About inference region",
+                    on: regionIconHandlers,
+                  }
+                : null,
+            ]
+              .filter((m): m is NonNullable<typeof m> => m !== null)
+              .map(({ key, Icon, label, on }, i, all) => {
+                const iconX = cx - (all.length * 12 + (all.length - 1) * 2) / 2 + i * 14;
+                return (
+                  <g
+                    key={key}
+                    {...on}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={label}
+                    style={{ cursor: "help" }}
+                  >
+                    <Icon
+                      x={iconX}
+                      y={Number(y) + 5}
+                      size={12}
+                      color={themeColors.label}
+                      strokeWidth={2.4}
+                      aria-hidden
+                    />
+                    <rect
+                      x={iconX - 6}
+                      y={Number(y) - 1}
+                      width={24}
+                      height={24}
+                      fill="transparent"
+                    />
+                  </g>
+                );
+              })}
         </g>
       );
     },
-    [displayBars, clickedWERBars, themeColors.label, dedicatedModels, dedicatedIconHandlers]
+    [
+      displayBars,
+      clickedWERBars,
+      themeColors.label,
+      dedicatedModels,
+      dedicatedIconHandlers,
+      crossRegionModels,
+      regionIconHandlers,
+    ]
   );
 
   // Instruction labels are plain: value only, hidden on very thin bars.
@@ -361,6 +397,7 @@ const QualityBarSection: React.FC = () => {
                 dataKey="instructionScore"
                 valueLabel="Instruction adherence"
                 formatValue={(value) => `${value.toFixed(0)}%`}
+                crossRegionModels={crossRegionModels}
               />
             }
             isMobile={isMobile}
@@ -386,6 +423,7 @@ const QualityBarSection: React.FC = () => {
               <CustomBarTooltip
                 getProviderForModel={getProviderForModel}
                 dedicatedModels={dedicatedModels}
+                crossRegionModels={crossRegionModels}
               />
             }
             isMobile={isMobile}
