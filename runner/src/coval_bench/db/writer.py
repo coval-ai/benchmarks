@@ -27,7 +27,7 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.models import Result, Run, RunStatus
-from coval_bench.registries import Metric
+from coval_bench.registries import SERIES_EXCLUDED_METRICS, Metric
 
 STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
 
@@ -171,7 +171,13 @@ class RunWriter:
                 # interleave such that the staler recompute commits and the
                 # fresher one aborts on the primary key, dropping a run from
                 # the slot. Released on commit/abort.
-                params = {"bucket": bucket_at, "period": period_seconds}
+                params = {
+                    "bucket": bucket_at,
+                    "period": period_seconds,
+                    # Window-aggregate-only metrics stay out of the series
+                    # rollup; see SERIES_EXCLUDED_METRICS for the why.
+                    "series_excluded": [str(m) for m in SERIES_EXCLUDED_METRICS],
+                }
                 await cur.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended('results_by_bucket',"
                     " extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
@@ -211,6 +217,7 @@ class RunWriter:
                     WHERE r.status = 'success'
                       AND rn.status IN ('succeeded', 'partial')
                       AND r.metric_value IS NOT NULL
+                      AND r.metric_type != ALL(%(series_excluded)s)
                       AND (
                           rn.scheduled_at = %(bucket)s
                           OR (

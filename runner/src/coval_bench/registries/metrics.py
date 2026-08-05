@@ -134,6 +134,17 @@ if METRIC_SPECS.keys() != set(Metric):
     raise RuntimeError(f"METRIC_SPECS is missing specs for: {_missing}")
 
 
+# Metrics kept out of the per-bucket series rollup (results_by_bucket) and
+# therefore out of every aggregates response's `series` array. The TTFA
+# components are consumed as window aggregates only (the Latency Variation
+# breakdown); TTS runs ~48x/day, so carrying them per bucket would double an
+# already multi-MB 30d series payload for rows nothing reads. Remove a metric
+# here if a per-run surface ever ships for it.
+SERIES_EXCLUDED_METRICS: frozenset[Metric] = frozenset(
+    {Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE}
+)
+
+
 # (provider, model) pairs whose metric is not comparable with the cohort:
 # TTFT gated by buffering rather than engine speed, TTFS acked without
 # finalizing. The orchestrator skips writing these rows; the API hides
