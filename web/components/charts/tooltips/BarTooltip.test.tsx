@@ -60,4 +60,24 @@ describe("TtfaBreakdownTooltip", () => {
     expect(html).toContain("Network roundtrip: 160 ms (80%)");
     expect(html).toContain("Leading silence: 40 ms (20%)");
   });
+
+  it("omits shares when the total is zero instead of rendering NaN%", () => {
+    const bar: TtfaBreakdownBar = {
+      model: "elevenlabs:eleven_flash_v2_5",
+      provider: "elevenlabs",
+      roundtrip: 0,
+      silence: 0,
+      ttfa: 0,
+    };
+    const html = renderToStaticMarkup(
+      <TtfaBreakdownTooltip
+        active
+        payload={[{ dataKey: "roundtrip", value: 0, payload: bar }] as never}
+        label={bar.model}
+      />
+    );
+    expect(html).toContain("Network roundtrip: 0 ms");
+    expect(html).not.toContain("NaN");
+    expect(html).not.toContain("%");
+  });
 });

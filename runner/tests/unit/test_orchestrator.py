@@ -1977,6 +1977,7 @@ async def test_tts_provider_error_wins_over_contamination(
         audio_path=None,
         error="synth stream closed early",
         http_version="HTTP/1.1",  # would otherwise trigger the contamination message
+        leading_silence_ms=45.0,  # split present — a failed row must not emit components
     )
 
     provider_inst = MagicMock()
@@ -2012,6 +2013,9 @@ async def test_tts_provider_error_wins_over_contamination(
     assert "HTTP/1.1" not in (ttfa.error or "")  # contamination message must not win
     assert ttfa.http_version == "HTTP/1.1"  # diagnostic still recorded
     assert "WER" not in by_metric  # errored synth → no WER scoring
+    # A failed TTFA writes no component rows even though its split was known.
+    assert "TTFARoundtrip" not in by_metric
+    assert "TTFALeadingSilence" not in by_metric
     assert summary.success_count == 0
 
 

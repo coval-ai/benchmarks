@@ -775,11 +775,17 @@ async def _run_tts_item(
                 )
             )
 
-            # TTFA component rows, only when the split is known so the two
-            # always sum back to the TTFA row. A nulled TTFA (transport gate)
-            # or an arrival-only TTFA (offset detection failed) writes neither.
+            # TTFA component rows, only for a successful TTFA with a known
+            # split, so the two always sum back to the TTFA row. A failed row
+            # (provider error can arrive after audio, leaving ttfa_ms set), a
+            # nulled TTFA (transport gate) or an arrival-only TTFA (offset
+            # detection failed) writes neither.
             leading_silence_ms = tts_result.leading_silence_ms if tts_result else None
-            if ttfa_value is not None and leading_silence_ms is not None:
+            if (
+                ttfa_status is ResultStatus.SUCCESS
+                and ttfa_value is not None
+                and leading_silence_ms is not None
+            ):
                 for component, value in (
                     (Metric.TTFA_ROUNDTRIP, ttfa_value - leading_silence_ms),
                     (Metric.TTFA_LEADING_SILENCE, leading_silence_ms),

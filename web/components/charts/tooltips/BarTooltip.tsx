@@ -125,7 +125,9 @@ export const TtfaBreakdownTooltip: React.FC<
             color: "var(--color-text-on-tooltip)",
             opacity: 0.8,
           }}
-        >{`${text}: ${Math.round(value)} ms (${Math.round((value / row.ttfa) * 100)}%)`}</p>
+        >{`${text}: ${Math.round(value)} ms${
+          row.ttfa > 0 ? ` (${Math.round((value / row.ttfa) * 100)}%)` : ""
+        }`}</p>
       ))}
     </div>
   );
