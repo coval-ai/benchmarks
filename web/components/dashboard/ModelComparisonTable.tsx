@@ -8,12 +8,15 @@ import { Globe, Server } from "lucide-react";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
 import { REGION_CONTENT } from "@/components/shared/InferenceRegionInfo";
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
-import { normalizeModelName } from "@/lib/utils/formatters";
+import { formatUsd, normalizeModelName } from "@/lib/utils/formatters";
+import { priceUnitShortLabel } from "@/lib/utils/pricing";
+import { priceTooltipContent } from "@/components/shared/PriceInfo";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
 import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
+import type { PricingEntry } from "@/lib/api/client";
 
 interface ModelComparisonTableProps {
   data: ModelHeatmapData[];
@@ -22,13 +25,15 @@ interface ModelComparisonTableProps {
   dedicatedModels?: Set<string>;
   /** Model key -> inference region, for models served outside our worker's region. */
   crossRegionModels?: Map<string, string>;
+  /** Model key -> normalized list price; column hidden when absent/empty. */
+  pricingByModel?: Map<string, PricingEntry>;
   percentileIdx: number;
   onPercentileChange: (idx: number) => void;
   werLabel?: string;
   werLoading?: boolean;
 }
 
-type ColumnKey = "latency" | "avgWER" | "sampleCount";
+type ColumnKey = "latency" | "avgWER" | "price" | "sampleCount";
 
 export const PERCENTILES: { key: LatencyPercentile; hint?: string }[] = [
   { key: "p0", hint: "fastest run" },
@@ -51,8 +56,66 @@ const COLUMNS: {
 }[] = [
   { key: "latency", label: "Latency", bestDirection: "asc" },
   { key: "avgWER", label: "Word error rate", bestDirection: "asc" },
+  { key: "price", label: "Price", bestDirection: "asc" },
   { key: "sampleCount", label: "Samples", bestDirection: "desc" }
 ];
+
+// Normalized list price with full provenance on hover/tap; unpriced models
+// degrade to a dash that says why.
+const PriceValue: React.FC<{
+  model: string;
+  entry: PricingEntry | undefined;
+  tab: "tts" | "stt" | "s2s";
+  handlersFor: (content: React.ReactNode) => React.DOMAttributes<HTMLElement>;
+}> = ({ model, entry, tab, handlersFor }) => {
+  const handlers = handlersFor(
+    entry ? (
+      priceTooltipContent(entry, tab)
+    ) : (
+      <span>Pricing not published by the provider.</span>
+    )
+  );
+  const tracked: React.DOMAttributes<HTMLElement> = {
+    ...handlers,
+    onClick: (e) => {
+      capturePostHogEvent(POSTHOG_EVENTS.pricingTooltipOpened, {
+        surface: `${tab}_dashboard`,
+        mode: tab,
+        model,
+        priced: entry != null
+      });
+      handlers.onClick?.(e as React.MouseEvent<HTMLElement>);
+    }
+  };
+  return (
+    <button
+      type="button"
+      aria-label={
+        entry?.normalized_usd != null
+          ? `${normalizeModelName(model)}: ${formatUsd(entry.normalized_usd)} ${priceUnitShortLabel(tab)}, details`
+          : `${normalizeModelName(model)}: pricing details`
+      }
+      className="cursor-help rounded-md p-1 -m-1 underline decoration-border-primary decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+      {...tracked}
+    >
+      {entry?.normalized_usd != null ? (
+        <span className="font-mono text-base text-text-primary">
+          {formatUsd(entry.normalized_usd)}
+          {entry.basis === "list_price_measured_conversion" && (
+            <span
+              className="text-xs text-text-tertiary"
+              title="Converted with rates measured from our runs"
+            >
+              *
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="text-text-tertiary">—</span>
+      )}
+    </button>
+  );
+};
 
 // WER value with the error-type split on hover/tap when the API serves one.
 const WerValue: React.FC<{
@@ -105,6 +168,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   getProviderForModel,
   dedicatedModels,
   crossRegionModels,
+  pricingByModel,
   percentileIdx,
   onPercentileChange,
   werLabel,
@@ -131,9 +195,16 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
 
   // Latency-only benchmarks (S2S) ship rows without WER; hide that column.
   const hasWER = useMemo(() => data.some((d) => d.avgWER !== undefined), [data]);
+  // No pricing data at all (endpoint down or nothing seeded) hides the column
+  // rather than rendering a dash for every row.
+  const hasPricing = (pricingByModel?.size ?? 0) > 0;
   const columns = useMemo(
-    () => (hasWER ? COLUMNS : COLUMNS.filter((c) => c.key !== "avgWER")),
-    [hasWER]
+    () =>
+      COLUMNS.filter(
+        (c) =>
+          (hasWER || c.key !== "avgWER") && (hasPricing || c.key !== "price")
+      ),
+    [hasWER, hasPricing]
   );
 
   // One pass per (data, percentile, sort) change: pull the selected latency
@@ -148,15 +219,21 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
       .filter((v): v is number => v !== undefined);
     const werMin = Math.min(...werValues);
 
+    const priceValues = data
+      .map((d) => pricingByModel?.get(d.model)?.normalized_usd)
+      .filter((v): v is number => v != null);
+    const priceMin = Math.min(...priceValues);
+
     const rows = data
       .map((d) => {
         const latency = d.latency?.[percentile.key];
-        return { ...d, latency };
+        const price = pricingByModel?.get(d.model)?.normalized_usd ?? undefined;
+        return { ...d, latency, price };
       })
       .sort((a, b) => {
         const [av, bv] = [a[sort.key], b[sort.key]];
-        if (av === undefined || bv === undefined)
-          return (av === undefined ? 1 : 0) - (bv === undefined ? 1 : 0);
+        if (av == null || bv == null)
+          return (av == null ? 1 : 0) - (bv == null ? 1 : 0);
         const delta = av - bv;
         return sort.direction === "asc" ? delta : -delta;
       });
@@ -166,10 +243,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
       best: {
         latency: latencyMin,
         avgWER: werMin,
+        price: priceMin,
         sampleCount: Math.max(...data.map((d) => d.sampleCount))
       }
     };
-  }, [data, percentile.key, sort]);
+  }, [data, percentile.key, sort, pricingByModel]);
 
   type Row = (typeof rows)[number];
 
@@ -181,12 +259,17 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
             ? "desc"
             : "asc"
           : column.bestDirection;
-      capturePostHogEvent(POSTHOG_EVENTS.dashboardHeatmapSorted, {
-        surface: `${activeTab}_dashboard`,
-        mode: activeTab,
-        metric: column.key,
-        direction
-      });
+      capturePostHogEvent(
+        column.key === "price"
+          ? POSTHOG_EVENTS.pricingColumnSorted
+          : POSTHOG_EVENTS.dashboardHeatmapSorted,
+        {
+          surface: `${activeTab}_dashboard`,
+          mode: activeTab,
+          metric: column.key,
+          direction
+        }
+      );
       setSort({ key: column.key, direction });
     },
     [activeTab, sort]
@@ -269,7 +352,9 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                   >
                     {column.key === "latency"
                       ? `Latency (${percentile.key})`
-                      : column.label}
+                      : column.key === "price"
+                        ? `Price (${priceUnitShortLabel(activeTab)})`
+                        : column.label}
                     {sort.key === column.key && (
                       <span className="text-xs">
                         {sort.direction === "asc" ? "↑" : "↓"}
@@ -348,6 +433,17 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         <span className="text-text-tertiary">—</span>
                       )}
                     </div>
+                  )}
+                {hasPricing &&
+                  cell(
+                    row,
+                    "price",
+                    <PriceValue
+                      model={row.model}
+                      entry={pricingByModel?.get(row.model)}
+                      tab={activeTab}
+                      handlersFor={infoTipHandlersFor}
+                    />
                   )}
                 {cell(
                   row,

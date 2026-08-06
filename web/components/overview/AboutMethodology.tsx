@@ -71,6 +71,21 @@ const SECTIONS: MethodologySection[] = [
       "The runner, the dataset manifests, and the methodology docs are all open source, and every audio file is checked against its SHA-256 hash on fetch. Every number on this site can be reproduced straight from the repository.",
     ],
   },
+  {
+    title: "Pricing",
+    summary:
+      "Published list prices, normalized to one unit per board so models are comparable at a glance — with the source linked on every number.",
+    terms: [
+      { code: "$/1k min", tag: "STT", name: "Normalized unit", def: "USD per 1,000 minutes of audio (also used for speech-to-speech)" },
+      { code: "$/1M chars", tag: "TTS", name: "Normalized unit", def: "USD per 1 million input characters" },
+      { code: "as of", name: "Provenance", def: "every price carries the date it was verified and a link to the provider's public pricing page" },
+      { code: "*", name: "Measured conversion", def: "token- and per-second-billed rates converted with usage rates measured from our own runs over the trailing 7 days" },
+    ],
+    details: [
+      "Every price on this site is the provider's published list rate, stored in its native billing unit — per minute, per hour, per character, or per token — and normalized for display to USD per 1,000 minutes of audio (speech-to-text, speech-to-speech) or USD per 1M characters (text-to-speech). Duration- and character-billed rates convert arithmetically. Token-billed models convert through how many tokens a minute of audio actually costs, measured continuously from our own benchmark runs rather than sampled once; prices derived this way carry a marker, and a model without enough recent samples shows its native rates with no normalized number instead of an estimate.",
+      "Providers that only sell subscriptions or credits are normalized under a stated plan assumption: the lowest-upfront plan that realistically supports 1,000 minutes per month (speech-to-text) or 1M characters per month (text-to-speech). The assumption is spelled out in the price tooltip. Models with no published price show a dash — we never guess. Price changes are detected automatically from providers' pricing pages, applied with a verbatim quote and page snapshot as evidence, and reviewed by a human when large or uncertain; the price history chart shows every recorded change.",
+    ],
+  },
 ];
 
 const MethodologyRow: React.FC<{ section: MethodologySection }> = ({ section }) => {

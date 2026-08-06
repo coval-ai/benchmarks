@@ -26,6 +26,8 @@ const ModelComparisonSection: React.FC = () => {
     werDatasetLoading,
     dedicatedModels,
     crossRegionModels,
+    pricingByModel,
+    page,
   } = useDashboard();
   const trackChartHover = useChartHoverTracking("heatmap");
   const [percentileIdx, setPercentileIdx] = useState(DEFAULT_PERCENTILE_IDX);
@@ -43,19 +45,32 @@ const ModelComparisonSection: React.FC = () => {
           }}
           note={metricAboutNote(activeMetric)}
           exportRows={() =>
-            data.map(({ model, latency, avgWER, werStdDev, sampleCount }) => ({
-              model: parseModelKey(model).model,
-              provider: getProviderForModel(model),
-              metric: activeMetric,
-              ...(latency
-                ? { [`latency_${percentile}_ms`]: latency[percentile] }
-                : {}),
-              ...(avgWER !== undefined
-                ? { avg_wer_percent: avgWER, wer_std_dev_percent: werStdDev }
-                : {}),
-              ...(werServedDataset ? { wer_dataset: werServedDataset } : {}),
-              runs: sampleCount,
-            }))
+            data.map(({ model, latency, avgWER, werStdDev, sampleCount }) => {
+              const pricing = pricingByModel.get(model);
+              const priceKey =
+                page === "tts" ? "price_usd_per_1m_chars" : "price_usd_per_1k_min";
+              return {
+                model: parseModelKey(model).model,
+                provider: getProviderForModel(model),
+                metric: activeMetric,
+                ...(latency
+                  ? { [`latency_${percentile}_ms`]: latency[percentile] }
+                  : {}),
+                ...(avgWER !== undefined
+                  ? { avg_wer_percent: avgWER, wer_std_dev_percent: werStdDev }
+                  : {}),
+                ...(werServedDataset ? { wer_dataset: werServedDataset } : {}),
+                ...(pricing?.normalized_usd != null
+                  ? {
+                      [priceKey]: pricing.normalized_usd,
+                      price_basis: pricing.basis,
+                      price_as_of: pricing.as_of,
+                      price_source: pricing.source_url,
+                    }
+                  : {}),
+                runs: sampleCount,
+              };
+            })
           }
           exportImage={false}
         />
@@ -67,6 +82,7 @@ const ModelComparisonSection: React.FC = () => {
           getProviderForModel={getProviderForModel}
           dedicatedModels={dedicatedModels}
           crossRegionModels={crossRegionModels}
+          pricingByModel={pricingByModel}
           percentileIdx={percentileIdx}
           onPercentileChange={setPercentileIdx}
           werLabel={werServedDataset ? datasetLabel(werServedDataset) : undefined}

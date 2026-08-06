@@ -34,6 +34,11 @@ const ModelComparisonSection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
+const PriceHistorySection = dynamic(
+  () => import("@/components/dashboard/PriceHistorySection"),
+  { ssr: false, loading: () => <ChartSkeleton /> }
+);
+
 export function S2SDashboard() {
   return (
     <DashboardProvider page="s2s">
@@ -44,6 +49,7 @@ export function S2SDashboard() {
           <BoxPlotSection />
           <QualityBarSection />
           <ModelComparisonSection />
+          <PriceHistorySection />
         </DashboardLayout>
       </SidebarMenuProvider>
     </DashboardProvider>

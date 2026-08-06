@@ -8,6 +8,7 @@ import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
 import {
   getAggregates,
   getAggregatesByDataset,
+  getPricing,
   getProviders,
   getRuns,
   getS2SSample,
@@ -52,6 +53,19 @@ export function useProvidersQuery() {
     queryKey: ["providers"],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
       getProviders({ signal } satisfies FetchOptions),
+  });
+}
+
+// Prices change on the weekly collector cadence at most; an hour of staleness
+// is invisible while sparing every navigation a refetch.
+const PRICING_STALE_MS = 60 * 60 * 1000;
+
+export function usePricingQuery(benchmark: "STT" | "TTS" | "S2S") {
+  return useQuery({
+    queryKey: ["pricing", benchmark],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      getPricing(benchmark, { signal } satisfies FetchOptions),
+    staleTime: PRICING_STALE_MS,
   });
 }
 

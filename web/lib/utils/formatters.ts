@@ -12,6 +12,24 @@
  * `Intl.DateTimeFormat` defaults to the runtime timezone when none is given, so
  * axes reflect the viewer's local time unless a `timeZone` is supplied.
  */
+/**
+ * Format a USD amount with sensible significant figures and no trailing noise:
+ * $0.42, $12.50, $1,240. Sub-$10 keeps cents-level precision (3 sig figs for
+ * tiny normalized prices like $0.0048), $10-$1000 keeps cents, above that
+ * whole dollars with thousands separators.
+ */
+export function formatUsd(value: number): string {
+  const abs = Math.abs(value);
+  if (abs === 0) return "$0";
+  const opts: Intl.NumberFormatOptions =
+    abs >= 1000
+      ? { maximumFractionDigits: 0 }
+      : abs >= 0.1
+        ? { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+        : { maximumSignificantDigits: 3 };
+  return `$${value.toLocaleString("en-US", opts)}`;
+}
+
 export function formatTime(timestamp: number, timeZone?: string): string {
   return new Date(timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",

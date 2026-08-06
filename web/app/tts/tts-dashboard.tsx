@@ -38,6 +38,11 @@ const ModelComparisonSection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
+const PriceHistorySection = dynamic(
+  () => import("@/components/dashboard/PriceHistorySection"),
+  { ssr: false, loading: () => <ChartSkeleton /> }
+);
+
 export function TTSDashboard() {
   return (
     <DashboardProvider page="tts">
@@ -49,6 +54,7 @@ export function TTSDashboard() {
           <QualityBarSection />
           <LatencyAccuracySection />
           <ModelComparisonSection />
+          <PriceHistorySection />
         </DashboardLayout>
       </SidebarMenuProvider>
     </DashboardProvider>

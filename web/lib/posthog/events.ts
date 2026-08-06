@@ -25,7 +25,11 @@ export const POSTHOG_EVENTS = {
   s2sSamplePlaybackEnded: "s2s_sample_playback_ended",
   s2sSampleTickChanged: "s2s_sample_tick_changed",
   s2sSampleSeeked: "s2s_sample_seeked",
-  headerCovalLinkClicked: "header_coval_link_clicked"
+  headerCovalLinkClicked: "header_coval_link_clicked",
+  pricingColumnSorted: "pricing_column_sorted",
+  pricingTooltipOpened: "pricing_tooltip_opened",
+  priceQualityToggleChanged: "price_quality_toggle_changed",
+  priceHistoryViewed: "price_history_viewed"
 } as const;
 
 export type PostHogSurface =
@@ -43,7 +47,8 @@ export type DashboardChartId =
   | "wer_radar"
   | "box_plot"
   | "heatmap"
-  | "performance_delta";
+  | "performance_delta"
+  | "price_history";
 export type PlaygroundRunTrigger = "button" | "keyboard";
 export type PlaygroundModeSwitchTrigger = "tab" | "keyboard";
 // The quality bar plots WER on STT/TTS and instruction adherence on S2S; the

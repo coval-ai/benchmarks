@@ -26,7 +26,7 @@ Run against a LOCAL/dev database only::
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import NamedTuple
 from urllib.parse import urlsplit
@@ -648,6 +648,9 @@ async def apply_ratesheet(store: PricingStore) -> tuple[int, int, list[str]]:
     inserted = 0
     unchanged = 0
     gaps: list[str] = []
+    # One shared timestamp per invocation: a token-billed model's input+output
+    # rows land as a single effective period, not two breakpoints ms apart.
+    effective_at = datetime.now(tz=UTC)
     active = [
         m for m in MODEL_REGISTRY if m.status in (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
     ]
@@ -673,6 +676,7 @@ async def apply_ratesheet(store: PricingStore) -> tuple[int, int, list[str]]:
                 evidence=r.evidence,
                 plan_assumption=r.plan_assumption,
                 updated_by="human",
+                effective_at=effective_at,
             )
             if created:
                 inserted += 1

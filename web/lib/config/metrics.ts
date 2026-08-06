@@ -51,9 +51,9 @@ export const metricDescriptions = {
   pareto: {
     short: "Pareto frontier",
     tooltip:
-      "The dashed line traces the best WER you can get at each latency budget. Bright dots earn their spot: nothing beats them on speed and accuracy at once. Every faded dot loses on both counts to some bright one.",
+      "The dashed line traces the best WER you can get at each budget on the x-axis — latency or price, whichever the toggle shows. Bright dots earn their spot: nothing beats them on both axes at once. Every faded dot loses on both counts to some bright one.",
     detailed:
-      "Speed and accuracy pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency budget. A straight stretch of the line is reachable too — split traffic between the models at its two ends. Bright models are the ones nothing beats on both axes at once, even where the line cuts below them. Faded models are beaten outright by a bright one, so picking them only makes sense for reasons this chart can't see, like price or language coverage."
+      "The two axes pull against each other, and the dashed line shows what the trade actually costs: follow it to read the best WER on offer at each latency or price budget. A straight stretch of the line is reachable too — split traffic between the models at its two ends. Bright models are the ones nothing beats on both axes at once, even where the line cuts below them. Faded models are beaten outright by a bright one on this pair of axes — flip the toggle to see whether they win on the other one, since a latency-dominated model can still be the value pick and vice versa. Only factors like language coverage stay off the chart entirely."
   },
   // Shared by the Latency Variation card's description and its headline tooltip.
   iqr: {

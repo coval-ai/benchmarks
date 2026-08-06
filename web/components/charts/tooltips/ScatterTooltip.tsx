@@ -6,7 +6,8 @@ import type { TooltipContentProps } from "recharts";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { DedicatedBadge } from "@/components/shared/DedicatedInferenceInfo";
 import { RegionBadge } from "@/components/shared/InferenceRegionInfo";
-import { normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
+import { formatUsd, normalizeModelName, normalizeSTTProviderName, normalizeTTSProviderName } from "@/lib/utils/formatters";
+import { priceUnitShortLabel } from "@/lib/utils/pricing";
 
 interface ScatterTooltipProps extends Partial<Pick<
   TooltipContentProps<number, string>,
@@ -14,13 +15,15 @@ interface ScatterTooltipProps extends Partial<Pick<
 >> {
   activeTab: "tts" | "stt";
   metric: string;
+  /** What the x axis is plotting; "price" renders normalized USD instead of ms. */
+  xKind?: "latency" | "price";
   /** Dedicated-inference endpoints carry the server marker in their tooltip. */
   dedicatedModels?: Set<string>;
   /** Model key -> inference region, for models served outside our worker's region. */
   crossRegionModels?: Map<string, string>;
 }
 
-const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric, dedicatedModels, crossRegionModels }) => {
+const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, activeTab, metric, xKind = "latency", dedicatedModels, crossRegionModels }) => {
   if (active && payload && payload.length > 0) {
     const item = payload[0];
     const point = item?.payload as ScatterDataPoint | undefined;
@@ -41,7 +44,11 @@ const CustomScatterTooltip: React.FC<ScatterTooltipProps> = ({ active, payload, 
         <p style={{ margin: 0 }}>{`Provider: ${activeTab === "stt" ? normalizeSTTProviderName(point.provider) : normalizeTTSProviderName(point.provider)}`}</p>
         {dedicatedModels?.has(point.model) && <DedicatedBadge />}
         <RegionBadge region={crossRegionModels?.get(point.model)} />
-        <p style={{ margin: 0 }}>{`Avg ${metric}: ${point.x.toFixed(0)}ms`}</p>
+        <p style={{ margin: 0 }}>
+          {xKind === "price"
+            ? `Price: ${formatUsd(point.x)} ${priceUnitShortLabel(activeTab)}`
+            : `Avg ${metric}: ${point.x.toFixed(0)}ms`}
+        </p>
         <p style={{ margin: 0 }}>{`Avg WER: ${point.y.toFixed(1)}%`}</p>
         <p style={{ margin: 0 }}>{`Samples: ${point.count}`}</p>
       </div>

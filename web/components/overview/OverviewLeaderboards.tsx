@@ -4,15 +4,18 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { useAggregatesQuery, usePricingQuery, useProvidersQuery } from "@/lib/api/queries";
 import { buildTagIndex, dedicatedModelKeys } from "@/lib/utils/facets";
 import {
+  formatUsd,
   normalizeModelName,
   normalizeS2SProviderName,
   normalizeSTTProviderName,
   normalizeTTSProviderName,
   toModelKey,
 } from "@/lib/utils/formatters";
+import { priceUnitShortLabel } from "@/lib/utils/pricing";
+import type { PricingApiResponse } from "@/lib/api/client";
 import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
 import type { ModelStatEntry, ProvidersApiResponse } from "@/lib/api/client";
 import { disabledModelKeys } from "@/lib/utils/modelsFromResults";
@@ -51,6 +54,24 @@ function toRows(
 
 const windowBadge = (window: TimeWindow): string => `Last ${WINDOW_LABELS[window]}`;
 
+// Cheapest normalized list price, ranked ascending. Prices are window-free
+// (list rates, not measurements), so the badge carries the unit instead.
+function toPriceRows(
+  pricing: PricingApiResponse | undefined,
+  normalizeProvider: (p: string) => string
+): LeaderboardRow[] {
+  return (pricing?.entries ?? [])
+    .filter((e) => e.normalized_usd != null)
+    .sort((a, b) => a.normalized_usd! - b.normalized_usd!)
+    .slice(0, TOP_N)
+    .map((e) => ({
+      key: toModelKey(e.provider, e.model),
+      model: normalizeModelName(toModelKey(e.provider, e.model)),
+      provider: normalizeProvider(e.provider),
+      value: formatUsd(e.normalized_usd!),
+    }));
+}
+
 // Dedicated-inference endpoints stay off these shared-latency rankings, and
 // disabled (retired/pending) models still present in the window's stats too.
 const excludedKeys = (
@@ -78,6 +99,9 @@ const OverviewLeaderboards: React.FC = () => {
     dataset: S2S_MULTITURN_DATASET,
   });
   const providersQuery = useProvidersQuery();
+  const ttsPricing = usePricingQuery("TTS");
+  const sttPricing = usePricingQuery("STT");
+  const s2sPricing = usePricingQuery("S2S");
   const windowDataStale =
     ttsQuery.isPlaceholderData ||
     sttQuery.isPlaceholderData ||
@@ -182,6 +206,42 @@ const OverviewLeaderboards: React.FC = () => {
           error={s2sQuery.isError || providersQuery.isError}
         />
       </div>
+      {/* Cheapest by normalized list price. Hidden entirely (never an error
+          card) while pricing has nothing to rank — the latency cards above
+          are the page's core. */}
+      {(toPriceRows(ttsPricing.data, normalizeTTSProviderName).length > 0 ||
+        toPriceRows(sttPricing.data, normalizeSTTProviderName).length > 0 ||
+        toPriceRows(s2sPricing.data, normalizeS2SProviderName).length > 0) && (
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <LeaderboardCard
+            title="Cheapest Text-to-Speech"
+            metricLabel="List price"
+            windowLabel={priceUnitShortLabel("tts")}
+            rows={toPriceRows(ttsPricing.data, normalizeTTSProviderName)}
+            href="/tts"
+            loading={ttsPricing.isLoading}
+            error={ttsPricing.isError}
+          />
+          <LeaderboardCard
+            title="Cheapest Speech-to-Text"
+            metricLabel="List price"
+            windowLabel={priceUnitShortLabel("stt")}
+            rows={toPriceRows(sttPricing.data, normalizeSTTProviderName)}
+            href="/stt"
+            loading={sttPricing.isLoading}
+            error={sttPricing.isError}
+          />
+          <LeaderboardCard
+            title="Cheapest Speech-to-Speech"
+            metricLabel="List price"
+            windowLabel={priceUnitShortLabel("s2s")}
+            rows={toPriceRows(s2sPricing.data, normalizeS2SProviderName)}
+            href="/s2s"
+            loading={s2sPricing.isLoading}
+            error={s2sPricing.isError}
+          />
+        </div>
+      )}
     </div>
   );
 };

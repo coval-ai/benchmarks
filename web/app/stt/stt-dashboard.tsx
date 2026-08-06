@@ -43,6 +43,11 @@ const ModelComparisonSection = dynamic(
   { ssr: false, loading: () => <ChartSkeleton /> }
 );
 
+const PriceHistorySection = dynamic(
+  () => import("@/components/dashboard/PriceHistorySection"),
+  { ssr: false, loading: () => <ChartSkeleton /> }
+);
+
 export function STTDashboard() {
   return (
     <DashboardProvider page="stt">
@@ -55,6 +60,7 @@ export function STTDashboard() {
           <LatencyAccuracySection />
           <WerRadarSection />
           <ModelComparisonSection />
+          <PriceHistorySection />
         </DashboardLayout>
       </SidebarMenuProvider>
     </DashboardProvider>

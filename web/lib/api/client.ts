@@ -61,6 +61,9 @@ export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
 export type SeriesPoint = components["schemas"]["SeriesPoint"];
 export type RunsApiResponse = components["schemas"]["RunsResponse"];
 export type RunOut = components["schemas"]["RunOut"];
+export type PricingApiResponse = components["schemas"]["PricingResponse"];
+export type PricingEntry = components["schemas"]["PricingEntry"];
+export type PriceHistoryPoint = components["schemas"]["PriceHistoryPoint"];
 
 // Query-param types from codegen
 export type AggregatesQueryParams = NonNullable<
@@ -143,6 +146,15 @@ export async function getAggregatesByDataset(
     `/v1/results/aggregates/by-dataset${qs}`,
     { signal: opts?.signal }
   );
+}
+
+export async function getPricing(
+  benchmark: "STT" | "TTS" | "S2S",
+  opts?: FetchOptions
+): Promise<PricingApiResponse> {
+  return request<PricingApiResponse>(`/v1/pricing?benchmark=${benchmark}`, {
+    signal: opts?.signal,
+  });
 }
 
 export async function getRuns(opts?: FetchOptions): Promise<RunsApiResponse> {

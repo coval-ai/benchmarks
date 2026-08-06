@@ -37,7 +37,8 @@ import { getModelColor } from "@/lib/utils/colors";
 import { werBreakdownOf } from "@/lib/utils/werBreakdown";
 import { metricDescriptions } from "@/lib/config/metrics";
 import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
-import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
+import { useAggregatesQuery, usePricingQuery, useProvidersQuery } from "@/lib/api/queries";
+import { buildPricingMap } from "@/lib/utils/pricing";
 import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
 import type { BarDataPoint, ModelStats } from "@/types/benchmark.types";
@@ -96,6 +97,14 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     dataset: page === "s2s" ? S2S_MULTITURN_DATASET : undefined,
   });
   const providersQuery = useProvidersQuery();
+
+  // List prices for the price column / value chart. A pricing outage never
+  // blocks the dashboard — surfaces just degrade to "—".
+  const pricingQuery = usePricingQuery(benchmarkParam);
+  const pricingByModel = useMemo(
+    () => buildPricingMap(pricingQuery.data?.entries),
+    [pricingQuery.data]
+  );
 
   // STT only: pin the WER column to one dataset (null = pooled across all).
   const [werDataset, setWerDataset] = useState<string | null>(null);
@@ -745,6 +754,9 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     toggleLegendModel,
     dedicatedModels,
     crossRegionModels,
+
+    // List prices (model key -> PricingEntry)
+    pricingByModel,
 
     // UI state
     isMobile,

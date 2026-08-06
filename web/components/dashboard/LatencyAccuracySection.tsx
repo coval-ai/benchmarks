@@ -18,7 +18,10 @@ import {
 import { Info } from "lucide-react";
 import type { ScatterDataPoint } from "@/types/benchmark.types";
 import { getModelColor } from "@/lib/utils/colors";
-import { normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
+import { formatUsd, normalizeModelName, parseModelKey } from "@/lib/utils/formatters";
+import { priceUnitShortLabel } from "@/lib/utils/pricing";
+import { capturePostHogEvent } from "@/lib/posthog/client";
+import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { labelScatterDots } from "@/lib/utils/chartExport";
 import CustomScatterTooltip from "@/components/charts/tooltips/ScatterTooltip";
 import Card from "@/components/shared/Card";
@@ -66,6 +69,7 @@ const LatencyAccuracySection: React.FC = () => {
     activeMetric: metric,
     dedicatedModels,
     crossRegionModels,
+    pricingByModel,
   } = useDashboard();
 
   const activeTab = useActiveTab();
@@ -74,10 +78,49 @@ const LatencyAccuracySection: React.FC = () => {
   const metricTab = useMetricTab();
 
   const latencyLabel = metric;
-  const scatterData = useMemo(
+  const baseScatterData = useMemo(
     () => getScatterData(metric),
     [getScatterData, metric]
   );
+
+  // AA-style "value" view: x flips from latency to normalized list price.
+  const [xMode, setXMode] = useState<"latency" | "price">("latency");
+  const priceModeAvailable = useMemo(
+    () =>
+      baseScatterData.some(
+        (p) => pricingByModel.get(p.model)?.normalized_usd != null
+      ),
+    [baseScatterData, pricingByModel]
+  );
+  const priced = xMode === "price" && priceModeAvailable;
+  const changeXMode = (mode: "latency" | "price") => {
+    if (mode === xMode) return;
+    capturePostHogEvent(POSTHOG_EVENTS.priceQualityToggleChanged, {
+      surface: `${activeTab}_dashboard`,
+      mode: activeTab,
+      axis: mode,
+    });
+    setXMode(mode);
+  };
+
+  // Price mode keeps only priced models; unpriced ones have no x to plot.
+  const scatterData = useMemo(
+    () =>
+      priced
+        ? baseScatterData.flatMap((p) => {
+            const price = pricingByModel.get(p.model)?.normalized_usd;
+            return price != null ? [{ ...p, x: price }] : [];
+          })
+        : baseScatterData,
+    [baseScatterData, priced, pricingByModel]
+  );
+  const xLabel = priced
+    ? `Price (${priceUnitShortLabel(activeTab)})`
+    : `Average ${latencyLabel}`;
+  const formatX = (value: number) =>
+    priced
+      ? formatUsd(value)
+      : `${parseFloat((Number(value) / 1000).toFixed(2))}s`;
 
   const isMobile = useMobileDetection();
   const sortedData = useMemo(
@@ -137,11 +180,17 @@ const LatencyAccuracySection: React.FC = () => {
     };
   }, [activePoint]);
 
-  const description = {
-    short: `Average ${latencyLabel} and WER per model`,
-    detailed:
-      "Every voice AI system faces a fundamental trade-off between speed and accuracy. Faster models might sacrifice precision to deliver quick responses, while more accurate models may take additional processing time to ensure correct results. Choose the model that offers the best balance for your specific use case.",
-  };
+  const description = priced
+    ? {
+        short: `List price and WER per model`,
+        detailed:
+          "The value view: what each point of accuracy costs. Prices are normalized published list rates (see the comparison table's price column for provenance); models without a published price drop out of this view. The frontier traces the best WER available at each price point.",
+      }
+    : {
+        short: `Average ${latencyLabel} and WER per model`,
+        detailed:
+          "Every voice AI system faces a fundamental trade-off between speed and accuracy. Faster models might sacrifice precision to deliver quick responses, while more accurate models may take additional processing time to ensure correct results. Choose the model that offers the best balance for your specific use case.",
+      };
 
   // Overall run-weighted average, matching the mean over all raw measurements
   const avgLatency = useMemo(() => {
@@ -157,6 +206,11 @@ const LatencyAccuracySection: React.FC = () => {
     return sum / totalRuns;
   }, [scatterData]);
 
+  const cheapest = useMemo(
+    () => scatterData.reduce((min, p) => Math.min(min, p.x), Infinity),
+    [scatterData]
+  );
+
   // Y domain rounded up to the next 2% step, ticks every 2%
   const { yMax, yTicks } = useMemo(() => {
     const maxWER = scatterData.reduce(
@@ -169,21 +223,34 @@ const LatencyAccuracySection: React.FC = () => {
     return { yMax: max, yTicks: ticks };
   }, [scatterData]);
 
-  // X ticks at a "nice" step computed from the data, domain rounded up to the last tick
-  const { xMax, xTicks } = useMemo(() => {
-    const maxLatency = scatterData.reduce(
+  // X ticks at a "nice" step computed from the data, domain rounded up to the
+  // last tick. A wide price spread (>50x) switches to a log scale with
+  // powers-of-ten ticks, so a $1 model doesn't flatten against a $100 one.
+  const { xMin, xMax, xTicks, logScale } = useMemo(() => {
+    const maxX = scatterData.reduce(
       (acc: number, item: ScatterDataPoint) => Math.max(acc, item.x),
       0
     );
-    const raw = (maxLatency * 1.05) / 5;
+    if (priced) {
+      const positive = scatterData.map((p) => p.x).filter((v) => v > 0);
+      const minX = positive.length ? Math.min(...positive) : 0;
+      if (minX > 0 && maxX / minX > 50) {
+        const lo = Math.pow(10, Math.floor(Math.log10(minX)));
+        const hi = Math.pow(10, Math.ceil(Math.log10(maxX)));
+        const ticks = [];
+        for (let t = lo; t <= hi; t *= 10) ticks.push(t);
+        return { xMin: lo, xMax: hi, xTicks: ticks, logScale: true };
+      }
+    }
+    const raw = (maxX * 1.05) / 5;
     const pow = Math.pow(10, Math.floor(Math.log10(raw || 1)));
     const step =
       [1, 2, 2.5, 5, 10].map((m) => m * pow).find((s) => s >= raw) ?? pow;
-    const max = Math.ceil((maxLatency * 1.05) / step) * step;
+    const max = Math.ceil((maxX * 1.05) / step) * step;
     const ticks = [];
     for (let t = 0; t <= max; t += step) ticks.push(t);
-    return { xMax: max, xTicks: ticks };
-  }, [scatterData]);
+    return { xMin: 0, xMax: max, xTicks: ticks, logScale: false };
+  }, [scatterData, priced]);
 
   // The non-dominated set is rarely convex, so a curve through every one of
   // its points would dip and flatten between them. The drawn curve is its
@@ -232,11 +299,11 @@ const LatencyAccuracySection: React.FC = () => {
     <div className="mb-4">
       <Card padding="p-5 lg:p-8">
         <SectionHeader
-          label="Latency vs Accuracy"
+          label={priced ? "Price vs Accuracy" : "Latency vs Accuracy"}
           description={description}
           note={metricAboutNote(metric)}
-          exportNote={metricTab}
-          exportXLabel={`Average ${latencyLabel}`}
+          exportNote={priced ? "price" : metricTab}
+          exportXLabel={xLabel}
           exportAnnotate={(clone) => {
             // A tapped point leaves crosshairs, an enlarged dot and dimmed
             // neighbors in the SVG; the export is selection-neutral, so strip
@@ -287,21 +354,52 @@ const LatencyAccuracySection: React.FC = () => {
               model: parseModelKey(model).model,
               provider,
               benchmark,
-              [`avg_${metric}_ms`]: x,
+              [priced
+                ? activeTab === "tts"
+                  ? "price_usd_per_1m_chars"
+                  : "price_usd_per_1k_min"
+                : `avg_${metric}_ms`]: x,
               avg_wer_percent: y,
               runs: count,
             }))
           }
-          stat={{
-            label: (
-              <MetricInfo metric={metric} align="right">{`Avg ${latencyLabel}`}</MetricInfo>
-            ),
-            value: `${avgLatency.toFixed(0)} ms`,
-          }}
+          stat={
+            priced
+              ? {
+                  label: "Cheapest shown",
+                  value: Number.isFinite(cheapest) ? formatUsd(cheapest) : "—",
+                }
+              : {
+                  label: (
+                    <MetricInfo metric={metric} align="right">{`Avg ${latencyLabel}`}</MetricInfo>
+                  ),
+                  value: `${avgLatency.toFixed(0)} ms`,
+                }
+          }
         />
 
-        <div className="flex flex-wrap items-center">
+        <div className="flex flex-wrap items-center gap-x-3">
           <MetricToggle />
+          {priceModeAvailable && (
+            <div className="mb-4 inline-flex gap-0.5 rounded-lg bg-surface-toggle-inactive p-0.5">
+              {(["latency", "price"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  aria-pressed={xMode === m}
+                  onClick={() => changeXMode(m)}
+                  className={
+                    "rounded-md px-4 py-3 text-sm sm:px-3 sm:py-1 sm:text-xs font-medium transition-colors " +
+                    (xMode === m
+                      ? "bg-surface-primary text-text-primary shadow-sm"
+                      : "text-text-secondary hover:text-text-primary")
+                  }
+                >
+                  {m === "latency" ? "Latency vs WER" : "Price vs WER"}
+                </button>
+              ))}
+            </div>
+          )}
           <ul data-chart-legend className="mb-4 ml-auto flex items-center gap-4">
             <li
               className="flex items-center gap-1.5 whitespace-nowrap text-xs"
@@ -325,7 +423,7 @@ const LatencyAccuracySection: React.FC = () => {
           data-export-frame
           className="relative h-64 select-none"
           role="listbox"
-          aria-label={`Models by ${latencyLabel} and WER; arrow keys move between points`}
+          aria-label={`Models by ${priced ? "price" : latencyLabel} and WER; arrow keys move between points`}
           tabIndex={0}
           aria-activedescendant={
             activeIdx >= 0 ? `latency-scatter-point-${activeIdx}` : undefined
@@ -367,6 +465,7 @@ const LatencyAccuracySection: React.FC = () => {
                 }]}
                 activeTab={activeTab}
                 metric={metric}
+                xKind={priced ? "price" : "latency"}
                 dedicatedModels={dedicatedModels}
                 crossRegionModels={crossRegionModels}
               />
@@ -387,13 +486,15 @@ const LatencyAccuracySection: React.FC = () => {
               <XAxis
                 dataKey="x"
                 type="number"
-                name={latencyLabel}
-                domain={[0, xMax]}
+                name={priced ? "Price" : latencyLabel}
+                scale={logScale ? "log" : "linear"}
+                domain={[xMin, xMax]}
                 ticks={xTicks}
+                allowDataOverflow={logScale}
                 axisLine={false}
                 tickLine={false}
                 tick={{ fill: themeColors.axisText, fontSize: 12 }}
-                tickFormatter={(value) => `${parseFloat((Number(value) / 1000).toFixed(2))}s`}
+                tickFormatter={(value) => formatX(Number(value))}
               />
               <YAxis
                 dataKey="y"
@@ -413,6 +514,7 @@ const LatencyAccuracySection: React.FC = () => {
                     <CustomScatterTooltip
                       activeTab={activeTab}
                       metric={metric}
+                      xKind={priced ? "price" : "latency"}
                       dedicatedModels={dedicatedModels}
                       crossRegionModels={crossRegionModels}
                     />
@@ -478,7 +580,7 @@ const LatencyAccuracySection: React.FC = () => {
                         strokeWidth={2}
                         role="option"
                         aria-selected={props.payload === activePoint}
-                        aria-label={`${normalizeModelName(props.payload!.model)}: ${props.payload!.x.toFixed(0)}ms ${metric}, ${props.payload!.y.toFixed(1)}% WER${paretoData.includes(props.payload!) ? ", on Pareto frontier" : ""}`}
+                        aria-label={`${normalizeModelName(props.payload!.model)}: ${priced ? formatUsd(props.payload!.x) : `${props.payload!.x.toFixed(0)}ms ${metric}`}, ${props.payload!.y.toFixed(1)}% WER${paretoData.includes(props.payload!) ? ", on Pareto frontier" : ""}`}
                         onClick={() => setActiveIdx(idx)}
                       />
                     );
@@ -492,7 +594,11 @@ const LatencyAccuracySection: React.FC = () => {
           className="mt-1 text-center font-mono text-sm"
           style={{ color: themeColors.axisText }}
         >
-          <MetricInfo metric={metric}>{latencyLabel}</MetricInfo>
+          {priced ? (
+            xLabel
+          ) : (
+            <MetricInfo metric={metric}>{latencyLabel}</MetricInfo>
+          )}
         </div>
       </Card>
     </div>
