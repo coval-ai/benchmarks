@@ -40,14 +40,42 @@ _SECONDS_PER_UNIT: dict[BillingUnit, float] = {
 # One anchor metric per benchmark (AudioToFinal / TTFA / V2V): exactly one row
 # per item carries the item's usage quantities, so summing over anchors never
 # double-counts the usage columns duplicated across an item's metric rows.
+# Each ratio is computed strictly over rows where BOTH its numerator and
+# denominator are present (FILTER pairs), and each carries its own sample
+# count — COUNT(*) over the anchor rows would overstate the population when
+# providers report usage on only some rows, biasing the published conversion.
 _CONVERSIONS_SQL = """
     SELECT provider, model, benchmark,
-           SUM(input_tokens)::float8    AS in_tokens,
-           SUM(output_tokens)::float8   AS out_tokens,
-           SUM(audio_seconds_in)::float8  AS seconds_in,
-           SUM(audio_seconds_out)::float8 AS seconds_out,
-           SUM(characters_in)::float8   AS chars_in,
-           COUNT(*)::int                AS sample_count
+           COUNT(*) FILTER (WHERE input_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::int AS in_tpm_n,
+           SUM(input_tokens)     FILTER (WHERE input_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::float8 AS in_tpm_tokens,
+           SUM(audio_seconds_in) FILTER (WHERE input_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::float8 AS in_tpm_seconds,
+           COUNT(*) FILTER (WHERE output_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::int AS out_tpm_n,
+           SUM(output_tokens)    FILTER (WHERE output_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::float8 AS out_tpm_tokens,
+           SUM(audio_seconds_in) FILTER (WHERE output_tokens IS NOT NULL
+                              AND audio_seconds_in > 0)::float8 AS out_tpm_seconds,
+           COUNT(*) FILTER (WHERE characters_in IS NOT NULL
+                              AND audio_seconds_out > 0)::int AS cps_n,
+           SUM(characters_in)     FILTER (WHERE characters_in IS NOT NULL
+                              AND audio_seconds_out > 0)::float8 AS cps_chars,
+           SUM(audio_seconds_out) FILTER (WHERE characters_in IS NOT NULL
+                              AND audio_seconds_out > 0)::float8 AS cps_seconds,
+           COUNT(*) FILTER (WHERE input_tokens IS NOT NULL
+                              AND characters_in > 0)::int AS in_tpc_n,
+           SUM(input_tokens)  FILTER (WHERE input_tokens IS NOT NULL
+                              AND characters_in > 0)::float8 AS in_tpc_tokens,
+           SUM(characters_in) FILTER (WHERE input_tokens IS NOT NULL
+                              AND characters_in > 0)::float8 AS in_tpc_chars,
+           COUNT(*) FILTER (WHERE output_tokens IS NOT NULL
+                              AND characters_in > 0)::int AS out_tpc_n,
+           SUM(output_tokens) FILTER (WHERE output_tokens IS NOT NULL
+                              AND characters_in > 0)::float8 AS out_tpc_tokens,
+           SUM(characters_in) FILTER (WHERE output_tokens IS NOT NULL
+                              AND characters_in > 0)::float8 AS out_tpc_chars
     FROM benchmarks_v2.results
     WHERE status = 'success'
       AND created_at >= now() - INTERVAL '7 days'
@@ -101,16 +129,37 @@ async def load_conversions(
 
     conversions: dict[tuple[str, str, Benchmark], Conversion] = {}
     for r in rows:
-        if r["sample_count"] < MIN_CONVERSION_SAMPLES:
+
+        def _pair(n_key: str, num_key: str, den_key: str, scale: float = 1.0) -> float | None:
+            # A ratio exists only when its own paired population clears the
+            # floor; each pair's numerator and denominator come from the same
+            # rows by construction of the FILTER clauses.
+            if r[n_key] < MIN_CONVERSION_SAMPLES:  # noqa: B023 — consumed within the iteration
+                return None
+            return _ratio(r[num_key], (r[den_key] or 0) / scale)  # noqa: B023
+
+        fields = {
+            "in_tokens_per_min": _pair("in_tpm_n", "in_tpm_tokens", "in_tpm_seconds", 60),
+            "out_tokens_per_min": _pair("out_tpm_n", "out_tpm_tokens", "out_tpm_seconds", 60),
+            "chars_per_sec": _pair("cps_n", "cps_chars", "cps_seconds"),
+            "in_tokens_per_char": _pair("in_tpc_n", "in_tpc_tokens", "in_tpc_chars"),
+            "out_tokens_per_char": _pair("out_tpc_n", "out_tpc_tokens", "out_tpc_chars"),
+        }
+        counts = {
+            "in_tokens_per_min": r["in_tpm_n"],
+            "out_tokens_per_min": r["out_tpm_n"],
+            "chars_per_sec": r["cps_n"],
+            "in_tokens_per_char": r["in_tpc_n"],
+            "out_tokens_per_char": r["out_tpc_n"],
+        }
+        present = {k: v for k, v in fields.items() if v is not None}
+        if not present:
             continue
-        minutes_in = r["seconds_in"] / 60 if r["seconds_in"] else None
         conversions[(r["provider"], r["model"], Benchmark(r["benchmark"]))] = Conversion(
-            in_tokens_per_min=_ratio(r["in_tokens"], minutes_in),
-            out_tokens_per_min=_ratio(r["out_tokens"], minutes_in),
-            chars_per_sec=_ratio(r["chars_in"], r["seconds_out"]),
-            in_tokens_per_char=_ratio(r["in_tokens"], r["chars_in"]),
-            out_tokens_per_char=_ratio(r["out_tokens"], r["chars_in"]),
-            sample_count=r["sample_count"],
+            **fields,
+            # The smallest population among the ratios actually served — the
+            # conservative honest answer to "how many samples back this".
+            sample_count=min(counts[k] for k in present),
         )
     return conversions
 

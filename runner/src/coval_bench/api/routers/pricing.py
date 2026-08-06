@@ -133,18 +133,18 @@ async def get_pricing(
 
         now = datetime.now(tz=UTC)
         entries: list[PricingEntry] = []
-        for (provider, model), model_rows in sorted(by_model.items()):
+        for (provider, model), all_rows in sorted(by_model.items()):
             if (provider, model) not in visible:
                 continue
-            effective = [
-                r
-                for r in model_rows
-                if r.effective_at <= now and (r.superseded_at is None or r.superseded_at > now)
-            ]
+            # A scheduled future-effective row is neither current nor history
+            # yet — it must not leak into either surface before its time.
+            model_rows = [r for r in all_rows if r.effective_at <= now]
+            effective = [r for r in model_rows if r.superseded_at is None or r.superseded_at > now]
             if not effective:
                 continue
             conversion = conversions.get((provider, model, bench))
             normalized = normalized_price(bench, effective, conversion)
+            latest = max(effective, key=lambda r: (r.as_of, r.id or 0))
             entries.append(
                 PricingEntry(
                     provider=provider,
@@ -170,8 +170,10 @@ async def get_pricing(
                         if conversion
                         else None
                     ),
-                    as_of=max(r.as_of for r in effective),
-                    source_url=effective[0].source_url,
+                    # Provenance from ONE row (the most recently verified),
+                    # never a max-date paired with another row's URL.
+                    as_of=latest.as_of,
+                    source_url=latest.source_url,
                     history=_history(bench, model_rows, conversion),
                 )
             )

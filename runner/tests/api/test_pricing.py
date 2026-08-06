@@ -224,3 +224,33 @@ async def test_unregistered_model_absent(client: AsyncClient, postgresql: Any) -
     )
     response = await client.get("/v1/pricing", params={"benchmark": "TTS"})
     assert response.json()["entries"] == []
+
+
+async def test_future_effective_rate_absent_from_current_and_history(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A scheduled future rate leaks into neither native_rates nor history."""
+    now = datetime.now(tz=UTC)
+    await _insert_price(
+        postgresql,
+        provider="mistral",
+        model="voxtral-mini-transcribe-realtime-2602",
+        benchmark="STT",
+        billing_unit="per_minute",
+        rate_usd="0.006",
+        effective_at=now - timedelta(days=10),
+    )
+    await _insert_price(
+        postgresql,
+        provider="mistral",
+        model="voxtral-mini-transcribe-realtime-2602",
+        benchmark="STT",
+        billing_unit="per_second",
+        rate_usd="0.001",
+        effective_at=now + timedelta(days=10),  # scheduled, not yet effective
+    )
+    response = await client.get("/v1/pricing", params={"benchmark": "STT"})
+    entry = response.json()["entries"][0]
+    assert [r["billing_unit"] for r in entry["native_rates"]] == ["per_minute"]
+    assert len(entry["history"]) == 1
+    assert entry["normalized_usd"] == pytest.approx(6.0)
