@@ -196,6 +196,40 @@ filtered out of analysis rather than silently inflating the published TTFA.
   Deferred — pool reuse achieves the same end result by construction, and the
   recorded interval is sufficient to detect and filter pool eviction.
 
+## Pricing normalization
+
+Model prices are published list prices, normalized the way Artificial
+Analysis does it: **USD per 1,000 minutes of audio** for STT and
+speech-to-speech, **USD per 1M characters** for TTS. Served by
+`GET /v1/pricing`.
+
+- **Rates are stored raw** in the provider's native billing unit in an
+  append-only table (`benchmarks_v2.model_pricing`); every rate carries the
+  provider's public pricing page (`source_url`), the date it was verified
+  (`as_of`), and evidence (page-snapshot hash / verbatim quote). A price
+  change supersedes the old row rather than replacing it, which is what makes
+  price history and historically-correct cost attribution possible.
+- **Duration- and character-billed rates** convert arithmetically
+  (`basis: "list_price"`): per-minute × 1,000, per-second × 60,000,
+  per-hour ÷ 60 × 1,000; per-1M-characters passes through.
+- **Token- and per-second-billed models** convert through conversion rates
+  measured from our own benchmark runs over the trailing 7 days
+  (`basis: "list_price_measured_conversion"`): tokens per minute of audio for
+  token-billed STT/S2S, characters per second of synthesized audio for
+  duration-billed TTS. This mirrors how AA converts token billing, but the
+  conversion is re-measured continuously rather than sampled once; the
+  response includes the measured rates, sample count, and window. A model
+  needs at least 50 sampled items in the window; below that (or when the
+  usage signal isn't reported) the model serves its native rates with
+  `normalized_usd: null` — nothing is estimated.
+- **Subscription/credit providers** (no pay-as-you-go list price) are
+  normalized under the assumption recorded in `plan_assumption`: the
+  lowest-upfront plan that realistically supports 1,000 minutes/month (STT)
+  or 1M characters/month (TTS) — the AA convention.
+- **Price history** normalizes each superseded rate at *today's* measured
+  conversion rates. Historical token prices at historical conversion rates
+  are not reconstructed; the approximation is noted on the response schema.
+
 ## Reproducing a result
 
 To reproduce a single `(provider, model, voice, metric)` cell:

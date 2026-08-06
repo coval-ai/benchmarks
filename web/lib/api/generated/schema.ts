@@ -40,6 +40,22 @@ export interface paths {
       };
     };
   };
+  "/v1/pricing": {
+    get: {
+      parameters: {
+        query: {
+          benchmark: components["schemas"]["BenchmarkLiteral"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["PricingResponse"];
+          };
+        };
+      };
+    };
+  };
 }
 
 export interface components {
@@ -106,6 +122,39 @@ export interface components {
       category: components["schemas"]["TagCategory"];
       value: string;
       label: string;
+    };
+    ConversionOut: {
+      in_tokens_per_min?: number | null;
+      out_tokens_per_min?: number | null;
+      chars_per_sec?: number | null;
+      sample_count: number;
+      window: string;
+    };
+    NativeRateOut: {
+      billing_unit: string;
+      rate_usd: number;
+      plan_assumption?: string | null;
+    };
+    PriceHistoryPoint: {
+      normalized_usd?: number | null;
+      effective_at: string;
+      superseded_at?: string | null;
+    };
+    PricingEntry: {
+      provider: string;
+      model: string;
+      normalized_usd?: number | null;
+      basis?: ("list_price" | "list_price_measured_conversion") | null;
+      native_rates: components["schemas"]["NativeRateOut"][];
+      conversion?: components["schemas"]["ConversionOut"] | null;
+      as_of: string;
+      source_url: string;
+      history: components["schemas"]["PriceHistoryPoint"][];
+    };
+    PricingResponse: {
+      benchmark: components["schemas"]["BenchmarkLiteral"];
+      unit_label: "USD per 1,000 minutes" | "USD per 1M characters";
+      entries: components["schemas"]["PricingEntry"][];
     };
     ProviderInfo: {
       provider: string;

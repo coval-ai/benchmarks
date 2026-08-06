@@ -46,6 +46,7 @@ from coval_bench.api.routers import (
     arena,
     health,
     leaderboard,
+    pricing,
     providers,
     results,
     robots,
@@ -168,6 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
+    app.include_router(pricing.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
 

@@ -11,7 +11,7 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -220,6 +220,59 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+
+
+class NativeRateOut(BaseModel):
+    """One published rate in the provider's native billing unit."""
+
+    billing_unit: str
+    rate_usd: float
+    plan_assumption: str | None = None
+
+
+class ConversionOut(BaseModel):
+    """Measured unit-conversion rates from our own runs (7-day window)."""
+
+    in_tokens_per_min: float | None = None
+    out_tokens_per_min: float | None = None
+    chars_per_sec: float | None = None
+    sample_count: int
+    window: str
+
+
+class PriceHistoryPoint(BaseModel):
+    """One effective-rate period, normalized with today's measured conversion.
+
+    Historical token rates are normalized at today's conversion rates (not the
+    conversion measured back then) — the approximation keeps history a pure
+    function of the append-only pricing table.
+    """
+
+    normalized_usd: float | None = None
+    effective_at: datetime
+    superseded_at: datetime | None = None
+
+
+class PricingEntry(BaseModel):
+    """Normalized display price + provenance for one model."""
+
+    provider: str
+    model: str
+    normalized_usd: float | None = None
+    basis: Literal["list_price", "list_price_measured_conversion"] | None = None
+    native_rates: list[NativeRateOut]
+    conversion: ConversionOut | None = None
+    as_of: date
+    source_url: str
+    history: list[PriceHistoryPoint]
+
+
+class PricingResponse(BaseModel):
+    """Response schema for GET /v1/pricing."""
+
+    benchmark: BenchmarkLiteral
+    unit_label: Literal["USD per 1,000 minutes", "USD per 1M characters"]
+    entries: list[PricingEntry]
 
 
 class S2SSampleTurnOut(BaseModel):

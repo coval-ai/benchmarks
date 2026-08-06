@@ -117,7 +117,33 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now(),
                 wer_insertions_pct    double precision,
                 wer_deletions_pct     double precision,
-                wer_substitutions_pct double precision
+                wer_substitutions_pct double precision,
+                input_tokens     bigint,
+                output_tokens    bigint,
+                total_tokens     bigint,
+                billable_seconds double precision,
+                characters_in    integer,
+                audio_seconds_in  double precision,
+                audio_seconds_out double precision
+            )
+        """)
+        # Append-only pricing store (mirrors migration 20260806_0016).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.model_pricing (
+                id BIGSERIAL PRIMARY KEY,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                benchmark TEXT NOT NULL,
+                billing_unit TEXT NOT NULL,
+                rate_usd NUMERIC(14,8) NOT NULL,
+                plan_assumption TEXT NULL,
+                effective_at TIMESTAMPTZ NOT NULL,
+                superseded_at TIMESTAMPTZ NULL,
+                source_url TEXT NOT NULL,
+                as_of DATE NOT NULL,
+                evidence TEXT NULL,
+                updated_by TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
         # Per-window stats materialized views (model_stats + leaderboard).
