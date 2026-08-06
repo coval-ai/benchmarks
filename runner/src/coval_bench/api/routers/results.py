@@ -47,6 +47,7 @@ from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import ResultOut, ResultsResponse
 from coval_bench.config import Settings
+from coval_bench.registries import INTERNAL_METRICS
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -176,10 +177,12 @@ async def list_results(
         resolved_metric = metric_type
 
     # Build WHERE clause dynamically — parameterised only, no f-string SQL injection.
-    conditions: list[str] = ["r.status = 'success'"]
+    # Internal metrics (measured spend) are never served publicly.
+    conditions: list[str] = ["r.status = 'success'", "r.metric_type <> ALL(%(internal_metrics)s)"]
     params: dict[str, Any] = {
         "limit": limit,
         "schedule_period": settings.schedule_period_seconds,
+        "internal_metrics": [str(m) for m in INTERNAL_METRICS],
     }
 
     if provider is not None:

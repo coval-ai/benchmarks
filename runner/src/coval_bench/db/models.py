@@ -68,6 +68,9 @@ class Run(BaseModel):
     judge_input_tokens: int | None = None
     judge_output_tokens: int | None = None
     judge_audio_seconds: float | None = None
+    # Spend rollup (migration 0017): COST_USD rows + judge cost, set at finish_run.
+    total_cost_usd: Decimal | None = None
+    judge_cost_usd: Decimal | None = None
 
 
 class Result(BaseModel):

@@ -30,6 +30,7 @@ class Metric(StrEnum):
     AUDIO_TO_FINAL = "AudioToFinal"
     V2V = "V2V"
     INSTRUCTION_FOLLOWING = "InstructionFollowing"
+    COST_USD = "COST_USD"
 
 
 class MetricDirection(StrEnum):
@@ -127,6 +128,16 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    # Measured spend per benchmark item at the effective list rate — internal
+    # only (see INTERNAL_METRICS); the public site shows list prices, not our
+    # measured spend.
+    Metric.COST_USD: MetricSpec(
+        display_name="Cost",
+        units="usd",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=4,
+        benchmarks=frozenset({Benchmark.STT, Benchmark.TTS, Benchmark.S2S}),
+    ),
 }
 
 if METRIC_SPECS.keys() != set(Metric):
@@ -143,6 +154,13 @@ if METRIC_SPECS.keys() != set(Metric):
 SERIES_EXCLUDED_METRICS: frozenset[Metric] = frozenset(
     {Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE}
 )
+
+
+# Metrics the public API never serves: they ride the results pipeline (rows,
+# buckets, matviews) for internal spend tracking but are filtered out of every
+# /v1 response. Keep COST_USD out of SERIES_EXCLUDED_METRICS — the per-bucket
+# spend series is exactly what internal dashboards query.
+INTERNAL_METRICS: frozenset[Metric] = frozenset({Metric.COST_USD})
 
 
 # (provider, model) pairs whose metric is not comparable with the cohort:

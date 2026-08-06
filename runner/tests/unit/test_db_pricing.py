@@ -215,6 +215,88 @@ def test_ratesheet_keys_match_registry() -> None:
     assert not orphans, f"ratesheet entries for unknown/inactive models: {sorted(orphans)}"
 
 
+def test_cost_rollup_and_bucket_flow(pg_conn: psycopg.Connection[Any]) -> None:
+    """COST_USD rows roll up onto the run row and flow into bucket + matviews."""
+    from datetime import timedelta as _td
+
+    from coval_bench.db.models import Result, ResultStatus, RunStatus
+    from coval_bench.db.writer import RunWriter
+
+    _apply_migrations(pg_conn)
+
+    def _cost_row(run_id: int, value: float) -> Result:
+        return Result(
+            run_id=run_id,
+            provider="deepgram",
+            model="nova-3",
+            benchmark=Benchmark.STT,
+            metric_type="COST_USD",
+            metric_value=value,
+            metric_units="usd",
+            status=ResultStatus.SUCCESS,
+        )
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            scheduled = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
+            run = await writer.start_run(
+                runner_sha="s", dataset_id="stt-v1", dataset_sha256="h", scheduled_at=scheduled
+            )
+            assert run.id is not None
+            await writer.record_results([_cost_row(run.id, 0.01), _cost_row(run.id, 0.02)])
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED, judge_cost_usd=0.5)
+            await writer.refresh_bucket(run.id, period_seconds=1800)
+            await writer.refresh_stats_matviews()
+
+            # A run with no cost rows and no judge cost stays NULL — no zeros.
+            run2 = await writer.start_run(
+                runner_sha="s",
+                dataset_id="stt-v1",
+                dataset_sha256="h",
+                scheduled_at=scheduled + _td(hours=1),
+            )
+            assert run2.id is not None
+            await writer.finish_run(run2.id, status=RunStatus.FAILED, error="boom")
+        finally:
+            await pool.close()
+
+        pg_conn.autocommit = True
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                "SELECT total_cost_usd, judge_cost_usd FROM benchmarks_v2.runs WHERE id = %s",
+                (run.id,),
+            )
+            totals = cur.fetchone()
+            assert totals is not None
+            assert float(totals[0]) == pytest.approx(0.53)
+            assert float(totals[1]) == pytest.approx(0.5)
+
+            cur.execute("SELECT total_cost_usd FROM benchmarks_v2.runs WHERE id = %s", (run2.id,))
+            row2 = cur.fetchone()
+            assert row2 is not None and row2[0] is None
+
+            cur.execute(
+                "SELECT value_sum, sample_count FROM benchmarks_v2.results_by_bucket "
+                "WHERE metric_type = 'COST_USD' AND dataset_id = '__all__'"
+            )
+            bucket = cur.fetchone()
+            assert bucket is not None
+            assert float(bucket[0]) == pytest.approx(0.03)
+            assert bucket[1] == 2
+
+            cur.execute(
+                "SELECT avg_value, sample_count FROM benchmarks_v2.results_24h "
+                "WHERE metric_type = 'COST_USD'"
+            )
+            stat = cur.fetchone()
+            assert stat is not None
+            assert float(stat[0]) == pytest.approx(0.015)
+
+    asyncio.run(_run())
+
+
 def test_seed_is_idempotent(pg_conn: psycopg.Connection[Any]) -> None:
     """Second apply_ratesheet run writes nothing new."""
     _apply_migrations(pg_conn)

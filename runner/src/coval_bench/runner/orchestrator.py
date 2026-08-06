@@ -338,6 +338,57 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
+def _append_cost_row(
+    results: list[Any],
+    pricing: Any,  # noqa: ANN401 — PricingStore, lazy-imported by the caller
+    unpriced_logged: set[tuple[str, str]],
+    *,
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by the caller
+) -> None:
+    """Append the item's COST_USD sibling row, or log the unpriced model once per run.
+
+    Usage quantities ride every row of the item identically, so any row (the
+    first) carries what the calculator needs. No effective rate or no usable
+    quantity → no row, never a zero.
+    """
+    first = results[0]
+    rates = pricing.effective_rates_cached(first.provider, first.model)
+    cost = importlib.import_module("coval_bench.metrics").compute_cost_usd(first, rates)
+    if cost is None:
+        key = (first.provider, first.model)
+        if key not in unpriced_logged:
+            unpriced_logged.add(key)
+            logger.info(
+                "cost_unpriced",
+                provider=first.provider,
+                model=first.model,
+                benchmark=str(first.benchmark),
+            )
+        return
+    results.append(
+        type(first)(
+            run_id=first.run_id,
+            provider=first.provider,
+            model=first.model,
+            voice=first.voice,
+            benchmark=first.benchmark,
+            metric_type=Metric.COST_USD,
+            metric_value=cost,
+            metric_units=METRIC_SPECS[Metric.COST_USD].units,
+            audio_filename=first.audio_filename,
+            status=result_status.SUCCESS,
+            error=None,
+            input_tokens=first.input_tokens,
+            output_tokens=first.output_tokens,
+            total_tokens=first.total_tokens,
+            billable_seconds=first.billable_seconds,
+            characters_in=first.characters_in,
+            audio_seconds_in=first.audio_seconds_in,
+            audio_seconds_out=first.audio_seconds_out,
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -351,6 +402,8 @@ async def _run_stt_item(
     sem: asyncio.Semaphore,
     settings: Settings,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
+    pricing: Any | None = None,  # noqa: ANN401 — PricingStore, lazy-imported in caller
+    unpriced_logged: set[tuple[str, str]] | None = None,
 ) -> list[Any]:
     """Run a single STT provider × dataset item, returning a list of Result rows.
 
@@ -659,6 +712,14 @@ async def _run_stt_item(
                     )
                 )
 
+        if pricing is not None and results and item_error is None:
+            _append_cost_row(
+                results,
+                pricing,
+                unpriced_logged if unpriced_logged is not None else set(),
+                result_status=ResultStatus,
+            )
+
     _log_item_failures(
         "stt_item_failed",
         results,
@@ -715,6 +776,8 @@ async def _run_tts_item(
     voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
     judge_usage: dict[str, float] | None = None,
+    pricing: Any | None = None,  # noqa: ANN401 — PricingStore, lazy-imported in caller
+    unpriced_logged: set[tuple[str, str]] | None = None,
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
 
@@ -948,6 +1011,14 @@ async def _run_tts_item(
                         exc_info=exc,
                     )
 
+        if pricing is not None and results and item_error is None:
+            _append_cost_row(
+                results,
+                pricing,
+                unpriced_logged if unpriced_logged is not None else set(),
+                result_status=ResultStatus,
+            )
+
     _log_item_failures(
         "tts_item_failed",
         results,
@@ -1145,15 +1216,35 @@ async def run_benchmarks(
         all_results: list[Any] = []
         sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
 
+        # Run-scoped pricing cache (one DB read per run) for COST_USD rows.
+        # Cost capture is best-effort: a failed load means no cost rows this
+        # run, never a failed run.
+        pricing: Any = None
+        unpriced_logged: set[tuple[str, str]] = set()
+        try:
+            pricing = importlib.import_module("coval_bench.db.pricing").PricingStore(pool)
+            await pricing.load_cache()
+        except Exception:
+            logger.warning("pricing_cache_load_failed", exc_info=True)
+            pricing = None
+
         # Run-scoped whisper-judge spend, filled by _transcribe_with_whisper.
         # Empty keys stay NULL on the run row rather than fabricating zeros.
         judge_usage: dict[str, float] = {}
+
+        def _judge_cost() -> float | None:
+            if pricing is None or not judge_usage:
+                return None
+            rates = pricing.effective_rates_cached("openai", "whisper-1-judge")
+            judge_cost_fn = importlib.import_module("coval_bench.metrics").judge_cost_usd
+            return judge_cost_fn(judge_usage, rates)
 
         def _judge_totals() -> dict[str, Any]:
             return {
                 "judge_input_tokens": judge_usage.get("input_tokens"),
                 "judge_output_tokens": judge_usage.get("output_tokens"),
                 "judge_audio_seconds": judge_usage.get("audio_seconds"),
+                "judge_cost_usd": _judge_cost(),
             }
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
@@ -1233,6 +1324,8 @@ async def run_benchmarks(
                         sem=sem,
                         settings=settings,
                         writer=writer,
+                        pricing=pricing,
+                        unpriced_logged=unpriced_logged,
                     )
                     for entry, item in stt_pairs
                 ]
@@ -1283,6 +1376,8 @@ async def run_benchmarks(
                         voice=voice,
                         writer=writer,
                         judge_usage=judge_usage,
+                        pricing=pricing,
+                        unpriced_logged=unpriced_logged,
                     )
                     for entry, item, voice in tts_pairs
                 ]
@@ -1380,6 +1475,30 @@ async def run_benchmarks(
                     "$process_person_profile": False,
                 },
             )
+
+            # Internal spend telemetry — one event per run so PostHog can chart
+            # spend with no UI work. Best-effort like every _emit_posthog call.
+            model_costs: dict[str, float] = defaultdict(float)
+            for r in typed_results:
+                if r.metric_type == Metric.COST_USD and r.metric_value is not None:
+                    model_costs[f"{r.provider}/{r.model}"] += r.metric_value
+            judge_cost = _judge_cost()
+            if model_costs or judge_cost is not None:
+                run_cost = sum(model_costs.values()) + (judge_cost or 0.0)
+                _emit_posthog(
+                    posthog_client,
+                    "benchmark_run_cost",
+                    {
+                        "run_id": run_id,
+                        "benchmark_kind": benchmark_kind,
+                        "total_cost_usd": run_cost,
+                        "judge_cost_usd": judge_cost,
+                        "top_model_costs": dict(
+                            sorted(model_costs.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                        ),
+                        "$process_person_profile": False,
+                    },
+                )
             return summary
 
         except asyncio.CancelledError:

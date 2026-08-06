@@ -255,30 +255,51 @@ class RunWriter:
         judge_input_tokens: int | None = None,
         judge_output_tokens: int | None = None,
         judge_audio_seconds: float | None = None,
+        judge_cost_usd: float | None = None,
     ) -> None:
-        """Set ``finished_at = now()``, ``status`` / ``error``, and judge spend on a run row."""
+        """Set ``finished_at = now()``, ``status`` / ``error``, and spend on a run row.
+
+        ``total_cost_usd`` is summed from the run's persisted COST_USD rows in
+        SQL (not from memory) so a SIGTERM-cancelled run still rolls up every
+        row its tasks flushed, plus *judge_cost_usd*. Runs with neither stay
+        NULL — no fabricated zeros.
+        """
         sql = """
             UPDATE benchmarks_v2.runs
             SET finished_at = now(),
-                status = %s,
-                error  = %s,
-                judge_input_tokens = %s,
-                judge_output_tokens = %s,
-                judge_audio_seconds = %s
-            WHERE id = %s
+                status = %(status)s,
+                error  = %(error)s,
+                judge_input_tokens = %(judge_input_tokens)s,
+                judge_output_tokens = %(judge_output_tokens)s,
+                judge_audio_seconds = %(judge_audio_seconds)s,
+                judge_cost_usd = %(judge_cost_usd)s::numeric,
+                total_cost_usd = (
+                    SELECT CASE
+                        WHEN SUM(r.metric_value) IS NULL
+                             AND %(judge_cost_usd)s::numeric IS NULL THEN NULL
+                        ELSE COALESCE(SUM(r.metric_value), 0)::numeric
+                             + COALESCE(%(judge_cost_usd)s::numeric, 0)
+                    END
+                    FROM benchmarks_v2.results r
+                    WHERE r.run_id = %(run_id)s
+                      AND r.metric_type = 'COST_USD'
+                      AND r.status = 'success'
+                )
+            WHERE id = %(run_id)s
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     sql,
-                    (
-                        status,
-                        error,
-                        judge_input_tokens,
-                        judge_output_tokens,
-                        judge_audio_seconds,
-                        run_id,
-                    ),
+                    {
+                        "status": status,
+                        "error": error,
+                        "judge_input_tokens": judge_input_tokens,
+                        "judge_output_tokens": judge_output_tokens,
+                        "judge_audio_seconds": judge_audio_seconds,
+                        "judge_cost_usd": judge_cost_usd,
+                        "run_id": run_id,
+                    },
                 )
             await conn.commit()
 

@@ -60,7 +60,7 @@ from coval_bench.api.schemas import (
     SeriesPoint,
 )
 from coval_bench.config import DATASET_ALL
-from coval_bench.registries import is_metric_excluded
+from coval_bench.registries import INTERNAL_METRICS, is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -106,8 +106,10 @@ _STATS_BY_DATASET_SQL_TEMPLATE = (
 
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
-    return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
-        row["provider"], row["model"], row["metric_type"]
+    return (
+        row["metric_type"] not in INTERNAL_METRICS
+        and (row["provider"], row["model"]) not in hidden
+        and not is_metric_excluded(row["provider"], row["model"], row["metric_type"])
     )
 
 

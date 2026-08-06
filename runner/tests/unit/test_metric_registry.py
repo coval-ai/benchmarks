@@ -25,6 +25,7 @@ def test_metric_values_match_stored_strings() -> None:
         "AudioToFinal",
         "V2V",
         "InstructionFollowing",
+        "COST_USD",
     }
 
 
@@ -41,6 +42,7 @@ def test_units_match_stored_strings() -> None:
         Metric.AUDIO_TO_FINAL: "seconds",
         Metric.V2V: "milliseconds",
         Metric.INSTRUCTION_FOLLOWING: "percent",
+        Metric.COST_USD: "usd",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 

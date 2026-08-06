@@ -350,6 +350,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
         judge_input_tokens=None,
         judge_output_tokens=None,
         judge_audio_seconds=None,
+        judge_cost_usd=None,
     )
     # Usage quantities ride every row of the item: the dataset item's audio
     # duration plus whatever the provider reported.
@@ -417,6 +418,7 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
         judge_input_tokens=None,
         judge_output_tokens=None,
         judge_audio_seconds=None,
+        judge_cost_usd=None,
     )
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
@@ -2098,6 +2100,82 @@ async def test_tts_usage_quantities_recorded(audio_file: Path, settings: Setting
     assert all(r.characters_in == len("hello world") for r in rows)
     assert all(r.audio_seconds_out == pytest.approx(512 / 16000) for r in rows)
     assert all(r.billable_seconds == 1.9 for r in rows)
+
+
+class _StubPricing:
+    """PricingStore stand-in: nova-2 priced per-minute, everything else unpriced."""
+
+    def __init__(self, pool: Any) -> None:
+        self.pool = pool
+
+    async def load_cache(self) -> None:
+        return None
+
+    def effective_rates_cached(self, provider: str, model: str) -> list[Any]:
+        from datetime import date
+        from decimal import Decimal
+
+        from coval_bench.db.models import BillingUnit, PriceRow
+
+        if (provider, model) != ("deepgram", "nova-2"):
+            return []
+        return [
+            PriceRow(
+                provider=provider,
+                model=model,
+                benchmark=Benchmark.STT,
+                billing_unit=BillingUnit.PER_MINUTE,
+                rate_usd=Decimal("0.006"),
+                effective_at=datetime(2026, 8, 1, tzinfo=UTC),
+                source_url="https://example.com/pricing",
+                as_of=date(2026, 8, 6),
+                updated_by="human",
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_stt_cost_rows_emitted_for_priced_models(
+    audio_file: Path, settings: Settings
+) -> None:
+    """Priced model gets one COST_USD sibling row per item; unpriced model gets none."""
+    good = _good_transcription()
+    good.billable_seconds = 120.0
+
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=good)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": provider_cls, "elevenlabs": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        with patch("coval_bench.db.pricing.PricingStore", _StubPricing):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[
+                    _stt_entry("deepgram", "nova-2"),
+                    _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                ],
+            )
+
+    cost_rows = [r for r in _recorded_rows(writer) if r.metric_type == "COST_USD"]
+    assert len(cost_rows) == 1
+    row = cost_rows[0]
+    assert (row.provider, row.model) == ("deepgram", "nova-2")
+    # 120 billable seconds at $0.006/min
+    assert row.metric_value == pytest.approx(0.012)
+    assert row.metric_units == "usd"
+    assert row.status == ResultStatus.SUCCESS
+    assert row.billable_seconds == 120.0
 
 
 @pytest.mark.asyncio

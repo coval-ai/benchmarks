@@ -71,6 +71,25 @@ async def test_model_stats_math(client: AsyncClient, postgresql: Any) -> None:
     assert s["sample_count"] == 4
 
 
+async def test_internal_cost_metric_never_served(client: AsyncClient, postgresql: Any) -> None:
+    """COST_USD rides the pipeline for internal spend tracking but never leaves the API."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, metric_type="WER", metric_value=5.0)
+    await _insert_result(postgresql, run_id, metric_type="COST_USD", metric_value=0.01)
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    body = response.json()
+    assert {s["metric_type"] for s in body["model_stats"]} == {"WER"}
+    assert all(p["metric_type"] != "COST_USD" for p in body["series"])
+
+    raw = await client.get("/v1/results", params={"benchmark": "STT"})
+    assert raw.status_code == 200
+    assert all(r["metric_type"] != "COST_USD" for r in raw.json()["results"])
+
+
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
     """STDDEV_SAMP is NULL for n=1 — must be coalesced to 0 like the client did."""
     run_id = await _insert_run(postgresql)
