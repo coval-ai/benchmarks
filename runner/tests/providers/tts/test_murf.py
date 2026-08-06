@@ -17,7 +17,7 @@ from coval_bench.providers.tts.murf import MurfTTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
-_VOICE = "Natalie"
+_VOICE = "Amara"
 
 
 def _settings() -> Settings:
@@ -84,7 +84,7 @@ async def test_murf_tts_url_and_frames(murf_settings: Settings) -> None:
     assert result.error is None
     parts = urlsplit(captured["url"])
     assert parts.scheme == "wss"
-    assert parts.netloc == "us-east.api.murf.ai"
+    assert parts.netloc == "global.api.murf.ai"
     assert parts.path == "/v1/speech/stream-input"
     assert parse_qs(parts.query) == {
         "api-key": ["test-murf-key"],
