@@ -152,6 +152,23 @@ class PricingStore:
             await conn.commit()
         return PriceRow.model_validate(dict(row)), True
 
+    async def refresh_as_of(self, row_id: int, as_of: date) -> None:
+        """Re-stamp the verification date on a still-effective row.
+
+        The one metadata update the append-only rule allows besides
+        ``superseded_at``: the rate itself is untouched, this only records
+        that the collector re-verified it on *as_of* — without it, unchanged
+        rates would trip the staleness alarm forever.
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE benchmarks_v2.model_pricing SET as_of = %s"
+                    " WHERE id = %s AND superseded_at IS NULL",
+                    (as_of, row_id),
+                )
+            await conn.commit()
+
     async def load_cache(self) -> None:
         """Load every currently-effective rate into memory, one query per run."""
         sql = f"""

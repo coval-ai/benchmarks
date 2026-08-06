@@ -24,6 +24,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
@@ -102,6 +103,7 @@ class ExtractedRate(BaseModel):
     plan: str | None = None
     confidence: Literal["high", "medium", "low"]
     quote: str
+    note: str | None = None
 
 
 class _Extraction(BaseModel):
@@ -131,8 +133,10 @@ _EXTRACTION_PROMPT = """You extract published API list prices from a pricing pag
 Rules — follow them exactly:
 - Extract ONLY rates literally stated on the page. NEVER infer, estimate, or \
 compute a rate that is not written there (converting a stated per-1k rate to \
-per-1M by x1000 is allowed and must be noted in the quote).
-- For each rate include `quote`: the verbatim page text stating it.
+per-1M by x1000 is allowed and must be explained in `note`).
+- For each rate include `quote`: the EXACT verbatim page text stating it, \
+copied character-for-character — no paraphrase, no added notes. Auto-apply is \
+gated on this text being found in the page.
 - billing_unit is the provider's native unit. Token-billed models produce two \
 entries (input and output).
 - When a promotional price shows a struck-through regular price, extract the \
@@ -160,11 +164,14 @@ async def _store_snapshot(
     provider: str,
     url: str,
     text: str,
+    *,
+    dry_run: bool = False,
 ) -> tuple[str, bool]:
     """Persist the page (gzipped) unless its hash matches the latest snapshot.
 
     Returns ``(sha256, changed)`` — *changed* is False when the page is
-    byte-identical to the previous fetch.
+    byte-identical to the previous fetch. ``dry_run`` computes the hash and
+    compares, but never inserts.
     """
     sha = hashlib.sha256(text.encode()).hexdigest()
     async with pool.connection() as conn:
@@ -175,9 +182,9 @@ async def _store_snapshot(
                 (provider,),
             )
             row = await cur.fetchone()
-            if row is not None and row["sha256"] == sha:
+            if (row is not None and row["sha256"] == sha) or dry_run:
                 await conn.commit()
-                return sha, False
+                return sha, row is not None and row["sha256"] != sha
             await cur.execute(
                 "INSERT INTO benchmarks_v2.pricing_snapshots (provider, url, sha256, content_gz)"
                 " VALUES (%s, %s, %s, %s)",
@@ -288,6 +295,23 @@ def _cross_check(
     return "agree" if delta <= Decimal("5") else "disagree"
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_page_text(text: str) -> str:
+    return _WS_RE.sub(" ", _TAG_RE.sub(" ", text)).casefold().strip()
+
+
+def _quote_in_page(quote: str, page: str) -> bool:
+    """The auto-apply integrity gate: the extractor's verbatim quote must
+    actually appear in the fetched page (tag-stripped, whitespace-collapsed),
+    so a hallucinated or prompt-injected rate can never self-attest its way
+    into the pricing table."""
+    normalized_quote = _normalize_page_text(quote)
+    return bool(normalized_quote) and normalized_quote in _normalize_page_text(page)
+
+
 def _delta_pct(old: Decimal, new: Decimal) -> float:
     if old == 0:
         return float("inf") if new != 0 else 0.0
@@ -303,6 +327,7 @@ async def _diff_and_gate(
     benchmark: Benchmark,
     source_url: str,
     snapshot_sha: str,
+    page: str,
     litellm: dict[str, Any],
     dry_run: bool,
 ) -> Change:
@@ -327,6 +352,10 @@ async def _diff_and_gate(
         action="noop",
     )
     if current is not None and current.rate_usd == new_rate:
+        # Re-verified unchanged: stamp today's as_of so the rate never trips
+        # the staleness alarm right after a successful check.
+        if not dry_run and current.id is not None and current.as_of < date.today():  # noqa: DTZ011
+            await store.refresh_as_of(current.id, date.today())  # noqa: DTZ011
         return change
 
     delta = _delta_pct(current.rate_usd, new_rate) if current is not None else None
@@ -348,6 +377,10 @@ async def _diff_and_gate(
     if witness == "disagree":
         change.action = "review"
         change.reason = "LiteLLM cross-check disagrees"
+        return change
+    if not _quote_in_page(extracted.quote, page):
+        change.action = "review"
+        change.reason = "extractor's quote not found verbatim in the fetched page"
         return change
 
     change.action = "auto_applied"
@@ -459,7 +492,7 @@ async def collect_provider(
 ) -> list[Change]:
     """Fetch → snapshot → extract → match → diff one provider. Raises on failure."""
     page = await _fetch_page(source.url)
-    sha, _ = await _store_snapshot(pool, provider, source.url, page)
+    sha, _ = await _store_snapshot(pool, provider, source.url, page, dry_run=dry_run)
     extracted = await _extract_rates(settings, provider, page, source)
 
     changes: list[Change] = []
@@ -492,6 +525,7 @@ async def collect_provider(
                 benchmark=benchmark,
                 source_url=source.url,
                 snapshot_sha=sha,
+                page=page,
                 litellm=litellm,
                 dry_run=dry_run,
             )
@@ -554,6 +588,14 @@ async def run_update_prices(
     alerts: list[str] = []
     if failed:
         alerts.append("page fetch/extract failed: " + ", ".join(failed))
+    unmatched = [c for c in all_changes if c.action == "unmatched"]
+    if unmatched:
+        alerts.append(
+            "unmatched page rates (possible new/renamed models, never auto-written): "
+            + "; ".join(
+                f"{c.provider}: {c.model!r} @ {c.new_rate} [{c.billing_unit}]" for c in unmatched
+            )
+        )
     if stale:
         alerts.append("stale rates (>45d): " + "; ".join(stale))
     if alerts and not dry_run:

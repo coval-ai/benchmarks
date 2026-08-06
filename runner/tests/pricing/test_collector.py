@@ -94,13 +94,19 @@ async def _seed_nova3(store: PricingStore, rate: str = "0.0048") -> None:
     )
 
 
-def _extracted(rate: float, *, model: str = "Nova-3 Monolingual", confidence: str = "high") -> Any:
+def _extracted(
+    rate: float,
+    *,
+    model: str = "Nova-3 Monolingual",
+    confidence: str = "high",
+    quote: str | None = None,
+) -> Any:
     return ExtractedRate(
         model=model,
         billing_unit=BillingUnit.PER_MINUTE,
         rate_usd=rate,
         confidence=confidence,  # type: ignore[arg-type]
-        quote=f"Nova-3 Monolingual ${rate}/min",
+        quote=quote if quote is not None else f"Nova-3 Monolingual ${rate}/min",
     )
 
 
@@ -111,6 +117,7 @@ def _run_collector(
     seed_rate: str | None = "0.0048",
     dry_run: bool = False,
     fetch_side_effect: Any = None,
+    page: str | None = None,
 ) -> tuple[dict[str, Any], list[tuple[str, str]], PricingStore]:
     """Drive run_update_prices for deepgram only, LLM + fetch + reviews mocked."""
     reviews: list[tuple[str, str]] = []
@@ -129,7 +136,9 @@ def _run_collector(
                     "coval_bench.pricing.collector._fetch_page",
                     AsyncMock(
                         side_effect=fetch_side_effect,
-                        return_value=_fixture_page("deepgram-pricing.html"),
+                        return_value=page
+                        if page is not None
+                        else _fixture_page("deepgram-pricing.html"),
                     ),
                 ),
                 patch(
@@ -174,6 +183,15 @@ def test_noop_when_rate_unchanged(pg_conn: psycopg.Connection[Any]) -> None:
     _apply_migrations(pg_conn)
     summary, reviews, _ = _run_collector(pg_conn, [_extracted(0.0048)])
     assert summary["counts"] == {"noop": 1, "auto_applied": 0, "review": 0, "unmatched": 0}
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT as_of FROM benchmarks_v2.model_pricing"
+            " WHERE provider = 'deepgram' AND superseded_at IS NULL"
+        )
+        row = cur.fetchone()
+    # A re-verified unchanged rate carries today's as_of, so it never goes stale.
+    assert row is not None and row[0] == date.today()
     assert reviews == []
     rows = _effective_nova3(pg_conn)
     assert len(rows) == 1  # nothing new written
@@ -181,7 +199,10 @@ def test_noop_when_rate_unchanged(pg_conn: psycopg.Connection[Any]) -> None:
 
 def test_small_delta_high_confidence_auto_applies(pg_conn: psycopg.Connection[Any]) -> None:
     _apply_migrations(pg_conn)
-    summary, reviews, _ = _run_collector(pg_conn, [_extracted(0.005)])  # +4.2%
+    page = _fixture_page("deepgram-pricing.html").replace("$0.0048/min", "$0.005/min")
+    summary, reviews, _ = _run_collector(
+        pg_conn, [_extracted(0.005, quote="Nova-3 Monolingual $0.005/min")], page=page
+    )  # +4.2%
     assert summary["counts"]["auto_applied"] == 1
     assert reviews == []
     rows = _effective_nova3(pg_conn)
@@ -224,7 +245,9 @@ def test_unmatched_model_logged_never_written(pg_conn: psycopg.Connection[Any]) 
     _apply_migrations(pg_conn)
     summary, reviews, _ = _run_collector(pg_conn, [_extracted(0.5, model="Totally Unknown Model")])
     assert summary["counts"]["unmatched"] == 1
-    assert reviews == []  # unmatched is a log line, not a review item
+    # Unmatched rates are never written, but they do reach the alert channel
+    # so a renamed/new page model can't rot unnoticed in the logs.
+    assert any("Totally Unknown Model" in body for _, body in reviews)
     assert len(_effective_nova3(pg_conn)) == 1
 
 
@@ -238,7 +261,13 @@ def test_fetch_failure_skips_provider_without_aborting(pg_conn: psycopg.Connecti
 
 def test_dry_run_writes_nothing(pg_conn: psycopg.Connection[Any]) -> None:
     _apply_migrations(pg_conn)
-    summary, reviews, _ = _run_collector(pg_conn, [_extracted(0.005)], dry_run=True)
+    page = _fixture_page("deepgram-pricing.html").replace("$0.0048/min", "$0.005/min")
+    summary, reviews, _ = _run_collector(
+        pg_conn,
+        [_extracted(0.005, quote="Nova-3 Monolingual $0.005/min")],
+        dry_run=True,
+        page=page,
+    )
     assert summary["counts"]["auto_applied"] == 1  # reported in the diff table
     assert reviews == []  # no review items filed on dry-run
     assert len(_effective_nova3(pg_conn)) == 1  # but nothing written
@@ -247,7 +276,7 @@ def test_dry_run_writes_nothing(pg_conn: psycopg.Connection[Any]) -> None:
     with pg_conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM benchmarks_v2.pricing_snapshots")
         row = cur.fetchone()
-    assert row is not None and row[0] >= 0  # snapshot table exists either way
+    assert row is not None and row[0] == 0  # dry-run persists no snapshots either
 
 
 def test_snapshot_dedupes_on_hash(pg_conn: psycopg.Connection[Any]) -> None:
@@ -305,3 +334,15 @@ def test_match_model_exact_alias_and_ambiguous() -> None:
     assert _match_model("deepgram", "some-future-model") is None
     # gradium registers 'default' under STT and TTS — ambiguous, never guessed.
     assert _match_model("gradium", "default") is None
+
+
+def test_fabricated_quote_goes_to_review(pg_conn: psycopg.Connection[Any]) -> None:
+    """A small in-gate delta whose quote is not verbatim in the page never auto-applies."""
+    _apply_migrations(pg_conn)
+    summary, reviews, _ = _run_collector(
+        pg_conn, [_extracted(0.005, quote="Nova-3 Monolingual $0.005/min")]
+    )  # fetched page still says $0.0048 — the quote self-attests a rate the page doesn't show
+    assert summary["counts"]["auto_applied"] == 0
+    assert summary["counts"]["review"] == 1
+    assert any("quote not found" in body for _, body in reviews)
+    assert len(_effective_nova3(pg_conn)) == 1  # untouched
