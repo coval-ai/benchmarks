@@ -256,13 +256,15 @@ class RunWriter:
         judge_output_tokens: int | None = None,
         judge_audio_seconds: float | None = None,
         judge_cost_usd: float | None = None,
-    ) -> None:
+    ) -> float | None:
         """Set ``finished_at = now()``, ``status`` / ``error``, and spend on a run row.
 
         ``total_cost_usd`` is summed from the run's persisted COST_USD rows in
         SQL (not from memory) so a SIGTERM-cancelled run still rolls up every
         row its tasks flushed, plus *judge_cost_usd*. Runs with neither stay
-        NULL — no fabricated zeros.
+        NULL — no fabricated zeros. Returns the persisted total so telemetry
+        reports exactly what the DB recorded, never an in-memory sum that a
+        rolled-back batch could inflate.
         """
         sql = """
             UPDATE benchmarks_v2.runs
@@ -286,9 +288,10 @@ class RunWriter:
                       AND r.status = 'success'
                 )
             WHERE id = %(run_id)s
+            RETURNING total_cost_usd
         """
         async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
                     sql,
                     {
@@ -301,7 +304,10 @@ class RunWriter:
                         "run_id": run_id,
                     },
                 )
+                row = await cur.fetchone()
             await conn.commit()
+        total = row["total_cost_usd"] if row else None
+        return float(total) if total is not None else None
 
     async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
         """True if a succeeded or partial run already holds rows for this Coval run.

@@ -352,7 +352,7 @@ def _append_cost_row(
     quantity → no row, never a zero.
     """
     first = results[0]
-    rates = pricing.effective_rates_cached(first.provider, first.model)
+    rates = pricing.effective_rates_cached(first.provider, first.model, first.benchmark)
     cost = importlib.import_module("coval_bench.metrics").compute_cost_usd(first, rates)
     if cost is None:
         key = (first.provider, first.model)
@@ -1061,6 +1061,47 @@ def _emit_posthog(client: Posthog | None, event: str, properties: dict[str, Any]
         logger.warning("posthog_emit_failed", event_name=event, exc_info=True)
 
 
+def _emit_run_cost_event(
+    posthog_client: Posthog | None,
+    *,
+    run_id: int,
+    benchmark_kind: str,
+    persisted_total: Any,  # noqa: ANN401 — float from RunWriter; mocks pass through
+    judge_cost: float | None,
+    typed_results: list[Any],
+    sigterm: bool = False,
+) -> None:
+    """Internal spend telemetry — one event per run so PostHog can chart spend.
+
+    ``total_cost_usd`` is the DB-persisted rollup returned by ``finish_run``,
+    never an in-memory sum that a rolled-back batch could inflate; the top-5
+    breakdown is in-memory and therefore approximate on persist failures.
+    Best-effort like every ``_emit_posthog`` call.
+    """
+    total = persisted_total if isinstance(persisted_total, (int, float)) else None
+    model_costs: dict[str, float] = defaultdict(float)
+    for r in typed_results:
+        if r.metric_type == Metric.COST_USD and r.metric_value is not None:
+            model_costs[f"{r.provider}/{r.model}"] += r.metric_value
+    if total is None and not model_costs and judge_cost is None:
+        return
+    _emit_posthog(
+        posthog_client,
+        "benchmark_run_cost",
+        {
+            "run_id": run_id,
+            "benchmark_kind": benchmark_kind,
+            "total_cost_usd": total,
+            "judge_cost_usd": judge_cost,
+            "top_model_costs": dict(
+                sorted(model_costs.items(), key=lambda kv: kv[1], reverse=True)[:5]
+            ),
+            "sigterm": sigterm,
+            "$process_person_profile": False,
+        },
+    )
+
+
 # Transient-failure retry for the end-of-run bucket refresh.
 _BUCKET_REFRESH_ATTEMPTS = 3
 _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
@@ -1414,7 +1455,9 @@ async def run_benchmarks(
             else:
                 final_status = RunStatus.PARTIAL
 
-            await writer.finish_run(run_id, status=final_status, error=None, **_judge_totals())
+            persisted_cost = await writer.finish_run(
+                run_id, status=final_status, error=None, **_judge_totals()
+            )
 
             # After the row is stored, never before: if finish_run raises, the outer
             # handler is the only thing that should report, otherwise a partial run
@@ -1476,29 +1519,14 @@ async def run_benchmarks(
                 },
             )
 
-            # Internal spend telemetry — one event per run so PostHog can chart
-            # spend with no UI work. Best-effort like every _emit_posthog call.
-            model_costs: dict[str, float] = defaultdict(float)
-            for r in typed_results:
-                if r.metric_type == Metric.COST_USD and r.metric_value is not None:
-                    model_costs[f"{r.provider}/{r.model}"] += r.metric_value
-            judge_cost = _judge_cost()
-            if model_costs or judge_cost is not None:
-                run_cost = sum(model_costs.values()) + (judge_cost or 0.0)
-                _emit_posthog(
-                    posthog_client,
-                    "benchmark_run_cost",
-                    {
-                        "run_id": run_id,
-                        "benchmark_kind": benchmark_kind,
-                        "total_cost_usd": run_cost,
-                        "judge_cost_usd": judge_cost,
-                        "top_model_costs": dict(
-                            sorted(model_costs.items(), key=lambda kv: kv[1], reverse=True)[:5]
-                        ),
-                        "$process_person_profile": False,
-                    },
-                )
+            _emit_run_cost_event(
+                posthog_client,
+                run_id=run_id,
+                benchmark_kind=benchmark_kind,
+                persisted_total=persisted_cost,
+                judge_cost=_judge_cost(),
+                typed_results=typed_results,
+            )
             return summary
 
         except asyncio.CancelledError:
@@ -1513,8 +1541,9 @@ async def run_benchmarks(
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)
+            sigterm_cost: Any = None
             try:
-                await asyncio.shield(
+                sigterm_cost = await asyncio.shield(
                     writer.finish_run(
                         run_id,
                         status=RunStatus.PARTIAL,
@@ -1544,6 +1573,17 @@ async def run_benchmarks(
                 )
                 # Run row is PARTIAL, so its bucket qualifies.
                 await asyncio.shield(_refresh_series_bucket(writer, run_id, settings))
+                # Spend persisted by the incremental flush must reach the
+                # PostHog charts too, not just the run row.
+                _emit_run_cost_event(
+                    posthog_client,
+                    run_id=run_id,
+                    benchmark_kind=benchmark_kind,
+                    persisted_total=sigterm_cost,
+                    judge_cost=_judge_cost(),
+                    typed_results=typed_results,
+                    sigterm=True,
+                )
             finished_at = datetime.now(tz=UTC)
             sigterm_duration_s = (finished_at - started_at).total_seconds()
             logger.warning(

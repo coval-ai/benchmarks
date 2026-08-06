@@ -2111,7 +2111,7 @@ class _StubPricing:
     async def load_cache(self) -> None:
         return None
 
-    def effective_rates_cached(self, provider: str, model: str) -> list[Any]:
+    def effective_rates_cached(self, provider: str, model: str, benchmark: Any = None) -> list[Any]:
         from datetime import date
         from decimal import Decimal
 
