@@ -213,6 +213,8 @@ class XaiSTTProvider(STTProvider):
 
                 if event_type == "transcript.done":
                     done_received = True
+                    if isinstance(event.get("duration"), (int, float)):
+                        result.billable_seconds = float(event["duration"])
                     done_transcript = str(event.get("text", "")).strip() or None
                     if done_transcript:
                         set_first_token(result, done_transcript, now=now)

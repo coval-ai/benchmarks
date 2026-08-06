@@ -60,6 +60,9 @@ async def test_mistral_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) 
     assert result.first_token_content == "hello"  # noqa: S105 - transcript fixture text
     assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
+    assert result.input_tokens == 0
+    assert result.output_tokens == 12
+    assert result.total_tokens == 12
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
 

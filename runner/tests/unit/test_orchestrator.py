@@ -48,6 +48,7 @@ from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
     _stt_silent_failure,
+    _transcribe_with_whisper,
     run_benchmarks,
 )
 from coval_bench.runner.retry import with_retry
@@ -293,6 +294,10 @@ def settings() -> Settings:
 async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     """1-item dataset, 2 STT providers, happy path → SUCCEEDED."""
     good = _good_transcription()
+    good.input_tokens = 5
+    good.output_tokens = 7
+    good.total_tokens = 12
+    good.billable_seconds = 2.5
 
     provider_a = MagicMock()
     provider_a.measure_ttft = AsyncMock(return_value=good)
@@ -338,7 +343,23 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     # The default STT matrix has additional deepgram models (nova-3, flux), so
     # both deepgram and elevenlabs each fire multiple times via the same mock.
     assert writer.record_results.await_count >= 2
-    writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
+    writer.finish_run.assert_awaited_once_with(
+        1,
+        status=RunStatus.SUCCEEDED,
+        error=None,
+        judge_input_tokens=None,
+        judge_output_tokens=None,
+        judge_audio_seconds=None,
+    )
+    # Usage quantities ride every row of the item: the dataset item's audio
+    # duration plus whatever the provider reported.
+    rows = _recorded_rows(writer)
+    assert rows
+    assert all(r.audio_seconds_in == 1.0 for r in rows)
+    assert all(r.input_tokens == 5 for r in rows)
+    assert all(r.output_tokens == 7 for r in rows)
+    assert all(r.total_tokens == 12 for r in rows)
+    assert all(r.billable_seconds == 2.5 for r in rows)
     writer.refresh_stats_matviews.assert_awaited_once_with()
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
@@ -389,7 +410,14 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     assert summary.status == str(RunStatus.PARTIAL)
     assert summary.fail_count >= 1
     assert summary.success_count >= 1
-    writer.finish_run.assert_awaited_once_with(1, status=RunStatus.PARTIAL, error=None)
+    writer.finish_run.assert_awaited_once_with(
+        1,
+        status=RunStatus.PARTIAL,
+        error=None,
+        judge_input_tokens=None,
+        judge_output_tokens=None,
+        judge_audio_seconds=None,
+    )
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
@@ -2017,6 +2045,80 @@ async def test_tts_provider_error_wins_over_contamination(
     assert "TTFARoundtrip" not in by_metric
     assert "TTFALeadingSilence" not in by_metric
     assert summary.success_count == 0
+
+
+@pytest.mark.asyncio
+async def test_tts_usage_quantities_recorded(audio_file: Path, settings: Settings) -> None:
+    """Every TTS row carries characters_in, measured output duration, and provider usage."""
+    hume_entry = _registry_entry(Benchmark.TTS, "hume")
+    tts_result = TTSResult(
+        provider="hume",
+        model=hume_entry.model,
+        voice=hume_entry.voice or "v",
+        ttfa_ms=120.0,
+        audio_path=audio_file,
+        error=None,
+        http_version="HTTP/2",
+        billable_seconds=1.9,
+    )
+
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(return_value=tts_result)
+    provider_cls = MagicMock(return_value=provider_inst)
+
+    matrix = [
+        *_paused_registry(Benchmark.TTS),
+        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+    ]
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_items=[_make_tts_item("hello world")],
+        tts_providers={"hume": provider_cls},
+        run=run,
+        writer=writer,
+    ) as _:
+        with patch(
+            "coval_bench.runner.orchestrator._transcribe_with_whisper",
+            return_value="hello world",
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    rows = _recorded_rows(writer)
+    assert {r.metric_type for r in rows} == {"TTFA", "WER"}
+    # audio_file is 512 PCM16 frames at 16 kHz.
+    assert all(r.characters_in == len("hello world") for r in rows)
+    assert all(r.audio_seconds_out == pytest.approx(512 / 16000) for r in rows)
+    assert all(r.billable_seconds == 1.9 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_transcribe_with_whisper_accumulates_judge_usage(
+    audio_file: Path, settings: Settings
+) -> None:
+    """Both whisper usage shapes accumulate: duration-type seconds, token-type tokens."""
+    response = MagicMock()
+    response.text = "hello"
+    response.usage = MagicMock(type="duration", seconds=2.0)
+    client = MagicMock()
+    client.audio.transcriptions.create = AsyncMock(return_value=response)
+
+    judge_usage: dict[str, float] = {}
+    with patch("openai.AsyncOpenAI", return_value=client):
+        assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
+        assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
+        response.usage = MagicMock(type="tokens", input_tokens=7, output_tokens=3)
+        assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
+
+    assert judge_usage == {"audio_seconds": 4.0, "input_tokens": 7, "output_tokens": 3}
 
 
 @pytest.mark.asyncio

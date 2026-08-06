@@ -53,6 +53,12 @@ class TranscriptionResult:
     vad_events_count: int | None = None
     vad_first_event_content: str | None = None
 
+    # Native billing units as reported by the provider (never derived)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    billable_seconds: float | None = None
+
 
 @dataclass
 class TTSResult:
@@ -70,6 +76,12 @@ class TTSResult:
     # The leading-silence part of ttfa_ms; None when offset detection didn't
     # run or failed, in which case ttfa_ms is arrival-only and has no split.
     leading_silence_ms: float | None = None
+    # Native billing units as reported by the provider (never derived)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    characters_in: int | None = None
+    billable_seconds: float | None = None
 
 
 # ---------------------------------------------------------------------------

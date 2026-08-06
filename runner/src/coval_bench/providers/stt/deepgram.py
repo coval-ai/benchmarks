@@ -261,6 +261,14 @@ class DeepgramProvider(STTProvider):
                         final_event.set()
                     continue
 
+                # is_final Results frames partition the audio, so their durations
+                # sum to the billed total — accumulate before the empty-transcript
+                # skip, which would drop silent tail segments.
+                if msg.get("is_final") and isinstance(msg.get("duration"), (int, float)):
+                    result.billable_seconds = (result.billable_seconds or 0.0) + float(
+                        msg["duration"]
+                    )
+
                 transcript = self._extract_transcript(msg)
                 if not transcript:
                     continue

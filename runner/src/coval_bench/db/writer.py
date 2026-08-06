@@ -114,9 +114,11 @@ class RunWriter:
                 (run_id, provider, model, voice, benchmark, metric_type,
                  metric_value, metric_units, audio_filename, transcript,
                  status, error, http_version, submit_to_headers_ms,
-                 wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct)
+                 wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
+                 input_tokens, output_tokens, total_tokens, billable_seconds,
+                 characters_in, audio_seconds_in, audio_seconds_out)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         params = [
             (
@@ -137,6 +139,13 @@ class RunWriter:
                 r.wer_insertions_pct,
                 r.wer_deletions_pct,
                 r.wer_substitutions_pct,
+                r.input_tokens,
+                r.output_tokens,
+                r.total_tokens,
+                r.billable_seconds,
+                r.characters_in,
+                r.audio_seconds_in,
+                r.audio_seconds_out,
             )
             for r in results
         ]
@@ -243,18 +252,34 @@ class RunWriter:
         *,
         status: RunStatus,
         error: str | None = None,
+        judge_input_tokens: int | None = None,
+        judge_output_tokens: int | None = None,
+        judge_audio_seconds: float | None = None,
     ) -> None:
-        """Set ``finished_at = now()`` and update ``status`` / ``error`` on a run row."""
+        """Set ``finished_at = now()``, ``status`` / ``error``, and judge spend on a run row."""
         sql = """
             UPDATE benchmarks_v2.runs
             SET finished_at = now(),
                 status = %s,
-                error  = %s
+                error  = %s,
+                judge_input_tokens = %s,
+                judge_output_tokens = %s,
+                judge_audio_seconds = %s
             WHERE id = %s
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (status, error, run_id))
+                await cur.execute(
+                    sql,
+                    (
+                        status,
+                        error,
+                        judge_input_tokens,
+                        judge_output_tokens,
+                        judge_audio_seconds,
+                        run_id,
+                    ),
+                )
             await conn.commit()
 
     async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:

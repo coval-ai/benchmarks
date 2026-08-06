@@ -58,6 +58,9 @@ async def test_openai_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -
     assert result.ttft_seconds >= 0
     assert result.audio_to_final_seconds is not None
     assert result.complete_transcript == "hello world how are you"
+    assert result.input_tokens == 33
+    assert result.output_tokens == 11
+    assert result.total_tokens == 44
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
 

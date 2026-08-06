@@ -156,6 +156,10 @@ class CartesiaSTTProvider(STTProvider):
                 if msg_type != "transcript":
                     continue
 
+                # Cumulative processed-audio duration; the last frame carries the total.
+                if isinstance(msg.get("duration"), (int, float)):
+                    result.billable_seconds = float(msg["duration"])
+
                 # Keep the raw text: Cartesia deltas carry their own leading spaces,
                 # which are the word separators. Strip only for the empty check + display.
                 text = str(msg.get("text", ""))

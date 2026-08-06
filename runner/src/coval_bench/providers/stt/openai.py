@@ -240,6 +240,11 @@ class OpenAISTTProvider(STTProvider):
                     continue
 
                 if event_type == "conversation.item.input_audio_transcription.completed":
+                    usage = event.get("usage")
+                    if isinstance(usage, dict):
+                        result.input_tokens = usage.get("input_tokens")
+                        result.output_tokens = usage.get("output_tokens")
+                        result.total_tokens = usage.get("total_tokens")
                     transcript = str(event.get("transcript", "")).strip()
                     if not transcript:
                         continue

@@ -59,6 +59,8 @@ async def test_cartesia_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes)
     assert result.first_token_content is not None
     assert "hello" in result.first_token_content.lower()
     assert result.complete_transcript == "hello world how are you"
+    # duration is cumulative; the last transcript frame carries the total
+    assert result.billable_seconds == 2.4
 
 
 # ---------------------------------------------------------------------------

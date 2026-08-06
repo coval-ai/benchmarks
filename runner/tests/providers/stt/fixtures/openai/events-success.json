@@ -17,6 +17,13 @@
     "type": "conversation.item.input_audio_transcription.completed",
     "item_id": "item_001",
     "content_index": 0,
-    "transcript": "hello world how are you"
+    "transcript": "hello world how are you",
+    "usage": {
+      "type": "tokens",
+      "input_tokens": 33,
+      "input_token_details": {"text_tokens": 0, "audio_tokens": 33},
+      "output_tokens": 11,
+      "total_tokens": 44
+    }
   }
 ]

@@ -70,6 +70,8 @@ async def test_deepgram_nova3_success(fake_api_key: SecretStr, audio_pcm_bytes: 
     # VAD: 1 SpeechStarted in fixture
     assert result.vad_events_count == 1
     assert result.vad_first_detected is not None
+    # One is_final Results frame with duration 3.0
+    assert result.billable_seconds == 3.0
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +476,8 @@ async def test_deepgram_audio_to_final_uses_last_final(
     complete_lower = result.complete_transcript.lower()
     assert "hello world" in complete_lower
     assert "how are you" in complete_lower
+    # is_final durations (1.5 + 3.0) sum to the billed total
+    assert result.billable_seconds == 4.5
 
 
 # ---------------------------------------------------------------------------

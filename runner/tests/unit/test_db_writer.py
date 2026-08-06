@@ -113,6 +113,9 @@ def _make_result(
         metric_value=0.05 + idx * 0.01,
         metric_units="ratio",
         status=status,
+        total_tokens=12,
+        billable_seconds=2.5,
+        audio_seconds_in=3.0,
     )
 
 
@@ -148,6 +151,23 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
         )
         columns = {row[0] for row in cur.fetchall()}
     assert {"http_version", "submit_to_headers_ms"} <= columns
+    assert {
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "billable_seconds",
+        "characters_in",
+        "audio_seconds_in",
+        "audio_seconds_out",
+    } <= columns
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'benchmarks_v2' AND table_name = 'runs'"
+        )
+        run_columns = {row[0] for row in cur.fetchall()}
+    assert {"judge_input_tokens", "judge_output_tokens", "judge_audio_seconds"} <= run_columns
 
     _downgrade_migrations(pg_conn)
 
@@ -226,7 +246,11 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
             for i in range(3):
                 await writer.record_result(_make_result(run.id, idx=i))
 
-            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+            await writer.finish_run(
+                run.id,
+                status=RunStatus.SUCCEEDED,
+                judge_audio_seconds=8.4,
+            )
         finally:
             await pool.close()
 
@@ -234,22 +258,31 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
         pg_conn.autocommit = True
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT status, finished_at FROM benchmarks_v2.runs WHERE id = %s",
+                "SELECT status, finished_at, judge_input_tokens, judge_audio_seconds "
+                "FROM benchmarks_v2.runs WHERE id = %s",
                 (run.id,),
             )
             row = cur.fetchone()
         assert row is not None
         assert row[0] == "succeeded"
         assert row[1] is not None
+        assert row[2] is None
+        assert row[3] == pytest.approx(8.4)
 
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
+                "SELECT count(*), min(total_tokens), min(billable_seconds), "
+                "min(audio_seconds_in), min(characters_in) "
+                "FROM benchmarks_v2.results WHERE run_id = %s",
                 (run.id,),
             )
             count_row = cur.fetchone()
         assert count_row is not None
         assert count_row[0] == 3
+        assert count_row[1] == 12
+        assert count_row[2] == pytest.approx(2.5)
+        assert count_row[3] == pytest.approx(3.0)
+        assert count_row[4] is None
 
     asyncio.run(_run())
 

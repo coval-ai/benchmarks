@@ -186,6 +186,10 @@ class InworldSTTProvider(STTProvider):
                     break
 
                 if "usage" in msg:
+                    if isinstance(msg["usage"], dict):
+                        duration = msg["usage"].get("durationSeconds")
+                        if isinstance(duration, (int, float)):
+                            result.billable_seconds = float(duration)
                     break
 
                 transcription = msg.get("result", {}).get("transcription")

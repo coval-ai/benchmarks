@@ -217,6 +217,11 @@ class MistralSTTProvider(STTProvider):
                         delta_texts.append(text)
                         result.partial_transcripts.append(text)
                 elif msg_type == "transcription.done":
+                    usage = msg.get("usage")
+                    if isinstance(usage, dict):
+                        result.input_tokens = usage.get("prompt_tokens")
+                        result.output_tokens = usage.get("completion_tokens")
+                        result.total_tokens = usage.get("total_tokens")
                     text = str(msg.get("text", "")).strip()
                     result.complete_transcript = text or None
                     # A done with no text after a delta-less session is a dead

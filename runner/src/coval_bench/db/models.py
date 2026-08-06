@@ -61,6 +61,10 @@ class Run(BaseModel):
     dataset_sha256: str
     status: RunStatus
     error: str | None = None
+    # whisper-1 judge spend for the run; null before migration 0015.
+    judge_input_tokens: int | None = None
+    judge_output_tokens: int | None = None
+    judge_audio_seconds: float | None = None
 
 
 class Result(BaseModel):
@@ -85,6 +89,15 @@ class Result(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
+    # Raw usage in native billing units; null before migration 0015 or when
+    # the provider reports nothing.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    billable_seconds: float | None = None
+    characters_in: int | None = None
+    audio_seconds_in: float | None = None
+    audio_seconds_out: float | None = None
 
 
 class VoteOutcome(StrEnum):

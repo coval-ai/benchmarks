@@ -250,11 +250,18 @@ def _log_run_outcome(
         log_run_partial(f"providers failed every item: {'; '.join(dead)}")
 
 
-async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
+async def _transcribe_with_whisper(
+    audio_path: Path, settings: Settings, judge_usage: dict[str, float] | None = None
+) -> str:
     """Transcribe *audio_path* with OpenAI ``whisper-1`` and return the text.
 
     Used by the TTS path to compute WER against the synthesized audio.
     Raises on API error — caller handles and records as a failed Result.
+
+    *judge_usage* is a run-scoped accumulator for the judge's own billed
+    quantities: whisper-1 reports duration-type usage (its billing unit), a
+    token-billed judge model would report token-type. Single-threaded asyncio
+    makes the read-modify-write safe without a lock.
     """
     import openai
 
@@ -268,6 +275,13 @@ async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
             model="whisper-1",
             file=fh,
         )
+    usage = getattr(response, "usage", None)
+    if judge_usage is not None and usage is not None:
+        if usage.type == "tokens":
+            judge_usage["input_tokens"] = judge_usage.get("input_tokens", 0) + usage.input_tokens
+            judge_usage["output_tokens"] = judge_usage.get("output_tokens", 0) + usage.output_tokens
+        elif usage.type == "duration":
+            judge_usage["audio_seconds"] = judge_usage.get("audio_seconds", 0.0) + usage.seconds
     return str(response.text)
 
 
@@ -422,6 +436,16 @@ async def _run_stt_item(
         complete_transcript = (
             transcription_result.complete_transcript if transcription_result else None
         )
+        # Raw usage in native billing units, identical on every row of this item;
+        # duration_sec reflects the trimmed audio actually sent.
+        tr = transcription_result
+        usage_fields = {
+            "input_tokens": tr.input_tokens if tr else None,
+            "output_tokens": tr.output_tokens if tr else None,
+            "total_tokens": tr.total_tokens if tr else None,
+            "billable_seconds": tr.billable_seconds if tr else None,
+            "audio_seconds_in": duration_sec,
+        }
 
         # 1. TTFT — time-to-first-partial from first audio.
         ttft_status, ttft_error = _metric_outcome(
@@ -442,6 +466,7 @@ async def _run_stt_item(
                     transcript=complete_transcript,
                     status=ttft_status,
                     error=ttft_error,
+                    **usage_fields,
                 )
             )
             if ttft_status is ResultStatus.SUCCESS:
@@ -469,6 +494,7 @@ async def _run_stt_item(
                 transcript=complete_transcript,
                 status=atf_status,
                 error=atf_error,
+                **usage_fields,
             )
         )
         if atf_status is ResultStatus.SUCCESS:
@@ -514,6 +540,7 @@ async def _run_stt_item(
                     transcript=complete_transcript,
                     status=ttfs_status,
                     error=ttfs_error,
+                    **usage_fields,
                 )
             )
             if ttfs_status is ResultStatus.SUCCESS:
@@ -555,6 +582,7 @@ async def _run_stt_item(
                 transcript=complete_transcript,
                 status=rtf_status,
                 error=rtf_error,
+                **usage_fields,
             )
         )
         if rtf_status is ResultStatus.SUCCESS and rtf_value is not None:
@@ -584,6 +612,7 @@ async def _run_stt_item(
                         status=ResultStatus.SUCCESS,
                         error=None,
                         **wer_result.error_percentages,
+                        **usage_fields,
                     )
                 )
                 logger.debug(
@@ -616,6 +645,7 @@ async def _run_stt_item(
                         transcript=complete_transcript,
                         status=ResultStatus.FAILED,
                         error=_truncate(str(exc)),
+                        **usage_fields,
                     )
                 )
 
@@ -674,6 +704,7 @@ async def _run_tts_item(
     settings: Settings,
     voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
+    judge_usage: dict[str, float] | None = None,
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
 
@@ -732,6 +763,21 @@ async def _run_tts_item(
         item_error = item_error or (tts_result.error if tts_result is not None else None)
         ttfa_ms = tts_result.ttfa_ms if tts_result else None
 
+        audio_seconds_out: float | None = None
+        if audio_path is not None and audio_path.exists():
+            with contextlib.suppress(Exception), wave.open(str(audio_path), "rb") as wav_file:
+                audio_seconds_out = wav_file.getnframes() / wav_file.getframerate()
+
+        # Raw usage in native billing units, identical on every row of this item.
+        usage_fields = {
+            "input_tokens": tts_result.input_tokens if tts_result else None,
+            "output_tokens": tts_result.output_tokens if tts_result else None,
+            "total_tokens": tts_result.total_tokens if tts_result else None,
+            "billable_seconds": tts_result.billable_seconds if tts_result else None,
+            "characters_in": len(transcript),
+            "audio_seconds_out": audio_seconds_out,
+        }
+
         try:
             # 1. TTFA
             ttfa_status, ttfa_error = _metric_outcome(
@@ -772,6 +818,7 @@ async def _run_tts_item(
                     error=ttfa_error,
                     http_version=tts_result.http_version if tts_result else None,
                     submit_to_headers_ms=tts_result.submit_to_headers_ms if tts_result else None,
+                    **usage_fields,
                 )
             )
 
@@ -803,6 +850,7 @@ async def _run_tts_item(
                             transcript=transcript,
                             status=ResultStatus.SUCCESS,
                             error=None,
+                            **usage_fields,
                         )
                     )
 
@@ -813,7 +861,9 @@ async def _run_tts_item(
                 # transient Whisper outage doesn't drag the provider's run to PARTIAL.
                 whisper_transcript: str | None = None
                 try:
-                    whisper_transcript = await _transcribe_with_whisper(audio_path, settings)
+                    whisper_transcript = await _transcribe_with_whisper(
+                        audio_path, settings, judge_usage
+                    )
                 except Exception as exc:
                     logger.warning(
                         "tts_wer_transcription_failed",
@@ -842,6 +892,7 @@ async def _run_tts_item(
                                 status=ResultStatus.SUCCESS,
                                 error=None,
                                 **wer_result.error_percentages,
+                                **usage_fields,
                             )
                         )
                         logger.debug(
@@ -872,6 +923,7 @@ async def _run_tts_item(
                                 transcript=whisper_transcript,
                                 status=ResultStatus.FAILED,
                                 error=_truncate(str(exc)),
+                                **usage_fields,
                             )
                         )
         finally:
@@ -1083,6 +1135,17 @@ async def run_benchmarks(
         all_results: list[Any] = []
         sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
 
+        # Run-scoped whisper-judge spend, filled by _transcribe_with_whisper.
+        # Empty keys stay NULL on the run row rather than fabricating zeros.
+        judge_usage: dict[str, float] = {}
+
+        def _judge_totals() -> dict[str, Any]:
+            return {
+                "judge_input_tokens": judge_usage.get("input_tokens"),
+                "judge_output_tokens": judge_usage.get("output_tokens"),
+                "judge_audio_seconds": judge_usage.get("audio_seconds"),
+            }
+
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
         # We catch it, cancel the in-flight gather, and finalize the run row as
         # PARTIAL so timed-out executions surface in /v1/results instead of
@@ -1209,6 +1272,7 @@ async def run_benchmarks(
                         settings=settings,
                         voice=voice,
                         writer=writer,
+                        judge_usage=judge_usage,
                     )
                     for entry, item, voice in tts_pairs
                 ]
@@ -1245,7 +1309,7 @@ async def run_benchmarks(
             else:
                 final_status = RunStatus.PARTIAL
 
-            await writer.finish_run(run_id, status=final_status, error=None)
+            await writer.finish_run(run_id, status=final_status, error=None, **_judge_totals())
 
             # After the row is stored, never before: if finish_run raises, the outer
             # handler is the only thing that should report, otherwise a partial run
@@ -1326,6 +1390,7 @@ async def run_benchmarks(
                         run_id,
                         status=RunStatus.PARTIAL,
                         error="sigterm-received (cloud-run-task-timeout)",
+                        **_judge_totals(),
                     )
                 )
             except Exception as write_exc:
@@ -1391,7 +1456,9 @@ async def run_benchmarks(
             err_msg = _truncate(str(exc))
             log_run_failed(err_msg, exc)
             try:
-                await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
+                await writer.finish_run(
+                    run_id, status=RunStatus.FAILED, error=err_msg, **_judge_totals()
+                )
             except Exception as write_exc:
                 logger.error(
                     "run_row_update_failed_after_failure",

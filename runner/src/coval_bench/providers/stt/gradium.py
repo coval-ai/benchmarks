@@ -165,6 +165,9 @@ class GradiumSTTProvider(STTProvider):
                 msg_type: str = msg.get("type", "")
 
                 if msg_type == "step":
+                    # Cumulative processed-audio duration; the last step carries the total.
+                    if isinstance(msg.get("total_duration_s"), (int, float)):
+                        result.billable_seconds = float(msg["total_duration_s"])
                     result.vad_events_count = (result.vad_events_count or 0) + 1
                     if result.vad_first_detected is None and result.audio_start_time is not None:
                         result.vad_first_detected = now - result.audio_start_time

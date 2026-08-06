@@ -59,6 +59,7 @@ async def test_xai_grok_stt_success(fake_api_key: SecretStr, audio_pcm_bytes: by
     assert result.first_token_content == "hello"  # noqa: S105 - transcript fixture text
     assert result.complete_transcript == "hello world how are you"
     assert result.audio_to_final_seconds is not None
+    assert result.billable_seconds == 3.0
     wer = compute_wer("hello world how are you", result.complete_transcript)
     assert wer.wer_percentage == pytest.approx(0.0)
 

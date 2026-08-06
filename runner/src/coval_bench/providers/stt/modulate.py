@@ -191,6 +191,8 @@ class ModulateSTTProvider(STTProvider):
                     break
 
                 if msg_type == "done":
+                    if isinstance(msg.get("duration_ms"), (int, float)):
+                        result.billable_seconds = float(msg["duration_ms"]) / 1000.0
                     break
 
                 payload = msg.get(msg_type)
