@@ -6,13 +6,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useState, type ReactNode } from "react";
-import { captureInternalKeyFromUrl, stripInternalKeyFromUrl } from "@/lib/api/internalKey";
+import { applyTokensFromUrl } from "@/lib/api/accessTokens";
 
 export function ApiProviders({ children }: { children: ReactNode }) {
-  // Store ?internal=<key> before the first query fires (idempotent); the URL
-  // cleanup must wait until after hydration or the router restores the param.
-  if (typeof window !== "undefined") captureInternalKeyFromUrl();
-  useEffect(() => stripInternalKeyFromUrl(), []);
   const [client] = useState(
     () =>
       new QueryClient({
@@ -26,6 +22,10 @@ export function ApiProviders({ children }: { children: ReactNode }) {
         },
       })
   );
+  // Adopting ?internal=<key> / ?ea=<token>, dropping a previous caller's cached rows,
+  // and cleaning the URL all happen here: one committed effect, so the identity change
+  // cannot be lost to a replayed render, and the router cannot restore the param.
+  useEffect(() => applyTokensFromUrl(() => client.clear()), [client]);
   return (
     <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem>
       <QueryClientProvider client={client}>{children}</QueryClientProvider>

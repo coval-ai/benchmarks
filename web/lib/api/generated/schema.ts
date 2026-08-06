@@ -23,10 +23,32 @@ export interface paths {
       };
     };
   };
+  "/v1/results/aggregates/by-dataset": {
+    get: {
+      parameters: {
+        query: {
+          benchmark: components["schemas"]["BenchmarkLiteral"];
+          window?: components["schemas"]["WindowLiteral"];
+        };
+      };
+      responses: {
+        200: {
+          content: {
+            "application/json": components["schemas"]["AggregatesByDatasetResponse"];
+          };
+        };
+      };
+    };
+  };
 }
 
 export interface components {
   schemas: {
+    AggregatesByDatasetResponse: {
+      benchmark: components["schemas"]["BenchmarkLiteral"];
+      window: components["schemas"]["WindowLiteral"];
+      blocks: components["schemas"]["DatasetAggregates"][];
+    };
     AggregatesResponse: {
       benchmark: components["schemas"]["BenchmarkLiteral"];
       window: components["schemas"]["WindowLiteral"];
@@ -36,6 +58,10 @@ export interface components {
       series: components["schemas"]["SeriesPoint"][];
     };
     BenchmarkLiteral: "STT" | "TTS" | "S2S";
+    DatasetAggregates: {
+      dataset: string;
+      model_stats: components["schemas"]["ModelStatEntry"][];
+    };
     LeaderboardEntry: {
       provider: string;
       model: string;
@@ -69,6 +95,12 @@ export interface components {
       min_value: number;
       max_value: number;
       sample_count: number;
+      /** WER only: avg_value split by error type, in percentage points summing
+       *  to avg_value. Null on other metrics and on WER groups whose rows
+       *  predate the breakdown. */
+      wer_insertions_pct?: number | null;
+      wer_deletions_pct?: number | null;
+      wer_substitutions_pct?: number | null;
     };
     ModelTagOut: {
       category: components["schemas"]["TagCategory"];
@@ -121,7 +153,8 @@ export interface components {
       | "features"
       | "source"
       | "licensing"
-      | "deployment";
+      | "deployment"
+      | "region";
     TagCategoryOut: {
       category: components["schemas"]["TagCategory"];
       label: string;

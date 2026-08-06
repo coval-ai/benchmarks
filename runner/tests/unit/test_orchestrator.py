@@ -44,7 +44,12 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel, Source
-from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
+from coval_bench.runner.orchestrator import (
+    RunSummary,
+    _dead_providers,
+    _stt_silent_failure,
+    run_benchmarks,
+)
 from coval_bench.runner.retry import with_retry
 
 # ---------------------------------------------------------------------------
@@ -859,6 +864,7 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
             error=None,
             http_version="HTTP/1.1",
             submit_to_headers_ms=210.0,
+            leading_silence_ms=45.0,
         )
 
         provider_inst = MagicMock()
@@ -938,6 +944,11 @@ async def test_tts_http1_downgrade_nulls_ttfa_row(settings: Settings) -> None:
         assert ttfa_rows[0].metric_value is None
         assert "HTTP/1.1" in ttfa_rows[0].error
         assert ttfa_rows[0].http_version == "HTTP/1.1"
+
+        # A nulled TTFA writes no component rows either.
+        assert not [
+            r for r in recorded if r.metric_type.startswith("TTFA") and r.metric_type != "TTFA"
+        ]
 
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
@@ -1044,6 +1055,111 @@ async def test_tts_cold_connection_nulls_ttfa_row(settings: Settings) -> None:
 
         assert len(wer_rows) == 1
         assert wer_rows[0].status == ResultStatus.SUCCESS
+
+        assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_tts_ttfa_component_rows_reconcile(settings: Settings) -> None:
+    """A comparable TTFA with a known split writes component rows that sum back to it."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = Path(tmpdir) / "synth.wav"
+        audio_path.write_bytes(b"\x00" * 512)
+
+        tts_result = TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="IKne3meq5aSn9XLyUdCD",
+            ttfa_ms=120.0,
+            audio_path=audio_path,
+            error=None,
+            http_version="HTTP/2",
+            submit_to_headers_ms=90.0,
+            connection_reused=True,
+            leading_silence_ms=45.0,
+        )
+
+        provider_inst = MagicMock()
+        provider_inst.synthesize = AsyncMock(return_value=tts_result)
+        provider_cls = MagicMock(return_value=provider_inst)
+        provider_cls.warmup = AsyncMock(return_value=None)
+
+        tts_providers = {"elevenlabs": provider_cls}
+
+        run = _make_run()
+        writer = _make_stub_writer(run)
+
+        tts_dataset = MagicMock()
+        tts_dataset.items = [_make_tts_item("hello world")]
+
+        def _load(
+            dataset_id: str, *, settings: Any, sample_size: int | None = None, rng: Any = None
+        ) -> Any:
+            return tts_dataset
+
+        fake_pool = MagicMock()
+
+        @contextlib.asynccontextmanager
+        async def _fake_pool(s: Any) -> AsyncIterator[MagicMock]:
+            yield fake_pool
+
+        models_mod = MagicMock()
+        models_mod.Benchmark = Benchmark
+        models_mod.Result = Result
+        models_mod.ResultStatus = ResultStatus
+        models_mod.RunStatus = RunStatus
+
+        def _fake_get_db_symbols() -> tuple[Any, Any, Any, Any]:
+            return _fake_pool, MagicMock(return_value=writer), RunStatus, models_mod
+
+        compute_wer_real = __import__("coval_bench.metrics", fromlist=["compute_wer"]).compute_wer
+        compute_rtf_real = __import__("coval_bench.metrics", fromlist=["compute_rtf"]).compute_rtf
+
+        matrix = [
+            *_paused_registry(Benchmark.TTS),
+            _tts_entry("elevenlabs", "eleven_flash_v2_5", "IKne3meq5aSn9XLyUdCD"),
+        ]
+
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._get_db_symbols",
+                side_effect=_fake_get_db_symbols,
+            ),
+            patch("coval_bench.runner.orchestrator._get_stt_providers", return_value={}),
+            patch(
+                "coval_bench.runner.orchestrator._get_tts_providers",
+                return_value=tts_providers,
+            ),
+            patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load),
+            patch(
+                "coval_bench.runner.orchestrator._get_metrics",
+                return_value=(compute_wer_real, compute_rtf_real),
+            ),
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                return_value="hello world",
+            ),
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+        recorded = [r for call in writer.record_results.call_args_list for r in call.args[0]]
+        ttfa = [r for r in recorded if r.metric_type == "TTFA"]
+        roundtrip = [r for r in recorded if r.metric_type == "TTFARoundtrip"]
+        silence = [r for r in recorded if r.metric_type == "TTFALeadingSilence"]
+
+        assert len(ttfa) == len(roundtrip) == len(silence) == 1
+        assert ttfa[0].metric_value == 120.0
+        assert roundtrip[0].metric_value == 75.0
+        assert silence[0].metric_value == 45.0
+        for row in (roundtrip[0], silence[0]):
+            assert row.status == ResultStatus.SUCCESS
+            assert row.metric_units == "milliseconds"
+            assert row.voice == "IKne3meq5aSn9XLyUdCD"
 
         assert writer.finish_run.call_args.kwargs["status"] == RunStatus.SUCCEEDED
 
@@ -1633,7 +1749,9 @@ async def test_stt_empty_result_marked_failed(audio_file: Path, settings: Settin
     for mt in ("TTFT", "AudioToFinal", "RTF"):
         assert by_metric[mt].status == ResultStatus.FAILED
         error = by_metric[mt].error
-        assert error is not None and "produced" in error
+        # A silent return is diagnosed as such, not left on the generic
+        # "no <METRIC> produced" fallback that hides an unmatched error frame.
+        assert error == "provider closed the stream without sending a transcript or an error"
     assert "WER" not in by_metric  # no transcript → no WER row
     assert summary.success_count == 0
     assert summary.status == str(RunStatus.FAILED)
@@ -1859,6 +1977,7 @@ async def test_tts_provider_error_wins_over_contamination(
         audio_path=None,
         error="synth stream closed early",
         http_version="HTTP/1.1",  # would otherwise trigger the contamination message
+        leading_silence_ms=45.0,  # split present — a failed row must not emit components
     )
 
     provider_inst = MagicMock()
@@ -1894,6 +2013,9 @@ async def test_tts_provider_error_wins_over_contamination(
     assert "HTTP/1.1" not in (ttfa.error or "")  # contamination message must not win
     assert ttfa.http_version == "HTTP/1.1"  # diagnostic still recorded
     assert "WER" not in by_metric  # errored synth → no WER scoring
+    # A failed TTFA writes no component rows even though its split was known.
+    assert "TTFARoundtrip" not in by_metric
+    assert "TTFALeadingSilence" not in by_metric
     assert summary.success_count == 0
 
 
@@ -2098,7 +2220,10 @@ async def test_stt_empty_result_logs_item_failure(audio_file: Path, settings: Se
     assert event["item"] == "0001.wav"
     # Every silent FAILED metric is carried with its reason.
     assert {"TTFT", "AudioToFinal", "RTF"} <= set(event["reasons"])
-    assert all("produced" in reason for reason in event["reasons"].values())
+    assert all(
+        reason == "provider closed the stream without sending a transcript or an error"
+        for reason in event["reasons"].values()
+    )
 
 
 @pytest.mark.asyncio
@@ -2449,3 +2574,390 @@ async def test_posthog_capture_failure_does_not_fail_run(
 
     assert summary.status == str(RunStatus.SUCCEEDED)
     fake.capture.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Run-level alert events — RUN_FAILED / RUN_PARTIAL
+#
+# These literal event strings are what the Cloud Logging metrics in
+# benchmark-infra filter on, so the assertions below are a contract with the
+# alerting stack, not just internal logging detail.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_total_failure_emits_run_failed(audio_file: Path, settings: Settings) -> None:
+    """Every row failing logs RUN_FAILED, so a silent wipeout still pages."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert summary.status == str(RunStatus.FAILED)
+    failed = _events(captured, "RUN_FAILED")
+    assert len(failed) == 1, "exactly one run-level event per run"
+    assert "result rows failed" in failed[0]["error"]
+    # A total loss is already covered by RUN_FAILED; paging twice is the bug
+    # the s2s metric comment warns about.
+    assert _events(captured, "RUN_PARTIAL") == []
+
+
+@pytest.mark.asyncio
+async def test_partial_run_emits_run_partial_with_cause(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A provider failing every item is named, with its reason, in RUN_PARTIAL."""
+    provider_ok = MagicMock()
+    provider_ok.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    provider_bad = MagicMock()
+    provider_bad.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={
+            "deepgram": MagicMock(return_value=provider_ok),
+            "elevenlabs": MagicMock(return_value=provider_bad),
+        },
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[
+                    _stt_entry("deepgram", "nova-2"),
+                    _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                ],
+            )
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    partial = _events(captured, "RUN_PARTIAL")
+    assert len(partial) == 1
+    message = partial[0]["error"]
+    # The dead provider is named and its cause carried, so Slack's Logs link
+    # lands on an actionable line.
+    assert "elevenlabs/scribe_v2_realtime" in message
+    assert "boom" in message
+    # The healthy provider must never appear in the failure list.
+    assert "deepgram" not in message
+    assert _events(captured, "RUN_FAILED") == []
+
+
+@pytest.mark.asyncio
+async def test_healthy_run_emits_no_run_event(audio_file: Path, settings: Settings) -> None:
+    """A fully successful run stays quiet — no alert event of either kind."""
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=_only_stt_matrix("deepgram", "nova-2"),
+            )
+
+    assert summary.status == str(RunStatus.SUCCEEDED)
+    assert _events(captured, "RUN_FAILED") == []
+    assert _events(captured, "RUN_PARTIAL") == []
+
+
+def _result(provider: str, benchmark: Benchmark, status: ResultStatus, error: str | None) -> Result:
+    return Result(
+        run_id=1,
+        provider=provider,
+        model="m1",
+        benchmark=benchmark,
+        metric_type="TTFT",
+        metric_value=None if status is ResultStatus.FAILED else 1.0,
+        metric_units="ms",
+        status=status,
+        error=error,
+    )
+
+
+def test_dead_providers_keyed_by_benchmark() -> None:
+    """A dead TTS model is not masked by the same provider's healthy STT rows."""
+    results = [
+        _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio"),
+        _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio"),
+        _result("openai", Benchmark.STT, ResultStatus.SUCCESS, None),
+    ]
+
+    dead = _dead_providers(results, ResultStatus)
+
+    assert dead == ["TTS:openai/m1 (no audio)"]
+
+
+def test_dead_providers_reports_most_common_reason() -> None:
+    """The reason carried is the dominant one, not whichever row came first."""
+    results = [
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "one-off blip"),
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "stream closed"),
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "stream closed"),
+    ]
+
+    dead = _dead_providers(results, ResultStatus)
+
+    assert dead == ["TTS:hume/m1 (stream closed)"]
+
+
+def test_dead_providers_skips_partly_healthy_provider() -> None:
+    """One flaky item is not a dead provider — that threshold is what avoids noise."""
+    results = [
+        _result("deepgram", Benchmark.STT, ResultStatus.FAILED, "timeout"),
+        _result("deepgram", Benchmark.STT, ResultStatus.SUCCESS, None),
+    ]
+
+    assert _dead_providers(results, ResultStatus) == []
+
+
+def test_dead_providers_handles_missing_reason() -> None:
+    """A failed row with no error still names the provider rather than crashing."""
+    results = [_result("rime", Benchmark.TTS, ResultStatus.FAILED, None)]
+
+    assert _dead_providers(results, ResultStatus) == ["TTS:rime/m1 (no reason reported)"]
+
+
+def test_stt_silent_failure_stamps_a_reason_when_nothing_was_produced() -> None:
+    """Nothing at all returned and no reason given → a diagnostic replaces the generic row.
+
+    The STT mirror of the TTS guard: an error frame whose schema the integration failed
+    to match leaves ``error`` unset, and the row would otherwise read "no TTFS produced".
+    """
+    result = TranscriptionResult(provider="assemblyai")
+
+    assert (
+        _stt_silent_failure(result)
+        == "provider closed the stream without sending a transcript or an error"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ttft_seconds", 0.4),
+        ("audio_to_final_seconds", 1.2),
+        ("complete_transcript", "hello"),
+    ],
+)
+def test_stt_silent_failure_ignores_a_result_that_produced_something(
+    field: str, value: object
+) -> None:
+    """Any real measurement means the item is not a silent failure.
+
+    Deliberately narrow: a provider can send a final segment with empty text, which
+    still yields a valid TTFT/AudioToFinal. Failing the item on an empty transcript
+    alone would discard real latency data and shrink sample counts.
+    """
+    result = TranscriptionResult(provider="deepgram", **{field: value})  # type: ignore[arg-type]
+
+    assert _stt_silent_failure(result) is None
+
+
+def test_stt_silent_failure_ignores_partials_only() -> None:
+    """Partial transcripts arrived, so the stream was not silent."""
+    result = TranscriptionResult(provider="together", partial_transcripts=["par"])
+
+    assert _stt_silent_failure(result) is None
+
+
+@pytest.mark.asyncio
+async def test_finish_run_failure_reports_only_run_failed(
+    audio_file: Path, settings: Settings
+) -> None:
+    """If storing the run row fails, one RUN_FAILED is reported and no RUN_PARTIAL.
+
+    The run-level event is emitted after finish_run for exactly this reason: emitting
+    first would page RUN_PARTIAL and then RUN_FAILED for a single incident.
+    """
+    provider_ok = MagicMock()
+    provider_ok.measure_ttft = AsyncMock(return_value=_good_transcription())
+
+    provider_bad = MagicMock()
+    provider_bad.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    # Would otherwise be a PARTIAL run; persistence dies at the last step.
+    writer.finish_run = AsyncMock(side_effect=RuntimeError("db down"))
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={
+            "deepgram": MagicMock(return_value=provider_ok),
+            "elevenlabs": MagicMock(return_value=provider_bad),
+        },
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            with pytest.raises(RuntimeError, match="db down"):
+                await run_benchmarks(
+                    settings=settings,
+                    benchmark_kind="stt",
+                    smoke=True,
+                    matrix_overrides=[
+                        _stt_entry("deepgram", "nova-2"),
+                        _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                    ],
+                )
+
+    assert _events(captured, "RUN_PARTIAL") == [], "one incident must not page twice"
+    assert len(_events(captured, "RUN_FAILED")) == 1
+
+
+@pytest.mark.asyncio
+async def test_sigterm_partial_does_not_report_a_dead_provider(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A truncated single-kind run reports no dead provider, so it cannot page falsely.
+
+    ``all_results`` is only extended once a phase's gather returns, so the cancelled
+    phase contributes no rows and there is nothing to attribute. Documents the reach of
+    the SIGTERM branch rather than asserting an alert it cannot produce.
+    """
+    import os
+    import signal
+
+    started = asyncio.Event()
+
+    async def _slow_measure(*args: Any, **kwargs: Any) -> TranscriptionResult:
+        started.set()
+        await asyncio.sleep(60)
+        return _good_transcription()
+
+    provider = MagicMock()
+    provider.measure_ttft = _slow_measure
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async def _send_sigterm_after_start() -> None:
+        await started.wait()
+        await asyncio.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    sigterm_task = asyncio.create_task(_send_sigterm_after_start())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=[_stt_entry("deepgram", "nova-2")],
+            )
+
+    await sigterm_task
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    assert _events(captured, "RUN_PARTIAL") == []
+    assert _events(captured, "RUN_FAILED") == []
+
+
+@pytest.mark.asyncio
+async def test_sigterm_reports_dead_provider_from_a_completed_phase(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A phase that finished before SIGTERM still gets its dead provider reported.
+
+    kind="both" runs STT then TTS. STT completes with a provider that failed every
+    item, then TTS hangs until SIGTERM cancels it. The STT rows are already in
+    ``all_results``, so the truncated run can still name what died.
+    """
+    import os
+    import signal
+
+    stt_bad = MagicMock()
+    stt_bad.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    started = asyncio.Event()
+
+    async def _hang(*args: Any, **kwargs: Any) -> TTSResult:
+        started.set()
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable — SIGTERM cancels this")
+
+    tts_slow = MagicMock()
+    tts_slow.synthesize = _hang
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async def _send_sigterm_after_tts_starts() -> None:
+        await started.wait()
+        await asyncio.sleep(0.01)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    sigterm_task = asyncio.create_task(_send_sigterm_after_tts_starts())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        tts_items=[_make_tts_item("hello world")],
+        stt_providers={"elevenlabs": MagicMock(return_value=stt_bad)},
+        tts_providers={"cartesia": MagicMock(return_value=tts_slow)},
+        run=run,
+        writer=writer,
+    ) as _:
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="both",
+                smoke=True,
+                matrix_overrides=[
+                    *_paused_registry(Benchmark.STT),
+                    *_paused_registry(Benchmark.TTS),
+                    _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                    _tts_entry("cartesia", "sonic-3", "luna"),
+                ],
+            )
+
+    await sigterm_task
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    partial = _events(captured, "RUN_PARTIAL")
+    assert len(partial) == 1, "the completed phase's dead provider must still report"
+    assert "elevenlabs/scribe_v2_realtime" in partial[0]["error"]
+    assert "boom" in partial[0]["error"]

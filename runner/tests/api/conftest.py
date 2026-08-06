@@ -20,6 +20,7 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -42,6 +43,19 @@ from coval_bench.config import Settings
 
 ARENA_LABELER_KEY = "test-labeler-key"
 INTERNAL_API_KEY = "test-internal-key"
+
+# Two synthetic embargoed models on one provider, and a partner token entitled to
+# each. Same provider on purpose: it proves the allowlist separates callers by
+# model, not just by vendor.
+EA_PROVIDER = "acme"
+EA_MODEL = "unreleased-stt"
+EA_MODEL_OTHER = "unreleased-stt-2"
+EA_TOKEN = "test-ea-token"  # noqa: S105 - fake grant token
+EA_TOKEN_OTHER = "test-ea-token-other"  # noqa: S105 - fake grant token
+EARLY_ACCESS_TOKENS = {
+    EA_TOKEN: [f"{EA_PROVIDER}/{EA_MODEL}"],
+    EA_TOKEN_OTHER: [f"{EA_PROVIDER}/{EA_MODEL_OTHER}"],
+}
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -100,12 +114,15 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 transcript     text,
                 status         text NOT NULL CHECK (status IN ('success','failed')),
                 error          text,
-                created_at     timestamptz NOT NULL DEFAULT now()
+                created_at     timestamptz NOT NULL DEFAULT now(),
+                wer_insertions_pct    double precision,
+                wer_deletions_pct     double precision,
+                wer_substitutions_pct double precision
             )
         """)
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
-        # under the '__all__' sentinel.
+        # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
         # S608 false-positive: name and interval come from the _MV_WINDOWS constant.
         for name, interval in _MV_WINDOWS.items():
             conn.execute(f"""
@@ -114,7 +131,8 @@ def _load_schema(**connect_kwargs: Any) -> None:
                        avg_value, stddev_value, min_value,
                        pct[1] AS p25, pct[2] AS p50, pct[3] AS p75,
                        pct[4] AS p90, pct[5] AS p95, pct[6] AS p99,
-                       max_value, sample_count
+                       max_value, sample_count,
+                       wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct
                 FROM (
                     SELECT r.provider, r.model, r.benchmark,
                            COALESCE({_DATASET_CASE_SQL}, '__all__') AS dataset_id,
@@ -125,7 +143,20 @@ def _load_schema(**connect_kwargs: Any) -> None:
                            PERCENTILE_CONT(ARRAY[0.25, 0.5, 0.75, 0.9, 0.95, 0.99])
                                WITHIN GROUP (ORDER BY r.metric_value)::float8[] AS pct,
                            MAX(r.metric_value)::float8 AS max_value,
-                           COUNT(*)::int AS sample_count
+                           COUNT(*)::int AS sample_count,
+                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
+                               THEN AVG(r.wer_insertions_pct)::float8 END AS wer_insertions_pct,
+                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
+                               THEN AVG(r.wer_deletions_pct)::float8 END AS wer_deletions_pct,
+                           CASE WHEN COUNT(r.wer_insertions_pct) = COUNT(*)
+                               AND COUNT(r.wer_deletions_pct) = COUNT(*)
+                               AND COUNT(r.wer_substitutions_pct) = COUNT(*)
+                               THEN AVG(r.wer_substitutions_pct)::float8
+                               END AS wer_substitutions_pct
                     FROM benchmarks_v2.results r
                     JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
                     WHERE r.status = 'success'
@@ -179,6 +210,7 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
+    monkeypatch.setenv("EARLY_ACCESS_TOKENS", json.dumps(EARLY_ACCESS_TOKENS))
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -323,36 +355,17 @@ async def _insert_result(
             "status": "success",
         }
         defaults.update(kwargs)
-
         if created_at is not None:
             defaults["created_at"] = created_at
-            row = await aconn.execute(
-                """
-                INSERT INTO benchmarks_v2.results
-                    (run_id, provider, model, voice, benchmark, metric_type,
-                     metric_value, metric_units, audio_filename, status, created_at)
-                VALUES
-                    (%(run_id)s, %(provider)s, %(model)s, %(voice)s, %(benchmark)s,
-                     %(metric_type)s, %(metric_value)s, %(metric_units)s,
-                     %(audio_filename)s, %(status)s, %(created_at)s)
-                RETURNING id
-                """,
-                defaults,
-            )
-        else:
-            row = await aconn.execute(
-                """
-                INSERT INTO benchmarks_v2.results
-                    (run_id, provider, model, voice, benchmark, metric_type,
-                     metric_value, metric_units, audio_filename, status)
-                VALUES
-                    (%(run_id)s, %(provider)s, %(model)s, %(voice)s, %(benchmark)s,
-                     %(metric_type)s, %(metric_value)s, %(metric_units)s,
-                     %(audio_filename)s, %(status)s)
-                RETURNING id
-                """,
-                defaults,
-            )
+
+        # S608 false-positive: column names are dict keys set here, never caller values.
+        columns = ", ".join(defaults)
+        placeholders = ", ".join(f"%({c})s" for c in defaults)
+        row = await aconn.execute(
+            f"INSERT INTO benchmarks_v2.results ({columns})"  # noqa: S608
+            f" VALUES ({placeholders}) RETURNING id",
+            defaults,
+        )
         result = await row.fetchone()
         assert result is not None
         return int(result[0])

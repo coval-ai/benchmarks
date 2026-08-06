@@ -83,6 +83,76 @@ async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any
     assert s["sample_count"] == 1
 
 
+async def test_wer_breakdown_averages_and_reconciles(client: AsyncClient, postgresql: Any) -> None:
+    """Each error type averages independently, and the three sum to avg_value."""
+    run_id = await _insert_run(postgresql)
+    for ins, dele, sub in ((1.0, 2.0, 3.0), (3.0, 4.0, 11.0)):
+        await _insert_result(
+            postgresql,
+            run_id,
+            metric_value=ins + dele + sub,
+            wer_insertions_pct=ins,
+            wer_deletions_pct=dele,
+            wer_substitutions_pct=sub,
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] == pytest.approx(2.0)
+    assert s["wer_deletions_pct"] == pytest.approx(3.0)
+    assert s["wer_substitutions_pct"] == pytest.approx(7.0)
+    assert s["avg_value"] == pytest.approx(12.0)
+    parts = ("wer_insertions_pct", "wer_deletions_pct", "wer_substitutions_pct")
+    assert sum(s[k] for k in parts) == pytest.approx(s["avg_value"])
+
+
+async def test_wer_breakdown_null_when_any_row_lacks_it(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A scored/pre-migration mix reports no breakdown: a partial average would not reconcile."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=3.0,
+    )
+    await _insert_result(postgresql, run_id, metric_value=10.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["avg_value"] == pytest.approx(8.0)
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
+async def test_wer_breakdown_null_when_any_component_missing(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A row carrying only some components nulls the whole split — two real
+    averages beside a null third could never reconcile with avg_value."""
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        metric_value=6.0,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    s = response.json()["model_stats"][0]
+    assert s["wer_insertions_pct"] is None
+    assert s["wer_deletions_pct"] is None
+    assert s["wer_substitutions_pct"] is None
+
+
 async def test_excludes_failed_null_and_other_benchmark(
     client: AsyncClient, postgresql: Any
 ) -> None:
@@ -367,6 +437,117 @@ async def test_models_grouped_separately(client: AsyncClient, postgresql: Any) -
         ("deepgram", "nova-3", "TTFT"),
         ("deepgram", "nova-3", "WER"),
     ]
+
+
+async def test_by_dataset_empty_db_returns_no_blocks(client: AsyncClient) -> None:
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["benchmark"] == "STT"
+    assert body["window"] == "24h"
+    assert body["blocks"] == []
+
+
+async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgresql: Any) -> None:
+    """One block per dataset, sorted by dataset id; the pooled sentinel rows
+    never appear as a block of their own."""
+    run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_v1, metric_value=1.0)
+    run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=3.0,
+        wer_insertions_pct=0.5,
+        wer_deletions_pct=1.0,
+        wer_substitutions_pct=1.5,
+    )
+    await _insert_result(
+        postgresql,
+        run_v3,
+        metric_value=5.0,
+        wer_insertions_pct=1.5,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=1.5,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    blocks = response.json()["blocks"]
+    assert [b["dataset"] for b in blocks] == ["stt-v1", "stt-v3"]
+
+    v1, v3 = blocks
+    assert v1["model_stats"][0]["sample_count"] == 1
+    assert v1["model_stats"][0]["avg_value"] == pytest.approx(1.0)
+    assert v1["model_stats"][0]["wer_insertions_pct"] is None
+    assert v3["model_stats"][0]["sample_count"] == 2
+    assert v3["model_stats"][0]["avg_value"] == pytest.approx(4.0)
+    assert v3["model_stats"][0]["wer_insertions_pct"] == pytest.approx(1.0)
+    assert v3["model_stats"][0]["wer_deletions_pct"] == pytest.approx(1.5)
+    assert v3["model_stats"][0]["wer_substitutions_pct"] == pytest.approx(1.5)
+
+
+async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    old = datetime.now(dt.UTC) - timedelta(days=10)
+    await _insert_result(postgresql, run_id, created_at=old, metric_value=1.0)
+    await _refresh_mv(postgresql)
+
+    response_24h = await client.get(
+        "/v1/results/aggregates/by-dataset", params={"benchmark": "STT"}
+    )
+    assert response_24h.json()["blocks"] == []
+
+    response_30d = await client.get(
+        "/v1/results/aggregates/by-dataset", params={"benchmark": "STT", "window": "30d"}
+    )
+    blocks = response_30d.json()["blocks"]
+    assert len(blocks) == 1
+    assert blocks[0]["model_stats"][0]["sample_count"] == 1
+
+
+async def test_by_dataset_hides_excluded_metric_rows(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql)
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="TTFS",
+        metric_value=0.4,
+    )
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="assemblyai",
+        model="universal-streaming",
+        metric_type="WER",
+        metric_value=5.0,
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    blocks = response.json()["blocks"]
+    assert len(blocks) == 1
+    metric_types = {s["metric_type"] for s in blocks[0]["model_stats"]}
+    assert metric_types == {"WER"}
+
+
+async def test_by_dataset_cached_separately_from_plain_aggregates(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The two endpoints never share a cache entry despite identical params."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_id, metric_value=1.0)
+    await _refresh_mv(postgresql)
+
+    plain = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert plain.json()["model_stats"][0]["sample_count"] == 1
+
+    by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    blocks = by_dataset.json()["blocks"]
+    assert [b["dataset"] for b in blocks] == ["stt-v1"]
 
 
 async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any) -> None:

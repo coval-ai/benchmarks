@@ -100,9 +100,11 @@ class Settings(BaseSettings):
     minimax_api_key: SecretStr | None = None
     palabra_api_key: SecretStr | None = None
     lmnt_api_key: SecretStr | None = None
+    murfai_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
+    deepdub_api_key: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
@@ -132,6 +134,7 @@ class Settings(BaseSettings):
     coval_s2s_openai_agent_id: str | None = None
     coval_s2s_gemini_agent_id: str | None = None
     coval_s2s_xai_agent_id: str | None = None
+    coval_s2s_xai_think_fast_2_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
@@ -171,6 +174,18 @@ class Settings(BaseSettings):
     # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
     # models on the data endpoints. Unset means no request is internal.
     internal_api_key: SecretStr | None = None
+    # Partner early-access tokens (X-EA-Token header), as a JSON object mapping
+    # each token to the "provider/model" entries that token may see under embargo:
+    # {"<token>": ["xai/grok-voice-think-fast-1.0"]}. The allowlist lives here,
+    # server-side, so a request carries only an opaque token and can never
+    # widen its own view.
+    # Unset means no token unlocks anything.
+    early_access_tokens: SecretStr | None = None
+    # Clerk instance whose JWKS verifies provider-org session tokens.
+    # Unset means no bearer token unlocks anything.
+    clerk_issuer: str | None = None
+    # Allowed azp claim values; bearer tokens are rejected while empty.
+    clerk_authorized_parties: list[str] = []
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

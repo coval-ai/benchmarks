@@ -4,8 +4,10 @@
 """Deepgram TTS provider — WebSocket streaming to Deepgram Speak API.
 
 Wire protocol (single-utterance benchmark path):
-  connect → recv Metadata → send Speak(text) → send Flush
+  Aura (v1): connect → recv Metadata → send Speak(text) → send Flush
   → recv binary PCM frames until Flushed → close
+  Flux (v2): connect → recv Connected → send Speak(text) → send Flush
+  → recv binary PCM frames until SpeechMetadata → close
 
 Rate limit: 20 Flush messages per 60 seconds per API key.
 """
@@ -28,6 +30,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
 _DEEPGRAM_TTS_WS_BASE = "wss://api.deepgram.com/v1/speak"
+_DEEPGRAM_FLUX_TTS_WS_BASE = "wss://api.deepgram.com/v2/speak"
 
 
 class DeepgramTTSProvider(TTSProvider):
@@ -51,7 +54,7 @@ class DeepgramTTSProvider(TTSProvider):
         return self._model
 
     def _model_supported(self, model: str) -> bool:
-        return model.startswith("aura-")
+        return model.startswith(("aura-", "flux-"))
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Deepgram WebSocket and return a TTSResult."""
@@ -63,20 +66,26 @@ class DeepgramTTSProvider(TTSProvider):
                 ttfa_ms=None,
                 audio_path=None,
                 error=(
-                    f"Unsupported Deepgram TTS model: {self._model}. Expected an 'aura-' model."
+                    f"Unsupported Deepgram TTS model: {self._model}. "
+                    "Expected an 'aura-' or 'flux-' model."
                 ),
             )
         audio_chunks: list[bytes] = []
         start: float | None = None
         first_chunk_at: float | None = None
 
+        is_flux = self._model.startswith("flux-")
+        base = _DEEPGRAM_FLUX_TTS_WS_BASE if is_flux else _DEEPGRAM_TTS_WS_BASE
+        # Flux emits Flushed before the turn's audio; SpeechMetadata marks audio-complete.
+        final_msg_type = "SpeechMetadata" if is_flux else "Flushed"
         qs = urlencode({"encoding": "linear16", "sample_rate": SAMPLE_RATE, "model": self._model})
-        url = f"{_DEEPGRAM_TTS_WS_BASE}?{qs}"
+        url = f"{base}?{qs}"
         headers = {"Authorization": f"Token {self._api_key}"}
 
         try:
             async with ws_client.connect(url, additional_headers=headers) as ws:
-                # Drain the server-initiated Metadata frame before starting the clock.
+                # Drain the server-initiated frame (Metadata on v1, Connected on v2)
+                # before starting the clock.
                 # Connection is fully established; t0 starts before Flush (synthesis trigger).
                 raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
                 if isinstance(raw, str):
@@ -99,8 +108,12 @@ class DeepgramTTSProvider(TTSProvider):
 
                     msg = json.loads(raw)
                     msg_type = msg.get("type", "")
-                    if msg_type == "Flushed":
+                    if msg_type == final_msg_type:
                         break
+                    if msg_type == "Error":
+                        raise RuntimeError(
+                            f"Deepgram error {msg.get('code')}: {msg.get('description')}"
+                        )
                     if msg_type == "Warning":
                         logger.warning("deepgram_ws_warning", description=msg.get("description"))
 

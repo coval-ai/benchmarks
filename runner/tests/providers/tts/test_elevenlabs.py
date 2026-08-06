@@ -48,7 +48,7 @@ async def test_elevenlabs_happy_path(
     fake_settings: Settings,
     tmp_path: Path,
 ) -> None:
-    pcm = make_pcm_bytes(480) * 4  # ~80 ms of silence
+    pcm = make_pcm_bytes(480) * 4  # ~80 ms of audible tone
     captured: dict[str, object] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -149,7 +149,7 @@ async def test_elevenlabs_empty_response(fake_settings: Settings) -> None:
     provider = ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="v")
     result = await provider.synthesize("silence")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

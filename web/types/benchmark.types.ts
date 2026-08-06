@@ -1,6 +1,8 @@
 // Copyright 2026 The Coval Benchmarks Authors
 // SPDX-License-Identifier: Apache-2.0
 
+import type { WerBreakdown } from "@/lib/utils/werBreakdown";
+
 export interface ModelsByProvider {
   [provider: string]: string[];
 }
@@ -41,13 +43,31 @@ export interface ModelHeatmapData {
   // pinned WER dataset.
   avgWER?: number;
   werStdDev?: number;
+  /** Absent when the API reports no error-type split for this group. */
+  werBreakdown?: WerBreakdown;
   sampleCount: number;
 }
+
+/**
+ * One stacked bar of the TTFA breakdown view. All three values come straight
+ * from served averages over the same rows, so roundtrip + silence = ttfa
+ * exactly. A type alias (not an interface) so rows satisfy the bar chassis's
+ * Record<string, unknown> constraint via an implicit index signature.
+ */
+export type TtfaBreakdownBar = {
+  model: string;
+  provider: string;
+  roundtrip: number;
+  silence: number;
+  ttfa: number;
+};
 
 export interface BarDataPoint {
   model: string;
   averageWER: number;
   provider: string;
+  /** Absent when the API reports no error-type split for this group. */
+  breakdown?: WerBreakdown;
 }
 
 export interface InstructionBarDataPoint {

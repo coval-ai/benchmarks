@@ -131,7 +131,7 @@ async def test_deepgram_no_audio_chunks(fake_settings: Settings) -> None:
     ):
         result = await provider.synthesize("silent test")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
@@ -207,6 +207,91 @@ async def test_synthesize_wav_contains_riff(fake_settings: Settings) -> None:
     assert result.audio_path.exists()
     assert result.audio_path.read_bytes()[:4] == b"RIFF"
     result.audio_path.unlink()
+
+
+def _flux_fixture_events(pcm_chunks: list[bytes]) -> list[Any]:
+    """Flux v2 event stream: Connected (first ``recv``), then the turn.
+
+    Mirrors the live endpoint's ordering — Flushed arrives before the audio,
+    and SpeechMetadata terminates the turn.
+    """
+    return [
+        {"type": "Connected", "request_id": "req-1", "model_name": "haley"},
+        {"type": "SpeechStarted", "speech_id": "dg_sp_test"},
+        {"type": "Flushed", "speech_id": "dg_sp_test"},
+        *pcm_chunks,
+        {"type": "SpeechMetadata", "speech_id": "dg_sp_test", "audio_duration_ms": 20},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deepgram_flux_happy_path(fake_settings: Settings) -> None:
+    """Flux path hits v2/speak and keeps reading audio past the early Flushed."""
+    chunks = [make_pcm_bytes(240), make_pcm_bytes(240)]
+    ws = FakeWebSocket(_flux_fixture_events(chunks))
+    provider = DeepgramTTSProvider(fake_settings, model="flux-haley-en", voice="flux-haley-en")
+
+    captured: dict[str, str] = {}
+
+    def _capture(url: str, **_kwargs: object) -> Any:
+        captured["url"] = url
+        return _fake_connect(ws)
+
+    with patch("coval_bench.providers.tts.deepgram.ws_client.connect", side_effect=_capture):
+        result = await provider.synthesize("Hello from Flux")
+
+    parsed = urlparse(captured["url"])
+    assert parsed.hostname == "api.deepgram.com"
+    assert parsed.path == "/v2/speak"
+    assert "model=flux-haley-en" in captured["url"]
+    assert f"sample_rate={SAMPLE_RATE}" in captured["url"]
+    assert "encoding=linear16" in captured["url"]
+
+    assert result.error is None, f"Unexpected error: {result.error}"
+    assert result.ttfa_ms is not None
+    assert result.provider == "deepgram"
+    assert result.model == "flux-haley-en"
+    assert result.voice == "flux-haley-en"
+    assert result.audio_path is not None
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    # Both PCM chunks made it into the WAV (44-byte header + payload).
+    assert result.audio_path.stat().st_size == 44 + sum(len(c) for c in chunks)
+
+    sent_strs = [s.decode() if isinstance(s, bytes) else s for s in ws._sent]
+    assert any('"type": "Speak"' in s for s in sent_strs)
+    assert any('"type": "Flush"' in s for s in sent_strs)
+
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_deepgram_flux_error_event(fake_settings: Settings) -> None:
+    """A server Error frame surfaces in result.error instead of hanging the loop."""
+    events: list[Any] = [
+        {"type": "Connected", "request_id": "req-1"},
+        {"type": "Error", "code": "MESSAGE-0000", "description": "The message could not be parsed"},
+    ]
+    ws = FakeWebSocket(events)
+    provider = DeepgramTTSProvider(fake_settings, model="flux-haley-en", voice="flux-haley-en")
+
+    with patch(
+        "coval_bench.providers.tts.deepgram.ws_client.connect",
+        return_value=_fake_connect(ws),
+    ):
+        result = await provider.synthesize("error test")
+
+    assert result.error is not None
+    assert "MESSAGE-0000" in result.error
+    assert result.audio_path is None
+
+
+@pytest.mark.asyncio
+async def test_deepgram_unsupported_model(fake_settings: Settings) -> None:
+    provider = DeepgramTTSProvider(fake_settings, model="sonic-1", voice="sonic-1")
+    result = await provider.synthesize("nope")
+    assert result.error is not None
+    assert "Unsupported" in result.error
+    assert result.audio_path is None
 
 
 def test_deepgram_missing_api_key() -> None:

@@ -189,7 +189,7 @@ async def test_inworld_empty_audio(fake_settings: Settings) -> None:
         provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
         result = await provider.synthesize("silence")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

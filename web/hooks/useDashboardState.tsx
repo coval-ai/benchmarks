@@ -19,6 +19,7 @@ import { buildModelsByProvider } from "@/lib/utils/modelsFromResults";
 import {
   buildFacetGroups,
   buildTagIndex,
+  crossRegionByModelKey,
   dedicatedModelKeys,
   filterModelsByFacets,
   getTagCategories,
@@ -33,8 +34,9 @@ import {
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
 import { getModelColor } from "@/lib/utils/colors";
+import { werBreakdownOf } from "@/lib/utils/werBreakdown";
 import { metricDescriptions } from "@/lib/config/metrics";
-import { WER_BAR_VIEWS, type WerBarView } from "@/lib/config/datasets";
+import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
 import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { useDatasetScopedWer } from "@/hooks/useDatasetScopedWer";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
@@ -91,7 +93,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const aggregatesQuery = useAggregatesQuery({
     benchmark: benchmarkParam,
     window: timeWindow,
-    dataset: page === "s2s" ? "s2s-multiturn-v1" : undefined,
+    dataset: page === "s2s" ? S2S_MULTITURN_DATASET : undefined,
   });
   const providersQuery = useProvidersQuery();
 
@@ -110,8 +112,11 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [page]
   );
 
-  const { werByModel: werDatasetStats, loading: werDatasetLoading } =
-    useDatasetScopedWer(
+  const {
+    werByModel: werDatasetStats,
+    loading: werDatasetLoading,
+    servedDataset: werServedDataset,
+  } = useDatasetScopedWer(
       { benchmark: benchmarkParam, window: timeWindow },
       activeWerDataset
     );
@@ -120,25 +125,25 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
-  // STT only: the accuracy bar chart switches between the pooled WER
-  // (cumulative) and the easy/hard single-dataset views.
-  const [werBarView, setWerBarView] = useState<WerBarView>("cumulative");
-  const activeWerBarView = page === "stt" ? werBarView : "cumulative";
-  const werBarDatasetId =
-    WER_BAR_VIEWS.find((v) => v.key === activeWerBarView)?.dataset ?? null;
-  const changeWerBarView = useCallback(
-    (view: WerBarView) => {
-      setWerBarView(view);
+  // Accuracy bar chart scope: one dataset, or null to pool them all.
+  const [werBarDataset, setWerBarDataset] = useState<string | null>(null);
+  const werBarDatasetId = page === "s2s" ? null : werBarDataset;
+  const changeWerBarDataset = useCallback(
+    (dataset: string | null) => {
+      setWerBarDataset(dataset);
       capturePostHogEvent(POSTHOG_EVENTS.dashboardWerBarViewChanged, {
         surface: `${page}_dashboard`,
         mode: page,
-        view,
+        view: dataset ?? "cumulative",
       });
     },
     [page]
   );
-  const { werByModel: werBarDatasetStats, loading: werBarLoading } =
-    useDatasetScopedWer(
+  const {
+    werByModel: werBarDatasetStats,
+    loading: werBarLoading,
+    servedDataset: werBarServedDataset,
+  } = useDatasetScopedWer(
       { benchmark: benchmarkParam, window: timeWindow },
       werBarDatasetId
     );
@@ -149,9 +154,32 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
       setWerDataset(null);
     }
     if (werBarDatasetId && !availableWerDatasets.includes(werBarDatasetId)) {
-      setWerBarView("cumulative");
+      setWerBarDataset(null);
     }
   }, [availableWerDatasets, werDataset, werBarDatasetId]);
+
+  // Freshness as the charts see it: the newest series bucket actually served
+  // (start, end inferred from the bucket spacing, and the dataset scope the
+  // response covers). Deliberately not the runs table alone — a finished run
+  // can precede its aggregates.
+  const latestDataBucket = useMemo(() => {
+    const data = aggregatesQuery.data;
+    const times = [
+      ...new Set((data?.series ?? []).map((point) => Date.parse(point.scheduled_at))),
+    ].sort((a, b) => a - b);
+    if (times.length === 0) return null;
+    const start = times[times.length - 1]!;
+    // Minimum spacing, not last spacing: a gap from a missed run would inflate
+    // the bucket and admit runs the charts don't serve yet. A single-point
+    // series degenerates to end === start, which only ever falls back to the
+    // bucket time itself.
+    let period = 0;
+    for (let i = 1; i < times.length; i++) {
+      const diff = times[i]! - times[i - 1]!;
+      if (period === 0 || diff < period) period = diff;
+    }
+    return { start, end: start + period, datasets: data?.datasets ?? [] };
+  }, [aggregatesQuery.data]);
 
   // The charts keep showing the prior window's data while a new one loads,
   // so window-derived rendering must follow the data, not the toggle.
@@ -170,6 +198,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [aggregatesQuery.data]
   );
 
+
   const allModelsByProvider = useMemo(
     () => buildModelsByProvider(modelStats, benchmarkParam, providersQuery.data),
     [providersQuery.data, modelStats, benchmarkParam]
@@ -183,6 +212,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     [providersQuery.data]
   );
   const dedicatedModels = useMemo(() => dedicatedModelKeys(tagIndex), [tagIndex]);
+  const crossRegionModels = useMemo(() => crossRegionByModelKey(tagIndex), [tagIndex]);
 
   // Facets are driven only by models that actually have data to plot. A
   // catalogue model without stats (e.g. a batch-only or not-yet-benchmarked
@@ -409,7 +439,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   });
 
   // Calculate metrics
-  const { getStat, getHeatmapData } = chartData;
+  const { getStat, getHeatmapData, ttfaBreakdownBars } = chartData;
 
   // Run-weighted average latency across selected models, in display units:
   // Σ(avg·runs) / Σ(runs). Backs the box plot and timeline headlines.
@@ -505,23 +535,20 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
   const werBarData = useMemo<BarDataPoint[]>(() => {
     if (!werBarDatasetStats) return cumulativeWerBarData;
     return deferredSelectedModels
-      .map((model) => {
+      .map((model): BarDataPoint | null => {
         const hit = werBarDatasetStats.get(model);
         return hit
-          ? { model, averageWER: hit.avg_value, provider: hit.provider }
+          ? {
+              model,
+              averageWER: hit.avg_value,
+              provider: hit.provider,
+              breakdown: werBreakdownOf(hit),
+            }
           : null;
       })
       .filter((b): b is BarDataPoint => b !== null)
       .sort((a, b) => a.averageWER - b.averageWER);
   }, [werBarDatasetStats, cumulativeWerBarData, deferredSelectedModels]);
-
-  const availableWerBarViews = useMemo(() => {
-    if (page !== "stt") return [];
-    const available = new Set(availableWerDatasets);
-    return WER_BAR_VIEWS.filter(
-      (v) => v.dataset === null || available.has(v.dataset)
-    );
-  }, [page, availableWerDatasets]);
 
   const werBarDataWithColors = useMemo(() => {
     const hasSelection = werBarData.some((item) => clickedWERBars.has(item.model));
@@ -601,6 +628,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
         ...row,
         avgWER: wer?.avg_value,
         werStdDev: wer?.stddev_value,
+        werBreakdown: wer && werBreakdownOf(wer),
         sampleCount: wer?.sample_count ?? 0,
       };
     });
@@ -608,7 +636,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
 
   // Pre-computed key metrics for display
   const primaryKeyMetric = {
-    label: `Lowest Median ${activeMetric}`,
+    label: `Lowest Median ${latencyLabel}`,
     displayValue: `${fastestPrimary.fastestMs.toFixed(0)} ms`,
     subtitle: fastestPrimary.fastestModel
       ? {
@@ -679,18 +707,20 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     sttMetric,
     setSttMetric,
     activeMetric,
+    ttfaBreakdownBars,
 
     // WER dataset pin (STT comparison card)
     werDataset: activeWerDataset,
     changeWerDataset,
     availableWerDatasets,
     werDatasetLoading,
+    werServedDataset,
 
-    // WER bar chart view (STT accuracy card)
-    werBarView: activeWerBarView,
-    changeWerBarView,
-    availableWerBarViews,
+    // WER bar chart dataset scope (TTS + STT accuracy card)
+    werBarDataset: werBarDatasetId,
+    changeWerBarDataset,
     werBarLoading,
+    werBarServedDataset,
 
     // Key metrics
     primaryKeyMetric,
@@ -700,6 +730,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     // Data loading
     loading,
     loadError,
+    latestDataBucket,
 
     // Model state
     selectedModels,
@@ -713,6 +744,7 @@ export function useDashboardState(page: "tts" | "stt" | "s2s") {
     legendModels,
     toggleLegendModel,
     dedicatedModels,
+    crossRegionModels,
 
     // UI state
     isMobile,

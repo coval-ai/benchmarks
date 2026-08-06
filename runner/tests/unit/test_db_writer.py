@@ -685,6 +685,64 @@ def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
         assert float(row["p50"]) == pytest.approx(3.0)
 
 
+def test_refresh_bucket_excludes_series_excluded_metrics(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """TTFA component rows stay out of the series rollup: they are consumed as
+    window aggregates only, and at ~48 TTS runs/day they would double an
+    already multi-MB 30d series payload for rows nothing reads."""
+    _apply_migrations(pg_conn)
+    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+
+    def _tts_result(run_id: int, metric_type: str, value: float) -> Result:
+        return Result(
+            run_id=run_id,
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            benchmark=Benchmark.TTS,
+            metric_type=metric_type,
+            metric_value=value,
+            metric_units="milliseconds",
+            status=ResultStatus.SUCCESS,
+        )
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(
+                runner_sha="abc123",
+                dataset_id="tts-v1",
+                dataset_sha256="deadbeef",
+                scheduled_at=scheduled,
+            )
+            assert run.id is not None
+            await writer.record_results(
+                [
+                    _tts_result(run.id, "TTFA", 170.0),
+                    _tts_result(run.id, "TTFARoundtrip", 140.0),
+                    _tts_result(run.id, "TTFALeadingSilence", 30.0),
+                ]
+            )
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+            await writer.refresh_bucket(run.id, period_seconds=1800)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT metric_type FROM benchmarks_v2.results_by_bucket")
+        bucket_metrics = {row[0] for row in cur.fetchall()}
+        # The raw rows keep the split for the stats matviews.
+        cur.execute("SELECT DISTINCT metric_type FROM benchmarks_v2.results")
+        result_metrics = {row[0] for row in cur.fetchall()}
+
+    assert bucket_metrics == {"TTFA"}
+    assert result_metrics == {"TTFA", "TTFARoundtrip", "TTFALeadingSilence"}
+
+
 def test_refresh_bucket_splits_datasets(pg_conn: psycopg.Connection[Any]) -> None:
     """Two runs on different datasets in one bucket: per-dataset rows split,
     the pooled '__all__' row spans both."""

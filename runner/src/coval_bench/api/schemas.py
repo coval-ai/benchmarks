@@ -143,6 +143,11 @@ class ModelStatEntry(BaseModel):
     min_value: float
     max_value: float
     sample_count: int
+    # WER only, percentage points summing to avg_value; null pre-0014 rows —
+    # clients fall back to the total alone.
+    wer_insertions_pct: float | None = None
+    wer_deletions_pct: float | None = None
+    wer_substitutions_pct: float | None = None
 
 
 class SeriesPoint(BaseModel):
@@ -181,6 +186,27 @@ class AggregatesResponse(BaseModel):
     series: list[SeriesPoint]
 
 
+class DatasetAggregates(BaseModel):
+    """Per-model stats for one dataset — one block of the by-dataset response."""
+
+    dataset: str
+    model_stats: list[ModelStatEntry]
+
+
+class AggregatesByDatasetResponse(BaseModel):
+    """Response schema for GET /v1/results/aggregates/by-dataset.
+
+    One block per dataset with data in the window, sorted by dataset id.
+    Series are deliberately absent: per-dataset timelines would multiply the
+    payload by the dataset count and nothing consumes them batched — the
+    single-dataset endpoint serves that long tail.
+    """
+
+    benchmark: BenchmarkLiteral
+    window: WindowLiteral
+    blocks: list[DatasetAggregates]
+
+
 class RunsResponse(BaseModel):
     """Response schema for GET /v1/runs."""
 
@@ -194,6 +220,53 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+
+
+class S2SSampleTurnOut(BaseModel):
+    """One spoken turn of a sampled conversation."""
+
+    index: int
+    role: str
+    content: str
+    start_offset: float | None = None
+    end_offset: float | None = None
+
+
+class S2SSampleRecordingOut(BaseModel):
+    """One model's recording. ``audio_path`` is an API route, not a storage URL."""
+
+    provider: str
+    model: str
+    audio_path: str
+    coval_run_id: str
+    sim_id: str
+    agent_id: str | None = None
+    turns: list[S2SSampleTurnOut] = Field(default_factory=list)
+
+
+class S2SSampleOut(BaseModel):
+    """One sample, filtered to the recordings this caller may see."""
+
+    schema_version: int | None = None
+    sample_id: str
+    test_case_id: str
+    test_set_id: str | None = None
+    persona_name: str | None = None
+    transcript: str | None = None
+    recordings: list[S2SSampleRecordingOut]
+
+
+class S2SSampleAudioOut(BaseModel):
+    """A freshly signed URL for one recording, with the moment it stops working.
+
+    Handed over as a body rather than a redirect: a browser cannot carry its
+    early-access header through a cross-origin redirect to storage, so the caller
+    fetches this with its proof and then points an audio element at ``url``.
+    ``expires_at`` lets the caller re-ask before playing rather than after failing.
+    """
+
+    url: str
+    expires_at: datetime
 
 
 class BattleOut(BaseModel):

@@ -67,6 +67,9 @@ class TTSResult:
     http_version: str | None = None
     submit_to_headers_ms: float | None = None
     connection_reused: bool | None = None
+    # The leading-silence part of ttfa_ms; None when offset detection didn't
+    # run or failed, in which case ttfa_ms is arrival-only and has no split.
+    leading_silence_ms: float | None = None
 
 
 # ---------------------------------------------------------------------------

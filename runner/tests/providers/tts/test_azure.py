@@ -201,7 +201,7 @@ async def test_azure_tts_skips_empty_audio_frames(fake_settings: Settings) -> No
     with patch("coval_bench.providers.tts.azure.ws_client.connect", return_value=ws):
         result = await provider.synthesize("Hello")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 

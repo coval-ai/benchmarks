@@ -150,7 +150,7 @@ async def _publish(
     runs: list[SampleRun],
     *,
     rng_seed: int = 0,
-    expected_providers: set[str] | None = None,
+    expected_models: set[tuple[str, str]] | None = None,
 ) -> int:
     return await publish_tick_sample(
         client,
@@ -160,7 +160,7 @@ async def _publish(
         rng=random.Random(rng_seed),
         storage_client=storage_client,
         download_client=client,
-        expected_providers=expected_providers,
+        expected_models=expected_models,
     )
 
 
@@ -172,8 +172,8 @@ async def test_publishes_complete_conversation_for_all_providers() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    assert f"{PREFIX}/{TICK}/openai.wav" in bucket.objects
-    assert f"{PREFIX}/{TICK}/google.wav" in bucket.objects
+    assert f"{PREFIX}/{TICK}/openai/gpt-realtime.wav" in bucket.objects
+    assert f"{PREFIX}/{TICK}/google/gemini-live.wav" in bucket.objects
 
     manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
     assert manifest["schema_version"] == 2
@@ -349,8 +349,8 @@ async def test_missed_day_publishes_alongside_the_current_tick() -> None:
         manifest = json.loads(bucket.objects[f"{PREFIX}/{tick}/manifest.json"])
         assert manifest["bucket_at"] == tick
         assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
-        assert f"{PREFIX}/{tick}/openai.wav" in bucket.objects
-        assert f"{PREFIX}/{tick}/google.wav" in bucket.objects
+        assert f"{PREFIX}/{tick}/openai/gpt-realtime.wav" in bucket.objects
+        assert f"{PREFIX}/{tick}/google/gemini-live.wav" in bucket.objects
     # Published oldest-first, so the index ends up newest-first.
     assert json.loads(bucket.objects[f"{PREFIX}/index.json"]) == [TICK, PREV_TICK]
 
@@ -372,14 +372,17 @@ async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
     cases = {r.coval_run_id: ["b", "c"] for r in runs}
     async with _fake_client(cases) as client:
         stored = await _publish(
-            client, storage_client, runs, expected_providers={"openai", "google"}
+            client,
+            storage_client,
+            runs,
+            expected_models={("openai", "gpt-realtime"), ("google", "gemini-live")},
         )
 
     # Today is complete and publishes; yesterday is refused outright.
     assert stored == 2
     assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
     assert f"{PREFIX}/{PREV_TICK}/manifest.json" not in bucket.objects
-    assert f"{PREFIX}/{PREV_TICK}/openai.wav" not in bucket.objects
+    assert f"{PREFIX}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
     assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
 
 
@@ -400,7 +403,10 @@ async def test_published_day_is_reindexed_even_when_a_provider_is_absent() -> No
     cases = {r.coval_run_id: ["b"] for r in openai_only}
     async with _fake_client(cases) as client:
         stored = await _publish(
-            client, storage_client, openai_only, expected_providers={"openai", "google"}
+            client,
+            storage_client,
+            openai_only,
+            expected_models={("openai", "gpt-realtime"), ("google", "gemini-live")},
         )
 
     assert stored == 0
@@ -420,7 +426,7 @@ async def test_recovery_never_overwrites_an_existing_manifest() -> None:
 
     assert stored == 2  # only the current tick
     assert bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] == already_there
-    assert f"{PREFIX}/{PREV_TICK}/openai.wav" not in bucket.objects
+    assert f"{PREFIX}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
     assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
     # The existing day is still repaired into the index.
     assert PREV_TICK in json.loads(bucket.objects[f"{PREFIX}/index.json"])

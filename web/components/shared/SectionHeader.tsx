@@ -229,8 +229,8 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   return (
     <div id={anchorId} className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 sm:gap-8 mb-4 scroll-mt-24">
       <div className="w-full sm:w-3/4 min-w-0">
-        <h2 className="mb-2 flex items-start gap-2 text-[0.9rem] font-light text-text-secondary">
-          <span className="min-w-0 flex-1 pt-3 lg:pt-1">{label}</span>
+        <h2 className="mb-2 flex items-center gap-2 text-[0.9rem] font-light text-text-secondary">
+          <span className="min-w-0">{label}</span>
           <button
             type="button"
             onClick={() => void copyLink()}

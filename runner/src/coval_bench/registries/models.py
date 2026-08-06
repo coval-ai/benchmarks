@@ -62,6 +62,8 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
+    # Provider's serving region in ``us-east-1`` form; set only when confirmed.
+    region: str | None = None
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -70,6 +72,7 @@ _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
 _ACTIVE = ModelStatus.ACTIVE
+_PAUSED = ModelStatus.PAUSED
 _RETIRED = ModelStatus.RETIRED
 _PENDING = ModelStatus.PENDING
 _EARLY_ACCESS = ModelStatus.EARLY_ACCESS
@@ -288,7 +291,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -482,6 +485,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="deepgram",
+        model="flux-haley-en",
+        voice="flux-haley-en",
+        tags=(_STREAMING, _STREAM),
+        on_prem=True,
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="gradium",
         model="default",
         voice="YTpq7expH9539ERJ",
@@ -625,7 +637,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -635,7 +647,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("en-US-Ava:DragonHDLatestNeural", "en-US-Andrew:DragonHDLatestNeural"),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _STREAM),
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -700,6 +712,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -709,6 +722,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -718,6 +732,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="9a9cf47702da476aa4629e2506d4a857",
         voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        region="us-west-1",
         status=_ACTIVE,
     ),
     # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
@@ -744,16 +759,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechify",
         model="simba-3.2",
         voice="geffen_32",
+        voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="speechify",
         model="simba-3.0",
         voice="geffen_32",
+        voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
     # Arena-disabled: FLUXIONS_API_KEY is not mounted on benchmarks-api yet.
@@ -775,6 +792,30 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("leah", "caleb"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
+    ),
+    # Deepdub eTTS. Voices are preset voice-prompt ids from Deepdub's docs:
+    # the female sales-agent and male call-center-agent presets.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="deepdub",
+        model="dd-etts-3.0",
+        voice="02215cf5-04af-46f3-a061-48a4c81989bf",
+        voices=(
+            "02215cf5-04af-46f3-a061-48a4c81989bf",
+            "b2abb241-ac92-48bf-a890-fec03f43e209",
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="murf",
+        model="falcon-2",
+        voice="Natalie",
+        voices=("Natalie", "Gordon"),
+        tags=(_STREAMING, _MULTI, _STREAM),
+        status=_EARLY_ACCESS,
+        arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
     # from a text "instructions" prompt folds LLM inference into TTFA and never
@@ -798,27 +839,36 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     # S2S #
     #######
     # S2S realtime models. Numbers are fetched daily from Coval (no local
-    # provider client). EARLY_ACCESS = pre-launch embargo: they run and fetch
-    # normally, but every data endpoint strips them for public callers and
-    # serves them only to X-Internal-Key requests until the benchmark launches.
+    # provider client).
     RegisteredModel(
         benchmark=_S2S,
         provider="openai",
         model="gpt-realtime",
         tags=(_STREAMING, _MULTI),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="google",
         model="gemini-live",
         tags=(_STREAMING, _MULTI),
+        status=_ACTIVE,
+    ),
+    # xAI stays under the early-access embargo while they are unresponsive to
+    # outreach: runs and fetches normally, but every data endpoint strips both
+    # models for public callers (unlike PENDING, which only disables the
+    # catalogue entry and still serves their rows).
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="xai",
+        model="grok-voice-think-fast-1.0",
+        tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="xai",
-        model="grok-realtime",
+        model="grok-voice-think-fast-2.0",
         tags=(_STREAMING, _MULTI),
         status=_EARLY_ACCESS,
     ),

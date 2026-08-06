@@ -154,6 +154,22 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     assert qwen_labels[("licensing", "open-weight")] == "Open-weight"
 
 
+async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncClient) -> None:
+    """Region is emitted only where a provider confirmed it, and the label stays raw."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    fishaudio = next(e for e in data["tts"] if e["provider"] == "fishaudio")
+    for model in fishaudio["models"]:
+        region = next(t for t in model["tags"] if t["category"] == "region")
+        assert region["value"] == "us-west-1"
+        # Raw, not "Us-west-1": region skips the capitalize() every other facet gets.
+        assert region["label"] == "us-west-1"
+
+    elevenlabs = next(e for e in data["tts"] if e["provider"] == "elevenlabs")
+    assert not [t for m in elevenlabs["models"] for t in m["tags"] if t["category"] == "region"]
+
+
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
     """tag_categories ships the full vocabulary in display order with labels."""
     response = await client.get("/v1/providers")
@@ -169,6 +185,7 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
         "source",
         "licensing",
         "deployment",
+        "region",
     ]
     by_category = {c["category"]: c for c in categories}
     assert by_category["features"]["label"] == "Features"

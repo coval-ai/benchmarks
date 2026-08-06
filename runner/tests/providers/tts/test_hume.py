@@ -177,7 +177,7 @@ async def test_hume_empty_response(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
         result = await provider.synthesize("silence")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
@@ -216,7 +216,7 @@ async def test_hume_empty_chunk_not_counted(fake_settings: Settings) -> None:
     with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
         result = await provider.synthesize("empty chunk")
 
-    assert result.error is None
+    assert result.error == ("provider closed the stream without sending audio or an error")
     assert result.audio_path is None
     assert result.ttfa_ms is None
 
@@ -305,3 +305,58 @@ def test_hume_missing_api_key() -> None:
     )
     with pytest.raises(ValueError, match="hume_api_key"):
         HumeTTSProvider(settings_no_key, model="octave-tts", voice="v")
+
+
+# ---------------------------------------------------------------------------
+# Error-frame recognition (BENCH-589)
+# ---------------------------------------------------------------------------
+
+_ZERO_CREDITS_FRAME = json.dumps(
+    {
+        "status_code": 400,
+        "message": (
+            "Exhausted credit balance. Visit platform.hume.ai/billing to manage your account."
+        ),
+        "details": {"type": "error", "code": "E0300", "slug": "zero_credits"},
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_hume_zero_credits_frame_surfaces_its_message(fake_settings: Settings) -> None:
+    """Hume's real error frame reaches ``result.error`` verbatim.
+
+    The live frame nests the discriminator under ``details`` and carries no top-level
+    ``type``, so the original check never matched and this message — stated on every
+    request for four and a half days — was discarded on every one of them.
+    """
+    ws = FakeWebSocket([_ZERO_CREDITS_FRAME])
+    provider = HumeTTSProvider(fake_settings, model="octave-2", voice="v")
+
+    with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("hello")
+
+    assert result.error is not None
+    assert "Exhausted credit balance" in result.error
+    assert result.ttfa_ms is None
+    assert result.audio_path is None
+
+
+@pytest.mark.asyncio
+async def test_hume_unrecognised_frame_is_quoted_in_the_silent_reason(
+    fake_settings: Settings,
+) -> None:
+    """A shape we don't classify still survives, via the retained trailing frames.
+
+    The safety net for the next schema change: even with no matching rule, the
+    provider's own words reach the row instead of a bare generic reason.
+    """
+    ws = FakeWebSocket([json.dumps({"somethingNew": "quota drained, contact billing"})])
+    provider = HumeTTSProvider(fake_settings, model="octave-2", voice="v")
+
+    with patch("coval_bench.providers.tts.hume.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("hello")
+
+    assert result.error is not None
+    assert result.error.startswith("provider closed the stream without sending audio or an error")
+    assert "quota drained, contact billing" in result.error

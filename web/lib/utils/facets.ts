@@ -46,6 +46,35 @@ export function dedicatedModelKeys(tagIndex: Map<string, ModelTagOut[]>): Set<st
   return keys;
 }
 
+// Widened to string on purpose: CI regenerates the schema from the *deployed*
+// API, so this must still compile against an API that predates the region facet.
+/** Region facet identifier, mirroring runner registries/tags.py. */
+export const REGION_CATEGORY: string = "region";
+
+/** Where our benchmark workers run. Providers elsewhere pay a round-trip we can't subtract. */
+export const WORKER_REGION = "us-east-1";
+
+export const REGION_LABEL = "Inference region";
+// Fish Audio flagged that their us-west-1 inference is measured from an
+// east-coast worker. One string, every surface.
+export const REGION_BLURB = `Our benchmark workers run in ${WORKER_REGION}. A provider serving from another region carries a network round-trip that these latency numbers include, but that isn't part of the model's own speed.`;
+
+/**
+ * Model key -> inference region, for models served outside our worker's region.
+ * Same-region models are omitted: the badge exists to flag a measurable
+ * handicap, and a matching region has none to explain.
+ */
+export function crossRegionByModelKey(
+  tagIndex: Map<string, ModelTagOut[]>
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [key, tags] of tagIndex) {
+    const region = tags.find((t) => t.category === REGION_CATEGORY)?.value;
+    if (region && region !== WORKER_REGION) out.set(key, region);
+  }
+  return out;
+}
+
 interface FacetOption {
   value: string;
   label: string;
@@ -200,8 +229,14 @@ export function buildFacetGroups(
     // A dedicated endpoint never mints a new filter group on its own: aside
     // from Source (the shared/dedicated axis itself), a category becomes a
     // facet only once shared endpoints hold two distinct values for it.
-    if ((category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) < 2)
-      continue;
+    // Region settles for one, since the filter exists to disclose a
+    // measurement handicap rather than to slice the board — but never for
+    // zero, which is every benchmark whose models carry no region at all.
+    const enoughValues =
+      category === REGION_CATEGORY
+        ? valueLabels.size > 0
+        : (category === SOURCE_CATEGORY ? valueLabels.size : sharedValues.size) >= 2;
+    if (!enoughValues) continue;
 
     const others: FacetSelection = { ...tagSelected, [category]: [] };
     const options: FacetOption[] = [...valueLabels.entries()]

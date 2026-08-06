@@ -5,12 +5,12 @@
 
 import type { components, paths } from "./generated/schema";
 import { buildQueryString } from "./url";
-import { getInternalKey } from "./internalKey";
+import { tokenHeaders } from "./accessTokens";
 import { normalizePlaygroundError, type PlaygroundApiError } from "@/lib/playground/schemas";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly statusText: string,
@@ -29,13 +29,12 @@ export class PlaygroundTtsError extends Error {
 }
 
 async function request<T>(path: string, init?: Parameters<typeof fetch>[1]): Promise<T> {
-  // Benchmarking-team key: unlocks early-access models server-side.
-  const internalKey = getInternalKey();
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
       Accept: "application/json",
-      ...(internalKey ? { "X-Internal-Key": internalKey } : {}),
+      // Unlocks early-access models server-side; absent for public callers.
+      ...tokenHeaders(),
       ...(init?.headers ?? {}),
     },
   });
@@ -56,12 +55,19 @@ export type ProvidersApiResponse = components["schemas"]["ProvidersResponse"];
 export type ModelTagOut = components["schemas"]["ModelTagOut"];
 export type TagCategoryOut = components["schemas"]["TagCategoryOut"];
 export type AggregatesApiResponse = components["schemas"]["AggregatesResponse"];
+export type AggregatesByDatasetApiResponse =
+  components["schemas"]["AggregatesByDatasetResponse"];
 export type ModelStatEntry = components["schemas"]["ModelStatEntry"];
 export type SeriesPoint = components["schemas"]["SeriesPoint"];
+export type RunsApiResponse = components["schemas"]["RunsResponse"];
+export type RunOut = components["schemas"]["RunOut"];
 
 // Query-param types from codegen
 export type AggregatesQueryParams = NonNullable<
   paths["/v1/results/aggregates"]["get"]["parameters"]["query"]
+>;
+export type AggregatesByDatasetQueryParams = NonNullable<
+  paths["/v1/results/aggregates/by-dataset"]["get"]["parameters"]["query"]
 >;
 export interface FetchOptions {
   signal?: AbortSignal;
@@ -126,8 +132,100 @@ export async function getAggregates(
   });
 }
 
+export async function getAggregatesByDataset(
+  params: AggregatesByDatasetQueryParams,
+  opts?: FetchOptions
+): Promise<AggregatesByDatasetApiResponse> {
+  const qs = buildQueryString(
+    params as Record<string, string | number | boolean | null | undefined>
+  );
+  return request<AggregatesByDatasetApiResponse>(
+    `/v1/results/aggregates/by-dataset${qs}`,
+    { signal: opts?.signal }
+  );
+}
+
+export async function getRuns(opts?: FetchOptions): Promise<RunsApiResponse> {
+  // Max page size: one page must reach back past a full day of per-dataset
+  // runs so every modality still has a completed run on it.
+  return request<RunsApiResponse>("/v1/runs?limit=200", { signal: opts?.signal });
+}
+
 export async function getProviders(
   opts?: FetchOptions
 ): Promise<ProvidersApiResponse> {
   return request<ProvidersApiResponse>("/v1/providers", { signal: opts?.signal });
+}
+
+// Declared by hand rather than taken from codegen: the committed schema predates
+// these routes, and regenerating it here would sweep in every unrelated API change
+// since it was last built. Refresh codegen on its own and swap these for
+// components["schemas"]["S2SSample*"] then.
+export interface S2SSampleTurn {
+  index: number;
+  role: string;
+  content: string;
+  start_offset?: number | null;
+  end_offset?: number | null;
+}
+
+export interface S2SSampleRecording {
+  provider: string;
+  model: string;
+  // An address on this API, not a storage URL: playing it mints a signed URL.
+  audio_path: string;
+  coval_run_id: string;
+  sim_id: string;
+  agent_id?: string | null;
+  turns: S2SSampleTurn[];
+}
+
+export interface S2SSampleApiResponse {
+  schema_version?: number | null;
+  sample_id: string;
+  test_case_id: string;
+  test_set_id?: string | null;
+  persona_name?: string | null;
+  transcript?: string | null;
+  recordings: S2SSampleRecording[];
+}
+
+export interface S2SSampleAudio {
+  url: string;
+  expires_at: string;
+}
+
+/** Sample ids newest-first; empty when the caller may see no S2S model at all. */
+export async function getS2SSampleIds(opts?: FetchOptions): Promise<string[]> {
+  return request<string[]>("/v1/s2s/samples", { signal: opts?.signal });
+}
+
+/**
+ * One sample, carrying only the recordings this caller may hear.
+ *
+ * `null` on 404 — no sample was published for that tick, or every recording in it
+ * is embargoed for this caller. Both mean the same thing to the card: nothing to
+ * show here. Any other failure throws so the card says so instead of going quiet.
+ */
+export async function getS2SSample(
+  sampleId: string,
+  opts?: FetchOptions
+): Promise<S2SSampleApiResponse | null> {
+  try {
+    return await request<S2SSampleApiResponse>(
+      `/v1/s2s/samples/${encodeURIComponent(sampleId)}`,
+      { signal: opts?.signal }
+    );
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+/** A freshly signed URL for one recording, from the `audio_path` its manifest gave. */
+export async function getS2SSampleAudio(
+  audioPath: string,
+  opts?: FetchOptions
+): Promise<S2SSampleAudio> {
+  return request<S2SSampleAudio>(audioPath, { signal: opts?.signal });
 }

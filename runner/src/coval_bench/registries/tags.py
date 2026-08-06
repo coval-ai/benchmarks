@@ -23,6 +23,7 @@ class TagCategory(StrEnum):
     SOURCE = "source"
     LICENSING = "licensing"
     DEPLOYMENT = "deployment"
+    REGION = "region"
 
 
 class ModelTag(StrEnum):
@@ -78,6 +79,7 @@ CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.SOURCE: "Source",
     TagCategory.LICENSING: "Licensing",
     TagCategory.DEPLOYMENT: "Deployment",
+    TagCategory.REGION: "Inference region",
 }
 
 if CATEGORY_LABELS.keys() != set(TagCategory):
@@ -105,9 +107,11 @@ _VALUE_LABELS: dict[str, str] = {
 
 
 def tag_value_label(category: TagCategory, value: str) -> str:
-    """Display label for a tag value. Provider-valued categories keep the raw id."""
+    """Display label for a tag value. Provider- and region-valued keep the raw id."""
     if category in PROVIDER_VALUED_CATEGORIES:
         return value
     if category is TagCategory.TYPE:
         return value.upper()
+    if category is TagCategory.REGION:
+        return value
     return _VALUE_LABELS.get(value, value.capitalize())

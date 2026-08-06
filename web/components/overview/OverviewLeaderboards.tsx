@@ -8,13 +8,16 @@ import { useAggregatesQuery, useProvidersQuery } from "@/lib/api/queries";
 import { buildTagIndex, dedicatedModelKeys } from "@/lib/utils/facets";
 import {
   normalizeModelName,
+  normalizeS2SProviderName,
   normalizeSTTProviderName,
   normalizeTTSProviderName,
   toModelKey,
 } from "@/lib/utils/formatters";
-import type { ModelStatEntry } from "@/lib/api/client";
+import { S2S_MULTITURN_DATASET } from "@/lib/config/datasets";
+import type { ModelStatEntry, ProvidersApiResponse } from "@/lib/api/client";
+import { disabledModelKeys } from "@/lib/utils/modelsFromResults";
 import { useTimeWindow } from "@/hooks/useTimeWindow";
-import { WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
+import { S2S_24H_ENABLED, WINDOW_LABELS, type TimeWindow } from "@/lib/config/timeWindows";
 import TimeWindowToggle from "@/components/shared/TimeWindowToggle";
 import { CymaticLoader } from "@/components/shared/CymaticLoader";
 import LeaderboardCard, { type LeaderboardRow } from "./LeaderboardCard";
@@ -48,6 +51,17 @@ function toRows(
 
 const windowBadge = (window: TimeWindow): string => `Last ${WINDOW_LABELS[window]}`;
 
+// Dedicated-inference endpoints stay off these shared-latency rankings, and
+// disabled (retired/pending) models still present in the window's stats too.
+const excludedKeys = (
+  benchmark: "STT" | "TTS" | "S2S",
+  providers: ProvidersApiResponse
+): Set<string> =>
+  new Set([
+    ...dedicatedModelKeys(buildTagIndex(benchmark, providers)),
+    ...disabledModelKeys(benchmark, providers),
+  ]);
+
 const OverviewLeaderboards: React.FC = () => {
   const { timeWindow, changeTimeWindow } = useTimeWindow("overview");
 
@@ -55,8 +69,19 @@ const OverviewLeaderboards: React.FC = () => {
   // entry with the dashboards whenever the selected windows coincide.
   const ttsQuery = useAggregatesQuery({ benchmark: "TTS", window: timeWindow });
   const sttQuery = useAggregatesQuery({ benchmark: "STT", window: timeWindow });
+  // S2S ingests daily, so it has no 24h window — pin the card to 7d there.
+  const s2sWindow: TimeWindow =
+    timeWindow === "24h" && !S2S_24H_ENABLED ? "7d" : timeWindow;
+  const s2sQuery = useAggregatesQuery({
+    benchmark: "S2S",
+    window: s2sWindow,
+    dataset: S2S_MULTITURN_DATASET,
+  });
   const providersQuery = useProvidersQuery();
-  const windowDataStale = ttsQuery.isPlaceholderData || sttQuery.isPlaceholderData;
+  const windowDataStale =
+    ttsQuery.isPlaceholderData ||
+    sttQuery.isPlaceholderData ||
+    s2sQuery.isPlaceholderData;
 
   // These cards rank shared latency, so dedicated-inference endpoints stay
   // off them — same rule as the dashboards' latency timeline. Rankings are
@@ -70,7 +95,7 @@ const OverviewLeaderboards: React.FC = () => {
             "p50",
             normalizeTTSProviderName,
             (value) => `${Math.round(value)} ms`,
-            dedicatedModelKeys(buildTagIndex("TTS", providersQuery.data))
+            excludedKeys("TTS", providersQuery.data)
           )
         : [],
     [ttsQuery.data, providersQuery.data]
@@ -85,10 +110,25 @@ const OverviewLeaderboards: React.FC = () => {
             "p50",
             normalizeSTTProviderName,
             (value) => `${Math.round(value * 1000)} ms`,
-            dedicatedModelKeys(buildTagIndex("STT", providersQuery.data))
+            excludedKeys("STT", providersQuery.data)
           )
         : [],
     [sttQuery.data, providersQuery.data]
+  );
+
+  const s2sRows = useMemo(
+    () =>
+      providersQuery.data
+        ? toRows(
+            s2sQuery.data?.model_stats,
+            "V2V",
+            "p50",
+            normalizeS2SProviderName,
+            (value) => `${Math.round(value)} ms`,
+            excludedKeys("S2S", providersQuery.data)
+          )
+        : [],
+    [s2sQuery.data, providersQuery.data]
   );
 
   return (
@@ -107,7 +147,7 @@ const OverviewLeaderboards: React.FC = () => {
           loading={windowDataStale}
         />
       </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Providers metadata drives the dedicated exclusion, so these cards
             wait for it (and surface its failure) rather than momentarily
             ranking a dedicated endpoint as shared. */}
@@ -130,6 +170,16 @@ const OverviewLeaderboards: React.FC = () => {
           loading={sttQuery.isLoading || providersQuery.isLoading}
           stale={sttQuery.isPlaceholderData}
           error={sttQuery.isError || providersQuery.isError}
+        />
+        <LeaderboardCard
+          title="Speech-to-Speech"
+          metricLabel="Voice-to-Voice Latency"
+          windowLabel={windowBadge(s2sQuery.data?.window ?? s2sWindow)}
+          rows={s2sRows}
+          href="/s2s"
+          loading={s2sQuery.isLoading || providersQuery.isLoading}
+          stale={s2sQuery.isPlaceholderData}
+          error={s2sQuery.isError || providersQuery.isError}
         />
       </div>
     </div>

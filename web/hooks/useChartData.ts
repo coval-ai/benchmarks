@@ -14,15 +14,19 @@ import type {
   ModelHeatmapData,
   BarDataPoint,
   InstructionBarDataPoint,
-  LatencyPercentile
+  LatencyPercentile,
+  TtfaBreakdownBar
 } from "@/types/benchmark.types";
 import type { SeriesPoint } from "@/lib/api/client";
 import { latencyToMs, normalizeModelName, normalizeProviderNameForTab, toModelKey, parseModelKey } from "@/lib/utils/formatters";
 import { WINDOW_MS, type TimeWindow } from "@/lib/config/timeWindows";
+import { werBreakdownOf } from "@/lib/utils/werBreakdown";
+import { TTFA_LEADING_SILENCE, TTFA_ROUNDTRIP } from "@/lib/config/metrics";
 
 // Latency metrics share every chart's number machinery (box plot, scatter,
 // comparison table). Membership gates the builders so a new one (V2V for S2S)
-// is never silently skipped.
+// is never silently skipped. The TTFA component metrics are deliberately
+// absent: they feed only the breakdown bars and the comparison-table split.
 const LATENCY_METRICS: readonly string[] = ["TTFS", "TTFT", "TTFA", "V2V"];
 
 interface UseChartDataParams {
@@ -298,6 +302,30 @@ export function useChartData({
     [scatterByMetricModel, selectedModels]
   );
 
+  // Stacked-bar rows for the TTFA breakdown view, fastest total first. Rows
+  // exist only where both component metrics are served; the runner writes the
+  // pair together, so the parts sum to the split runs' average TTFA exactly.
+  const ttfaBreakdownBars = useMemo<TtfaBreakdownBar[]>(
+    () =>
+      selectedModels
+        .flatMap((model) => {
+          const roundtrip = getStat(model, TTFA_ROUNDTRIP);
+          const silence = getStat(model, TTFA_LEADING_SILENCE)?.avg_value;
+          if (!roundtrip || silence === undefined) return [];
+          return [
+            {
+              model,
+              provider: roundtrip.provider,
+              roundtrip: roundtrip.avg_value,
+              silence,
+              ttfa: roundtrip.avg_value + silence
+            }
+          ];
+        })
+        .sort((a, b) => a.ttfa - b.ttfa),
+    [selectedModels, getStat]
+  );
+
   // Comparison rows for a given latency metric: the full latency percentile
   // ladder straight from the SQL stats, plus avg WER and sample counts.
   const getHeatmapData = useCallback(
@@ -358,7 +386,11 @@ export function useChartData({
           model,
           ...(latency ? { latency } : {}),
           ...(werStat
-            ? { avgWER: werStat.avg_value, werStdDev: werStat.stddev_value }
+            ? {
+                avgWER: werStat.avg_value,
+                werStdDev: werStat.stddev_value,
+                werBreakdown: werBreakdownOf(werStat)
+              }
             : {}),
           sampleCount: latencySampleCount ?? werStat?.sample_count ?? 0
         });
@@ -380,14 +412,15 @@ export function useChartData({
     }
 
     return selectedModels
-      .map((model) => {
+      .map((model): BarDataPoint | null => {
         const werStat = getStat(model, "WER");
         if (!werStat) return null;
 
         return {
           model,
           averageWER: werStat.avg_value,
-          provider: werStat.provider
+          provider: werStat.provider,
+          breakdown: werBreakdownOf(werStat)
         };
       })
       .filter((item): item is BarDataPoint => item !== null)
@@ -503,6 +536,7 @@ export function useChartData({
     getScatterData,
     getHeatmapData,
     getWERBarData,
+    ttfaBreakdownBars,
     getInstructionBarData,
     getCurrentTimeWindow,
     getTimelineTicks,

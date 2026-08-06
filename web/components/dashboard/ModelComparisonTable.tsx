@@ -4,11 +4,13 @@
 "use client";
 
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { Server } from "lucide-react";
+import { Globe, Server } from "lucide-react";
 import { useDedicatedInfoTip } from "@/components/shared/DedicatedInferenceInfo";
+import { REGION_CONTENT } from "@/components/shared/InferenceRegionInfo";
 import { LatencyPercentile, ModelHeatmapData } from "@/types/benchmark.types";
 import { normalizeModelName } from "@/lib/utils/formatters";
 import WerDatasetSelect from "@/components/dashboard/WerDatasetSelect";
+import { WER_BREAKDOWN_LABELS } from "@/lib/utils/werBreakdown";
 import { useActiveTab } from "@/hooks/useActiveTab";
 import { capturePostHogEvent } from "@/lib/posthog/client";
 import { POSTHOG_EVENTS } from "@/lib/posthog/events";
@@ -18,6 +20,8 @@ interface ModelComparisonTableProps {
   getProviderForModel: (model: string) => string;
   /** Dedicated-inference endpoints carry the server marker beside the name. */
   dedicatedModels?: Set<string>;
+  /** Model key -> inference region, for models served outside our worker's region. */
+  crossRegionModels?: Map<string, string>;
   percentileIdx: number;
   onPercentileChange: (idx: number) => void;
   werLabel?: string;
@@ -50,10 +54,57 @@ const COLUMNS: {
   { key: "sampleCount", label: "Samples", bestDirection: "desc" }
 ];
 
+// WER value with the error-type split on hover/tap when the API serves one.
+const WerValue: React.FC<{
+  row: Pick<ModelHeatmapData, "model" | "avgWER" | "werStdDev" | "werBreakdown">;
+  handlersFor: (content: React.ReactNode) => React.DOMAttributes<HTMLElement>;
+  getProviderForModel: (model: string) => string;
+}> = ({ row, handlersFor, getProviderForModel }) => {
+  const value = (
+    <>
+      <span className="font-mono text-base text-text-primary">
+        {row.avgWER!.toFixed(1)}
+        <span className="text-xs">%</span>
+      </span>
+      {row.werStdDev !== undefined && (
+        <span className="ml-1.5 font-mono text-xs text-text-tertiary">
+          ± {row.werStdDev.toFixed(1)}
+        </span>
+      )}
+    </>
+  );
+  const breakdown = row.werBreakdown;
+  if (!breakdown) return value;
+  return (
+    <button
+      type="button"
+      aria-label={`${getProviderForModel(row.model)} ${normalizeModelName(row.model)}: ${row.avgWER!.toFixed(1)}% WER (${WER_BREAKDOWN_LABELS.map(
+        ([key, text]) => `${text.toLowerCase()} ${breakdown[key].toFixed(1)}%`
+      ).join(", ")})`}
+      className="cursor-help rounded-md p-1 -m-1 underline decoration-border-primary decoration-dotted underline-offset-4 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+      {...handlersFor(
+        <>
+          <span className="font-semibold">
+            {normalizeModelName(row.model)}: {row.avgWER!.toFixed(1)}% WER
+          </span>
+          {WER_BREAKDOWN_LABELS.map(([key, text]) => (
+            <span key={key} className="block opacity-80">
+              {text}: {breakdown[key].toFixed(1)}%
+            </span>
+          ))}
+        </>
+      )}
+    >
+      {value}
+    </button>
+  );
+};
+
 const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   data,
   getProviderForModel,
   dedicatedModels,
+  crossRegionModels,
   percentileIdx,
   onPercentileChange,
   werLabel,
@@ -63,8 +114,15 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
   // The table scrolls horizontally, which clips anchored popovers, so the
   // dedicated explainer renders as an overlay on this unclipped wrapper.
   const tableWrapRef = useRef<HTMLDivElement>(null);
-  const { iconHandlers: dedicatedIconHandlers, overlay: dedicatedOverlay } =
-    useDedicatedInfoTip(tableWrapRef);
+  const {
+    iconHandlers: dedicatedIconHandlers,
+    handlersFor: infoTipHandlersFor,
+    overlay: infoTipOverlay
+  } = useDedicatedInfoTip(tableWrapRef);
+  const regionIconHandlers = useMemo(
+    () => infoTipHandlersFor(REGION_CONTENT),
+    [infoTipHandlersFor]
+  );
   const [sort, setSort] = useState<{ key: ColumnKey; direction: "asc" | "desc" }>(
     { key: "latency", direction: "asc" }
   );
@@ -177,19 +235,19 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
         {percentile.hint && (
           <span className="text-xs text-text-tertiary">{percentile.hint}</span>
         )}
-        <WerDatasetSelect className="ml-auto" />
+        {hasWER && activeTab === "stt" && <WerDatasetSelect className="ml-auto" />}
       </div>
 
       <div ref={tableWrapRef} className="relative">
-        {dedicatedOverlay}
+        {infoTipOverlay}
         <p className="mb-2 text-right text-xs text-text-tertiary sm:hidden">
           Swipe table for more →
         </p>
-        <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse text-sm">
+        <div className="max-h-[70vh] overflow-auto">
+        <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border-primary text-text-tertiary">
-              <th className="sticky left-0 z-10 bg-surface-elevated py-2 pr-4 text-left font-medium">Model</th>
+              <th className="sticky top-0 z-10 w-px bg-surface-elevated py-2 pr-4 text-left font-medium">Model</th>
               {columns.map((column) => (
                 <th
                   key={column.key}
@@ -200,7 +258,7 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         : "descending"
                       : undefined
                   }
-                  className="px-3 py-2 text-right font-medium"
+                  className="sticky top-0 z-10 bg-surface-elevated px-3 py-2 text-right font-medium"
                 >
                   <button
                     type="button"
@@ -233,8 +291,8 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                 key={row.model}
                 className="border-b border-border-secondary last:border-b-0 hover:bg-hover-bg"
               >
-                <td className="sticky left-0 z-[1] bg-surface-elevated py-3 pr-4 align-middle">
-                  <div className="flex items-center gap-1.5 font-medium text-text-primary">
+                <td className="py-3 pr-4 align-middle">
+                  <div className="flex items-center gap-1.5 whitespace-nowrap font-medium text-text-primary">
                     {normalizeModelName(row.model)}
                     {dedicatedModels?.has(row.model) && (
                       <button
@@ -244,6 +302,16 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                         {...dedicatedIconHandlers}
                       >
                         <Server size={13} aria-hidden />
+                      </button>
+                    )}
+                    {crossRegionModels?.has(row.model) && (
+                      <button
+                        type="button"
+                        aria-label="About inference region"
+                        className="flex shrink-0 cursor-help items-center rounded-md p-1 -m-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-text-tertiary/40"
+                        {...regionIconHandlers}
+                      >
+                        <Globe size={13} aria-hidden />
                       </button>
                     )}
                   </div>
@@ -271,17 +339,11 @@ const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({
                       className={`transition-opacity ${werLoading ? "opacity-40" : ""}`}
                     >
                       {row.avgWER !== undefined ? (
-                        <>
-                          <span className="font-mono text-base text-text-primary">
-                            {row.avgWER.toFixed(1)}
-                            <span className="text-xs">%</span>
-                          </span>
-                          {row.werStdDev !== undefined && (
-                            <span className="ml-1.5 font-mono text-xs text-text-tertiary">
-                              ± {row.werStdDev.toFixed(1)}
-                            </span>
-                          )}
-                        </>
+                        <WerValue
+                          row={row}
+                          handlersFor={infoTipHandlersFor}
+                          getProviderForModel={getProviderForModel}
+                        />
                       ) : (
                         <span className="text-text-tertiary">—</span>
                       )}

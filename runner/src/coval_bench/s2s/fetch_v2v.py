@@ -28,7 +28,7 @@ from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.s2s.samples import SampleRun, publish_tick_sample
+from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
 
@@ -69,7 +69,16 @@ class CovalRun:
 AGENTS: tuple[AgentSpec, ...] = (
     AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
     AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
-    AgentSpec(agent_id_attr="coval_s2s_xai_agent_id", provider="xai", model="grok-realtime"),
+    AgentSpec(
+        agent_id_attr="coval_s2s_xai_agent_id",
+        provider="xai",
+        model="grok-voice-think-fast-1.0",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
+        provider="xai",
+        model="grok-voice-think-fast-2.0",
+    ),
 )
 
 
@@ -635,7 +644,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
                 continue
-            statuses[spec.provider], ingested = await _fetch_one_provider(
+            statuses[f"{spec.provider}:{spec.model}"], ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=spec,
@@ -657,19 +666,23 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
         if settings.s2s_samples_bucket and sampled_runs and test_set_id:
-            expected = {spec.provider for spec in AGENTS if getattr(settings, spec.agent_id_attr)}
-            missing = expected - {r.provider for r in sampled_runs}
+            expected = {
+                (spec.provider, spec.model)
+                for spec in AGENTS
+                if getattr(settings, spec.agent_id_attr)
+            }
+            missing = expected - {r.key for r in sampled_runs}
             if missing:
-                # Error level on purpose: this is the alert that a provider is
+                # Error level on purpose: this is the alert that a model is
                 # absent from the window, so no day in it can publish a sample.
-                logger.error("samples_provider_missing", missing=sorted(missing))
+                logger.error("samples_provider_missing", missing=model_labels(missing))
             await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
                 test_set_id=test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
-                expected_providers=expected,
+                expected_models=expected,
             )
         logger.info(
             "s2s_fetch_done",

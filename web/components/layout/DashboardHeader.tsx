@@ -18,6 +18,7 @@ const SECTIONS = [
   { href: "/overview", label: "Overview", short: "Overview" },
   { href: "/tts", label: "Text-to-Speech", short: "TTS" },
   { href: "/stt", label: "Speech-to-Text", short: "STT" },
+  { href: "/s2s", label: "Speech-to-Speech", short: "S2S" },
   { href: "/playground", label: "Playground", short: "Playground" }
 ];
 

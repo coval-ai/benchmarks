@@ -81,6 +81,10 @@ class Result(BaseModel):
     error: str | None = None
     http_version: str | None = None
     submit_to_headers_ms: float | None = None
+    # WER only: metric_value split in percentage points; null before migration 0014.
+    wer_insertions_pct: float | None = None
+    wer_deletions_pct: float | None = None
+    wer_substitutions_pct: float | None = None
 
 
 class VoteOutcome(StrEnum):
