@@ -6,6 +6,13 @@ import type { PricingEntry } from "@/lib/api/client";
 import { formatUsd, normalizeModelName, toModelKey } from "@/lib/utils/formatters";
 import { billingUnitLabel, priceUnitShortLabel } from "@/lib/utils/pricing";
 
+// Provenance URLs are provider-controlled data by way of the collector;
+// only http(s) may become a navigable link (defense-in-depth against a
+// malformed or malicious scheme ever reaching the table).
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
 /**
  * The one provenance body every displayed price carries (AA convention):
  * native rate(s), derivation basis, plan assumption, as-of date, source link.
@@ -59,15 +66,19 @@ export function priceTooltipContent(
       )}
       <span className="block pt-1 opacity-80">
         as of {entry.as_of} ·{" "}
-        <a
-          href={entry.source_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline underline-offset-2"
-          onClick={(e) => e.stopPropagation()}
-        >
-          provider pricing page
-        </a>
+        {isHttpUrl(entry.source_url) ? (
+          <a
+            href={entry.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            provider pricing page
+          </a>
+        ) : (
+          <span>{entry.source_url}</span>
+        )}
       </span>
     </>
   );
