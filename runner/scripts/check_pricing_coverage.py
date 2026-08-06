@@ -28,10 +28,7 @@ async def _unpriced() -> list[str]:
             f"{m.benchmark}:{m.provider}/{m.model}"
             for m in MODEL_REGISTRY
             if m.status in (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
-            and not any(
-                r.benchmark is m.benchmark
-                for r in store.effective_rates_cached(m.provider, m.model)
-            )
+            and not store.effective_rates_cached(m.provider, m.model, m.benchmark)
         ]
 
 

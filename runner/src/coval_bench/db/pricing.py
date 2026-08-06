@@ -41,22 +41,35 @@ class PricingStore:
         self._pool = pool
         self._cache: dict[tuple[str, str], list[PriceRow]] | None = None
 
-    async def get_effective_rates(self, provider: str, model: str, at: datetime) -> list[PriceRow]:
+    async def get_effective_rates(
+        self,
+        provider: str,
+        model: str,
+        at: datetime,
+        benchmark: Benchmark | None = None,
+    ) -> list[PriceRow]:
         """Rates in force at *at*: ``effective_at <= at < coalesce(superseded_at, ∞)``.
 
-        Token-billed models return two rows (input + output units).
+        Token-billed models return two rows (input + output units). Pass
+        *benchmark* whenever the caller knows it: (provider, model) alone is
+        not unique — gradium serves STT and TTS under one model id, and an
+        unfiltered read would hand back incompatible rates together.
         """
         sql = f"""
             SELECT {_COLUMNS}
             FROM benchmarks_v2.model_pricing
             WHERE provider = %(provider)s AND model = %(model)s
+              AND (%(benchmark)s::text IS NULL OR benchmark = %(benchmark)s)
               AND effective_at <= %(at)s
               AND (superseded_at IS NULL OR superseded_at > %(at)s)
             ORDER BY billing_unit
         """  # noqa: S608 — column list is a module constant
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                await cur.execute(sql, {"provider": provider, "model": model, "at": at})
+                await cur.execute(
+                    sql,
+                    {"provider": provider, "model": model, "at": at, "benchmark": benchmark},
+                )
                 rows = await cur.fetchall()
             await conn.commit()
         return [PriceRow.model_validate(dict(r)) for r in rows]
@@ -157,8 +170,16 @@ class PricingStore:
             cache.setdefault((price.provider, price.model), []).append(price)
         self._cache = cache
 
-    def effective_rates_cached(self, provider: str, model: str) -> list[PriceRow]:
-        """Currently-effective rates from the in-process cache ([] = unpriced model)."""
+    def effective_rates_cached(
+        self, provider: str, model: str, benchmark: Benchmark | None = None
+    ) -> list[PriceRow]:
+        """Currently-effective rates from the in-process cache ([] = unpriced model).
+
+        Same *benchmark* rule as :meth:`get_effective_rates` — pass it when known.
+        """
         if self._cache is None:
             raise RuntimeError("PricingStore cache not loaded — call load_cache() first")
-        return self._cache.get((provider, model), [])
+        rates = self._cache.get((provider, model), [])
+        if benchmark is None:
+            return rates
+        return [r for r in rates if r.benchmark is benchmark]

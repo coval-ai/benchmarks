@@ -169,6 +169,29 @@ def test_token_billed_model_holds_two_effective_rows(pg_conn: psycopg.Connection
             cached = store.effective_rates_cached("openai", "gpt-4o-transcribe")
             assert len(cached) == 2
             assert store.effective_rates_cached("openai", "unknown") == []
+
+            # The benchmark filter keeps shared model ids apart (gradium
+            # serves STT and TTS under "default").
+            await _upsert(store, "0.013", at=_T0, provider="gradium", model="default")
+            await _upsert(
+                store,
+                "48.0",
+                at=_T0,
+                provider="gradium",
+                model="default",
+                benchmark=Benchmark.TTS,
+                billing_unit=BillingUnit.PER_1M_CHARS,
+            )
+            both = await store.get_effective_rates("gradium", "default", _T0)
+            assert len(both) == 2
+            stt_only = await store.get_effective_rates(
+                "gradium", "default", _T0, benchmark=Benchmark.STT
+            )
+            assert [r.benchmark for r in stt_only] == [Benchmark.STT]
+            await store.load_cache()
+            assert len(store.effective_rates_cached("gradium", "default")) == 2
+            tts_only = store.effective_rates_cached("gradium", "default", Benchmark.TTS)
+            assert [r.benchmark for r in tts_only] == [Benchmark.TTS]
         finally:
             await pool.close()
 
