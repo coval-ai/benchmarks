@@ -13,6 +13,10 @@ const allowedDevOrigins = (process.env.NEXT_ALLOWED_DEV_ORIGINS ?? "")
   .filter(Boolean);
 
 const proxyApiTarget = process.env.BENCH_PROXY_API?.replace(/\/$/, "");
+// Optional split-target for /v1/pricing only: lets a dev preview serve live
+// production benchmark data while the pricing store (not yet deployed there)
+// comes from a local API. Rewrites are ordered, so the specific rule wins.
+const proxyPricingTarget = process.env.BENCH_PROXY_PRICING_API?.replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -26,7 +30,17 @@ const nextConfig: NextConfig = {
   ...(proxyApiTarget
     ? {
         async rewrites() {
-          return [{ source: "/proxy-api/:path*", destination: `${proxyApiTarget}/:path*` }];
+          return [
+            ...(proxyPricingTarget
+              ? [
+                  {
+                    source: "/proxy-api/v1/pricing",
+                    destination: `${proxyPricingTarget}/v1/pricing`,
+                  },
+                ]
+              : []),
+            { source: "/proxy-api/:path*", destination: `${proxyApiTarget}/:path*` },
+          ];
         },
       }
     : {}),
