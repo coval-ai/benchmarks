@@ -274,14 +274,24 @@ async def _transcribe_with_whisper(
         response = await client.audio.transcriptions.create(
             model="whisper-1",
             file=fh,
+            # verbose_json always carries a `duration` field; the default json
+            # shape only sometimes attaches `usage`, which would leave the
+            # judge unmetered. The transcript text is identical either way.
+            response_format="verbose_json",
         )
-    usage = getattr(response, "usage", None)
-    if judge_usage is not None and usage is not None:
-        if usage.type == "tokens":
+    if judge_usage is not None:
+        usage = getattr(response, "usage", None)
+        if usage is not None and usage.type == "tokens":
             judge_usage["input_tokens"] = judge_usage.get("input_tokens", 0) + usage.input_tokens
             judge_usage["output_tokens"] = judge_usage.get("output_tokens", 0) + usage.output_tokens
-        elif usage.type == "duration":
+        elif usage is not None and usage.type == "duration":
             judge_usage["audio_seconds"] = judge_usage.get("audio_seconds", 0.0) + usage.seconds
+        else:
+            duration = getattr(response, "duration", None)
+            if isinstance(duration, (int, float)):
+                judge_usage["audio_seconds"] = judge_usage.get("audio_seconds", 0.0) + float(
+                    duration
+                )
     return str(response.text)
 
 

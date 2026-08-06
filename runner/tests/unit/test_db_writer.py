@@ -269,20 +269,26 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
         assert row[2] is None
         assert row[3] == pytest.approx(8.4)
 
+        # count(col) + min==max prove every row carries the value (min/max
+        # alone would pass with NULLs or strays mixed in).
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT count(*), min(total_tokens), min(billable_seconds), "
-                "min(audio_seconds_in), min(characters_in) "
+                "SELECT count(*), count(total_tokens), min(total_tokens), max(total_tokens), "
+                "count(billable_seconds), min(billable_seconds), max(billable_seconds), "
+                "count(audio_seconds_in), min(audio_seconds_in), max(audio_seconds_in), "
+                "count(characters_in) "
                 "FROM benchmarks_v2.results WHERE run_id = %s",
                 (run.id,),
             )
             count_row = cur.fetchone()
         assert count_row is not None
         assert count_row[0] == 3
-        assert count_row[1] == 12
-        assert count_row[2] == pytest.approx(2.5)
-        assert count_row[3] == pytest.approx(3.0)
-        assert count_row[4] is None
+        assert count_row[1] == 3 and count_row[2] == count_row[3] == 12
+        assert count_row[4] == 3
+        assert count_row[5] == pytest.approx(2.5) and count_row[6] == pytest.approx(2.5)
+        assert count_row[7] == 3
+        assert count_row[8] == pytest.approx(3.0) and count_row[9] == pytest.approx(3.0)
+        assert count_row[10] == 0  # STT-shaped rows: characters_in stays NULL
 
     asyncio.run(_run())
 

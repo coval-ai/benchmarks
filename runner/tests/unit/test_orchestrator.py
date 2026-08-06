@@ -2117,8 +2117,15 @@ async def test_transcribe_with_whisper_accumulates_judge_usage(
         assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
         response.usage = MagicMock(type="tokens", input_tokens=7, output_tokens=3)
         assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
+        # No usage object at all: verbose_json's duration field is the fallback.
+        response.usage = None
+        response.duration = 2.5
+        assert await _transcribe_with_whisper(audio_file, settings, judge_usage) == "hello"
 
-    assert judge_usage == {"audio_seconds": 4.0, "input_tokens": 7, "output_tokens": 3}
+    assert judge_usage == {"audio_seconds": 6.5, "input_tokens": 7, "output_tokens": 3}
+    # verbose_json is what guarantees the duration field exists.
+    call_kwargs = client.audio.transcriptions.create.await_args.kwargs
+    assert call_kwargs["response_format"] == "verbose_json"
 
 
 @pytest.mark.asyncio
