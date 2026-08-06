@@ -9,7 +9,8 @@ These are **persistence-layer** models only. The API layer has its own
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
@@ -20,8 +21,10 @@ from coval_bench.registries.benchmarks import Benchmark
 __all__ = [
     "Battle",
     "Benchmark",
+    "BillingUnit",
     "LeaderboardSnapshot",
     "PairingRating",
+    "PriceRow",
     "Result",
     "ResultStatus",
     "Run",
@@ -98,6 +101,45 @@ class Result(BaseModel):
     characters_in: int | None = None
     audio_seconds_in: float | None = None
     audio_seconds_out: float | None = None
+
+
+class BillingUnit(StrEnum):
+    """Native billing unit a provider publishes its rate in.
+
+    Rates are stored raw in these units; normalization to $/1k min or
+    $/1M chars happens at read time.
+    """
+
+    PER_MINUTE = "per_minute"
+    PER_SECOND = "per_second"
+    PER_HOUR = "per_hour"
+    PER_1M_CHARS = "per_1m_chars"
+    PER_1M_TOKENS_INPUT = "per_1m_tokens_input"
+    PER_1M_TOKENS_OUTPUT = "per_1m_tokens_output"
+    PER_REQUEST = "per_request"
+
+
+class PriceRow(BaseModel):
+    """Domain model for a row in ``benchmarks_v2.model_pricing`` (append-only).
+
+    ``superseded_at IS NULL`` marks the currently effective rate; token-billed
+    models hold two effective rows (input + output units).
+    """
+
+    id: int | None = None  # set by DB (bigserial)
+    provider: str
+    model: str
+    benchmark: Benchmark
+    billing_unit: BillingUnit
+    rate_usd: Decimal
+    plan_assumption: str | None = None
+    effective_at: datetime
+    superseded_at: datetime | None = None
+    source_url: str
+    as_of: date
+    evidence: str | None = None
+    updated_by: str  # 'human' | 'bot'
+    created_at: datetime | None = None  # set by DB default (now())
 
 
 class VoteOutcome(StrEnum):
