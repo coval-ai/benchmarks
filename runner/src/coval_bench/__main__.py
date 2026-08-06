@@ -100,6 +100,53 @@ migrate.add_command(import_legacy_cli, name="import-legacy")
 cli.add_command(fetch_s2s, name="fetch-s2s")
 
 
+@cli.command(name="update-prices")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print the diff table only — write no snapshots, rates, or review items.",
+)
+@click.option(
+    "--provider",
+    "providers",
+    multiple=True,
+    help="Restrict to one or more providers (repeatable). Default: all with a pricing page.",
+)
+def update_prices(dry_run: bool, providers: tuple[str, ...]) -> None:
+    """Scrape pricing pages, LLM-extract rates, and diff against the pricing store.
+
+    Small agreed changes auto-apply as new effective rows (updated_by='bot');
+    large or uncertain ones open a review item. Invoked weekly by a Cloud Run
+    Job (cron in benchmark-infra).
+    """
+    from coval_bench.config import get_settings
+    from coval_bench.db.conn import lifespan_pool
+    from coval_bench.pricing.collector import run_update_prices
+
+    async def _run() -> dict:
+        settings = get_settings()
+        async with lifespan_pool(settings) as pool:
+            return await run_update_prices(
+                settings, pool, providers=list(providers) or None, dry_run=dry_run
+            )
+
+    summary = asyncio.run(_run())
+    for change in summary["changes"]:
+        old = change["old_rate"] if change["old_rate"] is not None else "—"
+        delta = f"{change['delta_pct']:.1f}%" if change["delta_pct"] is not None else "—"
+        click.echo(
+            f"{change['action']:<13} {change['provider']}/{change['model']}"
+            f" [{change['billing_unit']}] {old} -> {change['new_rate']}"
+            f" (Δ {delta}) {change['reason']}"
+        )
+    click.echo(
+        json.dumps(
+            {"event": "update_prices", **{k: v for k, v in summary.items() if k != "changes"}}
+        )
+    )
+
+
 @cli.command(name="tts-smoke")
 @click.option("--provider", required=True, help="TTS provider name (e.g. openai, cartesia).")
 @click.option("--model", required=True, help="Model ID for the provider (e.g. gpt-4o-mini-tts).")

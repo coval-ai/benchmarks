@@ -151,6 +151,19 @@ class Settings(BaseSettings):
     # Public bucket for per-tick sample recordings; empty disables sampling.
     s2s_samples_bucket: str = ""
 
+    # --- Pricing collector ---
+    # Cadence of the update-prices Cloud Run Job; the cron itself lives in
+    # benchmark-infra (same mirror convention as schedule_period_seconds).
+    # Default weekly.
+    pricing_update_period_seconds: int = Field(default=604_800, gt=0)
+    # Model used for pricing-page rate extraction (OpenAI structured outputs).
+    pricing_extraction_model: str = "gpt-5-mini"
+    # Review-item sink: Linear preferred when the key is set, else the Slack
+    # webhook, else review items are logged only.
+    linear_api_key: SecretStr | None = None
+    linear_team_name: str = "Benchmarks"
+    pricing_review_slack_webhook: SecretStr | None = None
+
     # --- Analytics ---
     posthog_project_token: str = ""
     posthog_host: str = "https://us.i.posthog.com"

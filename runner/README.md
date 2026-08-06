@@ -4,6 +4,15 @@ Runner + API for Coval voice-AI benchmarks. Implements:
 
 - A Cloud Run Job that runs STT/TTS providers against a pinned dataset every 30 min and writes results to Cloud SQL.
 - A FastAPI service that serves the public results API at `https://benchmarks.coval.ai`.
+- A weekly price-collector Cloud Run Job (`coval-bench update-prices`, same
+  image, different command; cron in `benchmark-infra`, cadence mirrored by
+  `PRICING_UPDATE_PERIOD_SECONDS`). It scrapes provider pricing pages,
+  LLM-extracts rates with verbatim quotes, snapshots the pages for evidence,
+  auto-applies small agreed changes to `benchmarks_v2.model_pricing` as
+  `updated_by='bot'` rows, and opens a review item (Linear via
+  `LINEAR_API_KEY`, or `PRICING_REVIEW_SLACK_WEBHOOK`) for large or uncertain
+  ones and for rates stale beyond 45 days. `--dry-run` prints the diff table
+  without writing.
 
 ## What we benchmark
 
