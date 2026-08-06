@@ -5,28 +5,38 @@ Merge order: the six branches are stacked and must merge in ticket order
 
 ## Deploy sequence
 
-1. **Migrate prod FIRST** — migrations `0015`–`0018` must be applied before
-   the new runner/API images go live: the writer's INSERT names the new usage
-   columns and `finish_run` names the judge/cost columns, so old-schema +
-   new-code fails every run. All four migrations are plain
-   `CREATE TABLE`/`ADD COLUMN` (no matview drop/recreate, no lock-order
-   hazard, no backfill). Apply via cloud-sql-proxy the usual way:
+Prod auto-deploys main on a frequent weekday cron, so steps 1–2 run
+**before merging** — both are purely additive and invisible to the currently
+deployed code, which removes the merge→deploy race entirely.
+
+1. **Migrate prod BEFORE merging** — migrations `0015`–`0018` must be in
+   place before the new runner/API images go live: the new writer's INSERT
+   names the new usage columns and `finish_run` names the judge/cost columns,
+   so old-schema + new-code fails every run. (Old code + new schema is fine —
+   all four migrations are plain `CREATE TABLE`/`ADD COLUMN`, no matview
+   drop/recreate, no lock-order hazard, no backfill.) Apply via
+   cloud-sql-proxy the usual way, from the 637 branch checkout:
    `coval-bench db migrate` against the proxied DSN.
-2. **Seed the ratesheet** — `uv run python scripts/seed_pricing.py` against
-   the proxied DSN (the local-host guard passes through the proxy; the script
-   is idempotent and only ever supersedes). Expect ~69 rows inserted and a
-   6-model gap list (baseten ×2 dedicated, alibaba console-only, deepdub
-   enterprise, fluxions + deepgram flux TTS unreleased) — those are known and
-   deliberate; `scripts/check_pricing_coverage.py` will keep flagging them
-   until they're priced or paused.
-3. **Deploy runner + API**, then verify `GET /v1/pricing?benchmark=STT|TTS|S2S`
-   returns entries with `as_of` + `source_url` and that early-access models
-   (murf falcon-2, xai grok-voice, modulate english-v2) are absent without an
-   EA token.
-4. **Web deploys any time** — order does not matter. Verified against a live
-   API serving 404 on `/v1/pricing`: every pricing surface (column, toggle,
-   history card, overview cards) hides itself and the dashboards render
-   normally.
+2. **Seed the ratesheet (also pre-merge)** — `uv run python
+   scripts/seed_pricing.py` against the proxied DSN (the local-host guard
+   passes through the proxy; the script is idempotent and only ever
+   supersedes). Expect 69 rows inserted and a 6-model gap list (baseten ×2
+   dedicated, alibaba console-only, deepdub enterprise, fluxions + deepgram
+   flux TTS unreleased) — those are known and deliberate;
+   `scripts/check_pricing_coverage.py` will keep flagging them until they're
+   priced or paused.
+3. **Merge the six PRs in order** — the scheduled deploy (or a manual
+   ci-cd-switchboard "Deploy Service" run) rolls out runner + API. Then
+   verify `GET /v1/pricing?benchmark=STT|TTS|S2S` returns entries with
+   `as_of` + `source_url` and that early-access models (murf falcon-2, xai
+   grok-voice, modulate english-v2) are absent without an EA token.
+4. **Web deploys AFTER the API is live** — `vercel-build` runs `pnpm codegen`
+   against the live API's `/openapi.json` at build time, and the new
+   components reference the pricing types, so a web build that runs before
+   the new API is live fails its typecheck (safe: the site stays on the
+   previous version — just redeploy once step 3 is verified). At runtime the
+   ordering is free either way: against an API without `/v1/pricing` every
+   pricing surface hides itself (verified live).
 
 ## Day-one expectations
 
