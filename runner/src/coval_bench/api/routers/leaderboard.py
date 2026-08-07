@@ -24,7 +24,12 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
-from coval_bench.api.common import WINDOW_VIEWS, BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import (
+    WINDOW_VIEWS,
+    BenchmarkLiteral,
+    WindowLiteral,
+    has_enough_samples,
+)
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
@@ -106,6 +111,16 @@ async def get_leaderboard(
         if (r["provider"], r["model"]) not in hidden
         and not is_metric_excluded(r["provider"], r["model"], metric)
     ]
+    entries = [
+        e
+        if has_enough_samples(benchmark, e.n)
+        else e.model_copy(update={"insufficient_samples": True})
+        for e in entries
+    ]
+    # The view ranks by value alone, so a model that scored once with a fast time
+    # would lead the board. Thin entries sink below every ranked one; ORDER BY
+    # already sorted within each group, and a stable sort preserves it.
+    entries.sort(key=lambda e: e.insufficient_samples)
     capture_api_event(
         posthog_client,
         "leaderboard_queried",

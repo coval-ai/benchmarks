@@ -42,6 +42,7 @@ from coval_bench.api.common import (
     WINDOW_VIEWS,
     BenchmarkLiteral,
     WindowLiteral,
+    has_enough_samples,
 )
 from coval_bench.api.deps import (
     capture_api_event,
@@ -111,6 +112,18 @@ def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
     )
 
 
+def _flag_thin(stat: ModelStatEntry, benchmark: str) -> ModelStatEntry:
+    """Mark a stat that rests on too few samples to present as a real number.
+
+    The values are left intact — a collapsed provider's one measurement is a real
+    measurement, and callers that want it still get it. Only the flag changes, so
+    the frontend can show "n/a" instead of ranking a lucky sample.
+    """
+    if has_enough_samples(benchmark, stat.sample_count):
+        return stat
+    return stat.model_copy(update={"insufficient_samples": True})
+
+
 @router.get("/results/aggregates", response_model=AggregatesResponse)
 @limiter.limit("60/minute")
 async def get_results_aggregates(
@@ -163,8 +176,12 @@ async def get_results_aggregates(
             dataset=dataset_key,
             datasets=[r["dataset_id"] for r in dataset_rows],
             model_stats=[
-                ModelStatEntry.model_validate(r) for r in stat_rows if _visible(r, hidden)
+                _flag_thin(ModelStatEntry.model_validate(r), benchmark)
+                for r in stat_rows
+                if _visible(r, hidden)
             ],
+            # Series points are deliberately unflagged: one bucket holds a single
+            # run's samples, so every point sits under the floor by design.
             series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
         )
 
@@ -220,7 +237,9 @@ async def get_results_aggregates_by_dataset(
         grouped: dict[str, list[ModelStatEntry]] = {}
         for row in rows:
             if _visible(row, hidden):
-                grouped.setdefault(row["dataset_id"], []).append(ModelStatEntry.model_validate(row))
+                grouped.setdefault(row["dataset_id"], []).append(
+                    _flag_thin(ModelStatEntry.model_validate(row), benchmark)
+                )
 
         return AggregatesByDatasetResponse(
             benchmark=benchmark,
