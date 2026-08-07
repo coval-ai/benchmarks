@@ -17,7 +17,7 @@ const runnerRelease = fs.readFileSync(
   "utf8",
 );
 const promotionFoundationSha =
-  "d728caa7eee1b51abff3c9266b97313392f6537e";
+  "84d68f1f389588d9403971bced2160ede7b0c49c";
 
 describe("Benchmarks deployment-state workflows", () => {
   it("preserves immutable release context for both services", () => {
