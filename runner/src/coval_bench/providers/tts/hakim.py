@@ -1,15 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Hakim AI TTS provider — WebSocket streaming via the realtime speech API.
-
-Wire protocol on wss://api.tryhakim.ai/v1/audio/speech/stream (Bearer auth at
-the handshake): send one ``speech.create`` → audio arrives as binary
-PCM-S16LE frames (24 kHz mono) between the matching ``speech.started`` /
-``speech.done`` JSON frames. Errors arrive as ``error`` frames with a stable
-``code``; lifecycle frames (``session.created``, ``session.usage``) interleave
-and carry no audio.
-"""
+"""Hakim AI TTS provider — WebSocket streaming via the realtime speech API."""
 
 from __future__ import annotations
 
@@ -30,7 +22,6 @@ _VALID_MODELS = ("hakim-fast-v1",)
 _WS_URL = "wss://api.tryhakim.ai/v1/audio/speech/stream"
 _SAMPLE_RATE = 24000
 
-# How many trailing non-audio frames to retain for the silent-stream diagnostic.
 _LAST_FRAMES_KEPT = 3
 
 
@@ -97,8 +88,6 @@ class HakimTTSProvider(TTSProvider):
                         done = True
                         break
 
-                # A clean close before ``speech.done`` is a truncated stream; audio
-                # collected so far must not be scored as a complete synthesis.
                 if not done:
                     raise RuntimeError("connection closed before the speech.done frame")
 

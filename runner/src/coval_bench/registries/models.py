@@ -817,8 +817,6 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_EARLY_ACCESS,
         arena_enabled=False,
     ),
-    # Hakim AI (tryhakim.ai), Arabic-first realtime TTS. Voices are preset
-    # slugs from GET /v1/audio/voices: the en-US conversational pair.
     RegisteredModel(
         benchmark=_TTS,
         provider="hakim",
