@@ -84,11 +84,11 @@ async def test_murf_tts_url_and_frames(murf_settings: Settings) -> None:
     assert result.error is None
     parts = urlsplit(captured["url"])
     assert parts.scheme == "wss"
-    assert parts.netloc == "global.api.murf.ai"
+    assert parts.netloc == "us-east.api.murf.ai"
     assert parts.path == "/v1/speech/stream-input"
     assert parse_qs(parts.query) == {
         "api-key": ["test-murf-key"],
-        "model": ["falcon-2"],
+        "model": ["FALCON"],
         "sample_rate": ["24000"],
         "channel_type": ["MONO"],
         "format": ["PCM"],
