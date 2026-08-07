@@ -16,7 +16,7 @@ on:
       changed_files_json:
         description: JSON array of changed files for manual planning.
         required: false
-        default: '["runner/pyproject.toml","web/package.json"]'
+        default: '["runner/pyproject.toml"]'
         type: string
 
 concurrency:
@@ -35,7 +35,6 @@ jobs:
     outputs:
       checkout_ref: ${{ steps.context.outputs.checkout_ref }}
       run_runner_ci: ${{ steps.adapters.outputs.run_runner_ci }}
-      run_web_ci: ${{ steps.adapters.outputs.run_web_ci }}
       selected_check_ids: ${{ steps.switchboard.outputs.selected_check_ids }}
       required_gates: ${{ steps.switchboard.outputs.required_gates }}
       workflow_ownership: ${{ steps.switchboard.outputs.workflow_ownership }}
@@ -97,7 +96,7 @@ jobs:
         with:
           resolve: "true"
           switchboard-repo: benchmarks
-          dispatch-default: runner/pyproject.toml,web/package.json
+          dispatch-default: runner/pyproject.toml
           manual-json: ${{ github.event.inputs.changed_files_json }}
           event: ${{ github.workspace }}/switchboard/event.json
           changed-files: ${{ github.workspace }}/switchboard/changed-files.json
@@ -115,12 +114,10 @@ jobs:
           node <<'NODE' >> "$GITHUB_OUTPUT"
           if (process.env.SWITCHBOARD_TOKEN_AVAILABLE !== "true") {
             console.log("run_runner_ci=true")
-            console.log("run_web_ci=true")
             process.exit(0)
           }
           const selected = new Set(JSON.parse(process.env.SELECTED_CHECK_IDS || "[]"))
           console.log(`run_runner_ci=${selected.has("benchmarks.runner.ci")}`)
-          console.log(`run_web_ci=${selected.has("benchmarks.web.ci")}`)
           NODE
 
       - name: Publish Switchboard plan summary
@@ -148,20 +145,9 @@ jobs:
       ref: ${{ needs.plan.outputs.checkout_ref }}
     secrets: inherit
 
-  web_ci:
-    name: Benchmarks Web CI Adapter
-    needs: plan
-    if: needs.plan.outputs.run_web_ci == 'true'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/web-ci.yml
-    with:
-      ref: ${{ needs.plan.outputs.checkout_ref }}
-    secrets: inherit
-
   switchboard_gate:
     name: Switchboard Gate
-    needs: [plan, runner_ci, web_ci]
+    needs: [plan, runner_ci]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -170,9 +156,7 @@ jobs:
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
           RUNNER_RESULT: ${{ needs.runner_ci.result }}
-          WEB_RESULT: ${{ needs.web_ci.result }}
           RUN_RUNNER_CI: ${{ needs.plan.outputs.run_runner_ci }}
-          RUN_WEB_CI: ${{ needs.plan.outputs.run_web_ci }}
           SELECTED_CHECK_IDS: ${{ needs.plan.outputs.selected_check_ids }}
         run: |
           set -euo pipefail
@@ -187,17 +171,12 @@ jobs:
             echo "::error::Runner CI adapter was selected but finished with result ${RUNNER_RESULT}."
             failed=true
           fi
-          if [ "$RUN_WEB_CI" = "true" ] && [ "$WEB_RESULT" != "success" ]; then
-            echo "::error::Web CI adapter was selected but finished with result ${WEB_RESULT}."
-            failed=true
-          fi
 
           {
             echo "## Switchboard gate"
             echo ""
             echo "- Selected check ids: ${SELECTED_CHECK_IDS:-[]}"
             echo "- Runner CI adapter: ${RUNNER_RESULT}"
-            echo "- Web CI adapter: ${WEB_RESULT}"
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$failed" = "true" ]; then
