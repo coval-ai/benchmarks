@@ -21,7 +21,7 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("falcon-2",)
-_WS_URL = "wss://us-east.api.murf.ai/v1/speech/stream-input"
+_WS_URL = "wss://global.api.murf.ai/v1/speech/stream-input"
 _SAMPLE_RATE = 24000
 
 

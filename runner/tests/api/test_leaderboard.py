@@ -9,6 +9,7 @@ from typing import Any
 
 from httpx import AsyncClient
 
+from coval_bench.api.common import MIN_SCORED_SAMPLES
 from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
 
 
@@ -154,3 +155,74 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert response.status_code == 200
     entries = response.json()["entries"]
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
+
+
+async def test_thin_entry_flagged_and_sunk_below_ranked(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A model scored fewer times than the floor can't outrank a well-sampled one.
+
+    The view orders by value alone, so a single fast measurement would otherwise
+    lead the board.
+    """
+    run_id = await _insert_run(postgresql)
+    # One lucky, very fast sample — would sort first on value.
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="fishaudio",
+        model="s1",
+        metric_type="WER",
+        metric_value=0.0,
+        benchmark="STT",
+    )
+    for _ in range(MIN_SCORED_SAMPLES["STT"]):
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="deepgram",
+            model="nova-3",
+            metric_type="WER",
+            metric_value=9.0,
+            benchmark="STT",
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get(
+        "/v1/leaderboard", params={"metric": "WER", "benchmark": "STT", "window": "24h"}
+    )
+    assert response.status_code == 200
+    entries = response.json()["entries"]
+
+    assert [(e["model"], e["insufficient_samples"]) for e in entries] == [
+        ("nova-3", False),
+        ("s1", True),
+    ]
+    # The measurement is still reported, just not presented as rankable.
+    thin = entries[1]
+    assert thin["avg"] == 0.0
+    assert thin["n"] == 1
+
+
+async def test_entry_at_the_floor_is_not_flagged(client: AsyncClient, postgresql: Any) -> None:
+    """Exactly the floor's worth of samples counts as enough."""
+    run_id = await _insert_run(postgresql)
+    for _ in range(MIN_SCORED_SAMPLES["STT"]):
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="deepgram",
+            model="nova-3",
+            metric_type="WER",
+            metric_value=4.0,
+            benchmark="STT",
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get(
+        "/v1/leaderboard", params={"metric": "WER", "benchmark": "STT", "window": "24h"}
+    )
+    entries = response.json()["entries"]
+    assert [(e["n"], e["insufficient_samples"]) for e in entries] == [
+        (MIN_SCORED_SAMPLES["STT"], False)
+    ]

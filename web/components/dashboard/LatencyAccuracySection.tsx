@@ -343,7 +343,7 @@ const LatencyAccuracySection: React.FC = () => {
         >
           {activePoint && (
             <div
-              className={`absolute top-2 z-10 max-w-[40%] text-xs ${
+              className={`absolute top-2 z-10 max-w-[calc(40%+2.75rem)] pr-11 text-xs md:max-w-[calc(40%+1.75rem)] md:pr-7 ${
                 activePoint.x > xMax / 2 ? "left-12" : "right-2"
               }`}
               onPointerDown={(e) => e.stopPropagation()}
@@ -352,7 +352,7 @@ const LatencyAccuracySection: React.FC = () => {
                 type="button"
                 aria-label="Close model details"
                 onClick={() => setActiveIdx(-1)}
-                className="absolute -right-2 -top-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-toggle-inactive text-lg text-text-secondary"
+                className="absolute right-0 top-0 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-surface-toggle-inactive text-lg leading-none text-text-secondary hover:text-text-primary md:right-2 md:top-2 md:h-5 md:w-5 md:text-xs"
               >
                 ×
               </button>
