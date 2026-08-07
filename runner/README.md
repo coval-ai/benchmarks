@@ -51,7 +51,7 @@ docker compose run --rm runner coval-bench tts-smoke \
   --provider cartesia --model sonic-3 --voice <voice-id> --text "hello"
 ```
 
-The web FE (`web/`) is a Next.js app — run `pnpm dev` against `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+The web FE lives in the private `coval-ai/benchmarks-web` repo — run it against `NEXT_PUBLIC_API_URL=http://localhost:8000`.
 
 All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 

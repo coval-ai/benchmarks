@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Local Voice Arena stack: Postgres + API (docker compose) + Next.js web (pnpm).
+# Local Voice Arena backend: Postgres + API (docker compose).
+# The web half lives in the private benchmarks-web repo; point its dev server
+# at the API this starts on :8000 (ARENA_API_URL, shared ARENA_LABELER_KEY).
 # Run from anywhere inside the worktree.
 #
 #   ./arena-local.sh up            # db + migrate + api on :8000
-#   ./arena-local.sh web           # ensure web env, then pnpm dev on :3000 (foreground)
-#   ./arena-local.sh all           # up -> snapshot -> web  (one shot; the normal way to start)
+#   ./arena-local.sh all           # up -> snapshot  (one shot; the normal way to start)
 #   ./arena-local.sh snapshot      # compute a leaderboard ratings snapshot (needs votes)
 #   ./arena-local.sh status        # health + battle/vote counts
 #   ./arena-local.sh down          # stop the docker stack (keeps the pgdata volume)
@@ -19,7 +20,6 @@ ROOT="$(git rev-parse --show-toplevel)"
 cd "$ROOT"
 
 ENV_FILE="$ROOT/.env"
-WEB_ENV="$ROOT/web/.env.local"
 API_URL="http://localhost:8000"
 
 log()  { printf '\033[36m▸ %s\033[0m\n' "$*" >&2; }
@@ -48,11 +48,11 @@ env_ensure() {
   log "set $key in ${file#"$ROOT"/}"
 }
 
-# Resolve one shared labeler key: prefer an existing value in either file, else generate.
+# Resolve the labeler key (shared with the benchmarks-web dev env): keep an
+# existing value, else generate.
 resolve_labeler_key() {
   local k
   k="$(env_get "$ENV_FILE" ARENA_LABELER_KEY)"
-  [ -z "$k" ] && k="$(env_get "$WEB_ENV" ARENA_LABELER_KEY)"
   [ -z "$k" ] && k="local-$(openssl rand -hex 8 2>/dev/null || echo devkey$RANDOM)"
   printf '%s' "$k"
 }
@@ -69,13 +69,6 @@ ensure_backend_env() {
   # browser (on :3000) can fetch clips the API serves on :8000.
   env_ensure "$ENV_FILE" ARENA_AUDIO_DIR /tmp/arena-audio
   env_ensure "$ENV_FILE" ARENA_AUDIO_BASE_URL "$API_URL"
-}
-
-ensure_web_env() {
-  local key; key="$(resolve_labeler_key)"
-  env_ensure "$WEB_ENV" NEXT_PUBLIC_ARENA_SOURCE api
-  env_ensure "$WEB_ENV" ARENA_API_URL "$API_URL"
-  env_ensure "$WEB_ENV" ARENA_LABELER_KEY "$key"
 }
 
 wait_for_api() {
@@ -112,24 +105,13 @@ cmd_status() {
     2>/dev/null || warn "could not query db (is it up? are migrations applied?)"
 }
 
-cmd_web() {
-  command -v pnpm >/dev/null || die "pnpm not found"
-  ensure_web_env
-  cd "$ROOT/web"
-  log "syncing web dependencies"
-  pnpm install
-  log "starting Next.js dev — open http://localhost:3000/arena"
-  pnpm dev
-}
-
 cmd_down() { docker compose down; }
 
 case "${1:-}" in
   up)       cmd_up ;;
   snapshot) cmd_snapshot ;;
   status)   cmd_status ;;
-  web)      cmd_web ;;
   down)     cmd_down ;;
-  all)      cmd_up; cmd_snapshot || warn "snapshot skipped (no votes yet)"; cmd_web ;;
-  *)        sed -n '2,14p' "$0"; exit 2 ;;
+  all)      cmd_up; cmd_snapshot || warn "snapshot skipped (no votes yet)" ;;
+  *)        sed -n '2,15p' "$0"; exit 2 ;;
 esac

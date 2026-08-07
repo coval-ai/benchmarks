@@ -4,7 +4,7 @@
 # Runner CI adapter: lint + type-check + tests + secret scan + docker build
 # (no push). Selection is owned by switchboard.yml, which invokes this workflow
 # only when the runner CI check is selected — there is no in-adapter
-# re-selection. The web tier is a separate adapter (web-ci.yml).
+# re-selection.
 
 name: CI
 
@@ -133,37 +133,3 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # ---------------------------------------------------------------------------
-  # Methodology marker reminder — advisory only (warns, never blocks).
-  # If a PR changes how a metric is computed (WER normalization, TTFT/TTFA
-  # definitions) or the eval dataset, the timeline charts should get a
-  # methodology marker. Warn when those paths change but the curated marker
-  # file (web/lib/config/methodologyChanges.ts) was not touched.
-  # Provider add/exclude (orchestrator.py) is intentionally NOT watched — it
-  # changes for routine reasons and is left to human judgment.
-  #
-  # The check script self-detects methodology-sensitive changes and stays
-  # silent otherwise, so it needs no pre-selection. Gated to pull_request (a
-  # base ref to diff against): it is a PR-authoring reminder.
-  # ---------------------------------------------------------------------------
-  methodology-gate:
-    name: Methodology marker check
-    if: github.base_ref != ''
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # Advisory only: never let this job block a PR, even on an unexpected error.
-    continue-on-error: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Warn on methodology change without a marker
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          set -euo pipefail
-          python3 runner/scripts/methodology_marker_check.py --base "origin/$BASE_REF"
