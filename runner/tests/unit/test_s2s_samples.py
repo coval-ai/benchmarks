@@ -462,3 +462,32 @@ def test_conversation_turns_coerces_offsets() -> None:
         (None, None),
         (None, None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_failed_recording_download_keeps_the_signature_out_of_the_error() -> None:
+    """The error names the object but not the signature — the caller logs it verbatim."""
+    signature = "3a9fSECRETSIGNATURE"
+    signed = f"https://blobs.test/recordings/sim-1.wav?X-Goog-Signature={signature}"
+
+    def api(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"audio_url": signed})
+
+    def blobs(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, text="upstream unavailable")
+
+    async with (
+        httpx.AsyncClient(
+            base_url="https://api.test/v1", transport=httpx.MockTransport(api)
+        ) as client,
+        httpx.AsyncClient(transport=httpx.MockTransport(blobs)) as download_client,
+    ):
+        with pytest.raises(httpx.HTTPStatusError) as caught:
+            await samples._download_recording(client, download_client, "sim-1")
+
+    message = str(caught.value)
+    assert signature not in message
+    assert "?" not in message
+    assert "https://blobs.test/recordings/sim-1.wav" in message
+    assert "502" in message
+    assert "sim-1" in message

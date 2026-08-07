@@ -161,14 +161,35 @@ async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> di
 async def _download_recording(
     client: httpx.AsyncClient, download_client: httpx.AsyncClient, sim_id: str
 ) -> bytes | None:
-    """Recording bytes via the presigned URL; None when the object is gone."""
+    """Recording bytes via the presigned URL; None when the object is gone.
+
+    The download failure is raised by hand rather than through
+    ``blob.raise_for_status()``: that message embeds the whole URL, and the
+    signature in the query string is the credential granting read access to the
+    recording. The caller logs the failure with ``exc_info``, so the message
+    reaches Cloud Logging verbatim. Only the query is dropped — host and object
+    path say which backend refused which recording, and neither is secret.
+    Still an ``HTTPStatusError``: the retry in ``_fetch_retry`` keys on
+    ``httpx.HTTPError``.
+
+    Assumes Coval signs ``audio_url`` the way GCS and S3 do, with the signature
+    in the query string. A CDN that signs by path token instead would put the
+    credential in a path segment, which this keeps — revisit if the recordings
+    ever move off object storage.
+    """
     url_resp = await client.get(f"/simulations/{sim_id}/audio")
     if url_resp.status_code == 404:
         return None
     url_resp.raise_for_status()
     audio_url = cast("str", url_resp.json()["audio_url"])
     blob = await download_client.get(audio_url)
-    blob.raise_for_status()
+    if blob.is_error:
+        raise httpx.HTTPStatusError(
+            f"recording download for {sim_id} failed: HTTP {blob.status_code} "
+            f"from {blob.request.url.copy_with(query=None, userinfo=b'')}",
+            request=blob.request,
+            response=blob,
+        )
     return blob.content
 
 
