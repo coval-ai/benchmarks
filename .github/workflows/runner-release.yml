@@ -39,15 +39,54 @@ jobs:
       runner_image: ${{ steps.context.outputs.runner_image }}
       api_image: ${{ steps.context.outputs.api_image }}
       skip: ${{ steps.context.outputs.skip }}
+      mode: ${{ steps.context.outputs.mode }}
+      promotion_origin: ${{ steps.context.outputs.promotion_origin }}
+      selected_deploy_action_ids: ${{ steps.context.outputs.selected_deploy_action_ids }}
     steps:
       - name: Resolve deploy ref
         id: input
         env:
           DISPATCH_REF: ${{ github.event.client_payload.deploy_ref }}
+          DISPATCH_MODE: ${{ github.event.client_payload.mode }}
+          DISPATCH_ORIGIN: ${{ github.event.client_payload.promotion_origin }}
+          DISPATCH_SELECTED_DEPLOY_ACTION_IDS: ${{ toJSON(github.event.client_payload.selected_deploy_action_ids) }}
           MANUAL_REF: ${{ inputs.deploy_ref }}
         run: |
           set -euo pipefail
-          echo "deploy_ref=${DISPATCH_REF:-${MANUAL_REF:-main}}" >> "$GITHUB_OUTPUT"
+          deploy_mode="${DISPATCH_MODE:-safe}"
+          promotion_origin="${DISPATCH_ORIGIN:-manual}"
+          case "$deploy_mode" in
+            safe|plan|deploy_only) ;;
+            *)
+              echo "::error::mode must be safe, plan, or deploy_only."
+              exit 1
+              ;;
+          esac
+          case "$promotion_origin" in
+            automatic|manual) ;;
+            *)
+              echo "::error::promotion_origin must be automatic or manual."
+              exit 1
+              ;;
+          esac
+          selected_deploy_action_ids="$(
+            jq -c '
+              if type == "array" and length > 0
+              then .
+              else ["benchmarks.runner.production.release"]
+              end
+            ' <<<"$DISPATCH_SELECTED_DEPLOY_ACTION_IDS"
+          )"
+          if ! jq -e 'index("benchmarks.runner.production.release") != null' <<<"$selected_deploy_action_ids" >/dev/null; then
+            echo "::error::The Benchmarks Runner production release action was not selected."
+            exit 1
+          fi
+          {
+            echo "deploy_ref=${DISPATCH_REF:-${MANUAL_REF:-main}}"
+            echo "mode=${deploy_mode}"
+            echo "promotion_origin=${promotion_origin}"
+            echo "selected_deploy_action_ids=${selected_deploy_action_ids}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -75,6 +114,9 @@ jobs:
             echo "runner_image=${runner_image}"
             echo "api_image=${api_image}"
             echo "skip=${skip}"
+            echo "mode=${{ steps.input.outputs.mode }}"
+            echo "promotion_origin=${{ steps.input.outputs.promotion_origin }}"
+            echo "selected_deploy_action_ids=${{ steps.input.outputs.selected_deploy_action_ids }}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -240,9 +282,116 @@ jobs:
           set -euo pipefail
           git push origin "HEAD:refs/heads/production-runner"
 
+  record_deployment:
+    name: Record verified runner/API deployment
+    needs: [context, build_and_push, dispatch_infra, promote_marker]
+    if: >-
+      always() &&
+      needs.context.result == 'success' &&
+      (
+        needs.context.outputs.skip == 'true' ||
+        (
+          needs.build_and_push.result == 'success' &&
+          needs.dispatch_infra.result == 'success' &&
+          needs.promote_marker.result == 'success'
+        )
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Record verified deployment result
+        env:
+          API_IMAGE: ${{ needs.context.outputs.api_image }}
+          DEPLOYMENT_PERFORMED: ${{ needs.context.outputs.skip != 'true' }}
+          DEPLOY_MODE: ${{ needs.context.outputs.mode }}
+          INFRA_URL: ${{ needs.dispatch_infra.outputs.infra_url }}
+          REQUESTED_REF: ${{ needs.context.outputs.deploy_ref }}
+          RUNNER_IMAGE: ${{ needs.context.outputs.runner_image }}
+          SELECTED_DEPLOY_ACTION_IDS: ${{ needs.context.outputs.selected_deploy_action_ids }}
+          SOURCE_SHA: ${{ needs.context.outputs.deploy_sha }}
+        run: |
+          set -euo pipefail
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          image_identity="runner=${RUNNER_IMAGE};api=${API_IMAGE}"
+          result_path="${RUNNER_TEMP}/switchboard-deploy-result.json"
+          jq -n \
+            --arg image_identity "$image_identity" \
+            --arg infra_url "$INFRA_URL" \
+            --arg mode "$DEPLOY_MODE" \
+            --arg requested_ref "$REQUESTED_REF" \
+            --arg run_url "$run_url" \
+            --arg source_sha "$SOURCE_SHA" \
+            --argjson deployment_performed "$DEPLOYMENT_PERFORMED" \
+            --argjson selected_deploy_action_ids "$SELECTED_DEPLOY_ACTION_IDS" \
+            '{
+              schema_version: 1,
+              service: "benchmarks.runner",
+              environment: "prod",
+              mode: $mode,
+              source: {repository: "coval-ai/benchmarks", requested_ref: $requested_ref, resolved_sha: $source_sha},
+              adapter: {kind: "repository_dispatch", run_url: $run_url},
+              selected_deploy_action_ids: $selected_deploy_action_ids,
+              deploy_action_results: ($selected_deploy_action_ids | map({id: ., conclusion: "success", evidence_url: $run_url})),
+              deployment_performed: $deployment_performed,
+              canaries: [{
+                id: "benchmarks.runner.infrastructure-rollout",
+                name: "Benchmark infrastructure rollout",
+                conclusion: (if $deployment_performed then "success" else "skipped" end),
+                evidence_url: (if $deployment_performed then $infra_url else $run_url end)
+              }],
+              generated_artifact_publications: [],
+              overall_status: "success",
+              evidence_urls: ([$run_url] + if $deployment_performed then [$infra_url] else [] end)
+            }
+            + if $deployment_performed then {
+                built_artifact: {kind: "other", identity: $image_identity},
+                live_artifact: {identity: $image_identity, verified: true, evidence_url: $infra_url}
+              } else {} end' > "$result_path"
+
+      - name: Upload verified deployment result
+        uses: actions/upload-artifact@v6
+        with:
+          name: switchboard-deploy-result
+          path: ${{ runner.temp }}/switchboard-deploy-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Generate token for Switchboard
+        id: app_token
+        if: needs.context.outputs.promotion_origin == 'manual' && needs.context.outputs.skip != 'true'
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: coval-ai
+          repositories: ci-cd-switchboard
+          permission-contents: read
+
+      - name: Checkout Switchboard publication action
+        if: steps.app_token.outputs.token != ''
+        uses: actions/checkout@v7
+        with:
+          repository: coval-ai/ci-cd-switchboard
+          ref: 84d68f1f389588d9403971bced2160ede7b0c49c
+          token: ${{ steps.app_token.outputs.token }}
+          path: switchboard-src
+          persist-credentials: false
+
+      - name: Publish manually selected production state
+        if: steps.app_token.outputs.token != ''
+        uses: ./switchboard-src/.github/actions/switchboard-publish-deployment-state
+        with:
+          environment: prod
+          repository: coval-ai/benchmarks
+          result-path: ${{ runner.temp }}/switchboard-deploy-result.json
+          service: benchmarks.runner
+          token: ${{ github.token }}
+
   summarize:
     name: Summarize release
-    needs: [context, build_and_push, dispatch_infra, promote_marker]
+    needs: [context, build_and_push, dispatch_infra, promote_marker, record_deployment]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -255,5 +404,6 @@ jobs:
             echo "- Build: \`${{ needs.build_and_push.result }}\`"
             echo "- Infra rollout: \`${{ needs.dispatch_infra.result }}\`"
             echo "- Marker promote: \`${{ needs.promote_marker.result }}\`"
+            echo "- Deployment result: \`${{ needs.record_deployment.result }}\`"
             echo "- Infra run: ${{ needs.dispatch_infra.outputs.infra_url || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -47,13 +47,19 @@ jobs:
       deploy_ref: ${{ steps.release.outputs.deploy_ref }}
       environment: ${{ steps.release.outputs.environment }}
       marker_branch: ${{ steps.release.outputs.marker_branch }}
+      mode: ${{ steps.release.outputs.mode }}
+      promotion_origin: ${{ steps.release.outputs.promotion_origin }}
+      selected_deploy_action_ids: ${{ steps.release.outputs.selected_deploy_action_ids }}
 
     steps:
       - name: Resolve release request
         id: release
         env:
           DISPATCH_ENVIRONMENT: ${{ github.event.client_payload.environment }}
+          DISPATCH_MODE: ${{ github.event.client_payload.mode }}
+          DISPATCH_ORIGIN: ${{ github.event.client_payload.promotion_origin }}
           DISPATCH_REF: ${{ github.event.client_payload.deploy_ref }}
+          DISPATCH_SELECTED_DEPLOY_ACTION_IDS: ${{ toJSON(github.event.client_payload.selected_deploy_action_ids) }}
           MANUAL_ENVIRONMENT: ${{ inputs.environment }}
           MANUAL_REF: ${{ inputs.deploy_ref }}
         run: |
@@ -61,6 +67,8 @@ jobs:
 
           environment="${DISPATCH_ENVIRONMENT:-${MANUAL_ENVIRONMENT:-production}}"
           deploy_ref="${DISPATCH_REF:-${MANUAL_REF:-main}}"
+          mode="${DISPATCH_MODE:-safe}"
+          promotion_origin="${DISPATCH_ORIGIN:-manual}"
 
           case "$environment" in
             staging)
@@ -75,10 +83,43 @@ jobs:
               ;;
           esac
 
+          case "$mode" in
+            safe|plan|deploy_only) ;;
+            *)
+              echo "::error::mode must be safe, plan, or deploy_only."
+              exit 1
+              ;;
+          esac
+          case "$promotion_origin" in
+            automatic|manual) ;;
+            *)
+              echo "::error::promotion_origin must be automatic or manual."
+              exit 1
+              ;;
+          esac
+          selected_deploy_action_ids="$(
+            jq -c --arg environment "$environment" '
+              if type == "array"
+              then .
+              elif $environment == "production"
+              then ["benchmarks.web.production.release"]
+              else []
+              end
+            ' <<<"$DISPATCH_SELECTED_DEPLOY_ACTION_IDS"
+          )"
+          if [ "$environment" = "production" ] &&
+            ! jq -e 'index("benchmarks.web.production.release") != null' <<<"$selected_deploy_action_ids" >/dev/null; then
+            echo "::error::The Benchmarks Web production release action was not selected."
+            exit 1
+          fi
+
           {
             echo "environment=${environment}"
             echo "deploy_ref=${deploy_ref}"
             echo "marker_branch=${marker_branch}"
+            echo "mode=${mode}"
+            echo "promotion_origin=${promotion_origin}"
+            echo "selected_deploy_action_ids=${selected_deploy_action_ids}"
           } >> "$GITHUB_OUTPUT"
 
   release:
@@ -140,7 +181,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: coval-ai/ci-cd-switchboard
-          ref: 9221d6f4ce20b7c253b46aa62aa9a807f4a1488d
+          ref: 84d68f1f389588d9403971bced2160ede7b0c49c
           token: ${{ steps.app_token.outputs.token }}
           path: switchboard-src
           persist-credentials: false
@@ -154,7 +195,7 @@ jobs:
           resolved-sha: ${{ steps.revision.outputs.resolved_sha }}
           marker-branch: ${{ needs.context.outputs.marker_branch }}
           install-directory: web
-          vercel-directory: .
+          vercel-directory: web
           package-manager: pnpm
           node-version: "22"
           pre-build-command: |
@@ -171,7 +212,6 @@ jobs:
               echo "::error::NEXT_PUBLIC_API_URL is required for benchmarks web codegen."
               exit 1
             fi
-            cd web
             pnpm codegen
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
@@ -186,3 +226,75 @@ jobs:
             echo "- Commit: \`${{ steps.revision.outputs.resolved_sha }}\`"
             echo "- Skipped: \`true\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record verified deployment result
+        env:
+          DEPLOYMENT_PERFORMED: ${{ steps.release.outputs.deployed || 'false' }}
+          DEPLOYMENT_URL: ${{ steps.release.outputs.deployment-url }}
+          DEPLOY_MODE: ${{ needs.context.outputs.mode }}
+          RELEASE_ENVIRONMENT: ${{ needs.context.outputs.environment }}
+          REQUESTED_REF: ${{ needs.context.outputs.deploy_ref }}
+          RESOLVED_SHA: ${{ steps.revision.outputs.resolved_sha }}
+          SELECTED_DEPLOY_ACTION_IDS: ${{ needs.context.outputs.selected_deploy_action_ids }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_ENVIRONMENT" in
+            staging) canonical_environment="staging" ;;
+            production) canonical_environment="prod" ;;
+          esac
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          result_path="${RUNNER_TEMP}/switchboard-deploy-result.json"
+          jq -n \
+            --arg canonical_environment "$canonical_environment" \
+            --arg deployment_url "$DEPLOYMENT_URL" \
+            --arg mode "$DEPLOY_MODE" \
+            --arg requested_ref "$REQUESTED_REF" \
+            --arg run_url "$run_url" \
+            --arg source_sha "$RESOLVED_SHA" \
+            --argjson deployment_performed "$DEPLOYMENT_PERFORMED" \
+            --argjson selected_deploy_action_ids "$SELECTED_DEPLOY_ACTION_IDS" \
+            '{
+              schema_version: 1,
+              service: "benchmarks.web",
+              environment: $canonical_environment,
+              mode: $mode,
+              source: {repository: "coval-ai/benchmarks", requested_ref: $requested_ref, resolved_sha: $source_sha},
+              adapter: {kind: "repository_dispatch", run_url: $run_url},
+              selected_deploy_action_ids: $selected_deploy_action_ids,
+              deploy_action_results: ($selected_deploy_action_ids | map({id: ., conclusion: "success", evidence_url: $run_url})),
+              deployment_performed: $deployment_performed,
+              canaries: [{
+                id: "benchmarks.web.vercel-release",
+                name: "Vercel release",
+                conclusion: (if $deployment_performed then "success" else "skipped" end),
+                evidence_url: (if $deployment_performed then $deployment_url else $run_url end)
+              }],
+              generated_artifact_publications: [],
+              overall_status: "success",
+              evidence_urls: ([$run_url] + if $deployment_performed then [$deployment_url] else [] end)
+            }
+            + if $deployment_performed then {
+                built_artifact: {kind: "vercel_deployment", identity: $deployment_url, url: $deployment_url},
+                live_artifact: {identity: $deployment_url, verified: true, evidence_url: $deployment_url}
+              } else {} end' > "$result_path"
+
+      - name: Upload verified deployment result
+        uses: actions/upload-artifact@v6
+        with:
+          name: switchboard-deploy-result
+          path: ${{ runner.temp }}/switchboard-deploy-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish manually selected production state
+        if: >-
+          needs.context.outputs.promotion_origin == 'manual' &&
+          needs.context.outputs.environment == 'production' &&
+          steps.release.outputs.deployed == 'true'
+        uses: ./switchboard-src/.github/actions/switchboard-publish-deployment-state
+        with:
+          environment: prod
+          repository: coval-ai/benchmarks
+          result-path: ${{ runner.temp }}/switchboard-deploy-result.json
+          service: benchmarks.web
+          token: ${{ github.token }}
