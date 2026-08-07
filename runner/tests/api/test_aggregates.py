@@ -667,4 +667,6 @@ async def test_by_dataset_stats_carry_the_flag(client: AsyncClient, postgresql: 
     assert thin["model_stats"][0]["insufficient_samples"] is True
     # The value survives the flag — nothing is dropped or nulled.
     assert thin["model_stats"][0]["avg_value"] == 0.0
+    assert thin["model_stats"][0]["sample_count"] == 1
     assert full["model_stats"][0]["insufficient_samples"] is False
+    assert full["model_stats"][0]["sample_count"] == MIN_SCORED_SAMPLES["STT"]
