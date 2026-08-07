@@ -93,6 +93,7 @@ async def test_hakim_tts_url_auth_and_frames(hakim_settings: Settings) -> None:
             "input": "Hello world",
             "model": _MODEL,
             "voice": _VOICE,
+            "cfg": 3,
         }
     ]
     if result.audio_path is not None:
@@ -197,6 +198,19 @@ def test_hakim_tts_missing_key_raises() -> None:
         dataset_id="stt-v1",
         runner_sha="test",
         log_level="DEBUG",
+    )
+    with pytest.raises(ValueError, match="hakimai_api_key"):
+        HakimTTSProvider(settings, model=_MODEL, voice=_VOICE)
+
+
+def test_hakim_tts_empty_key_raises() -> None:
+    settings = Settings(
+        database_url="postgresql://runner:password@localhost:5432/benchmarks",
+        dataset_bucket="test-bucket",
+        dataset_id="stt-v1",
+        runner_sha="test",
+        log_level="DEBUG",
+        hakimai_api_key="",
     )
     with pytest.raises(ValueError, match="hakimai_api_key"):
         HakimTTSProvider(settings, model=_MODEL, voice=_VOICE)

@@ -21,6 +21,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 _VALID_MODELS = ("hakim-fast-v1",)
 _WS_URL = "wss://api.tryhakim.ai/v1/audio/speech/stream"
 _SAMPLE_RATE = 24000
+_CFG = 3
 
 _LAST_FRAMES_KEPT = 3
 
@@ -37,7 +38,7 @@ class HakimTTSProvider(TTSProvider):
         self._voice = voice
 
         api_key_secret = settings.hakimai_api_key
-        if api_key_secret is None:
+        if api_key_secret is None or not api_key_secret.get_secret_value():
             raise ValueError("hakimai_api_key is required in Settings")
         self._api_key = api_key_secret.get_secret_value()
 
@@ -61,6 +62,7 @@ class HakimTTSProvider(TTSProvider):
             "input": text,
             "model": self._model,
             "voice": self._voice,
+            "cfg": _CFG,
         }
 
         try:
