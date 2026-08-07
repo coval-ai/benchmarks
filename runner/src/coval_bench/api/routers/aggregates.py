@@ -237,7 +237,9 @@ async def get_results_aggregates_by_dataset(
         grouped: dict[str, list[ModelStatEntry]] = {}
         for row in rows:
             if _visible(row, hidden):
-                grouped.setdefault(row["dataset_id"], []).append(ModelStatEntry.model_validate(row))
+                grouped.setdefault(row["dataset_id"], []).append(
+                    _flag_thin(ModelStatEntry.model_validate(row), benchmark)
+                )
 
         return AggregatesByDatasetResponse(
             benchmark=benchmark,

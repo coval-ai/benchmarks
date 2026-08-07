@@ -643,3 +643,28 @@ async def test_well_sampled_stat_not_flagged(client: AsyncClient, postgresql: An
     )
     stats = [s for s in response.json()["model_stats"] if s["model"] == "eleven_v3"]
     assert [s["insufficient_samples"] for s in stats] == [False]
+
+
+async def test_by_dataset_stats_carry_the_flag(client: AsyncClient, postgresql: Any) -> None:
+    """Per-dataset blocks flag thin stats the same way the pooled ones do.
+
+    The same statistic must not read as trustworthy on one endpoint and thin on
+    the other.
+    """
+    thin_run = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, thin_run, metric_value=0.0)
+    full_run = await _insert_run(postgresql, dataset_id="stt-v3")
+    for _ in range(MIN_SCORED_SAMPLES["STT"]):
+        await _insert_result(postgresql, full_run, metric_value=9.0)
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    blocks = response.json()["blocks"]
+    assert [b["dataset"] for b in blocks] == ["stt-v1", "stt-v3"]
+
+    thin, full = blocks
+    assert thin["model_stats"][0]["insufficient_samples"] is True
+    # The value survives the flag — nothing is dropped or nulled.
+    assert thin["model_stats"][0]["avg_value"] == 0.0
+    assert full["model_stats"][0]["insufficient_samples"] is False
