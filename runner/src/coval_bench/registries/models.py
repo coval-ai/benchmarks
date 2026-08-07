@@ -46,6 +46,35 @@ class Licensing(StrEnum):
     OPEN_WEIGHT = "open-weight"
 
 
+class Gender(StrEnum):
+    """Perceived gender of a voice — an editorial label, not ground truth.
+
+    Provider metadata is too uneven to encode provenance: Hume tags every stock
+    voice, OpenAI publishes none. Four providers here are API-confirmed
+    (cartesia, hume, xai, lmnt); the rest are our own listening.
+    """
+
+    FEMALE = "female"
+    MALE = "male"
+
+
+class Voice(BaseModel, frozen=True, extra="forbid"):
+    """One speaker, as the provider addresses it.
+
+    ``id`` goes on the wire and is often an opaque UUID, so ``name`` keeps
+    registry diffs readable. ``accent`` is recorded where known, not controlled.
+
+    Nothing pairs on ``gender`` yet: the arena synthesizes with the scalar
+    ``RegisteredModel.voice``, which has no gender and for most models isn't
+    even a pool member. Battles today are cross-gender by construction.
+    """
+
+    id: str
+    gender: Gender
+    name: str | None = None
+    accent: str | None = None
+
+
 class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     """A single benchmarked model: identity, display metadata, run config."""
 
@@ -53,10 +82,11 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     provider: str
     model: str
     voice: str | None = None  # TTS only
-    # TTS only: balanced voice pool, ordered (female, male). When set, each run
-    # splits its samples evenly across the pool; ``voice`` is the single-voice
-    # fallback for models without one.
-    voices: tuple[str, ...] = ()
+    # TTS only: balanced voice pool, one :class:`Voice` per gender. Each run
+    # splits its samples evenly across the pool; ``voice`` is the fallback for
+    # models without one. Gender lives on the ``Voice``, not in tuple order —
+    # see :class:`Voice` for why nothing pairs on it yet.
+    voices: tuple[Voice, ...] = ()
     creator: str | None = None  # who makes the model; None means same as provider
     tags: tuple[ModelTag, ...] = ()
     source: Source = Source.OFFICIAL_API
@@ -400,7 +430,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
-        voices=("21m00Tcm4TlvDq8ikWAM", "29vD33N1CtxCmqQRPOHJ"),
+        voices=(
+            Voice(id="21m00Tcm4TlvDq8ikWAM", gender=Gender.FEMALE, name="Rachel"),
+            Voice(id="29vD33N1CtxCmqQRPOHJ", gender=Gender.MALE, name="Drew"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -409,7 +442,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_multilingual_v2",
         voice="IKne3meq5aSn9XLyUdCD",
-        voices=("21m00Tcm4TlvDq8ikWAM", "29vD33N1CtxCmqQRPOHJ"),
+        voices=(
+            Voice(id="21m00Tcm4TlvDq8ikWAM", gender=Gender.FEMALE, name="Rachel"),
+            Voice(id="29vD33N1CtxCmqQRPOHJ", gender=Gender.MALE, name="Drew"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -426,7 +462,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_v3",
         voice="IKne3meq5aSn9XLyUdCD",
-        voices=("21m00Tcm4TlvDq8ikWAM", "29vD33N1CtxCmqQRPOHJ"),
+        voices=(
+            Voice(id="21m00Tcm4TlvDq8ikWAM", gender=Gender.FEMALE, name="Rachel"),
+            Voice(id="29vD33N1CtxCmqQRPOHJ", gender=Gender.MALE, name="Drew"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_ACTIVE,
     ),
@@ -435,7 +474,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="openai",
         model="gpt-4o-mini-tts",
         voice="alloy",
-        voices=("shimmer", "onyx"),
+        voices=(Voice(id="shimmer", gender=Gender.FEMALE), Voice(id="onyx", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _EMOTION),
         status=_ACTIVE,
     ),
@@ -469,7 +508,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="cartesia",
         model="sonic-3.5",
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
-        voices=("f786b574-daa5-4673-aa0c-cbe3e8534c02", "a5136bf9-224c-4d76-b823-52bd5efcffcc"),
+        voices=(
+            Voice(id="f786b574-daa5-4673-aa0c-cbe3e8534c02", gender=Gender.FEMALE, name="Katie"),
+            Voice(id="a5136bf9-224c-4d76-b823-52bd5efcffcc", gender=Gender.MALE, name="Jameson"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -497,7 +539,12 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="gradium",
         model="default",
         voice="YTpq7expH9539ERJ",
-        voices=("NbpkqMVS3CJeq2j8", "6MFfc37kq0sBjBjy"),
+        # Genders are positional carry-over, NOT verified: Gradium's catalog isn't
+        # enumerable and `voice` above appears in neither pool slot.
+        voices=(
+            Voice(id="NbpkqMVS3CJeq2j8", gender=Gender.FEMALE),
+            Voice(id="6MFfc37kq0sBjBjy", gender=Gender.MALE),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -517,7 +564,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="coda",
         voice="luna",
-        voices=("luna", "masonry"),
+        voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="masonry", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -527,7 +574,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="arcana",
         voice="luna",
-        voices=("luna", "masonry"),
+        voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="masonry", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -537,7 +584,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="mistv3",
         voice="luna",
-        voices=("luna", "cedar"),
+        voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="cedar", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -556,7 +603,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="hume",
         model="octave-tts",
         voice="176a55b1-4468-4736-8878-db82729667c1",
-        voices=("33045fd9-8010-43f6-b6b0-da3fbf326c29", "82a76fb8-3524-4e87-9265-9795c8e4ede6"),
+        voices=(
+            Voice(
+                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",
+                gender=Gender.FEMALE,
+                name="Casual Podcast Host",
+            ),
+            Voice(
+                id="82a76fb8-3524-4e87-9265-9795c8e4ede6",
+                gender=Gender.MALE,
+                name="Male Protagonist",
+            ),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -565,7 +623,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="hume",
         model="octave-2",
         voice="176a55b1-4468-4736-8878-db82729667c1",
-        voices=("33045fd9-8010-43f6-b6b0-da3fbf326c29", "82a76fb8-3524-4e87-9265-9795c8e4ede6"),
+        voices=(
+            Voice(
+                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",
+                gender=Gender.FEMALE,
+                name="Casual Podcast Host",
+            ),
+            Voice(
+                id="82a76fb8-3524-4e87-9265-9795c8e4ede6",
+                gender=Gender.MALE,
+                name="Male Protagonist",
+            ),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -574,7 +643,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="xai",
         model="grok-tts",
         voice="eve",
-        voices=("eve", "leo"),
+        voices=(Voice(id="eve", gender=Gender.FEMALE), Voice(id="leo", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -583,7 +652,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="smallest",
         model="lightning_v3.1_pro",
         voice="kaitlyn",
-        voices=("kaitlyn", "blake"),
+        voices=(Voice(id="kaitlyn", gender=Gender.FEMALE), Voice(id="blake", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -591,8 +660,11 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-2",
-        voice="Ashley",
-        voices=("Ashley", "Alex"),
+        voice="Brooke",
+        voices=(
+            Voice(id="Brooke", gender=Gender.FEMALE, accent="en-US"),
+            Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -600,8 +672,11 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-max",
-        voice="Ashley",
-        voices=("Ashley", "Alex"),
+        voice="Brooke",
+        voices=(
+            Voice(id="Brooke", gender=Gender.FEMALE, accent="en-US"),
+            Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -610,8 +685,11 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="inworld",
         model="inworld-tts-1.5-mini",
-        voice="Ashley",
-        voices=("Ashley", "Alex"),
+        voice="Brooke",
+        voices=(
+            Voice(id="Brooke", gender=Gender.FEMALE, accent="en-US"),
+            Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
         status=_ACTIVE,
@@ -621,7 +699,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="soniox",
         model="tts-rt-v1",
         voice="Adrian",
-        voices=("Emma", "Daniel"),
+        voices=(Voice(id="Emma", gender=Gender.FEMALE), Voice(id="Daniel", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -633,7 +711,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="azure",
         model="neural",
         voice="en-US-AvaNeural",
-        voices=("en-US-AvaNeural", "en-US-AndrewNeural"),
+        voices=(
+            Voice(id="en-US-AvaNeural", gender=Gender.FEMALE, name="Ava", accent="en-US"),
+            Voice(id="en-US-AndrewNeural", gender=Gender.MALE, name="Andrew", accent="en-US"),
+        ),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
@@ -644,7 +725,20 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="azure",
         model="dragon-hd-latest",
         voice="en-US-Ava:DragonHDLatestNeural",
-        voices=("en-US-Ava:DragonHDLatestNeural", "en-US-Andrew:DragonHDLatestNeural"),
+        voices=(
+            Voice(
+                id="en-US-Ava:DragonHDLatestNeural",
+                gender=Gender.FEMALE,
+                name="Ava",
+                accent="en-US",
+            ),
+            Voice(
+                id="en-US-Andrew:DragonHDLatestNeural",
+                gender=Gender.MALE,
+                name="Andrew",
+                accent="en-US",
+            ),
+        ),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _STREAM),
         status=_PAUSED,
@@ -667,7 +761,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="chirp-3-hd",
         voice="en-US-Chirp3-HD-Kore",
-        voices=("en-US-Chirp3-HD-Kore", "en-US-Chirp3-HD-Charon"),
+        voices=(
+            Voice(id="en-US-Chirp3-HD-Kore", gender=Gender.FEMALE, name="Kore", accent="en-US"),
+            Voice(
+                id="en-US-Chirp3-HD-Charon",
+                gender=Gender.MALE,
+                name="Charon",
+                accent="en-US",
+            ),
+        ),
         tags=(_STREAMING, _MULTI, _STREAM),
         status=_ACTIVE,
         arena_enabled=False,
@@ -700,7 +802,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="alibaba",
         model="qwen3-tts-flash-realtime",
         voice="Cherry",
-        voices=("Cherry", "Ethan"),
+        voices=(Voice(id="Cherry", gender=Gender.FEMALE), Voice(id="Ethan", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         status=_ACTIVE,
     ),
@@ -710,7 +812,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="fishaudio",
         model="s1",
         voice="9a9cf47702da476aa4629e2506d4a857",
-        voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
+        voices=(
+            Voice(id="9a9cf47702da476aa4629e2506d4a857", gender=Gender.FEMALE, name="Hannah"),
+            Voice(id="536d3a5e000945adb7038665781a4aca", gender=Gender.MALE, name="Ethan"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us-west-1",
         status=_ACTIVE,
@@ -720,7 +825,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="fishaudio",
         model="s2.1-pro",
         voice="9a9cf47702da476aa4629e2506d4a857",
-        voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
+        voices=(
+            Voice(id="9a9cf47702da476aa4629e2506d4a857", gender=Gender.FEMALE, name="Hannah"),
+            Voice(id="536d3a5e000945adb7038665781a4aca", gender=Gender.MALE, name="Ethan"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us-west-1",
         status=_ACTIVE,
@@ -730,7 +838,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="fishaudio",
         model="s2.1-pro-free",
         voice="9a9cf47702da476aa4629e2506d4a857",
-        voices=("9a9cf47702da476aa4629e2506d4a857", "536d3a5e000945adb7038665781a4aca"),
+        voices=(
+            Voice(id="9a9cf47702da476aa4629e2506d4a857", gender=Gender.FEMALE, name="Hannah"),
+            Voice(id="536d3a5e000945adb7038665781a4aca", gender=Gender.MALE, name="Ethan"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us-west-1",
         status=_ACTIVE,
@@ -741,7 +852,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="minimax",
         model="speech-2.8-hd",
         voice="English_expressive_narrator",
-        voices=("English_radiant_girl", "English_magnetic_voiced_man"),
+        voices=(
+            Voice(id="English_radiant_girl", gender=Gender.FEMALE),
+            Voice(id="English_magnetic_voiced_man", gender=Gender.MALE),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -750,7 +864,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="minimax",
         model="speech-2.8-turbo",
         voice="English_expressive_narrator",
-        voices=("English_radiant_girl", "English_magnetic_voiced_man"),
+        voices=(
+            Voice(id="English_radiant_girl", gender=Gender.FEMALE),
+            Voice(id="English_magnetic_voiced_man", gender=Gender.MALE),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_ACTIVE,
     ),
@@ -759,7 +876,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechify",
         model="simba-3.2",
         voice="geffen_32",
-        voices=("beatrice_32", "hugh_32"),
+        voices=(
+            Voice(id="beatrice_32", gender=Gender.FEMALE),
+            Voice(id="hugh_32", gender=Gender.MALE),
+        ),
         tags=(_STREAMING, _CLONE, _EMOTION),
         status=_ACTIVE,
     ),
@@ -768,7 +888,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="speechify",
         model="simba-3.0",
         voice="geffen_32",
-        voices=("beatrice_32", "hugh_32"),
+        voices=(
+            Voice(id="beatrice_32", gender=Gender.FEMALE),
+            Voice(id="hugh_32", gender=Gender.MALE),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_ACTIVE,
     ),
@@ -779,7 +902,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="fluxions",
         model="vui",
         voice="maeve",
-        voices=("maeve", "abraham"),
+        voices=(Voice(id="maeve", gender=Gender.FEMALE), Voice(id="abraham", gender=Gender.MALE)),
         tags=(_STREAMING, _CLONE, _EMOTION),
         status=_EARLY_ACCESS,
         arena_enabled=False,
@@ -789,7 +912,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="lmnt",
         model="blizzard",
         voice="leah",
-        voices=("leah", "caleb"),
+        voices=(Voice(id="leah", gender=Gender.FEMALE), Voice(id="caleb", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
     ),
@@ -801,8 +924,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="dd-etts-3.0",
         voice="02215cf5-04af-46f3-a061-48a4c81989bf",
         voices=(
-            "02215cf5-04af-46f3-a061-48a4c81989bf",
-            "b2abb241-ac92-48bf-a890-fec03f43e209",
+            Voice(id="02215cf5-04af-46f3-a061-48a4c81989bf", gender=Gender.FEMALE),
+            Voice(id="b2abb241-ac92-48bf-a890-fec03f43e209", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         status=_EARLY_ACCESS,
@@ -812,7 +935,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="murf",
         model="falcon-2",
         voice="Amara",
-        voices=("Amara", "Gordon"),
+        voices=(Voice(id="Amara", gender=Gender.FEMALE), Voice(id="Gordon", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         status=_EARLY_ACCESS,
         arena_enabled=False,
@@ -822,7 +945,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="hakim",
         model="hakim-fast-v1",
         voice="amelia-en-us",
-        voices=("amelia-en-us", "noah-en-us"),
+        voices=(
+            Voice(id="amelia-en-us", gender=Gender.FEMALE, name="Amelia", accent="en-US"),
+            Voice(id="noah-en-us", gender=Gender.MALE, name="Noah", accent="en-US"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE),
         status=_EARLY_ACCESS,
         arena_enabled=False,

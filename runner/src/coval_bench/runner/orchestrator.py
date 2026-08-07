@@ -659,7 +659,9 @@ def _assign_tts_voices(entry: RegisteredModel, item_count: int, run_id: int) -> 
     """
     if not entry.voices:
         return [entry.voice] * item_count
-    assignments: list[str | None] = [entry.voices[i % len(entry.voices)] for i in range(item_count)]
+    assignments: list[str | None] = [
+        entry.voices[i % len(entry.voices)].id for i in range(item_count)
+    ]
     rng = random.Random(f"{run_id}:{entry.provider}:{entry.model}")  # noqa: S311
     rng.shuffle(assignments)
     return assignments
