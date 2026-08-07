@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     palabra_api_key: SecretStr | None = None
     lmnt_api_key: SecretStr | None = None
     murfai_api_key: SecretStr | None = None
+    hakimai_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
