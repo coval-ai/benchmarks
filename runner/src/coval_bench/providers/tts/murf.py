@@ -21,7 +21,8 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("falcon-2",)
-_WS_URL = "wss://global.api.murf.ai/v1/speech/stream-input"
+_WIRE_MODELS = {"falcon-2": "FALCON"}
+_WS_URL = "wss://us-east.api.murf.ai/v1/speech/stream-input"
 _SAMPLE_RATE = 24000
 
 
@@ -57,7 +58,7 @@ class MurfTTSProvider(TTSProvider):
         query = urlencode(
             {
                 "api-key": self._api_key,
-                "model": self._model,
+                "model": _WIRE_MODELS[self._model],
                 "sample_rate": _SAMPLE_RATE,
                 "channel_type": "MONO",
                 "format": "PCM",
