@@ -183,7 +183,7 @@ async def _download_recording(
     url_resp.raise_for_status()
     audio_url = cast("str", url_resp.json()["audio_url"])
     blob = await download_client.get(audio_url)
-    if blob.is_error:
+    if not blob.is_success:
         raise httpx.HTTPStatusError(
             f"recording download for {sim_id} failed: HTTP {blob.status_code} "
             f"from {blob.request.url.copy_with(query=None, userinfo=b'')}",

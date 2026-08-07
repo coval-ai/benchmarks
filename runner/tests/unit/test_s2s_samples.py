@@ -464,8 +464,13 @@ def test_conversation_turns_coerces_offsets() -> None:
     ]
 
 
+# 302 as well as 502: the download client does not follow redirects, so an
+# unfollowed 3xx carries an empty body that would otherwise publish as audio.
+@pytest.mark.parametrize("status", [502, 302])
 @pytest.mark.asyncio
-async def test_failed_recording_download_keeps_the_signature_out_of_the_error() -> None:
+async def test_failed_recording_download_keeps_the_signature_out_of_the_error(
+    status: int,
+) -> None:
     """The error names the object but not the signature — the caller logs it verbatim."""
     signature = "3a9fSECRETSIGNATURE"
     signed = f"https://blobs.test/recordings/sim-1.wav?X-Goog-Signature={signature}"
@@ -474,7 +479,7 @@ async def test_failed_recording_download_keeps_the_signature_out_of_the_error() 
         return httpx.Response(200, json={"audio_url": signed})
 
     def blobs(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(502, text="upstream unavailable")
+        return httpx.Response(status, headers={"Location": "https://elsewhere.test/x.wav"})
 
     async with (
         httpx.AsyncClient(
@@ -489,5 +494,5 @@ async def test_failed_recording_download_keeps_the_signature_out_of_the_error() 
     assert signature not in message
     assert "?" not in message
     assert "https://blobs.test/recordings/sim-1.wav" in message
-    assert "502" in message
+    assert str(status) in message
     assert "sim-1" in message
