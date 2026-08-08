@@ -129,6 +129,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push ${{ matrix.image }} image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: runner
@@ -140,10 +141,67 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
 
+      - name: Retain immutable ${{ matrix.image }} digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::Build did not produce a valid immutable image digest."
+            exit 1
+          fi
+          mkdir -p image-digest
+          printf '%s\n' "$IMAGE_DIGEST" > "image-digest/${{ matrix.image }}"
+
+      - name: Upload ${{ matrix.image }} digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-image-digest-${{ matrix.image }}
+          path: image-digest/${{ matrix.image }}
+          if-no-files-found: error
+          retention-days: 1
+
+  resolve_images:
+    name: Resolve immutable image references
+    needs: build_and_push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      runner_image: ${{ steps.images.outputs.runner_image }}
+      api_image: ${{ steps.images.outputs.api_image }}
+    steps:
+      - name: Download runner digest
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmarks-image-digest-runner
+          path: image-digests/runner
+
+      - name: Download API digest
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmarks-image-digest-api
+          path: image-digests/api
+
+      - name: Build immutable image references
+        id: images
+        run: |
+          set -euo pipefail
+          runner_digest="$(tr -d '\r\n' < image-digests/runner/runner)"
+          api_digest="$(tr -d '\r\n' < image-digests/api/api)"
+          for digest in "$runner_digest" "$api_digest"; do
+            if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::Invalid retained image digest."
+              exit 1
+            fi
+          done
+          echo "runner_image=us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-runner@${runner_digest}" >> "$GITHUB_OUTPUT"
+          echo "api_image=us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-api@${api_digest}" >> "$GITHUB_OUTPUT"
+
   dispatch_infra:
     name: Dispatch and watch benchmark-infra rollout
-    needs: [context, build_and_push]
-    if: always() && needs.context.outputs.skip != 'true' && needs.build_and_push.result == 'success'
+    needs: [context, resolve_images]
+    if: always() && needs.context.outputs.skip != 'true' && needs.resolve_images.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     outputs:
@@ -153,11 +211,11 @@ jobs:
       - name: Dispatch image-bump
         id: dispatch
         env:
-          API_IMAGE: ${{ needs.context.outputs.api_image }}
+          API_IMAGE: ${{ needs.resolve_images.outputs.api_image }}
           DEPLOY_REF: ${{ needs.context.outputs.deploy_ref }}
           DEPLOY_SHA: ${{ needs.context.outputs.deploy_sha }}
           GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
-          RUNNER_IMAGE: ${{ needs.context.outputs.runner_image }}
+          RUNNER_IMAGE: ${{ needs.resolve_images.outputs.runner_image }}
           SWITCHBOARD_CORRELATION_ID: ${{ github.event.client_payload.switchboard_correlation_id }}
         run: |
           set -euo pipefail
@@ -242,7 +300,7 @@ jobs:
 
   summarize:
     name: Summarize release
-    needs: [context, build_and_push, dispatch_infra, promote_marker]
+    needs: [context, build_and_push, resolve_images, dispatch_infra, promote_marker]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -253,6 +311,7 @@ jobs:
             echo ""
             echo "- Skipped: \`${{ needs.context.outputs.skip || 'false' }}\`"
             echo "- Build: \`${{ needs.build_and_push.result }}\`"
+            echo "- Immutable image resolution: \`${{ needs.resolve_images.result }}\`"
             echo "- Infra rollout: \`${{ needs.dispatch_infra.result }}\`"
             echo "- Marker promote: \`${{ needs.promote_marker.result }}\`"
             echo "- Infra run: ${{ needs.dispatch_infra.outputs.infra_url || 'n/a' }}"
