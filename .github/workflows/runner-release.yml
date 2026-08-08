@@ -244,32 +244,18 @@ jobs:
           gh api repos/coval-ai/benchmark-infra/dispatches --method POST --input - <<< "$payload"
 
           run_id=""
-          fallback_run_id=""
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             candidates="$(gh run list --repo coval-ai/benchmark-infra --workflow bump-images.yml --event repository_dispatch --limit 30 --json databaseId,createdAt,displayTitle \
               | jq -c --arg started "$started_at" 'map(select(.createdAt >= $started)) | sort_by(.createdAt) | reverse')"
-            fallback_run_id="$(jq -r '.[0].databaseId // ""' <<<"$candidates")"
-            run_id="$(jq -r --arg correlation "$correlation_id" '.[] | select((.displayTitle // "") | contains($correlation)) | .databaseId' <<<"$candidates" | head -n 1)"
-            if [ -z "$run_id" ]; then
-              while IFS= read -r candidate_id; do
-                [ -z "$candidate_id" ] && continue
-                if gh run view "$candidate_id" --repo coval-ai/benchmark-infra --log 2>/dev/null | grep -Fq "$correlation_id"; then
-                  run_id="$candidate_id"
-                  break
-                fi
-              done < <(jq -r '.[].databaseId' <<<"$candidates")
-            fi
+            run_id="$(jq -r --arg correlation "$correlation_id" \
+              '.[] | select((.displayTitle // "") | endswith(" " + $correlation)) | .databaseId' \
+              <<<"$candidates" | head -n 1)"
             [ -n "$run_id" ] && break
-            if [ "$attempt" -ge 6 ] && [ -n "$fallback_run_id" ]; then
-              echo "::notice::Could not find benchmark-infra run with correlation ${correlation_id}; using newest repository_dispatch run after ${started_at}: ${fallback_run_id}."
-              run_id="$fallback_run_id"
-              break
-            fi
             sleep 5
           done
 
           if [ -z "$run_id" ]; then
-            echo "::error::Could not find dispatched benchmark-infra bump-images run."
+            echo "::error::Could not find the benchmark-infra bump-images run for correlation ${correlation_id}."
             exit 1
           fi
 
