@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "azure",
+    "model": "neural",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-10",
+    "source_url": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/",
+    "notes": "Pay-as-you-go standard neural voice rate (US regions); commitment tiers are cheaper."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "azure",
+    "model": "dragon-hd-latest",
+    "unit": "per_1m_chars",
+    "price_usd": "22",
+    "effective_from": "2026-08-10",
+    "source_url": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/",
+    "notes": "Pay-as-you-go Neural HD rate in East US; HD voices are region-limited."
+  }
+]

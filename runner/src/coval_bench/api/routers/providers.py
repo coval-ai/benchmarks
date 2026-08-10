@@ -41,6 +41,7 @@ from coval_bench.registries import (
     TagCategory,
     tag_value_label,
 )
+from coval_bench.registries.pricing import PRICING
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -95,11 +96,15 @@ def _build_provider_map(
             continue
         if (m.provider, m.model) in hidden:
             continue
+        entry = PRICING.get((m.benchmark, m.provider, m.model))
+        price = entry.price_per_1m_chars if entry else None
         result.setdefault(m.provider, []).append(
             ModelInfo(
                 model=m.model,
                 disabled=m.status in _HIDDEN_STATUSES,
                 tags=_model_tags(m),
+                price_per_1m_chars=float(price) if price is not None else None,
+                price_effective_from=entry.effective_from if entry and price is not None else None,
             )
         )
     return result

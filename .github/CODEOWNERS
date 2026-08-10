@@ -1,2 +1,7 @@
 # Everyone on the benchmarking team owns everything in this repo.
 * @coval-ai/coval-benchmarking
+
+# Pricing registry: providers own their own rates. As provider GitHub teams
+# get repo access, add a line per file so their PRs route to them, e.g.:
+#   /runner/src/coval_bench/registries/pricing/data/tts/<provider>.json @<provider-org>/<team>
+/runner/src/coval_bench/registries/pricing/data/ @coval-ai/coval-benchmarking

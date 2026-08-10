@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "hume",
+    "model": "octave-tts",
+    "unit": "per_1k_chars",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.hume.ai/pricing",
+    "notes": "Usage-based rate on the entry Starter/Creator plans; higher tiers publish lower rates. Octave 1 and 2 are priced together."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "hume",
+    "model": "octave-2",
+    "unit": "per_1k_chars",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.hume.ai/pricing",
+    "notes": "Usage-based rate on the entry Starter/Creator plans; higher tiers publish lower rates. Octave 1 and 2 are priced together."
+  }
+]

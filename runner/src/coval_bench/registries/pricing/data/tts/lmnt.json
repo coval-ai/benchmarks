@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "lmnt",
+    "model": "blizzard",
+    "unit": "per_1k_chars",
+    "price_usd": "0.05",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.lmnt.com/pricing",
+    "notes": "Overage rate past the entry Indie plan's included characters; plan-based, not per-model."
+  }
+]

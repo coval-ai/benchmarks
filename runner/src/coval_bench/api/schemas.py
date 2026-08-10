@@ -11,7 +11,7 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -102,6 +102,10 @@ class ModelInfo(BaseModel):
     model: str
     disabled: bool = False
     tags: list[ModelTagOut] = []
+    # From the pricing registry, normalized server-side to USD per 1M
+    # characters. None (never $0) for STT/S2S models and unpriced TTS models.
+    price_per_1m_chars: float | None = None
+    price_effective_from: date | None = None
 
 
 class ProviderInfo(BaseModel):

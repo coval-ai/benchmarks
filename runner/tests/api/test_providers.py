@@ -69,8 +69,9 @@ async def test_response_shape_breaking_change(client: AsyncClient) -> None:
     data = response.json()
     first_model = data["stt"][0]["models"][0]
     assert isinstance(first_model, dict), "models must be dicts, not strings"
-    assert set(first_model.keys()) == {"model", "disabled", "tags"}, (
-        f"ModelInfo keys must be model/disabled/tags, got {set(first_model.keys())}"
+    expected_keys = {"model", "disabled", "tags", "price_per_1m_chars", "price_effective_from"}
+    assert set(first_model.keys()) == expected_keys, (
+        f"ModelInfo keys must be {expected_keys}, got {set(first_model.keys())}"
     )
 
     openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
@@ -201,6 +202,27 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert ("host", "groq") in orpheus_facets
     assert ("creator", "canopylabs") in orpheus_facets
     assert ("source", "shared-inference") in orpheus_facets
+
+
+async def test_pricing_served_for_seeded_tts_models_only(client: AsyncClient) -> None:
+    """Registry prices ride TTS models normalized to $/1M chars; STT/S2S stay null."""
+    response = await client.get("/v1/providers")
+    data = response.json()
+
+    # Deepgram Aura-2 is seeded at $0.030/1k chars — served as $30/1M chars.
+    deepgram = next(e for e in data["tts"] if e["provider"] == "deepgram")
+    aura = next(m for m in deepgram["models"] if m["model"] == "aura-2-thalia-en")
+    assert aura["price_per_1m_chars"] == 30.0
+    assert aura["price_effective_from"] is not None
+
+    priced = [m for e in data["tts"] for m in e["models"] if m["price_per_1m_chars"] is not None]
+    assert len(priced) >= 2
+    # Unpriced models are absent, never $0 — and effective_from never rides alone.
+    assert all(m["price_per_1m_chars"] > 0 for m in priced)
+    for entry in [*data["stt"], *data["s2s"]]:
+        for m in entry["models"]:
+            assert m["price_per_1m_chars"] is None
+            assert m["price_effective_from"] is None
 
 
 async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
