@@ -1,15 +1,19 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve a Clerk session token to the embargoed models its org may see.
+"""Resolve a Clerk session token to the embargoed models its holder may see.
 
-Verified against the instance JWKS (public — no secret involved). The
-``benchmark_providers`` claim names the org's providers, or ``"*"`` for all.
+Verified against the instance JWKS (public — no secret involved). A mapped
+``org_id`` scopes the caller to its provider — even for coval.dev emails, so
+switching into a partner org previews exactly their view. Outside a mapped
+org, a coval.dev ``email`` sees everything.
 """
 
 from __future__ import annotations
 
 import functools
+import json
+from collections.abc import Mapping
 from typing import Any
 
 import jwt
@@ -19,10 +23,35 @@ from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
 
+_INTERNAL_EMAIL_SUFFIX = "@coval.dev"
+
 
 @functools.lru_cache(maxsize=4)
 def _jwks(issuer: str) -> jwt.PyJWKClient:
     return jwt.PyJWKClient(f"{issuer}/.well-known/jwks.json")
+
+
+@functools.lru_cache(maxsize=1)
+def _parse_org_providers(raw: str) -> Mapping[str, str]:
+    """Parse the ``{org_id: provider}`` settings blob; a malformed blob maps nothing."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("clerk_org_providers_unparsable")
+        return {}
+    if not isinstance(parsed, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in parsed.items()
+    ):
+        logger.error("clerk_org_providers_malformed")
+        return {}
+    return parsed
+
+
+def _org_provider(claims: dict[str, Any], settings: Settings) -> str | None:
+    org_id = claims.get("org_id")
+    if not isinstance(org_id, str) or settings.clerk_org_providers is None:
+        return None
+    return _parse_org_providers(settings.clerk_org_providers).get(org_id)
 
 
 def _claims(token: str, settings: Settings) -> dict[str, Any] | None:
@@ -61,9 +90,10 @@ def allowed_pairs(
     claims = _claims(token.strip(), settings)
     if claims is None:
         return None
-    providers = claims.get("benchmark_providers")
-    if providers == "*":
+    provider = _org_provider(claims, settings)
+    if provider is not None:
+        return frozenset(pair for pair in embargoed if pair[0] == provider)
+    email = claims.get("email")
+    if isinstance(email, str) and email.endswith(_INTERNAL_EMAIL_SUFFIX):
         return embargoed
-    if not isinstance(providers, list):
-        return frozenset()
-    return frozenset(pair for pair in embargoed if pair[0] in providers)
+    return frozenset()
