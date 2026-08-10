@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from coval_bench.config import get_settings
 from coval_bench.db.arena_store import ArenaPool, ArenaStore
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.models import Battle, VoteOutcome, VoterType
+from coval_bench.db.models import Battle, Gender, VoteOutcome, VoterType
 
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -112,6 +112,12 @@ async def run_seed(*, reset: bool = False) -> None:
                     prompt_text=_PROMPTS[idx % len(_PROMPTS)],
                     audio_a_url=_sample_url(provider_a, model_a),
                     audio_b_url=_sample_url(provider_b, model_b),
+                    # Alternate so a seeded database exercises both, and give
+                    # every row a gender — an ungendered one is never served for
+                    # voting, so the seeded battles would be unreachable.
+                    gender=Gender.FEMALE if idx % 2 == 0 else Gender.MALE,
+                    voice_a=f"{model_a}-seed",
+                    voice_b=f"{model_b}-seed",
                 )
             )
             battle_count += 1

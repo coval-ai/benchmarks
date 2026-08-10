@@ -84,7 +84,9 @@ class ConvergenceError(RuntimeError):
 # as the leaderboard tiebreaker on equal timestamps) still matches numeric order
 # past version 9.
 #
-# 002: battles pair same-gender voices, and only gendered battles are counted.
+# 002: battles pair same-gender voices. Votes carry over rather than reset, so a
+# board spans both regimes and the older cross-gender share dilutes as new votes
+# land — continuity was preferred to a clean break.
 METHODOLOGY_VERSION: Literal["davidson-bt-002"] = "davidson-bt-002"
 
 # Standard Bradley-Terry -> Elo scale: a difference of 400 Elo == 10:1 win odds.

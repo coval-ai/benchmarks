@@ -114,10 +114,10 @@ class ArenaStore:
     async def count_battles_by_gender(self) -> dict[Gender, int]:
         """Gendered battle counts, all time, for keeping generation balanced.
 
-        Only gendered rows are counted: pre-migration battles carry NULL and
-        belong to the retired cross-gender methodology, so including them would
-        skew the deficit the caller is trying to close. A gender absent from the
-        result has no battles yet, which the caller reads as zero.
+        Only gendered rows are counted: pre-migration battles carry NULL and had
+        no gender to balance, so including them would skew the deficit the caller
+        is trying to close. A gender absent from the result has no battles yet,
+        which the caller reads as zero.
         """
         sql = "SELECT gender, count(*) FROM arena.battles WHERE gender IS NOT NULL GROUP BY gender"
         async with (

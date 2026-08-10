@@ -165,7 +165,10 @@ async def get_battle(
     # Placeholder selection: a uniformly random battle. Adaptive pairing will
     # replace this to surface the most informative matchups. With GCS-backed
     # clips, skip battles older than the bucket retention — their audio is gone.
-    conditions = []
+    # Only gendered battles. Their votes still count, but serving a legacy
+    # cross-gender pairing would keep adding the very comparison this stopped
+    # making — the old share should shrink from here, not grow.
+    conditions = ["gender IS NOT NULL"]
     params: dict[str, Any] = {}
     if settings.arena_gcs_bucket:
         conditions.append("created_at >= now() - make_interval(days => %(days)s)")

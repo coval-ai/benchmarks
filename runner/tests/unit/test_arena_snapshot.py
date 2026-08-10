@@ -342,11 +342,12 @@ def test_count_battles_by_gender_ignores_ungendered_rows(
     asyncio.run(_run())
 
 
-def test_snapshot_excludes_pre_gender_battles(snap_pg: psycopg.Connection[Any]) -> None:
-    """Cross-gender votes from the retired methodology never reach a new board.
+def test_snapshot_counts_pre_gender_battles(snap_pg: psycopg.Connection[Any]) -> None:
+    """Votes carry across the methodology change instead of resetting.
 
-    Their voices have since been replaced, so they are not evidence about the
-    models as they sound now. The rows stay; only the board excludes them.
+    Ratings continue rather than starting fresh, so a battle from the
+    cross-gender era still feeds the board. Its share dilutes as same-gender
+    votes accumulate.
     """
     _apply_migrations(snap_pg)
 
@@ -370,12 +371,9 @@ def test_snapshot_excludes_pre_gender_battles(snap_pg: psycopg.Connection[Any]) 
 
             result = await run_snapshot(store, bootstrap_rounds=50, seed=0)
             assert result is not None
-            assert result.models == []
-            assert await _snapshot_row_count(pool) == 0
-
-            # The battle and its votes are still on disk, just not in the board.
-            assert len(await store.list_battles(limit=None)) == 1
-            assert len(await store.list_votes()) == len(_VOTES)
+            assert len(result.models) == 2
+            assert sum(m.votes_total for m in result.models) == 2 * len(_VOTES)
+            assert await _snapshot_row_count(pool) == 2
         finally:
             await pool.close()
 

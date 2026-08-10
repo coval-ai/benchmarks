@@ -116,9 +116,11 @@ async def _insert_battle(postgresql: Any, **kwargs: Any) -> str:
             "prompt_text": "Tell me about your refund policy.",
             "audio_a_url": "https://example.test/a.wav",
             "audio_b_url": "https://example.test/b.wav",
+            # Gendered by default: that is what generation now writes, and only
+            # gendered battles are served. Pass gender=None for a legacy row.
             "voice_a": None,
             "voice_b": None,
-            "gender": None,
+            "gender": "female",
         }
         defaults.update(kwargs)
         row = await aconn.execute(
@@ -1030,3 +1032,18 @@ async def test_reveal_never_exposes_voice_ids(client: AsyncClient, postgresql: A
     assert "sonic-english-male" not in body
     assert "voice_a" not in body and "voice_b" not in body
     assert await _stored_voice_a(postgresql, battle_id) == "aura-2-orion-en"
+
+
+@pytest.mark.asyncio
+async def test_ungendered_battles_are_never_served(client: AsyncClient, postgresql: Any) -> None:
+    """A vote on a pre-gender battle is discarded by the refit, so never offer one."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    await _insert_battle(postgresql, gender=None)
+
+    assert (await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)).status_code == 404
+
+    gendered = await _insert_battle(postgresql, voice_a="a-f", voice_b="b-f", gender="female")
+    response = await client.get("/v1/arena/battle", headers=_LABELER_HEADERS)
+
+    assert response.status_code == 200
+    assert response.json()["id"] == gendered
