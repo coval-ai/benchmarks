@@ -8,10 +8,11 @@ benchmarks-api from Secret Manager. Two infra layouts are understood:
 ``envs/prod/provider_keys.tf`` (one map entry per key; ``api = true`` marks
 the mount) and the older ``modules/cloud_run_service/main.tf`` (inline env
 blocks with ``secret_key_ref``). Fails if any provider the arena would
-synthesize lacks its key on the service (the cross-repo parity gate), and also
-fails when an ACTIVE provider is opted out with ``arena_enabled=False`` even
-though its key IS mounted — a stale opt-out that silently keeps the provider
-off the arena. Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g.
+synthesize lacks its key on the service — the cross-repo parity gate, and the
+only failing condition. An ACTIVE provider opted out with
+``arena_enabled=False`` while its key IS mounted only warns: the registry owns
+arena membership, so a deliberate exclusion must not need an infra change to
+keep CI green. Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g.
 ADC-authenticated ones) are skipped: there is no key mount to check them
 against.
 
@@ -109,7 +110,7 @@ def main(tf_path: str) -> int:
         )
         return 1
 
-    stale_opt_outs = sorted(
+    mounted_opt_outs = sorted(
         {
             m.provider
             for m in MODEL_REGISTRY
@@ -119,14 +120,13 @@ def main(tf_path: str) -> int:
             and PROVIDER_ENV.get(m.provider) in mounted
         }
     )
-    if stale_opt_outs:
+    if mounted_opt_outs:
         print(
-            f"ERROR: key mounted on benchmarks-api but arena_enabled=False: {stale_opt_outs}\n"
-            "The opt-out is stale — remove arena_enabled=False from these providers' "
-            "ACTIVE models in registries/models.py (or unmount the key if the "
-            "exclusion is intentional)."
+            f"::warning::key mounted on benchmarks-api but arena_enabled=False: "
+            f"{mounted_opt_outs}. Fine if the exclusion is deliberate. If it is not, "
+            "drop arena_enabled=False in registries/models.py, or unmount the key "
+            "to free the slot."
         )
-        return 1
 
     print(f"OK: all {len(required)} arena provider keys are mounted on benchmarks-api")
     return 0
