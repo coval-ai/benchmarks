@@ -141,11 +141,23 @@ def test_coval_email_sees_everything(monkeypatch: pytest.MonkeyPatch) -> None:
     assert hidden == frozenset()
 
 
-def test_coval_email_wins_over_the_org(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A coval.dev user browsing under a provider org still sees everything."""
+def test_mapped_org_scopes_even_a_coval_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Switching into a partner org previews exactly that org's view."""
     provider = _embargoed_provider()
     settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: provider}))
     token = _mint({"email": _INTERNAL_EMAIL, "org_id": _ORG_ID})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "accepted"
+    assert hidden == frozenset(pair for pair in embargoed_pairs() if pair[0] != provider)
+
+
+def test_coval_email_in_an_unmapped_org_still_sees_everything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a mapped org narrows the view; an unmapped one must not demote to public."""
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: provider}))
+    token = _mint({"email": _INTERNAL_EMAIL, "org_id": "org_2someoneelse"})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == frozenset()

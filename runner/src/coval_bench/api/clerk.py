@@ -3,9 +3,10 @@
 
 """Resolve a Clerk session token to the embargoed models its holder may see.
 
-Verified against the instance JWKS (public — no secret involved). A coval.dev
-``email`` sees everything; an org sees the provider its ``org_id`` is mapped to
-in settings.
+Verified against the instance JWKS (public — no secret involved). A mapped
+``org_id`` scopes the caller to its provider — even for coval.dev emails, so
+switching into a partner org previews exactly their view. Outside a mapped
+org, a coval.dev ``email`` sees everything.
 """
 
 from __future__ import annotations
@@ -89,10 +90,10 @@ def allowed_pairs(
     claims = _claims(token.strip(), settings)
     if claims is None:
         return None
+    provider = _org_provider(claims, settings)
+    if provider is not None:
+        return frozenset(pair for pair in embargoed if pair[0] == provider)
     email = claims.get("email")
     if isinstance(email, str) and email.endswith(_INTERNAL_EMAIL_SUFFIX):
         return embargoed
-    provider = _org_provider(claims, settings)
-    if provider is None:
-        return frozenset()
-    return frozenset(pair for pair in embargoed if pair[0] == provider)
+    return frozenset()
