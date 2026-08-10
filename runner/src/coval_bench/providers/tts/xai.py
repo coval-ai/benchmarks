@@ -21,7 +21,7 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("grok-tts",)
-_VALID_VOICES = ("eve", "ara", "rex", "sal", "leo")
+_VALID_VOICES = ("eve", "ara", "rex", "sal", "leo", "carina", "altair")
 _BASE_WS_URL = "wss://api.x.ai/v1/tts"
 _SAMPLE_RATE = 24000
 
