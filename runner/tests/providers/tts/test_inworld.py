@@ -245,6 +245,12 @@ def test_inworld_accepts_tts_2(fake_settings: Settings) -> None:
     assert p.model == "inworld-tts-2"
 
 
+def test_inworld_accepts_tts_2_flash(fake_settings: Settings) -> None:
+    p = InworldTTSProvider(fake_settings, model="inworld-tts-2-flash", voice="Brooke")
+    assert p.name == "inworld-tts-2-flash"
+    assert p.model == "inworld-tts-2-flash"
+
+
 def test_inworld_rejects_unsupported_model(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Unsupported Inworld model"):
         InworldTTSProvider(fake_settings, model="not-a-real-model", voice="Brooke")
