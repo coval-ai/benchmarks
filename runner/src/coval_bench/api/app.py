@@ -133,13 +133,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     # CORS — allowlist read from settings; never hard-coded (ADR-015).
+    # Proof headers are listed explicitly: the `*` wildcard never covers
+    # Authorization, so bearer preflights would fail under it.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved.cors_origins,
         allow_origin_regex=resolved.cors_origin_regex,
         allow_credentials=False,
         allow_methods=["GET", "OPTIONS"],
-        allow_headers=["*"],
+        allow_headers=["Authorization", "X-Internal-Key", "X-EA-Token"],
         max_age=600,
     )
 

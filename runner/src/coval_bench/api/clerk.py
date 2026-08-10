@@ -1,10 +1,12 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Resolve a Clerk session token to the embargoed models its org may see.
+"""Resolve a Clerk session token to the embargoed models its holder may see.
 
-Verified against the instance JWKS (public — no secret involved). The
-``benchmark_providers`` claim names the org's providers, or ``"*"`` for all.
+Verified against the instance JWKS (public — no secret involved). The token
+carries the user's verified ``email`` and active org's ``org_slug``: a coval.dev
+email sees everything, an org sees its own provider's models (org slugs equal
+provider ids), and a valid token matching neither keeps the public view.
 """
 
 from __future__ import annotations
@@ -18,6 +20,9 @@ import structlog
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
+
+# Benchmarking-team domain; Clerk only exposes verified primary emails.
+_INTERNAL_EMAIL_SUFFIX = "@coval.dev"
 
 
 @functools.lru_cache(maxsize=4)
@@ -61,9 +66,10 @@ def allowed_pairs(
     claims = _claims(token.strip(), settings)
     if claims is None:
         return None
-    providers = claims.get("benchmark_providers")
-    if providers == "*":
+    email = claims.get("email")
+    if isinstance(email, str) and email.endswith(_INTERNAL_EMAIL_SUFFIX):
         return embargoed
-    if not isinstance(providers, list):
+    org_slug = claims.get("org_slug")
+    if not isinstance(org_slug, str) or not org_slug:
         return frozenset()
-    return frozenset(pair for pair in embargoed if pair[0] in providers)
+    return frozenset(pair for pair in embargoed if pair[0] == org_slug)
