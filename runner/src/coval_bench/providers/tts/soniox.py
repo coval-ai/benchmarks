@@ -20,7 +20,7 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("tts-rt-v1",)
+_VALID_MODELS = ("tts-rt-v1", "tts-rt-v2")
 _VALID_VOICES = (
     "Maya",
     "Daniel",
