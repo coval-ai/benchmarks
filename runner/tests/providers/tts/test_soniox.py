@@ -234,7 +234,8 @@ def test_soniox_tts_missing_api_key_raises() -> None:
         SonioxTTSProvider(settings, model="tts-rt-v1", voice="Adrian")
 
 
-def test_soniox_tts_provider_name(fake_settings: Settings) -> None:
-    provider = SonioxTTSProvider(fake_settings, model="tts-rt-v1", voice="Adrian")
-    assert provider.name == "soniox-tts-rt-v1"
-    assert provider.model == "tts-rt-v1"
+@pytest.mark.parametrize("model", ["tts-rt-v1", "tts-rt-v2"])
+def test_soniox_tts_provider_name(fake_settings: Settings, model: str) -> None:
+    provider = SonioxTTSProvider(fake_settings, model=model, voice="Adrian")
+    assert provider.name == f"soniox-{model}"
+    assert provider.model == model
