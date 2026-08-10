@@ -18,10 +18,12 @@ from coval_bench.registries.metrics import (
 )
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
+    Gender,
     Licensing,
     ModelStatus,
     RegisteredModel,
     Source,
+    Voice,
 )
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
@@ -41,10 +43,12 @@ __all__ = [
     "Metric",
     "MetricDirection",
     "MetricSpec",
+    "Gender",
     "Licensing",
     "ModelStatus",
     "RegisteredModel",
     "Source",
+    "Voice",
     "CATEGORY_LABELS",
     "PROVIDER_VALUED_CATEGORIES",
     "TAG_CATEGORIES",

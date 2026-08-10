@@ -8,16 +8,20 @@ from __future__ import annotations
 from collections import Counter
 
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries.models import Gender, Voice
 from coval_bench.runner.orchestrator import _assign_tts_voices
 
 
 def _entry(voices: tuple[str, ...] = ()) -> RegisteredModel:
+    """Build a TTS entry from bare voice ids; ids starting with ``f`` are female."""
     return RegisteredModel(
         benchmark=Benchmark.TTS,
         provider="fake",
         model="fake-tts",
         voice="pinned",
-        voices=voices,
+        voices=tuple(
+            Voice(id=v, gender=Gender.FEMALE if v.startswith("f") else Gender.MALE) for v in voices
+        ),
         status=ModelStatus.ACTIVE,
     )
 
@@ -74,7 +78,12 @@ def test_registry_pools_are_f_m_pairs() -> None:
         assert m.benchmark is Benchmark.TTS, f"{m.provider}/{m.model}: pool on non-TTS entry"
         assert m.status in live, f"{m.provider}/{m.model}: pool on dead entry"
         assert len(m.voices) == 2, f"{m.provider}/{m.model}: pool must be a (female, male) pair"
-        assert len(set(m.voices)) == 2, f"{m.provider}/{m.model}: duplicate voice in pool"
+        ids = [v.id for v in m.voices]
+        assert len(set(ids)) == 2, f"{m.provider}/{m.model}: duplicate voice in pool"
+        genders = sorted(v.gender for v in m.voices)
+        assert genders == [Gender.FEMALE, Gender.MALE], (
+            f"{m.provider}/{m.model}: pool must hold exactly one female and one male, got {genders}"
+        )
 
 
 def test_active_tts_entries_have_pools() -> None:

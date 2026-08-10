@@ -69,7 +69,7 @@ async def test_inworld_happy_path(fake_settings: Settings, tmp_path: Path) -> No
     fake_ws = _make_ws([pcm, pcm, pcm, pcm])
 
     with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("Hello from Inworld")
 
     assert result.error is None, result.error
@@ -82,7 +82,7 @@ async def test_inworld_happy_path(fake_settings: Settings, tmp_path: Path) -> No
     # Confirm the two messages sent to the WebSocket were correct.
     assert len(fake_ws.sent) == 2
     create = json.loads(fake_ws.sent[0])
-    assert create["create"]["voiceId"] == "Ashley"
+    assert create["create"]["voiceId"] == "Brooke"
     assert create["create"]["modelId"] == "inworld-tts-1.5-max"
     assert create["create"]["audioConfig"]["audioEncoding"] == "LINEAR16"
     assert create["create"]["audioConfig"]["sampleRateHertz"] == 24000
@@ -104,7 +104,7 @@ async def test_inworld_strips_per_chunk_wav_header(fake_settings: Settings, tmp_
     fake_ws = _make_ws([_wav_wrap(pcm), _wav_wrap(pcm), _wav_wrap(pcm)])
 
     with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("header test")
 
     assert result.error is None, result.error
@@ -130,7 +130,7 @@ async def test_inworld_auth_in_connect_url(fake_settings: Settings) -> None:
     with patch(
         "coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws
     ) as connect:
-        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("hi")
 
     url = connect.call_args.args[0]
@@ -155,7 +155,7 @@ async def test_inworld_redacts_key_in_error(fake_settings: Settings) -> None:
         "coval_bench.providers.tts.inworld.ws_client.connect",
         side_effect=RuntimeError(leaky),
     ):
-        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("hi")
 
     assert result.error is not None
@@ -168,7 +168,7 @@ async def test_inworld_all_models(fake_settings: Settings) -> None:
     for model in InworldTTSProvider._VALID_MODELS:
         fake_ws = _make_ws([make_pcm_bytes(240)])
         with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-            provider = InworldTTSProvider(fake_settings, model=model, voice="Ashley")
+            provider = InworldTTSProvider(fake_settings, model=model, voice="Brooke")
             result = await provider.synthesize("test")
         assert result.error is None, f"{model}: {result.error}"
         if result.audio_path is not None:
@@ -186,7 +186,7 @@ async def test_inworld_empty_audio(fake_settings: Settings) -> None:
     fake_ws = FakeWebSocket([_done_msg()])
 
     with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("silence")
 
     assert result.error == ("provider closed the stream without sending audio or an error")
@@ -201,7 +201,7 @@ async def test_inworld_error_message(fake_settings: Settings) -> None:
     fake_ws = FakeWebSocket([err])
 
     with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("hi")
 
     assert result.error is not None
@@ -219,7 +219,7 @@ async def test_inworld_connection_error(fake_settings: Settings) -> None:
         "coval_bench.providers.tts.inworld.ws_client.connect",
         side_effect=OSError("connection refused"),
     ):
-        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Ashley")
+        provider = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-max", voice="Brooke")
         result = await provider.synthesize("hi")
 
     assert result.error is not None
@@ -234,20 +234,20 @@ async def test_inworld_connection_error(fake_settings: Settings) -> None:
 
 
 def test_inworld_name_and_model(fake_settings: Settings) -> None:
-    p = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-mini", voice="Ashley")
+    p = InworldTTSProvider(fake_settings, model="inworld-tts-1.5-mini", voice="Brooke")
     assert p.name == "inworld-tts-1.5-mini"
     assert p.model == "inworld-tts-1.5-mini"
 
 
 def test_inworld_accepts_tts_2(fake_settings: Settings) -> None:
-    p = InworldTTSProvider(fake_settings, model="inworld-tts-2", voice="Ashley")
+    p = InworldTTSProvider(fake_settings, model="inworld-tts-2", voice="Brooke")
     assert p.name == "inworld-tts-2"
     assert p.model == "inworld-tts-2"
 
 
 def test_inworld_rejects_unsupported_model(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Unsupported Inworld model"):
-        InworldTTSProvider(fake_settings, model="not-a-real-model", voice="Ashley")
+        InworldTTSProvider(fake_settings, model="not-a-real-model", voice="Brooke")
 
 
 # ---------------------------------------------------------------------------
@@ -264,4 +264,4 @@ def test_inworld_missing_api_key() -> None:
         inworld_api_key=None,
     )
     with pytest.raises(ValueError, match="inworld_api_key"):
-        InworldTTSProvider(settings_no_key, model="inworld-tts-1.5-max", voice="Ashley")
+        InworldTTSProvider(settings_no_key, model="inworld-tts-1.5-max", voice="Brooke")
