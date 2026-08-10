@@ -167,12 +167,9 @@ def hidden_early_access(
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
 
-    Sets the cache headers here rather than per route, so no endpoint can serve
-    embargoed rows without them. A caller presenting several proofs gets the union
-    of what they unlock. Only a presented-but-unknown token is logged; an absent
-    one is ordinary public traffic. Subtracting the allowlist means an entry
-    naming a model that is no longer embargoed is inert, and no token reveals what
-    the registry does not currently embargo.
+    Cache headers are set here rather than per route, so no endpoint can serve
+    embargoed rows without them. Several proofs may be presented at once; the
+    caller gets the union of what they unlock.
     """
     # Appended, not assigned: SelectiveGZipMiddleware adds Accept-Encoding after
     # the route returns, and assignment here would be overwritten.
@@ -184,25 +181,22 @@ def hidden_early_access(
         return frozenset()
 
     embargoed = embargoed_pairs()
-    bearer_presented = authorization is not None and settings.clerk_issuer is not None
-
-    # None means no proof was accepted, distinct from accepted-but-unlocks-nothing.
     unlocked: frozenset[tuple[str, str]] | None = None
     if x_ea_token is not None:
         allowed = _allowed_for(x_ea_token, _allowlists(settings))
         if allowed is None:
-            # The one case worth alerting on: a link that should work and doesn't.
             logger.warning("early_access_token_unknown", token=_fingerprint(x_ea_token))
         else:
             unlocked = with_retired_keys(allowed)
-    if authorization is not None and settings.clerk_issuer is not None:
-        allowed = clerk.allowed_pairs(authorization, settings, embargoed)
-        if allowed is not None:
-            unlocked = (unlocked or frozenset()) | with_retired_keys(allowed)
 
-    if x_ea_token is None and not bearer_presented:
+    if authorization is not None and settings.clerk_issuer is not None:
+        bearer = clerk.allowed_pairs(authorization, settings, embargoed)
+        if bearer is not None:
+            unlocked = (unlocked or frozenset()) | with_retired_keys(bearer)
+    elif x_ea_token is None:
         response.headers[EA_STATUS_HEADER] = "absent"
         return embargoed
+
     if unlocked is None:
         response.headers[EA_STATUS_HEADER] = "unknown"
         return embargoed

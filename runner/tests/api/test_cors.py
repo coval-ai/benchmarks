@@ -62,11 +62,7 @@ async def test_cors_methods_include_get_options(client: AsyncClient) -> None:
 
 
 async def test_cors_preflight_allows_the_proof_headers(client: AsyncClient) -> None:
-    """Preflight passes for every embargo proof header, Authorization included.
-
-    Authorization is the header the `*` wildcard never covers, so this pins the
-    explicit allowlist.
-    """
+    """Preflight passes for the proof headers; `*` never covers Authorization."""
     response = await client.options(
         "/v1/results",
         headers={

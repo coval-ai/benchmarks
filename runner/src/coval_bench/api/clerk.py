@@ -3,10 +3,9 @@
 
 """Resolve a Clerk session token to the embargoed models its holder may see.
 
-Verified against the instance JWKS (public — no secret involved). The token
-carries the user's verified ``email`` and active org's ``org_slug``: a coval.dev
-email sees everything, an org sees its own provider's models (org slugs equal
-provider ids), and a valid token matching neither keeps the public view.
+Verified against the instance JWKS (public — no secret involved). A coval.dev
+``email`` sees everything; an org sees its own provider's models (org slugs
+equal provider ids).
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
 
-# Benchmarking-team domain; Clerk only exposes verified primary emails.
 _INTERNAL_EMAIL_SUFFIX = "@coval.dev"
 
 
