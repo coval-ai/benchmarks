@@ -39,6 +39,12 @@ async def _refit_and_persist(
         battle = battles.get(vote.battle_id)
         if battle is None:
             continue
+        # Battles predating same-gender pairing carry a NULL gender. They pitted
+        # a female voice against a male one, and several of those voices have
+        # since been replaced, so their votes are not evidence about the models
+        # as they sound today. They stay in the table, out of this board.
+        if battle.gender is None:
+            continue
         a_id = _model_id(battle.provider_a, battle.model_a)
         b_id = _model_id(battle.provider_b, battle.model_b)
         id_to_pm[a_id] = (battle.provider_a, battle.model_a)

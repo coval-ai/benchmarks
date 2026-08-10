@@ -17,7 +17,13 @@ from collections.abc import Mapping, Sequence
 
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus, RegisteredModel
+from coval_bench.registries.models import (
+    MODEL_REGISTRY,
+    Gender,
+    ModelStatus,
+    RegisteredModel,
+    Voice,
+)
 
 # Volume knob (Elo points): the rating gap at which a matchup's sampling priority
 # decays by 1/e. Tuned offline and committed — deliberately a constant, never an
@@ -37,6 +43,44 @@ def active_tts_models() -> list[RegisteredModel]:
         for m in MODEL_REGISTRY
         if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE and m.arena_enabled
     ]
+
+
+def roster_for(gender: Gender) -> list[RegisteredModel]:
+    """The arena roster restricted to models that can render a *gender* battle.
+
+    A model without a voice of that gender cannot take a side, so it sits the
+    round out — today that is only Palabra, whose voices are quality tiers.
+    """
+    return [m for m in active_tts_models() if any(v.gender is gender for v in m.voices)]
+
+
+def voice_for(model: RegisteredModel, gender: Gender) -> Voice:
+    """The model's pooled voice of *gender*.
+
+    Guards the caller contract, not the registry: ``roster_for`` selects on the
+    same predicate, so a miss means *model* came from an unfiltered roster.
+    """
+    for voice in model.voices:
+        if voice.gender is gender:
+            return voice
+    raise ValueError(f"{model.provider}/{model.model} has no {gender.value} voice")
+
+
+def gender_for_next_battle(
+    counts: Mapping[Gender, int], rng: random.Random | None = None
+) -> Gender:
+    """Pick the gender with fewer battles so both accrue votes at the same rate.
+
+    Chooses the deficit rather than alternating on a parity bit: two concurrent
+    picks can overshoot by one, and only a deficit rule pulls that back. Ties
+    break randomly, since a fixed winner would hand one gender a standing +1 at
+    every cold start.
+    """
+    female, male = counts.get(Gender.FEMALE, 0), counts.get(Gender.MALE, 0)
+    if female != male:
+        return Gender.FEMALE if female < male else Gender.MALE
+    picker = rng if rng is not None else random.Random()  # noqa: S311
+    return picker.choice([Gender.FEMALE, Gender.MALE])
 
 
 def select_pair(

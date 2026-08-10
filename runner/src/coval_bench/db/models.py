@@ -16,10 +16,12 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import Gender
 
 __all__ = [
     "Battle",
     "Benchmark",
+    "Gender",
     "LeaderboardSnapshot",
     "PairingRating",
     "Result",
@@ -114,6 +116,12 @@ class Battle(BaseModel):
     prompt_text: str
     audio_a_url: str
     audio_b_url: str
+    # Which voice sang each side, and the gender both share. Stored rather than
+    # derived from the registry: voices get retired, and a retired id would
+    # leave historical rows unreadable. NULL on pre-gendered battles.
+    voice_a: str | None = None
+    voice_b: str | None = None
+    gender: Gender | None = None
     created_at: datetime | None = None  # set by DB default (now())
 
 

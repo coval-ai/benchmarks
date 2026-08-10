@@ -21,6 +21,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.models import (
     Battle,
+    Gender,
     LeaderboardSnapshot,
     PairingRating,
     Vote,
@@ -48,10 +49,11 @@ class ArenaStore:
         sql = """
             INSERT INTO arena.battles
                 (provider_a, model_a, provider_b, model_b, domain,
-                 prompt_text, audio_a_url, audio_b_url)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 prompt_text, audio_a_url, audio_b_url, voice_a, voice_b, gender)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id, provider_a, model_a, provider_b, model_b, domain,
-                      prompt_text, audio_a_url, audio_b_url, created_at
+                      prompt_text, audio_a_url, audio_b_url, voice_a, voice_b,
+                      gender, created_at
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -66,6 +68,9 @@ class ArenaStore:
                         battle.prompt_text,
                         battle.audio_a_url,
                         battle.audio_b_url,
+                        battle.voice_a,
+                        battle.voice_b,
+                        battle.gender,
                     ),
                 )
                 row = await cur.fetchone()
@@ -106,6 +111,23 @@ class ArenaStore:
             await conn.commit()
         return Vote.model_validate(dict(row))
 
+    async def count_battles_by_gender(self) -> dict[Gender, int]:
+        """Gendered battle counts, all time, for keeping generation balanced.
+
+        Only gendered rows are counted: pre-migration battles carry NULL and
+        belong to the retired cross-gender methodology, so including them would
+        skew the deficit the caller is trying to close. A gender absent from the
+        result has no battles yet, which the caller reads as zero.
+        """
+        sql = "SELECT gender, count(*) FROM arena.battles WHERE gender IS NOT NULL GROUP BY gender"
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.tuple_row) as cur,
+        ):
+            await cur.execute(sql)
+            rows = await cur.fetchall()
+        return {Gender(gender): int(count) for gender, count in rows}
+
     async def count_battles_today(self) -> int:
         """Count battles created since the start of the current UTC day.
 
@@ -128,7 +150,8 @@ class ArenaStore:
         """Return the battle with this id, or ``None`` if it does not exist."""
         sql = """
             SELECT id, provider_a, model_a, provider_b, model_b, domain,
-                   prompt_text, audio_a_url, audio_b_url, created_at
+                   prompt_text, audio_a_url, audio_b_url, voice_a, voice_b,
+                   gender, created_at
             FROM arena.battles
             WHERE id = %s
         """
@@ -153,7 +176,8 @@ class ArenaStore:
         """
         clauses = [
             "SELECT id, provider_a, model_a, provider_b, model_b, domain,"
-            " prompt_text, audio_a_url, audio_b_url, created_at FROM arena.battles",
+            " prompt_text, audio_a_url, audio_b_url, voice_a, voice_b, gender,"
+            " created_at FROM arena.battles",
         ]
         params: list[object] = []
         if domain is not None:

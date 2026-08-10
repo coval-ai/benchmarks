@@ -23,7 +23,7 @@ from pytest_postgresql.factories import postgresql
 
 from coval_bench.arena.snapshot import run_snapshot
 from coval_bench.db.arena_store import ArenaStore
-from coval_bench.db.models import Battle, VoteOutcome, VoterType
+from coval_bench.db.models import Battle, Gender, VoteOutcome, VoterType
 
 snap_pg = postgresql("pg_proc")  # shared server from conftest, own per-test DB
 
@@ -101,6 +101,9 @@ def _battle(provider_b: str, model_b: str) -> Battle:
         prompt_text="hello there",
         audio_a_url="https://example.test/a.wav",
         audio_b_url="https://example.test/b.wav",
+        voice_a="voice-a",
+        voice_b="voice-b",
+        gender=Gender.FEMALE,
     )
 
 
@@ -118,6 +121,9 @@ async def _seed_battle(store: ArenaStore, *, domain: str, provider_b: str, model
             prompt_text="hello there",
             audio_a_url="https://example.test/a.wav",
             audio_b_url="https://example.test/b.wav",
+            voice_a="voice-a",
+            voice_b="voice-b",
+            gender=Gender.FEMALE,
         )
     )
     assert battle.id is not None
@@ -162,7 +168,7 @@ def test_snapshot_persists_one_board(snap_pg: psycopg.Connection[Any]) -> None:
             assert len(rows) == 2
             assert {r["metric_name"] for r in rows} == {"naturalness"}
             assert {r["domain"] for r in rows} == {"all"}
-            assert {r["methodology_version"] for r in rows} == {"davidson-bt-001"}
+            assert {r["methodology_version"] for r in rows} == {"davidson-bt-002"}
             assert len({r["computed_at"] for r in rows}) == 1
             assert {(r["provider"], r["model"]) for r in rows} == {
                 ("cartesia", "sonic-3.5"),
@@ -274,3 +280,154 @@ def test_snapshot_scoped_to_domain_excludes_other_domains(snap_pg: psycopg.Conne
             await pool.close()
 
     asyncio.run(_run())
+
+
+def test_battle_voices_and_gender_survive_a_round_trip(snap_pg: psycopg.Connection[Any]) -> None:
+    """Written by ``insert_battle``, read back by both battle getters.
+
+    The INSERT and the two SELECTs carry independent column lists, so a column
+    added to one and forgotten in another reads back as ``None`` rather than
+    failing — this is the test that catches it.
+    """
+    _apply_migrations(snap_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(snap_pg)
+        try:
+            await _reset(pool)
+            store = ArenaStore(pool)
+            inserted = await store.insert_battle(_battle("openai", "gpt-4o-mini-tts"))
+
+            assert inserted.voice_a == "voice-a"
+            assert inserted.voice_b == "voice-b"
+            assert inserted.gender is Gender.FEMALE
+
+            assert inserted.id is not None
+            fetched = await store.get_battle(inserted.id)
+            assert fetched is not None
+            assert (fetched.voice_a, fetched.voice_b) == ("voice-a", "voice-b")
+            assert fetched.gender is Gender.FEMALE
+
+            listed = await store.list_battles(limit=None)
+            assert [b.gender for b in listed] == [Gender.FEMALE]
+            assert [b.voice_a for b in listed] == ["voice-a"]
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_count_battles_by_gender_ignores_ungendered_rows(
+    snap_pg: psycopg.Connection[Any],
+) -> None:
+    _apply_migrations(snap_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(snap_pg)
+        try:
+            await _reset(pool)
+            store = ArenaStore(pool)
+            assert await store.count_battles_by_gender() == {}
+
+            await store.insert_battle(_battle("openai", "gpt-4o-mini-tts"))
+            male = _battle("deepgram", "aura-2").model_copy(update={"gender": Gender.MALE})
+            await store.insert_battle(male)
+            legacy = _battle("rime", "mistv3").model_copy(update={"gender": None})
+            await store.insert_battle(legacy)
+
+            assert await store.count_battles_by_gender() == {Gender.FEMALE: 1, Gender.MALE: 1}
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def test_snapshot_excludes_pre_gender_battles(snap_pg: psycopg.Connection[Any]) -> None:
+    """Cross-gender votes from the retired methodology never reach a new board.
+
+    Their voices have since been replaced, so they are not evidence about the
+    models as they sound now. The rows stay; only the board excludes them.
+    """
+    _apply_migrations(snap_pg)
+
+    async def _run() -> None:
+        pool = await _make_pool(snap_pg)
+        try:
+            await _reset(pool)
+            store = ArenaStore(pool)
+
+            legacy = await store.insert_battle(
+                _battle("openai", "gpt-4o-mini-tts").model_copy(update={"gender": None})
+            )
+            assert legacy.id is not None
+            for idx, outcome in enumerate(_VOTES):
+                await store.upsert_vote(
+                    battle_id=legacy.id,
+                    outcome=outcome,
+                    voter_type=VoterType.LABELER,
+                    voter_id=f"labeler-{idx + 1}",
+                )
+
+            result = await run_snapshot(store, bootstrap_rounds=50, seed=0)
+            assert result is not None
+            assert result.models == []
+            assert await _snapshot_row_count(pool) == 0
+
+            # The battle and its votes are still on disk, just not in the board.
+            assert len(await store.list_battles(limit=None)) == 1
+            assert len(await store.list_votes()) == len(_VOTES)
+        finally:
+            await pool.close()
+
+    asyncio.run(_run())
+
+
+def _battle_columns(conn: psycopg.Connection[Any]) -> set[str]:
+    conn.rollback()  # see the catalog as alembic left it, not this session's snapshot
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns"
+            " WHERE table_schema = 'arena' AND table_name = 'battles'"
+        )
+        return {str(row[0]) for row in cur.fetchall()}
+
+
+def test_battle_voice_migration_reverses(snap_pg: psycopg.Connection[Any]) -> None:
+    """0016 adds three columns and takes exactly those three back off.
+
+    A downgrade that leaves debris behind makes the migration unsafe to roll
+    back, which is the only thing standing between a bad deploy and a restore.
+    """
+    _apply_migrations(snap_pg)
+    cfg = _alembic_cfg(_async_dsn(snap_pg))
+    added = {"voice_a", "voice_b", "gender"}
+
+    after_upgrade = _battle_columns(snap_pg)
+    assert added <= after_upgrade
+
+    alembic_command.downgrade(cfg, "-1")
+    after_downgrade = _battle_columns(snap_pg)
+    assert added.isdisjoint(after_downgrade)
+    assert after_downgrade == after_upgrade - added
+
+    alembic_command.upgrade(cfg, "head")
+    assert _battle_columns(snap_pg) == after_upgrade
+
+
+def test_gender_check_constraint_rejects_other_values(snap_pg: psycopg.Connection[Any]) -> None:
+    """Postgres refuses a bad gender even when the write bypasses Pydantic."""
+    _apply_migrations(snap_pg)
+    snap_pg.rollback()
+    with snap_pg.cursor() as cur:
+        try:
+            cur.execute(
+                "INSERT INTO arena.battles"
+                " (provider_a, model_a, provider_b, model_b, prompt_text,"
+                "  audio_a_url, audio_b_url, gender)"
+                " VALUES ('a', 'm', 'b', 'n', 'p', 'x', 'y', 'nonbinary')"
+            )
+        except psycopg.errors.CheckViolation:
+            pass
+        else:  # pragma: no cover - the constraint is missing
+            raise AssertionError("arena.battles accepted a gender outside the CHECK")
+    snap_pg.rollback()

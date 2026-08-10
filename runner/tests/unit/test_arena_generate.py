@@ -18,7 +18,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Battle
 from coval_bench.providers.base import TTSResult
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import ModelStatus, RegisteredModel
+from coval_bench.registries.models import Gender, ModelStatus, RegisteredModel, Voice
 
 
 def _model(provider: str, model: str) -> RegisteredModel:
@@ -27,6 +27,10 @@ def _model(provider: str, model: str) -> RegisteredModel:
         provider=provider,
         model=model,
         voice="v",
+        voices=(
+            Voice(id=f"{model}-f", gender=Gender.FEMALE),
+            Voice(id=f"{model}-m", gender=Gender.MALE),
+        ),
         status=ModelStatus.ACTIVE,
     )
 
@@ -96,6 +100,7 @@ async def test_generate_battle_success(tmp_path: Path, monkeypatch: pytest.Monke
         prompt=prompt,
         domain="healthcare",
         pair=models,
+        gender=Gender.FEMALE,
         rng=random.Random(0),
     )
 
@@ -106,6 +111,13 @@ async def test_generate_battle_success(tmp_path: Path, monkeypatch: pytest.Monke
     assert {battle.model_a, battle.model_b} == {"model-a", "model-b"}
     for url in (battle.audio_a_url, battle.audio_b_url):
         assert (settings.arena_audio_dir / url.lstrip("/")).is_file()
+
+    # The pooled female voice sang, not the scalar ``voice="v"``, and the row
+    # records which one so the rating can be traced back to a speaker.
+    assert battle.gender is Gender.FEMALE
+    assert battle.voice_a is not None and battle.voice_a.endswith("-f")
+    assert battle.voice_b is not None and battle.voice_b.endswith("-f")
+    assert {battle.voice_a, battle.voice_b} == {"model-a-f", "model-b-f"}
 
 
 async def test_generate_battle_skips_when_a_side_fails(
@@ -123,8 +135,75 @@ async def test_generate_battle_skips_when_a_side_fails(
         prompt="Your claim has been approved and payment will arrive within five business days.",
         domain="insurance",
         pair=models,
+        gender=Gender.MALE,
         rng=random.Random(0),
     )
 
     assert battle is None
     assert store.inserted == []
+
+
+@pytest.mark.asyncio
+async def test_generate_battle_uses_the_requested_gender(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The male half of each pool sings when a male battle is asked for."""
+    models = (_model("provider-a", "model-a"), _model("provider-b", "model-b"))
+    provider = _fake_provider_cls(tmp_path, fail_models=set())
+    monkeypatch.setattr(generate_module, "TTS_PROVIDERS", {m.provider: provider for m in models})
+    settings = Settings(arena_audio_dir=tmp_path / "store")
+    store = _FakeStore()
+
+    battle = await generate_battle(
+        settings,
+        store,  # type: ignore[arg-type]
+        prompt="Your appointment has been moved to Thursday afternoon.",
+        domain="healthcare",
+        pair=models,
+        gender=Gender.MALE,
+        rng=random.Random(0),
+    )
+
+    assert battle is not None
+    assert battle.gender is Gender.MALE
+    assert {battle.voice_a, battle.voice_b} == {"model-a-m", "model-b-m"}
+
+
+@pytest.mark.asyncio
+async def test_generate_battle_refuses_a_model_without_that_gender(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unfiltered roster is a caller bug, and it must not reach a provider.
+
+    The raise has to land before synthesis, otherwise the healthy side has
+    already been paid for by the time the broken one is noticed.
+    """
+    female_only = RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider="provider-b",
+        model="model-b",
+        voice="v",
+        voices=(Voice(id="model-b-f", gender=Gender.FEMALE),),
+        status=ModelStatus.ACTIVE,
+    )
+    models = (_model("provider-a", "model-a"), female_only)
+    provider = _fake_provider_cls(tmp_path, fail_models=set())
+    monkeypatch.setattr(generate_module, "TTS_PROVIDERS", {m.provider: provider for m in models})
+    settings = Settings(arena_audio_dir=tmp_path / "store")
+    store = _FakeStore()
+
+    with pytest.raises(ValueError, match="no male voice"):
+        await generate_battle(
+            settings,
+            store,  # type: ignore[arg-type]
+            prompt="This should never reach a provider.",
+            domain="healthcare",
+            pair=models,
+            gender=Gender.MALE,
+            rng=random.Random(0),
+        )
+
+    assert store.inserted == []
+    assert not (settings.arena_audio_dir).exists() or not any(
+        settings.arena_audio_dir.rglob("*.wav")
+    )

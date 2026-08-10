@@ -10,11 +10,17 @@ from collections import Counter
 
 import pytest
 
-from coval_bench.arena.pairing import active_tts_models, select_pair
+from coval_bench.arena.pairing import (
+    active_tts_models,
+    gender_for_next_battle,
+    roster_for,
+    select_pair,
+    voice_for,
+)
 from coval_bench.config import Settings
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import ModelStatus, RegisteredModel
+from coval_bench.registries.models import Gender, ModelStatus, RegisteredModel, Voice
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -158,3 +164,75 @@ def test_provider_env_names_match_settings_fields() -> None:
     fields = Settings.model_fields
     bad = {env for env in PROVIDER_ENV.values() if env.lower() not in fields}
     assert not bad, f"PROVIDER_ENV names with no Settings field: {sorted(bad)}"
+
+
+def test_every_arena_model_can_field_both_genders() -> None:
+    """Any arena model must field both genders, or it silently sits out half the battles.
+
+    Palabra is the standing exception: its ``voices`` are quality tiers rather
+    than speakers, so it has no gendered pool to draw from.
+    """
+    incomplete = [
+        f"{m.provider}/{m.model}"
+        for m in active_tts_models()
+        if {v.gender for v in m.voices} != {Gender.FEMALE, Gender.MALE} and m.provider != "palabra"
+    ]
+    assert incomplete == [], f"arena models missing a gendered voice: {incomplete}"
+
+
+def test_roster_for_keeps_only_models_with_that_gender() -> None:
+    for gender in (Gender.FEMALE, Gender.MALE):
+        roster = roster_for(gender)
+        assert len(roster) >= 2
+        assert all(any(v.gender is gender for v in m.voices) for m in roster)
+    assert {m.provider for m in roster_for(Gender.FEMALE)}.isdisjoint({"palabra"})
+
+
+def test_voice_for_returns_the_matching_half() -> None:
+    model = RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider="p",
+        model="m",
+        voice="v",
+        voices=(Voice(id="她", gender=Gender.FEMALE), Voice(id="他", gender=Gender.MALE)),
+        status=ModelStatus.ACTIVE,
+    )
+    assert voice_for(model, Gender.FEMALE).id == "她"
+    assert voice_for(model, Gender.MALE).id == "他"
+
+
+def test_voice_for_raises_when_the_model_cannot_field_the_gender() -> None:
+    model = RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider="p",
+        model="m",
+        voice="v",
+        voices=(Voice(id="only-female", gender=Gender.FEMALE),),
+        status=ModelStatus.ACTIVE,
+    )
+    with pytest.raises(ValueError, match="no male voice"):
+        voice_for(model, Gender.MALE)
+
+
+def test_gender_for_next_battle_picks_the_deficit() -> None:
+    assert gender_for_next_battle({Gender.FEMALE: 6, Gender.MALE: 5}) is Gender.MALE
+    assert gender_for_next_battle({Gender.FEMALE: 5, Gender.MALE: 6}) is Gender.FEMALE
+    # A concurrent double-pick overshoots; the deficit rule pulls it back rather
+    # than latching, which a parity bit would not do.
+    assert gender_for_next_battle({Gender.FEMALE: 7, Gender.MALE: 5}) is Gender.MALE
+    # An absent gender counts as zero, so a cold start is not a special case.
+    assert gender_for_next_battle({Gender.FEMALE: 3}) is Gender.MALE
+
+
+def test_gender_for_next_battle_breaks_ties_both_ways() -> None:
+    """A fixed tie-break would hand one gender a standing +1 at every cold start."""
+    picks = {gender_for_next_battle({}, random.Random(seed)) for seed in range(20)}
+    assert picks == {Gender.FEMALE, Gender.MALE}
+
+
+def test_gender_alternates_over_a_run_of_battles() -> None:
+    counts: dict[Gender, int] = {}
+    for _ in range(20):
+        gender = gender_for_next_battle(counts, random.Random(0))
+        counts[gender] = counts.get(gender, 0) + 1
+    assert counts[Gender.FEMALE] == counts[Gender.MALE] == 10

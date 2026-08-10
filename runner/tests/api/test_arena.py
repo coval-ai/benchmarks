@@ -25,7 +25,11 @@ _LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
 
 
 async def _apply_arena_schema(dsn: str) -> None:
-    """Create the arena tables read by the endpoints (mirrors migration 20260615_0007)."""
+    """Create the arena tables read by the endpoints.
+
+    Mirrors migrations 20260615_0007 and 20260810_0016 by hand — this fixture does
+    not run the migration chain, so a schema change has to be repeated here.
+    """
     aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
     try:
         await aconn.execute("CREATE SCHEMA IF NOT EXISTS arena")
@@ -40,6 +44,9 @@ async def _apply_arena_schema(dsn: str) -> None:
                 prompt_text TEXT NOT NULL,
                 audio_a_url TEXT NOT NULL,
                 audio_b_url TEXT NOT NULL,
+                voice_a     TEXT,
+                voice_b     TEXT,
+                gender      TEXT CHECK (gender IN ('female', 'male')),
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
@@ -109,16 +116,20 @@ async def _insert_battle(postgresql: Any, **kwargs: Any) -> str:
             "prompt_text": "Tell me about your refund policy.",
             "audio_a_url": "https://example.test/a.wav",
             "audio_b_url": "https://example.test/b.wav",
+            "voice_a": None,
+            "voice_b": None,
+            "gender": None,
         }
         defaults.update(kwargs)
         row = await aconn.execute(
             """
             INSERT INTO arena.battles
                 (provider_a, model_a, provider_b, model_b, domain,
-                 prompt_text, audio_a_url, audio_b_url)
+                 prompt_text, audio_a_url, audio_b_url, voice_a, voice_b, gender)
             VALUES
                 (%(provider_a)s, %(model_a)s, %(provider_b)s, %(model_b)s, %(domain)s,
-                 %(prompt_text)s, %(audio_a_url)s, %(audio_b_url)s)
+                 %(prompt_text)s, %(audio_a_url)s, %(audio_b_url)s,
+                 %(voice_a)s, %(voice_b)s, %(gender)s)
             RETURNING id
             """,
             defaults,
@@ -126,6 +137,18 @@ async def _insert_battle(postgresql: Any, **kwargs: Any) -> str:
         result = await row.fetchone()
         assert result is not None
         return str(result[0])
+    finally:
+        await aconn.close()
+
+
+async def _stored_voice_a(postgresql: Any, battle_id: str) -> str | None:
+    """Read voice_a straight from the row, bypassing the API."""
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True)
+    try:
+        cur = await aconn.execute("SELECT voice_a FROM arena.battles WHERE id = %s", (battle_id,))
+        row = await cur.fetchone()
+        assert row is not None
+        return str(row[0]) if row[0] is not None else None
     finally:
         await aconn.close()
 
@@ -953,3 +976,57 @@ async def test_admin_convergence_renders_history(client: AsyncClient, postgresql
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "elevenlabs/eleven_multilingual_v2" in response.text
+
+
+@pytest.mark.asyncio
+async def test_battle_never_exposes_voice_ids(client: AsyncClient, postgresql: Any) -> None:
+    """A voice id names its provider, so it would unblind the battle.
+
+    ``aura-2-orion-en`` gives Deepgram away on sight. The blind endpoints must
+    withhold the voice columns even though the row carries them.
+    """
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(
+        postgresql,
+        voice_a="aura-2-orion-en",
+        voice_b="sonic-english-male",
+        gender="male",
+    )
+
+    response = await client.get(f"/v1/arena/battle/{battle_id}", headers=_LABELER_HEADERS)
+
+    assert response.status_code == 200
+    body = response.text
+    assert "aura-2-orion-en" not in body
+    assert "sonic-english-male" not in body
+    assert set(response.json()) == {"id", "prompt_text", "domain", "audio_a_url", "audio_b_url"}
+    # Guard against a vacuous pass: the row really does carry the voice ids.
+    assert await _stored_voice_a(postgresql, battle_id) == "aura-2-orion-en"
+
+
+@pytest.mark.asyncio
+async def test_reveal_never_exposes_voice_ids(client: AsyncClient, postgresql: Any) -> None:
+    """Reveal discloses provider and model by design — voices stay out of it."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    battle_id = await _insert_battle(
+        postgresql,
+        voice_a="aura-2-orion-en",
+        voice_b="sonic-english-male",
+        gender="male",
+    )
+    await client.post(
+        "/v1/arena/vote",
+        json={"battle_id": battle_id, "outcome": "A_WIN", "voter_id": "ann-1"},
+        headers=_LABELER_HEADERS,
+    )
+
+    response = await client.get(
+        f"/v1/arena/battle/{battle_id}/reveal?voter_id=ann-1", headers=_LABELER_HEADERS
+    )
+
+    assert response.status_code == 200
+    body = response.text
+    assert "aura-2-orion-en" not in body
+    assert "sonic-english-male" not in body
+    assert "voice_a" not in body and "voice_b" not in body
+    assert await _stored_voice_a(postgresql, battle_id) == "aura-2-orion-en"
