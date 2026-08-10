@@ -58,7 +58,10 @@ class DeepgramTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Deepgram WebSocket and return a TTSResult."""
-        if not self._model_supported(self._model):
+        # Deepgram addresses a speaker by model string, so the pooled voice — when
+        # one is assigned — selects the speaker and the endpoint family.
+        speaker = self._voice or self._model
+        if not self._model_supported(speaker):
             return TTSResult(
                 provider="deepgram",
                 model=self._model,
@@ -66,7 +69,7 @@ class DeepgramTTSProvider(TTSProvider):
                 ttfa_ms=None,
                 audio_path=None,
                 error=(
-                    f"Unsupported Deepgram TTS model: {self._model}. "
+                    f"Unsupported Deepgram TTS model: {speaker}. "
                     "Expected an 'aura-' or 'flux-' model."
                 ),
             )
@@ -74,11 +77,11 @@ class DeepgramTTSProvider(TTSProvider):
         start: float | None = None
         first_chunk_at: float | None = None
 
-        is_flux = self._model.startswith("flux-")
+        is_flux = speaker.startswith("flux-")
         base = _DEEPGRAM_FLUX_TTS_WS_BASE if is_flux else _DEEPGRAM_TTS_WS_BASE
         # Flux emits Flushed before the turn's audio; SpeechMetadata marks audio-complete.
         final_msg_type = "SpeechMetadata" if is_flux else "Flushed"
-        qs = urlencode({"encoding": "linear16", "sample_rate": SAMPLE_RATE, "model": self._model})
+        qs = urlencode({"encoding": "linear16", "sample_rate": SAMPLE_RATE, "model": speaker})
         url = f"{base}?{qs}"
         headers = {"Authorization": f"Token {self._api_key}"}
 
