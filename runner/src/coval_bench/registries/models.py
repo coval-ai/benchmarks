@@ -578,10 +578,9 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="rime",
         model="arcana",
         voice="luna",
-        voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="masonry", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
