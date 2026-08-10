@@ -624,6 +624,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("Emma", "Daniel"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -633,6 +634,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("Emma", "Daniel"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         status=_EARLY_ACCESS,
+        arena_enabled=False,
     ),
     # Azure AI Speech real-time (raw WebSocket). "neural" is the standard
     # neural-voice family; "dragon-hd-latest" pins the auto-updating
@@ -771,6 +773,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _CLONE, _EMOTION),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -780,6 +783,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("beatrice_32", "hugh_32"),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
     RegisteredModel(
@@ -790,6 +794,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=("maeve", "abraham"),
         tags=(_STREAMING, _CLONE, _EMOTION),
         status=_ACTIVE,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
