@@ -187,6 +187,10 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     # Allowed azp claim values; bearer tokens are rejected while empty.
     clerk_authorized_parties: list[str] = []
+    # Clerk org id -> provider id, as a JSON object: {"org_abc123": "deepgram"}.
+    # Keyed by the immutable org id, not the slug, which org admins can rename.
+    # An org missing from the map unlocks nothing.
+    clerk_org_providers: str | None = None
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

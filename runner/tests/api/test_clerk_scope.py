@@ -40,6 +40,7 @@ _PUBLIC_PEM = _PRIVATE_KEY.public_key().public_bytes(
 )
 
 _INTERNAL_EMAIL = "someone@coval.dev"
+_ORG_ID = "org_2abc123"
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +55,7 @@ def _settings(
     issuer: str | None = _ISSUER,
     parties: str | None = f'["{_PARTY}"]',
     ea_tokens: str | None = None,
+    org_providers: str | None = None,
 ) -> Settings:
     monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
@@ -64,6 +66,10 @@ def _settings(
         monkeypatch.delenv("EARLY_ACCESS_TOKENS", raising=False)
     else:
         monkeypatch.setenv("EARLY_ACCESS_TOKENS", ea_tokens)
+    if org_providers is None:
+        monkeypatch.delenv("CLERK_ORG_PROVIDERS", raising=False)
+    else:
+        monkeypatch.setenv("CLERK_ORG_PROVIDERS", org_providers)
     if issuer is None:
         monkeypatch.delenv("CLERK_ISSUER", raising=False)
     else:
@@ -118,8 +124,8 @@ def test_org_sees_its_own_providers_models_and_no_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mine, theirs = _two_embargoed_providers()
-    settings = _settings(monkeypatch)
-    token = _mint({"org_slug": mine})
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: mine}))
+    token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == frozenset(pair for pair in embargoed_pairs() if pair[0] != mine)
@@ -138,8 +144,8 @@ def test_coval_email_sees_everything(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_coval_email_wins_over_the_org(monkeypatch: pytest.MonkeyPatch) -> None:
     """A coval.dev user browsing under a provider org still sees everything."""
     provider = _embargoed_provider()
-    settings = _settings(monkeypatch)
-    token = _mint({"email": _INTERNAL_EMAIL, "org_slug": provider})
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: provider}))
+    token = _mint({"email": _INTERNAL_EMAIL, "org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == frozenset()
@@ -168,7 +174,27 @@ def test_signed_in_user_without_an_org_keeps_the_public_view(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = _settings(monkeypatch)
-    token = _mint({"email": "user@example.com", "org_slug": None})
+    token = _mint({"email": "user@example.com", "org_id": None})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "accepted"
+    assert hidden == embargoed_pairs()
+
+
+def test_unmapped_org_keeps_the_public_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real org unlocks nothing until settings say which provider it is."""
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: provider}))
+    token = _mint({"org_id": "org_2someoneelse"})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "accepted"
+    assert hidden == embargoed_pairs()
+
+
+def test_org_without_a_configured_map_keeps_the_public_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(monkeypatch)
+    token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == embargoed_pairs()
@@ -176,8 +202,8 @@ def test_signed_in_user_without_an_org_keeps_the_public_view(
 
 def test_claims_of_the_wrong_shape_unlock_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _embargoed_provider()
-    settings = _settings(monkeypatch)
-    token = _mint({"email": [_INTERNAL_EMAIL], "org_slug": [provider]})
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: provider}))
+    token = _mint({"email": [_INTERNAL_EMAIL], "org_id": [_ORG_ID]})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
     assert hidden == embargoed_pairs()
@@ -292,8 +318,9 @@ def test_partner_token_and_bearer_unlock_the_union(monkeypatch: pytest.MonkeyPat
     settings = _settings(
         monkeypatch,
         ea_tokens=json.dumps({"partner-token": [f"{their_pair[0]}/{their_pair[1]}"]}),
+        org_providers=json.dumps({_ORG_ID: mine}),
     )
-    token = _mint({"org_slug": mine})
+    token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}", x_ea_token="partner-token")  # noqa: S106 - fake token
     assert status == "accepted"
     unlocked = with_retired_keys(
@@ -320,7 +347,7 @@ def test_valid_partner_token_survives_a_bad_bearer(monkeypatch: pytest.MonkeyPat
         ea_tokens=json.dumps({"partner-token": [f"{pair[0]}/{pair[1]}"]}),
     )
     now = int(time.time())
-    expired = _mint({"org_slug": provider}, iat=now - 120, exp=now - 60)
+    expired = _mint({"org_id": _ORG_ID}, iat=now - 120, exp=now - 60)
     hidden, status = _resolve(settings, f"Bearer {expired}", x_ea_token="partner-token")  # noqa: S106 - fake token
     assert status == "accepted"
     assert hidden == embargoed_pairs() - with_retired_keys(frozenset({pair}))
