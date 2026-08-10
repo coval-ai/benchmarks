@@ -632,7 +632,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Adrian",
         voices=("Emma", "Daniel"),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # Azure AI Speech real-time (raw WebSocket). "neural" is the standard
     # neural-voice family; "dragon-hd-latest" pins the auto-updating
