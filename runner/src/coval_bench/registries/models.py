@@ -674,6 +674,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS,
         provider="inworld",
+        model="inworld-tts-2-flash",
+        voice="Brooke",
+        voices=(
+            Voice(id="Brooke", gender=Gender.FEMALE, accent="en-US"),
+            Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="inworld",
         model="inworld-tts-1.5-max",
         voice="Brooke",
         voices=(
