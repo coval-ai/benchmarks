@@ -87,14 +87,14 @@ def test_registry_pools_are_f_m_pairs() -> None:
 
 
 def test_active_tts_entries_have_pools() -> None:
-    """All ACTIVE TTS models split voices, except providers with no per-gender voices:
-    deepgram (voice IS the model string) and palabra (quality tiers only)."""
+    """All ACTIVE TTS models split voices, except palabra, whose voices are quality
+    tiers rather than speakers."""
     missing = [
         (m.provider, m.model)
         for m in MODEL_REGISTRY
         if m.benchmark is Benchmark.TTS
         and m.status is ModelStatus.ACTIVE
         and not m.voices
-        and m.provider not in ("deepgram", "palabra")
+        and m.provider != "palabra"
     ]
     assert missing == []

@@ -136,6 +136,30 @@ async def test_deepgram_no_audio_chunks(fake_settings: Settings) -> None:
     assert result.ttfa_ms is None
 
 
+@pytest.mark.asyncio
+async def test_deepgram_voice_selects_the_speaker(fake_settings: Settings) -> None:
+    """A pooled voice addresses a speaker other than the entry's own model string."""
+    ws = FakeWebSocket(_speak_fixture_events([make_pcm_bytes(240)]))
+    provider = DeepgramTTSProvider(fake_settings, model="aura-2-thalia-en", voice="aura-2-orion-en")
+
+    captured: dict[str, str] = {}
+
+    def _capture(url: str, **_kwargs: object) -> Any:
+        captured["url"] = url
+        return _fake_connect(ws)
+
+    with patch("coval_bench.providers.tts.deepgram.ws_client.connect", side_effect=_capture):
+        result = await provider.synthesize("Hello from Orion")
+
+    assert urlparse(captured["url"]).path == "/v1/speak"
+    assert "model=aura-2-orion-en" in captured["url"]
+    assert result.error is None, f"Unexpected error: {result.error}"
+    assert result.voice == "aura-2-orion-en"
+    assert result.model == "aura-2-thalia-en"
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
 def test_deepgram_name_and_model(fake_settings: Settings) -> None:
     p = DeepgramTTSProvider(fake_settings, model="aura-2-thalia-en", voice="v")
     assert p.name == "deepgram-aura-2-thalia-en"

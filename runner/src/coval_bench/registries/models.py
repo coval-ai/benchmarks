@@ -521,6 +521,10 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
+        voices=(
+            Voice(id="aura-2-thalia-en", gender=Gender.FEMALE, name="Thalia", accent="en-US"),
+            Voice(id="aura-2-orion-en", gender=Gender.MALE, name="Orion", accent="en-US"),
+        ),
         tags=(_STREAMING, _STREAM),
         on_prem=True,
         status=_ACTIVE,
