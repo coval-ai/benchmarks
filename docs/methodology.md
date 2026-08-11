@@ -196,6 +196,23 @@ filtered out of analysis rather than silently inflating the published TTFA.
   Deferred — pool reuse achieves the same end result by construction, and the
   recorded interval is sufficient to detect and filter pool eviction.
 
+### Metric exclusions
+
+A metric is withheld for a model when the provider's wire protocol makes the
+number measure something other than the model. It applies per
+`(provider, model, metric)`, so a model excluded from one metric still publishes
+the others. The orchestrator does not write excluded rows and the API hides
+historical ones; the list and its reasons live in
+`runner/src/coval_bench/registries/metrics.py`.
+
+The recurring case is an emission cadence. TTFT assumes a provider sends a
+partial when it has one; a provider that emits on a fixed interval instead
+reports the wait for its next tick. That number can't go below the interval
+however fast the model is, and it's a step function rather than a latency
+distribution, so its median and tail don't mean what they do elsewhere.
+Withholding it is more honest than scoring it. The signature is a first-token
+time that barely moves across clips with different audio.
+
 ## Reproducing a result
 
 To reproduce a single `(provider, model, voice, metric)` cell:

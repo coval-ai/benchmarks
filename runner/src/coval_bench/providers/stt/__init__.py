@@ -27,6 +27,7 @@ from coval_bench.providers.stt.inworld import InworldSTTProvider
 from coval_bench.providers.stt.mistral import MistralSTTProvider
 from coval_bench.providers.stt.modulate import ModulateSTTProvider
 from coval_bench.providers.stt.openai import OpenAISTTProvider
+from coval_bench.providers.stt.reson8 import Reson8STTProvider
 from coval_bench.providers.stt.revai import RevAISTTProvider
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
@@ -56,6 +57,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "mistral": MistralSTTProvider,
     "modulate": ModulateSTTProvider,
     "openai": OpenAISTTProvider,
+    "reson8": Reson8STTProvider,
     "revai": RevAISTTProvider,
     "smallest": SmallestSTTProvider,
     "soniox": SonioxSTTProvider,
@@ -82,6 +84,7 @@ __all__ = [
     "MistralSTTProvider",
     "ModulateSTTProvider",
     "OpenAISTTProvider",
+    "Reson8STTProvider",
     "RevAISTTProvider",
     "SmallestSTTProvider",
     "SonioxSTTProvider",
