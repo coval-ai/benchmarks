@@ -1,0 +1,6 @@
+[
+  {"type": "transcript", "text": "hello", "is_final": false},
+  {"type": "transcript", "text": "hello world how", "is_final": false},
+  {"type": "transcript", "text": "hello world how are you", "is_final": true},
+  {"type": "flush_confirmation", "id": "eos"}
+]

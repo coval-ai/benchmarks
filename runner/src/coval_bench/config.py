@@ -91,6 +91,7 @@ class Settings(BaseSettings):
     smallest_api_key: SecretStr | None = None
     inworld_api_key: SecretStr | None = None
     soniox_api_key: SecretStr | None = None
+    reson8_api_key: SecretStr | None = None
     revai_api_key: SecretStr | None = None
     baseten_api_key: SecretStr | None = None
     together_api_key: SecretStr | None = None

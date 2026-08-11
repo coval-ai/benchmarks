@@ -158,6 +158,9 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # Modulate's English endpoint emits partials on a fixed ~1.5s
             # cadence, so first-token timing tracks the emission interval.
             ("modulate", "velma-2-stt-streaming-english-v2"),
+            # Reson8 emits interims on a fixed ~1.1s grid, so first-token timing
+            # tracks the emission interval.
+            ("reson8", "realtime"),
         }
     ),
     Metric.TTFS: frozenset(

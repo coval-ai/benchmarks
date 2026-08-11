@@ -389,6 +389,17 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         status=_ACTIVE,
     ),
+    # Reson8's realtime endpoint takes no model id, so the slug names the endpoint
+    # and leaves room for their separate turn-level one. TTFT is grid-quantized
+    # and excluded in registries/metrics.py; the client-driven flush keeps TTFS
+    # comparable.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="reson8",
+        model="realtime",
+        tags=(_STREAMING, _MULTI, _DIAR, _KEYTERM),
+        status=_EARLY_ACCESS,
+    ),
     # Modulate Velma-2 real-time streaming; ids are the endpoint path segments.
     # The empty-frame EOS is a genuine finalize: the complete transcript lands
     # ~150-300 ms after the last audio, so TTFS is comparable. The English

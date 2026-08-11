@@ -143,6 +143,7 @@ _WAIT_PATCHES = (
     "coval_bench.providers.stt.revai._EOT_SILENCE_S",
     "coval_bench.providers.stt.xai._FINAL_WAIT_S",
     "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
+    "coval_bench.providers.stt.reson8._FLUSH_WAIT_S",
     "coval_bench.providers.stt.inworld._CLOSE_WAIT_S",
     "coval_bench.providers.stt.together._FINAL_WAIT_S",
     "coval_bench.providers.stt.together._TAIL_SILENCE_S",
