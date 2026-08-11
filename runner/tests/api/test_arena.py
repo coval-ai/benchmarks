@@ -213,6 +213,35 @@ async def test_example_prompt_served_from_bank(client: AsyncClient, postgresql: 
     assert data["prompt"] in EXAMPLE_PROMPTS[data["domain"]]
 
 
+async def test_example_prompt_honours_requested_domain(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """?domain= draws from that bank only, so the prompt and its domain always agree."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    for domain in EXAMPLE_PROMPTS:
+        response = await client.get(
+            "/v1/arena/example-prompt",
+            params={"domain": domain},
+            headers=_LABELER_HEADERS,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["domain"] == domain
+        assert data["prompt"] in EXAMPLE_PROMPTS[domain]
+
+
+async def test_example_prompt_rejects_unknown_domain(client: AsyncClient, postgresql: Any) -> None:
+    """A domain outside the closed set is a 422, including the reserved "all" board key."""
+    await _apply_arena_schema(_make_db_url(postgresql))
+    for domain in ("all", "not-a-domain"):
+        response = await client.get(
+            "/v1/arena/example-prompt",
+            params={"domain": domain},
+            headers=_LABELER_HEADERS,
+        )
+        assert response.status_code == 422
+
+
 async def test_example_prompt_hidden_without_labeler_key(
     client: AsyncClient, postgresql: Any
 ) -> None:

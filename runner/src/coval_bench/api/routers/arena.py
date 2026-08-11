@@ -203,10 +203,19 @@ async def get_battle(
 @limiter.limit("60/minute", key_func=_client_key)
 async def get_example_prompt(
     request: Request,  # required by slowapi
+    domain: ArenaDomain | None = Query(
+        None,
+        description="Draw only from this domain's bank. Omitted -> a random domain.",
+    ),
 ) -> ExamplePromptOut:
-    """Return a random prompt from the per-domain seed bank, tagged with its domain."""
-    domain = secrets.choice(list(EXAMPLE_PROMPTS))
-    return ExamplePromptOut(prompt=secrets.choice(EXAMPLE_PROMPTS[domain]), domain=domain)
+    """Return a random prompt from the seed bank, tagged with the domain it came from.
+
+    Callers that already know the domain pass it, so the prompt and the domain a battle
+    is filed under always agree; an unfiltered draw would hand back a prompt from some
+    other domain and mislabel every per-domain board built from it.
+    """
+    chosen = domain if domain is not None else secrets.choice(list(EXAMPLE_PROMPTS))
+    return ExamplePromptOut(prompt=secrets.choice(EXAMPLE_PROMPTS[chosen]), domain=chosen)
 
 
 @router.get(
