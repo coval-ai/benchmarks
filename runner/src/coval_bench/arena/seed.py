@@ -15,11 +15,12 @@ import random
 import structlog
 
 from coval_bench.arena.generate import generate_battle
-from coval_bench.arena.pairing import active_tts_models, select_pair
+from coval_bench.arena.pairing import gender_for_next_battle, roster_for, select_pair
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import Battle
+from coval_bench.registries.models import Gender
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -37,23 +38,28 @@ async def seed_demo_battles(
     (logged), never inserted — so the result may be shorter than requested.
     """
     picker = rng if rng is not None else random.Random()  # noqa: S311
-    models = active_tts_models()
     created: list[Battle] = []
+    # Counted locally rather than read back from the table, so a seed run
+    # balances its own output without depending on what is already stored.
+    counts: dict[Gender, int] = {}
 
     for domain, prompts in EXAMPLE_PROMPTS.items():
         for prompt in prompts[:per_domain]:
-            pair = select_pair(models, {}, rng=picker)
+            gender = gender_for_next_battle(counts, rng=picker)
+            pair = select_pair(roster_for(gender), {}, rng=picker)
             battle = await generate_battle(
                 settings,
                 store,
                 prompt=prompt,
                 domain=domain,
                 pair=pair,
+                gender=gender,
                 rng=picker,
             )
             if battle is None:
                 logger.warning("arena_seed_skipped", domain=domain, prompt=prompt)
                 continue
+            counts[gender] = counts.get(gender, 0) + 1
             created.append(battle)
 
     return created

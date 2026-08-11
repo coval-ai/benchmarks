@@ -19,12 +19,13 @@ from typing import Any
 import structlog
 
 from coval_bench.arena.audio_store import store_clip
+from coval_bench.arena.pairing import voice_for
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import Battle
 from coval_bench.providers.base import TTSResult
 from coval_bench.providers.tts import TTS_PROVIDERS
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import Gender, RegisteredModel, Voice
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -38,20 +39,28 @@ async def generate_battle(
     prompt: str,
     domain: str | None,
     pair: tuple[RegisteredModel, RegisteredModel],
+    gender: Gender,
     rng: random.Random | None = None,
 ) -> Battle | None:
     """Synthesize both sides of *pair* on *prompt*, store the clips, persist a battle.
 
-    Returns the inserted ``Battle``, or ``None`` if either synthesis fails (no row
-    is written). ``rng`` is injectable so the A/B assignment is deterministic in tests.
+    Both sides speak in *gender*, so a listener compares delivery rather than
+    register. Returns the inserted ``Battle``, or ``None`` if either synthesis
+    fails (no row is written). ``rng`` is injectable so the A/B assignment is
+    deterministic in tests.
     """
     picker = rng if rng is not None else random.Random()  # noqa: S311
     first, second = pair
     model_a, model_b = (first, second) if picker.random() < 0.5 else (second, first)
 
+    # Resolved before synthesis: a roster that cannot field this gender is a
+    # caller error, and it should surface without paying for any audio.
+    voice_a = voice_for(model_a, gender)
+    voice_b = voice_for(model_b, gender)
+
     path_a, path_b = await asyncio.gather(
-        _synthesize(settings, model_a, prompt),
-        _synthesize(settings, model_b, prompt),
+        _synthesize(settings, model_a, prompt, voice_a),
+        _synthesize(settings, model_b, prompt, voice_b),
     )
     if path_a is None or path_b is None:
         for path in (path_a, path_b):
@@ -85,6 +94,9 @@ async def generate_battle(
         prompt_text=prompt,
         audio_a_url=audio_a_url,
         audio_b_url=audio_b_url,
+        voice_a=voice_a.id,
+        voice_b=voice_b.id,
+        gender=gender,
     )
     inserted = await store.insert_battle(battle)
     logger.info(
@@ -97,18 +109,17 @@ async def generate_battle(
     return inserted
 
 
-async def _synthesize(settings: Settings, model: RegisteredModel, prompt: str) -> Path | None:
-    """Synthesize one side; return its WAV path, or ``None`` on any failure."""
+async def _synthesize(
+    settings: Settings, model: RegisteredModel, prompt: str, voice: Voice
+) -> Path | None:
+    """Synthesize one side in *voice*; return its WAV path, or ``None`` on any failure."""
     provider_cls: Any = TTS_PROVIDERS.get(model.provider)
     if provider_cls is None:
         logger.warning("arena_unknown_provider", provider=model.provider, model=model.model)
         return None
-    if model.voice is None:
-        logger.warning("arena_missing_voice", provider=model.provider, model=model.model)
-        return None
 
     try:
-        provider = provider_cls(settings=settings, model=model.model, voice=model.voice)
+        provider = provider_cls(settings=settings, model=model.model, voice=voice.id)
         result: TTSResult = await asyncio.wait_for(
             provider.synthesize(prompt), timeout=_SYNTH_TIMEOUT_S
         )
