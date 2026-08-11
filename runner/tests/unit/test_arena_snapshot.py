@@ -429,3 +429,51 @@ def test_gender_check_constraint_rejects_other_values(snap_pg: psycopg.Connectio
         else:  # pragma: no cover - the constraint is missing
             raise AssertionError("arena.battles accepted a gender outside the CHECK")
     snap_pg.rollback()
+
+
+def test_migration_preserves_existing_rows(snap_pg: psycopg.Connection[Any]) -> None:
+    """0016 adds columns to a populated table without touching a single row.
+
+    Runs the real chain to 0015, writes a battle and a vote, then upgrades. The
+    rows must survive untouched, with the new columns NULL rather than defaulted.
+    """
+    cfg = _alembic_cfg(_async_dsn(snap_pg))
+    alembic_command.upgrade(cfg, "20260807_0015")
+    snap_pg.rollback()
+
+    with snap_pg.cursor() as cur:
+        cur.execute(
+            "INSERT INTO arena.battles"
+            " (provider_a, model_a, provider_b, model_b, domain, prompt_text,"
+            "  audio_a_url, audio_b_url)"
+            " VALUES ('cartesia', 'sonic-3.5', 'openai', 'gpt-4o-mini-tts',"
+            "         'general', 'hello there', 'a.wav', 'b.wav')"
+            " RETURNING id"
+        )
+        inserted = cur.fetchone()
+        assert inserted is not None
+        battle_id = inserted[0]
+        cur.execute(
+            "INSERT INTO arena.votes (battle_id, outcome, voter_type, voter_id)"
+            " VALUES (%s, 'A_WIN', 'labeler', 'ann')",
+            (battle_id,),
+        )
+    snap_pg.commit()
+
+    alembic_command.upgrade(cfg, "head")
+    snap_pg.rollback()
+
+    with snap_pg.cursor() as cur:
+        cur.execute("SELECT count(*) FROM arena.battles")
+        battles = cur.fetchone()
+        cur.execute("SELECT count(*) FROM arena.votes")
+        votes = cur.fetchone()
+        cur.execute("SELECT id, prompt_text, voice_a, voice_b, gender FROM arena.battles")
+        row = cur.fetchone()
+
+    assert battles is not None and battles[0] == 1
+    assert votes is not None and votes[0] == 1
+    assert row is not None
+    assert row[0] == battle_id  # same row, not a replacement
+    assert row[1] == "hello there"
+    assert (row[2], row[3], row[4]) == (None, None, None)
