@@ -737,7 +737,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Adrian",
         voices=(Voice(id="Emma", gender=Gender.FEMALE), Voice(id="Daniel", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
         arena_enabled=False,
     ),
     # Azure AI Speech real-time (raw WebSocket). "neural" is the standard
