@@ -10,6 +10,8 @@ realtime protocol: ``transcript`` frames carrying ``is_final``, and a
 
 from __future__ import annotations
 
+import asyncio
+import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,6 +29,64 @@ def make_provider() -> Reson8STTProvider:
 
 def _fake_connect(events: list[Any]) -> Any:
     ws = FakeWebSocket(events)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return cm
+
+
+class FlushGatedWebSocket:
+    """Fake WS that withholds the tail final and the ack until a flush is sent.
+
+    ``FakeWebSocket`` preloads every response and ends the stream once they are
+    consumed, so the ack lands whether or not the client asked for it. This one
+    keeps the post-flush frames queued until a ``flush_request`` actually
+    arrives, which is what exercises the ordering that protects the tail.
+    """
+
+    def __init__(
+        self,
+        interims: list[dict[str, Any] | str],
+        post_flush: list[dict[str, Any] | str],
+    ) -> None:
+        self._queue: asyncio.Queue[str | None] = asyncio.Queue()
+        for event in interims:
+            self._queue.put_nowait(self._encode(event))
+        self._post_flush = post_flush
+        self.sent: list[Any] = []
+        self.flush_seen = False
+
+    @staticmethod
+    def _encode(event: dict[str, Any] | str) -> str:
+        """Dicts are serialised; raw strings go on the wire verbatim."""
+        return json.dumps(event) if isinstance(event, dict) else event
+
+    async def send(self, msg: bytes | str) -> None:
+        self.sent.append(msg)
+        if isinstance(msg, str) and json.loads(msg).get("type") == "flush_request":
+            self.flush_seen = True
+            for event in self._post_flush:
+                self._queue.put_nowait(self._encode(event))
+            self._queue.put_nowait(None)
+
+    async def close(self) -> None:
+        self._queue.put_nowait(None)
+
+    def __aiter__(self) -> FlushGatedWebSocket:
+        return self
+
+    async def __anext__(self) -> str:
+        # Bounded so a client that never flushes fails the test instead of hanging.
+        try:
+            item = await asyncio.wait_for(self._queue.get(), timeout=2.0)
+        except TimeoutError:
+            raise StopAsyncIteration from None
+        if item is None:
+            raise StopAsyncIteration
+        return item
+
+
+def _gated_connect(ws: FlushGatedWebSocket) -> Any:
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -354,3 +414,53 @@ async def test_reson8_surfaces_send_failure(
     assert result.error is not None
     assert "send boom" in result.error
     assert result.complete_transcript is None
+
+
+# ---------------------------------------------------------------------------
+# Flush ordering — the tail final only exists because the client asked for it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reson8_tail_final_requires_the_flush(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """The last segment arrives only after flush_request, and must be captured."""
+    ws = FlushGatedWebSocket(
+        interims=[{"type": "transcript", "text": "hello", "is_final": False}],
+        post_flush=[
+            {"type": "transcript", "text": "hello world", "is_final": True},
+            {"type": "flush_confirmation", "id": "eos"},
+        ],
+    )
+
+    result = await _run(
+        Reson8STTProvider(api_key=fake_api_key), _gated_connect(ws), audio_pcm_bytes
+    )
+
+    assert ws.flush_seen
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.partial_transcripts == ["hello"]
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
+async def test_reson8_receive_failure_after_a_segment_final_fails_the_row(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A mid-stream failure after segment one must not publish a truncated transcript."""
+    ws = FlushGatedWebSocket(
+        interims=[
+            {"type": "transcript", "text": "first segment", "is_final": True},
+            "{not json",
+        ],
+        post_flush=[],
+    )
+
+    result = await _run(
+        Reson8STTProvider(api_key=fake_api_key), _gated_connect(ws), audio_pcm_bytes
+    )
+
+    assert result.error is not None
+    assert "ws_closed_without_final_transcript" not in result.error

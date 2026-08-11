@@ -239,7 +239,10 @@ class Reson8STTProvider(STTProvider):
             logger.warning(
                 "reson8_receive_error", provider="reson8", model=self._model, exc_info=exc
             )
-            if result.error is None and result.audio_to_final_seconds is None:
+            # Gated on the ack, not on audio_to_final_seconds: finals arrive per
+            # segment, so an early one must not mask a mid-stream failure that
+            # truncates the rest.
+            if result.error is None and not saw_flush_confirmation:
                 result.error = str(exc)
 
         flushed_event.set()
