@@ -10,11 +10,15 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.metrics import (
     METRIC_EXCLUSIONS,
     METRIC_SPECS,
+    METRIC_VALUE_CONTRACTS,
     SERIES_EXCLUDED_METRICS,
     Metric,
     MetricDirection,
     MetricSpec,
+    MetricValueContract,
+    MetricValueDefinition,
     is_metric_excluded,
+    validate_metric_values,
 )
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
@@ -38,12 +42,15 @@ __all__ = [
     "Benchmark",
     "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
+    "METRIC_VALUE_CONTRACTS",
     "SERIES_EXCLUDED_METRICS",
     "MODEL_REGISTRY",
     "Metric",
     "MetricDirection",
     "MetricSpec",
     "Gender",
+    "MetricValueContract",
+    "MetricValueDefinition",
     "Licensing",
     "ModelStatus",
     "RegisteredModel",
@@ -55,5 +62,6 @@ __all__ = [
     "ModelTag",
     "TagCategory",
     "is_metric_excluded",
+    "validate_metric_values",
     "tag_value_label",
 ]

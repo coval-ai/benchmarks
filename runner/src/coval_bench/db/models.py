@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import Gender
@@ -32,7 +33,265 @@ __all__ = [
     "Vote",
     "VoteOutcome",
     "VoterType",
+    "Observation",
+    "ObservationSourceKind",
+    "ObservationStatus",
+    "PreprocessingArtifact",
+    "ProcessingStatus",
+    "MetricArtifact",
+    "MetricEvaluation",
+    "MetricExecutor",
+    "MetricValue",
+    "MetricValueBucket",
+    "TimestampArtifactSchema",
+    "TimestampArtifactName",
+    "TimestampProducerName",
 ]
+
+
+class ProcessingStatus(StrEnum):
+    """Shared lifecycle status for normalized work rows."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    PARTIAL = "partial"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ObservationStatus(StrEnum):
+    """Capture outcome of one benchmark sample/provider/model observation."""
+
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ObservationSourceKind(StrEnum):
+    DATASET_AUDIO = "dataset_audio"
+    GENERATED_AUDIO = "generated_audio"
+    CONVERSATION_AUDIO = "conversation_audio"
+
+
+class MetricExecutor(StrEnum):
+    INLINE = "inline"
+    COVAL_API = "coval_api"
+
+
+class TimestampArtifactSchema(StrEnum):
+    """Canonical schemas emitted by timestamp preprocessing pipelines."""
+
+    WORD_TIMESTAMPS_V1 = "WordTimestampsV1"
+    PHONEME_TIMESTAMPS_V1 = "PhonemeTimestampsV1"
+
+
+class TimestampArtifactName(StrEnum):
+    WORD_TIMESTAMPS = "word_timestamps"
+    PHONEME_TIMESTAMPS = "phoneme_timestamps"
+
+
+class TimestampProducerName(StrEnum):
+    WORD_ALIGNER = "word_aligner"
+    PHONEME_ALIGNER = "phoneme_aligner"
+
+
+def _validate_processing_lifecycle(
+    status: ProcessingStatus,
+    started_at: datetime | None,
+    finished_at: datetime | None,
+    error: str | None,
+) -> None:
+    """Keep job/evaluation state transitions internally consistent."""
+    if finished_at is not None and (started_at is None or finished_at < started_at):
+        raise ValueError("finished_at requires started_at and must not precede it")
+    if status is ProcessingStatus.QUEUED:
+        if started_at is not None or finished_at is not None or error is not None:
+            raise ValueError("queued work cannot have timestamps or error")
+    elif status is ProcessingStatus.RUNNING:
+        if started_at is None or finished_at is not None or error is not None:
+            raise ValueError("running work requires started_at and no terminal state")
+    elif status is ProcessingStatus.SUCCEEDED:
+        if started_at is None or finished_at is None or error is not None:
+            raise ValueError("succeeded work requires timestamps and no error")
+    elif status is ProcessingStatus.PARTIAL:
+        if started_at is None or finished_at is None:
+            raise ValueError("partial work requires timestamps")
+    elif started_at is None or finished_at is None or not error:
+        raise ValueError("failed work requires timestamps and an error")
+
+
+def _private_gs_uri(value: str) -> str:
+    if not value.startswith("gs://") or "?" in value or "#" in value:
+        raise ValueError("must be a private gs:// URI without query or fragment")
+    return value
+
+
+def _optional_private_gs_uri(value: str | None) -> str | None:
+    """Accept absent source audio while validating any supplied object URI."""
+    return None if value is None else _private_gs_uri(value)
+
+
+class Observation(BaseModel):
+    """Normalized raw benchmark capture, independently of a metric result."""
+
+    id: UUID | None = None
+    run_id: int
+    dataset_id: str = Field(min_length=1)
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sample_id: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    voice: str | None = None
+    benchmark: Benchmark
+    source_kind: ObservationSourceKind
+    audio_filename: str | None = None
+    transport_protocol: str | None = None
+    submit_to_headers_ms: float | None = Field(default=None, ge=0)
+    audio_uri: str | None = None
+    audio_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    audio_size_bytes: int | None = Field(default=None, gt=0)
+    audio_duration_ms: int | None = Field(default=None, gt=0)
+    captured_at: datetime | None = None
+    status: ObservationStatus
+    error: str | None = None
+
+    _validate_audio_uri = field_validator("audio_uri")(_optional_private_gs_uri)
+
+    @model_validator(mode="after")
+    def _outcome_matches_error(self) -> Observation:
+        import math
+
+        audio_fields = (
+            self.audio_uri,
+            self.audio_sha256,
+            self.audio_size_bytes,
+            self.audio_duration_ms,
+        )
+        if any(value is None for value in audio_fields) and any(
+            value is not None for value in audio_fields
+        ):
+            raise ValueError("audio URI, sha256, size, and duration must be present together")
+        if self.submit_to_headers_ms is not None and not math.isfinite(self.submit_to_headers_ms):
+            raise ValueError("submit_to_headers_ms must be finite")
+        if self.status is ObservationStatus.SUCCEEDED and self.error is not None:
+            raise ValueError("succeeded observation cannot have an error")
+        if self.status is ObservationStatus.FAILED and not self.error:
+            raise ValueError("failed observation requires an error")
+        return self
+
+
+class PreprocessingArtifact(BaseModel):
+    id: UUID | None = None
+    observation_id: UUID
+    pipeline: str = Field(min_length=1)
+    pipeline_version: str = Field(min_length=1)
+    artifact_name: TimestampArtifactName
+    schema_name: TimestampArtifactSchema
+    schema_version: Literal["v1"] = "v1"
+    producer_name: TimestampProducerName
+    producer_version: str = Field(min_length=1)
+    gcs_uri: str
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(gt=0)
+    duration_ms: float | None = Field(default=None, gt=0)
+    created_at: datetime | None = None
+
+    _validate_uri = field_validator("gcs_uri")(_private_gs_uri)
+
+    @model_validator(mode="after")
+    def _artifact_identity(self) -> PreprocessingArtifact:
+        expected = {
+            TimestampArtifactName.WORD_TIMESTAMPS: (
+                TimestampArtifactSchema.WORD_TIMESTAMPS_V1,
+                TimestampProducerName.WORD_ALIGNER,
+            ),
+            TimestampArtifactName.PHONEME_TIMESTAMPS: (
+                TimestampArtifactSchema.PHONEME_TIMESTAMPS_V1,
+                TimestampProducerName.PHONEME_ALIGNER,
+            ),
+        }[self.artifact_name]
+        if (self.schema_name, self.producer_name) != expected:
+            raise ValueError("artifact name, schema, and producer must be a supported pair")
+        return self
+
+
+class MetricEvaluation(BaseModel):
+    id: UUID | None = None
+    observation_id: UUID
+    metric_type: str = Field(min_length=1)
+    metric_version: str = Field(min_length=1)
+    executor: MetricExecutor
+    external_request_id: str | None = None
+    status: ProcessingStatus
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+    attempt_count: int = Field(default=0, ge=0)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _lifecycle(self) -> MetricEvaluation:
+        _validate_processing_lifecycle(self.status, self.started_at, self.finished_at, self.error)
+        return self
+
+
+class MetricValue(BaseModel):
+    metric_evaluation_id: UUID
+    value_key: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    value: float
+    is_primary: bool = False
+
+    @field_validator("value")
+    @classmethod
+    def _finite(cls, value: float) -> float:
+        import math
+
+        if not math.isfinite(value):
+            raise ValueError("value must be finite")
+        return value
+
+
+class MetricArtifact(BaseModel):
+    id: UUID | None = None
+    metric_evaluation_id: UUID
+    artifact_type: str = Field(min_length=1)
+    uri: str
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(gt=0)
+    created_at: datetime | None = None
+
+    _validate_uri = field_validator("uri")(_private_gs_uri)
+
+
+class MetricValueBucket(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    benchmark: Benchmark
+    dataset_id: str = Field(min_length=1)
+    metric_type: str = Field(min_length=1)
+    metric_version: str = Field(min_length=1)
+    value_key: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    bucket_at: datetime
+    min_value: float
+    p25: float
+    p50: float
+    p75: float
+    max_value: float
+    value_sum: float
+    sample_count: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _valid_percentiles(self) -> MetricValueBucket:
+        import math
+
+        values = (self.min_value, self.p25, self.p50, self.p75, self.max_value, self.value_sum)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("bucket values must be finite")
+        if not self.min_value <= self.p25 <= self.p50 <= self.p75 <= self.max_value:
+            raise ValueError("bucket percentiles must be ordered")
+        return self
 
 
 class RunStatus(StrEnum):
