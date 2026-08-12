@@ -595,10 +595,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="deepgram",
         model="flux-haley-en",
         voice="flux-haley-en",
+        voices=(
+            Voice(id="flux-haley-en", gender=Gender.FEMALE, name="Haley", accent="en-US"),
+            Voice(id="flux-cole-en", gender=Gender.MALE, name="Cole", accent="en-US"),
+        ),
         tags=(_STREAMING, _STREAM),
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
