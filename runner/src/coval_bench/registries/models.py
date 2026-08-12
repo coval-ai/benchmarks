@@ -668,7 +668,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
