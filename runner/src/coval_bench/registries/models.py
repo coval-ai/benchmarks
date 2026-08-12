@@ -617,40 +617,16 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="hume",
         model="octave-tts",
         voice="176a55b1-4468-4736-8878-db82729667c1",
-        voices=(
-            Voice(
-                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",
-                gender=Gender.FEMALE,
-                name="Casual Podcast Host",
-            ),
-            Voice(
-                id="82a76fb8-3524-4e87-9265-9795c8e4ede6",
-                gender=Gender.MALE,
-                name="Male Protagonist",
-            ),
-        ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
         provider="hume",
         model="octave-2",
         voice="176a55b1-4468-4736-8878-db82729667c1",
-        voices=(
-            Voice(
-                id="33045fd9-8010-43f6-b6b0-da3fbf326c29",
-                gender=Gender.FEMALE,
-                name="Casual Podcast Host",
-            ),
-            Voice(
-                id="82a76fb8-3524-4e87-9265-9795c8e4ede6",
-                gender=Gender.MALE,
-                name="Male Protagonist",
-            ),
-        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
