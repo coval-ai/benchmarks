@@ -52,6 +52,11 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("V2V", "S2S"),
 }
 
+# The headline S2S board is the clean multi-turn condition.  ``__all__`` remains
+# available to aggregate callers that explicitly want every S2S condition pooled,
+# including robustness datasets such as the noisy persona.
+_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": "s2s-multiturn-v1"}
+
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,
            avg_value AS avg,
@@ -97,7 +102,11 @@ async def get_leaderboard(
             f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S.",
         )
 
-    params: dict[str, Any] = {"metric": metric, "benchmark": benchmark, "dataset": DATASET_ALL}
+    params: dict[str, Any] = {
+        "metric": metric,
+        "benchmark": benchmark,
+        "dataset": _PRIMARY_DATASET_BY_BENCHMARK.get(benchmark, DATASET_ALL),
+    }
     sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
 
     async with pool.connection() as conn:
