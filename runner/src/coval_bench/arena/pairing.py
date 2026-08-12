@@ -45,13 +45,21 @@ def active_tts_models() -> list[RegisteredModel]:
     ]
 
 
-def roster_for(gender: Gender) -> list[RegisteredModel]:
+def roster_for(gender: Gender, benched: frozenset[str] = frozenset()) -> list[RegisteredModel]:
     """The arena roster restricted to models that can render a *gender* battle.
 
     A model without a voice of that gender cannot take a side, so it sits the
     round out — today that is only Palabra, whose voices are quality tiers.
+
+    *benched* providers (a key the TTS benchmark reports as failing) are always dropped,
+    even when that leaves too few to pair. Returning one to the draw would spend a paid
+    call on a key already known to be dead and hand the voter an error anyway; the caller
+    reports the arena as unavailable instead.
     """
-    return [m for m in active_tts_models() if any(v.gender is gender for v in m.voices)]
+    eligible = [m for m in active_tts_models() if any(v.gender is gender for v in m.voices)]
+    if not benched:
+        return eligible
+    return [m for m in eligible if m.provider not in benched]
 
 
 def voice_for(model: RegisteredModel, gender: Gender) -> Voice:

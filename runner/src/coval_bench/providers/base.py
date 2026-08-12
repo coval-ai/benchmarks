@@ -64,6 +64,10 @@ class TTSResult:
     ttfa_ms: float | None
     audio_path: Path | None
     error: str | None
+    # Upstream HTTP status, when the provider reported one. Apart from ``error`` so
+    # callers can tell "out of credits" from "hiccup" without parsing prose. None means
+    # no status was surfaced (websocket frames, SDK exceptions), not success.
+    status_code: int | None = None
     http_version: str | None = None
     submit_to_headers_ms: float | None = None
     connection_reused: bool | None = None

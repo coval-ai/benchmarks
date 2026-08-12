@@ -115,6 +115,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                         audio_synthesis_start=None,
                         first_audio_chunk_at=None,
                         error=f"HTTP {response.status_code}: {detail[:500]}",
+                        status_code=response.status_code,
                         http_version=http_version,
                         submit_to_headers_ms=setup_ms,
                         connection_reused=reused,

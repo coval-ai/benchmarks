@@ -34,6 +34,21 @@ def _model(name: str) -> RegisteredModel:
     )
 
 
+def _gendered_model(provider: str, model: str) -> RegisteredModel:
+    """A roster entry with both gendered voices, so ``roster_for`` keeps it."""
+    return RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider=provider,
+        model=model,
+        voice="v",
+        voices=(
+            Voice(id=f"{model}-f", gender=Gender.FEMALE),
+            Voice(id=f"{model}-m", gender=Gender.MALE),
+        ),
+        status=ModelStatus.ACTIVE,
+    )
+
+
 def _rating(elo: float, ci: float | None) -> PairingRating:
     return PairingRating(rating_elo=elo, ci_half_width=ci)
 
@@ -236,3 +251,32 @@ def test_gender_alternates_over_a_run_of_battles() -> None:
         gender = gender_for_next_battle(counts, random.Random(0))
         counts[gender] = counts.get(gender, 0) + 1
     assert counts[Gender.FEMALE] == counts[Gender.MALE] == 10
+
+
+class TestBenchedProviders:
+    """A provider whose key is dead is dropped from the draw — unless dropping it
+    would leave no battle to run at all."""
+
+    def test_benched_providers_are_dropped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        roster = [
+            _gendered_model("alpha", "m-alpha"),
+            _gendered_model("beta", "m-beta"),
+            _gendered_model("gamma", "m-gamma"),
+        ]
+        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda: roster)
+
+        remaining = roster_for(Gender.FEMALE, frozenset({"beta"}))
+
+        assert [m.provider for m in remaining] == ["alpha", "gamma"]
+
+    def test_a_benched_provider_is_never_returned_to_make_up_the_numbers(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Too few to pair is the caller's problem to report; pairing a key already known
+        # to be dead spends a paid call and fails the voter anyway.
+        roster = [_gendered_model("alpha", "m-alpha"), _gendered_model("beta", "m-beta")]
+        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda: roster)
+
+        remaining = roster_for(Gender.FEMALE, frozenset({"beta"}))
+
+        assert [m.provider for m in remaining] == ["alpha"]

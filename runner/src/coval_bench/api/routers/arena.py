@@ -50,6 +50,7 @@ from coval_bench.api.schemas import (
     VoteIn,
     VoteOut,
 )
+from coval_bench.arena import provider_health
 from coval_bench.arena.audio_store import clip_url
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.arena.generate import generate_battle
@@ -63,6 +64,7 @@ from coval_bench.arena.monitoring import (
 from coval_bench.arena.pairing import (
     PAIRING_DOMAIN,
     PAIRING_METRIC,
+    active_tts_models,
     gender_for_next_battle,
     roster_for,
     select_pair,
@@ -392,9 +394,16 @@ async def create_battle(
     # Whichever gender has fewer battles goes next, so the two accrue votes at
     # the same rate and neither board lags the other into significance.
     gender = gender_for_next_battle(await store.count_battles_by_gender())
-    models = roster_for(gender)
+    # Providers with a dead key — named by the last TTS benchmark, or with no key
+    # configured here — sit out until that changes. This call also raises the alert,
+    # since nothing downstream ever sees a provider that was filtered out here.
+    roster = [m.provider for m in active_tts_models()]
+    benched = provider_health.unconfigured_providers(
+        settings, roster
+    ) | await provider_health.benchmark_benched_providers(pool)
+    models = roster_for(gender, benched)
     if len(models) < 2:
-        raise HTTPException(503, "not enough active TTS models to form a battle")
+        raise HTTPException(503, "not enough healthy TTS models to form a battle")
     ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)
     pair = select_pair(models, ratings)
     battle = await generate_battle(
@@ -404,6 +413,8 @@ async def create_battle(
         domain=body.domain,
         pair=pair,
         gender=gender,
+        alternates=models,
+        benched=benched,
     )
     if battle is None:
         raise HTTPException(502, "audio synthesis failed for one or both models")
