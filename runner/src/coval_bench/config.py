@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     # other sims on the same agents (e.g. the single-turn set) would be ingested
     # and pooled into the same provider. Opaque id, not secret.
     coval_s2s_test_set_id: str | None = None
+    # The caller persona whose audio carries background noise; its runs land
+    # under their own dataset instead of pooling into the clean numbers. Unset
+    # means every persona is clean. Temporary: personas belong in stored
+    # settings, not one id here, once there is more than one condition.
+    coval_s2s_noisy_persona_id: str | None = None
     # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
     # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)

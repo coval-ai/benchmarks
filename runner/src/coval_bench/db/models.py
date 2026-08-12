@@ -63,6 +63,7 @@ class Run(BaseModel):
     dataset_sha256: str
     status: RunStatus
     error: str | None = None
+    persona_id: str | None = None  # S2S caller persona; provenance only, never aggregated
 
 
 class Result(BaseModel):

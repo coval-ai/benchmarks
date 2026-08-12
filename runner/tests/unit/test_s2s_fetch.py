@@ -576,6 +576,92 @@ def test_dataset_identity() -> None:
     assert dataset_id == "s2s-v1"
 
 
+def test_dataset_identity_splits_the_noisy_caller() -> None:
+    """The noisy persona shares the test set but gets its own dataset."""
+    assert fetch_v2v._dataset_identity("TS1", "PN", "PN") == (
+        "s2s-multiturn-noisy-v1",
+        "TS1:PN",
+    )
+    # Every other persona in that test set stays pooled as the clean condition.
+    assert fetch_v2v._dataset_identity("TS1", "PCLEAN", "PN") == ("s2s-multiturn-v1", "TS1")
+    # Unset setting: no persona is noisy, so nothing splits.
+    assert fetch_v2v._dataset_identity("TS1", "PN", None) == ("s2s-multiturn-v1", "TS1")
+    # Single-turn has no test set, so it keeps the packaged manifest.
+    single_turn, _sha = fetch_v2v._dataset_identity(None, "PN", "PN")
+    assert single_turn == "s2s-v1"
+
+
+@pytest.mark.asyncio
+async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
+    """One scan, two personas: the dataset is chosen per run, not per tick."""
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"},
+        {"run_id": "RCLEAN", "create_time": _iso(timedelta(hours=1)), "persona_id": "PCLEAN"},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            test_set_id="TS1",
+            noisy_persona_id="PN",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+        )
+    datasets = [c.kwargs["dataset_id"] for c in writer.start_run.await_args_list]
+    assert datasets == ["s2s-multiturn-noisy-v1", "s2s-multiturn-v1"]
+    # Provenance rides along so a row says which persona produced it.
+    personas = [c.kwargs["persona_id"] for c in writer.start_run.await_args_list]
+    assert personas == ["PN", "PCLEAN"]
+
+
+@pytest.mark.asyncio
+async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
+    """Embargoed audio must not reach the public samples card."""
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"},
+        {"run_id": "RCLEAN", "create_time": _iso(timedelta(hours=1)), "persona_id": "PCLEAN"},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            test_set_id="TS1",
+            noisy_persona_id="PN",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert [r.coval_run_id for r in sampled] == ["RCLEAN"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> None:
+    # Without a test set the persona split can never fire, so fail loudly.
+    settings = Settings(
+        runner_sha="test",
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_noisy_persona_id="PN",
+    )
+    with pytest.raises(RuntimeError, match="requires coval_s2s_test_set_id"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
 @pytest.mark.asyncio
 async def test_ingest_run_writes_instruction_rows() -> None:
     writer = _stub_writer()
