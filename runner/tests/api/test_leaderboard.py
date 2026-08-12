@@ -185,9 +185,7 @@ async def test_s2s_leaderboard_uses_clean_multiturn_dataset(
     )
     await _refresh_mv(postgresql)
 
-    response = await client.get(
-        "/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"}
-    )
+    response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"})
 
     assert response.status_code == 200
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
