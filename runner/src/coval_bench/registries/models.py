@@ -547,7 +547,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="flux-haley-en",
         tags=(_STREAMING, _STREAM),
         on_prem=True,
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
