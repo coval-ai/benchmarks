@@ -172,6 +172,18 @@ async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncCl
         assert region["value"] == "us"
         assert region["label"] == "US"
 
+    reson8 = next(e for e in data["stt"] if e["provider"] == "reson8")
+    for model in reson8["models"]:
+        region = next(t for t in model["tags"] if t["category"] == "region")
+        assert region["value"] == "eu"
+        assert region["label"] == "Europe"
+
+    google = next(e for e in data["tts"] if e["provider"] == "google")
+    chirp = next(m for m in google["models"] if m["model"] == "chirp-3-hd")
+    region = next(t for t in chirp["tags"] if t["category"] == "region")
+    assert region["value"] == "global"
+    assert region["label"] == "Global"
+
     fluxions = next(e for e in data["tts"] if e["provider"] == "fluxions")
     assert not [t for m in fluxions["models"] for t in m["tags"] if t["category"] == "region"]
 

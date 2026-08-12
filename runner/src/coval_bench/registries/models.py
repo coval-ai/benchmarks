@@ -93,9 +93,10 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
     # Serving region behind the endpoint we benchmark, normalized to
-    # ``us-east-1``-style codes regardless of cloud; broad ``us``/``eu``/
-    # ``global`` when the provider doesn't disclose or pin one. Unset means
-    # unknown. Geo-routed endpoints record where our runner's traffic lands.
+    # ``us-east-1``-style codes regardless of cloud. Broad ``us``/``eu`` when
+    # only the geography is known; ``global`` when the provider documents
+    # globally routed serving. Unset means unknown. Geo-routed endpoints
+    # record where our runner's traffic lands.
     region: str | None = None
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
