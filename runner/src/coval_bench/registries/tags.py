@@ -91,6 +91,13 @@ PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset(
     {TagCategory.HOST, TagCategory.CREATOR}
 )
 
+# Broad region values get a readable label; granular codes stay raw.
+_REGION_LABELS: dict[str, str] = {
+    "us": "US",
+    "eu": "Europe",
+    "global": "Global",
+}
+
 # Value labels that aren't a plain capitalization.
 _VALUE_LABELS: dict[str, str] = {
     "shared-inference": "Shared inference",
@@ -113,5 +120,5 @@ def tag_value_label(category: TagCategory, value: str) -> str:
     if category is TagCategory.TYPE:
         return value.upper()
     if category is TagCategory.REGION:
-        return value
+        return _REGION_LABELS.get(value, value)
     return _VALUE_LABELS.get(value, value.capitalize())

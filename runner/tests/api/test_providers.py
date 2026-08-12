@@ -155,7 +155,7 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
 
 
 async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncClient) -> None:
-    """Region is emitted only where a provider confirmed it, and the label stays raw."""
+    """Region is emitted only where known; granular labels stay raw, broad ones readable."""
     response = await client.get("/v1/providers")
     data = response.json()
 
@@ -167,7 +167,13 @@ async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncCl
         assert region["label"] == "us-west-1"
 
     elevenlabs = next(e for e in data["tts"] if e["provider"] == "elevenlabs")
-    assert not [t for m in elevenlabs["models"] for t in m["tags"] if t["category"] == "region"]
+    for model in elevenlabs["models"]:
+        region = next(t for t in model["tags"] if t["category"] == "region")
+        assert region["value"] == "us"
+        assert region["label"] == "US"
+
+    fluxions = next(e for e in data["tts"] if e["provider"] == "fluxions")
+    assert not [t for m in fluxions["models"] for t in m["tags"] if t["category"] == "region"]
 
 
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
