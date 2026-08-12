@@ -398,7 +398,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="reson8",
         model="realtime",
         tags=(_STREAMING, _MULTI, _DIAR, _KEYTERM),
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     # Modulate Velma-2 real-time streaming; ids are the endpoint path segments.
     # The empty-frame EOS is a genuine finalize: the complete transcript lands
