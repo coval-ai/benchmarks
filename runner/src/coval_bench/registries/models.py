@@ -1017,7 +1017,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS,
         provider="deepdub",
-        model="dd-etts-3.0",
+        model="dd-etts-3.3",
         voice="02215cf5-04af-46f3-a061-48a4c81989bf",
         voices=(
             Voice(id="02215cf5-04af-46f3-a061-48a4c81989bf", gender=Gender.FEMALE),

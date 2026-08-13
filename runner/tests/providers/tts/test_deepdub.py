@@ -18,7 +18,7 @@ from coval_bench.providers.tts.deepdub import SAMPLE_RATE, DeepdubTTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
-_MODEL = "dd-etts-3.0"
+_MODEL = "dd-etts-3.3"
 _VOICE = "02215cf5-04af-46f3-a061-48a4c81989bf"
 
 
@@ -235,5 +235,5 @@ def test_deepdub_tts_missing_api_key_raises() -> None:
 
 def test_deepdub_tts_provider_name(deepdub_settings: Settings) -> None:
     provider = DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice=_VOICE)
-    assert provider.name == "deepdub-dd-etts-3.0"
+    assert provider.name == "deepdub-dd-etts-3.3"
     assert provider.model == _MODEL
