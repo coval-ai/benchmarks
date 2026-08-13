@@ -21,7 +21,15 @@ from coval_bench.db.models import ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Metric
 from coval_bench.s2s import fetch_v2v
+from coval_bench.s2s.conditions import (
+    DATASET_ID_MULTITURN,
+    DATASET_ID_MULTITURN_NOISY,
+    condition_for,
+)
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
+
+IDS = {Metric.V2V: "MID", Metric.INSTRUCTION_FOLLOWING: "IID"}
+LATENCY_IDS = {Metric.V2V: "MID"}
 
 SPEC = AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime")
 
@@ -95,7 +103,7 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
         writer,
         spec=SPEC,
         agent_id="a1",
-        metric_id="MID",
+        metric_ids=LATENCY_IDS,
         runner_sha="test",
         period_seconds=10_800,
         stale_grace_seconds=5_400,
@@ -115,7 +123,7 @@ def test_result_rows_maps_values() -> None:
         {"simulation_output_id": "s2", "value": None},
         {"value": 0.5},  # missing sim id -> index fallback in the clip key
     ]
-    rows = fetch_v2v._result_rows(values, run_pk=1, coval_run_id="R1", spec=SPEC)
+    rows = fetch_v2v._s2s_rows(values, metric=Metric.V2V, run_pk=1, coval_run_id="R1", spec=SPEC)
     assert [r.metric_value for r in rows] == [842.0, None, 500.0]
     assert [r.status for r in rows] == [
         ResultStatus.SUCCESS,
@@ -165,7 +173,7 @@ async def test_ingest_run_slots_by_create_time() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=created, error_status=None),
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -190,7 +198,7 @@ async def test_ingest_run_partial_and_failed() -> None:
             writer,
             spec=SPEC,
             coval_run=run,
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -204,7 +212,7 @@ async def test_ingest_run_partial_and_failed() -> None:
             writer,
             spec=SPEC,
             coval_run=run,
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -224,7 +232,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
                 writer,
                 spec=SPEC,
                 coval_run=run,
-                metric_id="MID",
+                metric_ids=LATENCY_IDS,
                 runner_sha="test",
                 period_seconds=10_800,
             )
@@ -241,7 +249,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
                 writer,
                 spec=SPEC,
                 coval_run=run,
-                metric_id="MID",
+                metric_ids=LATENCY_IDS,
                 runner_sha="test",
                 period_seconds=10_800,
             )
@@ -427,7 +435,7 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -456,7 +464,7 @@ async def test_each_bucket_contributes_its_own_sample_candidate() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -486,7 +494,7 @@ async def test_one_bucket_keeps_only_its_newest_candidate() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -511,7 +519,7 @@ async def test_stale_provider_lends_no_sample_candidate() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
@@ -535,7 +543,9 @@ def test_instruction_rows_maps_verdicts() -> None:
         {"simulation_output_id": "s2", "value": "NO"},
         {"simulation_output_id": "s3", "value": "UNKNOWN"},
     ]
-    rows = fetch_v2v._instruction_rows(values, run_pk=1, coval_run_id="R1", spec=SPEC)
+    rows = fetch_v2v._s2s_rows(
+        values, metric=Metric.INSTRUCTION_FOLLOWING, run_pk=1, coval_run_id="R1", spec=SPEC
+    )
     # UNKNOWN produces no row (excluded from the pool); only YES/NO are written.
     assert [r.metric_value for r in rows] == [100.0, 0.0]
     assert [r.status for r in rows] == [ResultStatus.SUCCESS, ResultStatus.SUCCESS]
@@ -552,27 +562,28 @@ def test_instruction_verdict_raises_on_unexpected() -> None:
         fetch_v2v._instruction_verdict(None)
 
 
-def test_instruction_id_mismatch() -> None:
-    lat = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s2"}]
-    assert fetch_v2v._instruction_id_mismatch(lat, lat) is None
+def test_population_mismatch() -> None:
+    anchor = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s2"}]
+    assert fetch_v2v._population_mismatch(anchor, anchor) is None
     # different population (same count) -> diff reported
-    ins = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s3"}]
-    diff = fetch_v2v._instruction_id_mismatch(lat, ins)
-    assert diff == {
-        "missing_instruction_ids": ["s2"],
-        "extra_instruction_ids": ["s3"],
-        "duplicate_instruction_ids": False,
+    other = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s3"}]
+    assert fetch_v2v._population_mismatch(anchor, other) == {
+        "missing_ids": ["s2"],
+        "extra_ids": ["s3"],
+        "duplicate_ids": False,
     }
-    # duplicate id
     dup = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s1"}]
-    dup_diff = fetch_v2v._instruction_id_mismatch(lat, dup)
+    dup_diff = fetch_v2v._population_mismatch(anchor, dup)
     assert dup_diff is not None
-    assert dup_diff["duplicate_instruction_ids"] is True
-    # no latency metric: nothing to compare against, duplicates still rejected
-    assert fetch_v2v._instruction_id_mismatch(None, ins) is None
-    no_anchor = fetch_v2v._instruction_id_mismatch(None, dup)
-    assert no_anchor is not None
-    assert no_anchor["duplicate_instruction_ids"] is True
+    assert dup_diff["duplicate_ids"] is True
+
+
+def test_has_duplicate_ids_guards_the_anchor() -> None:
+    # The anchor has nothing to be compared against, so this is its only check.
+    assert not fetch_v2v._has_duplicate_ids([{"simulation_output_id": "s1"}])
+    assert fetch_v2v._has_duplicate_ids(
+        [{"simulation_output_id": "s1"}, {"simulation_output_id": "s1"}]
+    )
 
 
 def test_dataset_identity() -> None:
@@ -604,14 +615,15 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
         {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"},
         {"run_id": "RCLEAN", "create_time": _iso(timedelta(hours=1)), "persona_id": "PCLEAN"},
     )
-    values = [{"simulation_output_id": "s1", "value": 0.5}]
-    async with _fake_client(list_json, _run_json(values)) as client:
+    latency = [{"simulation_output_id": "s1", "value": 0.5}]
+    instruction = [{"simulation_output_id": "s1", "value": "YES"}]
+    async with _fake_client(list_json, _multi_metric_run(latency, instruction)) as client:
         await fetch_v2v._fetch_one_provider(
             client,
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
             runner_sha="test",
@@ -620,6 +632,13 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
         )
     datasets = [c.kwargs["dataset_id"] for c in writer.start_run.await_args_list]
     assert datasets == ["s2s-multiturn-noisy-v1", "s2s-multiturn-v1"]
+    # Both runs carry latency, but the noise dataset excludes it: only the clean
+    # run writes V2V rows, and neither warns about the omission.
+    written = [c.args[0] for c in writer.record_results.await_args_list]
+    assert [{r.metric_type for r in rows} for rows in written] == [
+        {Metric.INSTRUCTION_FOLLOWING},
+        {Metric.V2V, Metric.INSTRUCTION_FOLLOWING},
+    ]
     # Provenance rides along so a row says which persona produced it.
     personas = [c.kwargs["persona_id"] for c in writer.start_run.await_args_list]
     assert personas == ["PN", "PCLEAN"]
@@ -643,7 +662,7 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
             runner_sha="test",
@@ -688,8 +707,7 @@ async def test_ingest_run_writes_instruction_rows() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -734,8 +752,7 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -755,8 +772,7 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -790,10 +806,8 @@ async def test_ingest_run_backfill_instruction_only() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
-            want_latency=False,
-            want_instruction=True,
+            metric_ids=IDS,
+            pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -814,10 +828,8 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
-            want_latency=False,
-            want_instruction=True,
+            metric_ids=IDS,
+            pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -828,7 +840,8 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_ingest_run_latency_absent_writes_instruction() -> None:
-    # Conditions that run with latency off must still yield instruction rows.
+    # The noise condition requires instruction, not latency, so a run with no V2V
+    # is normal there and its instruction rows must still land.
     writer = _stub_writer()
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
@@ -837,8 +850,9 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
+            condition=condition_for(DATASET_ID_MULTITURN_NOISY),
+            dataset_id=DATASET_ID_MULTITURN_NOISY,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -849,8 +863,32 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ingest_run_latency_absent_rejects_duplicate_instruction_ids() -> None:
-    # The duplicate check is instruction-only, so it survives having no anchor.
+async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
+    # Same payload under the standard condition: latency is a must, so this is a
+    # fault and nothing is written rather than instruction publishing on its own.
+    writer = _stub_writer()
+    instruction = [{"simulation_output_id": "s0", "value": "YES"}]
+    async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_ids=IDS,
+            condition=condition_for(DATASET_ID_MULTITURN),
+            dataset_id=DATASET_ID_MULTITURN,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is None
+    writer.start_run.assert_not_awaited()
+    writer.record_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
+    # Noise condition, so instruction is the anchor and nothing compares it against
+    # another metric: this guard is the only thing stopping double-counted rows.
     writer = _stub_writer()
     instruction = [
         {"simulation_output_id": "s0", "value": "YES"},
@@ -862,8 +900,9 @@ async def test_ingest_run_latency_absent_rejects_duplicate_instruction_ids() -> 
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
+            condition=condition_for(DATASET_ID_MULTITURN_NOISY),
+            dataset_id=DATASET_ID_MULTITURN_NOISY,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -881,6 +920,8 @@ async def test_ingest_run_latency_absent_rejects_duplicate_instruction_ids() -> 
 async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
     instruction: list[dict[str, Any]],
 ) -> None:
+    # Noise condition: instruction is the anchor, so values mapping to no rows
+    # must not leave an empty run row behind.
     writer = _stub_writer()
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
         status = await fetch_v2v._ingest_run(
@@ -888,8 +929,9 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
+            condition=condition_for(DATASET_ID_MULTITURN_NOISY),
+            dataset_id=DATASET_ID_MULTITURN_NOISY,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -900,6 +942,7 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
 
 @pytest.mark.asyncio
 async def test_already_ingested_instruction_only_run_is_fresh() -> None:
+    # Any persisted metric keeps the provider fresh, even with latency still owed.
     writer = _stub_writer()
 
     async def metric_ingested(*, metric_type: str, **_kwargs: Any) -> bool:
@@ -914,8 +957,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
             writer,
             spec=SPEC,
             agent_id="a1",
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
             test_set_id="TS1",
             runner_sha="test",
             period_seconds=10_800,
@@ -924,6 +966,37 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
     writer.start_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_skipped_when_the_required_metric_is_unconfigured() -> None:
+    # Noise requires instruction; without its id the run cannot be judged, so it is
+    # skipped and must not count as fresh data or a sample candidate.
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "RNOISY", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"}
+    )
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, _run_json([{"simulation_output_id": "s1"}])) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            test_set_id="TS1",
+            noisy_persona_id="PN",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert ingested == 0
+    assert sampled == []
+    writer.start_run.assert_not_awaited()
+    assert status is not RunStatus.SUCCEEDED
 
 
 @pytest.mark.asyncio
@@ -936,8 +1009,7 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
-            instruction_metric_id="IID",
+            metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
@@ -957,7 +1029,7 @@ async def test_ingest_run_without_instruction_metric_id() -> None:
             writer,
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
-            metric_id="MID",
+            metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
         )
