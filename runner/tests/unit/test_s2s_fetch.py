@@ -787,6 +787,60 @@ async def test_ingest_run_latency_absent_rejects_duplicate_instruction_ids() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "instruction",
+    [[], [{"simulation_output_id": "s0", "value": "UNKNOWN"}]],
+    ids=["empty", "all-unknown"],
+)
+async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
+    instruction: list[dict[str, Any]],
+) -> None:
+    writer = _stub_writer()
+    async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_id="MID",
+            instruction_metric_id="IID",
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is None
+    writer.start_run.assert_not_awaited()
+    writer.record_results.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_already_ingested_instruction_only_run_is_fresh() -> None:
+    writer = _stub_writer()
+
+    async def metric_ingested(*, metric_type: str, **_kwargs: Any) -> bool:
+        return metric_type == Metric.INSTRUCTION_FOLLOWING
+
+    writer.coval_metric_ingested = AsyncMock(side_effect=metric_ingested)
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    instruction = [{"simulation_output_id": "s0", "value": "YES"}]
+    async with _fake_client(list_json, _run_json(instruction, metric_id="IID")) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_id="MID",
+            instruction_metric_id="IID",
+            test_set_id="TS1",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
+    writer.start_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ingest_run_no_metrics_present_is_noop() -> None:
     # Neither metric on the run -> no run row, stays retryable.
     writer = _stub_writer()

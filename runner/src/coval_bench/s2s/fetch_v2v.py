@@ -384,9 +384,11 @@ async def _ingest_run(
                     )
                 else:
                     try:
+                        has_instruction_row = False
                         for v in instr_values:
-                            _instruction_verdict(v.get("value"))
-                        write_instruction = True
+                            verdict = _instruction_verdict(v.get("value"))
+                            has_instruction_row |= verdict is not None
+                        write_instruction = has_instruction_row
                     except InvalidInstructionVerdict as exc:
                         # Judge-contract violation: discard instruction for the
                         # whole run (keep latency); retryable on a later scan.
@@ -542,9 +544,12 @@ async def _fetch_one_provider(
                 coval_run_id=coval_run.run_id,
                 metric_type=Metric.INSTRUCTION_FOLLOWING,
             )
-            # A run whose latency already landed is fresh data + an eligible
-            # sample even if we still owe it an instruction backfill.
-            if latency_done:
+            instruction_data_done = instruction_metric_id is not None and instruction_done
+            # Either persisted metric is fresh data + an eligible sample. This
+            # keeps intentionally instruction-only conditions healthy between
+            # fetches while an unconfigured instruction metric cannot mask
+            # missing latency.
+            if latency_done or instruction_data_done:
                 note_sample_candidate(coval_run)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
