@@ -245,20 +245,23 @@ def _instruction_verdict(raw: object) -> bool | None:
 
 
 def _instruction_id_mismatch(
-    latency_values: list[dict[str, Any]], instruction_values: list[dict[str, Any]]
+    latency_values: list[dict[str, Any]] | None, instruction_values: list[dict[str, Any]]
 ) -> dict[str, object] | None:
-    """None if instruction's sim-id set matches latency exactly; else the diff.
+    """None if instruction's sim-id set is sound; else the diff.
 
-    Equal counts can still be different conversations, so compare the id sets and
-    reject duplicates. A mismatch means the pass rate would not be over the same
-    population as latency, so instruction is skipped for the run.
+    Ids, not counts: equal counts can be different conversations. ``latency_values``
+    is None -- not empty -- when the run has no latency metric, and then only
+    duplicate ids are checked. A mismatch skips instruction for the run.
     """
-    lat_ids = [v.get("simulation_output_id") for v in latency_values]
     ins_ids = [v.get("simulation_output_id") for v in instruction_values]
-    lat_set, ins_set = set(lat_ids), set(ins_ids)
+    ins_set = set(ins_ids)
     duplicate = len(ins_ids) != len(ins_set)
-    missing = sorted(str(x) for x in lat_set - ins_set)
-    extra = sorted(str(x) for x in ins_set - lat_set)
+    missing: list[str] = []
+    extra: list[str] = []
+    if latency_values is not None:
+        lat_set = {v.get("simulation_output_id") for v in latency_values}
+        missing = sorted(str(x) for x in lat_set - ins_set)
+        extra = sorted(str(x) for x in ins_set - lat_set)
     if not duplicate and not missing and not extra:
         return None
     return {
@@ -322,8 +325,8 @@ async def _ingest_run(
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
     Skips (before any DB write) runs finalized with an error_status — those
-    failed upstream of the provider and must not dent its reliability — and
-    runs missing the metric. Otherwise SUCCEEDED = all clips numeric, PARTIAL =
+    failed upstream of the provider and must not dent its reliability — and runs
+    left with nothing to write. Otherwise SUCCEEDED = all clips numeric, PARTIAL =
     some failed, FAILED = all failed.
     """
     run_pk: int | None = None
@@ -343,14 +346,15 @@ async def _ingest_run(
         metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
         metric = metrics.get(metric_id)
         if metric is None:
+            # Conditions with unreliable turn boundaries run with latency off.
             logger.warning(
                 "metric_absent",
                 provider=spec.provider,
                 coval_run_id=coval_run.run_id,
                 metric_id=metric_id,
             )
-            return None
-        values = cast("list[dict[str, Any]]", metric.get("values", []))
+        values = cast("list[dict[str, Any]]", metric.get("values", [])) if metric else []
+        write_latency = want_latency and metric is not None
 
         # Decide instruction writability up front (pure) so a backfill with
         # nothing to add creates no run row and stays retryable.
@@ -368,7 +372,7 @@ async def _ingest_run(
                 )
             else:
                 instr_values = cast("list[dict[str, Any]]", instr.get("values", []))
-                mismatch = _instruction_id_mismatch(values, instr_values)
+                mismatch = _instruction_id_mismatch(values if metric else None, instr_values)
                 if mismatch is not None:
                     # Different conversation population than latency -> skip
                     # instruction (keep latency) so the rate stays comparable.
@@ -393,7 +397,7 @@ async def _ingest_run(
                             error=str(exc),
                         )
 
-        if not want_latency and not write_instruction:
+        if not write_latency and not write_instruction:
             # Backfill with nothing to add; leave it retryable, write no run row.
             return None
 
@@ -410,7 +414,7 @@ async def _ingest_run(
 
         rows = (
             _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-            if want_latency
+            if write_latency
             else []
         )
         instruction_rows = (
@@ -430,7 +434,7 @@ async def _ingest_run(
             instruction=len(instruction_rows),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
-        if want_latency:
+        if write_latency:
             # Reliability is the latency signal (instruction lag never fails the run).
             failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
             if not rows or failed == len(rows):
