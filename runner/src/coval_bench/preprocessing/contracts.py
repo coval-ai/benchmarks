@@ -113,8 +113,11 @@ class PhonemeTimestampV1(_FrozenContract):
 class _TimestampSpan(Protocol):
     """Structural type shared by word and phoneme timestamp spans."""
 
-    start_ms: int
-    end_ms: int
+    @property
+    def start_ms(self) -> int: ...
+
+    @property
+    def end_ms(self) -> int: ...
 
 
 def _validate_timeline(
