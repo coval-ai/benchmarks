@@ -141,6 +141,8 @@ class Settings(BaseSettings):
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
     coval_s2s_instruction_metric_id: str | None = None
+    # The S2S interruption-rate metric id (opaque, not secret). Optional.
+    coval_s2s_interruption_metric_id: str | None = None
     # Restrict the fetch to one Coval test set (the multi-turn set). Without it,
     # other sims on the same agents (e.g. the single-turn set) would be ingested
     # and pooled into the same provider. Opaque id, not secret.

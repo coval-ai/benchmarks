@@ -30,6 +30,7 @@ class Metric(StrEnum):
     AUDIO_TO_FINAL = "AudioToFinal"
     V2V = "V2V"
     INSTRUCTION_FOLLOWING = "InstructionFollowing"
+    INTERRUPTION_RATE = "InterruptionRate"
 
 
 class MetricDirection(StrEnum):
@@ -124,6 +125,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         # average is the pass rate as a percentage, like WER.
         units="percent",
         direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.INTERRUPTION_RATE: MetricSpec(
+        display_name="Interruption Rate",
+        units="percent",
+        direction=MetricDirection.LOWER_IS_BETTER,
         decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
