@@ -602,7 +602,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _STREAM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_TTS,
