@@ -403,7 +403,9 @@ def test_battle_voice_migration_reverses(snap_pg: psycopg.Connection[Any]) -> No
     after_upgrade = _battle_columns(snap_pg)
     assert added <= after_upgrade
 
-    alembic_command.downgrade(cfg, "-1")
+    # Named, not "-1": relative to head this stopped testing 0016 the moment a
+    # later migration landed.
+    alembic_command.downgrade(cfg, "20260807_0015")
     after_downgrade = _battle_columns(snap_pg)
     assert added.isdisjoint(after_downgrade)
     assert after_downgrade == after_upgrade - added

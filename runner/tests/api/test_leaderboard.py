@@ -157,6 +157,42 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
 
 
+async def test_s2s_leaderboard_uses_clean_multiturn_dataset(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The headline S2S board excludes robustness conditions such as noisy speech."""
+    clean_run = await _insert_run(postgresql, dataset_id="s2s-multiturn-v1")
+    noisy_run = await _insert_run(postgresql, dataset_id="s2s-multiturn-noisy-v1")
+    await _insert_result(
+        postgresql,
+        clean_run,
+        provider="openai",
+        model="gpt-realtime",
+        metric_type="V2V",
+        metric_value=1200.0,
+        metric_units="ms",
+        benchmark="S2S",
+    )
+    await _insert_result(
+        postgresql,
+        noisy_run,
+        provider="google",
+        model="gemini-live",
+        metric_type="V2V",
+        metric_value=900.0,
+        metric_units="ms",
+        benchmark="S2S",
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "S2S"})
+
+    assert response.status_code == 200
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
+        ("openai", "gpt-realtime")
+    ]
+
+
 async def test_thin_entry_flagged_and_sunk_below_ranked(
     client: AsyncClient, postgresql: Any
 ) -> None:

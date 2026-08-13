@@ -108,7 +108,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 provider       text NOT NULL,
                 model          text NOT NULL,
                 voice          text,
-                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS')),
+                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
                 metric_type    text NOT NULL,
                 metric_value   double precision,
                 metric_units   text,

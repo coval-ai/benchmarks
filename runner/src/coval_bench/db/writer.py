@@ -59,6 +59,7 @@ class RunWriter:
         dataset_id: str,
         dataset_sha256: str,
         scheduled_at: datetime | None = None,
+        persona_id: str | None = None,
     ) -> Run:
         """Insert a ``running`` row into ``benchmarks_v2.runs``.
 
@@ -66,16 +67,23 @@ class RunWriter:
         """
         sql = """
             INSERT INTO benchmarks_v2.runs
-                (runner_sha, dataset_id, dataset_sha256, status, scheduled_at)
-            VALUES (%s, %s, %s, %s, %s)
+                (runner_sha, dataset_id, dataset_sha256, status, scheduled_at, persona_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id, started_at, finished_at, scheduled_at, runner_sha,
-                      dataset_id, dataset_sha256, status, error
+                      dataset_id, dataset_sha256, status, error, persona_id
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
                     sql,
-                    (runner_sha, dataset_id, dataset_sha256, RunStatus.RUNNING, scheduled_at),
+                    (
+                        runner_sha,
+                        dataset_id,
+                        dataset_sha256,
+                        RunStatus.RUNNING,
+                        scheduled_at,
+                        persona_id,
+                    ),
                 )
                 row = await cur.fetchone()
                 if row is None:  # pragma: no cover — unreachable after INSERT RETURNING

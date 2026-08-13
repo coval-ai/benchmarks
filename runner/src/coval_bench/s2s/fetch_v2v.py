@@ -37,6 +37,9 @@ DATASET_ID = "s2s-v1"
 # Multi-turn runs have no local manifest -- they're keyed to the Coval test set --
 # so they use a distinct dataset id and never pool with single-turn s2s-v1.
 DATASET_ID_MULTITURN = "s2s-multiturn-v1"
+# The same test set run by the noisy caller persona, kept apart so background
+# noise never pools into the clean numbers.
+DATASET_ID_MULTITURN_NOISY = "s2s-multiturn-noisy-v1"
 
 # Ingest window: how far back one tick looks for not-yet-ingested runs, and
 # how many list results that scan reads. Two periods (with a one-day floor)
@@ -106,15 +109,24 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
-def _dataset_identity(test_set_id: str | None) -> tuple[str, str]:
-    """Dataset id + provenance for the fetched rows.
+def _dataset_identity(
+    test_set_id: str | None,
+    persona_id: str = "",
+    noisy_persona_id: str | None = None,
+) -> tuple[str, str]:
+    """Dataset id + provenance for one run's rows.
 
     Multi-turn runs are keyed to their Coval test set, not the single-turn SLURP
     manifest, so they get their own dataset id (never pooling with s2s-v1) and
     record the test-set id as provenance. Without a test set (legacy latency-only
     mode) the rows stay under the packaged s2s-v1 manifest.
+
+    The noisy caller shares that test set, so only the persona separates the two
+    conditions; its provenance names the persona to keep the rows self-describing.
     """
     if test_set_id:
+        if noisy_persona_id and persona_id == noisy_persona_id:
+            return DATASET_ID_MULTITURN_NOISY, f"{test_set_id}:{persona_id}"
         return DATASET_ID_MULTITURN, test_set_id
     return DATASET_ID, _dataset_sha256()
 
@@ -403,6 +415,7 @@ async def _ingest_run(
             dataset_id=dataset_id,
             dataset_sha256=dataset_sha256 or _dataset_sha256(),
             scheduled_at=scheduled_at,
+            persona_id=coval_run.persona_id or None,
         )
         if run_row.id is None:  # pragma: no cover -- start_run always returns an id
             raise RuntimeError("start_run returned a run with no id")
@@ -475,6 +488,7 @@ async def _fetch_one_provider(
     metric_id: str,
     instruction_metric_id: str | None = None,
     test_set_id: str | None = None,
+    noisy_persona_id: str | None = None,
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
@@ -500,6 +514,10 @@ async def _fetch_one_provider(
         # yesterday's before the sampler ever saw it. Staggered arrivals must not
         # shrink the sample; committed only after the staleness check so a stale
         # provider's old recording never ships today.
+        # The noisy caller is under embargo, so its recordings never reach the
+        # public samples card.
+        if noisy_persona_id and coval_run.persona_id == noisy_persona_id:
+            return
         bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         key = (bucket_at, coval_run.persona_id)
         if key in candidates:
@@ -517,8 +535,6 @@ async def _fetch_one_provider(
         runs = await recent_completed_runs(
             client, agent_id, period_seconds=period_seconds, test_set_id=test_set_id
         )
-        dataset_id, dataset_sha256 = _dataset_identity(test_set_id)
-
         data_seen = False
         newest_data_at: datetime | None = None
         for coval_run in runs:
@@ -549,6 +565,9 @@ async def _fetch_one_provider(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
                 continue
+            dataset_id, dataset_sha256 = _dataset_identity(
+                test_set_id, coval_run.persona_id, noisy_persona_id
+            )
             status = await _ingest_run(
                 client,
                 writer,
@@ -633,6 +652,14 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
         )
+    # The noisy persona only separates conditions within a test set, so without
+    # one it would silently never take effect.
+    raw_noisy = settings.coval_s2s_noisy_persona_id
+    if raw_noisy is not None and not raw_noisy.strip():
+        raise RuntimeError("coval_s2s_noisy_persona_id must not be blank")
+    noisy_persona_id = raw_noisy or None
+    if noisy_persona_id and not test_set_id:
+        raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
@@ -652,6 +679,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 metric_id=metric_id,
                 instruction_metric_id=instruction_metric_id,
                 test_set_id=test_set_id,
+                noisy_persona_id=noisy_persona_id,
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,
