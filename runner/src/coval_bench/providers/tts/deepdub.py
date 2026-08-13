@@ -45,7 +45,7 @@ def _raise_on_error(frame: dict[str, Any]) -> None:
 class DeepdubTTSProvider(TTSProvider):
     """Deepdub TTS provider using the realtime WebSocket API (base64 PCM frames)."""
 
-    _VALID_MODELS = frozenset({"dd-etts-3.0"})
+    _VALID_MODELS = frozenset({"dd-etts-3.3"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if model not in self._VALID_MODELS:
