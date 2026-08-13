@@ -246,7 +246,7 @@ def test_empty_spans_require_registered_empty_warning() -> None:
 
 def test_warning_codes_and_intervals_are_strict_paired_and_bounded() -> None:
     with pytest.raises(ValidationError):
-        TimestampWarningV1(code="UNKNOWN", message="Unknown")
+        TimestampWarningV1(code="UNKNOWN", message="Unknown")  # type: ignore[arg-type]
     with pytest.raises(ValidationError, match="provided together"):
         TimestampWarningV1(
             code=TimestampWarningCode.PARTIAL_ALIGNMENT,

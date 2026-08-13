@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -110,9 +110,16 @@ class PhonemeTimestampV1(_FrozenContract):
         return self
 
 
+class _TimestampSpan(Protocol):
+    """Structural type shared by word and phoneme timestamp spans."""
+
+    start_ms: int
+    end_ms: int
+
+
 def _validate_timeline(
     *,
-    spans: tuple[WordTimestampV1, ...] | tuple[PhonemeTimestampV1, ...],
+    spans: tuple[_TimestampSpan, ...],
     warnings: tuple[TimestampWarningV1, ...],
     duration_ms: int,
 ) -> None:
