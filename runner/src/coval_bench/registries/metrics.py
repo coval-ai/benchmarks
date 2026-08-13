@@ -130,9 +130,9 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
     ),
     Metric.INTERRUPTION_RATE: MetricSpec(
         display_name="Interruption Rate",
-        units="percent",
+        units="per_minute",
         direction=MetricDirection.LOWER_IS_BETTER,
-        decimals=1,
+        decimals=2,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
 }
