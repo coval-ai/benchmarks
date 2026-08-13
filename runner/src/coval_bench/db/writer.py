@@ -255,9 +255,8 @@ class RunWriter:
             or evaluation.started_at is not None
             or evaluation.finished_at is not None
             or evaluation.error is not None
-            or evaluation.attempt_count != 0
         ):
-            raise ValueError("metric evaluations must be created queued with attempt_count zero")
+            raise ValueError("metric evaluations must be created queued")
         sql = """
             INSERT INTO benchmarks_v2.metric_evaluations
             (observation_id, metric_type, metric_version, executor, external_request_id, status)
@@ -266,7 +265,7 @@ class RunWriter:
             DO NOTHING
             RETURNING id, observation_id, metric_type, metric_version, executor,
                       external_request_id,
-                      status, started_at, finished_at, error, attempt_count, created_at, updated_at
+                      status, started_at, finished_at, error, created_at, updated_at
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -286,7 +285,7 @@ class RunWriter:
                     await cur.execute(
                         """SELECT id, observation_id, metric_type, metric_version, executor,
                                   external_request_id, status, started_at, finished_at, error,
-                                  attempt_count, created_at, updated_at
+                                  created_at, updated_at
                            FROM benchmarks_v2.metric_evaluations
                            WHERE observation_id = %s
                              AND metric_type = %s AND metric_version = %s""",
@@ -320,6 +319,7 @@ class RunWriter:
             )
         return stored
 
+    # Database transitions are guarded by validate_metric_transition() in the normalized migration.
     async def start_metric_evaluation(
         self, evaluation_id: UUID, *, started_at: datetime
     ) -> MetricEvaluation:
@@ -328,18 +328,17 @@ class RunWriter:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
                     """UPDATE benchmarks_v2.metric_evaluations
-                       SET status = %s, started_at = %s, attempt_count = attempt_count + 1,
-                           updated_at = now()
+                       SET status = %s, started_at = %s, updated_at = now()
                        WHERE id = %s AND status = %s
                        RETURNING id, observation_id, metric_type, metric_version, executor,
                                  external_request_id, status, started_at, finished_at, error,
-                                 attempt_count, created_at, updated_at""",
+                                 created_at, updated_at""",
                     (ProcessingStatus.RUNNING, started_at, evaluation_id, ProcessingStatus.QUEUED),
                 )
                 row = await cur.fetchone()
             await conn.commit()
         if row is None:
-            raise ValueError("only queued metric evaluations may be started")
+            raise ValueError(f"metric evaluation {evaluation_id} is not queued")
         return MetricEvaluation.model_validate(dict(row))
 
     async def fail_metric_evaluation(
@@ -357,7 +356,7 @@ class RunWriter:
                        WHERE id = %s AND status IN (%s, %s)
                        RETURNING id, observation_id, metric_type, metric_version, executor,
                                  external_request_id, status, started_at, finished_at, error,
-                                 attempt_count, created_at, updated_at""",
+                                 created_at, updated_at""",
                     (
                         ProcessingStatus.FAILED,
                         finished_at,
@@ -371,7 +370,7 @@ class RunWriter:
                 row = await cur.fetchone()
             await conn.commit()
         if row is None:
-            raise ValueError("only queued or running metric evaluations may fail")
+            raise ValueError(f"metric evaluation {evaluation_id} is not queued or running")
         return MetricEvaluation.model_validate(dict(row))
 
     async def insert_preprocessing_artifact(
@@ -467,7 +466,7 @@ class RunWriter:
                 )
                 evaluation = await cur.fetchone()
                 if evaluation is None:
-                    raise ValueError("metric evaluation does not exist")
+                    raise ValueError(f"metric evaluation {evaluation_id} does not exist")
                 validate_metric_values(
                     evaluation["metric_type"],
                     evaluation["metric_version"],

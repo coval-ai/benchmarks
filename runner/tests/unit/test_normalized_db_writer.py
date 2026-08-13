@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import psycopg.errors
@@ -31,7 +32,7 @@ from coval_bench.db.models import (
     RunStatus,
 )
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import Metric, validate_metric_values
+from coval_bench.registries import METRIC_VALUE_CONTRACTS, Metric, validate_metric_values
 
 pg_conn = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
@@ -230,7 +231,6 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "started_at",
                 "finished_at",
                 "error",
-                "attempt_count",
                 "created_at",
                 "updated_at",
             },
@@ -280,10 +280,24 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
     config.set_main_option(
         "sqlalchemy.url", _dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
     )
-    alembic_command.downgrade(config, "20260807_0015")
+    alembic_command.downgrade(config, "20260812_0017")
     with pg_conn.cursor() as cur:
-        cur.execute("SELECT to_regclass('benchmarks_v2.benchmark_observations')")
-        assert cur.fetchone() == (None,)
+        for table_name in (
+            "benchmark_observations",
+            "preprocessing_artifacts",
+            "metric_evaluations",
+            "metric_values",
+            "metric_artifacts",
+            "metric_values_by_bucket",
+        ):
+            cur.execute("SELECT to_regclass(%s)", (f"benchmarks_v2.{table_name}",))
+            assert cur.fetchone() == (None,)
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'benchmarks_v2' AND table_name = 'runs' "
+            "AND column_name = 'persona_id'"
+        )
+        assert cur.fetchone() == ("persona_id",)
         cur.execute("SELECT to_regclass('benchmarks_v2.results')")
         assert cur.fetchone() == ("benchmarks_v2.results",)
 
@@ -415,6 +429,14 @@ def test_observation_model_requires_complete_audio_tuple() -> None:
         audio_duration_ms=1,
     )
     assert complete.audio_duration_ms == 1
+    with pytest.raises(ValueError, match="private gs:// object URI"):
+        Observation(
+            **base,
+            audio_uri="gs://private",
+            audio_sha256=_SHA,
+            audio_size_bytes=1,
+            audio_duration_ms=1,
+        )
 
 
 @pytest.mark.asyncio
@@ -487,6 +509,27 @@ async def test_explicit_lifecycle_and_failed_terminal_state(
             evaluation_id, finished_at=_NOW, error="request failed"
         )
         assert failed_evaluation.started_at == failed_evaluation.finished_at == _NOW
+        with pytest.raises(ValueError, match=str(evaluation_id)):
+            await writer.start_metric_evaluation(evaluation_id, started_at=_NOW)
+        with pytest.raises(ValueError, match=str(evaluation_id)):
+            await writer.fail_metric_evaluation(
+                evaluation_id, finished_at=_NOW, error="retry failed"
+            )
+        missing_id = uuid4()
+        with pytest.raises(ValueError, match=str(missing_id)):
+            await writer.complete_metric_evaluation(
+                missing_id,
+                values=[
+                    MetricValue(
+                        metric_evaluation_id=missing_id,
+                        value_key="primary",
+                        unit="seconds",
+                        value=0,
+                        is_primary=True,
+                    )
+                ],
+                finished_at=_NOW,
+            )
     finally:
         await pool.close()
 
@@ -612,7 +655,7 @@ def test_database_enforces_queued_creation_and_success_outputs(
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
                    (observation_id, metric_type, metric_version, executor, status, started_at)
-                   VALUES (%s, 'WER', 'v1-direct', 'inline', 'running', now())""",
+                   VALUES (%s, 'WER', 'v1', 'inline', 'running', now())""",
                 (observation_id,),
             )
         cur.execute(
@@ -624,7 +667,7 @@ def test_database_enforces_queued_creation_and_success_outputs(
         evaluation_id = _required(cur.fetchone())[0]
         cur.execute(
             """UPDATE benchmarks_v2.metric_evaluations
-               SET status = 'running', started_at = now(), attempt_count = 1 WHERE id = %s""",
+               SET status = 'running', started_at = now() WHERE id = %s""",
             (evaluation_id,),
         )
         cur.execute("BEGIN")
@@ -692,7 +735,7 @@ def test_database_metric_contracts_match_python_validation(
             evaluation_id = _required(cur.fetchone())[0]
             cur.execute(
                 """UPDATE benchmarks_v2.metric_evaluations
-                   SET status = 'running', started_at = now(), attempt_count = 1 WHERE id = %s""",
+                   SET status = 'running', started_at = now() WHERE id = %s""",
                 (evaluation_id,),
             )
             cur.executemany(
@@ -725,7 +768,7 @@ def test_database_metric_contracts_match_python_validation(
             (str(Metric.TTFT), "v1", (("primary", "seconds", -1.0, True),)),
             (str(Metric.INSTRUCTION_FOLLOWING), "v1", (("primary", "percent", 101.0, True),)),
         ):
-            with pytest.raises(psycopg.errors.RaiseException):
+            with pytest.raises((psycopg.errors.RaiseException, psycopg.errors.CheckViolation)):
                 complete_direct(metric_type, version, values)
             cur.execute("ROLLBACK")
 

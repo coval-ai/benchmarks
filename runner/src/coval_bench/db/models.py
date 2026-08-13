@@ -9,6 +9,8 @@ These are **persistence-layer** models only. The API layer has its own
 
 from __future__ import annotations
 
+import math
+import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
@@ -120,8 +122,8 @@ def _validate_processing_lifecycle(
 
 
 def _private_gs_uri(value: str) -> str:
-    if not value.startswith("gs://") or "?" in value or "#" in value:
-        raise ValueError("must be a private gs:// URI without query or fragment")
+    if re.fullmatch(r"gs://[^/?#]+/[^/?#][^?#]*", value) is None:
+        raise ValueError("must be a private gs:// object URI without query or fragment")
     return value
 
 
@@ -158,8 +160,6 @@ class Observation(BaseModel):
 
     @model_validator(mode="after")
     def _outcome_matches_error(self) -> Observation:
-        import math
-
         audio_fields = (
             self.audio_uri,
             self.audio_sha256,
@@ -225,7 +225,6 @@ class MetricEvaluation(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
-    attempt_count: int = Field(default=0, ge=0)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -245,8 +244,6 @@ class MetricValue(BaseModel):
     @field_validator("value")
     @classmethod
     def _finite(cls, value: float) -> float:
-        import math
-
         if not math.isfinite(value):
             raise ValueError("value must be finite")
         return value
@@ -284,8 +281,6 @@ class MetricValueBucket(BaseModel):
 
     @model_validator(mode="after")
     def _valid_percentiles(self) -> MetricValueBucket:
-        import math
-
         values = (self.min_value, self.p25, self.p50, self.p75, self.max_value, self.value_sum)
         if not all(math.isfinite(value) for value in values):
             raise ValueError("bucket values must be finite")

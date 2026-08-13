@@ -10,6 +10,7 @@ app-side against already-aggregated rows; the database stores plain strings.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 
 from pydantic import BaseModel
@@ -215,8 +216,6 @@ def validate_metric_values(
     Values are ``(key, unit, value, is_primary)`` tuples so the persistence
     layer remains free to use its own Pydantic input models.
     """
-    import math
-
     try:
         contract = METRIC_VALUE_CONTRACTS[(Metric(metric), version)]
     except ValueError as exc:
