@@ -988,8 +988,11 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         benchmark=_TTS,
         provider="fluxions",
         model="vui",
-        voice="maeve",
-        voices=(Voice(id="maeve", gender=Gender.FEMALE), Voice(id="abraham", gender=Gender.MALE)),
+        voice="delta",
+        voices=(
+            Voice(id="delta", gender=Gender.FEMALE, accent="en-US"),
+            Voice(id="grove", gender=Gender.MALE, accent="en-US"),
+        ),
         tags=(_STREAMING, _CLONE, _EMOTION),
         status=_ACTIVE,
         arena_enabled=False,
