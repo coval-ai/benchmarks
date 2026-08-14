@@ -191,8 +191,8 @@ async def test_elevenlabs_no_audio(fake_settings: Settings) -> None:
 @pytest.mark.asyncio
 async def test_elevenlabs_skips_non_json_frames(fake_settings: Settings) -> None:
     events: list[str | bytes] = [
-        json.dumps({"audio": base64.b64encode(make_pcm_bytes(240)).decode()}),
         "not json",
+        json.dumps({"audio": base64.b64encode(make_pcm_bytes(240)).decode()}),
         json.dumps({"is_final": True}),
     ]
     ws = FakeWebSocket(events)
