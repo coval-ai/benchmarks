@@ -328,6 +328,38 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
 
 
 @pytest.mark.asyncio
+async def test_optional_metric_alone_does_not_prove_freshness() -> None:
+    writer = _stub_writer()
+
+    async def ingested(*, provider: str, coval_run_id: str, metric_type: Metric) -> bool:
+        return metric_type is Metric.INSTRUCTION_FOLLOWING
+
+    writer.coval_metric_ingested = AsyncMock(side_effect=ingested)
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "metrics": {"IID": {"values": [{"simulation_output_id": "s1", "value": "YES"}]}}
+            },
+        }
+    }
+    async with _fake_client(list_json, run_json) as client:
+        status, _ = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=IDS,
+            test_set_id="TS1",
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+        )
+    assert status is RunStatus.FAILED
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_unknown_age_is_stale() -> None:
     # A usable run without a parseable create_time is no evidence of freshness.
     writer = _stub_writer()
@@ -942,14 +974,17 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
 
 @pytest.mark.asyncio
 async def test_already_ingested_instruction_only_run_is_fresh() -> None:
-    # Any persisted metric keeps the provider fresh, even with latency still owed.
+    # Noise requires instruction and never carries latency, so a persisted
+    # instruction run keeps the provider fresh between fetches.
     writer = _stub_writer()
 
     async def metric_ingested(*, metric_type: str, **_kwargs: Any) -> bool:
         return metric_type == Metric.INSTRUCTION_FOLLOWING
 
     writer.coval_metric_ingested = AsyncMock(side_effect=metric_ingested)
-    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PN"}
+    )
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client(list_json, _run_json(instruction, metric_id="IID")) as client:
         status, ingested = await fetch_v2v._fetch_one_provider(
@@ -959,6 +994,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
             agent_id="a1",
             metric_ids=IDS,
             test_set_id="TS1",
+            noisy_persona_id="PN",
             runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,

@@ -609,13 +609,11 @@ async def _fetch_one_provider(
                 condition=condition,
                 metric_ids=metric_ids,
             )
-            # Any persisted metric is fresh data + an eligible sample, so an
-            # instruction-only condition stays healthy between fetches while an
-            # unconfigured metric cannot mask a missing one.
-            if ingestable - pending:
+            persisted = ingestable - pending
+            if persisted:
                 note_sample_candidate(coval_run)
-                if not data_seen:
-                    data_seen, newest_data_at = True, coval_run.create_time
+            if condition.required in persisted and not data_seen:
+                data_seen, newest_data_at = True, coval_run.create_time
             if not pending:
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
@@ -638,9 +636,9 @@ async def _fetch_one_provider(
                 continue
             if status is not RunStatus.FAILED:
                 note_sample_candidate(coval_run)
+                if not data_seen:
+                    data_seen, newest_data_at = True, coval_run.create_time
             statuses.append(status)
-            if not data_seen:
-                data_seen, newest_data_at = True, coval_run.create_time
 
         threshold = period_seconds + stale_grace_seconds
         age = (
