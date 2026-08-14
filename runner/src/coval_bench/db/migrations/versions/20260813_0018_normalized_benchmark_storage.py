@@ -52,21 +52,25 @@ def upgrade() -> None:
             artifact_name TEXT NOT NULL CHECK (artifact_name IN ('word_timestamps', 'phoneme_timestamps')),
             schema_name TEXT NOT NULL CHECK (schema_name IN ('WordTimestampsV1', 'PhonemeTimestampsV1')),
             schema_version TEXT NOT NULL CHECK (schema_version = 'v1'),
-            producer_name TEXT NOT NULL CHECK (producer_name IN ('word_aligner', 'phoneme_aligner')),
+            producer_name TEXT NOT NULL CHECK (producer_name <> ''),
+            producer_provider TEXT NOT NULL CHECK (producer_provider <> ''),
+            producer_model TEXT NOT NULL CHECK (producer_model <> ''),
             producer_version TEXT NOT NULL CHECK (producer_version <> ''),
             gcs_uri TEXT NOT NULL CHECK (gcs_uri ~ '^gs://[^/?#]+/[^/?#][^?#]*$'),
             content_sha256 TEXT NOT NULL CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
             size_bytes BIGINT NOT NULL CHECK (size_bytes > 0),
             duration_ms DOUBLE PRECISION CHECK (duration_ms IS NULL OR (duration_ms NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8) AND duration_ms > 0)),
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            CHECK ((artifact_name = 'word_timestamps' AND schema_name = 'WordTimestampsV1' AND producer_name = 'word_aligner') OR (artifact_name = 'phoneme_timestamps' AND schema_name = 'PhonemeTimestampsV1' AND producer_name = 'phoneme_aligner')),
-            UNIQUE (observation_id, pipeline, pipeline_version, artifact_name, producer_version)
+            CHECK ((artifact_name = 'word_timestamps' AND schema_name = 'WordTimestampsV1') OR (artifact_name = 'phoneme_timestamps' AND schema_name = 'PhonemeTimestampsV1')),
+            UNIQUE (observation_id, pipeline, pipeline_version, artifact_name, schema_name, schema_version,
+                    producer_name, producer_provider, producer_model, producer_version)
         );
 
         CREATE TABLE benchmarks_v2.metric_evaluations (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             observation_id UUID NOT NULL REFERENCES benchmarks_v2.benchmark_observations(id) ON DELETE CASCADE,
             metric_type TEXT NOT NULL, metric_version TEXT NOT NULL,
+            evaluation_variant TEXT NOT NULL DEFAULT 'default' CHECK (evaluation_variant <> ''),
             CHECK ((metric_type, metric_version) IN (
                 ('WER', 'v1'), ('TTFT', 'v1'), ('TTFS', 'v1'), ('TTFA', 'v1'),
                 ('TTFARoundtrip', 'v1'), ('TTFALeadingSilence', 'v1'), ('RTF', 'v1'),
@@ -79,8 +83,17 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             CHECK (updated_at >= created_at), CHECK (finished_at IS NULL OR (started_at IS NOT NULL AND finished_at >= started_at)),
             CHECK ((status = 'queued' AND started_at IS NULL AND finished_at IS NULL AND error IS NULL) OR (status = 'running' AND started_at IS NOT NULL AND finished_at IS NULL AND error IS NULL) OR (status = 'partial' AND started_at IS NOT NULL AND finished_at IS NOT NULL) OR (status = 'succeeded' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND error IS NULL) OR (status = 'failed' AND started_at IS NOT NULL AND finished_at IS NOT NULL AND error IS NOT NULL)),
-            UNIQUE (observation_id, metric_type, metric_version)
+            UNIQUE (observation_id, metric_type, metric_version, evaluation_variant)
         );
+        CREATE TABLE benchmarks_v2.metric_evaluation_inputs (
+            metric_evaluation_id UUID NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id) ON DELETE CASCADE,
+            preprocessing_artifact_id UUID NOT NULL REFERENCES benchmarks_v2.preprocessing_artifacts(id) ON DELETE CASCADE,
+            input_role TEXT NOT NULL CHECK (input_role <> ''),
+            input_order INTEGER NOT NULL CHECK (input_order >= 0),
+            PRIMARY KEY (metric_evaluation_id, input_role, input_order),
+            UNIQUE (metric_evaluation_id, preprocessing_artifact_id)
+        );
+        CREATE INDEX metric_evaluation_inputs_artifact_id ON benchmarks_v2.metric_evaluation_inputs (preprocessing_artifact_id);
         CREATE TABLE benchmarks_v2.metric_values (
             metric_evaluation_id UUID NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id) ON DELETE CASCADE,
             value_key TEXT NOT NULL CHECK (value_key <> ''), unit TEXT NOT NULL CHECK (unit <> ''),
@@ -98,11 +111,11 @@ def upgrade() -> None:
         CREATE TABLE benchmarks_v2.metric_values_by_bucket (
             provider TEXT NOT NULL CHECK (provider <> ''), model TEXT NOT NULL CHECK (model <> ''),
             benchmark TEXT NOT NULL CHECK (benchmark IN ('STT', 'TTS', 'S2S')), dataset_id TEXT NOT NULL CHECK (dataset_id <> ''),
-            metric_type TEXT NOT NULL CHECK (metric_type <> ''), metric_version TEXT NOT NULL CHECK (metric_version <> ''),
+            metric_type TEXT NOT NULL CHECK (metric_type <> ''), metric_version TEXT NOT NULL CHECK (metric_version <> ''), evaluation_variant TEXT NOT NULL CHECK (evaluation_variant <> ''),
             value_key TEXT NOT NULL CHECK (value_key <> ''), unit TEXT NOT NULL CHECK (unit <> ''), bucket_at TIMESTAMPTZ NOT NULL,
             min_value DOUBLE PRECISION NOT NULL CHECK (min_value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), p25 DOUBLE PRECISION NOT NULL CHECK (p25 NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), p50 DOUBLE PRECISION NOT NULL CHECK (p50 NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), p75 DOUBLE PRECISION NOT NULL CHECK (p75 NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), max_value DOUBLE PRECISION NOT NULL CHECK (max_value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), value_sum DOUBLE PRECISION NOT NULL CHECK (value_sum NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)), sample_count INTEGER NOT NULL CHECK (sample_count > 0),
             CHECK (min_value <= p25 AND p25 <= p50 AND p50 <= p75 AND p75 <= max_value),
-            PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version, value_key, bucket_at)
+            PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version, evaluation_variant, value_key, bucket_at)
         );
         CREATE INDEX metric_values_by_bucket_bucket_at ON benchmarks_v2.metric_values_by_bucket (bucket_at);
 
@@ -111,9 +124,19 @@ def upgrade() -> None:
         BEGIN
             IF TG_OP = 'INSERT' THEN IF NEW.status <> 'queued' THEN RAISE EXCEPTION 'work rows must be created queued'; END IF; RETURN NEW; END IF;
             IF TG_OP = 'DELETE' THEN
-                IF pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+                IF NOT EXISTS (SELECT 1 FROM benchmarks_v2.benchmark_observations WHERE id = OLD.observation_id) THEN RETURN OLD; END IF;
                 IF OLD.status IN ('partial', 'succeeded', 'failed') THEN RAISE EXCEPTION 'terminal work rows are immutable'; END IF;
                 RETURN OLD;
+            END IF;
+            IF NEW.id IS DISTINCT FROM OLD.id
+               OR NEW.observation_id IS DISTINCT FROM OLD.observation_id
+               OR NEW.metric_type IS DISTINCT FROM OLD.metric_type
+               OR NEW.metric_version IS DISTINCT FROM OLD.metric_version
+               OR NEW.evaluation_variant IS DISTINCT FROM OLD.evaluation_variant
+               OR NEW.executor IS DISTINCT FROM OLD.executor
+               OR NEW.external_request_id IS DISTINCT FROM OLD.external_request_id
+               OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+                RAISE EXCEPTION 'metric evaluation identity is immutable';
             END IF;
             IF OLD.status IN ('partial', 'succeeded', 'failed') THEN RAISE EXCEPTION 'terminal work rows are immutable'; END IF;
             IF NOT ((OLD.status = 'queued' AND NEW.status IN ('running', 'failed')) OR (OLD.status = 'running' AND NEW.status IN ('partial', 'succeeded', 'failed'))) THEN RAISE EXCEPTION 'invalid work status transition from % to %', OLD.status, NEW.status; END IF;
@@ -122,10 +145,28 @@ def upgrade() -> None:
         CREATE TRIGGER metric_evaluations_validate_transition BEFORE INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_evaluations FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.validate_metric_transition();
         CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact() RETURNS trigger AS $$
         BEGIN
-            IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+            IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM benchmarks_v2.benchmark_observations WHERE id = OLD.observation_id) THEN RETURN OLD; END IF;
             RAISE EXCEPTION 'preprocessing artifacts are immutable';
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER preprocessing_artifacts_immutable BEFORE UPDATE OR DELETE ON benchmarks_v2.preprocessing_artifacts FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact();
+        CREATE FUNCTION benchmarks_v2.guard_metric_evaluation_input() RETURNS trigger AS $$
+        DECLARE evaluation_observation UUID; artifact_observation UUID; evaluation_status TEXT;
+        BEGIN
+            IF TG_OP = 'DELETE' THEN
+                IF NOT EXISTS (SELECT 1 FROM benchmarks_v2.metric_evaluations WHERE id = OLD.metric_evaluation_id)
+                   OR NOT EXISTS (SELECT 1 FROM benchmarks_v2.preprocessing_artifacts WHERE id = OLD.preprocessing_artifact_id) THEN RETURN OLD; END IF;
+                RAISE EXCEPTION 'metric evaluation inputs are immutable';
+            END IF;
+            IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'metric evaluation inputs are immutable'; END IF;
+            SELECT observation_id, status INTO evaluation_observation, evaluation_status
+              FROM benchmarks_v2.metric_evaluations WHERE id = NEW.metric_evaluation_id;
+            SELECT observation_id INTO artifact_observation FROM benchmarks_v2.preprocessing_artifacts
+              WHERE id = NEW.preprocessing_artifact_id;
+            IF evaluation_status IS DISTINCT FROM 'queued' THEN RAISE EXCEPTION 'metric evaluation inputs can only be inserted while queued'; END IF;
+            IF evaluation_observation IS DISTINCT FROM artifact_observation THEN RAISE EXCEPTION 'metric evaluation input must share the evaluation observation'; END IF;
+            RETURN NEW;
+        END; $$ LANGUAGE plpgsql;
+        CREATE TRIGGER metric_evaluation_inputs_guard BEFORE INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_evaluation_inputs FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.guard_metric_evaluation_input();
         CREATE FUNCTION benchmarks_v2.guard_terminal_metric_payload() RETURNS trigger AS $$
         DECLARE parent_status TEXT;
         BEGIN
@@ -168,7 +209,7 @@ def upgrade() -> None:
         CREATE CONSTRAINT TRIGGER metric_evaluations_validate_success_outputs AFTER INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_evaluations DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.validate_metric_evaluation_success_outputs();
         CREATE CONSTRAINT TRIGGER metric_values_validate_success AFTER INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_values DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.validate_metric_evaluation_success_outputs();
         CREATE CONSTRAINT TRIGGER metric_artifacts_validate_success AFTER INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_artifacts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.validate_metric_evaluation_success_outputs();
-        DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE benchmarks_v2.benchmark_observations, benchmarks_v2.preprocessing_artifacts, benchmarks_v2.metric_evaluations, benchmarks_v2.metric_values, benchmarks_v2.metric_artifacts, benchmarks_v2.metric_values_by_bucket FROM api'; END IF; END; $$;
+        DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN EXECUTE 'REVOKE ALL PRIVILEGES ON TABLE benchmarks_v2.benchmark_observations, benchmarks_v2.preprocessing_artifacts, benchmarks_v2.metric_evaluations, benchmarks_v2.metric_evaluation_inputs, benchmarks_v2.metric_values, benchmarks_v2.metric_artifacts, benchmarks_v2.metric_values_by_bucket FROM api'; END IF; END; $$;
         """
     )
 
@@ -186,11 +227,14 @@ def downgrade() -> None:
         DROP FUNCTION IF EXISTS benchmarks_v2.guard_terminal_metric_payload();
         DROP TRIGGER IF EXISTS preprocessing_artifacts_immutable ON benchmarks_v2.preprocessing_artifacts;
         DROP FUNCTION IF EXISTS benchmarks_v2.guard_immutable_preprocessing_artifact();
+        DROP TRIGGER IF EXISTS metric_evaluation_inputs_guard ON benchmarks_v2.metric_evaluation_inputs;
+        DROP FUNCTION IF EXISTS benchmarks_v2.guard_metric_evaluation_input();
         DROP TRIGGER IF EXISTS metric_evaluations_validate_transition ON benchmarks_v2.metric_evaluations;
         DROP FUNCTION IF EXISTS benchmarks_v2.validate_metric_transition();
         DROP TABLE IF EXISTS benchmarks_v2.metric_values_by_bucket;
         DROP TABLE IF EXISTS benchmarks_v2.metric_artifacts;
         DROP TABLE IF EXISTS benchmarks_v2.metric_values;
+        DROP TABLE IF EXISTS benchmarks_v2.metric_evaluation_inputs;
         DROP TABLE IF EXISTS benchmarks_v2.metric_evaluations;
         DROP TABLE IF EXISTS benchmarks_v2.preprocessing_artifacts;
         DROP TABLE IF EXISTS benchmarks_v2.benchmark_observations;

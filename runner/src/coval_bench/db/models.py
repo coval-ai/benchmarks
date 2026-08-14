@@ -47,7 +47,7 @@ __all__ = [
     "MetricValueBucket",
     "TimestampArtifactSchema",
     "TimestampArtifactName",
-    "TimestampProducerName",
+    "MetricEvaluationInput",
 ]
 
 
@@ -89,11 +89,6 @@ class TimestampArtifactSchema(StrEnum):
 class TimestampArtifactName(StrEnum):
     WORD_TIMESTAMPS = "word_timestamps"
     PHONEME_TIMESTAMPS = "phoneme_timestamps"
-
-
-class TimestampProducerName(StrEnum):
-    WORD_ALIGNER = "word_aligner"
-    PHONEME_ALIGNER = "phoneme_aligner"
 
 
 def _validate_processing_lifecycle(
@@ -187,7 +182,9 @@ class PreprocessingArtifact(BaseModel):
     artifact_name: TimestampArtifactName
     schema_name: TimestampArtifactSchema
     schema_version: Literal["v1"] = "v1"
-    producer_name: TimestampProducerName
+    producer_name: str = Field(min_length=1)
+    producer_provider: str = Field(min_length=1)
+    producer_model: str = Field(min_length=1)
     producer_version: str = Field(min_length=1)
     gcs_uri: str
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -200,17 +197,11 @@ class PreprocessingArtifact(BaseModel):
     @model_validator(mode="after")
     def _artifact_identity(self) -> PreprocessingArtifact:
         expected = {
-            TimestampArtifactName.WORD_TIMESTAMPS: (
-                TimestampArtifactSchema.WORD_TIMESTAMPS_V1,
-                TimestampProducerName.WORD_ALIGNER,
-            ),
-            TimestampArtifactName.PHONEME_TIMESTAMPS: (
-                TimestampArtifactSchema.PHONEME_TIMESTAMPS_V1,
-                TimestampProducerName.PHONEME_ALIGNER,
-            ),
+            TimestampArtifactName.WORD_TIMESTAMPS: TimestampArtifactSchema.WORD_TIMESTAMPS_V1,
+            TimestampArtifactName.PHONEME_TIMESTAMPS: TimestampArtifactSchema.PHONEME_TIMESTAMPS_V1,
         }[self.artifact_name]
-        if (self.schema_name, self.producer_name) != expected:
-            raise ValueError("artifact name, schema, and producer must be a supported pair")
+        if self.schema_name is not expected:
+            raise ValueError("artifact name and schema must be a supported pair")
         return self
 
 
@@ -219,6 +210,7 @@ class MetricEvaluation(BaseModel):
     observation_id: UUID
     metric_type: str = Field(min_length=1)
     metric_version: str = Field(min_length=1)
+    evaluation_variant: str = Field(default="default", min_length=1)
     executor: MetricExecutor
     external_request_id: str | None = None
     status: ProcessingStatus
@@ -232,6 +224,14 @@ class MetricEvaluation(BaseModel):
     def _lifecycle(self) -> MetricEvaluation:
         _validate_processing_lifecycle(self.status, self.started_at, self.finished_at, self.error)
         return self
+
+
+class MetricEvaluationInput(BaseModel):
+    """One immutable, role-aware preprocessing input frozen when work is queued."""
+
+    artifact_id: UUID
+    input_role: str = Field(min_length=1)
+    input_order: int = Field(ge=0)
 
 
 class MetricValue(BaseModel):
@@ -268,6 +268,7 @@ class MetricValueBucket(BaseModel):
     dataset_id: str = Field(min_length=1)
     metric_type: str = Field(min_length=1)
     metric_version: str = Field(min_length=1)
+    evaluation_variant: str = Field(min_length=1)
     value_key: str = Field(min_length=1)
     unit: str = Field(min_length=1)
     bucket_at: datetime

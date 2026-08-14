@@ -29,6 +29,7 @@ from psycopg_pool import AsyncConnectionPool
 from coval_bench.db.models import (
     MetricArtifact,
     MetricEvaluation,
+    MetricEvaluationInput,
     MetricValue,
     Observation,
     PreprocessingArtifact,
@@ -248,7 +249,9 @@ class RunWriter:
             )
         return stored
 
-    async def insert_metric_evaluation(self, evaluation: MetricEvaluation) -> MetricEvaluation:
+    async def insert_metric_evaluation(
+        self, evaluation: MetricEvaluation, *, inputs: Sequence[MetricEvaluationInput] = ()
+    ) -> MetricEvaluation:
         """Create a queued evaluation or retrieve the same evaluation on retry."""
         if (
             evaluation.status is not ProcessingStatus.QUEUED
@@ -257,13 +260,21 @@ class RunWriter:
             or evaluation.error is not None
         ):
             raise ValueError("metric evaluations must be created queued")
+        input_keys = [(item.input_role, item.input_order) for item in inputs]
+        if len(input_keys) != len(set(input_keys)):
+            raise ValueError("metric evaluation inputs must have unique role/order pairs")
+        artifact_ids = [item.artifact_id for item in inputs]
+        if len(artifact_ids) != len(set(artifact_ids)):
+            raise ValueError("metric evaluation inputs must not repeat an artifact")
         sql = """
             INSERT INTO benchmarks_v2.metric_evaluations
-            (observation_id, metric_type, metric_version, executor, external_request_id, status)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (observation_id, metric_type, metric_version)
+            (observation_id, metric_type, metric_version, evaluation_variant, executor,
+             external_request_id, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (observation_id, metric_type, metric_version, evaluation_variant)
             DO NOTHING
-            RETURNING id, observation_id, metric_type, metric_version, executor,
+            RETURNING id, observation_id, metric_type, metric_version,
+                      evaluation_variant, executor,
                       external_request_id,
                       status, started_at, finished_at, error, created_at, updated_at
         """
@@ -275,27 +286,65 @@ class RunWriter:
                         evaluation.observation_id,
                         evaluation.metric_type,
                         evaluation.metric_version,
+                        evaluation.evaluation_variant,
                         evaluation.executor,
                         evaluation.external_request_id,
                         evaluation.status,
                     ),
                 )
                 row = await cur.fetchone()
+                created = row is not None
                 if row is None:
                     await cur.execute(
-                        """SELECT id, observation_id, metric_type, metric_version, executor,
+                        """SELECT id, observation_id, metric_type, metric_version,
+                                  evaluation_variant, executor,
                                   external_request_id, status, started_at, finished_at, error,
                                   created_at, updated_at
                            FROM benchmarks_v2.metric_evaluations
                            WHERE observation_id = %s
-                             AND metric_type = %s AND metric_version = %s""",
+                             AND metric_type = %s AND metric_version = %s
+                             AND evaluation_variant = %s""",
                         (
                             evaluation.observation_id,
                             evaluation.metric_type,
                             evaluation.metric_version,
+                            evaluation.evaluation_variant,
                         ),
                     )
                     row = await cur.fetchone()
+                if row is not None:
+                    await cur.execute(
+                        """SELECT preprocessing_artifact_id, input_role, input_order
+                           FROM benchmarks_v2.metric_evaluation_inputs
+                           WHERE metric_evaluation_id = %s ORDER BY input_role, input_order""",
+                        (row["id"],),
+                    )
+                    stored_inputs = await cur.fetchall()
+                    expected_inputs = sorted(
+                        ((item.artifact_id, item.input_role, item.input_order) for item in inputs),
+                        key=lambda item: (item[1], item[2]),
+                    )
+                    actual_inputs = [
+                        (item["preprocessing_artifact_id"], item["input_role"], item["input_order"])
+                        for item in stored_inputs
+                    ]
+                    if not created and actual_inputs != expected_inputs:
+                        raise ValueError(
+                            "metric evaluation retry conflicts with stored immutable inputs"
+                        )
+                    # Only the successful INSERT creates links. Existing rows were checked
+                    # above and are intentionally frozen at queue time.
+                    if created and inputs:
+                        await cur.executemany(
+                            """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                               (metric_evaluation_id, preprocessing_artifact_id,
+                                input_role, input_order)
+                               VALUES (%s, %s, %s, %s)""",
+                            [
+                                (row["id"], item.artifact_id, item.input_role, item.input_order)
+                                for item in inputs
+                            ],
+                        )
             await conn.commit()
         if row is None:  # pragma: no cover
             raise RuntimeError("INSERT INTO metric_evaluations returned no row")
@@ -304,6 +353,7 @@ class RunWriter:
             "observation_id",
             "metric_type",
             "metric_version",
+            "evaluation_variant",
             "executor",
             "external_request_id",
         )
@@ -330,7 +380,8 @@ class RunWriter:
                     """UPDATE benchmarks_v2.metric_evaluations
                        SET status = %s, started_at = %s, updated_at = now()
                        WHERE id = %s AND status = %s
-                       RETURNING id, observation_id, metric_type, metric_version, executor,
+                       RETURNING id, observation_id, metric_type, metric_version,
+                                 evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",
                     (ProcessingStatus.RUNNING, started_at, evaluation_id, ProcessingStatus.QUEUED),
@@ -354,7 +405,8 @@ class RunWriter:
                        SET status = %s, started_at = COALESCE(started_at, %s), finished_at = %s,
                            error = %s, updated_at = now()
                        WHERE id = %s AND status IN (%s, %s)
-                       RETURNING id, observation_id, metric_type, metric_version, executor,
+                       RETURNING id, observation_id, metric_type, metric_version,
+                                 evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",
                     (
@@ -385,6 +437,8 @@ class RunWriter:
             "schema_name",
             "schema_version",
             "producer_name",
+            "producer_provider",
+            "producer_model",
             "producer_version",
             "gcs_uri",
             "content_sha256",
@@ -396,14 +450,17 @@ class RunWriter:
                 await cur.execute(
                     """INSERT INTO benchmarks_v2.preprocessing_artifacts
                        (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                        schema_version, producer_name, producer_version, gcs_uri, content_sha256,
+                        schema_version, producer_name, producer_provider, producer_model,
+                        producer_version, gcs_uri, content_sha256,
                         size_bytes, duration_ms)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (observation_id, pipeline, pipeline_version,
-                                    artifact_name, producer_version)
+                                    artifact_name, schema_name, producer_name, producer_provider,
+                                    producer_model, producer_version, schema_version)
                        DO NOTHING
                        RETURNING id, observation_id, pipeline, pipeline_version,
                                  artifact_name, schema_name, schema_version, producer_name,
+                                 producer_provider, producer_model,
                                  producer_version, gcs_uri, content_sha256,
                                  size_bytes, duration_ms, created_at""",
                     tuple(getattr(artifact, field) for field in fields),
@@ -413,16 +470,25 @@ class RunWriter:
                     await cur.execute(
                         """SELECT id, observation_id, pipeline, pipeline_version,
                                   artifact_name, schema_name, schema_version, producer_name,
+                                  producer_provider, producer_model,
                                   producer_version, gcs_uri, content_sha256,
                                   size_bytes, duration_ms, created_at
                            FROM benchmarks_v2.preprocessing_artifacts
                            WHERE observation_id = %s AND pipeline = %s AND pipeline_version = %s
-                             AND artifact_name = %s AND producer_version = %s""",
+                             AND artifact_name = %s AND schema_name = %s
+                             AND schema_version = %s AND producer_name = %s
+                             AND producer_provider = %s AND producer_model = %s
+                             AND producer_version = %s""",
                         (
                             artifact.observation_id,
                             artifact.pipeline,
                             artifact.pipeline_version,
                             artifact.artifact_name,
+                            artifact.schema_name,
+                            artifact.schema_version,
+                            artifact.producer_name,
+                            artifact.producer_provider,
+                            artifact.producer_model,
                             artifact.producer_version,
                         ),
                     )
@@ -587,11 +653,13 @@ class RunWriter:
                 await cur.execute(
                     """
                     INSERT INTO benchmarks_v2.metric_values_by_bucket
-                    (provider, model, benchmark, dataset_id, metric_type, metric_version, value_key,
+                    (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                     evaluation_variant, value_key,
                      unit, bucket_at, min_value, p25, p50, p75, max_value, value_sum, sample_count)
                     SELECT observation.provider, observation.model, observation.benchmark,
                            COALESCE(observation.dataset_id, '__all__'), evaluation.metric_type,
-                           evaluation.metric_version, value.value_key, value.unit, %(bucket)s,
+                           evaluation.metric_version, evaluation.evaluation_variant,
+                           value.value_key, value.unit, %(bucket)s,
                            MIN(value.value)::float8,
                            PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value.value)::float8,
                            PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value.value)::float8,
@@ -608,9 +676,11 @@ class RunWriter:
                     GROUP BY GROUPING SETS (
                       (observation.provider, observation.model, observation.benchmark,
                        observation.dataset_id, evaluation.metric_type,
-                       evaluation.metric_version, value.value_key, value.unit),
+                       evaluation.metric_version, evaluation.evaluation_variant,
+                       value.value_key, value.unit),
                       (observation.provider, observation.model, observation.benchmark,
                        evaluation.metric_type, evaluation.metric_version,
+                       evaluation.evaluation_variant,
                        value.value_key, value.unit)
                     )
                     """,

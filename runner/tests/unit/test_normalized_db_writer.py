@@ -22,6 +22,7 @@ from coval_bench.db.models import (
     Benchmark,
     MetricArtifact,
     MetricEvaluation,
+    MetricEvaluationInput,
     MetricExecutor,
     MetricValue,
     Observation,
@@ -121,6 +122,8 @@ def _word_artifact(observation_id: Any, *, sha: str = _SHA) -> PreprocessingArti
         artifact_name="word_timestamps",
         schema_name="WordTimestampsV1",
         producer_name="word_aligner",
+        producer_provider="google",
+        producer_model="latest",
         producer_version="words-v1",
         gcs_uri="gs://private/words",
         content_sha256=sha,
@@ -137,6 +140,8 @@ def _phone_artifact(observation_id: Any) -> PreprocessingArtifact:
         artifact_name="phoneme_timestamps",
         schema_name="PhonemeTimestampsV1",
         producer_name="phoneme_aligner",
+        producer_provider="phoneme-provider",
+        producer_model="latest",
         producer_version="phones-v1",
         gcs_uri="gs://private/phones",
         content_sha256="c" * 64,
@@ -179,8 +184,10 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
             "benchmark_observations",
             "preprocessing_artifacts",
             "metric_evaluations",
+            "metric_evaluation_inputs",
         } <= names
-        assert {"preprocessing_jobs", "metric_evaluation_inputs"}.isdisjoint(names)
+        assert "preprocessing_jobs" not in names
+        assert "metric_evaluation_inputs" in names
         expected_columns = {
             "benchmark_observations": {
                 "id",
@@ -213,6 +220,8 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "schema_name",
                 "schema_version",
                 "producer_name",
+                "producer_provider",
+                "producer_model",
                 "producer_version",
                 "gcs_uri",
                 "content_sha256",
@@ -225,6 +234,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "observation_id",
                 "metric_type",
                 "metric_version",
+                "evaluation_variant",
                 "executor",
                 "external_request_id",
                 "status",
@@ -250,6 +260,12 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "size_bytes",
                 "created_at",
             },
+            "metric_evaluation_inputs": {
+                "metric_evaluation_id",
+                "preprocessing_artifact_id",
+                "input_role",
+                "input_order",
+            },
             "metric_values_by_bucket": {
                 "provider",
                 "model",
@@ -257,6 +273,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "dataset_id",
                 "metric_type",
                 "metric_version",
+                "evaluation_variant",
                 "value_key",
                 "unit",
                 "bucket_at",
@@ -383,19 +400,21 @@ def test_database_uri_checks_require_bucket_and_object(pg_conn: psycopg.Connecti
             cur.execute(
                 """INSERT INTO benchmarks_v2.preprocessing_artifacts
                    (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                    schema_version, producer_name, producer_version, gcs_uri, content_sha256,
+                    schema_version, producer_name, producer_provider, producer_model,
+                    producer_version, gcs_uri, content_sha256,
                     size_bytes)
                    VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
-                    'word_aligner', 'words-v1', 'gs://private', %s, 1)""",
+                    'word_aligner', 'google', 'latest', 'words-v1', 'gs://private', %s, 1)""",
                 (observation_id, _SHA),
             )
         cur.execute(
             """INSERT INTO benchmarks_v2.preprocessing_artifacts
                (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                schema_version, producer_name, producer_version, gcs_uri, content_sha256,
+                schema_version, producer_name, producer_provider, producer_model,
+                producer_version, gcs_uri, content_sha256,
                 size_bytes)
                VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
-                'word_aligner', 'words-v1', 'gs://private/words', %s, 1)""",
+                'word_aligner', 'google', 'latest', 'words-v1', 'gs://private/words', %s, 1)""",
             (observation_id, _SHA),
         )
         cur.execute(
@@ -471,10 +490,11 @@ def test_nested_preprocessing_artifact_update_is_rejected(
         cur.execute(
             """INSERT INTO benchmarks_v2.preprocessing_artifacts
                (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
-                schema_version, producer_name, producer_version, gcs_uri, content_sha256,
+                schema_version, producer_name, producer_provider, producer_model,
+                producer_version, gcs_uri, content_sha256,
                 size_bytes)
                VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
-                'word_aligner', 'words-v1', 'gs://private/words', %s, 1)""",
+                'word_aligner', 'google', 'latest', 'words-v1', 'gs://private/words', %s, 1)""",
             (observation_id, _SHA),
         )
         cur.execute(
@@ -508,6 +528,103 @@ def test_nested_preprocessing_artifact_update_is_rejected(
             (observation_id,),
         )
         assert _required(cur.fetchone())[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_nested_deletes_cannot_bypass_immutable_lineage(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """Unrelated nested triggers are not mistaken for foreign-key cascades."""
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer)
+        observation_id = _required(observation.id)
+        artifact = await writer.insert_preprocessing_artifact(_word_artifact(observation_id))
+        evaluation = await writer.insert_metric_evaluation(
+            MetricEvaluation(
+                observation_id=observation_id,
+                metric_type=str(Metric.WER),
+                metric_version="v1",
+                evaluation_variant="nested-delete",
+                executor=MetricExecutor.INLINE,
+                status=ProcessingStatus.QUEUED,
+            ),
+            inputs=[
+                MetricEvaluationInput(
+                    artifact_id=_required(artifact.id), input_role="word", input_order=0
+                )
+            ],
+        )
+        evaluation_id = _required(evaluation.id)
+        await writer.fail_metric_evaluation(
+            evaluation_id, finished_at=_NOW, error="controlled failure"
+        )
+
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """CREATE TABLE benchmarks_v2.nested_delete_requests (
+                       target_kind TEXT NOT NULL,
+                       target_id UUID NOT NULL
+                   )"""
+            )
+            await cur.execute(
+                """CREATE FUNCTION benchmarks_v2.run_nested_delete_request()
+                   RETURNS trigger AS $$
+                   BEGIN
+                       IF NEW.target_kind = 'artifact' THEN
+                           DELETE FROM benchmarks_v2.preprocessing_artifacts
+                           WHERE id = NEW.target_id;
+                       ELSIF NEW.target_kind = 'input' THEN
+                           DELETE FROM benchmarks_v2.metric_evaluation_inputs
+                           WHERE metric_evaluation_id = NEW.target_id;
+                       ELSIF NEW.target_kind = 'evaluation' THEN
+                           DELETE FROM benchmarks_v2.metric_evaluations
+                           WHERE id = NEW.target_id;
+                       END IF;
+                       RETURN NEW;
+                   END; $$ LANGUAGE plpgsql"""
+            )
+            await cur.execute(
+                """CREATE TRIGGER nested_delete_request
+                   AFTER INSERT ON benchmarks_v2.nested_delete_requests
+                   FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.run_nested_delete_request()"""
+            )
+            await conn.commit()
+
+            attempts = (
+                ("artifact", _required(artifact.id), "artifacts are immutable"),
+                ("input", evaluation_id, "inputs are immutable"),
+                ("evaluation", evaluation_id, "terminal work rows are immutable"),
+            )
+            for target_kind, target_id, message in attempts:
+                with pytest.raises(psycopg.errors.RaiseException, match=message):
+                    await cur.execute(
+                        """INSERT INTO benchmarks_v2.nested_delete_requests
+                           (target_kind, target_id) VALUES (%s, %s)""",
+                        (target_kind, target_id),
+                    )
+                await conn.rollback()
+
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.preprocessing_artifacts WHERE id = %s",
+                (_required(artifact.id),),
+            )
+            assert _required(await cur.fetchone())["count"] == 1
+            await cur.execute(
+                "SELECT status FROM benchmarks_v2.metric_evaluations WHERE id = %s",
+                (evaluation_id,),
+            )
+            assert _required(await cur.fetchone())["status"] == "failed"
+            await cur.execute(
+                """SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs
+                   WHERE metric_evaluation_id = %s""",
+                (evaluation_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 1
+    finally:
+        await pool.close()
 
 
 @pytest.mark.asyncio
@@ -552,6 +669,151 @@ async def test_create_get_is_retry_safe_and_strict(pg_conn: psycopg.Connection[A
                 )
             )
         assert evaluation.status is ProcessingStatus.QUEUED
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_ensemble_variants_and_frozen_inputs(pg_conn: psycopg.Connection[Any]) -> None:
+    """Providers/models and ordered preprocessing lineage remain independently addressable."""
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer)
+        observation_id = _required(observation.id)
+        google = await writer.insert_preprocessing_artifact(_word_artifact(observation_id))
+        deepgram = await writer.insert_preprocessing_artifact(
+            _word_artifact(observation_id).model_copy(
+                update={
+                    "producer_provider": "deepgram",
+                    "producer_model": "nova",
+                    "gcs_uri": "gs://private/deepgram",
+                }
+            )
+        )
+        phone_a = await writer.insert_preprocessing_artifact(_phone_artifact(observation_id))
+        phone_b = await writer.insert_preprocessing_artifact(
+            _phone_artifact(observation_id).model_copy(
+                update={"producer_model": "model-b", "gcs_uri": "gs://private/phones-b"}
+            )
+        )
+        assert len({google.id, deepgram.id, phone_a.id, phone_b.id}) == 4
+
+        def queued(variant: str) -> MetricEvaluation:
+            return MetricEvaluation(
+                observation_id=observation_id,
+                metric_type=str(Metric.WER),
+                metric_version="v1",
+                evaluation_variant=variant,
+                executor=MetricExecutor.INLINE,
+                status=ProcessingStatus.QUEUED,
+            )
+
+        inputs = [
+            MetricEvaluationInput(
+                artifact_id=_required(google.id), input_role="word", input_order=0
+            ),
+            MetricEvaluationInput(
+                artifact_id=_required(deepgram.id), input_role="word", input_order=1
+            ),
+            MetricEvaluationInput(
+                artifact_id=_required(phone_a.id), input_role="phoneme", input_order=0
+            ),
+        ]
+        ensemble = await writer.insert_metric_evaluation(queued("ensemble"), inputs=inputs)
+        assert await writer.insert_metric_evaluation(queued("ensemble"), inputs=inputs) == ensemble
+        variants = {"ensemble": ensemble}
+        for variant in ("google", "deepgram"):
+            variants[variant] = await writer.insert_metric_evaluation(queued(variant))
+            assert variants[variant].evaluation_variant == variant
+        with pytest.raises(ValueError, match="immutable inputs"):
+            await writer.insert_metric_evaluation(queued("ensemble"), inputs=inputs[:-1])
+        with pytest.raises(ValueError, match="immutable inputs"):
+            await writer.insert_metric_evaluation(
+                queued("ensemble"),
+                inputs=[*inputs[:2], inputs[2].model_copy(update={"input_order": 1})],
+            )
+
+        _, other = await _observation(writer, sample="other")
+        other_artifact = await writer.insert_preprocessing_artifact(
+            _word_artifact(_required(other.id))
+        )
+        with pytest.raises(psycopg.errors.RaiseException, match="share the evaluation observation"):
+            async with pool.connection() as conn, conn.cursor() as cur:
+                await cur.execute(
+                    """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                       (metric_evaluation_id, preprocessing_artifact_id, input_role, input_order)
+                       VALUES (%s, %s, 'other', 0)""",
+                    (_required(ensemble.id), _required(other_artifact.id)),
+                )
+        async with pool.connection() as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.RaiseException, match="immutable"):
+                await cur.execute(
+                    "DELETE FROM benchmarks_v2.metric_evaluation_inputs "
+                    "WHERE metric_evaluation_id = %s",
+                    (_required(ensemble.id),),
+                )
+            await conn.rollback()
+        started = await writer.start_metric_evaluation(_required(ensemble.id), started_at=_NOW)
+        assert started.evaluation_variant == "ensemble"
+        async with pool.connection() as conn, conn.cursor() as cur:
+            with pytest.raises(
+                psycopg.errors.RaiseException, match="only be inserted while queued"
+            ):
+                await cur.execute(
+                    """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                       (metric_evaluation_id, preprocessing_artifact_id, input_role, input_order)
+                       VALUES (%s, %s, 'late', 2)""",
+                    (_required(ensemble.id), _required(phone_b.id)),
+                )
+            await conn.rollback()
+        finished = _NOW + timedelta(seconds=1)
+        await writer.complete_metric_evaluation(
+            _required(ensemble.id), values=_wer_values(_required(ensemble.id)), finished_at=finished
+        )
+        assert (
+            await writer.insert_metric_evaluation(queued("ensemble"), inputs=inputs)
+        ).status is ProcessingStatus.SUCCEEDED
+        for changed in (
+            inputs[:-1],
+            [*inputs[:2], inputs[2].model_copy(update={"input_role": "changed"})],
+        ):
+            with pytest.raises(ValueError, match="immutable inputs"):
+                await writer.insert_metric_evaluation(queued("ensemble"), inputs=changed)
+        for variant in ("google", "deepgram"):
+            running = await writer.start_metric_evaluation(
+                _required(variants[variant].id), started_at=_NOW
+            )
+            await writer.complete_metric_evaluation(
+                _required(running.id),
+                values=_wer_values(_required(running.id)),
+                finished_at=finished,
+            )
+        await writer.finish_run(_required(observation.run_id), status=RunStatus.SUCCEEDED)
+        await writer.refresh_metric_values_bucket(
+            _required(observation.run_id), period_seconds=1800
+        )
+        await writer.refresh_metric_values_bucket(
+            _required(observation.run_id), period_seconds=1800
+        )
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT dataset_id, evaluation_variant, sample_count
+                   FROM benchmarks_v2.metric_values_by_bucket WHERE value_key = 'primary'
+                   ORDER BY dataset_id, evaluation_variant"""
+            )
+            assert [
+                (row["dataset_id"], row["evaluation_variant"], row["sample_count"])
+                for row in await cur.fetchall()
+            ] == [
+                ("__all__", "deepgram", 1),
+                ("__all__", "ensemble", 1),
+                ("__all__", "google", 1),
+                ("observation-dataset", "deepgram", 1),
+                ("observation-dataset", "ensemble", 1),
+                ("observation-dataset", "google", 1),
+            ]
     finally:
         await pool.close()
 
@@ -736,6 +998,20 @@ def test_database_enforces_queued_creation_and_success_outputs(
             (observation_id,),
         )
         evaluation_id = _required(cur.fetchone())[0]
+        with pytest.raises(psycopg.errors.RaiseException, match="identity is immutable"):
+            cur.execute(
+                """UPDATE benchmarks_v2.metric_evaluations
+                   SET status = 'running', started_at = now(),
+                       evaluation_variant = 'mutated', executor = 'coval_api'
+                   WHERE id = %s""",
+                (evaluation_id,),
+            )
+        cur.execute(
+            """SELECT status, evaluation_variant, executor
+               FROM benchmarks_v2.metric_evaluations WHERE id = %s""",
+            (evaluation_id,),
+        )
+        assert _required(cur.fetchone()) == ("queued", "default", "inline")
         cur.execute(
             """UPDATE benchmarks_v2.metric_evaluations
                SET status = 'running', started_at = now() WHERE id = %s""",
@@ -888,6 +1164,9 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
         writer = RunWriter(pool)
         run_id, observation = await _observation(writer)
         observation_id = _required(observation.id)
+        queued_artifact = await writer.insert_preprocessing_artifact(
+            _phone_artifact(observation_id)
+        )
         queued = await writer.insert_metric_evaluation(
             MetricEvaluation(
                 observation_id=observation_id,
@@ -895,7 +1174,14 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
                 metric_version="v1",
                 executor=MetricExecutor.INLINE,
                 status=ProcessingStatus.QUEUED,
-            )
+            ),
+            inputs=[
+                MetricEvaluationInput(
+                    artifact_id=_required(queued_artifact.id),
+                    input_role="timing",
+                    input_order=0,
+                )
+            ],
         )
         running = await _evaluation(writer, observation, metric=Metric.TTFA)
         queued_id = _required(queued.id)
@@ -907,8 +1193,35 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
             await cur.execute(
                 "DELETE FROM benchmarks_v2.metric_evaluations WHERE id = %s", (running_id,)
             )
+            await cur.execute(
+                """SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs
+                   WHERE metric_evaluation_id = %s""",
+                (queued_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 0
             await conn.commit()
-        evaluation = await _evaluation(writer, observation)
+        terminal_artifact = await writer.insert_preprocessing_artifact(
+            _word_artifact(observation_id)
+        )
+        queued_terminal = await writer.insert_metric_evaluation(
+            MetricEvaluation(
+                observation_id=observation_id,
+                metric_type=str(Metric.WER),
+                metric_version="v1",
+                executor=MetricExecutor.INLINE,
+                status=ProcessingStatus.QUEUED,
+            ),
+            inputs=[
+                MetricEvaluationInput(
+                    artifact_id=_required(terminal_artifact.id),
+                    input_role="word",
+                    input_order=0,
+                )
+            ],
+        )
+        evaluation = await writer.start_metric_evaluation(
+            _required(queued_terminal.id), started_at=_NOW
+        )
         evaluation_id = _required(evaluation.id)
         await writer.complete_metric_evaluation(
             evaluation_id,
@@ -924,14 +1237,23 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
             ],
             finished_at=_NOW + timedelta(seconds=1),
         )
-        await writer.insert_preprocessing_artifact(_word_artifact(observation_id))
         async with pool.connection() as conn, conn.cursor() as cur:
             with pytest.raises(psycopg.errors.RaiseException, match="terminal work rows"):
                 await cur.execute(
                     "DELETE FROM benchmarks_v2.metric_evaluations WHERE id = %s", (evaluation_id,)
                 )
             await conn.rollback()
+            await cur.execute(
+                """SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs
+                   WHERE metric_evaluation_id = %s""",
+                (evaluation_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 1
             await cur.execute("DELETE FROM benchmarks_v2.runs WHERE id = %s", (run_id,))
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs"
+            )
+            assert _required(await cur.fetchone())["count"] == 0
             await cur.execute("SELECT count(*) AS count FROM benchmarks_v2.preprocessing_artifacts")
             assert _required(await cur.fetchone())["count"] == 0
             await cur.execute("SELECT count(*) AS count FROM benchmarks_v2.metric_values")
