@@ -276,6 +276,14 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 (table_name,),
             )
             assert {row[0] for row in cur.fetchall()} == expected
+        cur.execute(
+            "SELECT indexdef FROM pg_indexes "
+            "WHERE schemaname = 'benchmarks_v2' "
+            "AND indexname = 'metric_values_by_bucket_bucket_at'"
+        )
+        assert _required(cur.fetchone())[0].endswith(
+            "ON benchmarks_v2.metric_values_by_bucket USING btree (bucket_at)"
+        )
     config = AlembicConfig(str(_INI_PATH))
     config.set_main_option(
         "sqlalchemy.url", _dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
@@ -437,6 +445,69 @@ def test_observation_model_requires_complete_audio_tuple() -> None:
             audio_size_bytes=1,
             audio_duration_ms=1,
         )
+
+
+def test_nested_preprocessing_artifact_update_is_rejected(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    _migrate(pg_conn)
+    pg_conn.autocommit = True
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status)
+               VALUES ('sha', 'dataset', %s, 'running') RETURNING id""",
+            (_SHA,),
+        )
+        run_id = _required(cur.fetchone())[0]
+        cur.execute(
+            """INSERT INTO benchmarks_v2.benchmark_observations
+               (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
+                source_kind, status)
+               VALUES (%s, 'dataset', %s, 'nested-update', 'p', 'm', 'STT',
+                'dataset_audio', 'succeeded') RETURNING id""",
+            (run_id, _SHA),
+        )
+        observation_id = _required(cur.fetchone())[0]
+        cur.execute(
+            """INSERT INTO benchmarks_v2.preprocessing_artifacts
+               (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
+                schema_version, producer_name, producer_version, gcs_uri, content_sha256,
+                size_bytes)
+               VALUES (%s, 'align', 'v1', 'word_timestamps', 'WordTimestampsV1', 'v1',
+                'word_aligner', 'words-v1', 'gs://private/words', %s, 1)""",
+            (observation_id, _SHA),
+        )
+        cur.execute(
+            """CREATE FUNCTION benchmarks_v2.update_preprocessing_artifact_from_observation()
+               RETURNS trigger AS $$
+               BEGIN
+                   UPDATE benchmarks_v2.preprocessing_artifacts
+                   SET size_bytes = size_bytes + 1 WHERE observation_id = NEW.id;
+                   RETURN NEW;
+               END; $$ LANGUAGE plpgsql"""
+        )
+        cur.execute(
+            """CREATE TRIGGER observation_updates_preprocessing_artifact
+               AFTER UPDATE OF model ON benchmarks_v2.benchmark_observations
+               FOR EACH ROW EXECUTE FUNCTION
+               benchmarks_v2.update_preprocessing_artifact_from_observation()"""
+        )
+        with pytest.raises(psycopg.errors.RaiseException, match="artifacts are immutable"):
+            cur.execute(
+                "UPDATE benchmarks_v2.benchmark_observations SET model = 'updated' WHERE id = %s",
+                (observation_id,),
+            )
+        cur.execute(
+            "SELECT model FROM benchmarks_v2.benchmark_observations WHERE id = %s",
+            (observation_id,),
+        )
+        assert _required(cur.fetchone())[0] == "m"
+        cur.execute(
+            "SELECT size_bytes FROM benchmarks_v2.preprocessing_artifacts "
+            "WHERE observation_id = %s",
+            (observation_id,),
+        )
+        assert _required(cur.fetchone())[0] == 1
 
 
 @pytest.mark.asyncio

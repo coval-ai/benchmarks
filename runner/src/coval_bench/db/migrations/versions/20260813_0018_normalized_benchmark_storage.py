@@ -104,6 +104,7 @@ def upgrade() -> None:
             CHECK (min_value <= p25 AND p25 <= p50 AND p50 <= p75 AND p75 <= max_value),
             PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version, value_key, bucket_at)
         );
+        CREATE INDEX metric_values_by_bucket_bucket_at ON benchmarks_v2.metric_values_by_bucket (bucket_at);
 
         -- Lifecycle writes live in RunWriter's metric evaluation methods.
         CREATE FUNCTION benchmarks_v2.validate_metric_transition() RETURNS trigger AS $$
@@ -121,7 +122,7 @@ def upgrade() -> None:
         CREATE TRIGGER metric_evaluations_validate_transition BEFORE INSERT OR UPDATE OR DELETE ON benchmarks_v2.metric_evaluations FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.validate_metric_transition();
         CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact() RETURNS trigger AS $$
         BEGIN
-            IF pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
+            IF TG_OP = 'DELETE' AND pg_trigger_depth() > 1 THEN RETURN OLD; END IF;
             RAISE EXCEPTION 'preprocessing artifacts are immutable';
         END; $$ LANGUAGE plpgsql;
         CREATE TRIGGER preprocessing_artifacts_immutable BEFORE UPDATE OR DELETE ON benchmarks_v2.preprocessing_artifacts FOR EACH ROW EXECUTE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact();
