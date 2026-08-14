@@ -719,6 +719,20 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 
 
 @pytest.mark.asyncio
+async def test_fetch_and_write_rejects_a_metric_with_no_row_builder() -> None:
+    settings = Settings(
+        runner_sha="test",
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_test_set_id="TS1",
+        coval_s2s_instruction_metric_id="IID",
+        coval_s2s_interruption_metric_id="RID",
+    )
+    with pytest.raises(RuntimeError, match="no _VALUE_MAPPERS entry"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
 async def test_ingest_run_writes_instruction_rows() -> None:
     writer = _stub_writer()
     latency = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(3)]

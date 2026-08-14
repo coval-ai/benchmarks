@@ -720,6 +720,9 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         metric_ids[Metric.INSTRUCTION_FOLLOWING] = instruction_metric_id
     if raw_interruption:
         metric_ids[Metric.INTERRUPTION_RATE] = raw_interruption
+    unmapped = sorted(m.value for m in metric_ids.keys() - _VALUE_MAPPERS.keys())
+    if unmapped:
+        raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
