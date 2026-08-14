@@ -1035,7 +1035,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="Amara", gender=Gender.FEMALE), Voice(id="Gordon", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         region="us-east-2",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
         arena_enabled=False,
     ),
     RegisteredModel(
