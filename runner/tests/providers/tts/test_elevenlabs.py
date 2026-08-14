@@ -85,7 +85,6 @@ async def test_elevenlabs_url_and_frames(fake_settings: Settings) -> None:
         {"voices": [_VOICE]},
         {
             "inputs": [{"text": "Hello world", "voice_id": _VOICE}],
-            "flush": True,
             "close_socket": True,
         },
     ]
@@ -183,8 +182,28 @@ async def test_elevenlabs_no_audio(fake_settings: Settings) -> None:
         result = await provider.synthesize("silence")
 
     assert result.error is not None
+    # The silent-failure error carries the last non-audio frames for diagnosis.
+    assert "is_final" in result.error
     assert result.audio_path is None
     assert result.ttfa_ms is None
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_skips_non_json_frames(fake_settings: Settings) -> None:
+    events: list[str | bytes] = [
+        json.dumps({"audio": base64.b64encode(make_pcm_bytes(240)).decode()}),
+        "not json",
+        json.dumps({"is_final": True}),
+    ]
+    ws = FakeWebSocket(events)
+    provider = ElevenLabsTTSProvider(fake_settings, model=_MODEL, voice=_VOICE)
+
+    with patch("coval_bench.providers.tts.elevenlabs.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello")
+
+    assert result.error is None
+    assert result.audio_path is not None
+    result.audio_path.unlink()
 
 
 # ---------------------------------------------------------------------------

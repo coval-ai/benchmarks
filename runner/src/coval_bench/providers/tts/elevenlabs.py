@@ -27,6 +27,7 @@ SAMPLE_RATE = 24000
 
 _WS_URL = "wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input"
 _OUTPUT_FORMAT = "pcm_24000"
+_LAST_FRAMES_KEPT = 3
 
 
 class ElevenLabsTTSProvider(TTSProvider):
@@ -57,6 +58,7 @@ class ElevenLabsTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
+        last_frames: list[str] = []
         start: float | None = None
         first_chunk_at: float | None = None
 
@@ -73,7 +75,6 @@ class ElevenLabsTTSProvider(TTSProvider):
                     json.dumps(
                         {
                             "inputs": [{"text": text, "voice_id": self._voice}],
-                            "flush": True,
                             "close_socket": True,
                         }
                     )
@@ -82,7 +83,12 @@ class ElevenLabsTTSProvider(TTSProvider):
                 async for raw in ws:
                     if isinstance(raw, bytes):
                         continue
-                    event: dict[str, Any] = json.loads(raw)
+                    try:
+                        event: dict[str, Any] = json.loads(raw)
+                    except json.JSONDecodeError:
+                        last_frames.append(raw)
+                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        continue
 
                     if event.get("error"):
                         raise RuntimeError(f"{event.get('error')}: {event.get('message')}")
@@ -94,6 +100,9 @@ class ElevenLabsTTSProvider(TTSProvider):
                             if first_chunk_at is None:
                                 first_chunk_at = time.monotonic()
                             audio_chunks.append(chunk)
+                    else:
+                        last_frames.append(raw)
+                        del last_frames[:-_LAST_FRAMES_KEPT]
 
                     if event.get("is_final"):
                         break
@@ -110,6 +119,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
+                last_frames=last_frames,
                 error=str(exc),
             )
 
@@ -121,4 +131,5 @@ class ElevenLabsTTSProvider(TTSProvider):
             sample_rate=SAMPLE_RATE,
             audio_synthesis_start=start,
             first_audio_chunk_at=first_chunk_at,
+            last_frames=last_frames,
         )
