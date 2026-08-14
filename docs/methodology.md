@@ -148,8 +148,8 @@ but the rule is the same.
 
 | Cohort | What is excluded from t0 |
 |---|---|
-| WS streaming (Deepgram, AssemblyAI, ElevenLabs Scribe, Speechmatics, Gradium STT, Cartesia, Together AI, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
-| HTTP TTS (ElevenLabs HTTP, OpenAI `gpt-4o-mini-tts`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
+| WS streaming (Deepgram, AssemblyAI, ElevenLabs, Speechmatics, Gradium STT, Cartesia, Together AI, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
+| HTTP TTS (OpenAI `gpt-4o-mini-tts`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
 
 HTTP-pool warming lives in `runner/src/coval_bench/providers/_http_session.py`.
 Providers opt in by overriding `Provider.warmup()` in `providers/base.py`; the
@@ -163,9 +163,9 @@ multiplexes over a single connection. The connection is opened once by
 `warmup()`, and the dataset loop — run at a concurrency of 8 — reuses it, so
 TCP+TLS is paid once and excluded from every TTFA row rather than just the
 first. `http2=True` and the pool limits are set on `TimedTransport`, not on
-`AsyncClient`: httpx ignores both when a custom transport is supplied. Both
-hosts (`api.openai.com`, `api.elevenlabs.io`) negotiate HTTP/2; under 8-way
-concurrency the pool stays at one socket per host. Requires the `h2` package
+`AsyncClient`: httpx ignores both when a custom transport is supplied. The
+`api.openai.com` host negotiates HTTP/2; under 8-way concurrency the pool
+stays at one socket per host. Requires the `h2` package
 (`httpx[http2]`) — a build without it raises at client construction rather
 than downgrading silently.
 

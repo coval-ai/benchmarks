@@ -1,27 +1,23 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""ElevenLabs TTS provider — direct REST against a shared httpx pool.
+"""ElevenLabs TTS provider — Text to Dialogue WebSocket streaming.
 
-TTFA is measured from the first request byte to the first PCM chunk. The
-shared client is pre-warmed by ``warmup`` before the dataset loop, so the
-measurement excludes TCP+TLS setup.
-
-eleven_v3 has no realtime WebSocket; all models use the chunked HTTP stream.
+TTFA is measured from the text submit to the first PCM frame; session setup
+(connect plus voice registration) stays out of the measurement.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import time
+from typing import Any
 
 import structlog
+import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
-from coval_bench.providers._http_session import (
-    connection_reused,
-    get_shared_client,
-    submit_to_headers_ms,
-)
 from coval_bench.providers.base import TTSProvider, TTSResult
 from coval_bench.providers.tts._common import finalize_tts_result
 
@@ -29,16 +25,15 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 SAMPLE_RATE = 24000
 
-_BASE_URL = "https://api.elevenlabs.io"
+_WS_URL = "wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input"
 _OUTPUT_FORMAT = "pcm_24000"
+_LAST_FRAMES_KEPT = 3
 
 
 class ElevenLabsTTSProvider(TTSProvider):
-    """ElevenLabs TTS provider over the REST streaming endpoint."""
+    """ElevenLabs TTS provider using the Text to Dialogue WebSocket."""
 
-    _VALID_MODELS = frozenset(
-        {"eleven_flash_v2_5", "eleven_multilingual_v2", "eleven_turbo_v2_5", "eleven_v3"}
-    )
+    _VALID_MODELS = frozenset({"eleven_v3_conversational"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if model not in self._VALID_MODELS:
@@ -61,70 +56,57 @@ class ElevenLabsTTSProvider(TTSProvider):
     def model(self) -> str:
         return self._model
 
-    @classmethod
-    async def warmup(cls, settings: Settings) -> None:
-        """Pre-warm the shared httpx connection pool with a HEAD probe.
-
-        Transport failures propagate to the caller, which runs warmup under
-        ``return_exceptions=True`` and logs them. A 401 still warms the
-        socket, so an unauthenticated HEAD is sufficient.
-        """
-        client = get_shared_client("elevenlabs", _BASE_URL)
-        t0 = time.monotonic()
-        response = await client.head("/v1/voices")
-        logger.info(
-            "elevenlabs_prewarm",
-            warmup_ms=round((time.monotonic() - t0) * 1000, 1),
-            http_version=response.http_version,
-        )
-        if response.http_version != "HTTP/2":
-            logger.warning("elevenlabs_prewarm_no_http2", http_version=response.http_version)
-
     async def synthesize(self, text: str) -> TTSResult:
-        client = get_shared_client("elevenlabs", _BASE_URL)
-        url = f"/v1/text-to-speech/{self._voice}/stream?output_format={_OUTPUT_FORMAT}"
-        headers = {
-            "xi-api-key": self._api_key,
-            "Content-Type": "application/json",
-            "Accept": "audio/pcm",
-        }
-        payload = {"text": text, "model_id": self._model}
-
         audio_chunks: list[bytes] = []
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
+        last_frames: list[str] = []
         start: float | None = None
         first_chunk_at: float | None = None
 
+        url = f"{_WS_URL}?model_id={self._model}&output_format={_OUTPUT_FORMAT}"
+
         try:
-            start = time.monotonic()
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.request)
-                reused = connection_reused(response.request)
-                if response.is_error:
-                    body = await response.aread()
-                    detail = body.decode("utf-8", "replace").strip() or response.reason_phrase
-                    return finalize_tts_result(
-                        provider="elevenlabs",
-                        model=self._model,
-                        voice=self._voice,
-                        pcm=b"",
-                        sample_rate=SAMPLE_RATE,
-                        audio_synthesis_start=None,
-                        first_audio_chunk_at=None,
-                        error=f"HTTP {response.status_code}: {detail[:500]}",
-                        status_code=response.status_code,
-                        http_version=http_version,
-                        submit_to_headers_ms=setup_ms,
-                        connection_reused=reused,
+            async with ws_client.connect(
+                url, additional_headers={"xi-api-key": self._api_key}
+            ) as ws:
+                await ws.send(json.dumps({"voices": [self._voice]}))
+
+                start = time.monotonic()
+                await ws.send(
+                    json.dumps(
+                        {
+                            "inputs": [{"text": text, "voice_id": self._voice}],
+                            "close_socket": True,
+                        }
                     )
-                async for chunk in response.aiter_bytes():
-                    if chunk and first_chunk_at is None:
-                        first_chunk_at = time.monotonic()
-                    if chunk:
-                        audio_chunks.append(chunk)
+                )
+
+                async for raw in ws:
+                    if isinstance(raw, bytes):
+                        continue
+                    try:
+                        event: dict[str, Any] = json.loads(raw)
+                    except json.JSONDecodeError:
+                        last_frames.append(raw)
+                        del last_frames[:-_LAST_FRAMES_KEPT]
+                        continue
+
+                    if event.get("error"):
+                        raise RuntimeError(f"{event.get('error')}: {event.get('message')}")
+
+                    audio_b64 = event.get("audio")
+                    if audio_b64:
+                        chunk = base64.b64decode(audio_b64)
+                        if chunk:
+                            if first_chunk_at is None:
+                                first_chunk_at = time.monotonic()
+                            audio_chunks.append(chunk)
+                    else:
+                        last_frames.append(raw)
+                        del last_frames[:-_LAST_FRAMES_KEPT]
+
+                    if event.get("is_final"):
+                        break
+
         except Exception as exc:
             logger.warning(
                 "elevenlabs_error", provider="elevenlabs", model=self._model, exc_info=exc
@@ -137,25 +119,17 @@ class ElevenLabsTTSProvider(TTSProvider):
                 sample_rate=SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
+                last_frames=last_frames,
                 error=str(exc),
-                http_version=http_version,
-                submit_to_headers_ms=setup_ms,
-                connection_reused=reused,
             )
-
-        audio_data = b"".join(audio_chunks)
-        if not audio_data:
-            logger.warning("elevenlabs_no_audio", model=self._model)
 
         return finalize_tts_result(
             provider="elevenlabs",
             model=self._model,
             voice=self._voice,
-            pcm=audio_data,
+            pcm=b"".join(audio_chunks),
             sample_rate=SAMPLE_RATE,
             audio_synthesis_start=start,
             first_audio_chunk_at=first_chunk_at,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
+            last_frames=last_frames,
         )
