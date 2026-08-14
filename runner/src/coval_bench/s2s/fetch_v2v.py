@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import importlib.resources
 import random
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -26,20 +27,19 @@ from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import Metric
+from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.s2s.conditions import (
+    DATASET_ID,
+    DATASET_ID_MULTITURN,
+    DATASET_ID_MULTITURN_NOISY,
+    DEFAULT_CONDITION,
+    DatasetMetrics,
+    condition_for,
+)
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 
 logger = structlog.get_logger("coval_bench.s2s.fetch_v2v")
-
-# The dataset the S2S sims run against (matches the packaged manifest name).
-DATASET_ID = "s2s-v1"
-# Multi-turn runs have no local manifest -- they're keyed to the Coval test set --
-# so they use a distinct dataset id and never pool with single-turn s2s-v1.
-DATASET_ID_MULTITURN = "s2s-multiturn-v1"
-# The same test set run by the noisy caller persona, kept apart so background
-# noise never pools into the clean numbers.
-DATASET_ID_MULTITURN_NOISY = "s2s-multiturn-noisy-v1"
 
 # Ingest window: how far back one tick looks for not-yet-ingested runs, and
 # how many list results that scan reads. Two periods (with a one-day floor)
@@ -196,43 +196,11 @@ async def recent_completed_runs(
     return runs
 
 
-def _result_rows(
-    values: list[dict[str, Any]],
-    *,
-    run_pk: int,
-    coval_run_id: str,
-    spec: AgentSpec,
-) -> list[Result]:
-    """Map a Coval run's per-clip values to Result rows.
-
-    Values are seconds; convert to ms. A clip with no numeric value becomes a
-    FAILED row, so reliability = success/total.
-    """
-    rows: list[Result] = []
-    for i, v in enumerate(values):
-        raw = v.get("value")
-        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-            metric_value: float | None = round(float(raw) * 1000, 1)
-            status = ResultStatus.SUCCESS
-        else:
-            metric_value = None
-            status = ResultStatus.FAILED
-        sim_id = v.get("simulation_output_id")
-        clip_key = f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}"
-        rows.append(
-            Result(
-                run_id=run_pk,
-                provider=spec.provider,
-                model=spec.model,
-                benchmark=Benchmark.S2S,
-                metric_type=Metric.V2V,
-                metric_units="milliseconds",
-                metric_value=metric_value,
-                audio_filename=clip_key,
-                status=status,
-            )
-        )
-    return rows
+def _v2v_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Seconds to ms; a clip with no numeric value becomes a FAILED row."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return round(float(raw) * 1000, 1), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
 
 
 class InvalidInstructionVerdict(Exception):
@@ -256,67 +224,111 @@ def _instruction_verdict(raw: object) -> bool | None:
     raise InvalidInstructionVerdict(f"unexpected instruction verdict: {raw!r}")
 
 
-def _instruction_id_mismatch(
-    latency_values: list[dict[str, Any]] | None, instruction_values: list[dict[str, Any]]
-) -> dict[str, object] | None:
-    """None if instruction's sim-id set is sound; else the diff.
+def _has_duplicate_ids(values: list[dict[str, Any]]) -> bool:
+    """True if two of a metric's conversations share a simulation id."""
+    ids = [v.get("simulation_output_id") for v in values]
+    return len(ids) != len(set(ids))
 
-    Ids, not counts: equal counts can be different conversations. ``latency_values``
-    is None -- not empty -- when the run has no latency metric, and then only
-    duplicate ids are checked. A mismatch skips instruction for the run.
+
+def _population_mismatch(
+    anchor_values: list[dict[str, Any]], other_values: list[dict[str, Any]]
+) -> dict[str, object] | None:
+    """None if *other_values* covers the same conversations as the anchor.
+
+    Ids, not counts: equal counts can be different conversations. A mismatch skips
+    that metric for the run.
     """
-    ins_ids = [v.get("simulation_output_id") for v in instruction_values]
-    ins_set = set(ins_ids)
-    duplicate = len(ins_ids) != len(ins_set)
-    missing: list[str] = []
-    extra: list[str] = []
-    if latency_values is not None:
-        lat_set = {v.get("simulation_output_id") for v in latency_values}
-        missing = sorted(str(x) for x in lat_set - ins_set)
-        extra = sorted(str(x) for x in ins_set - lat_set)
+    other_set = {v.get("simulation_output_id") for v in other_values}
+    anchor_set = {v.get("simulation_output_id") for v in anchor_values}
+    missing = sorted(str(x) for x in anchor_set - other_set)
+    extra = sorted(str(x) for x in other_set - anchor_set)
+    duplicate = _has_duplicate_ids(other_values)
     if not duplicate and not missing and not extra:
         return None
-    return {
-        "missing_instruction_ids": missing,
-        "extra_instruction_ids": extra,
-        "duplicate_instruction_ids": duplicate,
-    }
+    return {"missing_ids": missing, "extra_ids": extra, "duplicate_ids": duplicate}
 
 
-def _instruction_rows(
+def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """YES -> 100.0, NO -> 0.0, UNKNOWN -> no row, so the mean is YES / (YES + NO).
+
+    Raises InvalidInstructionVerdict on any value outside the contract.
+    """
+    verdict = _instruction_verdict(raw)
+    if verdict is None:
+        return None
+    return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
+
+
+# The only per-metric part: one raw Coval value -> (row value, status), or None to
+# write no row. A metric is ingestable once it appears here.
+_VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
+    Metric.V2V: _v2v_value,
+    Metric.INSTRUCTION_FOLLOWING: _instruction_value,
+}
+
+
+def _s2s_rows(
     values: list[dict[str, Any]],
     *,
+    metric: Metric,
     run_pk: int,
     coval_run_id: str,
     spec: AgentSpec,
 ) -> list[Result]:
-    """Map a run's per-conversation verdicts to instruction Result rows.
-
-    YES -> 100.0, NO -> 0.0 (both SUCCESS, both in the pool); UNKNOWN produces no
-    row (excluded), so the aggregate mean is YES / (YES + NO). Raises
-    InvalidInstructionVerdict on any value outside the contract.
-    """
+    """Map one metric's per-conversation values to Result rows."""
+    to_row = _VALUE_MAPPERS[metric]
     rows: list[Result] = []
     for i, v in enumerate(values):
-        verdict = _instruction_verdict(v.get("value"))
-        if verdict is None:  # UNKNOWN: excluded from the pool, no row written
+        mapped = to_row(v.get("value"))
+        if mapped is None:
             continue
+        metric_value, status = mapped
         sim_id = v.get("simulation_output_id")
-        clip_key = f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}"
         rows.append(
             Result(
                 run_id=run_pk,
                 provider=spec.provider,
                 model=spec.model,
                 benchmark=Benchmark.S2S,
-                metric_type=Metric.INSTRUCTION_FOLLOWING,
-                metric_units="percent",
-                metric_value=100.0 if verdict else 0.0,
-                audio_filename=clip_key,
-                status=ResultStatus.SUCCESS,
+                metric_type=metric,
+                metric_units=METRIC_SPECS[metric].units,
+                metric_value=metric_value,
+                audio_filename=f"{coval_run_id}/{sim_id}" if sim_id else f"{coval_run_id}/{i}",
+                status=status,
             )
         )
     return rows
+
+
+def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[str, Any]] | None:
+    """The metric's per-conversation values, or None when it is not on the run."""
+    payload = metrics.get(metric_id) if metric_id else None
+    if payload is None:
+        return None
+    return cast("list[dict[str, Any]]", payload.get("values", []))
+
+
+def _ingestable(condition: DatasetMetrics, metric_ids: Mapping[Metric, str]) -> frozenset[Metric]:
+    """The condition's metrics that are configured and have a row builder."""
+    return frozenset(m for m in condition.fetched if m in metric_ids and m in _VALUE_MAPPERS)
+
+
+async def _pending_metrics(
+    writer: RunWriter,
+    *,
+    provider: str,
+    coval_run_id: str,
+    condition: DatasetMetrics,
+    metric_ids: Mapping[Metric, str],
+) -> frozenset[Metric]:
+    """The condition's ingestable metrics that are not yet stored."""
+    pending: set[Metric] = set()
+    for metric in _ingestable(condition, metric_ids):
+        if not await writer.coval_metric_ingested(
+            provider=provider, coval_run_id=coval_run_id, metric_type=metric
+        ):
+            pending.add(metric)
+    return frozenset(pending)
 
 
 async def _ingest_run(
@@ -325,22 +337,22 @@ async def _ingest_run(
     *,
     spec: AgentSpec,
     coval_run: CovalRun,
-    metric_id: str,
-    instruction_metric_id: str | None = None,
+    metric_ids: Mapping[Metric, str],
+    condition: DatasetMetrics = DEFAULT_CONDITION,
+    pending: frozenset[Metric] | None = None,
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
-    want_latency: bool = True,
-    want_instruction: bool = True,
     runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
-    Skips (before any DB write) runs finalized with an error_status — those
-    failed upstream of the provider and must not dent its reliability — and runs
-    left with nothing to write. Otherwise SUCCEEDED = all clips numeric, PARTIAL =
-    some failed, FAILED = all failed.
+    Writes the metrics *condition* declares and *pending* still owes (default all
+    of them). Skips (before any DB write) runs finalized with an error_status,
+    runs missing the condition's required metric, and runs left with nothing to
+    write. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
     """
+    pending = condition.fetched if pending is None else pending
     run_pk: int | None = None
     try:
         resp = await client.get(f"/runs/{coval_run.run_id}")
@@ -356,62 +368,89 @@ async def _ingest_run(
             )
             return None
         metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
-        metric = metrics.get(metric_id)
-        if metric is None:
-            # Conditions with unreliable turn boundaries run with latency off.
+        anchor = condition.required
+        anchor_values = _metric_values(metrics, metric_ids.get(anchor))
+        if anchor_values is None:
+            # The condition says this one must be here, so its absence is a fault
+            # rather than a quiet skip. Metrics the condition omits are never
+            # looked up, so they never reach this branch.
             logger.warning(
-                "metric_absent",
+                "required_metric_absent",
                 provider=spec.provider,
                 coval_run_id=coval_run.run_id,
-                metric_id=metric_id,
+                dataset_id=dataset_id,
+                metric=anchor.value,
             )
-        values = cast("list[dict[str, Any]]", metric.get("values", [])) if metric else []
-        write_latency = want_latency and metric is not None
+            return None
+        if _has_duplicate_ids(anchor_values):
+            # Nothing else checks the anchor's own population, and duplicate rows
+            # would double-count conversations in the aggregate.
+            logger.warning(
+                "anchor_duplicate_ids",
+                provider=spec.provider,
+                coval_run_id=coval_run.run_id,
+                metric=anchor.value,
+            )
+            return None
 
-        # Decide instruction writability up front (pure) so a backfill with
-        # nothing to add creates no run row and stays retryable.
-        instr_values: list[dict[str, Any]] = []
-        write_instruction = False
-        if want_instruction and instruction_metric_id:
-            instr = metrics.get(instruction_metric_id)
-            if instr is None:
-                # Latency still lands; instruction stays retryable on a later scan.
-                logger.warning(
-                    "instruction_metric_absent",
+        # Decide writability up front (pure) so a backfill with nothing to add
+        # creates no run row and stays retryable.
+        writable: dict[Metric, list[dict[str, Any]]] = {}
+        if anchor in pending:
+            writable[anchor] = anchor_values
+        for metric in sorted(condition.optional):
+            if metric not in pending:
+                continue
+            values = _metric_values(metrics, metric_ids.get(metric))
+            if values is None:
+                logger.info(
+                    "optional_metric_absent",
                     provider=spec.provider,
                     coval_run_id=coval_run.run_id,
-                    metric_id=instruction_metric_id,
+                    metric=metric.value,
                 )
+                continue
+            mismatch = _population_mismatch(anchor_values, values)
+            if mismatch is not None:
+                # A different conversation population than the anchor would make
+                # the rate incomparable, so drop this metric and keep the anchor.
+                logger.warning(
+                    "metric_population_mismatch",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric=metric.value,
+                    **mismatch,
+                )
+                continue
+            writable[metric] = values
+        # Same mapper the rows are built from, so "would this write anything?"
+        # cannot drift from what actually gets written.
+        for metric in list(writable):
+            try:
+                mapped = [_VALUE_MAPPERS[metric](v.get("value")) for v in writable[metric]]
+            except InvalidInstructionVerdict as exc:
+                # Judge-contract violation: discard that metric for the whole run;
+                # retryable on a later scan.
+                logger.warning(
+                    "instruction_verdict_invalid",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric=metric.value,
+                    error=str(exc),
+                )
+                del writable[metric]
             else:
-                instr_values = cast("list[dict[str, Any]]", instr.get("values", []))
-                mismatch = _instruction_id_mismatch(values if metric else None, instr_values)
-                if mismatch is not None:
-                    # Different conversation population than latency -> skip
-                    # instruction (keep latency) so the rate stays comparable.
-                    logger.warning(
-                        "instruction_id_mismatch",
+                if not any(m is not None for m in mapped):
+                    # Every value maps to no row (all UNKNOWN), so claim nothing.
+                    logger.info(
+                        "metric_yields_no_rows",
                         provider=spec.provider,
                         coval_run_id=coval_run.run_id,
-                        **mismatch,
+                        metric=metric.value,
                     )
-                else:
-                    try:
-                        has_instruction_row = False
-                        for v in instr_values:
-                            verdict = _instruction_verdict(v.get("value"))
-                            has_instruction_row |= verdict is not None
-                        write_instruction = has_instruction_row
-                    except InvalidInstructionVerdict as exc:
-                        # Judge-contract violation: discard instruction for the
-                        # whole run (keep latency); retryable on a later scan.
-                        logger.warning(
-                            "instruction_verdict_invalid",
-                            provider=spec.provider,
-                            coval_run_id=coval_run.run_id,
-                            error=str(exc),
-                        )
+                    del writable[metric]
 
-        if not write_latency and not write_instruction:
+        if not writable:
             # Backfill with nothing to add; leave it retryable, write no run row.
             return None
 
@@ -427,17 +466,16 @@ async def _ingest_run(
             raise RuntimeError("start_run returned a run with no id")
         run_pk = run_row.id
 
-        rows = (
-            _result_rows(values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-            if write_latency
-            else []
-        )
-        instruction_rows = (
-            _instruction_rows(instr_values, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec)
-            if write_instruction
-            else []
-        )
-        all_rows = rows + instruction_rows
+        # Grouped as built: metric_type is a plain str on Result, so filtering the
+        # flat list by enum identity would silently match nothing.
+        by_metric = {
+            metric: _s2s_rows(
+                values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
+            )
+            for metric, values in writable.items()
+        }
+        all_rows = [row for rows in by_metric.values() for row in rows]
+        rows = by_metric.get(Metric.V2V, [])
         if all_rows:
             await writer.record_results(all_rows)
         logger.info(
@@ -446,11 +484,11 @@ async def _ingest_run(
             coval_run_id=coval_run.run_id,
             slot=str(scheduled_at),
             clips=len(rows),
-            instruction=len(instruction_rows),
+            instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
-        if write_latency:
-            # Reliability is the latency signal (instruction lag never fails the run).
+        if Metric.V2V in writable:
+            # Reliability is the latency signal (other metrics never fail the run).
             failed = sum(1 for r in rows if r.status is ResultStatus.FAILED)
             if not rows or failed == len(rows):
                 status = RunStatus.FAILED
@@ -459,7 +497,7 @@ async def _ingest_run(
             else:
                 status = RunStatus.SUCCEEDED
         else:
-            # Instruction-only backfill onto an already-ingested run.
+            # This condition has no latency, or it landed on an earlier scan.
             status = RunStatus.SUCCEEDED
         await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
@@ -491,8 +529,7 @@ async def _fetch_one_provider(
     *,
     spec: AgentSpec,
     agent_id: str,
-    metric_id: str,
-    instruction_metric_id: str | None = None,
+    metric_ids: Mapping[Metric, str],
     test_set_id: str | None = None,
     noisy_persona_id: str | None = None,
     runner_sha: str,
@@ -552,42 +589,46 @@ async def _fetch_one_provider(
                     error_status=coval_run.error_status,
                 )
                 continue
-            latency_done = await writer.coval_metric_ingested(
-                provider=spec.provider, coval_run_id=coval_run.run_id, metric_type=Metric.V2V
+            dataset_id, dataset_sha256 = _dataset_identity(
+                test_set_id, coval_run.persona_id, noisy_persona_id
             )
-            instruction_done = instruction_metric_id is None or await writer.coval_metric_ingested(
+            condition = condition_for(dataset_id)
+            if condition.required not in metric_ids:
+                logger.warning(
+                    "required_metric_unconfigured",
+                    provider=spec.provider,
+                    dataset_id=dataset_id,
+                    metric=condition.required.value,
+                )
+                continue
+            ingestable = _ingestable(condition, metric_ids)
+            pending = await _pending_metrics(
+                writer,
                 provider=spec.provider,
                 coval_run_id=coval_run.run_id,
-                metric_type=Metric.INSTRUCTION_FOLLOWING,
+                condition=condition,
+                metric_ids=metric_ids,
             )
-            instruction_data_done = instruction_metric_id is not None and instruction_done
-            # Either persisted metric is fresh data + an eligible sample. This
-            # keeps intentionally instruction-only conditions healthy between
-            # fetches while an unconfigured instruction metric cannot mask
-            # missing latency.
-            if latency_done or instruction_data_done:
+            persisted = ingestable - pending
+            if persisted:
                 note_sample_candidate(coval_run)
-                if not data_seen:
-                    data_seen, newest_data_at = True, coval_run.create_time
-            if latency_done and instruction_done:
+            if condition.required in persisted and not data_seen:
+                data_seen, newest_data_at = True, coval_run.create_time
+            if not pending:
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
                 continue
-            dataset_id, dataset_sha256 = _dataset_identity(
-                test_set_id, coval_run.persona_id, noisy_persona_id
-            )
             status = await _ingest_run(
                 client,
                 writer,
                 spec=spec,
                 coval_run=coval_run,
-                metric_id=metric_id,
-                instruction_metric_id=instruction_metric_id,
+                metric_ids=metric_ids,
+                condition=condition,
+                pending=pending,
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
-                want_latency=not latency_done,
-                want_instruction=instruction_metric_id is not None and not instruction_done,
                 runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )
@@ -595,9 +636,9 @@ async def _fetch_one_provider(
                 continue
             if status is not RunStatus.FAILED:
                 note_sample_candidate(coval_run)
+                if not data_seen:
+                    data_seen, newest_data_at = True, coval_run.create_time
             statuses.append(status)
-            if not data_seen:
-                data_seen, newest_data_at = True, coval_run.create_time
 
         threshold = period_seconds + stale_grace_seconds
         age = (
@@ -669,6 +710,19 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     noisy_persona_id = raw_noisy or None
     if noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
+    raw_interruption = settings.coval_s2s_interruption_metric_id
+    if raw_interruption is not None and not raw_interruption.strip():
+        raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
+    # Only configured metrics are ever asked for, so an unset id simply means that
+    # metric is not ingested yet.
+    metric_ids: dict[Metric, str] = {Metric.V2V: metric_id}
+    if instruction_metric_id:
+        metric_ids[Metric.INSTRUCTION_FOLLOWING] = instruction_metric_id
+    if raw_interruption:
+        metric_ids[Metric.INTERRUPTION_RATE] = raw_interruption
+    unmapped = sorted(m.value for m in metric_ids.keys() - _VALUE_MAPPERS.keys())
+    if unmapped:
+        raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
@@ -685,8 +739,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 writer,
                 spec=spec,
                 agent_id=agent_id,
-                metric_id=metric_id,
-                instruction_metric_id=instruction_metric_id,
+                metric_ids=metric_ids,
                 test_set_id=test_set_id,
                 noisy_persona_id=noisy_persona_id,
                 runner_sha=settings.runner_sha,
