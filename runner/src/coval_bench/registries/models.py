@@ -569,8 +569,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="sonic-3.5",
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
         voices=(
-            Voice(id="f786b574-daa5-4673-aa0c-cbe3e8534c02", gender=Gender.FEMALE, name="Katie"),
-            Voice(id="a5136bf9-224c-4d76-b823-52bd5efcffcc", gender=Gender.MALE, name="Jameson"),
+            Voice(
+                id="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+                gender=Gender.FEMALE,
+                name="Skylar",
+                accent="en-US",
+            ),
+            Voice(
+                id="30894953-bcce-41fe-892c-15ce19c843ff",
+                gender=Gender.MALE,
+                name="Parker",
+                accent="en-US",
+            ),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
