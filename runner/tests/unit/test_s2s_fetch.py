@@ -24,6 +24,9 @@ from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
+    FAMILY_HAPPYPATH,
+    FAMILY_MULTITURN,
+    Condition,
     condition_for,
 )
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
@@ -478,6 +481,38 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
 
 
 @pytest.mark.asyncio
+async def test_embargoed_agent_never_becomes_a_sample_candidate() -> None:
+    """An embargoed agent's recordings must never reach the public samples card."""
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    writer.coval_metric_ingested = AsyncMock(return_value=True)
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "SUCCESS"}
+    )
+    embargoed = AgentSpec(
+        agent_id_attr="coval_s2s_gray_agent_id",
+        provider="colors",
+        model="gray",
+        publish_samples=False,
+    )
+    sampled: list[SampleRun] = []
+    async with _fake_client(list_json, {}) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=embargoed,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+        )
+    assert sampled == []
+
+
+@pytest.mark.asyncio
 async def test_each_bucket_contributes_its_own_sample_candidate() -> None:
     """Runs in different buckets are both candidates — this is what recovers a missed day."""
     from coval_bench.s2s.samples import SampleRun
@@ -620,12 +655,13 @@ def test_has_duplicate_ids_guards_the_anchor() -> None:
 
 def test_dataset_identity() -> None:
     assert fetch_v2v._dataset_identity("TS1") == ("s2s-multiturn-v1", "TS1")
-    dataset_id, _sha = fetch_v2v._dataset_identity(None)
-    assert dataset_id == "s2s-v1"
+    single_turn = fetch_v2v._dataset_identity(None)
+    assert single_turn is not None
+    assert single_turn[0] == "s2s-v1"
 
 
 def test_dataset_identity_splits_the_noisy_caller() -> None:
-    """The noisy persona shares the test set but gets its own dataset."""
+    """The pre-map setting still splits the noisy persona while the map is unset."""
     assert fetch_v2v._dataset_identity("TS1", "PN", "PN") == (
         "s2s-multiturn-noisy-v1",
         "TS1:PN",
@@ -635,8 +671,50 @@ def test_dataset_identity_splits_the_noisy_caller() -> None:
     # Unset setting: no persona is noisy, so nothing splits.
     assert fetch_v2v._dataset_identity("TS1", "PN", None) == ("s2s-multiturn-v1", "TS1")
     # Single-turn has no test set, so it keeps the packaged manifest.
-    single_turn, _sha = fetch_v2v._dataset_identity(None, "PN", "PN")
-    assert single_turn == "s2s-v1"
+    single_turn = fetch_v2v._dataset_identity(None, "PN", "PN")
+    assert single_turn is not None
+    assert single_turn[0] == "s2s-v1"
+
+
+def test_dataset_identity_keeps_families_apart() -> None:
+    """The same persona lands in a different dataset per test-set family."""
+    personas = {"PC": Condition.CLEAN, "PN": Condition.NOISY, "PA": Condition.ACCENTED}
+    assert fetch_v2v._dataset_identity(
+        "TS1", "PC", family=FAMILY_MULTITURN, persona_conditions=personas
+    ) == ("s2s-multiturn-v1", "TS1")
+    assert fetch_v2v._dataset_identity(
+        "TS2", "PC", family=FAMILY_HAPPYPATH, persona_conditions=personas
+    ) == ("s2s-happypath-v1", "TS2")
+    assert fetch_v2v._dataset_identity(
+        "TS2", "PN", family=FAMILY_HAPPYPATH, persona_conditions=personas
+    ) == ("s2s-happypath-noisy-v1", "TS2:PN")
+    assert fetch_v2v._dataset_identity(
+        "TS2", "PA", family=FAMILY_HAPPYPATH, persona_conditions=personas
+    ) == ("s2s-happypath-accented-v1", "TS2:PA")
+
+
+def test_dataset_identity_skips_known_and_faults_unknown_personas() -> None:
+    personas = {"PSKIP": Condition.SKIP}
+    # Known but deliberately not ingested.
+    assert fetch_v2v._dataset_identity("TS1", "PSKIP", persona_conditions=personas) is None
+    # Unmapped: loud, because counting it as clean would be invisible.
+    with pytest.raises(ValueError, match="no condition mapped"):
+        fetch_v2v._dataset_identity("TS1", "PUNKNOWN", persona_conditions=personas)
+
+
+def test_dataset_identity_map_supersedes_the_noisy_setting() -> None:
+    """Once the map is set the single-persona setting no longer applies."""
+    assert fetch_v2v._dataset_identity(
+        "TS1", "PN", "PN", persona_conditions={"PN": Condition.CLEAN}
+    ) == ("s2s-multiturn-v1", "TS1")
+
+
+def test_dataset_identity_rejects_a_condition_its_family_lacks() -> None:
+    """A persona mapped to a condition the shared set never runs is a config error."""
+    with pytest.raises(ValueError, match="no dataset id"):
+        fetch_v2v._dataset_identity(
+            "TS1", "PA", family=FAMILY_MULTITURN, persona_conditions={"PA": Condition.ACCENTED}
+        )
 
 
 @pytest.mark.asyncio
