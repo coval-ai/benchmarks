@@ -5,9 +5,15 @@
 A condition is one dataset id. ``required`` must be on the run or the run is a
 fault; ``optional`` is written when present; anything named in neither is never
 fetched, so its absence is silent rather than an alertable warning.
+
+Dataset ids pair a family with a condition. The family is the Coval test set the
+runs came from, so two sets' scenarios can never share a row key; the condition is
+the caller persona's character within it.
 """
 
 from __future__ import annotations
+
+from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -15,12 +21,41 @@ from coval_bench.registries import Metric
 
 __all__ = [
     "DATASET_ID",
+    "DATASET_ID_HAPPYPATH",
+    "DATASET_ID_HAPPYPATH_ACCENTED",
+    "DATASET_ID_HAPPYPATH_NOISY",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
+    "FAMILY_HAPPYPATH",
+    "FAMILY_MULTITURN",
+    "Condition",
     "DatasetMetrics",
     "condition_for",
+    "dataset_id_for",
 ]
+
+
+class Condition(StrEnum):
+    """One caller persona's character, independent of which test set ran it.
+
+    ``SKIP`` marks a persona we know about and deliberately do not ingest, so the
+    persona map can stay exhaustive — an *unmapped* persona faults instead of
+    silently counting as clean.
+    """
+
+    CLEAN = "clean"
+    NOISY = "noisy"
+    ACCENTED = "accented"
+    SKIP = "skip"
+
+
+# The Coval test sets we ingest, as dataset-id prefixes. Their case counts differ
+# by design: the shared set runs 15 cases across two clean voices and aggregates
+# them, the happy-path set runs 30 across one, so the clean condition carries the
+# same 30 conversations either way.
+FAMILY_MULTITURN = "s2s-multiturn"  # customer-service, the shared board
+FAMILY_HAPPYPATH = "s2s-happypath"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -28,6 +63,29 @@ __all__ = [
 DATASET_ID = "s2s-v1"
 DATASET_ID_MULTITURN = "s2s-multiturn-v1"
 DATASET_ID_MULTITURN_NOISY = "s2s-multiturn-noisy-v1"
+
+DATASET_ID_HAPPYPATH = "s2s-happypath-v1"
+DATASET_ID_HAPPYPATH_NOISY = "s2s-happypath-noisy-v1"
+DATASET_ID_HAPPYPATH_ACCENTED = "s2s-happypath-accented-v1"
+
+# Unlisted pairs are a configuration error, not a silent skip.
+DATASET_IDS: dict[tuple[str, Condition], str] = {
+    (FAMILY_MULTITURN, Condition.CLEAN): DATASET_ID_MULTITURN,
+    (FAMILY_MULTITURN, Condition.NOISY): DATASET_ID_MULTITURN_NOISY,
+    (FAMILY_HAPPYPATH, Condition.CLEAN): DATASET_ID_HAPPYPATH,
+    (FAMILY_HAPPYPATH, Condition.NOISY): DATASET_ID_HAPPYPATH_NOISY,
+    (FAMILY_HAPPYPATH, Condition.ACCENTED): DATASET_ID_HAPPYPATH_ACCENTED,
+}
+
+
+def dataset_id_for(family: str, condition: Condition) -> str | None:
+    """The dataset id for *condition* within *family*, or None when not ingested."""
+    if condition is Condition.SKIP:
+        return None
+    try:
+        return DATASET_IDS[(family, condition)]
+    except KeyError:
+        raise ValueError(f"no dataset id for family {family!r} condition {condition!r}") from None
 
 
 class DatasetMetrics(BaseModel, frozen=True):
@@ -54,6 +112,21 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
     ),
     DATASET_ID_MULTITURN_NOISY: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_HAPPYPATH: DatasetMetrics(
+        required=Metric.V2V,
+        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_HAPPYPATH_NOISY: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.INTERRUPTION_RATE}),
+    ),
+    # These runs were scored without V2V attached, so anchoring on it would skip
+    # every one with ``required_metric_absent``. Move the anchor back if they are
+    # ever re-scored with it.
+    DATASET_ID_HAPPYPATH_ACCENTED: DatasetMetrics(
         required=Metric.INSTRUCTION_FOLLOWING,
         optional=frozenset({Metric.INTERRUPTION_RATE}),
     ),
