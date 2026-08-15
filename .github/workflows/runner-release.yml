@@ -40,6 +40,26 @@ jobs:
       api_image: ${{ steps.context.outputs.api_image }}
       skip: ${{ steps.context.outputs.skip }}
     steps:
+      - name: Validate release environment
+        env:
+          DISPATCH_ENVIRONMENT: ${{ github.event.client_payload.environment }}
+          RELEASE_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          case "$RELEASE_EVENT_NAME" in
+            repository_dispatch)
+              if [ "$DISPATCH_ENVIRONMENT" != "production" ]; then
+                echo "::error::Benchmarks runner release environment must be production."
+                exit 1
+              fi
+              ;;
+            workflow_dispatch) ;;
+            *)
+              echo "::error::Unsupported Benchmarks runner release event."
+              exit 1
+              ;;
+          esac
+
       - name: Resolve deploy ref
         id: input
         env:
