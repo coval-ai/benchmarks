@@ -797,6 +797,19 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 
 
 @pytest.mark.asyncio
+async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
+    # Blank would skip its agents with only a warning, indistinguishable from unset.
+    settings = Settings(
+        runner_sha="test",
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_happypath_test_set_id="   ",
+    )
+    with pytest.raises(RuntimeError, match="coval_s2s_happypath_test_set_id must not be blank"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
 async def test_fetch_and_write_rejects_a_metric_with_no_row_builder() -> None:
     settings = Settings(
         runner_sha="test",

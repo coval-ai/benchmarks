@@ -784,6 +784,11 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
         )
+    # Blank rather than unset would skip its agents with only a warning, which
+    # reads the same as never having configured them.
+    raw_happypath = settings.coval_s2s_happypath_test_set_id
+    if raw_happypath is not None and not raw_happypath.strip():
+        raise RuntimeError("coval_s2s_happypath_test_set_id must not be blank")
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.
     raw_noisy = settings.coval_s2s_noisy_persona_id
