@@ -31,11 +31,13 @@ from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.conditions import (
     DATASET_ID,
-    DATASET_ID_MULTITURN,
-    DATASET_ID_MULTITURN_NOISY,
     DEFAULT_CONDITION,
+    FAMILY_HAPPYPATH,
+    FAMILY_MULTITURN,
+    Condition,
     DatasetMetrics,
     condition_for,
+    dataset_id_for,
 )
 from coval_bench.s2s.samples import SampleRun, model_labels, publish_tick_sample
 
@@ -56,6 +58,13 @@ class AgentSpec:
     agent_id_attr: str
     provider: str
     model: str
+    # Settings attr holding this agent's own Coval test set id; None uses the
+    # shared ``coval_s2s_test_set_id``.
+    test_set_id_attr: str | None = None
+    # Dataset family for this agent's rows (see ``s2s.conditions``).
+    family: str = FAMILY_MULTITURN
+    # Whether this agent's recordings may reach the public samples card.
+    publish_samples: bool = True
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,24 @@ AGENTS: tuple[AgentSpec, ...] = (
         agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
         provider="xai",
         model="grok-voice-think-fast-2.0",
+    ),
+    # Pre-launch models under codenames: the provider and model strings are what
+    # land in the results table, so they carry no vendor identity of their own.
+    AgentSpec(
+        agent_id_attr="coval_s2s_gray_agent_id",
+        provider="colors",
+        model="gray",
+        test_set_id_attr="coval_s2s_happypath_test_set_id",
+        family=FAMILY_HAPPYPATH,
+        publish_samples=False,
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_red_agent_id",
+        provider="colors",
+        model="red",
+        test_set_id_attr="coval_s2s_happypath_test_set_id",
+        family=FAMILY_HAPPYPATH,
+        publish_samples=False,
     ),
 )
 
@@ -109,26 +136,71 @@ def _dataset_sha256() -> str:
         return "unknown"
 
 
+def _condition_for_persona(
+    persona_id: str,
+    persona_conditions: Mapping[str, Condition] | None,
+    noisy_persona_id: str | None,
+) -> Condition:
+    """This run's caller condition.
+
+    An unmapped persona raises rather than counting as clean: that pooling would be
+    invisible in both the data and the logs. ``noisy_persona_id`` is the pre-map
+    setting, honoured only while the map is unset so the two can deploy in either
+    order.
+    """
+    if persona_conditions:
+        try:
+            return persona_conditions[persona_id]
+        except KeyError:
+            raise ValueError(f"persona {persona_id!r} has no condition mapped") from None
+    if noisy_persona_id and persona_id == noisy_persona_id:
+        return Condition.NOISY
+    return Condition.CLEAN
+
+
 def _dataset_identity(
     test_set_id: str | None,
     persona_id: str = "",
     noisy_persona_id: str | None = None,
-) -> tuple[str, str]:
-    """Dataset id + provenance for one run's rows.
+    *,
+    family: str = FAMILY_MULTITURN,
+    persona_conditions: Mapping[str, Condition] | None = None,
+) -> tuple[str, str] | None:
+    """Dataset id + provenance for one run's rows, or None when not ingested.
 
     Multi-turn runs are keyed to their Coval test set, not the single-turn SLURP
     manifest, so they get their own dataset id (never pooling with s2s-v1) and
     record the test-set id as provenance. Without a test set (legacy latency-only
     mode) the rows stay under the packaged s2s-v1 manifest.
 
-    The noisy caller shares that test set, so only the persona separates the two
-    conditions; its provenance names the persona to keep the rows self-describing.
+    Non-clean conditions name the persona in their provenance so the rows stay
+    self-describing.
     """
-    if test_set_id:
-        if noisy_persona_id and persona_id == noisy_persona_id:
-            return DATASET_ID_MULTITURN_NOISY, f"{test_set_id}:{persona_id}"
-        return DATASET_ID_MULTITURN, test_set_id
-    return DATASET_ID, _dataset_sha256()
+    if not test_set_id:
+        return DATASET_ID, _dataset_sha256()
+    condition = _condition_for_persona(persona_id, persona_conditions, noisy_persona_id)
+    dataset_id = dataset_id_for(family, condition)
+    if dataset_id is None:
+        return None
+    if condition is Condition.CLEAN:
+        return dataset_id, test_set_id
+    return dataset_id, f"{test_set_id}:{persona_id}"
+
+
+def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
+    """Parse the persona -> condition setting, rejecting unknown condition names."""
+    if not raw:
+        return None
+    parsed: dict[str, Condition] = {}
+    for persona_id, name in raw.items():
+        try:
+            parsed[persona_id] = Condition(name)
+        except ValueError:
+            valid = ", ".join(c.value for c in Condition)
+            raise RuntimeError(
+                f"coval_s2s_condition_personas[{persona_id!r}] is {name!r}; expected one of {valid}"
+            ) from None
+    return parsed
 
 
 def _parse_time(raw: object) -> datetime | None:
@@ -532,6 +604,7 @@ async def _fetch_one_provider(
     metric_ids: Mapping[Metric, str],
     test_set_id: str | None = None,
     noisy_persona_id: str | None = None,
+    persona_conditions: Mapping[str, Condition] | None = None,
     runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
@@ -547,8 +620,10 @@ async def _fetch_one_provider(
     """
     statuses: list[RunStatus] = []
     candidates: dict[tuple[datetime, str], SampleRun] = {}
+    # The clean caller, plus the legacy single-turn manifest which has no conditions.
+    publishable = {DATASET_ID, dataset_id_for(spec.family, Condition.CLEAN)}
 
-    def note_sample_candidate(coval_run: CovalRun) -> None:
+    def note_sample_candidate(coval_run: CovalRun, dataset_id: str) -> None:
         # Newest-first scan: keep the newest eligible run PER (BUCKET, PERSONA).
         # Multi-turn runs the same test set once per persona, so a provider yields
         # one candidate per persona per day (single-turn has no persona -> a "" key).
@@ -557,9 +632,9 @@ async def _fetch_one_provider(
         # yesterday's before the sampler ever saw it. Staggered arrivals must not
         # shrink the sample; committed only after the staleness check so a stale
         # provider's old recording never ships today.
-        # The noisy caller is under embargo, so its recordings never reach the
-        # public samples card.
-        if noisy_persona_id and coval_run.persona_id == noisy_persona_id:
+        # Every other condition's recording stays internal, as does every recording
+        # from an agent under embargo.
+        if not spec.publish_samples or dataset_id not in publishable:
             return
         bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         key = (bucket_at, coval_run.persona_id)
@@ -589,9 +664,16 @@ async def _fetch_one_provider(
                     error_status=coval_run.error_status,
                 )
                 continue
-            dataset_id, dataset_sha256 = _dataset_identity(
-                test_set_id, coval_run.persona_id, noisy_persona_id
+            identity = _dataset_identity(
+                test_set_id,
+                coval_run.persona_id,
+                noisy_persona_id,
+                family=spec.family,
+                persona_conditions=persona_conditions,
             )
+            if identity is None:
+                continue
+            dataset_id, dataset_sha256 = identity
             condition = condition_for(dataset_id)
             if condition.required not in metric_ids:
                 logger.warning(
@@ -611,7 +693,7 @@ async def _fetch_one_provider(
             )
             persisted = ingestable - pending
             if persisted:
-                note_sample_candidate(coval_run)
+                note_sample_candidate(coval_run, dataset_id)
             if condition.required in persisted and not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
             if not pending:
@@ -635,7 +717,7 @@ async def _fetch_one_provider(
             if status is None:
                 continue
             if status is not RunStatus.FAILED:
-                note_sample_candidate(coval_run)
+                note_sample_candidate(coval_run, dataset_id)
                 if not data_seen:
                     data_seen, newest_data_at = True, coval_run.create_time
             statuses.append(status)
@@ -702,6 +784,11 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
         )
+    # Blank rather than unset would skip its agents with only a warning, which
+    # reads the same as never having configured them.
+    raw_happypath = settings.coval_s2s_happypath_test_set_id
+    if raw_happypath is not None and not raw_happypath.strip():
+        raise RuntimeError("coval_s2s_happypath_test_set_id must not be blank")
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.
     raw_noisy = settings.coval_s2s_noisy_persona_id
@@ -710,6 +797,11 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
     noisy_persona_id = raw_noisy or None
     if noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
+    # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
+    # either order.
+    persona_conditions = _persona_conditions(settings.coval_s2s_condition_personas)
+    if persona_conditions and not test_set_id:
+        raise RuntimeError("coval_s2s_condition_personas requires coval_s2s_test_set_id")
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
@@ -734,14 +826,24 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
                 continue
+            # An agent on its own test set is skipped when that id is missing rather
+            # than falling back to the shared one, which would file its runs under
+            # the wrong family.
+            spec_test_set = (
+                getattr(settings, spec.test_set_id_attr) if spec.test_set_id_attr else test_set_id
+            ) or None
+            if spec.test_set_id_attr and not spec_test_set:
+                logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
+                continue
             statuses[f"{spec.provider}:{spec.model}"], ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=spec,
                 agent_id=agent_id,
                 metric_ids=metric_ids,
-                test_set_id=test_set_id,
+                test_set_id=spec_test_set,
                 noisy_persona_id=noisy_persona_id,
+                persona_conditions=persona_conditions,
                 runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,

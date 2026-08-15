@@ -1119,6 +1119,24 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us-east-1",
         status=_EARLY_ACCESS,
     ),
+    # Pre-launch models named by codename only: these strings reach the results
+    # table and every surface built on it, so they carry no vendor identity of
+    # their own. Leave `creator` unset — it falls back to the provider, which is
+    # the point.
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="colors",
+        model="gray",
+        tags=(_STREAMING, _MULTI),
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="colors",
+        model="red",
+        tags=(_STREAMING, _MULTI),
+        status=_EARLY_ACCESS,
+    ),
 ]
 
 _key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)
