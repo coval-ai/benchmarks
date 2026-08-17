@@ -99,6 +99,7 @@ def _build_provider_map(
             ModelInfo(
                 model=m.model,
                 disabled=m.status in _HIDDEN_STATUSES,
+                early_access=m.status is ModelStatus.EARLY_ACCESS,
                 tags=_model_tags(m),
             )
         )

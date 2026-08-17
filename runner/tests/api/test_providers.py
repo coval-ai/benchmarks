@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
 from tests.api.conftest import INTERNAL_API_KEY
 
 
@@ -64,13 +65,13 @@ async def test_disabled_flag_exposed(client: AsyncClient) -> None:
 
 
 async def test_response_shape_breaking_change(client: AsyncClient) -> None:
-    """models is a list[ModelInfo] (dict with 'model', 'disabled', 'tags'), not a list[str]."""
+    """models is a list[ModelInfo] dict (model/disabled/early_access/tags), not a list[str]."""
     response = await client.get("/v1/providers")
     data = response.json()
     first_model = data["stt"][0]["models"][0]
     assert isinstance(first_model, dict), "models must be dicts, not strings"
-    assert set(first_model.keys()) == {"model", "disabled", "tags"}, (
-        f"ModelInfo keys must be model/disabled/tags, got {set(first_model.keys())}"
+    assert set(first_model.keys()) == {"model", "disabled", "early_access", "tags"}, (
+        f"ModelInfo keys must be model/disabled/early_access/tags, got {set(first_model.keys())}"
     )
 
     openai_entry = next(e for e in data["tts"] if e["provider"] == "openai")
@@ -152,6 +153,37 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     qwen_labels = {(t["category"], t["value"]): t["label"] for t in qwen["tags"]}
     assert ("licensing", "open-weight") in qwen_facets
     assert qwen_labels[("licensing", "open-weight")] == "Open-weight"
+
+
+async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) -> None:
+    """Authorized callers can tell embargoed rows apart; public rows never carry the flag."""
+    public = (await client.get("/v1/providers")).json()
+    assert not any(
+        m["early_access"]
+        for board in ("stt", "tts", "s2s")
+        for entry in public[board]
+        for m in entry["models"]
+    )
+
+    internal = await client.get("/v1/providers", headers={"X-Internal-Key": INTERNAL_API_KEY})
+    internal_data = internal.json()
+    flagged = {
+        (entry["provider"], m["model"])
+        for board in ("stt", "tts", "s2s")
+        for entry in internal_data[board]
+        for m in entry["models"]
+        if m["early_access"]
+    }
+    # Registry-derived, not embargoed_pairs(): retired board keys stay embargoed
+    # for stored artefacts but are not registry entries, so they never appear here.
+    assert flagged == {
+        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+    }
+
+    baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
+    qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
+    assert qwen["early_access"] is True
+    assert qwen["disabled"] is False
 
 
 async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncClient) -> None:
