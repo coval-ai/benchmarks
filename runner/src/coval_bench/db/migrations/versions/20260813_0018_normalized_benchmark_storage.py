@@ -38,7 +38,7 @@ def upgrade() -> None:
             error TEXT,
             failure_origin TEXT CHECK (failure_origin IN ('provider', 'runner')),
             CHECK ((status = 'succeeded' AND error IS NULL AND failure_origin IS NULL) OR (status = 'failed' AND error IS NOT NULL AND error <> '' AND failure_origin IS NOT NULL)),
-            UNIQUE NULLS NOT DISTINCT (run_id, dataset_id, sample_id, provider, model, voice, benchmark)
+            UNIQUE NULLS NOT DISTINCT (run_id, sample_id, provider, model, voice)
         );
 
         CREATE TABLE benchmarks_v2.observation_artifacts (
@@ -172,7 +172,8 @@ def upgrade() -> None:
             END IF;
             IF TG_OP = 'UPDATE' THEN RAISE EXCEPTION 'metric evaluation inputs are immutable'; END IF;
             SELECT observation_id, status INTO evaluation_observation, evaluation_status
-              FROM benchmarks_v2.metric_evaluations WHERE id = NEW.metric_evaluation_id;
+              FROM benchmarks_v2.metric_evaluations
+              WHERE id = NEW.metric_evaluation_id FOR UPDATE;
             IF NEW.observation_artifact_id IS NOT NULL THEN
                 SELECT observation_id INTO artifact_observation FROM benchmarks_v2.observation_artifacts WHERE id = NEW.observation_artifact_id;
             ELSE

@@ -181,7 +181,7 @@ class RunWriter:
              provider_extras, captured_at, status, error, failure_origin)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, COALESCE(%s, now()), %s, %s, %s)
-            ON CONFLICT (run_id, dataset_id, sample_id, provider, model, voice, benchmark)
+            ON CONFLICT (run_id, sample_id, provider, model, voice)
             DO NOTHING
             RETURNING id, run_id, dataset_id, dataset_sha256, sample_id, provider, model,
                       voice, benchmark, source_kind, transport_protocol, submit_to_headers_ms,
@@ -221,17 +221,14 @@ class RunWriter:
                                   submit_to_headers_ms, provider_extras, captured_at, status, error,
                                   failure_origin
                            FROM benchmarks_v2.benchmark_observations
-                           WHERE run_id = %s AND dataset_id = %s AND sample_id = %s
-                             AND provider = %s AND model = %s AND voice IS NOT DISTINCT FROM %s
-                             AND benchmark = %s""",
+                           WHERE run_id = %s AND sample_id = %s AND provider = %s
+                             AND model = %s AND voice IS NOT DISTINCT FROM %s""",
                         (
                             observation.run_id,
-                            observation.dataset_id,
                             observation.sample_id,
                             observation.provider,
                             observation.model,
                             observation.voice,
-                            observation.benchmark,
                         ),
                     )
                     row = await cur.fetchone()

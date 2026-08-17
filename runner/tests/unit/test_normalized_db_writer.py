@@ -401,15 +401,6 @@ def test_observation_contract_and_independent_dataset_identity(
                     'dataset_audio', '[]'::jsonb, 'succeeded')""",
                 (run_id, _SHA),
             )
-        with pytest.raises((psycopg.errors.CheckViolation, psycopg.errors.RaiseException)):
-            cur.execute(
-                """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_type, metric_version, executor, status)
-                   SELECT id, 'WER', 'v1', 'inline', 'partial'
-                   FROM benchmarks_v2.benchmark_observations
-                   WHERE run_id = %s LIMIT 1""",
-                (run_id,),
-            )
         with pytest.raises(psycopg.errors.CheckViolation):
             cur.execute(
                 """INSERT INTO benchmarks_v2.benchmark_observations
@@ -508,6 +499,7 @@ def test_observation_model_validates_artifacts_and_provider_extras() -> None:
     )
     complete = Observation(**base, provider_extras={"provider_flag": True}, artifacts=[artifact])
     assert complete.artifacts[0].duration_ms == 1
+    assert complete.provider_extras == {"provider_flag": True}
     with pytest.raises(ValueError, match="cannot repeat"):
         Observation(**base, artifacts=[artifact, artifact])
     with pytest.raises(ValueError, match="private gs:// object URI"):
@@ -537,7 +529,10 @@ def test_metric_input_models_freeze_one_tagged_artifact_kind() -> None:
     preprocessed = MetricEvaluationInput(
         preprocessing_artifact_id=artifact_id, input_role="preprocessed", input_order=0
     )
-    assert raw.observation_artifact_id == preprocessed.preprocessing_artifact_id
+    assert raw.observation_artifact_id == artifact_id
+    assert raw.preprocessing_artifact_id is None
+    assert preprocessed.preprocessing_artifact_id == artifact_id
+    assert preprocessed.observation_artifact_id is None
     with pytest.raises(ValueError, match="exactly one"):
         MetricEvaluationInput(input_role="missing", input_order=0)
     with pytest.raises(ValueError, match="exactly one"):
@@ -549,7 +544,7 @@ def test_metric_input_models_freeze_one_tagged_artifact_kind() -> None:
         )
     with pytest.raises(ValueError):
         ProcessingStatus("partial")
-    assert RunStatus.PARTIAL == "partial"
+    assert RunStatus.PARTIAL.value == "partial"
 
 
 def test_nested_preprocessing_artifact_update_is_rejected(
@@ -761,6 +756,18 @@ async def test_create_get_is_retry_safe_and_strict(pg_conn: psycopg.Connection[A
                     }
                 )
             )
+        with pytest.raises(ValueError, match="dataset_id"):
+            await writer.insert_observation(
+                observation.model_copy(
+                    update={"id": None, "dataset_id": "different-dataset", "artifacts": []}
+                )
+            )
+        with pytest.raises(ValueError, match="benchmark"):
+            await writer.insert_observation(
+                observation.model_copy(
+                    update={"id": None, "benchmark": Benchmark.TTS, "artifacts": []}
+                )
+            )
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT count(*) AS count FROM benchmarks_v2.observation_artifacts "
@@ -946,20 +953,119 @@ async def test_ensemble_variants_and_frozen_inputs(pg_conn: psycopg.Connection[A
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT dataset_id, evaluation_variant, sample_count
-                   FROM benchmarks_v2.metric_values_by_bucket WHERE value_key = 'primary'
-                   ORDER BY dataset_id, evaluation_variant"""
+                   FROM benchmarks_v2.metric_values_by_bucket WHERE value_key = 'primary'"""
             )
-            assert [
+            assert {
                 (row["dataset_id"], row["evaluation_variant"], row["sample_count"])
                 for row in await cur.fetchall()
-            ] == [
+            } == {
                 ("__all__", "deepgram", 1),
                 ("__all__", "ensemble", 1),
                 ("__all__", "google", 1),
                 ("observation-dataset", "deepgram", 1),
                 ("observation-dataset", "ensemble", 1),
                 ("observation-dataset", "google", 1),
-            ]
+            }
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_metric_input_freeze_serializes_with_lifecycle_updates(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """The input trigger locks an evaluation before checking its queued state."""
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer)
+        observation_id = _required(observation.id)
+        artifact = await writer.insert_preprocessing_artifact(_word_artifact(observation_id))
+
+        def queued(variant: str) -> MetricEvaluation:
+            return MetricEvaluation(
+                observation_id=observation_id,
+                metric_type=str(Metric.WER),
+                metric_version="v1",
+                evaluation_variant=variant,
+                executor=MetricExecutor.INLINE,
+                status=ProcessingStatus.QUEUED,
+            )
+
+        input_first = await writer.insert_metric_evaluation(queued("input-first"))
+        input_first_id = _required(input_first.id)
+        async with pool.connection() as conn_a, conn_a.cursor() as cur_a:
+            await cur_a.execute(
+                """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                   (metric_evaluation_id, preprocessing_artifact_id, input_role, input_order)
+                   VALUES (%s, %s, 'word', 0)""",
+                (input_first_id, _required(artifact.id)),
+            )
+            async with pool.connection() as conn_b, conn_b.cursor() as cur_b:
+                await cur_b.execute("SET LOCAL lock_timeout = '100ms'")
+                # A server lock timeout proves the input trigger holds the evaluation lock.
+                with pytest.raises(psycopg.errors.LockNotAvailable):
+                    await cur_b.execute(
+                        """UPDATE benchmarks_v2.metric_evaluations
+                           SET status = 'running', started_at = %s WHERE id = %s""",
+                        (_NOW, input_first_id),
+                    )
+                await conn_b.rollback()
+            await conn_a.commit()
+        await writer.start_metric_evaluation(input_first_id, started_at=_NOW)
+
+        lifecycle_first = await writer.insert_metric_evaluation(queued("lifecycle-first"))
+        lifecycle_first_id = _required(lifecycle_first.id)
+        async with pool.connection() as conn_b, conn_b.cursor() as cur_b:
+            await cur_b.execute(
+                """UPDATE benchmarks_v2.metric_evaluations
+                   SET status = 'running', started_at = %s WHERE id = %s""",
+                (_NOW, lifecycle_first_id),
+            )
+            async with pool.connection() as conn_a, conn_a.cursor() as cur_a:
+                await cur_a.execute("SET LOCAL lock_timeout = '100ms'")
+                # The input trigger's row lock must wait behind the lifecycle update.
+                with pytest.raises(psycopg.errors.LockNotAvailable):
+                    await cur_a.execute(
+                        """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                           (metric_evaluation_id, preprocessing_artifact_id,
+                            input_role, input_order)
+                           VALUES (%s, %s, 'word', 0)""",
+                        (lifecycle_first_id, _required(artifact.id)),
+                    )
+                await conn_a.rollback()
+            await conn_b.commit()
+        async with pool.connection() as conn_a, conn_a.cursor() as cur_a:
+            with pytest.raises(
+                psycopg.errors.RaiseException, match="only be inserted while queued"
+            ):
+                await cur_a.execute(
+                    """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+                       (metric_evaluation_id, preprocessing_artifact_id, input_role, input_order)
+                       VALUES (%s, %s, 'word', 0)""",
+                    (lifecycle_first_id, _required(artifact.id)),
+                )
+            await conn_a.rollback()
+
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT status FROM benchmarks_v2.metric_evaluations WHERE id = %s",
+                (input_first_id,),
+            )
+            assert _required(await cur.fetchone())["status"] == "running"
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs "
+                "WHERE metric_evaluation_id = %s",
+                (input_first_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 1
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.metric_evaluation_inputs "
+                "WHERE metric_evaluation_id = %s",
+                (lifecycle_first_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 0
     finally:
         await pool.close()
 
@@ -1130,6 +1236,13 @@ def test_database_enforces_queued_creation_and_success_outputs(
             (run_id, _SHA),
         )
         observation_id = _required(cur.fetchone())[0]
+        with pytest.raises(psycopg.errors.RaiseException, match="work rows must be created queued"):
+            cur.execute(
+                """INSERT INTO benchmarks_v2.metric_evaluations
+                   (observation_id, metric_type, metric_version, executor, status)
+                   VALUES (%s, 'WER', 'v1', 'inline', 'partial')""",
+                (observation_id,),
+            )
         with pytest.raises(psycopg.errors.RaiseException, match="created queued"):
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
