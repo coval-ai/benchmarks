@@ -30,6 +30,10 @@ from coval_bench.registries.models import (
     Source,
     Voice,
 )
+from coval_bench.registries.preprocessing import (
+    SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS,
+    validate_preprocessing_artifact_contract,
+)
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
     PROVIDER_VALUED_CATEGORIES,
@@ -44,6 +48,7 @@ __all__ = [
     "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
     "METRIC_VALUE_CONTRACTS",
+    "SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS",
     "SERIES_EXCLUDED_METRICS",
     "MODEL_REGISTRY",
     "Metric",
@@ -65,5 +70,6 @@ __all__ = [
     "is_metric_excluded",
     "validate_metric_contract",
     "validate_metric_values",
+    "validate_preprocessing_artifact_contract",
     "tag_value_label",
 ]

@@ -151,6 +151,23 @@ def _phone_artifact(observation_id: Any) -> PreprocessingArtifact:
     )
 
 
+def _future_artifact(observation_id: Any) -> PreprocessingArtifact:
+    return PreprocessingArtifact(
+        observation_id=observation_id,
+        pipeline="align",
+        pipeline_version="v2",
+        artifact_name="future_artifact",
+        schema_name="FutureArtifactV2",
+        schema_version="v2",
+        producer_name="future_aligner",
+        producer_provider="future-provider",
+        producer_model="future-model",
+        producer_version="future-v2",
+        gcs_uri="gs://private/future",
+        content_sha256="d" * 64,
+    )
+
+
 def _raw_artifact(*, sha: str = _SHA) -> ObservationArtifact:
     return ObservationArtifact(
         artifact_type=ObservationArtifactType.PROVIDER_TRANSCRIPT,
@@ -459,6 +476,21 @@ def test_database_uri_checks_require_bucket_and_object(pg_conn: psycopg.Connecti
                 'word_aligner', 'google', 'latest', 'words-v1', 'gs://private/words', %s)""",
             (observation_id, _SHA),
         )
+        with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as dict_cur:
+            dict_cur.execute(
+                """SELECT id, observation_id, pipeline, pipeline_version, artifact_name,
+                          schema_name, schema_version, producer_name, producer_provider,
+                          producer_model, producer_version, gcs_uri, content_sha256, created_at
+                   FROM benchmarks_v2.preprocessing_artifacts
+                   WHERE observation_id = %s AND artifact_name = 'future_artifact'""",
+                (observation_id,),
+            )
+            future_artifact = PreprocessingArtifact.model_validate(
+                dict(_required(dict_cur.fetchone()))
+            )
+        assert future_artifact.artifact_name == "future_artifact"
+        assert future_artifact.schema_name == "FutureArtifactV2"
+        assert future_artifact.schema_version == "v2"
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
                (observation_id, metric_type, metric_version, executor, status)
@@ -519,6 +551,36 @@ def test_observation_model_validates_artifacts_and_provider_extras() -> None:
         failure_origin=ObservationFailureOrigin.PROVIDER,
     )
     assert failed.failure_origin is ObservationFailureOrigin.PROVIDER
+
+
+@pytest.mark.asyncio
+async def test_preprocessing_artifact_writer_validates_supported_contracts(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer)
+        observation_id = _required(observation.id)
+
+        word = await writer.insert_preprocessing_artifact(_word_artifact(observation_id))
+        phoneme = await writer.insert_preprocessing_artifact(_phone_artifact(observation_id))
+        assert word.schema_version == "v1"
+        assert phoneme.schema_version == "v1"
+
+        with pytest.raises(ValueError, match="unknown preprocessing artifact contract"):
+            await writer.insert_preprocessing_artifact(_future_artifact(observation_id))
+
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.preprocessing_artifacts "
+                "WHERE observation_id = %s AND artifact_name = 'future_artifact'",
+                (observation_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 0
+    finally:
+        await pool.close()
 
 
 def test_metric_input_models_freeze_one_tagged_artifact_kind() -> None:

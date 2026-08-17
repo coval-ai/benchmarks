@@ -13,7 +13,6 @@ import math
 import re
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
@@ -202,9 +201,9 @@ class PreprocessingArtifact(BaseModel):
     observation_id: UUID
     pipeline: str = Field(min_length=1)
     pipeline_version: str = Field(min_length=1)
-    artifact_name: TimestampArtifactName
-    schema_name: TimestampArtifactSchema
-    schema_version: Literal["v1"] = "v1"
+    artifact_name: str = Field(min_length=1)
+    schema_name: str = Field(min_length=1)
+    schema_version: str = Field(default="v1", min_length=1)
     producer_name: str = Field(min_length=1)
     producer_provider: str = Field(min_length=1)
     producer_model: str = Field(min_length=1)
@@ -214,16 +213,6 @@ class PreprocessingArtifact(BaseModel):
     created_at: datetime | None = None
 
     _validate_uri = field_validator("gcs_uri")(_private_gs_uri)
-
-    @model_validator(mode="after")
-    def _artifact_identity(self) -> PreprocessingArtifact:
-        expected = {
-            TimestampArtifactName.WORD_TIMESTAMPS: TimestampArtifactSchema.WORD_TIMESTAMPS_V1,
-            TimestampArtifactName.PHONEME_TIMESTAMPS: TimestampArtifactSchema.PHONEME_TIMESTAMPS_V1,
-        }[self.artifact_name]
-        if self.schema_name is not expected:
-            raise ValueError("artifact name and schema must be a supported pair")
-        return self
 
 
 class MetricEvaluation(BaseModel):

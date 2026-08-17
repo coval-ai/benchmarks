@@ -45,6 +45,7 @@ from coval_bench.registries import (
     Metric,
     validate_metric_contract,
     validate_metric_values,
+    validate_preprocessing_artifact_contract,
 )
 
 STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
@@ -530,6 +531,9 @@ class RunWriter:
         self, artifact: PreprocessingArtifact
     ) -> PreprocessingArtifact:
         """Create or retrieve one immutable, versioned preprocessing artifact."""
+        validate_preprocessing_artifact_contract(
+            artifact.artifact_name, artifact.schema_name, artifact.schema_version
+        )
         fields = (
             "observation_id",
             "pipeline",
