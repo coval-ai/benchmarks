@@ -18,6 +18,7 @@ from coval_bench.registries.metrics import (
     MetricValueContract,
     MetricValueDefinition,
     is_metric_excluded,
+    validate_metric_contract,
     validate_metric_values,
 )
 from coval_bench.registries.models import (
@@ -62,6 +63,7 @@ __all__ = [
     "ModelTag",
     "TagCategory",
     "is_metric_excluded",
+    "validate_metric_contract",
     "validate_metric_values",
     "tag_value_label",
 ]

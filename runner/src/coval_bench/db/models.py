@@ -16,7 +16,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import Gender
@@ -36,6 +36,9 @@ __all__ = [
     "VoteOutcome",
     "VoterType",
     "Observation",
+    "ObservationArtifact",
+    "ObservationArtifactType",
+    "ObservationFailureOrigin",
     "ObservationSourceKind",
     "ObservationStatus",
     "PreprocessingArtifact",
@@ -56,7 +59,6 @@ class ProcessingStatus(StrEnum):
 
     QUEUED = "queued"
     RUNNING = "running"
-    PARTIAL = "partial"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
@@ -69,9 +71,24 @@ class ObservationStatus(StrEnum):
 
 
 class ObservationSourceKind(StrEnum):
+    """Source category; dataset_id/sha256 identify the concrete dataset."""
+
     DATASET_AUDIO = "dataset_audio"
     GENERATED_AUDIO = "generated_audio"
     CONVERSATION_AUDIO = "conversation_audio"
+
+
+class ObservationFailureOrigin(StrEnum):
+    PROVIDER = "provider"
+    RUNNER = "runner"
+
+
+class ObservationArtifactType(StrEnum):
+    PROVIDER_TRANSCRIPT = "provider_transcript"
+    GENERATED_AUDIO = "generated_audio"
+    CONVERSATION_AUDIO = "conversation_audio"
+    CONVERSATION_TRACE = "conversation_trace"
+    TIMING_EVENTS = "timing_events"
 
 
 class MetricExecutor(StrEnum):
@@ -109,9 +126,6 @@ def _validate_processing_lifecycle(
     elif status is ProcessingStatus.SUCCEEDED:
         if started_at is None or finished_at is None or error is not None:
             raise ValueError("succeeded work requires timestamps and no error")
-    elif status is ProcessingStatus.PARTIAL:
-        if started_at is None or finished_at is None:
-            raise ValueError("partial work requires timestamps")
     elif started_at is None or finished_at is None or not error:
         raise ValueError("failed work requires timestamps and an error")
 
@@ -122,9 +136,28 @@ def _private_gs_uri(value: str) -> str:
     return value
 
 
-def _optional_private_gs_uri(value: str | None) -> str | None:
-    """Accept absent source audio while validating any supplied object URI."""
-    return None if value is None else _private_gs_uri(value)
+class ObservationArtifact(BaseModel):
+    """One immutable raw artifact emitted while capturing an observation."""
+
+    id: UUID | None = None
+    observation_id: UUID | None = None
+    artifact_type: ObservationArtifactType
+    schema_name: str = Field(min_length=1)
+    schema_version: str = Field(min_length=1)
+    gcs_uri: str
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size_bytes: int = Field(gt=0)
+    duration_ms: float | None = Field(default=None, gt=0)
+    created_at: datetime | None = None
+
+    _validate_uri = field_validator("gcs_uri")(_private_gs_uri)
+
+    @field_validator("duration_ms")
+    @classmethod
+    def _finite_duration(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("duration_ms must be finite")
+        return value
 
 
 class Observation(BaseModel):
@@ -140,37 +173,27 @@ class Observation(BaseModel):
     voice: str | None = None
     benchmark: Benchmark
     source_kind: ObservationSourceKind
-    audio_filename: str | None = None
     transport_protocol: str | None = None
     submit_to_headers_ms: float | None = Field(default=None, ge=0)
-    audio_uri: str | None = None
-    audio_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    audio_size_bytes: int | None = Field(default=None, gt=0)
-    audio_duration_ms: int | None = Field(default=None, gt=0)
+    provider_extras: dict[str, JsonValue] | None = None
+    artifacts: list[ObservationArtifact] = Field(default_factory=list)
     captured_at: datetime | None = None
     status: ObservationStatus
     error: str | None = None
-
-    _validate_audio_uri = field_validator("audio_uri")(_optional_private_gs_uri)
+    failure_origin: ObservationFailureOrigin | None = None
 
     @model_validator(mode="after")
     def _outcome_matches_error(self) -> Observation:
-        audio_fields = (
-            self.audio_uri,
-            self.audio_sha256,
-            self.audio_size_bytes,
-            self.audio_duration_ms,
-        )
-        if any(value is None for value in audio_fields) and any(
-            value is not None for value in audio_fields
-        ):
-            raise ValueError("audio URI, sha256, size, and duration must be present together")
         if self.submit_to_headers_ms is not None and not math.isfinite(self.submit_to_headers_ms):
             raise ValueError("submit_to_headers_ms must be finite")
-        if self.status is ObservationStatus.SUCCEEDED and self.error is not None:
-            raise ValueError("succeeded observation cannot have an error")
-        if self.status is ObservationStatus.FAILED and not self.error:
-            raise ValueError("failed observation requires an error")
+        if self.status is ObservationStatus.SUCCEEDED:
+            if self.error is not None or self.failure_origin is not None:
+                raise ValueError("succeeded observation cannot have error or failure_origin")
+        elif not self.error or self.failure_origin is None:
+            raise ValueError("failed observation requires error and failure_origin")
+        artifact_types = [artifact.artifact_type for artifact in self.artifacts]
+        if len(artifact_types) != len(set(artifact_types)):
+            raise ValueError("observation artifacts cannot repeat an artifact_type")
         return self
 
 
@@ -188,8 +211,6 @@ class PreprocessingArtifact(BaseModel):
     producer_version: str = Field(min_length=1)
     gcs_uri: str
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    size_bytes: int = Field(gt=0)
-    duration_ms: float | None = Field(default=None, gt=0)
     created_at: datetime | None = None
 
     _validate_uri = field_validator("gcs_uri")(_private_gs_uri)
@@ -227,11 +248,18 @@ class MetricEvaluation(BaseModel):
 
 
 class MetricEvaluationInput(BaseModel):
-    """One immutable, role-aware preprocessing input frozen when work is queued."""
+    """One immutable raw or preprocessing input frozen when work is queued."""
 
-    artifact_id: UUID
+    observation_artifact_id: UUID | None = None
+    preprocessing_artifact_id: UUID | None = None
     input_role: str = Field(min_length=1)
     input_order: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _exactly_one_artifact(self) -> MetricEvaluationInput:
+        if (self.observation_artifact_id is None) == (self.preprocessing_artifact_id is None):
+            raise ValueError("exactly one observation or preprocessing artifact is required")
+        return self
 
 
 class MetricValue(BaseModel):

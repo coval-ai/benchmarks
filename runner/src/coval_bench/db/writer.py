@@ -24,6 +24,7 @@ from uuid import UUID
 
 import psycopg
 import psycopg.rows
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.models import (
@@ -32,13 +33,19 @@ from coval_bench.db.models import (
     MetricEvaluationInput,
     MetricValue,
     Observation,
+    ObservationArtifact,
     PreprocessingArtifact,
     ProcessingStatus,
     Result,
     Run,
     RunStatus,
 )
-from coval_bench.registries import SERIES_EXCLUDED_METRICS, Metric, validate_metric_values
+from coval_bench.registries import (
+    SERIES_EXCLUDED_METRICS,
+    Metric,
+    validate_metric_contract,
+    validate_metric_values,
+)
 
 STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
 
@@ -170,17 +177,15 @@ class RunWriter:
         sql = """
             INSERT INTO benchmarks_v2.benchmark_observations
             (run_id, dataset_id, dataset_sha256, sample_id, provider, model, voice,
-             benchmark, source_kind,
-             audio_filename, transport_protocol, submit_to_headers_ms, audio_uri, audio_sha256,
-             audio_size_bytes, audio_duration_ms, captured_at, status, error)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    COALESCE(%s, now()), %s, %s)
+             benchmark, source_kind, transport_protocol, submit_to_headers_ms,
+             provider_extras, captured_at, status, error, failure_origin)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, COALESCE(%s, now()), %s, %s, %s)
             ON CONFLICT (run_id, dataset_id, sample_id, provider, model, voice, benchmark)
             DO NOTHING
             RETURNING id, run_id, dataset_id, dataset_sha256, sample_id, provider, model,
-                      voice, benchmark, source_kind, audio_filename, transport_protocol,
-                      submit_to_headers_ms, audio_uri,
-                      audio_sha256, audio_size_bytes, audio_duration_ms, captured_at, status, error
+                      voice, benchmark, source_kind, transport_protocol, submit_to_headers_ms,
+                      provider_extras, captured_at, status, error, failure_origin
         """
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -196,16 +201,15 @@ class RunWriter:
                         observation.voice,
                         observation.benchmark,
                         observation.source_kind,
-                        observation.audio_filename,
                         observation.transport_protocol,
                         observation.submit_to_headers_ms,
-                        observation.audio_uri,
-                        observation.audio_sha256,
-                        observation.audio_size_bytes,
-                        observation.audio_duration_ms,
+                        Jsonb(observation.provider_extras)
+                        if observation.provider_extras is not None
+                        else None,
                         observation.captured_at,
                         observation.status,
                         observation.error,
+                        observation.failure_origin,
                     ),
                 )
                 row = await cur.fetchone()
@@ -213,9 +217,9 @@ class RunWriter:
                     await cur.execute(
                         """SELECT id, run_id, dataset_id, dataset_sha256, sample_id,
                                   provider, model,
-                                  voice, benchmark, source_kind, audio_filename, transport_protocol,
-                                  submit_to_headers_ms, audio_uri, audio_sha256, audio_size_bytes,
-                                  audio_duration_ms, captured_at, status, error
+                                  voice, benchmark, source_kind, transport_protocol,
+                                  submit_to_headers_ms, provider_extras, captured_at, status, error,
+                                  failure_origin
                            FROM benchmarks_v2.benchmark_observations
                            WHERE run_id = %s AND dataset_id = %s AND sample_id = %s
                              AND provider = %s AND model = %s AND voice IS NOT DISTINCT FROM %s
@@ -231,22 +235,96 @@ class RunWriter:
                         ),
                     )
                     row = await cur.fetchone()
+                if row is None:  # pragma: no cover
+                    raise RuntimeError("INSERT INTO benchmark_observations returned no row")
+                stored_parent = Observation.model_validate(dict(row))
+                compared_fields = observation.model_fields_set - {"id", "artifacts"}
+                if observation.captured_at is None:
+                    compared_fields.discard("captured_at")
+                mismatches = sorted(
+                    field
+                    for field in compared_fields
+                    if getattr(observation, field) != getattr(stored_parent, field)
+                )
+                if mismatches:
+                    raise ValueError(
+                        "observation retry conflicts with stored immutable fields: "
+                        + ", ".join(mismatches)
+                    )
+                observation_id = row["id"]
+                for artifact in observation.artifacts:
+                    if (
+                        artifact.observation_id is not None
+                        and artifact.observation_id != observation_id
+                    ):
+                        raise ValueError(
+                            "nested artifact observation_id conflicts with observation"
+                        )
+                    await cur.execute(
+                        """INSERT INTO benchmarks_v2.observation_artifacts
+                           (observation_id, artifact_type, schema_name, schema_version, gcs_uri,
+                            content_sha256, size_bytes, duration_ms)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (observation_id, artifact_type) DO NOTHING
+                           RETURNING id, observation_id, artifact_type, schema_name,
+                                     schema_version, gcs_uri, content_sha256, size_bytes,
+                                     duration_ms, created_at""",
+                        (
+                            observation_id,
+                            artifact.artifact_type,
+                            artifact.schema_name,
+                            artifact.schema_version,
+                            artifact.gcs_uri,
+                            artifact.content_sha256,
+                            artifact.size_bytes,
+                            artifact.duration_ms,
+                        ),
+                    )
+                    stored_artifact = await cur.fetchone()
+                    if stored_artifact is None:
+                        await cur.execute(
+                            """SELECT id, observation_id, artifact_type, schema_name,
+                                      schema_version, gcs_uri, content_sha256, size_bytes,
+                                      duration_ms, created_at
+                               FROM benchmarks_v2.observation_artifacts
+                               WHERE observation_id = %s AND artifact_type = %s""",
+                            (observation_id, artifact.artifact_type),
+                        )
+                        stored_artifact = await cur.fetchone()
+                    if stored_artifact is None:  # pragma: no cover
+                        raise RuntimeError("INSERT INTO observation_artifacts returned no row")
+                    stored_model = ObservationArtifact.model_validate(dict(stored_artifact))
+                    artifact_fields = (
+                        "artifact_type",
+                        "schema_name",
+                        "schema_version",
+                        "gcs_uri",
+                        "content_sha256",
+                        "size_bytes",
+                        "duration_ms",
+                    )
+                    mismatches = [
+                        field
+                        for field in artifact_fields
+                        if getattr(artifact, field) != getattr(stored_model, field)
+                    ]
+                    if mismatches:
+                        raise ValueError(
+                            "observation artifact retry conflicts with stored immutable fields: "
+                            + ", ".join(mismatches)
+                        )
+                await cur.execute(
+                    """SELECT id, observation_id, artifact_type, schema_name, schema_version,
+                              gcs_uri, content_sha256, size_bytes, duration_ms, created_at
+                       FROM benchmarks_v2.observation_artifacts
+                       WHERE observation_id = %s ORDER BY artifact_type""",
+                    (observation_id,),
+                )
+                artifact_rows = await cur.fetchall()
             await conn.commit()
-        if row is None:  # pragma: no cover
-            raise RuntimeError("INSERT INTO benchmark_observations returned no row")
-        stored = Observation.model_validate(dict(row))
-        compared_fields = observation.model_fields_set - {"id"}
-        if observation.captured_at is None:
-            compared_fields.discard("captured_at")
-        mismatches = sorted(
-            field
-            for field in compared_fields
-            if getattr(observation, field) != getattr(stored, field)
+        stored = Observation.model_validate(
+            {**dict(row), "artifacts": [dict(item) for item in artifact_rows]}
         )
-        if mismatches:
-            raise ValueError(
-                "observation retry conflicts with stored immutable fields: " + ", ".join(mismatches)
-            )
         return stored
 
     async def insert_metric_evaluation(
@@ -260,10 +338,16 @@ class RunWriter:
             or evaluation.error is not None
         ):
             raise ValueError("metric evaluations must be created queued")
+        validate_metric_contract(evaluation.metric_type, evaluation.metric_version)
         input_keys = [(item.input_role, item.input_order) for item in inputs]
         if len(input_keys) != len(set(input_keys)):
             raise ValueError("metric evaluation inputs must have unique role/order pairs")
-        artifact_ids = [item.artifact_id for item in inputs]
+        artifact_ids = [
+            ("observation", item.observation_artifact_id)
+            if item.observation_artifact_id is not None
+            else ("preprocessing", item.preprocessing_artifact_id)
+            for item in inputs
+        ]
         if len(artifact_ids) != len(set(artifact_ids)):
             raise ValueError("metric evaluation inputs must not repeat an artifact")
         sql = """
@@ -314,18 +398,32 @@ class RunWriter:
                     row = await cur.fetchone()
                 if row is not None:
                     await cur.execute(
-                        """SELECT preprocessing_artifact_id, input_role, input_order
+                        """SELECT observation_artifact_id, preprocessing_artifact_id,
+                                  input_role, input_order
                            FROM benchmarks_v2.metric_evaluation_inputs
                            WHERE metric_evaluation_id = %s ORDER BY input_role, input_order""",
                         (row["id"],),
                     )
                     stored_inputs = await cur.fetchall()
                     expected_inputs = sorted(
-                        ((item.artifact_id, item.input_role, item.input_order) for item in inputs),
-                        key=lambda item: (item[1], item[2]),
+                        (
+                            (
+                                item.observation_artifact_id,
+                                item.preprocessing_artifact_id,
+                                item.input_role,
+                                item.input_order,
+                            )
+                            for item in inputs
+                        ),
+                        key=lambda item: (item[2], item[3]),
                     )
                     actual_inputs = [
-                        (item["preprocessing_artifact_id"], item["input_role"], item["input_order"])
+                        (
+                            item["observation_artifact_id"],
+                            item["preprocessing_artifact_id"],
+                            item["input_role"],
+                            item["input_order"],
+                        )
                         for item in stored_inputs
                     ]
                     if not created and actual_inputs != expected_inputs:
@@ -337,11 +435,17 @@ class RunWriter:
                     if created and inputs:
                         await cur.executemany(
                             """INSERT INTO benchmarks_v2.metric_evaluation_inputs
-                               (metric_evaluation_id, preprocessing_artifact_id,
-                                input_role, input_order)
-                               VALUES (%s, %s, %s, %s)""",
+                               (metric_evaluation_id, observation_artifact_id,
+                                preprocessing_artifact_id, input_role, input_order)
+                               VALUES (%s, %s, %s, %s, %s)""",
                             [
-                                (row["id"], item.artifact_id, item.input_role, item.input_order)
+                                (
+                                    row["id"],
+                                    item.observation_artifact_id,
+                                    item.preprocessing_artifact_id,
+                                    item.input_role,
+                                    item.input_order,
+                                )
                                 for item in inputs
                             ],
                         )
@@ -442,8 +546,6 @@ class RunWriter:
             "producer_version",
             "gcs_uri",
             "content_sha256",
-            "size_bytes",
-            "duration_ms",
         )
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -451,9 +553,8 @@ class RunWriter:
                     """INSERT INTO benchmarks_v2.preprocessing_artifacts
                        (observation_id, pipeline, pipeline_version, artifact_name, schema_name,
                         schema_version, producer_name, producer_provider, producer_model,
-                        producer_version, gcs_uri, content_sha256,
-                        size_bytes, duration_ms)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        producer_version, gcs_uri, content_sha256)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        ON CONFLICT (observation_id, pipeline, pipeline_version,
                                     artifact_name, schema_name, producer_name, producer_provider,
                                     producer_model, producer_version, schema_version)
@@ -461,8 +562,7 @@ class RunWriter:
                        RETURNING id, observation_id, pipeline, pipeline_version,
                                  artifact_name, schema_name, schema_version, producer_name,
                                  producer_provider, producer_model,
-                                 producer_version, gcs_uri, content_sha256,
-                                 size_bytes, duration_ms, created_at""",
+                                 producer_version, gcs_uri, content_sha256, created_at""",
                     tuple(getattr(artifact, field) for field in fields),
                 )
                 row = await cur.fetchone()
@@ -471,8 +571,7 @@ class RunWriter:
                         """SELECT id, observation_id, pipeline, pipeline_version,
                                   artifact_name, schema_name, schema_version, producer_name,
                                   producer_provider, producer_model,
-                                  producer_version, gcs_uri, content_sha256,
-                                  size_bytes, duration_ms, created_at
+                                  producer_version, gcs_uri, content_sha256, created_at
                            FROM benchmarks_v2.preprocessing_artifacts
                            WHERE observation_id = %s AND pipeline = %s AND pipeline_version = %s
                              AND artifact_name = %s AND schema_name = %s

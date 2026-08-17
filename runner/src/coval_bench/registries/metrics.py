@@ -206,6 +206,16 @@ METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
 )
 
 
+def validate_metric_contract(metric: Metric | str, version: str) -> MetricValueContract:
+    """Resolve one supported metric/version contract from the application registry."""
+    try:
+        return METRIC_VALUE_CONTRACTS[(Metric(metric), version)]
+    except ValueError as exc:
+        raise ValueError(f"unknown metric {metric!r}") from exc
+    except KeyError as exc:
+        raise ValueError(f"unknown metric/version {metric!r}/{version!r}") from exc
+
+
 def validate_metric_values(
     metric: Metric | str,
     version: str,
@@ -216,12 +226,7 @@ def validate_metric_values(
     Values are ``(key, unit, value, is_primary)`` tuples so the persistence
     layer remains free to use its own Pydantic input models.
     """
-    try:
-        contract = METRIC_VALUE_CONTRACTS[(Metric(metric), version)]
-    except ValueError as exc:
-        raise ValueError(f"unknown metric {metric!r}") from exc
-    except KeyError as exc:
-        raise ValueError(f"unknown metric/version {metric!r}/{version!r}") from exc
+    contract = validate_metric_contract(metric, version)
     definitions = {definition.key: definition for definition in contract.values}
     seen: set[str] = set()
     primary_count = 0
