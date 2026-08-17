@@ -589,6 +589,32 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="cartesia",
+        # Rolling pointer to Cartesia's next unreleased model; rename to the
+        # GA model id before promoting past EARLY_ACCESS.
+        model="sonic-preview",
+        voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        voices=(
+            Voice(
+                id="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+                gender=Gender.FEMALE,
+                name="Skylar",
+                accent="en-US",
+            ),
+            Voice(
+                id="30894953-bcce-41fe-892c-15ce19c843ff",
+                gender=Gender.MALE,
+                name="Parker",
+                accent="en-US",
+            ),
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
+        on_prem=True,
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="deepgram",
         model="aura-2-thalia-en",
         voice="aura-2-thalia-en",
