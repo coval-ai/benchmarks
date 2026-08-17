@@ -331,11 +331,19 @@ def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
 
 
+def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Interruptions per minute, stored as-is; a clip with no numeric value becomes a FAILED row."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return round(float(raw), 2), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
 # The only per-metric part: one raw Coval value -> (row value, status), or None to
 # write no row. A metric is ingestable once it appears here.
 _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
     Metric.V2V: _v2v_value,
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
+    Metric.INTERRUPTION_RATE: _interruption_value,
 }
 
 

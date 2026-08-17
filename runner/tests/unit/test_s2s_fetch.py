@@ -33,6 +33,7 @@ from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
 
 IDS = {Metric.V2V: "MID", Metric.INSTRUCTION_FOLLOWING: "IID"}
 LATENCY_IDS = {Metric.V2V: "MID"}
+ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
 SPEC = AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime")
 
@@ -810,7 +811,13 @@ async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_rejects_a_metric_with_no_row_builder() -> None:
+async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Simulate a configured metric whose mapper is missing.
+    mappers = dict(fetch_v2v._VALUE_MAPPERS)
+    del mappers[Metric.INTERRUPTION_RATE]
+    monkeypatch.setattr(fetch_v2v, "_VALUE_MAPPERS", mappers)
     settings = Settings(
         runner_sha="test",
         coval_s2s_latency_metric_id="MID",
@@ -821,6 +828,56 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder() -> None:
     )
     with pytest.raises(RuntimeError, match="no _VALUE_MAPPERS entry"):
         await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+def test_interruption_value_maps() -> None:
+    assert fetch_v2v._interruption_value(1.1666666666666632) == (1.17, ResultStatus.SUCCESS)
+    assert fetch_v2v._interruption_value(0) == (0.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._interruption_value(None) == (None, ResultStatus.FAILED)
+    assert fetch_v2v._interruption_value("1.5") == (None, ResultStatus.FAILED)
+    assert fetch_v2v._interruption_value(True) == (None, ResultStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_writes_interruption_rows() -> None:
+    writer = _stub_writer()
+    latency = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(2)]
+    instruction = [{"simulation_output_id": f"s{i}", "value": "YES"} for i in range(2)]
+    interruption = [
+        {"simulation_output_id": "s0", "value": 1.25},
+        {"simulation_output_id": "s1", "value": None},
+    ]
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "metrics": {
+                    "MID": {"values": latency},
+                    "IID": {"values": instruction},
+                    "RID": {"values": interruption},
+                }
+            },
+        }
+    }
+    async with _fake_client({}, run_json) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            metric_ids=ALL_IDS,
+            condition=condition_for(DATASET_ID_MULTITURN),
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    irr = [r for r in rows if r.metric_type == Metric.INTERRUPTION_RATE]
+    assert [(r.audio_filename, r.metric_value, r.status) for r in irr] == [
+        ("R1/s0", 1.25, ResultStatus.SUCCESS),
+        ("R1/s1", None, ResultStatus.FAILED),
+    ]
+    assert all(r.metric_units == "per_minute" for r in irr)
 
 
 @pytest.mark.asyncio
