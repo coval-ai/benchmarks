@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections import Counter
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -92,12 +93,10 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
-    # Serving region behind the endpoint we benchmark, normalized to
-    # ``us-east-1``-style codes regardless of cloud. Broad ``us``/``eu`` when
-    # only the geography is known; ``global`` when the provider documents
-    # globally routed serving. Unset means unknown. Geo-routed endpoints
-    # record where our runner's traffic lands.
-    region: str | None = None
+    # Coarse server location of the endpoint we benchmark. Unset means
+    # unknown. Geo- or globally routed endpoints record where our runner's
+    # traffic lands.
+    region: Literal["us", "eu", "asia"] | None = None
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
@@ -202,7 +201,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="universal-streaming",
         tags=(_STREAMING, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -211,7 +210,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="universal-streaming-multilingual",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
@@ -222,7 +221,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="universal-3-pro",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -231,7 +230,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="universal-3.5-pro",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM, _CONVCTX),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -240,7 +239,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="default",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         on_prem=True,
-        region="eu-west-3",
+        region="eu",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -249,7 +248,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="enhanced",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         on_prem=True,
-        region="eu-west-3",
+        region="eu",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -257,7 +256,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="gradium",
         model="default",
         tags=(_STREAMING, _MULTI, _VAD),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -265,7 +264,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="gladia",
         model="solaria-1",
         tags=(_STREAMING, _MULTI, _VAD, _TRANS, _CODESW, _KEYTERM),
-        region="eu-west",
+        region="eu",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -289,7 +288,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="inworld",
         model="inworld-stt-1",
         tags=(_STREAMING, _MULTI, _VAD, _KEYTERM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -297,7 +296,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="xai",
         model="grok-stt",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -305,7 +304,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="smallest",
         model="pulse",
         tags=(_STREAMING, _MULTI, _DIAR, _CODESW),
-        region="us-west-2",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -338,6 +337,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
         on_prem=True,
+        region="us",
         status=_EARLY_ACCESS,
     ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
@@ -348,7 +348,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_PAUSED,
     ),
     RegisteredModel(
@@ -357,7 +357,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="chirp_2",
         tags=(_STREAMING, _MULTI, _VAD, _KEYTERM),
         on_prem=True,
-        region="us-central-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -376,7 +376,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="rev",
         tags=(_STREAMING, _KEYTERM),
         on_prem=True,
-        region="us-west-2",
+        region="us",
         status=_ACTIVE,
     ),
     # Together AI serverless realtime endpoints (open-weight models).
@@ -445,7 +445,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="velma-2-stt-streaming-english-v2",
         tags=(_STREAMING,),
-        region="us-east-1",
+        region="us",
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
@@ -453,7 +453,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="velma-2-stt-streaming",
         tags=(_STREAMING, _MULTI, _DIAR),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     # Pre-Velma-2 ids; retired so their orphaned result rows stay off the site.
@@ -462,7 +462,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="english-fast-transcription-streaming",
         tags=(_STREAMING,),
-        region="us-east-1",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -470,7 +470,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="modulate",
         model="multilingual-transcription-streaming",
         tags=(_STREAMING, _MULTI, _DIAR),
-        region="us-east-1",
+        region="us",
         status=_RETIRED,
     ),
     #######
@@ -627,7 +627,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="6MFfc37kq0sBjBjy", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -637,7 +637,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="default_low",
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         on_prem=True,
-        region="us-central-1",
+        region="us",
         status=_ACTIVE,
     ),
     # Rime — all three on /ws3 WebSocket.
@@ -650,7 +650,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="masonry", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         on_prem=True,
-        region="us-west-2",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -660,7 +660,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="luna",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        region="us-west-2",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -671,7 +671,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="luna", gender=Gender.FEMALE), Voice(id="cedar", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
         on_prem=True,
-        region="us-west-2",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -681,7 +681,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="luna",
         tags=(_STREAMING, _MULTI),
         on_prem=True,
-        region="us-west-2",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -709,7 +709,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="carina",
         voices=(Voice(id="carina", gender=Gender.FEMALE), Voice(id="altair", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -719,7 +719,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="kelsey",
         voices=(Voice(id="kelsey", gender=Gender.FEMALE), Voice(id="spencer", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
-        region="us-west-2",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -732,7 +732,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -745,7 +745,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="Jason", gender=Gender.MALE, accent="en-US"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -755,7 +755,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Brooke",
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -765,7 +765,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Brooke",
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_RETIRED,
     ),
     RegisteredModel(
@@ -805,7 +805,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _EMOTION, _STREAM),
         on_prem=True,
-        region="us-east-1",
+        region="us",
         status=_PAUSED,
     ),
     RegisteredModel(
@@ -829,7 +829,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         creator="microsoft",
         tags=(_STREAMING, _MULTI, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_PAUSED,
     ),
     RegisteredModel(
@@ -861,7 +861,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             ),
         ),
         tags=(_STREAMING, _MULTI, _STREAM),
-        region="global",
+        region="us",
         status=_ACTIVE,
         arena_enabled=False,
     ),
@@ -871,7 +871,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gemini-2.5-flash-tts",
         voice="Kore",
         tags=(_STREAMING, _MULTI, _EMOTION),
-        region="global",
+        region="us",
         status=_PENDING,
         arena_enabled=False,
     ),
@@ -887,6 +887,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.DEDICATED_INFERENCE,
         licensing=_OPEN,
         on_prem=True,
+        region="us",
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
@@ -896,7 +897,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Cherry",
         voices=(Voice(id="Cherry", gender=Gender.FEMALE), Voice(id="Ethan", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
-        region="ap-southeast-1",
+        region="asia",
         status=_ACTIVE,
     ),
     # Fish Audio. Voice ids are library reference_ids, not names.
@@ -910,7 +911,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="fa4c9eb3dccc4806b382b40d61c6b10a", gender=Gender.MALE, name="Sawyer"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-west-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -923,7 +924,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="fa4c9eb3dccc4806b382b40d61c6b10a", gender=Gender.MALE, name="Sawyer"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-west-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -936,7 +937,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="fa4c9eb3dccc4806b382b40d61c6b10a", gender=Gender.MALE, name="Sawyer"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-west-1",
+        region="us",
         status=_ACTIVE,
     ),
     # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
@@ -950,7 +951,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="English_magnetic_voiced_man", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -963,7 +964,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="English_magnetic_voiced_man", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_ACTIVE,
     ),
     RegisteredModel(
@@ -976,7 +977,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="hugh_32", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _CLONE, _EMOTION),
-        region="us-east",
+        region="us",
         status=_ACTIVE,
         arena_enabled=False,
     ),
@@ -990,7 +991,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="hugh_32", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION),
-        region="us-east",
+        region="us",
         status=_ACTIVE,
         arena_enabled=False,
     ),
@@ -1005,6 +1006,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="grove", gender=Gender.MALE, accent="en-US"),
         ),
         tags=(_STREAMING, _CLONE, _EMOTION),
+        region="us",
         status=_ACTIVE,
         arena_enabled=False,
     ),
@@ -1030,7 +1032,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="b2abb241-ac92-48bf-a890-fec03f43e209", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
-        region="us-east-1",
+        region="us",
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
@@ -1040,7 +1042,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Amara",
         voices=(Voice(id="Amara", gender=Gender.FEMALE), Voice(id="Gordon", gender=Gender.MALE)),
         tags=(_STREAMING, _MULTI, _STREAM),
-        region="us-east-2",
+        region="us",
         status=_ACTIVE,
         arena_enabled=False,
     ),
@@ -1054,7 +1056,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
             Voice(id="noah-en-us", gender=Gender.MALE, name="Noah", accent="en-US"),
         ),
         tags=(_STREAMING, _MULTI, _CLONE),
-        region="eu-central-1",
+        region="eu",
         status=_EARLY_ACCESS,
         arena_enabled=False,
     ),
@@ -1096,7 +1098,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="google",
         model="gemini-live",
         tags=(_STREAMING, _MULTI),
-        region="global",
+        region="us",
         status=_ACTIVE,
     ),
     # xAI stays under the early-access embargo while they are unresponsive to
@@ -1108,7 +1110,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="xai",
         model="grok-voice-think-fast-1.0",
         tags=(_STREAMING, _MULTI),
-        region="us-east-1",
+        region="us",
         status=_EARLY_ACCESS,
     ),
     RegisteredModel(
@@ -1116,7 +1118,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="xai",
         model="grok-voice-think-fast-2.0",
         tags=(_STREAMING, _MULTI),
-        region="us-east-1",
+        region="us",
         status=_EARLY_ACCESS,
     ),
     # Pre-launch models named by codename only: these strings reach the results
