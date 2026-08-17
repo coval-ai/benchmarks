@@ -101,6 +101,7 @@ class ModelInfo(BaseModel):
 
     model: str
     disabled: bool = False
+    early_access: bool = False
     tags: list[ModelTagOut] = []
 
 
