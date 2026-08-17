@@ -79,7 +79,7 @@ CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.SOURCE: "Source",
     TagCategory.LICENSING: "Licensing",
     TagCategory.DEPLOYMENT: "Deployment",
-    TagCategory.REGION: "Inference region",
+    TagCategory.REGION: "Server location",
 }
 
 if CATEGORY_LABELS.keys() != set(TagCategory):
@@ -91,11 +91,10 @@ PROVIDER_VALUED_CATEGORIES: frozenset[TagCategory] = frozenset(
     {TagCategory.HOST, TagCategory.CREATOR}
 )
 
-# Broad region values get a readable label; granular codes stay raw.
 _REGION_LABELS: dict[str, str] = {
     "us": "US",
     "eu": "Europe",
-    "global": "Global",
+    "asia": "Asia",
 }
 
 # Value labels that aren't a plain capitalization.
@@ -114,7 +113,7 @@ _VALUE_LABELS: dict[str, str] = {
 
 
 def tag_value_label(category: TagCategory, value: str) -> str:
-    """Display label for a tag value. Provider- and region-valued keep the raw id."""
+    """Display label for a tag value. Provider-valued categories keep the raw id."""
     if category in PROVIDER_VALUED_CATEGORIES:
         return value
     if category is TagCategory.TYPE:

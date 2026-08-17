@@ -186,17 +186,10 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
     assert qwen["disabled"] is False
 
 
-async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncClient) -> None:
-    """Region is emitted only where known; granular labels stay raw, broad ones readable."""
+async def test_region_facet_buckets_and_labels(client: AsyncClient) -> None:
+    """Server location is a coarse us/eu/asia facet with readable labels."""
     response = await client.get("/v1/providers")
     data = response.json()
-
-    fishaudio = next(e for e in data["tts"] if e["provider"] == "fishaudio")
-    for model in fishaudio["models"]:
-        region = next(t for t in model["tags"] if t["category"] == "region")
-        assert region["value"] == "us-west-1"
-        # Raw, not "Us-west-1": region skips the capitalize() every other facet gets.
-        assert region["label"] == "us-west-1"
 
     elevenlabs = next(e for e in data["tts"] if e["provider"] == "elevenlabs")
     for model in elevenlabs["models"]:
@@ -210,14 +203,18 @@ async def test_region_facet_rides_only_on_models_that_report_one(client: AsyncCl
         assert region["value"] == "eu"
         assert region["label"] == "Europe"
 
+    alibaba = next(e for e in data["tts"] if e["provider"] == "alibaba")
+    for model in alibaba["models"]:
+        region = next(t for t in model["tags"] if t["category"] == "region")
+        assert region["value"] == "asia"
+        assert region["label"] == "Asia"
+
+    # Globally routed serving records where the runner's traffic lands.
     google = next(e for e in data["tts"] if e["provider"] == "google")
     chirp = next(m for m in google["models"] if m["model"] == "chirp-3-hd")
     region = next(t for t in chirp["tags"] if t["category"] == "region")
-    assert region["value"] == "global"
-    assert region["label"] == "Global"
-
-    fluxions = next(e for e in data["tts"] if e["provider"] == "fluxions")
-    assert not [t for m in fluxions["models"] for t in m["tags"] if t["category"] == "region"]
+    assert region["value"] == "us"
+    assert region["label"] == "US"
 
 
 async def test_tag_categories_metadata(client: AsyncClient) -> None:
