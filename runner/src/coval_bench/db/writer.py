@@ -728,7 +728,7 @@ class RunWriter:
                 )
             await conn.commit()
 
-    async def refresh_metric_values_bucket(self, run_id: int, *, period_seconds: int) -> None:
+    async def refresh_metric_values_bucket(self, run_id: int) -> None:
         """Idempotently recompute normalized metric rollups for a run's bucket."""
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
@@ -739,7 +739,7 @@ class RunWriter:
                 bucket_at = row["scheduled_at"] if row is not None else None
                 if bucket_at is None:
                     return
-                params = {"bucket": bucket_at, "period": period_seconds}
+                params = {"bucket": bucket_at}
                 await cur.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket',"
                     " extract(epoch FROM %(bucket)s::timestamptz)::bigint))",

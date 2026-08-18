@@ -1012,12 +1012,8 @@ async def test_ensemble_variants_and_frozen_inputs(pg_conn: psycopg.Connection[A
                 finished_at=finished,
             )
         await writer.finish_run(_required(observation.run_id), status=RunStatus.SUCCEEDED)
-        await writer.refresh_metric_values_bucket(
-            _required(observation.run_id), period_seconds=1800
-        )
-        await writer.refresh_metric_values_bucket(
-            _required(observation.run_id), period_seconds=1800
-        )
+        await writer.refresh_metric_values_bucket(_required(observation.run_id))
+        await writer.refresh_metric_values_bucket(_required(observation.run_id))
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT dataset_id, evaluation_variant, sample_count
@@ -1492,8 +1488,8 @@ async def test_rollup_is_idempotent_and_cascades(pg_conn: psycopg.Connection[Any
             finished_at=_NOW + timedelta(seconds=1),
         )
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
-        await writer.refresh_metric_values_bucket(run_id, period_seconds=1800)
-        await writer.refresh_metric_values_bucket(run_id, period_seconds=1800)
+        await writer.refresh_metric_values_bucket(run_id)
+        await writer.refresh_metric_values_bucket(run_id)
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 "SELECT dataset_id FROM benchmarks_v2.metric_values_by_bucket ORDER BY dataset_id"
