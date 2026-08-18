@@ -106,7 +106,7 @@ async def test_minimax_tts_sends_start_continue_finish(minimax_settings: Setting
     assert sent[0]["event"] == "task_start"
     assert sent[0]["model"] == "speech-2.8-hd"
     assert sent[0]["voice_setting"] == {"voice_id": _VOICE}
-    assert sent[0]["audio_setting"] == {"format": "pcm", "sample_rate": 44100, "channel": 1}
+    assert sent[0]["audio_setting"] == {"format": "pcm", "sample_rate": 24000, "channel": 1}
     assert sent[1] == {"event": "task_continue", "text": "Hello world"}
     assert sent[2] == {"event": "task_finish"}
     if result.audio_path is not None:

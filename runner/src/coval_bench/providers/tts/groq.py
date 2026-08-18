@@ -37,7 +37,7 @@ _MAX_INPUT_CHARS = 200
 
 _API_BASE_URL = "https://api.groq.com/openai/v1"
 _HOST_BASE_URL = "https://api.groq.com"
-_FALLBACK_SAMPLE_RATE = 24000
+_SAMPLE_RATE = 24000
 
 
 class GroqTTSProvider(TTSProvider):
@@ -93,7 +93,7 @@ class GroqTTSProvider(TTSProvider):
                 model=self._model,
                 voice=self._voice,
                 pcm=b"",
-                sample_rate=_FALLBACK_SAMPLE_RATE,
+                sample_rate=_SAMPLE_RATE,
                 audio_synthesis_start=None,
                 first_audio_chunk_at=None,
                 error=(
@@ -116,6 +116,8 @@ class GroqTTSProvider(TTSProvider):
                 voice=self._voice,
                 input=text,
                 response_format="wav",
+                # Groq extension; the WAV header stays authoritative at decode.
+                extra_body={"sample_rate": _SAMPLE_RATE},
             ) as response:
                 http_version = response.http_version
                 setup_ms = submit_to_headers_ms(response.http_response.request)
@@ -132,7 +134,7 @@ class GroqTTSProvider(TTSProvider):
                 model=self._model,
                 voice=self._voice,
                 pcm=b"",
-                sample_rate=_FALLBACK_SAMPLE_RATE,
+                sample_rate=_SAMPLE_RATE,
                 audio_synthesis_start=start,
                 first_audio_chunk_at=first_chunk_at,
                 error=str(exc),
@@ -159,7 +161,7 @@ class GroqTTSProvider(TTSProvider):
 
 def _wav_to_pcm(data: bytes) -> tuple[bytes, int, str | None]:
     if not data:
-        return b"", _FALLBACK_SAMPLE_RATE, "no audio bytes received from Groq"
+        return b"", _SAMPLE_RATE, "no audio bytes received from Groq"
     try:
         with wave.open(io.BytesIO(data), "rb") as wf:
             sample_rate = wf.getframerate()
@@ -167,7 +169,7 @@ def _wav_to_pcm(data: bytes) -> tuple[bytes, int, str | None]:
             n_channels = wf.getnchannels()
             pcm = wf.readframes(wf.getnframes())
     except (wave.Error, EOFError) as exc:
-        return b"", _FALLBACK_SAMPLE_RATE, f"Groq returned non-WAV audio: {exc}"
+        return b"", _SAMPLE_RATE, f"Groq returned non-WAV audio: {exc}"
     if n_channels != 1 or sampwidth != 2:
         return (
             b"",
