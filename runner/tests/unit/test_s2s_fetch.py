@@ -281,6 +281,19 @@ async def test_backfill_publishes_no_samples() -> None:
     assert sampled == []
 
 
+def test_expected_sample_models_excludes_non_publishing_agents() -> None:
+    settings = Settings.model_construct(
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_gray_agent_id="a2",
+        coval_s2s_red_agent_id="a3",
+    )
+    expected = fetch_v2v._expected_sample_models(settings)
+
+    assert ("openai", "gpt-realtime") in expected
+    assert ("colors", "gray") not in expected
+    assert ("colors", "red") not in expected
+
+
 def test_bucket_start_floors_to_grid() -> None:
     at = datetime(2026, 7, 7, 4, 59, 59, tzinfo=UTC)
     assert fetch_v2v._bucket_start(at, 10_800) == datetime(2026, 7, 7, 3, tzinfo=UTC)

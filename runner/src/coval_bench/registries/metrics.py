@@ -10,6 +10,7 @@ app-side against already-aggregated rows; the database stores plain strings.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 
 from pydantic import BaseModel
@@ -40,6 +41,13 @@ class MetricDirection(StrEnum):
     HIGHER_IS_BETTER = "higher"
 
 
+class MetricValueRole(StrEnum):
+    """The semantic role of a value emitted by a metric evaluation."""
+
+    PRIMARY = "primary"
+    COMPONENT = "component"
+
+
 class MetricSpec(BaseModel, frozen=True):
     """Display metadata for one metric."""
 
@@ -48,6 +56,27 @@ class MetricSpec(BaseModel, frozen=True):
     direction: MetricDirection
     decimals: int
     benchmarks: frozenset[Benchmark]
+
+
+class MetricValueDefinition(BaseModel, frozen=True):
+    """One value in the normalized, versioned metric result contract."""
+
+    key: str
+    unit: str
+    minimum: float | None = None
+    maximum: float | None = None
+    value_role: MetricValueRole = MetricValueRole.COMPONENT
+    required: bool = True
+
+
+class MetricValueContract(BaseModel, frozen=True):
+    """The values emitted by one metric implementation version."""
+
+    metric: Metric
+    version: str
+    values: tuple[MetricValueDefinition, ...]
+    component_sum_tolerance: float | None = None
+    optional_all_or_none: tuple[frozenset[str], ...] = ()
 
 
 # ``units`` values must stay byte-identical to what the orchestrator has
@@ -140,6 +169,116 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
 if METRIC_SPECS.keys() != set(Metric):
     _missing = ", ".join(sorted(set(Metric) - METRIC_SPECS.keys()))
     raise RuntimeError(f"METRIC_SPECS is missing specs for: {_missing}")
+
+
+def _primary(metric: Metric) -> MetricValueDefinition:
+    spec = METRIC_SPECS[metric]
+    # WER can legitimately exceed 100% when insertions outnumber reference
+    # words. Only the binary instruction-following rate is intrinsically bounded.
+    maximum = 100.0 if metric is Metric.INSTRUCTION_FOLLOWING else None
+    return MetricValueDefinition(
+        key="primary",
+        unit=spec.units,
+        minimum=0.0,
+        maximum=maximum,
+        value_role=MetricValueRole.PRIMARY,
+    )
+
+
+# This is deliberately independent from the legacy result-column layout.  A
+# metric implementation can add a new version without changing public rows.
+METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
+    (metric, "v1"): MetricValueContract(metric=metric, version="v1", values=(_primary(metric),))
+    for metric in Metric
+}
+METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
+    metric=Metric.WER,
+    version="v1",
+    values=(
+        _primary(Metric.WER),
+        MetricValueDefinition(key="insertions", unit="percent", minimum=0.0),
+        MetricValueDefinition(key="deletions", unit="percent", minimum=0.0),
+        MetricValueDefinition(key="substitutions", unit="percent", minimum=0.0),
+    ),
+    component_sum_tolerance=0.0001,
+)
+METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
+    metric=Metric.TTFA,
+    version="v1",
+    values=(
+        _primary(Metric.TTFA),
+        MetricValueDefinition(key="roundtrip", unit="milliseconds", minimum=0.0, required=False),
+        MetricValueDefinition(
+            key="leading_silence", unit="milliseconds", minimum=0.0, required=False
+        ),
+    ),
+    component_sum_tolerance=0.001,
+    optional_all_or_none=(frozenset({"roundtrip", "leading_silence"}),),
+)
+
+
+def validate_metric_contract(metric: Metric | str, version: str) -> MetricValueContract:
+    """Resolve one supported metric/version contract from the application registry."""
+    try:
+        return METRIC_VALUE_CONTRACTS[(Metric(metric), version)]
+    except ValueError as exc:
+        raise ValueError(f"unknown metric {metric!r}") from exc
+    except KeyError as exc:
+        raise ValueError(f"unknown metric/version {metric!r}/{version!r}") from exc
+
+
+def validate_metric_values(
+    metric: Metric | str,
+    version: str,
+    values: tuple[tuple[str, str, float, MetricValueRole], ...],
+) -> None:
+    """Validate one normalized metric evaluation before it reaches the DB.
+
+    Values are ``(key, unit, value, value_role)`` tuples so the persistence
+    layer remains free to use its own Pydantic input models.
+    """
+    contract = validate_metric_contract(metric, version)
+    definitions = {definition.key: definition for definition in contract.values}
+    seen: set[str] = set()
+    primary_count = 0
+    by_key: dict[str, float] = {}
+    for key, unit, value, value_role in values:
+        if key in seen:
+            raise ValueError(f"duplicate metric value key {key!r}")
+        seen.add(key)
+        definition = definitions.get(key)
+        if definition is None:
+            raise ValueError(f"unknown metric value key {key!r}")
+        if unit != definition.unit:
+            raise ValueError(f"wrong unit for {key!r}: {unit!r}")
+        if value_role != definition.value_role:
+            raise ValueError(f"wrong value role for {key!r}")
+        if not math.isfinite(value):
+            raise ValueError(f"metric value {key!r} must be finite")
+        if definition.minimum is not None and value < definition.minimum:
+            raise ValueError(f"metric value {key!r} is below its minimum")
+        if definition.maximum is not None and value > definition.maximum:
+            raise ValueError(f"metric value {key!r} is above its maximum")
+        primary_count += int(value_role is MetricValueRole.PRIMARY)
+        by_key[key] = value
+    if primary_count != 1:
+        raise ValueError("metric evaluation must contain exactly one primary value")
+    required_keys = {definition.key for definition in contract.values if definition.required}
+    if not required_keys <= seen:
+        missing = ", ".join(sorted(required_keys - seen))
+        raise ValueError(f"missing metric value keys: {missing}")
+    for optional_group in contract.optional_all_or_none:
+        present = seen & optional_group
+        if present and present != optional_group:
+            missing = ", ".join(sorted(optional_group - present))
+            raise ValueError(f"optional metric value group is incomplete; missing: {missing}")
+    if contract.component_sum_tolerance is not None:
+        components = [value for key, value in by_key.items() if key != "primary"]
+        if (
+            components
+            and abs(sum(components) - by_key["primary"]) > contract.component_sum_tolerance
+        ):
+            raise ValueError("metric components must sum to primary within tolerance")
 
 
 # Metrics kept out of the per-bucket series rollup (results_by_bucket) and
