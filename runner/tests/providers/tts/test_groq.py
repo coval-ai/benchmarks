@@ -95,6 +95,7 @@ async def test_groq_request_uses_wav_format(fake_settings: Settings) -> None:
     assert kwargs["voice"] == "daniel"
     assert kwargs["input"] == "Hello from Orpheus"
     assert kwargs["response_format"] == "wav"
+    assert kwargs["extra_body"] == {"sample_rate": 24000}
     if result.audio_path:
         result.audio_path.unlink()
 
