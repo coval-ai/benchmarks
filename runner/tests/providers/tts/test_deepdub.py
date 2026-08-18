@@ -19,7 +19,7 @@ from coval_bench.providers.tts.deepdub import SAMPLE_RATE, DeepdubTTSProvider
 from .conftest import FakeWebSocket, make_pcm_bytes
 
 _MODEL = "dd-etts-3.3"
-_VOICE = "02215cf5-04af-46f3-a061-48a4c81989bf"
+_VOICE = "f60bad7d-1667-42ff-8410-e60b71d0cc34"
 
 
 def _settings(**overrides: object) -> Settings:

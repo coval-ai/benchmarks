@@ -1047,15 +1047,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         status=_ACTIVE,
     ),
     # Deepdub eTTS. Voices are preset voice-prompt ids from Deepdub's docs:
-    # the female sales-agent and male call-center-agent presets.
+    # Alice Sanders (female) and Peter Jenkins (male).
     RegisteredModel(
         benchmark=_TTS,
         provider="deepdub",
         model="dd-etts-3.3",
-        voice="02215cf5-04af-46f3-a061-48a4c81989bf",
+        voice="f60bad7d-1667-42ff-8410-e60b71d0cc34",
         voices=(
-            Voice(id="02215cf5-04af-46f3-a061-48a4c81989bf", gender=Gender.FEMALE),
-            Voice(id="b2abb241-ac92-48bf-a890-fec03f43e209", gender=Gender.MALE),
+            Voice(id="f60bad7d-1667-42ff-8410-e60b71d0cc34", gender=Gender.FEMALE),
+            Voice(id="2448b68c-b253-4243-88a5-38b7cc9a1f0d", gender=Gender.MALE),
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
