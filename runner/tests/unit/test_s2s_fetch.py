@@ -114,6 +114,95 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
     )
 
 
+@pytest.mark.asyncio
+async def test_recent_completed_runs_window_and_page_overrides() -> None:
+    captured: list[httpx.Request] = []
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(days=20))})
+    async with _fake_client(list_json, {}, captured) as client:
+        runs = await fetch_v2v.recent_completed_runs(
+            client, "a1", period_seconds=10_800, window_seconds=30 * 86_400, page_size=100
+        )
+
+    assert [r.run_id for r in runs] == ["R1"]
+    assert captured[0].url.params["page_size"] == "100"
+
+
+@pytest.mark.asyncio
+async def test_backfill_ingests_only_named_runs() -> None:
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "R2", "create_time": _iso(timedelta(hours=1))},
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=4))},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1"}),
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
+    assert written == ["R1/s1"]
+
+
+@pytest.mark.asyncio
+async def test_backfill_reports_matches_and_ignores_staleness() -> None:
+    writer = _stub_writer()
+    matched: set[str] = set()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(days=20))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1", "R9"}),
+            window_seconds=30 * 86_400,
+            matched_run_ids=matched,
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert matched == {"R1"}
+
+
+@pytest.mark.asyncio
+async def test_backfill_publishes_no_samples() -> None:
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    sampled: list[SampleRun] = []
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+            only_run_ids=frozenset({"R1"}),
+        )
+
+    assert sampled == []
+
+
 def test_bucket_start_floors_to_grid() -> None:
     at = datetime(2026, 7, 7, 4, 59, 59, tzinfo=UTC)
     assert fetch_v2v._bucket_start(at, 10_800) == datetime(2026, 7, 7, 3, tzinfo=UTC)
@@ -1266,7 +1355,7 @@ def test_log_run_failed_emits_run_failed_event() -> None:
 def _run_fetch_cli(
     monkeypatch: pytest.MonkeyPatch, statuses: dict[str, RunStatus]
 ) -> tuple[int, list[str]]:
-    async def fake_fetch(_settings: Settings) -> dict[str, RunStatus]:
+    async def fake_fetch(_settings: Settings, **_kwargs: object) -> dict[str, RunStatus]:
         return statuses
 
     settings = Settings.model_construct(log_level="INFO")

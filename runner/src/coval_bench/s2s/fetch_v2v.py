@@ -230,6 +230,8 @@ async def recent_completed_runs(
     *,
     period_seconds: int,
     test_set_id: str | None = None,
+    window_seconds: int | None = None,
+    page_size: int = WINDOW_PAGE_SIZE,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
@@ -239,7 +241,7 @@ async def recent_completed_runs(
     without a parseable create_time are kept: better to ingest with a fetch-time
     slot than to drop data.
     """
-    window_seconds = max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
+    window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
     if test_set_id:
         filt += f' AND test_set_id="{test_set_id}"'
@@ -248,7 +250,7 @@ async def recent_completed_runs(
         params={
             "filter": filt,
             "order_by": "-create_time",
-            "page_size": WINDOW_PAGE_SIZE,
+            "page_size": page_size,
         },
     )
     resp.raise_for_status()
@@ -262,7 +264,7 @@ async def recent_completed_runs(
             error_status=_error_status(r.get("error_status")),
             persona_id=cast("str", r.get("persona_id") or ""),
         )
-        if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
+        if run.create_time is not None and (now - run.create_time).total_seconds() > window:
             continue
         runs.append(run)
     return runs
@@ -603,6 +605,21 @@ async def _ingest_run(
         return RunStatus.FAILED
 
 
+def _backfill_status(statuses: list[RunStatus]) -> RunStatus:
+    """A targeted backfill's verdict, which freshness is no part of.
+
+    Nothing matched is a success here: the named runs belong to one agent, so every
+    other provider legitimately has nothing to do.
+    """
+    if not statuses:
+        return RunStatus.SUCCEEDED
+    if all(s is RunStatus.FAILED for s in statuses):
+        return RunStatus.FAILED
+    if all(s is RunStatus.SUCCEEDED for s in statuses):
+        return RunStatus.SUCCEEDED
+    return RunStatus.PARTIAL
+
+
 async def _fetch_one_provider(
     client: httpx.AsyncClient,
     writer: RunWriter,
@@ -617,6 +634,10 @@ async def _fetch_one_provider(
     period_seconds: int,
     stale_grace_seconds: int,
     sampled_runs: list[SampleRun] | None = None,
+    only_run_ids: frozenset[str] | None = None,
+    window_seconds: int | None = None,
+    page_size: int = WINDOW_PAGE_SIZE,
+    matched_run_ids: set[str] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -642,6 +663,8 @@ async def _fetch_one_provider(
         # provider's old recording never ships today.
         # Every other condition's recording stays internal, as does every recording
         # from an agent under embargo.
+        if only_run_ids is not None:
+            return
         if not spec.publish_samples or dataset_id not in publishable:
             return
         bucket_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
@@ -659,11 +682,21 @@ async def _fetch_one_provider(
 
     try:
         runs = await recent_completed_runs(
-            client, agent_id, period_seconds=period_seconds, test_set_id=test_set_id
+            client,
+            agent_id,
+            period_seconds=period_seconds,
+            test_set_id=test_set_id,
+            window_seconds=window_seconds,
+            page_size=page_size,
         )
         data_seen = False
         newest_data_at: datetime | None = None
         for coval_run in runs:
+            if only_run_ids is not None:
+                if coval_run.run_id not in only_run_ids:
+                    continue
+                if matched_run_ids is not None:
+                    matched_run_ids.add(coval_run.run_id)
             if coval_run.error_status:
                 logger.warning(
                     "errored_run_skipped",
@@ -730,6 +763,9 @@ async def _fetch_one_provider(
                     data_seen, newest_data_at = True, coval_run.create_time
             statuses.append(status)
 
+        if only_run_ids is not None:
+            return _backfill_status(statuses), len(statuses)
+
         threshold = period_seconds + stale_grace_seconds
         age = (
             None
@@ -761,7 +797,13 @@ async def _fetch_one_provider(
         return RunStatus.FAILED, len(statuses)
 
 
-async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, RunStatus]:
+async def fetch_and_write_v2v(
+    settings: Settings | None = None,
+    *,
+    only_run_ids: frozenset[str] | None = None,
+    window_seconds: int | None = None,
+    page_size: int = WINDOW_PAGE_SIZE,
+) -> dict[str, RunStatus]:
     """Ingest every provider's recent runs; return per-provider status.
 
     Each ingested Coval run gets its own run row slotted by its create_time,
@@ -828,6 +870,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
+        matched_run_ids: set[str] = set()
         sampled_runs: list[SampleRun] = []
         for spec in AGENTS:
             agent_id = getattr(settings, spec.agent_id_attr)
@@ -856,6 +899,10 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,
                 sampled_runs=sampled_runs,
+                only_run_ids=only_run_ids,
+                window_seconds=window_seconds,
+                page_size=page_size,
+                matched_run_ids=matched_run_ids,
             )
             total_ingested += ingested
 
@@ -865,7 +912,10 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
-        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
+        if only_run_ids is not None and (unmatched := only_run_ids - matched_run_ids):
+            logger.error("backfill_runs_not_found", coval_run_ids=sorted(unmatched))
+
+        if only_run_ids is None and settings.s2s_samples_bucket and sampled_runs and test_set_id:
             expected = {
                 (spec.provider, spec.model)
                 for spec in AGENTS
@@ -893,15 +943,48 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
 
 
 @click.command(name="fetch-s2s")
-def fetch_s2s() -> None:
-    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job)."""
+@click.option(
+    "--coval-run-id",
+    "coval_run_ids",
+    multiple=True,
+    help="Ingest only these Coval runs, scanning beyond the scheduled window. Repeatable.",
+)
+@click.option(
+    "--window-hours",
+    type=click.IntRange(min=1),
+    default=720,
+    show_default=True,
+    help="How far back --coval-run-id searches. Ignored without it.",
+)
+@click.option(
+    "--page-size",
+    type=click.IntRange(min=1),
+    default=100,
+    show_default=True,
+    help="Runs listed per agent while searching for --coval-run-id. Ignored without it.",
+)
+def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
+    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job).
+
+    With --coval-run-id it becomes a targeted backfill instead: only the named runs
+    are ingested, no samples are published, and staleness is not judged, so an
+    operator can recover runs the scheduled window has already passed over.
+    """
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:
-        statuses = asyncio.run(fetch_and_write_v2v(settings))
+        only_run_ids = frozenset(coval_run_ids) or None
+        statuses = asyncio.run(
+            fetch_and_write_v2v(
+                settings,
+                only_run_ids=only_run_ids,
+                window_seconds=window_hours * 3600 if only_run_ids else None,
+                page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,
+            )
+        )
     except Exception as exc:
         log_run_failed(str(exc), exc)
         raise
