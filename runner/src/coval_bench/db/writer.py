@@ -637,7 +637,7 @@ class RunWriter:
                     evaluation["metric_type"],
                     evaluation["metric_version"],
                     tuple(
-                        (value.value_key, value.unit, value.value, value.is_primary)
+                        (value.value_key, value.unit, value.value, value.value_role)
                         for value in values
                     ),
                 )
@@ -645,7 +645,7 @@ class RunWriter:
                     if evaluation["finished_at"] != finished_at:
                         raise ValueError("metric completion replay conflicts with stored result")
                     await cur.execute(
-                        """SELECT value_key, unit, value, is_primary
+                        """SELECT value_key, unit, value, value_role
                            FROM benchmarks_v2.metric_values
                            WHERE metric_evaluation_id = %s""",
                         (evaluation_id,),
@@ -657,7 +657,7 @@ class RunWriter:
                         (evaluation_id,),
                     )
                     stored_artifacts = await cur.fetchall()
-                    value_fields = ("value_key", "unit", "value", "is_primary")
+                    value_fields = ("value_key", "unit", "value", "value_role")
                     expected_values = sorted(
                         (
                             tuple(getattr(value, field) for field in value_fields)
@@ -691,7 +691,7 @@ class RunWriter:
                     raise ValueError("only running metric evaluations may be completed")
                 await cur.executemany(
                     """INSERT INTO benchmarks_v2.metric_values
-                       (metric_evaluation_id, value_key, unit, value, is_primary)
+                       (metric_evaluation_id, value_key, unit, value, value_role)
                        VALUES (%s, %s, %s, %s, %s)""",
                     [
                         (
@@ -699,7 +699,7 @@ class RunWriter:
                             value.value_key,
                             value.unit,
                             value.value,
-                            value.is_primary,
+                            value.value_role,
                         )
                         for value in values
                     ],

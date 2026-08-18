@@ -36,7 +36,7 @@ from coval_bench.db.models import (
     RunStatus,
 )
 from coval_bench.db.writer import RunWriter
-from coval_bench.registries import Metric, validate_metric_values
+from coval_bench.registries import Metric, MetricValueRole, validate_metric_values
 
 pg_conn = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
@@ -186,7 +186,7 @@ def _wer_values(evaluation_id: Any) -> list[MetricValue]:
             value_key="primary",
             unit="percent",
             value=10,
-            is_primary=True,
+            value_role=MetricValueRole.PRIMARY,
         ),
         MetricValue(
             metric_evaluation_id=evaluation_id, value_key="insertions", unit="percent", value=1
@@ -287,7 +287,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "value_key",
                 "unit",
                 "value",
-                "is_primary",
+                "value_role",
             },
             "metric_artifacts": {
                 "id",
@@ -332,6 +332,12 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 (table_name,),
             )
             assert {row[0] for row in cur.fetchall()} == expected
+        cur.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema = 'benchmarks_v2' AND data_type = 'boolean'"
+        )
+        normalized_tables = set(expected_columns)
+        assert not {(row[0], row[1]) for row in cur.fetchall() if row[0] in normalized_tables}
         cur.execute(
             "SELECT indexdef FROM pg_indexes "
             "WHERE schemaname = 'benchmarks_v2' "
@@ -1172,7 +1178,7 @@ async def test_explicit_lifecycle_and_failed_terminal_state(
                         value_key="primary",
                         unit="seconds",
                         value=0,
-                        is_primary=True,
+                        value_role=MetricValueRole.PRIMARY,
                     )
                 ],
                 finished_at=_NOW,
@@ -1232,7 +1238,7 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
                         value_key="primary",
                         unit="milliseconds",
                         value=1,
-                        is_primary=True,
+                        value_role=MetricValueRole.PRIMARY,
                     )
                 ],
                 finished_at=_NOW - timedelta(seconds=1),
@@ -1253,27 +1259,43 @@ def test_metric_value_contracts_cover_wer_and_optional_ttfa_components() -> None
         Metric.WER,
         "v1",
         (
-            ("primary", "percent", 3, True),
-            ("insertions", "percent", 1, False),
-            ("deletions", "percent", 1, False),
-            ("substitutions", "percent", 1, False),
+            ("primary", "percent", 3, MetricValueRole.PRIMARY),
+            ("insertions", "percent", 1, MetricValueRole.COMPONENT),
+            ("deletions", "percent", 1, MetricValueRole.COMPONENT),
+            ("substitutions", "percent", 1, MetricValueRole.COMPONENT),
         ),
     )
-    validate_metric_values(Metric.TTFA, "v1", (("primary", "milliseconds", 12, True),))
+    validate_metric_values(
+        Metric.TTFA, "v1", (("primary", "milliseconds", 12, MetricValueRole.PRIMARY),)
+    )
     validate_metric_values(
         Metric.TTFA,
         "v1",
         (
-            ("primary", "milliseconds", 12, True),
-            ("roundtrip", "milliseconds", 10, False),
-            ("leading_silence", "milliseconds", 2, False),
+            ("primary", "milliseconds", 12, MetricValueRole.PRIMARY),
+            ("roundtrip", "milliseconds", 10, MetricValueRole.COMPONENT),
+            ("leading_silence", "milliseconds", 2, MetricValueRole.COMPONENT),
         ),
     )
     with pytest.raises(ValueError, match="optional metric value group"):
         validate_metric_values(
             Metric.TTFA,
             "v1",
-            (("primary", "milliseconds", 12, True), ("roundtrip", "milliseconds", 10, False)),
+            (
+                ("primary", "milliseconds", 12, MetricValueRole.PRIMARY),
+                ("roundtrip", "milliseconds", 10, MetricValueRole.COMPONENT),
+            ),
+        )
+    with pytest.raises(ValueError, match="wrong value role"):
+        validate_metric_values(
+            Metric.WER,
+            "v1",
+            (
+                ("primary", "percent", 3, MetricValueRole.COMPONENT),
+                ("insertions", "percent", 1, MetricValueRole.COMPONENT),
+                ("deletions", "percent", 1, MetricValueRole.COMPONENT),
+                ("substitutions", "percent", 1, MetricValueRole.COMPONENT),
+            ),
         )
 
 
@@ -1341,8 +1363,8 @@ def test_database_enforces_queued_creation_and_success_outputs(
         cur.execute("BEGIN")
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_values
-               (metric_evaluation_id, value_key, unit, value, is_primary)
-               VALUES (%s, 'primary', 'percent', 1, false)""",
+               (metric_evaluation_id, value_key, unit, value, value_role)
+               VALUES (%s, 'primary', 'percent', 1, 'component')""",
             (evaluation_id,),
         )
         cur.execute(
@@ -1352,6 +1374,40 @@ def test_database_enforces_queued_creation_and_success_outputs(
         )
         with pytest.raises(psycopg.errors.RaiseException, match="exactly one primary"):
             cur.execute("COMMIT")
+        cur.execute("ROLLBACK")
+        cur.execute(
+            """INSERT INTO benchmarks_v2.metric_evaluations
+               (observation_id, metric_type, metric_version, evaluation_variant, executor, status)
+               VALUES (%s, 'WER', 'v1', 'constraint-checks', 'inline', 'queued') RETURNING id""",
+            (observation_id,),
+        )
+        constraint_evaluation_id = _required(cur.fetchone())[0]
+        cur.execute(
+            """UPDATE benchmarks_v2.metric_evaluations
+               SET status = 'running', started_at = now() WHERE id = %s""",
+            (constraint_evaluation_id,),
+        )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cur.execute(
+                """INSERT INTO benchmarks_v2.metric_values
+                   (metric_evaluation_id, value_key, unit, value, value_role)
+                   VALUES (%s, 'invalid', 'percent', 1, 'unsupported')""",
+                (constraint_evaluation_id,),
+            )
+        cur.execute("BEGIN")
+        cur.execute(
+            """INSERT INTO benchmarks_v2.metric_values
+               (metric_evaluation_id, value_key, unit, value, value_role)
+               VALUES (%s, 'primary', 'percent', 1, 'primary')""",
+            (constraint_evaluation_id,),
+        )
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            cur.execute(
+                """INSERT INTO benchmarks_v2.metric_values
+                   (metric_evaluation_id, value_key, unit, value, value_role)
+                   VALUES (%s, 'second-primary', 'percent', 1, 'primary')""",
+                (constraint_evaluation_id,),
+            )
         cur.execute("ROLLBACK")
 
 
@@ -1381,7 +1437,7 @@ def test_database_success_validation_is_metric_agnostic(
             return _required(cur.fetchone())[0]
 
         def complete_direct(
-            metric: str, version: str, values: tuple[tuple[str, str, float, bool], ...]
+            metric: str, version: str, values: tuple[tuple[str, str, float, MetricValueRole], ...]
         ) -> None:
             cur.execute("BEGIN")
             observation_id = new_observation_id()
@@ -1399,7 +1455,7 @@ def test_database_success_validation_is_metric_agnostic(
             )
             cur.executemany(
                 """INSERT INTO benchmarks_v2.metric_values
-                   (metric_evaluation_id, value_key, unit, value, is_primary)
+                   (metric_evaluation_id, value_key, unit, value, value_role)
                    VALUES (%s, %s, %s, %s, %s)""",
                 [(evaluation_id, *value) for value in values],
             )
@@ -1410,10 +1466,14 @@ def test_database_success_validation_is_metric_agnostic(
             )
             cur.execute("COMMIT")
 
-        complete_direct("FutureMetric", "v9", (("score", "custom_unit", 1.0, True),))
+        complete_direct(
+            "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.PRIMARY),)
+        )
 
         with pytest.raises(psycopg.errors.RaiseException, match="exactly one primary"):
-            complete_direct("FutureMetric", "v9", (("score", "custom_unit", 1.0, False),))
+            complete_direct(
+                "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.COMPONENT),)
+            )
         cur.execute("ROLLBACK")
 
 

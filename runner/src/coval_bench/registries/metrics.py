@@ -41,6 +41,13 @@ class MetricDirection(StrEnum):
     HIGHER_IS_BETTER = "higher"
 
 
+class MetricValueRole(StrEnum):
+    """The semantic role of a value emitted by a metric evaluation."""
+
+    PRIMARY = "primary"
+    COMPONENT = "component"
+
+
 class MetricSpec(BaseModel, frozen=True):
     """Display metadata for one metric."""
 
@@ -58,7 +65,7 @@ class MetricValueDefinition(BaseModel, frozen=True):
     unit: str
     minimum: float | None = None
     maximum: float | None = None
-    primary: bool = False
+    value_role: MetricValueRole = MetricValueRole.COMPONENT
     required: bool = True
 
 
@@ -170,7 +177,11 @@ def _primary(metric: Metric) -> MetricValueDefinition:
     # words. Only the binary instruction-following rate is intrinsically bounded.
     maximum = 100.0 if metric is Metric.INSTRUCTION_FOLLOWING else None
     return MetricValueDefinition(
-        key="primary", unit=spec.units, minimum=0.0, maximum=maximum, primary=True
+        key="primary",
+        unit=spec.units,
+        minimum=0.0,
+        maximum=maximum,
+        value_role=MetricValueRole.PRIMARY,
     )
 
 
@@ -219,11 +230,11 @@ def validate_metric_contract(metric: Metric | str, version: str) -> MetricValueC
 def validate_metric_values(
     metric: Metric | str,
     version: str,
-    values: tuple[tuple[str, str, float, bool], ...],
+    values: tuple[tuple[str, str, float, MetricValueRole], ...],
 ) -> None:
     """Validate one normalized metric evaluation before it reaches the DB.
 
-    Values are ``(key, unit, value, is_primary)`` tuples so the persistence
+    Values are ``(key, unit, value, value_role)`` tuples so the persistence
     layer remains free to use its own Pydantic input models.
     """
     contract = validate_metric_contract(metric, version)
@@ -231,7 +242,7 @@ def validate_metric_values(
     seen: set[str] = set()
     primary_count = 0
     by_key: dict[str, float] = {}
-    for key, unit, value, is_primary in values:
+    for key, unit, value, value_role in values:
         if key in seen:
             raise ValueError(f"duplicate metric value key {key!r}")
         seen.add(key)
@@ -240,15 +251,15 @@ def validate_metric_values(
             raise ValueError(f"unknown metric value key {key!r}")
         if unit != definition.unit:
             raise ValueError(f"wrong unit for {key!r}: {unit!r}")
-        if is_primary != definition.primary:
-            raise ValueError(f"wrong primary designation for {key!r}")
+        if value_role != definition.value_role:
+            raise ValueError(f"wrong value role for {key!r}")
         if not math.isfinite(value):
             raise ValueError(f"metric value {key!r} must be finite")
         if definition.minimum is not None and value < definition.minimum:
             raise ValueError(f"metric value {key!r} is below its minimum")
         if definition.maximum is not None and value > definition.maximum:
             raise ValueError(f"metric value {key!r} is above its maximum")
-        primary_count += int(is_primary)
+        primary_count += int(value_role is MetricValueRole.PRIMARY)
         by_key[key] = value
     if primary_count != 1:
         raise ValueError("metric evaluation must contain exactly one primary value")

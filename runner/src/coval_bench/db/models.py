@@ -18,6 +18,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, JsonValue, field_validator, model_validator
 
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.metrics import MetricValueRole
 from coval_bench.registries.models import Gender
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "MetricEvaluation",
     "MetricExecutor",
     "MetricValue",
+    "MetricValueRole",
     "MetricValueBucket",
     "TimestampArtifactSchema",
     "TimestampArtifactName",
@@ -256,7 +258,7 @@ class MetricValue(BaseModel):
     value_key: str = Field(min_length=1)
     unit: str = Field(min_length=1)
     value: float
-    is_primary: bool = False
+    value_role: MetricValueRole = MetricValueRole.COMPONENT
 
     @field_validator("value")
     @classmethod

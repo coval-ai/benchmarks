@@ -104,9 +104,10 @@ def upgrade() -> None:
             metric_evaluation_id UUID NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id) ON DELETE CASCADE,
             value_key TEXT NOT NULL CHECK (value_key <> ''), unit TEXT NOT NULL CHECK (unit <> ''),
             value DOUBLE PRECISION NOT NULL CHECK (value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
-            is_primary BOOLEAN NOT NULL DEFAULT false, PRIMARY KEY (metric_evaluation_id, value_key)
+            value_role TEXT NOT NULL CHECK (value_role IN ('primary', 'component')),
+            PRIMARY KEY (metric_evaluation_id, value_key)
         );
-        CREATE UNIQUE INDEX metric_values_one_primary ON benchmarks_v2.metric_values (metric_evaluation_id) WHERE is_primary;
+        CREATE UNIQUE INDEX metric_values_one_primary ON benchmarks_v2.metric_values (metric_evaluation_id) WHERE value_role = 'primary';
         CREATE TABLE benchmarks_v2.metric_artifacts (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             metric_evaluation_id UUID NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id) ON DELETE CASCADE,
@@ -202,7 +203,7 @@ def upgrade() -> None:
                 target_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.metric_evaluation_id ELSE NEW.metric_evaluation_id END;
             END IF;
             SELECT status INTO target_status FROM benchmarks_v2.metric_evaluations WHERE id = target_id; IF NOT FOUND THEN RETURN NULL; END IF;
-            SELECT count(*), count(*) FILTER (WHERE is_primary) INTO value_count, primary_count FROM benchmarks_v2.metric_values WHERE metric_evaluation_id = target_id;
+            SELECT count(*), count(*) FILTER (WHERE value_role = 'primary') INTO value_count, primary_count FROM benchmarks_v2.metric_values WHERE metric_evaluation_id = target_id;
             SELECT count(*) INTO artifact_count FROM benchmarks_v2.metric_artifacts WHERE metric_evaluation_id = target_id;
             IF target_status <> 'succeeded' THEN IF value_count <> 0 OR artifact_count <> 0 THEN RAISE EXCEPTION 'metric outputs require a succeeded evaluation'; END IF; RETURN NULL; END IF;
             IF value_count = 0 OR primary_count <> 1 THEN RAISE EXCEPTION 'succeeded metric evaluation requires values and exactly one primary'; END IF;
