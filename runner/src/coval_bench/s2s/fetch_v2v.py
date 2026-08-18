@@ -232,6 +232,7 @@ async def recent_completed_runs(
     test_set_id: str | None = None,
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
+    requested_run_ids: frozenset[str] | None = None,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
@@ -245,28 +246,38 @@ async def recent_completed_runs(
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
     if test_set_id:
         filt += f' AND test_set_id="{test_set_id}"'
-    resp = await client.get(
-        "/runs",
-        params={
+    now = datetime.now(tz=UTC)
+    runs: list[CovalRun] = []
+    page_token: str | None = None
+    found_ids: set[str] = set()
+    while True:
+        params: dict[str, str | int] = {
             "filter": filt,
             "order_by": "-create_time",
             "page_size": page_size,
-        },
-    )
-    resp.raise_for_status()
-    raw = cast("list[dict[str, Any]]", resp.json().get("runs", []))
-    now = datetime.now(tz=UTC)
-    runs: list[CovalRun] = []
-    for r in raw:
-        run = CovalRun(
-            run_id=cast("str", r["run_id"]),
-            create_time=_parse_time(r.get("create_time")),
-            error_status=_error_status(r.get("error_status")),
-            persona_id=cast("str", r.get("persona_id") or ""),
-        )
-        if run.create_time is not None and (now - run.create_time).total_seconds() > window:
-            continue
-        runs.append(run)
+        }
+        if page_token:
+            params["page_token"] = page_token
+        resp = await client.get("/runs", params=params)
+        resp.raise_for_status()
+        payload = cast("dict[str, Any]", resp.json())
+        raw = cast("list[dict[str, Any]]", payload.get("runs", []))
+        for r in raw:
+            run = CovalRun(
+                run_id=cast("str", r["run_id"]),
+                create_time=_parse_time(r.get("create_time")),
+                error_status=_error_status(r.get("error_status")),
+                persona_id=cast("str", r.get("persona_id") or ""),
+            )
+            if run.create_time is not None and (now - run.create_time).total_seconds() > window:
+                continue
+            runs.append(run)
+            found_ids.add(run.run_id)
+        if not requested_run_ids or requested_run_ids <= found_ids:
+            break
+        page_token = cast("str | None", payload.get("next_page_token"))
+        if not page_token:
+            break
     return runs
 
 
@@ -688,15 +699,13 @@ async def _fetch_one_provider(
             test_set_id=test_set_id,
             window_seconds=window_seconds,
             page_size=page_size,
+            requested_run_ids=only_run_ids,
         )
         data_seen = False
         newest_data_at: datetime | None = None
         for coval_run in runs:
-            if only_run_ids is not None:
-                if coval_run.run_id not in only_run_ids:
-                    continue
-                if matched_run_ids is not None:
-                    matched_run_ids.add(coval_run.run_id)
+            if only_run_ids is not None and coval_run.run_id not in only_run_ids:
+                continue
             if coval_run.error_status:
                 logger.warning(
                     "errored_run_skipped",
@@ -738,6 +747,8 @@ async def _fetch_one_provider(
             if condition.required in persisted and not data_seen:
                 data_seen, newest_data_at = True, coval_run.create_time
             if not pending:
+                if matched_run_ids is not None and only_run_ids is not None:
+                    matched_run_ids.add(coval_run.run_id)
                 logger.info(
                     "run_already_ingested", provider=spec.provider, coval_run_id=coval_run.run_id
                 )
@@ -757,6 +768,12 @@ async def _fetch_one_provider(
             )
             if status is None:
                 continue
+            if (
+                status is not RunStatus.FAILED
+                and matched_run_ids is not None
+                and only_run_ids is not None
+            ):
+                matched_run_ids.add(coval_run.run_id)
             if status is not RunStatus.FAILED:
                 note_sample_candidate(coval_run, dataset_id)
                 if not data_seen:
@@ -914,6 +931,9 @@ async def fetch_and_write_v2v(
 
         if only_run_ids is not None and (unmatched := only_run_ids - matched_run_ids):
             logger.error("backfill_runs_not_found", coval_run_ids=sorted(unmatched))
+            raise RuntimeError(
+                f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
+            )
 
         if only_run_ids is None and settings.s2s_samples_bucket and sampled_runs and test_set_id:
             expected = {
