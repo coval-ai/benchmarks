@@ -30,7 +30,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("speech-2.8-hd", "speech-2.8-turbo")
 _WS_URL = "wss://api.minimax.io/ws/v1/t2a_v2"
-_SAMPLE_RATE = 44100
+_SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
 
 

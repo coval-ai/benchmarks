@@ -25,7 +25,7 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _VALID_MODELS = ("s1", "s2.1-pro", "s2.1-pro-free")
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
-_SAMPLE_RATE = 44100
+_SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
 
 

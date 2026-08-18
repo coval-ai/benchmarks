@@ -104,7 +104,7 @@ async def test_fishaudio_tts_sends_start_text_stop(fishaudio_settings: Settings)
     assert sent[0]["event"] == "start"
     request = sent[0]["request"]
     assert request["format"] == "pcm"
-    assert request["sample_rate"] == 44100
+    assert request["sample_rate"] == 24000
     assert request["reference_id"] == _VOICE
     assert request["latency"] == "balanced"
     assert request["features"] == ["quality-guard"]
