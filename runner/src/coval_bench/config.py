@@ -11,6 +11,7 @@ Every other module that needs configuration imports from here:
 from __future__ import annotations
 
 import functools
+import json
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -203,10 +204,49 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     # Allowed azp claim values; bearer tokens are rejected while empty.
     clerk_authorized_parties: list[str] = []
-    # Clerk org id -> provider id, as a JSON object: {"org_abc123": "deepgram"}.
-    # Keyed by the immutable org id, not the slug, which org admins can rename.
-    # An org missing from the map unlocks nothing.
+    # Clerk org id -> what it unlocks, as a JSON object. A value is a provider or a
+    # list of providers and provider/model pairs: {"org_abc": "deepgram"},
+    # {"org_def": ["colors/gray", "colors/red"]}. Keyed by the immutable org id, not
+    # the slug, which org admins can rename. An org missing from the map unlocks
+    # nothing.
     clerk_org_providers: str | None = None
+    # Clerk org id -> the ONLY models it may see, as a JSON object:
+    # {"org_abc": ["colors"]} or {"org_abc": ["colors/gray"]}. Same entry grammar as
+    # clerk_org_providers, but exclusive: everything else, public models included, is
+    # hidden from that org. Overrides clerk_org_providers for the same org.
+    clerk_org_exclusive: str | None = None
+
+    @field_validator("clerk_org_exclusive")
+    @classmethod
+    def _exclusive_map_is_usable(cls, value: str | None) -> str | None:
+        """Refuse to start on an unusable exclusive map.
+
+        The additive maps fall back to the public view when malformed, which is safe
+        because they only ever widen. This one only ever narrows, so a broken blob
+        must not boot into ordinary visibility for the orgs it was meant to restrict.
+        """
+        if value is None:
+            return None
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("clerk_org_exclusive is not valid JSON") from exc
+        if not isinstance(parsed, dict) or not all(
+            isinstance(org_id, str)
+            and org_id
+            and (
+                (isinstance(entries, str) and entries)
+                or (
+                    isinstance(entries, list)
+                    and all(isinstance(entry, str) and entry for entry in entries)
+                )
+            )
+            for org_id, entries in parsed.items()
+        ):
+            raise ValueError(
+                'clerk_org_exclusive must be {"org_id": "provider" | ["provider/model", ...]}'
+            )
+        return value
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
