@@ -73,7 +73,6 @@ class CovalRun:
 
     run_id: str
     create_time: datetime | None
-    error_status: str | None
     persona_id: str = ""
 
 
@@ -212,12 +211,6 @@ def _parse_time(raw: object) -> datetime | None:
         return None
 
 
-def _error_status(raw: object) -> str | None:
-    """Normalize Coval's error_status field; clean runs report the string "SUCCESS"."""
-    status = cast("str | None", raw) or None
-    return None if status == "SUCCESS" else status
-
-
 def _bucket_start(at: datetime, period_seconds: int) -> datetime:
     """Floor a timestamp to the epoch-anchored fetch grid."""
     epoch = int(at.timestamp())
@@ -259,7 +252,6 @@ async def recent_completed_runs(
         run = CovalRun(
             run_id=cast("str", r["run_id"]),
             create_time=_parse_time(r.get("create_time")),
-            error_status=_error_status(r.get("error_status")),
             persona_id=cast("str", r.get("persona_id") or ""),
         )
         if run.create_time is not None and (now - run.create_time).total_seconds() > window_seconds:
@@ -380,6 +372,39 @@ def _s2s_rows(
     return rows
 
 
+def _failed_conversation_rows(
+    output_ids: list[str],
+    anchor_values: list[dict[str, Any]],
+    *,
+    run_pk: int,
+    coval_run_id: str,
+    spec: AgentSpec,
+) -> list[Result]:
+    """A FAILED latency row for each conversation with no anchor value.
+
+    Coval omits a failed conversation from every metric's values but still lists
+    it in ``results.output_ids``. Without these rows a model is judged only on
+    the calls it survived, and a run's failures would not show in its success
+    rate.
+    """
+    covered = {v.get("simulation_output_id") for v in anchor_values}
+    return [
+        Result(
+            run_id=run_pk,
+            provider=spec.provider,
+            model=spec.model,
+            benchmark=Benchmark.S2S,
+            metric_type=Metric.V2V,
+            metric_units=METRIC_SPECS[Metric.V2V].units,
+            metric_value=None,
+            audio_filename=f"{coval_run_id}/{sim_id}",
+            status=ResultStatus.FAILED,
+        )
+        for sim_id in output_ids
+        if sim_id not in covered
+    ]
+
+
 def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[str, Any]] | None:
     """The metric's per-conversation values, or None when it is not on the run."""
     payload = metrics.get(metric_id) if metric_id else None
@@ -428,9 +453,12 @@ async def _ingest_run(
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
     Writes the metrics *condition* declares and *pending* still owes (default all
-    of them). Skips (before any DB write) runs finalized with an error_status,
-    runs missing the condition's required metric, and runs left with nothing to
-    write. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
+    of them). Skips (before any DB write) runs missing the condition's required
+    metric and runs left with nothing to write. Coval's error_status is ignored
+    on purpose: one failed conversation stamps the whole run EXECUTION_FAILURE,
+    and gating on it threw away the healthy clips (and starved the sampler) over
+    a single short call. A conversation with no anchor value becomes a FAILED
+    row instead. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
     """
     pending = condition.fetched if pending is None else pending
     run_pk: int | None = None
@@ -438,15 +466,6 @@ async def _ingest_run(
         resp = await client.get(f"/runs/{coval_run.run_id}")
         resp.raise_for_status()
         run = cast("dict[str, Any]", resp.json()["run"])
-        error_status = _error_status(run.get("error_status"))
-        if error_status:
-            logger.warning(
-                "errored_run_skipped",
-                provider=spec.provider,
-                coval_run_id=coval_run.run_id,
-                error_status=error_status,
-            )
-            return None
         metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
         anchor = condition.required
         anchor_values = _metric_values(metrics, metric_ids.get(anchor))
@@ -554,6 +573,21 @@ async def _ingest_run(
             )
             for metric, values in writable.items()
         }
+        if condition.required is Metric.V2V and Metric.V2V in writable:
+            output_ids = [
+                s
+                for s in cast("list[Any]", (run.get("results") or {}).get("output_ids") or [])
+                if isinstance(s, str)
+            ]
+            by_metric[Metric.V2V].extend(
+                _failed_conversation_rows(
+                    output_ids,
+                    anchor_values,
+                    run_pk=run_pk,
+                    coval_run_id=coval_run.run_id,
+                    spec=spec,
+                )
+            )
         all_rows = [row for rows in by_metric.values() for row in rows]
         rows = by_metric.get(Metric.V2V, [])
         if all_rows:
@@ -664,14 +698,6 @@ async def _fetch_one_provider(
         data_seen = False
         newest_data_at: datetime | None = None
         for coval_run in runs:
-            if coval_run.error_status:
-                logger.warning(
-                    "errored_run_skipped",
-                    provider=spec.provider,
-                    coval_run_id=coval_run.run_id,
-                    error_status=coval_run.error_status,
-                )
-                continue
             identity = _dataset_identity(
                 test_set_id,
                 coval_run.persona_id,

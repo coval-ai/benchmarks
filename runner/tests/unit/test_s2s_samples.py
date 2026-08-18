@@ -71,10 +71,17 @@ def _runs(*, include_google_male: bool = True) -> list[SampleRun]:
     return runs
 
 
-def _sims_payload(run_id: str, test_cases: list[str]) -> dict[str, Any]:
+def _sims_payload(
+    run_id: str, test_cases: list[str], failed: frozenset[str] = frozenset()
+) -> dict[str, Any]:
     return {
         "simulations": [
-            {"simulation_id": f"{run_id}-{tc}", "test_case_id": tc} for tc in test_cases
+            {
+                "simulation_id": f"{run_id}-{tc}",
+                "test_case_id": tc,
+                "status": "FAILED" if tc in failed else "COMPLETED",
+            }
+            for tc in test_cases
         ]
     }
 
@@ -84,12 +91,16 @@ def _fake_client(
     *,
     audio_404: frozenset[str] = frozenset(),
     empty_turns: frozenset[str] = frozenset(),
+    failed_by_run: dict[str, frozenset[str]] | None = None,
 ) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith("/simulations"):
             run_id = request.url.params["filter"].split('"')[1]
-            return httpx.Response(200, json=_sims_payload(run_id, test_cases_by_run[run_id]))
+            failed = (failed_by_run or {}).get(run_id, frozenset())
+            return httpx.Response(
+                200, json=_sims_payload(run_id, test_cases_by_run[run_id], failed)
+            )
         if "blobs.test" in str(request.url):
             return httpx.Response(200, content=b"RIFFfake")
         if path.endswith("/audio"):
@@ -223,6 +234,24 @@ async def test_incomplete_persona_is_skipped_and_other_is_published() -> None:
     assert manifest["persona_name"] == "Standard Male"
     assert manifest["test_case_id"] == "c"
     assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
+
+
+@pytest.mark.asyncio
+async def test_failed_sim_drops_its_test_case_from_the_pool() -> None:
+    # Female's openai sim for "b" FAILED on Coval's side (it may still carry a
+    # truncated recording): "b" leaves the shared pool and "c" is published.
+    storage_client, bucket = _fake_storage()
+    cases = {"RO_F": ["b", "c"], "RG_F": ["b", "c"], "RO_M": ["b", "c"], "RG_M": ["b", "c"]}
+    async with _fake_client(cases, failed_by_run={"RO_F": frozenset({"b"})}) as client:
+        stored = await _publish(client, storage_client, _runs())
+
+    assert stored == 2
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert (manifest["persona_name"], manifest["test_case_id"]) in {
+        ("Standard Female", "c"),
+        ("Standard Male", "b"),
+        ("Standard Male", "c"),
+    }
 
 
 @pytest.mark.asyncio

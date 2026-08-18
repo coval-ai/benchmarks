@@ -139,7 +139,12 @@ async def _fetch_retry[T](fn: Callable[[], Awaitable[T]], *, provider: str, what
 
 
 async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> dict[str, str]:
-    """Map test_case_id -> simulation id for one run (run_id is AIP-160-filterable)."""
+    """Map test_case_id -> simulation id for one run (run_id is AIP-160-filterable).
+
+    Only COMPLETED simulations: a failed conversation can still carry audio
+    (e.g. a call cut off after a few seconds), and dropping it here keeps its
+    test case out of the shared pool so it can never ship as the sample.
+    """
     resp = await client.get(
         "/simulations", params={"filter": f'run_id="{coval_run_id}"', "page_size": 100}
     )
@@ -154,7 +159,7 @@ async def _sims_by_test_case(client: httpx.AsyncClient, coval_run_id: str) -> di
     return {
         cast("str", s["test_case_id"]): cast("str", s["simulation_id"])
         for s in cast("list[dict[str, Any]]", items)
-        if s.get("test_case_id") and s.get("simulation_id")
+        if s.get("test_case_id") and s.get("simulation_id") and s.get("status") == "COMPLETED"
     }
 
 
