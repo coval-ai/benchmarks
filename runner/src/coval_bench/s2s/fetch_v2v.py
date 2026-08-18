@@ -603,6 +603,15 @@ async def _ingest_run(
         return RunStatus.FAILED
 
 
+def _expected_sample_models(settings: Settings) -> set[tuple[str, str]]:
+    """The pairs a sample must cover; a bucket short one publishes nothing."""
+    return {
+        (spec.provider, spec.model)
+        for spec in AGENTS
+        if getattr(settings, spec.agent_id_attr) and spec.publish_samples
+    }
+
+
 async def _fetch_one_provider(
     client: httpx.AsyncClient,
     writer: RunWriter,
@@ -866,11 +875,7 @@ async def fetch_and_write_v2v(settings: Settings | None = None) -> dict[str, Run
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
         if settings.s2s_samples_bucket and sampled_runs and test_set_id:
-            expected = {
-                (spec.provider, spec.model)
-                for spec in AGENTS
-                if getattr(settings, spec.agent_id_attr)
-            }
+            expected = _expected_sample_models(settings)
             missing = expected - {r.key for r in sampled_runs}
             if missing:
                 # Error level on purpose: this is the alert that a model is
