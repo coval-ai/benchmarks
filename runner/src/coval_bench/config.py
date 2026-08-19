@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
     dataset_id: str = "stt-v1"
+    # Private bucket for additive normalized observation artifacts. The rollout
+    # is deliberately fail-closed: enabling writes without a destination is an
+    # invalid deployment rather than a silent partial capture.
+    benchmark_artifact_bucket: str = ""
+    normalized_dual_write_enabled: bool = False
 
     @field_validator("dataset_id")
     @classmethod
@@ -58,6 +63,14 @@ class Settings(BaseSettings):
         if value == DATASET_ALL:
             raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
         return value
+
+    @model_validator(mode="after")
+    def _normalized_dual_write_requires_bucket(self) -> Settings:
+        if self.normalized_dual_write_enabled and not self.benchmark_artifact_bucket:
+            raise ValueError(
+                "benchmark_artifact_bucket is required when normalized dual write is enabled"
+            )
+        return self
 
     # Items drawn at random per run from each manifest, shared across all
     # models for parity. Set >= manifest size to run everything.

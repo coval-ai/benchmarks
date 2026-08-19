@@ -1,5 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
+# ruff: noqa: ANN401 -- lazy runtime collaborators intentionally use Any in this module.
 
 """Main benchmark run loop.
 
@@ -327,6 +328,9 @@ async def _run_stt_item(
     sem: asyncio.Semaphore,
     settings: Settings,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
+    dataset_id: str | None = None,
+    dataset_sha256: str = "",
+    artifact_client: Any | None = None,
 ) -> list[Any]:
     """Run a single STT provider × dataset item, returning a list of Result rows.
 
@@ -640,6 +644,38 @@ async def _run_stt_item(
                 exc_info=exc,
             )
 
+    if writer is not None and artifact_client is not None:
+        try:
+            from coval_bench.runner.normalized import dual_write
+
+            await dual_write(
+                writer=writer,
+                storage_client=artifact_client,
+                bucket=settings.benchmark_artifact_bucket,
+                run_id=run_id,
+                dataset_id=dataset_id or settings.dataset_id,
+                dataset_sha256=dataset_sha256,
+                sample_id=item.sample_id or audio_path.name,
+                entry=entry,
+                benchmark=Benchmark.STT,
+                results=results,
+                provider_error=item_error,
+                transcript=complete_transcript,
+                timing_events={
+                    "ttft_seconds": ttft_seconds,
+                    "audio_to_final_seconds": audio_to_final,
+                    "speech_end_offset_ms": speech_end_offset_ms,
+                    "effective_duration_sec": duration_sec,
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "normalized_stt_dual_write_failed",
+                provider=entry.provider,
+                model=entry.model,
+                exc_info=exc,
+            )
+
     return results
 
 
@@ -676,6 +712,9 @@ async def _run_tts_item(
     settings: Settings,
     voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
+    dataset_id: str = "tts-v1",
+    dataset_sha256: str = "",
+    artifact_client: Any | None = None,
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
 
@@ -876,6 +915,33 @@ async def _run_tts_item(
                                 error=_truncate(str(exc)),
                             )
                         )
+            if writer is not None and artifact_client is not None:
+                try:
+                    from coval_bench.runner.normalized import dual_write
+
+                    await dual_write(
+                        writer=writer,
+                        storage_client=artifact_client,
+                        bucket=settings.benchmark_artifact_bucket,
+                        run_id=run_id,
+                        dataset_id=dataset_id,
+                        dataset_sha256=dataset_sha256,
+                        sample_id=item.testcase_id,
+                        entry=entry,
+                        benchmark=Benchmark.TTS,
+                        results=results,
+                        provider_error=item_error,
+                        timing_events={"ttfa_ms": ttfa_ms},
+                        audio_path=audio_path,
+                        voice=voice,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "normalized_tts_dual_write_failed",
+                        provider=entry.provider,
+                        model=entry.model,
+                        exc_info=exc,
+                    )
         finally:
             # Orchestrator owns audio cleanup — always delete in finally block
             if audio_path is not None and audio_path.exists():
@@ -1083,6 +1149,29 @@ async def run_benchmarks(
         )
 
         all_results: list[Any] = []
+        artifact_client: Any | None = None
+        if settings.normalized_dual_write_enabled:
+            try:
+                from google.cloud import storage
+
+                artifact_client = storage.Client()
+            except Exception as exc:
+                logger.warning("normalized_artifact_client_failed", exc_info=exc)
+
+        stt_artifact_client = artifact_client
+        if (
+            stt_artifact_client is not None
+            and benchmark_kind in ("stt", "both")
+            and (
+                len(dataset_sha256) != 64
+                or any(character not in "0123456789abcdef" for character in dataset_sha256)
+            )
+        ):
+            logger.warning(
+                "normalized_stt_manifest_sha_unavailable",
+                dataset_id=settings.dataset_id,
+            )
+            stt_artifact_client = None
         sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
@@ -1162,6 +1251,9 @@ async def run_benchmarks(
                         sem=sem,
                         settings=settings,
                         writer=writer,
+                        dataset_id=settings.dataset_id,
+                        dataset_sha256=dataset_sha256,
+                        artifact_client=stt_artifact_client,
                     )
                     for entry, item in stt_pairs
                 ]
@@ -1202,6 +1294,22 @@ async def run_benchmarks(
                     for i, item in enumerate(tts_items)
                     for entry in enabled_tts
                 ]
+                tts_artifact_client = artifact_client
+                tts_manifest_sha256 = ""
+                if tts_artifact_client is not None:
+                    try:
+                        tts_manifest_sha256 = hashlib.sha256(
+                            importlib.resources.files("coval_bench.datasets.manifests")
+                            .joinpath("tts-v1.json")
+                            .read_bytes()
+                        ).hexdigest()
+                    except Exception as exc:
+                        logger.warning(
+                            "normalized_tts_manifest_sha_unavailable",
+                            dataset_id="tts-v1",
+                            exc_info=exc,
+                        )
+                        tts_artifact_client = None
                 tts_tasks = [
                     _run_tts_item(
                         entry=entry,
@@ -1211,6 +1319,9 @@ async def run_benchmarks(
                         settings=settings,
                         voice=voice,
                         writer=writer,
+                        dataset_id="tts-v1",
+                        dataset_sha256=tts_manifest_sha256,
+                        artifact_client=tts_artifact_client,
                     )
                     for entry, item, voice in tts_pairs
                 ]

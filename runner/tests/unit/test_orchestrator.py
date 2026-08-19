@@ -47,6 +47,7 @@ from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel,
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
+    _run_tts_item,
     _stt_silent_failure,
     run_benchmarks,
 )
@@ -2961,3 +2962,252 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
     assert len(partial) == 1, "the completed phase's dead provider must still report"
     assert "elevenlabs/scribe_v2_realtime" in partial[0]["error"]
     assert "boom" in partial[0]["error"]
+
+
+# ---------------------------------------------------------------------------
+# Normalized dual-write lifecycle
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_normalized_dual_write_disabled_creates_no_gcs_client(
+    audio_file: Path, settings: Settings
+) -> None:
+    """The default-off flag must leave both GCS and normalized writes untouched."""
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    matrix = [*_paused_registry(Benchmark.STT), _stt_entry("deepgram", "nova-2")]
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+    ):
+        with (
+            patch("google.cloud.storage.Client") as storage_client,
+            patch("coval_bench.runner.normalized.dual_write", new_callable=AsyncMock) as dual_write,
+        ):
+            await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    storage_client.assert_not_called()
+    dual_write.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_stt_normalized_write_fails_closed_without_manifest_sha(
+    audio_file: Path, settings: Settings
+) -> None:
+    """An unknown STT manifest hash must disable only the normalized write path."""
+    enabled = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts",
+            "normalized_dual_write_enabled": True,
+        }
+    )
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    writer = _make_stub_writer(_make_run())
+    matrix = [*_paused_registry(Benchmark.STT), _stt_entry("deepgram", "nova-2")]
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        writer=writer,
+    ):
+        with (
+            patch("importlib.resources.files", side_effect=OSError("manifest unavailable")),
+            patch("google.cloud.storage.Client", return_value=object()) as storage_client,
+            patch("coval_bench.runner.normalized.dual_write", new_callable=AsyncMock) as dual_write,
+        ):
+            await run_benchmarks(
+                settings=enabled,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    storage_client.assert_called_once_with()
+    dual_write.assert_not_awaited()
+    writer.record_results.assert_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dual_write_enabled", [False, True])
+async def test_tts_manifest_sha_failure_never_breaks_legacy_writes(
+    dual_write_enabled: bool, audio_file: Path, settings: Settings
+) -> None:
+    """TTS provenance lookup is skipped or fail-closed without affecting legacy rows."""
+    configured = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts" if dual_write_enabled else "",
+            "normalized_dual_write_enabled": dual_write_enabled,
+        }
+    )
+    provider = MagicMock()
+    provider.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="voice",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    writer = _make_stub_writer(_make_run())
+    matrix = [
+        *_paused_registry(Benchmark.TTS),
+        _tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
+    ]
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_items=[_make_tts_item()],
+        tts_providers={"elevenlabs": MagicMock(return_value=provider)},
+        writer=writer,
+    ):
+        with (
+            patch("importlib.resources.files", side_effect=OSError("manifest unavailable")),
+            patch("google.cloud.storage.Client", return_value=object()) as storage_client,
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ),
+            patch("coval_bench.runner.normalized.dual_write", new_callable=AsyncMock) as dual_write,
+        ):
+            await run_benchmarks(
+                settings=configured,
+                benchmark_kind="tts",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
+
+    assert storage_client.call_count == int(dual_write_enabled)
+    dual_write.assert_not_awaited()
+    writer.record_results.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_results(
+    audio_file: Path, settings: Settings
+) -> None:
+    """An ordinary normalized failure is isolated after it snapshots live audio."""
+    enabled = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts",
+            "normalized_dual_write_enabled": True,
+        }
+    )
+    provider = MagicMock()
+    provider.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="voice",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    writer = _make_stub_writer(_make_run())
+
+    async def _fail_after_checking_audio(**kwargs: Any) -> None:
+        assert kwargs["audio_path"].exists()
+        raise RuntimeError("normalized unavailable")
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_providers={"elevenlabs": MagicMock(return_value=provider)},
+        writer=writer,
+    ):
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ),
+            patch(
+                "coval_bench.runner.normalized.dual_write",
+                new_callable=AsyncMock,
+                side_effect=_fail_after_checking_audio,
+            ) as dual_write,
+        ):
+            results = await _run_tts_item(
+                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
+                item=_make_tts_item(),
+                run_id=1,
+                sem=asyncio.Semaphore(1),
+                settings=enabled,
+                writer=writer,
+                dataset_sha256="a" * 64,
+                artifact_client=object(),
+            )
+
+    dual_write.assert_awaited_once()
+    assert not audio_file.exists()
+    writer.record_results.assert_awaited_once_with(results)
+
+
+@pytest.mark.asyncio
+async def test_tts_cancellation_propagates_after_audio_cleanup(
+    audio_file: Path, settings: Settings
+) -> None:
+    """Cancellation is never swallowed, but orchestrator-owned audio is removed."""
+    enabled = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts",
+            "normalized_dual_write_enabled": True,
+        }
+    )
+    provider = MagicMock()
+    provider.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="voice",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    writer = _make_stub_writer(_make_run())
+
+    async def _cancel_after_checking_audio(**kwargs: Any) -> None:
+        assert kwargs["audio_path"].exists()
+        raise asyncio.CancelledError
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_providers={"elevenlabs": MagicMock(return_value=provider)},
+        writer=writer,
+    ):
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ),
+            patch(
+                "coval_bench.runner.normalized.dual_write",
+                new_callable=AsyncMock,
+                side_effect=_cancel_after_checking_audio,
+            ),
+            pytest.raises(asyncio.CancelledError),
+        ):
+            await _run_tts_item(
+                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
+                item=_make_tts_item(),
+                run_id=1,
+                sem=asyncio.Semaphore(1),
+                settings=enabled,
+                writer=writer,
+                dataset_sha256="a" * 64,
+                artifact_client=object(),
+            )
+
+    assert not audio_file.exists()
+    writer.record_results.assert_not_awaited()

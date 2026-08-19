@@ -55,4 +55,8 @@ The web FE lives in the private `coval-ai/benchmarks-web` repo — run it agains
 
 All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 
+Normalized observation dual writes are additive, private, and disabled by default.
+Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
+enable the STT/TTS rollout; legacy result writes remain the source of truth.
+
 Apache-2.0.
