@@ -50,8 +50,12 @@ def _run_json(
     values: list[dict[str, Any]],
     metric_id: str = "MID",
     error_status: str | None = "SUCCESS",
+    output_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    run: dict[str, Any] = {"results": {"metrics": {metric_id: {"values": values}}}}
+    results: dict[str, Any] = {"metrics": {metric_id: {"values": values}}}
+    if output_ids is not None:
+        results["output_ids"] = output_ids
+    run: dict[str, Any] = {"results": results}
     if error_status:
         run["error_status"] = error_status
     return {"run": run}
@@ -208,13 +212,17 @@ async def test_backfill_reports_matches_and_ignores_staleness() -> None:
 
 
 @pytest.mark.asyncio
-async def test_backfill_does_not_match_errored_run() -> None:
+async def test_backfill_matches_errored_run() -> None:
+    # The EXECUTION_FAILURE stamp no longer gates ingestion: a backfilled run
+    # lands its healthy clips (plus FAILED rows for the rest) and is matched.
     writer = _stub_writer()
     matched: set[str] = set()
     list_json = _list_json(
         {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "FAILED"}
     )
-    async with _fake_client(list_json, {}) as client:
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    errored = _run_json(values, error_status="EXECUTION_FAILURE", output_ids=["s1", "s2"])
+    async with _fake_client(list_json, errored) as client:
         status, ingested = await fetch_v2v._fetch_one_provider(
             client,
             writer,
@@ -228,8 +236,8 @@ async def test_backfill_does_not_match_errored_run() -> None:
             matched_run_ids=matched,
         )
 
-    assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
-    assert matched == set()
+    assert (status, ingested) == (RunStatus.PARTIAL, 1)
+    assert matched == {"R1"}
 
 
 @pytest.mark.asyncio
@@ -338,8 +346,6 @@ async def test_recent_completed_runs_window_and_parse() -> None:
     assert 'status="COMPLETED"' in filter_expr
     assert 'agent_id="a1"' in filter_expr
     assert [r.run_id for r in runs] == ["R3", "R2", "R0"]
-    assert runs[1].error_status == "EXECUTION_FAILURE"
-    assert runs[0].error_status is None
     assert runs[2].create_time is None
 
     async with _fake_client({"runs": []}, {}) as client:
@@ -356,7 +362,7 @@ async def test_ingest_run_slots_by_create_time() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=created, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=created),
             metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
@@ -375,7 +381,7 @@ async def test_ingest_run_partial_and_failed() -> None:
         {"simulation_output_id": "s1", "value": 0.5},
         {"simulation_output_id": "s2", "value": None},
     ]
-    run = CovalRun(run_id="R1", create_time=None, error_status=None)
+    run = CovalRun(run_id="R1", create_time=None)
     async with _fake_client({}, _run_json(mixed)) as client:
         status = await fetch_v2v._ingest_run(
             client,
@@ -406,26 +412,9 @@ async def test_ingest_run_partial_and_failed() -> None:
 
 @pytest.mark.asyncio
 async def test_ingest_run_skips_before_any_write() -> None:
-    # Errored detail: skipped, no run row created.
-    writer = _stub_writer()
-    run = CovalRun(run_id="R1", create_time=None, error_status=None)
-    async with _fake_client({}, _run_json([], error_status="EXECUTION_FAILURE")) as client:
-        assert (
-            await fetch_v2v._ingest_run(
-                client,
-                writer,
-                spec=SPEC,
-                coval_run=run,
-                metric_ids=LATENCY_IDS,
-                runner_sha="test",
-                period_seconds=10_800,
-            )
-            is None
-        )
-    writer.start_run.assert_not_awaited()
-
     # Metric absent: skipped, no run row created.
     writer = _stub_writer()
+    run = CovalRun(run_id="R1", create_time=None)
     async with _fake_client({}, _run_json([], metric_id="OTHER")) as client:
         assert (
             await fetch_v2v._ingest_run(
@@ -440,6 +429,102 @@ async def test_ingest_run_skips_before_any_write() -> None:
             is None
         )
     writer.start_run.assert_not_awaited()
+
+    # Anchor present but valueless (a fully-wrecked run): still skipped.
+    writer = _stub_writer()
+    async with _fake_client({}, _run_json([], output_ids=["s1", "s2"])) as client:
+        assert (
+            await fetch_v2v._ingest_run(
+                client,
+                writer,
+                spec=SPEC,
+                coval_run=run,
+                metric_ids=LATENCY_IDS,
+                runner_sha="test",
+                period_seconds=10_800,
+            )
+            is None
+        )
+    writer.start_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_ignores_error_status() -> None:
+    # One failed conversation stamps the whole run EXECUTION_FAILURE; the
+    # surviving clips must still land.
+    writer = _stub_writer()
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client({}, _run_json(values, error_status="EXECUTION_FAILURE")) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    writer.record_results.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
+    # s3 is in output_ids but has no anchor value: it failed on Coval's side
+    # and must land as a FAILED row, making the run PARTIAL.
+    writer = _stub_writer()
+    values = [
+        {"simulation_output_id": "s1", "value": 0.5},
+        {"simulation_output_id": "s2", "value": 0.6},
+    ]
+    fixture = _run_json(values, output_ids=["s1", "s2", "s3"])
+    async with _fake_client({}, fixture) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.PARTIAL
+    rows = writer.record_results.await_args.args[0]
+    assert [(r.audio_filename, r.status) for r in rows] == [
+        ("R1/s1", ResultStatus.SUCCESS),
+        ("R1/s2", ResultStatus.SUCCESS),
+        ("R1/s3", ResultStatus.FAILED),
+    ]
+    assert rows[-1].metric_value is None
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
+    # One anchor value has no simulation_output_id (kept under the index
+    # fallback), so its output_id can't be matched: no output_id may be treated
+    # as uncovered, or a measured conversation would be stamped FAILED.
+    writer = _stub_writer()
+    values: list[dict[str, Any]] = [
+        {"simulation_output_id": "s1", "value": 0.5},
+        {"value": 0.6},  # this is s2, but the id is missing
+    ]
+    fixture = _run_json(values, output_ids=["s1", "s2"])
+    async with _fake_client({}, fixture) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert [(r.audio_filename, r.status) for r in rows] == [
+        ("R1/s1", ResultStatus.SUCCESS),
+        ("R1/1", ResultStatus.SUCCESS),
+    ]
 
 
 @pytest.mark.asyncio
@@ -555,9 +640,22 @@ async def test_fetch_one_provider_unknown_age_is_stale() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_one_provider_skips_errored_ingests_older_clean() -> None:
-    # Newest run errored (summary view): skip it, ingest the older clean one.
+async def test_fetch_one_provider_ingests_errored_run() -> None:
+    # An EXECUTION_FAILURE stamp (one failed conversation) no longer drops the
+    # run: its healthy clips ingest and count as freshness.
     writer = _stub_writer()
+    writer.start_run = AsyncMock(
+        side_effect=[
+            Run(
+                id=i,
+                runner_sha="t",
+                dataset_id="s2s-v1",
+                dataset_sha256="x",
+                status=RunStatus.RUNNING,
+            )
+            for i in (1, 2)
+        ]
+    )
     list_json = _list_json(
         {
             "run_id": "R2",
@@ -567,12 +665,15 @@ async def test_fetch_one_provider_skips_errored_ingests_older_clean() -> None:
         {"run_id": "R1", "create_time": _iso(timedelta(hours=4))},
     )
     values = [{"simulation_output_id": "s1", "value": 0.5}]
-    async with _fake_client(list_json, {"R1": _run_json(values)}, None) as client:
+    errored = _run_json(values, error_status="EXECUTION_FAILURE", output_ids=["s1", "s2"])
+    async with _fake_client(list_json, {"R2": errored, "R1": _run_json(values)}, None) as client:
         status, ingested = await _fetch(client, writer)
 
-    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert (status, ingested) == (RunStatus.PARTIAL, 2)
     written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
-    assert written == ["R1/s1"]
+    assert written == ["R2/s1", "R1/s1"]
+    partial = writer.finish_run.await_args_list[0].kwargs["status"]
+    assert partial is RunStatus.PARTIAL
 
 
 @pytest.mark.asyncio
@@ -1044,7 +1145,7 @@ async def test_ingest_run_writes_interruption_rows() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=ALL_IDS,
             condition=condition_for(DATASET_ID_MULTITURN),
             runner_sha="test",
@@ -1080,7 +1181,7 @@ async def test_ingest_run_writes_instruction_rows() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
@@ -1125,7 +1226,7 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
@@ -1145,7 +1246,7 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
@@ -1179,7 +1280,7 @@ async def test_ingest_run_backfill_instruction_only() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
             runner_sha="test",
@@ -1201,7 +1302,7 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
             runner_sha="test",
@@ -1223,7 +1324,7 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
@@ -1247,7 +1348,7 @@ async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN),
             dataset_id=DATASET_ID_MULTITURN,
@@ -1273,7 +1374,7 @@ async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
@@ -1302,7 +1403,7 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
@@ -1386,7 +1487,7 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             runner_sha="test",
             period_seconds=10_800,
@@ -1406,7 +1507,7 @@ async def test_ingest_run_without_instruction_metric_id() -> None:
             client,
             writer,
             spec=SPEC,
-            coval_run=CovalRun(run_id="R1", create_time=None, error_status=None),
+            coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=LATENCY_IDS,
             runner_sha="test",
             period_seconds=10_800,
