@@ -58,10 +58,9 @@ def _inputs(metric: str, artifacts: dict[Any, Any], benchmark: Any) -> list[Metr
     ]
 
 
-def _values(metric: str, rows: Sequence[Any], evaluation_id: Any) -> list[MetricValue]:
-    primary = next(
-        row for row in rows if row.metric_value is not None and str(row.status) == "success"
-    )
+def _values(
+    metric: str, rows: Sequence[Any], evaluation_id: Any, primary: Any
+) -> list[MetricValue]:
     values = [
         MetricValue(
             metric_evaluation_id=evaluation_id,
@@ -185,6 +184,14 @@ async def dual_write(
         )
         grouped.setdefault(metric, []).append(row)
     for metric, rows in grouped.items():
+        primary = next(
+            (row for row in rows if row.metric_value is not None and str(row.status) == "success"),
+            None,
+        )
+        # A null-valued success is an intentional exclusion from aggregation (for example,
+        # transport-contaminated TTFA), not a failed metric evaluation.
+        if primary is None and any(str(row.status) == "success" for row in rows):
+            continue
         evaluation = await writer.insert_metric_evaluation(
             MetricEvaluation(
                 observation_id=observation.id,
@@ -204,10 +211,6 @@ async def dual_write(
             evaluation = await writer.start_metric_evaluation(
                 evaluation.id, started_at=datetime.now(UTC)
             )
-        primary = next(
-            (row for row in rows if row.metric_value is not None and str(row.status) == "success"),
-            None,
-        )
         finished_at = datetime.now(UTC)
         if primary is None:
             await writer.fail_metric_evaluation(
@@ -219,5 +222,7 @@ async def dual_write(
             )
         else:
             await writer.complete_metric_evaluation(
-                evaluation.id, finished_at=finished_at, values=_values(metric, rows, evaluation.id)
+                evaluation.id,
+                finished_at=finished_at,
+                values=_values(metric, rows, evaluation.id, primary),
             )

@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import wave
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 import pytest
 from google.api_core.exceptions import PreconditionFailed
+from google.cloud import storage
 
 from coval_bench.observation_artifacts import (
     snapshot_generated_audio,
@@ -26,7 +29,7 @@ class Blob:
     def upload_from_string(self, payload: bytes, **kwargs: object) -> None:
         self.kwargs = kwargs
         if self.conflict:
-            raise PreconditionFailed("exists")
+            raise cast(Callable[[str], Exception], PreconditionFailed)("exists")
         self.payload = payload
         self.size = len(payload)
         self.content_type = str(kwargs["content_type"])
@@ -54,9 +57,13 @@ class Client:
         return self._bucket
 
 
+def _client(blob: Blob) -> storage.Client:
+    return cast(storage.Client, Client(blob))
+
+
 def test_transcript_upload_is_create_only_private_and_opaque() -> None:
     blob = Blob()
-    artifact = upload_provider_transcript(Client(blob), "private", "secret transcript")  # type: ignore[arg-type]
+    artifact = upload_provider_transcript(_client(blob), "private", "secret transcript")
     assert blob.kwargs["if_generation_match"] == 0
     assert artifact.gcs_uri.startswith("gs://private/observation-artifacts/v1/")
     assert "secret" not in artifact.gcs_uri
@@ -68,18 +75,18 @@ def test_transcript_upload_is_create_only_private_and_opaque() -> None:
 
 def test_exact_collision_accepts_but_corruption_rejects() -> None:
     blob = Blob()
-    client = Client(blob)
-    upload_provider_transcript(client, "private", "same")  # type: ignore[arg-type]
+    client = _client(blob)
+    upload_provider_transcript(client, "private", "same")
     blob.conflict = True
-    upload_provider_transcript(client, "private", "same")  # type: ignore[arg-type]
+    upload_provider_transcript(client, "private", "same")
     blob.content_type = "text/plain"
     with pytest.raises(ValueError, match="collision"):
-        upload_provider_transcript(client, "private", "same")  # type: ignore[arg-type]
+        upload_provider_transcript(client, "private", "same")
     blob.content_type = "application/json"
     blob.payload = b"wrong"
     blob.size = len(blob.payload)
     with pytest.raises(ValueError, match="collision"):
-        upload_provider_transcript(client, "private", "same")  # type: ignore[arg-type]
+        upload_provider_transcript(client, "private", "same")
 
 
 def test_wav_snapshot_keeps_bytes_and_duration(tmp_path: Path) -> None:
@@ -92,9 +99,7 @@ def test_wav_snapshot_keeps_bytes_and_duration(tmp_path: Path) -> None:
     assert duration_ms == 10
 
     blob = Blob()
-    artifact = upload_generated_audio(  # type: ignore[arg-type]
-        Client(blob), "private", payload, duration_ms
-    )
+    artifact = upload_generated_audio(_client(blob), "private", payload, duration_ms)
     assert blob.payload == payload
     assert blob.content_type == "audio/wav"
     assert artifact.duration_ms == duration_ms

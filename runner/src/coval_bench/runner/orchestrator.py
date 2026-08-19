@@ -39,6 +39,7 @@ import atexit
 import contextlib
 import hashlib
 import importlib
+import importlib.resources
 import random
 import signal
 import wave
@@ -645,36 +646,37 @@ async def _run_stt_item(
             )
 
     if writer is not None and artifact_client is not None:
-        try:
-            from coval_bench.runner.normalized import dual_write
+        async with sem:
+            try:
+                from coval_bench.runner.normalized import dual_write
 
-            await dual_write(
-                writer=writer,
-                storage_client=artifact_client,
-                bucket=settings.benchmark_artifact_bucket,
-                run_id=run_id,
-                dataset_id=dataset_id or settings.dataset_id,
-                dataset_sha256=dataset_sha256,
-                sample_id=item.sample_id or audio_path.name,
-                entry=entry,
-                benchmark=Benchmark.STT,
-                results=results,
-                provider_error=item_error,
-                transcript=complete_transcript,
-                timing_events={
-                    "ttft_seconds": ttft_seconds,
-                    "audio_to_final_seconds": audio_to_final,
-                    "speech_end_offset_ms": speech_end_offset_ms,
-                    "effective_duration_sec": duration_sec,
-                },
-            )
-        except Exception as exc:
-            logger.warning(
-                "normalized_stt_dual_write_failed",
-                provider=entry.provider,
-                model=entry.model,
-                exc_info=exc,
-            )
+                await dual_write(
+                    writer=writer,
+                    storage_client=artifact_client,
+                    bucket=settings.benchmark_artifact_bucket,
+                    run_id=run_id,
+                    dataset_id=dataset_id or settings.dataset_id,
+                    dataset_sha256=dataset_sha256,
+                    sample_id=item.sample_id or audio_path.name,
+                    entry=entry,
+                    benchmark=Benchmark.STT,
+                    results=results,
+                    provider_error=item_error,
+                    transcript=complete_transcript,
+                    timing_events={
+                        "ttft_seconds": ttft_seconds,
+                        "audio_to_final_seconds": audio_to_final,
+                        "speech_end_offset_ms": speech_end_offset_ms,
+                        "effective_duration_sec": duration_sec,
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "normalized_stt_dual_write_failed",
+                    provider=entry.provider,
+                    model=entry.model,
+                    exc_info=exc,
+                )
 
     return results
 
@@ -915,6 +917,19 @@ async def _run_tts_item(
                                 error=_truncate(str(exc)),
                             )
                         )
+            # The legacy rows remain the source of truth. Persist them before the optional
+            # normalized path so cancellation during artifact upload cannot drop completed work.
+            if writer is not None and results:
+                try:
+                    await writer.record_results(results)
+                except Exception as exc:
+                    logger.warning(
+                        "tts_result_persist_failed",
+                        provider=entry.provider,
+                        model=entry.model,
+                        exc_info=exc,
+                    )
+
             if writer is not None and artifact_client is not None:
                 try:
                     from coval_bench.runner.normalized import dual_write
@@ -963,17 +978,6 @@ async def _run_tts_item(
         model=entry.model,
         item=item.testcase_id,
     )
-
-    if writer is not None and results:
-        try:
-            await writer.record_results(results)
-        except Exception as exc:
-            logger.warning(
-                "tts_result_persist_failed",
-                provider=entry.provider,
-                model=entry.model,
-                exc_info=exc,
-            )
 
     return results
 
@@ -1115,9 +1119,7 @@ async def run_benchmarks(
 
         # Dataset SHA256 for the run record (computed from the packaged manifest)
         try:
-            import importlib.resources as _importlib_resources
-
-            manifest_ref = _importlib_resources.files("coval_bench.datasets.manifests").joinpath(
+            manifest_ref = importlib.resources.files("coval_bench.datasets.manifests").joinpath(
                 f"{run_dataset_id}.json"
             )
             manifest_bytes = manifest_ref.read_bytes()

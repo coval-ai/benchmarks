@@ -14,6 +14,7 @@ import pytest
 
 from coval_bench.db.models import (
     Benchmark,
+    MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
     MetricValue,
@@ -77,7 +78,9 @@ class _Writer:
         *,
         finished_at: datetime,
         values: Sequence[MetricValue],
-    ) -> MetricEvaluation:
+        artifacts: Sequence[MetricArtifact] = (),
+    ) -> None:
+        del artifacts
         validate_metric_values(
             self.evaluations[evaluation_id].metric_type,
             "v1",
@@ -91,7 +94,6 @@ class _Writer:
             }
         )
         self.evaluations[evaluation_id] = stored
-        return stored
 
     async def fail_metric_evaluation(
         self, evaluation_id: UUID, *, finished_at: datetime, error: str
@@ -347,3 +349,35 @@ async def test_provider_and_metric_failure_map_to_failed_normalized_rows() -> No
     assert observation.failure_origin is ObservationFailureOrigin.PROVIDER
     assert not writer.completed
     assert list(writer.failed.values()) == ["provider failed"]
+
+
+@pytest.mark.asyncio
+async def test_null_success_metric_is_excluded_instead_of_failed() -> None:
+    writer = _Writer()
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="private",
+        run_id=1,
+        dataset_id="tts-v1",
+        dataset_sha256="d" * 64,
+        sample_id="tts-1",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.TTS,
+        results=[
+            _result(
+                Benchmark.TTS,
+                Metric.TTFA,
+                None,
+                "milliseconds",
+                error="TTFA measured over HTTP/1.1; not comparable",
+            )
+        ],
+        provider_error=None,
+        timing_events={"ttfa_ms": 120},
+    )
+
+    assert writer.observations[0].status is ObservationStatus.SUCCEEDED
+    assert not writer.evaluations
+    assert not writer.completed
+    assert not writer.failed

@@ -631,9 +631,11 @@ async def test_retry_exhausted() -> None:
 
 @pytest.mark.asyncio
 async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
-    """50 dataset items × 1 provider — at most 8 coroutines in flight at once."""
+    """Provider calls and normalized writes both stay within the eight-item cap."""
     max_concurrent = 0
     current_concurrent = 0
+    max_normalized_concurrent = 0
+    current_normalized_concurrent = 0
     lock = asyncio.Lock()
 
     async def tracked_measure_ttft(*args: Any, **kwargs: Any) -> TranscriptionResult:
@@ -647,6 +649,17 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
             current_concurrent -= 1
         return _good_transcription()
 
+    async def tracked_dual_write(**_kwargs: Any) -> None:
+        nonlocal max_normalized_concurrent, current_normalized_concurrent
+        async with lock:
+            current_normalized_concurrent += 1
+            max_normalized_concurrent = max(
+                max_normalized_concurrent, current_normalized_concurrent
+            )
+        await asyncio.sleep(0)
+        async with lock:
+            current_normalized_concurrent -= 1
+
     provider_inst = MagicMock()
     provider_inst.measure_ttft = tracked_measure_ttft
     provider_cls = MagicMock(return_value=provider_inst)
@@ -657,6 +670,12 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
 
     run = _make_run()
     writer = _make_stub_writer(run)
+    enabled = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts",
+            "normalized_dual_write_enabled": True,
+        }
+    )
 
     async with _orchestrator_env(
         audio_path=audio_file,
@@ -665,14 +684,27 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
         run=run,
         writer=writer,
     ) as _:
-        summary = await run_benchmarks(
-            settings=settings,
-            benchmark_kind="stt",
-            smoke=False,
-            matrix_overrides=matrix,
-        )
+        with (
+            patch("google.cloud.storage.Client", return_value=object()),
+            patch(
+                "coval_bench.runner.normalized.dual_write",
+                new_callable=AsyncMock,
+                side_effect=tracked_dual_write,
+            ) as dual_write,
+        ):
+            summary = await run_benchmarks(
+                settings=enabled,
+                benchmark_kind="stt",
+                smoke=False,
+                matrix_overrides=matrix,
+            )
 
     assert max_concurrent <= 8, f"max concurrent was {max_concurrent}"
+    assert max_normalized_concurrent <= 8, (
+        f"max normalized concurrent was {max_normalized_concurrent}"
+    )
+    assert dual_write.await_count == provider_cls.call_count
+    assert dual_write.await_count > 8
     assert summary.total_results >= 50 * 3
 
 
@@ -3117,8 +3149,10 @@ async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_res
     )
     writer = _make_stub_writer(_make_run())
 
+    audio_existed_during_write: list[bool] = []
+
     async def _fail_after_checking_audio(**kwargs: Any) -> None:
-        assert kwargs["audio_path"].exists()
+        audio_existed_during_write.append(kwargs["audio_path"].exists())
         raise RuntimeError("normalized unavailable")
 
     async with _orchestrator_env(
@@ -3149,6 +3183,7 @@ async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_res
             )
 
     dual_write.assert_awaited_once()
+    assert audio_existed_during_write == [True]
     assert not audio_file.exists()
     writer.record_results.assert_awaited_once_with(results)
 
@@ -3210,4 +3245,4 @@ async def test_tts_cancellation_propagates_after_audio_cleanup(
             )
 
     assert not audio_file.exists()
-    writer.record_results.assert_not_awaited()
+    writer.record_results.assert_awaited_once()
