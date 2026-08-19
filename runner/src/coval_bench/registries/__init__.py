@@ -10,11 +10,17 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.metrics import (
     METRIC_EXCLUSIONS,
     METRIC_SPECS,
+    METRIC_VALUE_CONTRACTS,
     SERIES_EXCLUDED_METRICS,
     Metric,
     MetricDirection,
     MetricSpec,
+    MetricValueContract,
+    MetricValueDefinition,
+    MetricValueRole,
     is_metric_excluded,
+    validate_metric_contract,
+    validate_metric_values,
 )
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
@@ -24,6 +30,10 @@ from coval_bench.registries.models import (
     RegisteredModel,
     Source,
     Voice,
+)
+from coval_bench.registries.preprocessing import (
+    SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS,
+    validate_preprocessing_artifact_contract,
 )
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
@@ -38,12 +48,17 @@ __all__ = [
     "Benchmark",
     "METRIC_EXCLUSIONS",
     "METRIC_SPECS",
+    "METRIC_VALUE_CONTRACTS",
+    "SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS",
     "SERIES_EXCLUDED_METRICS",
     "MODEL_REGISTRY",
     "Metric",
     "MetricDirection",
     "MetricSpec",
     "Gender",
+    "MetricValueContract",
+    "MetricValueDefinition",
+    "MetricValueRole",
     "Licensing",
     "ModelStatus",
     "RegisteredModel",
@@ -55,5 +70,8 @@ __all__ = [
     "ModelTag",
     "TagCategory",
     "is_metric_excluded",
+    "validate_metric_contract",
+    "validate_metric_values",
+    "validate_preprocessing_artifact_contract",
     "tag_value_label",
 ]

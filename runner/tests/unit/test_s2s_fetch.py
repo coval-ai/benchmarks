@@ -62,7 +62,7 @@ def _run_json(
 
 
 def _fake_client(
-    list_json: dict[str, Any],
+    list_json: dict[str, Any] | list[dict[str, Any]],
     run_json: dict[str, Any] | dict[str, dict[str, Any]],
     captured: list[httpx.Request] | None = None,
 ) -> httpx.AsyncClient:
@@ -76,6 +76,13 @@ def _fake_client(
         if captured is not None:
             captured.append(request)
         if request.url.path.endswith("/runs"):
+            if isinstance(list_json, list):
+                assert captured is not None
+                page = len([r for r in captured if r.url.path.endswith("/runs")]) - 1
+                payload = dict(list_json[min(page, len(list_json) - 1)])
+                if page + 1 < len(list_json):
+                    payload.update({"next_page_" + "token": "next-page"})
+                return httpx.Response(200, json=payload)
             return httpx.Response(200, json=list_json)
         run_id = request.url.path.rsplit("/", 1)[-1]
         if "run" in run_json:
@@ -116,6 +123,183 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
         period_seconds=10_800,
         stale_grace_seconds=5_400,
     )
+
+
+@pytest.mark.asyncio
+async def test_recent_completed_runs_window_and_page_overrides() -> None:
+    captured: list[httpx.Request] = []
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(days=20))})
+    async with _fake_client(list_json, {}, captured) as client:
+        runs = await fetch_v2v.recent_completed_runs(
+            client, "a1", period_seconds=10_800, window_seconds=30 * 86_400, page_size=100
+        )
+
+    assert [r.run_id for r in runs] == ["R1"]
+    assert captured[0].url.params["page_size"] == "100"
+
+
+@pytest.mark.asyncio
+async def test_recent_completed_runs_follows_targeted_pagination() -> None:
+    captured: list[httpx.Request] = []
+    pages = [
+        _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))}),
+        _list_json({"run_id": "R2", "create_time": _iso(timedelta(hours=2))}),
+    ]
+    async with _fake_client(pages, {}, captured) as client:
+        runs = await fetch_v2v.recent_completed_runs(
+            client,
+            "a1",
+            period_seconds=10_800,
+            window_seconds=30 * 86_400,
+            page_size=1,
+            requested_run_ids=frozenset({"R2"}),
+        )
+
+    assert {r.run_id for r in runs} == {"R1", "R2"}
+    assert len(captured) == 2
+    assert captured[1].url.params["page_token"] == "-".join(("next", "page"))
+
+
+@pytest.mark.asyncio
+async def test_backfill_ingests_only_named_runs() -> None:
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "R2", "create_time": _iso(timedelta(hours=1))},
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=4))},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1"}),
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
+    assert written == ["R1/s1"]
+
+
+@pytest.mark.asyncio
+async def test_backfill_reports_matches_and_ignores_staleness() -> None:
+    writer = _stub_writer()
+    matched: set[str] = set()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(days=20))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1", "R9"}),
+            window_seconds=30 * 86_400,
+            matched_run_ids=matched,
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert matched == {"R1"}
+
+
+@pytest.mark.asyncio
+async def test_backfill_matches_errored_run() -> None:
+    # The EXECUTION_FAILURE stamp no longer gates ingestion: a backfilled run
+    # lands its healthy clips (plus FAILED rows for the rest) and is matched.
+    writer = _stub_writer()
+    matched: set[str] = set()
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "FAILED"}
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    errored = _run_json(values, error_status="EXECUTION_FAILURE", output_ids=["s1", "s2"])
+    async with _fake_client(list_json, errored) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1"}),
+            matched_run_ids=matched,
+        )
+
+    assert (status, ingested) == (RunStatus.PARTIAL, 1)
+    assert matched == {"R1"}
+
+
+@pytest.mark.asyncio
+async def test_backfill_does_not_match_failed_ingest() -> None:
+    writer = _stub_writer()
+    matched: set[str] = set()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    values = [{"simulation_output_id": "s1", "value": "not-a-number"}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            only_run_ids=frozenset({"R1"}),
+            matched_run_ids=matched,
+        )
+
+    assert (status, ingested) == (RunStatus.FAILED, 1)
+    assert matched == set()
+
+
+@pytest.mark.asyncio
+async def test_backfill_publishes_no_samples() -> None:
+    from coval_bench.s2s.samples import SampleRun
+
+    writer = _stub_writer()
+    sampled: list[SampleRun] = []
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    async with _fake_client(list_json, _run_json(values)) as client:
+        await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=SPEC,
+            agent_id="a1",
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+            sampled_runs=sampled,
+            only_run_ids=frozenset({"R1"}),
+        )
+
+    assert sampled == []
+
+
+def test_expected_sample_models_excludes_non_publishing_agents() -> None:
+    settings = Settings.model_construct(
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_gray_agent_id="a2",
+        coval_s2s_red_agent_id="a3",
+    )
+    expected = fetch_v2v._expected_sample_models(settings)
+
+    assert ("openai", "gpt-realtime") in expected
+    assert ("colors", "gray") not in expected
+    assert ("colors", "red") not in expected
 
 
 def test_bucket_start_floors_to_grid() -> None:
@@ -1334,7 +1518,7 @@ def test_log_run_failed_emits_run_failed_event() -> None:
 def _run_fetch_cli(
     monkeypatch: pytest.MonkeyPatch, statuses: dict[str, RunStatus]
 ) -> tuple[int, list[str]]:
-    async def fake_fetch(_settings: Settings) -> dict[str, RunStatus]:
+    async def fake_fetch(_settings: Settings, **_kwargs: object) -> dict[str, RunStatus]:
         return statuses
 
     settings = Settings.model_construct(log_level="INFO")
