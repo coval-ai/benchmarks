@@ -57,6 +57,9 @@ scripts.local/
 # Internal provider docs / planning notes — never commit
 docs/providers/
 
+# Arena clips from the local-storage fallback (dev servers without GCS)
+runner/arena-audio/
+
 # Package manager / toolchain caches (local)
 .pnpm-store/
 .uv-cache/
