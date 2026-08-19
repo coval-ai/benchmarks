@@ -140,7 +140,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origin_regex=resolved.cors_origin_regex,
         allow_credentials=False,
         allow_methods=["GET", "OPTIONS"],
-        allow_headers=["Authorization", "X-Internal-Key", "X-EA-Token"],
+        allow_headers=["Authorization"],
         max_age=600,
     )
 

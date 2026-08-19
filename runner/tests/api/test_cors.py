@@ -61,20 +61,19 @@ async def test_cors_methods_include_get_options(client: AsyncClient) -> None:
     assert "GET" in methods_header
 
 
-async def test_cors_preflight_allows_the_proof_headers(client: AsyncClient) -> None:
-    """Preflight passes for the proof headers; `*` never covers Authorization."""
+async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> None:
+    """Preflight passes for the bearer proof; `*` never covers Authorization."""
     response = await client.options(
         "/v1/results",
         headers={
             "Origin": "https://benchmarks.coval.ai",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": "authorization, x-ea-token, x-internal-key",
+            "Access-Control-Request-Headers": "authorization",
         },
     )
     assert response.status_code in (200, 204)
     allowed = response.headers.get("access-control-allow-headers", "").lower()
-    for header in ("authorization", "x-ea-token", "x-internal-key"):
-        assert header in allowed, f"{header} missing from {allowed!r}"
+    assert "authorization" in allowed, f"authorization missing from {allowed!r}"
 
 
 async def test_cors_vercel_canonical_allowed(client: AsyncClient) -> None:

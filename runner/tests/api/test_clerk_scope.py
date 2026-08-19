@@ -57,7 +57,6 @@ def _settings(
     monkeypatch: pytest.MonkeyPatch,
     issuer: str | None = _ISSUER,
     parties: str | None = f'["{_PARTY}"]',
-    ea_tokens: str | None = None,
     org_providers: str | None = None,
     org_exclusive: str | None = None,
 ) -> Settings:
@@ -65,11 +64,6 @@ def _settings(
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "stt-v1")
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
-    monkeypatch.delenv("INTERNAL_API_KEY", raising=False)
-    if ea_tokens is None:
-        monkeypatch.delenv("EARLY_ACCESS_TOKENS", raising=False)
-    else:
-        monkeypatch.setenv("EARLY_ACCESS_TOKENS", ea_tokens)
     if org_providers is None:
         monkeypatch.delenv("CLERK_ORG_PROVIDERS", raising=False)
     else:
@@ -98,14 +92,12 @@ def _mint(claims: dict[str, Any], key: rsa.RSAPrivateKey = _PRIVATE_KEY, **overr
 
 
 def _resolve(
-    settings: Settings, authorization: str | None, x_ea_token: str | None = None
+    settings: Settings, authorization: str | None
 ) -> tuple[frozenset[tuple[str, str]], str]:
     """This caller's hidden set and the status header it got."""
     response = Response()
     hidden = hidden_early_access(
         response=response,
-        internal=False,
-        x_ea_token=x_ea_token,
         authorization=authorization,
         settings=settings,
     )
@@ -234,23 +226,6 @@ def test_exclusive_overrides_a_coval_email(monkeypatch: pytest.MonkeyPatch) -> N
     assert _public_pair() in hidden
 
 
-def test_ea_token_cannot_widen_an_exclusive_org(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider, model = sorted(embargoed_pairs())[0]
-    other = sorted(embargoed_pairs() - {(provider, model)})
-    if not other:
-        pytest.skip("only one embargoed model in the registry")
-    settings = _settings(
-        monkeypatch,
-        ea_tokens=json.dumps({"tok": [f"{other[0][0]}/{other[0][1]}"]}),
-        org_exclusive=json.dumps({_ORG_ID: [f"{provider}/{model}"]}),
-    )
-    token = _mint({"org_id": _ORG_ID})
-    hidden, _ = _resolve(settings, f"Bearer {token}", x_ea_token="tok")  # noqa: S106 - fake token
-
-    assert other[0] in hidden
-    assert (provider, model) not in hidden
-
-
 def test_unmapped_org_is_unaffected_by_the_exclusive_map(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _embargoed_provider()
     settings = _settings(monkeypatch, org_exclusive=json.dumps({"org_someone_else": [provider]}))
@@ -285,7 +260,6 @@ def _unvalidated_settings(exclusive: str) -> Settings:
         clerk_authorized_parties=[_PARTY],
         clerk_org_providers=None,
         clerk_org_exclusive=exclusive,
-        early_access_tokens=None,
     )
 
 
@@ -316,8 +290,6 @@ def test_unknown_exclusive_entry_grants_nothing_and_warns(
     with capture_logs() as logs:
         hidden = hidden_early_access(
             response=response,
-            internal=False,
-            x_ea_token=None,
             authorization=f"Bearer {token}",
             settings=settings,
         )
@@ -475,13 +447,7 @@ def test_unset_authorized_parties_rejects_every_token(monkeypatch: pytest.Monkey
 
 def _headers(settings: Settings, authorization: str) -> dict[str, str]:
     response = Response()
-    hidden_early_access(
-        response=response,
-        internal=False,
-        x_ea_token=None,
-        authorization=authorization,
-        settings=settings,
-    )
+    hidden_early_access(response=response, authorization=authorization, settings=settings)
     return dict(response.headers)
 
 
@@ -520,52 +486,31 @@ def test_non_bearer_authorization_keeps_the_public_view(
     assert hidden == embargoed_pairs()
 
 
-def test_partner_token_and_bearer_unlock_the_union(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One request may carry both proofs, say an embargo link opened while signed in."""
-    mine, theirs = _two_embargoed_providers()
-    their_pair = min(pair for pair in embargoed_pairs() if pair[0] == theirs)
-    settings = _settings(
-        monkeypatch,
-        ea_tokens=json.dumps({"partner-token": [f"{their_pair[0]}/{their_pair[1]}"]}),
-        org_providers=json.dumps({_ORG_ID: mine}),
-    )
-    token = _mint({"org_id": _ORG_ID})
-    hidden, status = _resolve(settings, f"Bearer {token}", x_ea_token="partner-token")  # noqa: S106 - fake token
-    assert status == "accepted"
-    unlocked = with_retired_keys(
-        frozenset({their_pair}) | frozenset(pair for pair in embargoed_pairs() if pair[0] == mine)
-    )
-    assert hidden == embargoed_pairs() - unlocked
+def test_retired_board_keys_stay_embargoed() -> None:
+    """A renamed embargoed model keeps hiding artefacts stored under its old key.
+
+    Sample manifests and result rows written before the rename still carry the
+    old string, and the embargo matches on what is stored -- so losing the old
+    key would publish every recording and row published under that name.
+    """
+    assert ("xai", "grok-realtime") in embargoed_pairs()
+    assert ("xai", "grok-voice-think-fast-1.0") in embargoed_pairs()
 
 
-def test_valid_bearer_rescues_an_unknown_partner_token(
+def test_org_grant_for_a_renamed_model_also_sees_its_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = _settings(monkeypatch)
-    token = _mint({"email": _INTERNAL_EMAIL})
-    hidden, status = _resolve(settings, f"Bearer {token}", x_ea_token="not-a-configured-token")  # noqa: S106 - fake token
-    assert status == "accepted"
-    assert hidden == frozenset()
+    """Clearing an org for a model clears it for its pre-rename artefacts.
 
-
-def test_valid_partner_token_survives_a_bad_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider = _embargoed_provider()
-    pair = min(p for p in embargoed_pairs() if p[0] == provider)
+    A grant names models, not the strings they were once published under, so an
+    org cleared for the current key must still reach the manifests that name the
+    old one -- otherwise a rename silently narrows what that org can see.
+    """
     settings = _settings(
         monkeypatch,
-        ea_tokens=json.dumps({"partner-token": [f"{pair[0]}/{pair[1]}"]}),
+        org_providers=json.dumps({_ORG_ID: ["xai/grok-voice-think-fast-1.0"]}),
     )
-    now = int(time.time())
-    expired = _mint({"org_id": _ORG_ID}, iat=now - 120, exp=now - 60)
-    hidden, status = _resolve(settings, f"Bearer {expired}", x_ea_token="partner-token")  # noqa: S106 - fake token
-    assert status == "accepted"
-    assert hidden == embargoed_pairs() - with_retired_keys(frozenset({pair}))
-
-
-def test_two_bad_proofs_stay_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = _settings(monkeypatch)
-    now = int(time.time())
-    expired = _mint({"email": _INTERNAL_EMAIL}, iat=now - 120, exp=now - 60)
-    hidden, status = _resolve(settings, f"Bearer {expired}", x_ea_token="not-a-configured-token")  # noqa: S106 - fake token
-    assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+    assert ("xai", "grok-voice-think-fast-1.0") not in hidden
+    assert ("xai", "grok-realtime") not in hidden

@@ -22,18 +22,24 @@ from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from coval_bench.s2s.samples import AUDIO_URL_TTL
-from tests.api.conftest import INTERNAL_API_KEY
+from tests.api.conftest import INTERNAL_EMAIL, bearer
 
 _BUCKET = "test-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
 _OTHER_SAMPLE = "2026-07-29T00:00:00Z"
 _SIGNED = "https://storage.googleapis.com/signed-for-test"
 
-_PARTNER_TOKEN = "partner-token-value"  # noqa: S105 — fake token for the stubbed allowlist
-_TOKENS = f'{{"{_PARTNER_TOKEN}": ["acme/secret-s2s"]}}'
+_PARTNER_ORG = "org_s2s_partner"
+_ORG_PROVIDERS = f'{{"{_PARTNER_ORG}": ["acme/secret-s2s"]}}'
 
-_INTERNAL = {"X-Internal-Key": INTERNAL_API_KEY}
-_PARTNER = {"X-EA-Token": _PARTNER_TOKEN}
+
+def _internal() -> dict[str, str]:
+    return bearer(email=INTERNAL_EMAIL)
+
+
+def _partner() -> dict[str, str]:
+    return bearer(org_id=_PARTNER_ORG)
+
 
 _LIVE = ("openlab", "public-s2s")
 _EMBARGOED = ("acme", "secret-s2s")
@@ -108,7 +114,7 @@ async def samples_client(app: FastAPI, client: AsyncClient) -> AsyncClient:
     """The API client with the samples bucket configured."""
     app.dependency_overrides[get_settings] = lambda: Settings(
         s2s_samples_bucket=_BUCKET,
-        early_access_tokens=_TOKENS,
+        clerk_org_providers=_ORG_PROVIDERS,
     )
     return client
 
@@ -131,7 +137,7 @@ async def test_index_is_never_shared_between_callers(samples_client: AsyncClient
     res = await samples_client.get("/v1/s2s/samples")
 
     assert res.headers["cache-control"] == "private, no-store"
-    assert "X-EA-Token" in res.headers["vary"]
+    assert "Authorization" in res.headers["vary"]
 
 
 async def test_index_empty_when_no_bucket_is_configured(app: FastAPI, client: AsyncClient) -> None:
@@ -165,13 +171,13 @@ async def test_embargoed_transcript_leaves_with_its_recording(
 
 
 async def test_internal_caller_sees_every_recording(samples_client: AsyncClient) -> None:
-    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_INTERNAL)
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_internal())
 
     assert _pairs(res.json()) == [_LIVE, _EMBARGOED]
 
 
 async def test_partner_token_unlocks_only_its_own_model(samples_client: AsyncClient) -> None:
-    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_PARTNER)
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_partner())
 
     assert _pairs(res.json()) == [_LIVE, _EMBARGOED]
     assert res.headers["X-EA-Token-Status"] == "accepted"
@@ -179,7 +185,7 @@ async def test_partner_token_unlocks_only_its_own_model(samples_client: AsyncCli
 
 async def test_unknown_token_falls_back_to_the_public_view(samples_client: AsyncClient) -> None:
     res = await samples_client.get(
-        f"/v1/s2s/samples/{_SAMPLE}", headers={"X-EA-Token": "not-a-real-token"}
+        f"/v1/s2s/samples/{_SAMPLE}", headers={"Authorization": "Bearer not-a-real-token"}
     )
 
     assert _pairs(res.json()) == [_LIVE]
@@ -189,7 +195,7 @@ async def test_unknown_token_falls_back_to_the_public_view(samples_client: Async
 async def test_manifest_hands_back_api_paths_not_storage_paths(
     samples_client: AsyncClient,
 ) -> None:
-    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_INTERNAL)
+    res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}", headers=_internal())
     body = res.json()
 
     assert body["sample_id"] == _SAMPLE
@@ -226,7 +232,7 @@ async def test_a_wholly_embargoed_sample_is_a_404_not_an_empty_shell(
 async def test_the_same_sample_is_served_to_a_caller_who_may_hear_it(
     samples_client: AsyncClient,
 ) -> None:
-    res = await samples_client.get(f"/v1/s2s/samples/{_OTHER_SAMPLE}", headers=_PARTNER)
+    res = await samples_client.get(f"/v1/s2s/samples/{_OTHER_SAMPLE}", headers=_partner())
 
     assert res.status_code == 200
     assert _pairs(res.json()) == [_EMBARGOED]
@@ -254,7 +260,7 @@ async def test_audio_url_is_never_cached(samples_client: AsyncClient) -> None:
     res = await samples_client.get(f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio")
 
     assert res.headers["cache-control"] == "private, no-store"
-    assert "X-EA-Token" in res.headers["vary"]
+    assert "Authorization" in res.headers["vary"]
     assert res.headers["X-EA-Token-Status"] == "absent"
 
 
@@ -271,11 +277,11 @@ async def test_audio_for_an_embargoed_model_is_served_to_internal(
 ) -> None:
     res = await samples_client.get(
         f"/v1/s2s/samples/{_SAMPLE}/{_EMBARGOED[0]}/{_EMBARGOED[1]}/audio",
-        headers=_INTERNAL,
+        headers=_internal(),
     )
 
     assert res.status_code == 200
-    assert res.headers["X-EA-Token-Status"] == "internal"
+    assert res.headers["X-EA-Token-Status"] == "accepted"
 
 
 async def test_audio_for_an_unknown_recording_is_a_404(samples_client: AsyncClient) -> None:
@@ -295,7 +301,7 @@ async def test_a_refusal_is_never_cached(samples_client: AsyncClient) -> None:
 
     assert res.status_code == 404
     assert res.headers["cache-control"] == "private, no-store"
-    assert "X-EA-Token" in res.headers["vary"]
+    assert "Authorization" in res.headers["vary"]
 
 
 async def test_an_embargoed_manifest_404_is_never_cached(samples_client: AsyncClient) -> None:
@@ -303,7 +309,7 @@ async def test_an_embargoed_manifest_404_is_never_cached(samples_client: AsyncCl
 
     assert res.status_code == 404
     assert res.headers["cache-control"] == "private, no-store"
-    assert "X-EA-Token" in res.headers["vary"]
+    assert "Authorization" in res.headers["vary"]
 
 
 async def test_a_rejected_sample_id_is_never_cached(samples_client: AsyncClient) -> None:
@@ -311,4 +317,4 @@ async def test_a_rejected_sample_id_is_never_cached(samples_client: AsyncClient)
 
     assert res.status_code == 422
     assert res.headers["cache-control"] == "private, no-store"
-    assert "X-EA-Token" in res.headers["vary"]
+    assert "Authorization" in res.headers["vary"]
