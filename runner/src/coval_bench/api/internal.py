@@ -91,6 +91,36 @@ def all_registered_pairs() -> frozenset[tuple[str, str]]:
     return frozenset((m.provider, m.model) for m in MODEL_REGISTRY) | frozenset(_RETIRED_BOARD_KEYS)
 
 
+def _pairs_on_boards(boards: frozenset[str]) -> frozenset[tuple[str, str]]:
+    """Every pair belonging to *boards*, retired keys following their model."""
+    current = frozenset(
+        (m.provider, m.model) for m in MODEL_REGISTRY if m.benchmark.value in boards
+    )
+    return current | frozenset(
+        retired for retired, model in _RETIRED_BOARD_KEYS.items() if model in current
+    )
+
+
+def exclusive_hidden(
+    only: frozenset[tuple[str, str]], embargoed: frozenset[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    """The pairs to hide from a caller whose view is limited to *only*.
+
+    Exclusivity covers just the boards the allowlist names: a partner cleared for
+    two S2S models sees those two there, while the other boards stay the ordinary
+    public view. An allowlist naming nothing hides everything, keeping a
+    mapped-but-empty org distinct from an unmapped one.
+    """
+    allowed = with_retired_keys(only)
+    if not allowed:
+        return all_registered_pairs()
+    boards = frozenset(
+        m.benchmark.value for m in MODEL_REGISTRY if (m.provider, m.model) in allowed
+    )
+    restricted = _pairs_on_boards(boards)
+    return (restricted - allowed) | (embargoed - restricted)
+
+
 def hidden_models() -> frozenset[tuple[str, str]]:
     """The pairs public API responses must not contain."""
     return embargoed_pairs()
@@ -199,7 +229,7 @@ def hidden_early_access(
         if only is not None:
             response.headers[EA_STATUS_HEADER] = "accepted"
             response.headers["Cache-Control"] = "private, no-store"
-            return universe - with_retired_keys(only)
+            return exclusive_hidden(only, embargoed)
 
     unlocked: frozenset[tuple[str, str]] | None = None
     if x_ea_token is not None:

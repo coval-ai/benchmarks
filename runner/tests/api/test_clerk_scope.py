@@ -31,6 +31,7 @@ from coval_bench.api.internal import (
     with_retired_keys,
 )
 from coval_bench.config import Settings
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
 
 _ISSUER = "https://clerk.example.com"
 _PARTY = "https://benchmarks.example.com"
@@ -110,6 +111,23 @@ def _resolve(
         settings=settings,
     )
     return hidden, response.headers[EA_STATUS_HEADER]
+
+
+def _benchmarks_covering(pairs: frozenset[tuple[str, str]]) -> frozenset[Benchmark]:
+    """The benchmarks the given pairs belong to."""
+    return frozenset(m.benchmark for m in MODEL_REGISTRY if (m.provider, m.model) in pairs)
+
+
+def _same_benchmark_pairs(benchmarks: frozenset[Benchmark]) -> frozenset[tuple[str, str]]:
+    return frozenset((m.provider, m.model) for m in MODEL_REGISTRY if m.benchmark in benchmarks)
+
+
+def _public_pairs_outside(benchmarks: frozenset[Benchmark]) -> frozenset[tuple[str, str]]:
+    return frozenset(
+        (m.provider, m.model)
+        for m in MODEL_REGISTRY
+        if m.benchmark not in benchmarks and m.status is not ModelStatus.EARLY_ACCESS
+    )
 
 
 def _embargoed_provider() -> str:
@@ -198,8 +216,10 @@ def test_exclusive_org_sees_only_its_own_provider(monkeypatch: pytest.MonkeyPatc
 
     assert status == "accepted"
     assert not (mine & hidden)
-    assert _public_pair() in hidden
-    assert hidden == all_registered_pairs() - with_retired_keys(frozenset(mine))
+    # Exclusive on the boards its own models live on, public elsewhere.
+    covered = _benchmarks_covering(frozenset(mine))
+    assert _same_benchmark_pairs(covered) - with_retired_keys(frozenset(mine)) <= hidden
+    assert not (_public_pairs_outside(covered) & hidden)
 
 
 def test_exclusive_org_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +229,9 @@ def test_exclusive_org_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> No
     hidden, _ = _resolve(settings, f"Bearer {token}")
 
     assert (provider, model) not in hidden
-    assert len(all_registered_pairs() - hidden) == 1
+    covered = _benchmarks_covering(frozenset({(provider, model)}))
+    visible_on_that_board = _same_benchmark_pairs(covered) - hidden
+    assert visible_on_that_board == with_retired_keys(frozenset({(provider, model)}))
 
 
 def test_exclusive_wins_over_additive_for_the_same_org(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -328,6 +350,44 @@ def test_unknown_exclusive_entry_grants_nothing_and_warns(
         (_ORG_ID, "colours/gray", "exclusive")
     ]
     assert not any("Bearer" in str(entry) for entry in logs)
+
+
+def _s2s_pairs() -> frozenset[tuple[str, str]]:
+    return frozenset((m.provider, m.model) for m in MODEL_REGISTRY if m.benchmark is Benchmark.S2S)
+
+
+def _public_pair_outside_s2s() -> tuple[str, str]:
+    """A public STT or TTS pair, or skip."""
+    other = sorted(
+        (m.provider, m.model)
+        for m in MODEL_REGISTRY
+        if m.benchmark is not Benchmark.S2S and m.status is not ModelStatus.EARLY_ACCESS
+    )
+    if not other:
+        pytest.skip("no public models outside S2S")
+    return other[0]
+
+
+def test_exclusive_scope_stops_at_the_named_benchmark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An S2S-only allowlist leaves the STT and TTS boards untouched."""
+    s2s_embargoed = sorted(p for p in embargoed_pairs() if p in _s2s_pairs())
+    if not s2s_embargoed:
+        pytest.skip("no embargoed S2S models")
+    mine = s2s_embargoed[0]
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [f"{mine[0]}/{mine[1]}"]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+
+    assert status == "accepted"
+    # The named board is exclusive: only the allowlisted pair survives.
+    assert mine not in hidden
+    assert (_s2s_pairs() - {mine}) <= hidden
+    # Other boards keep the ordinary public view.
+    assert _public_pair_outside_s2s() not in hidden
+    # And their embargoed models stay embargoed.
+    assert all(p in hidden for p in embargoed_pairs() if p not in _s2s_pairs())
 
 
 def test_coval_email_sees_everything(monkeypatch: pytest.MonkeyPatch) -> None:
