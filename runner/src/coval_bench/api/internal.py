@@ -82,6 +82,15 @@ def with_retired_keys(allowed: frozenset[tuple[str, str]]) -> frozenset[tuple[st
     )
 
 
+def all_registered_pairs() -> frozenset[tuple[str, str]]:
+    """Every pair the registry knows, embargoed or not, plus the retired keys.
+
+    The universe an exclusive org's view is subtracted from. A pair that was never
+    registered cannot be subtracted, so it stays visible.
+    """
+    return frozenset((m.provider, m.model) for m in MODEL_REGISTRY) | frozenset(_RETIRED_BOARD_KEYS)
+
+
 def hidden_models() -> frozenset[tuple[str, str]]:
     """The pairs public API responses must not contain."""
     return embargoed_pairs()
@@ -181,6 +190,17 @@ def hidden_early_access(
         return frozenset()
 
     embargoed = embargoed_pairs()
+
+    # Exclusive orgs are resolved first and never widened: an X-EA-Token must not
+    # add to a view whose whole point is what it leaves out.
+    if authorization is not None and settings.clerk_issuer is not None:
+        universe = all_registered_pairs()
+        only = clerk.exclusive_pairs(authorization, settings, universe)
+        if only is not None:
+            response.headers[EA_STATUS_HEADER] = "accepted"
+            response.headers["Cache-Control"] = "private, no-store"
+            return universe - with_retired_keys(only)
+
     unlocked: frozenset[tuple[str, str]] | None = None
     if x_ea_token is not None:
         allowed = _allowed_for(x_ea_token, _allowlists(settings))

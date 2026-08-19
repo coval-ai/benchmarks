@@ -19,10 +19,13 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Response
+from pydantic import ValidationError
+from structlog.testing import capture_logs
 
 from coval_bench.api import clerk
 from coval_bench.api.internal import (
     EA_STATUS_HEADER,
+    all_registered_pairs,
     embargoed_pairs,
     hidden_early_access,
     with_retired_keys,
@@ -56,6 +59,7 @@ def _settings(
     parties: str | None = f'["{_PARTY}"]',
     ea_tokens: str | None = None,
     org_providers: str | None = None,
+    org_exclusive: str | None = None,
 ) -> Settings:
     monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
@@ -70,6 +74,10 @@ def _settings(
         monkeypatch.delenv("CLERK_ORG_PROVIDERS", raising=False)
     else:
         monkeypatch.setenv("CLERK_ORG_PROVIDERS", org_providers)
+    if org_exclusive is None:
+        monkeypatch.delenv("CLERK_ORG_EXCLUSIVE", raising=False)
+    else:
+        monkeypatch.setenv("CLERK_ORG_EXCLUSIVE", org_exclusive)
     if issuer is None:
         monkeypatch.delenv("CLERK_ISSUER", raising=False)
     else:
@@ -131,6 +139,195 @@ def test_org_sees_its_own_providers_models_and_no_others(
     assert hidden == frozenset(pair for pair in embargoed_pairs() if pair[0] != mine)
     assert all(provider != mine for provider, _ in hidden)
     assert any(provider == theirs for provider, _ in hidden)
+
+
+def test_org_entry_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    pair = sorted(embargoed_pairs())[0]
+    provider, model = pair
+    siblings = {p for p in embargoed_pairs() if p[0] == provider and p != pair}
+    if not siblings:
+        pytest.skip("no embargoed provider has two models")
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: [f"{provider}/{model}"]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "accepted"
+    assert pair not in hidden
+    assert siblings <= hidden
+
+
+def test_org_entry_list_of_one_provider_unlocks_all_its_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: [provider]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+    assert all(p != provider for p, _ in hidden)
+
+
+def test_mapped_org_naming_nothing_unlocks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: []}))
+    token = _mint({"org_id": _ORG_ID, "email": _INTERNAL_EMAIL})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+    assert status == "accepted"
+    assert hidden == with_retired_keys(embargoed_pairs())
+
+
+def test_malformed_org_entry_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: [provider, 7]}))
+    token = _mint({"org_id": _ORG_ID, "email": "partner@example.com"})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+    assert hidden == with_retired_keys(embargoed_pairs())
+
+
+def _public_pair() -> tuple[str, str]:
+    """Any registered pair that is not embargoed, or skip."""
+    public = sorted(all_registered_pairs() - embargoed_pairs())
+    if not public:
+        pytest.skip("every registered model is embargoed")
+    return public[0]
+
+
+def test_exclusive_org_sees_only_its_own_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _embargoed_provider()
+    mine = {pair for pair in embargoed_pairs() if pair[0] == provider}
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [provider]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+
+    assert status == "accepted"
+    assert not (mine & hidden)
+    assert _public_pair() in hidden
+    assert hidden == all_registered_pairs() - with_retired_keys(frozenset(mine))
+
+
+def test_exclusive_org_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, model = sorted(embargoed_pairs())[0]
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [f"{provider}/{model}"]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+
+    assert (provider, model) not in hidden
+    assert len(all_registered_pairs() - hidden) == 1
+
+
+def test_exclusive_wins_over_additive_for_the_same_org(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _embargoed_provider()
+    settings = _settings(
+        monkeypatch,
+        org_providers=json.dumps({_ORG_ID: [provider]}),
+        org_exclusive=json.dumps({_ORG_ID: [provider]}),
+    )
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+
+    assert _public_pair() in hidden
+
+
+def test_exclusive_overrides_a_coval_email(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [provider]}))
+    token = _mint({"org_id": _ORG_ID, "email": _INTERNAL_EMAIL})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+
+    assert _public_pair() in hidden
+
+
+def test_ea_token_cannot_widen_an_exclusive_org(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, model = sorted(embargoed_pairs())[0]
+    other = sorted(embargoed_pairs() - {(provider, model)})
+    if not other:
+        pytest.skip("only one embargoed model in the registry")
+    settings = _settings(
+        monkeypatch,
+        ea_tokens=json.dumps({"tok": [f"{other[0][0]}/{other[0][1]}"]}),
+        org_exclusive=json.dumps({_ORG_ID: [f"{provider}/{model}"]}),
+    )
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}", x_ea_token="tok")  # noqa: S106 - fake token
+
+    assert other[0] in hidden
+    assert (provider, model) not in hidden
+
+
+def test_unmapped_org_is_unaffected_by_the_exclusive_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = _embargoed_provider()
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({"org_someone_else": [provider]}))
+    token = _mint({"email": _INTERNAL_EMAIL})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+
+    assert hidden == frozenset()
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        '{"org_x": ["colors"]',
+        '{"org_x": 7}',
+        '{"org_x": [""]}',
+        '{"org_x": ""}',
+        '{"": ["colors"]}',
+        '["colors"]',
+    ],
+)
+def test_unusable_exclusive_map_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, blob: str
+) -> None:
+    with pytest.raises(ValidationError):
+        _settings(monkeypatch, org_exclusive=blob)
+
+
+def _unvalidated_settings(exclusive: str) -> Settings:
+    """Settings carrying a blob the field validator would have rejected."""
+    return Settings.model_construct(
+        clerk_issuer=_ISSUER,
+        clerk_authorized_parties=[_PARTY],
+        clerk_org_providers=None,
+        clerk_org_exclusive=exclusive,
+        early_access_tokens=None,
+    )
+
+
+def test_unparsable_exclusive_map_denies_instead_of_falling_back() -> None:
+    settings = _unvalidated_settings('{"org_x": ["colors"]')
+    token = _mint({"org_id": _ORG_ID, "email": _INTERNAL_EMAIL})
+    hidden, status = _resolve(settings, f"Bearer {token}")
+
+    assert status == "accepted"
+    assert hidden == all_registered_pairs()
+    assert _public_pair() in hidden
+
+
+def test_malformed_org_entry_in_exclusive_map_denies() -> None:
+    settings = _unvalidated_settings(json.dumps({_ORG_ID: [7]}))
+    token = _mint({"org_id": _ORG_ID})
+    hidden, _ = _resolve(settings, f"Bearer {token}")
+
+    assert hidden == all_registered_pairs()
+
+
+def test_unknown_exclusive_entry_grants_nothing_and_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: ["colours/gray"]}))
+    token = _mint({"org_id": _ORG_ID})
+    response = Response()
+    with capture_logs() as logs:
+        hidden = hidden_early_access(
+            response=response,
+            internal=False,
+            x_ea_token=None,
+            authorization=f"Bearer {token}",
+            settings=settings,
+        )
+
+    assert hidden == all_registered_pairs()
+    warned = [entry for entry in logs if entry["event"] == "clerk_org_entry_unmatched"]
+    assert [(entry["org_id"], entry["entry"], entry["scope"]) for entry in warned] == [
+        (_ORG_ID, "colours/gray", "exclusive")
+    ]
+    assert not any("Bearer" in str(entry) for entry in logs)
 
 
 def test_coval_email_sees_everything(monkeypatch: pytest.MonkeyPatch) -> None:
