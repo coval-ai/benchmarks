@@ -21,17 +21,22 @@ pool per test instead of reusing the singleton.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import jwt
 import psycopg
 import psycopg.rows
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from psycopg_pool import AsyncConnectionPool
@@ -44,20 +49,44 @@ from coval_bench.config import Settings
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
-INTERNAL_API_KEY = "test-internal-key"
 
-# Two synthetic embargoed models on one provider, and a partner token entitled to
-# each. Same provider on purpose: it proves the allowlist separates callers by
-# model, not just by vendor.
+# The one early-access proof is a Clerk session token, so the app fixture wires a
+# whole stub instance: an issuer, an authorized party, a signing key the stubbed
+# JWKS lookup resolves, and org grants. Two synthetic embargoed models sit on one
+# provider, with an org entitled to each — same provider on purpose: it proves the
+# grants separate callers by model, not just by vendor.
+CLERK_ISSUER = "https://clerk.test.example.com"
+CLERK_PARTY = "https://benchmarks.test.example.com"
+INTERNAL_EMAIL = "tests@coval.dev"
+
 EA_PROVIDER = "acme"
 EA_MODEL = "unreleased-stt"
 EA_MODEL_OTHER = "unreleased-stt-2"
-EA_TOKEN = "test-ea-token"  # noqa: S105 - fake grant token
-EA_TOKEN_OTHER = "test-ea-token-other"  # noqa: S105 - fake grant token
-EARLY_ACCESS_TOKENS = {
-    EA_TOKEN: [f"{EA_PROVIDER}/{EA_MODEL}"],
-    EA_TOKEN_OTHER: [f"{EA_PROVIDER}/{EA_MODEL_OTHER}"],
+EA_ORG = "org_test_first"
+EA_ORG_OTHER = "org_test_second"
+CLERK_ORG_PROVIDERS = {
+    EA_ORG: [f"{EA_PROVIDER}/{EA_MODEL}"],
+    EA_ORG_OTHER: [f"{EA_PROVIDER}/{EA_MODEL_OTHER}"],
 }
+
+_CLERK_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_CLERK_PUBLIC_PEM = _CLERK_SIGNING_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+)
+
+
+def mint_clerk_token(**claims: Any) -> str:
+    """A session token the stubbed Clerk instance vouches for."""
+    now = int(time.time())
+    payload: dict[str, Any] = {"iss": CLERK_ISSUER, "iat": now, "exp": now + 60, "azp": CLERK_PARTY}
+    payload.update(claims)
+    return jwt.encode(payload, _CLERK_SIGNING_KEY, algorithm="RS256")
+
+
+def bearer(**claims: Any) -> dict[str, str]:
+    """Request headers proving whatever *claims* say (e.g. ``email=``, ``org_id=``)."""
+    return {"Authorization": f"Bearer {mint_clerk_token(**claims)}"}
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -211,8 +240,15 @@ async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator
     monkeypatch.setenv("RUNNER_SHA", "test-sha")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
-    monkeypatch.setenv("INTERNAL_API_KEY", INTERNAL_API_KEY)
-    monkeypatch.setenv("EARLY_ACCESS_TOKENS", json.dumps(EARLY_ACCESS_TOKENS))
+    monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
+    monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
+    monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
+    # Resolve token signatures against the fixture key instead of the network.
+    signing_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
+    monkeypatch.setattr(
+        "coval_bench.api.clerk._jwks",
+        lambda issuer: SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key),
+    )
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

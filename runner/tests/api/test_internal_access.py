@@ -1,10 +1,11 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the early-access embargo (``X-Internal-Key``).
+"""Tests for the early-access embargo over HTTP.
 
 EARLY_ACCESS models must never appear in public responses of the data
-endpoints; a request presenting the internal key sees them everywhere.
+endpoints. The one proof is a Clerk bearer session token: a coval.dev email
+sees them everywhere, and a mapped provider org sees what its grant names.
 """
 
 from __future__ import annotations
@@ -14,34 +15,38 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 
-from coval_bench.api.internal import VARY_HEADERS, is_internal
-from coval_bench.config import Settings
+from coval_bench.api.internal import VARY_HEADERS
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from tests.api.conftest import (
     EA_MODEL,
     EA_MODEL_OTHER,
+    EA_ORG,
+    EA_ORG_OTHER,
     EA_PROVIDER,
-    EA_TOKEN,
-    EA_TOKEN_OTHER,
-    INTERNAL_API_KEY,
+    INTERNAL_EMAIL,
     _fill_buckets,
     _insert_result,
     _insert_run,
     _refresh_mv,
+    bearer,
 )
 
-_INTERNAL_HEADERS = {"X-Internal-Key": INTERNAL_API_KEY}
-_WRONG_HEADERS = {"X-Internal-Key": "not-the-key"}
+# A token the stubbed Clerk instance never minted: an unknown proof, not an absent one.
+_WRONG_HEADERS = {"Authorization": "Bearer not-a-real-token"}
 
 _EA_PROVIDER = EA_PROVIDER
 _EA_MODEL = EA_MODEL
+
+
+def _internal_headers() -> dict[str, str]:
+    return bearer(email=INTERNAL_EMAIL)
 
 
 @pytest.fixture
 def early_access_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Extend the registry with two EARLY_ACCESS STT models for the duration of a test.
 
-    Both sit on one provider so a per-model allowlist can be told apart from a
+    Both sit on one provider so a per-model grant can be told apart from a
     per-provider one.
     """
     patched = [
@@ -72,7 +77,7 @@ def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
 
 @pytest.mark.usefixtures("early_access_registry")
 async def test_results_hides_early_access_from_public(client: AsyncClient, postgresql: Any) -> None:
-    """Public and wrong-key callers never see EARLY_ACCESS rows on /v1/results."""
+    """Public and bad-bearer callers never see EARLY_ACCESS rows on /v1/results."""
     await _seed_ea_and_public_rows(postgresql)
 
     for headers in ({}, _WRONG_HEADERS):
@@ -87,10 +92,10 @@ async def test_results_hides_early_access_from_public(client: AsyncClient, postg
 async def test_results_serves_early_access_to_internal(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """The internal key unlocks EARLY_ACCESS rows on /v1/results."""
+    """A coval.dev session unlocks EARLY_ACCESS rows on /v1/results."""
     await _seed_ea_and_public_rows(postgresql)
 
-    response = await client.get("/v1/results", headers=_INTERNAL_HEADERS)
+    response = await client.get("/v1/results", headers=_internal_headers())
     assert response.status_code == 200
     models = _models_in(response.json()["results"])
     assert ("deepgram", "nova-3") in models
@@ -125,7 +130,7 @@ async def test_leaderboard_embargo(client: AsyncClient, postgresql: Any) -> None
     assert ("deepgram", "nova-3") in public_models
     assert (_EA_PROVIDER, _EA_MODEL) not in public_models
 
-    internal = await client.get("/v1/leaderboard", params=params, headers=_INTERNAL_HEADERS)
+    internal = await client.get("/v1/leaderboard", params=params, headers=_internal_headers())
     assert internal.status_code == 200
     assert (_EA_PROVIDER, _EA_MODEL) in _models_in(internal.json()["entries"])
 
@@ -143,7 +148,9 @@ async def test_aggregates_embargo_and_cache_isolation(client: AsyncClient, postg
 
     params = {"benchmark": "STT", "window": "24h"}
 
-    internal = await client.get("/v1/results/aggregates", params=params, headers=_INTERNAL_HEADERS)
+    internal = await client.get(
+        "/v1/results/aggregates", params=params, headers=_internal_headers()
+    )
     assert internal.status_code == 200
     internal_body = internal.json()
     assert (_EA_PROVIDER, _EA_MODEL) in _models_in(internal_body["model_stats"])
@@ -176,7 +183,7 @@ async def test_aggregates_by_dataset_embargo_and_cache_isolation(
         return _models_in([s for block in body["blocks"] for s in block["model_stats"]])
 
     internal = await client.get(
-        "/v1/results/aggregates/by-dataset", params=params, headers=_INTERNAL_HEADERS
+        "/v1/results/aggregates/by-dataset", params=params, headers=_internal_headers()
     )
     assert internal.status_code == 200
     assert (_EA_PROVIDER, _EA_MODEL) in stats_models(internal.json())
@@ -200,7 +207,7 @@ async def test_providers_omits_early_access_from_public(client: AsyncClient) -> 
 @pytest.mark.usefixtures("early_access_registry")
 async def test_providers_serves_early_access_enabled_to_internal(client: AsyncClient) -> None:
     """Internal /v1/providers includes EARLY_ACCESS models, enabled."""
-    response = await client.get("/v1/providers", headers=_INTERNAL_HEADERS)
+    response = await client.get("/v1/providers", headers=_internal_headers())
     assert response.status_code == 200
     by_provider = {p["provider"]: p["models"] for p in response.json()["stt"]}
     assert _EA_PROVIDER in by_provider
@@ -209,22 +216,16 @@ async def test_providers_serves_early_access_enabled_to_internal(client: AsyncCl
     assert all(m["disabled"] is False for m in models.values())
 
 
-def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No configured key means no request is internal, whatever it presents."""
-    monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
-    monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
-    monkeypatch.setenv("DATASET_ID", "stt-v1")
-    monkeypatch.setenv("RUNNER_SHA", "test-sha")
-    monkeypatch.delenv("INTERNAL_API_KEY", raising=False)
-    settings = Settings()
-
-    assert is_internal(x_internal_key="anything", settings=settings) is False
-    assert is_internal(x_internal_key=None, settings=settings) is False
-
-    monkeypatch.setenv("INTERNAL_API_KEY", "k")
-    configured = Settings()
-    assert is_internal(x_internal_key="k", settings=configured) is True
-    assert is_internal(x_internal_key="wrong", settings=configured) is False
+@pytest.mark.usefixtures("early_access_registry")
+async def test_the_retired_x_headers_prove_nothing(client: AsyncClient) -> None:
+    """The removed X-Internal-Key / X-EA-Token headers are dead: ignored, not honoured."""
+    response = await client.get(
+        "/v1/providers",
+        headers={"X-Internal-Key": "test-internal-key", "X-EA-Token": "test-ea-token"},
+    )
+    assert response.status_code == 200
+    assert response.headers["X-EA-Token-Status"] == "absent"
+    assert _EA_PROVIDER not in {p["provider"] for p in response.json()["stt"]}
 
 
 @pytest.mark.parametrize(
@@ -237,22 +238,20 @@ def test_is_internal_requires_configured_key(monkeypatch: pytest.MonkeyPatch) ->
         ("/v1/results/aggregates/by-dataset", {"benchmark": "STT"}),
     ],
 )
-async def test_vary_lists_both_proof_headers(
+async def test_vary_lists_the_proof_header(
     client: AsyncClient, path: str, params: dict[str, str] | None
 ) -> None:
-    """Every embargo-gated endpoint must vary on both proofs.
-
-    Listing one and not the other is worse than listing neither: a cached internal
-    response carries no X-EA-Token, so it would match a public request.
-    """
+    """Every embargo-gated endpoint varies on the bearer proof and nothing retired."""
     response = await client.get(path, params=params)
     assert response.status_code == 200
     vary = response.headers["Vary"]
     for header in VARY_HEADERS.split(", "):
         assert header in vary, f"{header} missing from Vary: {vary!r}"
+    assert "x-internal-key" not in vary.lower()
+    assert "x-ea-token" not in vary.lower()
 
 
-async def test_vary_keeps_the_proof_headers_once_gzip_appends(client: AsyncClient) -> None:
+async def test_vary_keeps_the_proof_header_once_gzip_appends(client: AsyncClient) -> None:
     """SelectiveGZipMiddleware appends Accept-Encoding after the route returns.
 
     /v1/providers serves the whole registry, so it clears the 1024-byte gzip
@@ -272,15 +271,15 @@ async def test_public_responses_are_cacheable_privileged_ones_are_not(
     public = await client.get("/v1/providers")
     assert public.headers.get("Cache-Control") is None
 
-    internal = await client.get("/v1/providers", headers=_INTERNAL_HEADERS)
+    internal = await client.get("/v1/providers", headers=_internal_headers())
     assert internal.headers["Cache-Control"] == "private, no-store"
 
 
 @pytest.mark.usefixtures("early_access_registry")
-async def test_two_partner_tokens_never_share_an_aggregates_cache_entry(
+async def test_two_org_grants_never_share_an_aggregates_cache_entry(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """Token A then token B on the same cache: B must not see A's model.
+    """Org A then org B on the same cache: B must not see A's model.
 
     This is the case that actually proves the cache key. Only /v1/results/aggregates
     caches, and A goes first so a key that ignored the caller would serve A's rows
@@ -294,27 +293,25 @@ async def test_two_partner_tokens_never_share_an_aggregates_cache_entry(
 
     params = {"benchmark": "STT", "window": "24h"}
 
-    first = await client.get(
-        "/v1/results/aggregates", params=params, headers={"X-EA-Token": EA_TOKEN}
-    )
+    first = await client.get("/v1/results/aggregates", params=params, headers=bearer(org_id=EA_ORG))
     assert first.status_code == 200
     assert first.headers["X-EA-Token-Status"] == "accepted"
     assert (_EA_PROVIDER, _EA_MODEL) in _models_in(first.json()["model_stats"])
     assert (_EA_PROVIDER, EA_MODEL_OTHER) not in _models_in(first.json()["model_stats"])
 
     second = await client.get(
-        "/v1/results/aggregates", params=params, headers={"X-EA-Token": EA_TOKEN_OTHER}
+        "/v1/results/aggregates", params=params, headers=bearer(org_id=EA_ORG_OTHER)
     )
     assert second.status_code == 200
     stats = _models_in(second.json()["model_stats"])
     assert (_EA_PROVIDER, EA_MODEL_OTHER) in stats
-    assert (_EA_PROVIDER, _EA_MODEL) not in stats, "token A's model leaked into token B's view"
+    assert (_EA_PROVIDER, _EA_MODEL) not in stats, "org A's model leaked into org B's view"
 
 
 @pytest.mark.usefixtures("early_access_registry")
-async def test_partner_token_scopes_the_providers_catalogue(client: AsyncClient) -> None:
-    """A token reveals its own model and keeps the sibling on the same provider hidden."""
-    response = await client.get("/v1/providers", headers={"X-EA-Token": EA_TOKEN})
+async def test_org_grant_scopes_the_providers_catalogue(client: AsyncClient) -> None:
+    """A grant reveals its own model and keeps the sibling on the same provider hidden."""
+    response = await client.get("/v1/providers", headers=bearer(org_id=EA_ORG))
     assert response.status_code == 200
     by_provider = {p["provider"]: p["models"] for p in response.json()["stt"]}
     assert {m["model"] for m in by_provider[_EA_PROVIDER]} == {_EA_MODEL}
