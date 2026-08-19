@@ -499,6 +499,35 @@ async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
+    # One anchor value has no simulation_output_id (kept under the index
+    # fallback), so its output_id can't be matched: no output_id may be treated
+    # as uncovered, or a measured conversation would be stamped FAILED.
+    writer = _stub_writer()
+    values: list[dict[str, Any]] = [
+        {"simulation_output_id": "s1", "value": 0.5},
+        {"value": 0.6},  # this is s2, but the id is missing
+    ]
+    fixture = _run_json(values, output_ids=["s1", "s2"])
+    async with _fake_client({}, fixture) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            runner_sha="test",
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert [(r.audio_filename, r.status) for r in rows] == [
+        ("R1/s1", ResultStatus.SUCCESS),
+        ("R1/1", ResultStatus.SUCCESS),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_ingests_every_new_run() -> None:
     writer = _stub_writer()
     writer.start_run = AsyncMock(

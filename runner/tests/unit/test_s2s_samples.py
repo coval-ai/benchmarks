@@ -239,19 +239,19 @@ async def test_incomplete_persona_is_skipped_and_other_is_published() -> None:
 @pytest.mark.asyncio
 async def test_failed_sim_drops_its_test_case_from_the_pool() -> None:
     # Female's openai sim for "b" FAILED on Coval's side (it may still carry a
-    # truncated recording): "b" leaves the shared pool and "c" is published.
+    # truncated recording): "b" was female's only shared case, so the female
+    # persona drops out entirely and the male's "c" is published. Each persona
+    # has exactly one candidate so the pick is deterministic: the female's "b"
+    # sorts ahead of the male's "c" under the seed-0 shuffle, and publishing it
+    # would fail the exact assertion below.
     storage_client, bucket = _fake_storage()
-    cases = {"RO_F": ["b", "c"], "RG_F": ["b", "c"], "RO_M": ["b", "c"], "RG_M": ["b", "c"]}
+    cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["c"], "RG_M": ["c"]}
     async with _fake_client(cases, failed_by_run={"RO_F": frozenset({"b"})}) as client:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
     manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
-    assert (manifest["persona_name"], manifest["test_case_id"]) in {
-        ("Standard Female", "c"),
-        ("Standard Male", "b"),
-        ("Standard Male", "c"),
-    }
+    assert (manifest["persona_name"], manifest["test_case_id"]) == ("Standard Male", "c")
 
 
 @pytest.mark.asyncio

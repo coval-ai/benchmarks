@@ -400,8 +400,20 @@ def _failed_conversation_rows(
     the calls it survived, and a run's failures would not show in its success
     rate.
 
+    An anchor value without a simulation_output_id (kept by ``_s2s_rows`` under
+    its index fallback) can't be reconciled against ``output_ids``, so coverage
+    is undecidable for the whole run: synthesize nothing rather than stamp a
+    measured conversation FAILED.
     """
     covered = {v.get("simulation_output_id") for v in anchor_values}
+    if not all(covered):
+        logger.warning(
+            "anchor_ids_missing",
+            provider=spec.provider,
+            coval_run_id=coval_run_id,
+            anchors_without_id=sum(1 for v in anchor_values if not v.get("simulation_output_id")),
+        )
+        return []
     return [
         Result(
             run_id=run_pk,
