@@ -66,7 +66,7 @@ class Manifest(BaseModel):
 
     @model_validator(mode="after")
     def items_consistent(self) -> Manifest:
-        """Ensure all items are the same concrete type."""
+        """Ensure items are homogeneous and have distinct effective identities."""
         if not self.items:
             return self
         first_type = type(self.items[0])
@@ -77,4 +77,17 @@ class Manifest(BaseModel):
                     f"expected all {first_type.__name__}, "
                     f"found {type(item).__name__}"
                 )
+
+        identities: set[str] = set()
+        for item in self.items:
+            if isinstance(item, STTManifestItem):
+                identity = item.sample_id or item.path
+            else:
+                identity = item.testcase_id
+            if identity in identities:
+                raise ValueError(
+                    f"Manifest '{self.id}' contains duplicate effective sample identity: "
+                    f"{identity!r}"
+                )
+            identities.add(identity)
         return self

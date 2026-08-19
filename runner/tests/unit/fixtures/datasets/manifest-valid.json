@@ -7,6 +7,7 @@
   "items": [
     {
       "path": "audio/0001.wav",
+      "sample_id": "fixture-sample-0001",
       "sha256": "61648b306c4b096538b83eafa50fea3a22ae49918d48430859d29725243fb1d4",
       "transcript": "hello world",
       "duration_sec": 1.0,
@@ -16,6 +17,7 @@
     },
     {
       "path": "audio/0001.wav",
+      "sample_id": "fixture-sample-0002",
       "sha256": "61648b306c4b096538b83eafa50fea3a22ae49918d48430859d29725243fb1d4",
       "transcript": "how are you today",
       "duration_sec": 1.0,
