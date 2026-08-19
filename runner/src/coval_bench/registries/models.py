@@ -377,7 +377,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     # Together AI serverless realtime endpoints (open-weight models).
     RegisteredModel(
@@ -978,7 +978,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -991,7 +991,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,

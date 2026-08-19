@@ -189,16 +189,6 @@ class Settings(BaseSettings):
     # ephemeral preview deploys only.
     cors_origin_regex: str | None = r"^https://benchmarks-[a-z0-9-]+-covalai\.vercel\.app$"
     rate_limit_per_minute: int = 60
-    # Benchmarking-team key (X-Internal-Key header): unlocks EARLY_ACCESS
-    # models on the data endpoints. Unset means no request is internal.
-    internal_api_key: SecretStr | None = None
-    # Partner early-access tokens (X-EA-Token header), as a JSON object mapping
-    # each token to the "provider/model" entries that token may see under embargo:
-    # {"<token>": ["xai/grok-voice-think-fast-1.0"]}. The allowlist lives here,
-    # server-side, so a request carries only an opaque token and can never
-    # widen its own view.
-    # Unset means no token unlocks anything.
-    early_access_tokens: SecretStr | None = None
     # Clerk instance whose JWKS verifies provider-org session tokens.
     # Unset means no bearer token unlocks anything.
     clerk_issuer: str | None = None
