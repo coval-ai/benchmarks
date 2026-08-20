@@ -25,6 +25,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -226,13 +227,18 @@ postgresql = factories.postgresql("postgresql_proc")
 
 
 @pytest_asyncio.fixture
-async def app(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[FastAPI]:
+async def app(
+    postgresql: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> AsyncIterator[FastAPI]:
     """FastAPI app fixture with a real in-process Postgres.
 
     Creates a fresh pool per test (bypassing the module-level singleton) to
     ensure tests are fully isolated.
     """
     dsn = _make_db_url(postgresql)
+
+    # The default arena_audio_dir is CWD-relative: clips would land in the repo.
+    monkeypatch.setenv("ARENA_AUDIO_DIR", str(tmp_path / "arena-audio"))
 
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
@@ -307,7 +313,7 @@ def moderation_allows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def app_factory(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Callable[[dict[str, str] | None], Awaitable[FastAPI]]:
     """Build an app with a stubbed pool so lifespan and analytics wiring can be
     tested without spinning up Postgres. The caller drives the lifespan.
@@ -319,6 +325,7 @@ def app_factory(
         monkeypatch.setenv("DATASET_ID", "stt-v1")
         monkeypatch.setenv("RUNNER_SHA", "test-sha")
         monkeypatch.setenv("POSTHOG_DISABLED", "true")
+        monkeypatch.setenv("ARENA_AUDIO_DIR", str(tmp_path / "arena-audio"))
         for key, value in (extra_env or {}).items():
             monkeypatch.setenv(key, value)
 
