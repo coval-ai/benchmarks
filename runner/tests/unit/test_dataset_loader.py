@@ -42,8 +42,10 @@ from coval_bench.config import Settings
 from coval_bench.datasets.loader import (
     WILDASR_ENV_FAMILY,
     DatasetIntegrityError,
+    DatasetItem,
     ManifestAlignmentError,
     TTSDataset,
+    TTSDatasetItem,
     _assert_family_alignment,
     _load_manifest,
     family_rng,
@@ -355,6 +357,166 @@ def test_empty_manifest_items(test_settings: Settings, tmp_path: Path) -> None:
 
     assert result.items == []
     assert result.id == "stt-v1"
+
+
+def test_manifest_allows_unique_effective_stt_identities() -> None:
+    """Explicit and fallback STT identities may coexist when they are distinct."""
+    manifest = Manifest(
+        id="stt-v1",
+        version="1.0.0",
+        license="CC-BY-4.0",
+        source="test",
+        items=[
+            STTManifestItem(
+                path="audio/0001.wav",
+                sample_id="sample-0001",
+                sha256=FIXTURE_SHA256,
+                transcript="first",
+                duration_sec=1.0,
+            ),
+            STTManifestItem(
+                path="audio/0002.wav",
+                sha256=FIXTURE_SHA256,
+                transcript="second",
+                duration_sec=1.0,
+            ),
+        ],
+    )
+
+    assert len(manifest.items) == 2
+
+
+def test_manifest_rejects_duplicate_explicit_stt_sample_id() -> None:
+    """Repeated explicit STT sample IDs are rejected."""
+    with pytest.raises(ValidationError, match="duplicate effective sample identity: 'sample-0001'"):
+        Manifest(
+            id="stt-v1",
+            version="1.0.0",
+            license="CC-BY-4.0",
+            source="test",
+            items=[
+                STTManifestItem(
+                    path="audio/0001.wav",
+                    sample_id="sample-0001",
+                    sha256=FIXTURE_SHA256,
+                    transcript="first",
+                    duration_sec=1.0,
+                ),
+                STTManifestItem(
+                    path="audio/0002.wav",
+                    sample_id="sample-0001",
+                    sha256=FIXTURE_SHA256,
+                    transcript="second",
+                    duration_sec=1.0,
+                ),
+            ],
+        )
+
+
+def test_manifest_rejects_stt_path_fallback_and_sample_id_collision() -> None:
+    """An explicit STT sample ID cannot collide with another item's path fallback."""
+    with pytest.raises(
+        ValidationError, match="duplicate effective sample identity: 'audio/0001.wav'"
+    ):
+        Manifest(
+            id="stt-v1",
+            version="1.0.0",
+            license="CC-BY-4.0",
+            source="test",
+            items=[
+                STTManifestItem(
+                    path="audio/0001.wav",
+                    sha256=FIXTURE_SHA256,
+                    transcript="first",
+                    duration_sec=1.0,
+                ),
+                STTManifestItem(
+                    path="audio/0002.wav",
+                    sample_id="audio/0001.wav",
+                    sha256=FIXTURE_SHA256,
+                    transcript="second",
+                    duration_sec=1.0,
+                ),
+            ],
+        )
+
+
+def test_manifest_rejects_duplicate_tts_testcase_id() -> None:
+    """Repeated TTS testcase IDs are rejected."""
+    with pytest.raises(ValidationError, match="duplicate effective sample identity: 'TC001'"):
+        Manifest(
+            id="tts-v1",
+            version="1.0.0",
+            license="proprietary",
+            source="test",
+            items=[
+                TTSManifestItem(testcase_id="TC001", transcript="first"),
+                TTSManifestItem(testcase_id="TC001", transcript="second"),
+            ],
+        )
+
+
+@pytest.mark.parametrize(
+    ("sample_id", "expected"),
+    [("stable-sample-id", "stable-sample-id"), (None, "audio/0001.wav")],
+)
+def test_stt_sample_identity_is_explicit_or_manifest_path_fallback(
+    sample_id: str | None,
+    expected: str,
+    test_settings: Settings,
+    tmp_path: Path,
+) -> None:
+    """Normalized STT identity is stable without changing existing manifests."""
+    manifest = Manifest(
+        id="stt-v1",
+        version="1.0.0",
+        license="CC-BY-4.0",
+        source="test",
+        items=[
+            STTManifestItem(
+                path="audio/0001.wav",
+                sample_id=sample_id,
+                sha256=FIXTURE_SHA256,
+                transcript="test",
+                duration_sec=1.0,
+            )
+        ],
+    )
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=manifest):
+        dataset = load_stt_dataset(
+            "stt-v1",
+            settings=test_settings,
+            cache_dir=tmp_path,
+            storage_client=_make_fake_storage_client(AUDIO_DIR),
+        )
+
+    assert dataset.items[0].sample_id == expected
+
+
+def test_empty_dataset_identities_are_rejected(tmp_path: Path) -> None:
+    """Every identity entering a normalized observation must be non-empty."""
+    stt_fields = {
+        "sha256": "a" * 64,
+        "transcript": "test",
+        "duration_sec": 1.0,
+    }
+    with pytest.raises(ValidationError):
+        STTManifestItem(path="", **stt_fields)
+    with pytest.raises(ValidationError):
+        STTManifestItem(path="audio/test.wav", sample_id="", **stt_fields)
+    with pytest.raises(ValidationError):
+        DatasetItem(
+            path=tmp_path / "test.wav",
+            sample_id="",
+            transcript="test",
+            duration_sec=1.0,
+            sha256="a" * 64,
+        )
+    with pytest.raises(ValidationError):
+        TTSManifestItem(testcase_id="", transcript="test")
+    with pytest.raises(ValidationError):
+        TTSDatasetItem(testcase_id="", transcript="test")
 
 
 # ---------------------------------------------------------------------------

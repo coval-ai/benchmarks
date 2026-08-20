@@ -120,6 +120,7 @@ class DatasetItem(BaseModel):
     """A single STT benchmark item, ready for a provider."""
 
     path: Path  # local on-disk path after fetch
+    sample_id: str = Field(min_length=1)
     transcript: str  # ground-truth transcript
     duration_sec: float
     sha256: str
@@ -138,7 +139,7 @@ class Dataset(BaseModel):
 class TTSDatasetItem(BaseModel):
     """A single TTS benchmark item (text-only, no audio to fetch)."""
 
-    testcase_id: str
+    testcase_id: str = Field(min_length=1)
     transcript: str
 
 
@@ -355,6 +356,7 @@ def load_stt_dataset(
         items.append(
             DatasetItem(
                 path=local_path,
+                sample_id=raw_item.sample_id or raw_item.path,
                 transcript=raw_item.transcript,
                 duration_sec=raw_item.duration_sec,
                 sha256=raw_item.sha256,

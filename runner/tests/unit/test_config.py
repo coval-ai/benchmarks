@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 import structlog
 
 from coval_bench.config import SECRET_PLACEHOLDER, Settings
@@ -37,3 +38,15 @@ def test_real_values_pass_through_silently() -> None:
     assert settings.openai_api_key.get_secret_value() == "sk-real"
     assert settings.baseten_whisper_url == "wss://example"
     assert not [entry for entry in logs if entry["event"] == "placeholder_secret"]
+
+
+def test_normalized_dual_write_is_default_off_and_requires_bucket() -> None:
+    assert _settings().normalized_dual_write_enabled is False
+    assert (
+        _settings(
+            normalized_dual_write_enabled="true", benchmark_artifact_bucket="private"
+        ).normalized_dual_write_enabled
+        is True
+    )
+    with pytest.raises(ValueError, match="benchmark_artifact_bucket"):
+        _settings(normalized_dual_write_enabled=True)

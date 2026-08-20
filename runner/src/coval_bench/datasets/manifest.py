@@ -13,7 +13,7 @@ Schema matches ARCHITECTURE.md § "GCS dataset bucket — manifest.json schema".
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class STTManifestItem(BaseModel):
@@ -21,7 +21,8 @@ class STTManifestItem(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    path: str  # relative path, e.g. "audio/0001.wav"
+    path: str = Field(min_length=1)  # relative path, e.g. "audio/0001.wav"
+    sample_id: str | None = Field(default=None, min_length=1)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     transcript: str
     duration_sec: float = Field(gt=0)
@@ -30,13 +31,20 @@ class STTManifestItem(BaseModel):
     utterance_id: str | None = None
     speech_end_offset_ms: float | None = Field(default=None, ge=0)
 
+    @field_validator("sample_id")
+    @classmethod
+    def _sample_id_not_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value:
+            raise ValueError("sample_id must be non-empty when provided")
+        return value
+
 
 class TTSManifestItem(BaseModel):
     """A single TTS prompt entry in the manifest."""
 
     model_config = ConfigDict(frozen=True)
 
-    testcase_id: str
+    testcase_id: str = Field(min_length=1)
     transcript: str
 
 
@@ -58,7 +66,7 @@ class Manifest(BaseModel):
 
     @model_validator(mode="after")
     def items_consistent(self) -> Manifest:
-        """Ensure all items are the same concrete type."""
+        """Ensure items are homogeneous and have distinct effective identities."""
         if not self.items:
             return self
         first_type = type(self.items[0])
@@ -69,4 +77,17 @@ class Manifest(BaseModel):
                     f"expected all {first_type.__name__}, "
                     f"found {type(item).__name__}"
                 )
+
+        identities: set[str] = set()
+        for item in self.items:
+            if isinstance(item, STTManifestItem):
+                identity = item.sample_id or item.path
+            else:
+                identity = item.testcase_id
+            if identity in identities:
+                raise ValueError(
+                    f"Manifest '{self.id}' contains duplicate effective sample identity: "
+                    f"{identity!r}"
+                )
+            identities.add(identity)
         return self
