@@ -211,7 +211,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_STREAMING, _MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        status=_RETIRED,
     ),
     # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
     # universal-3.5-pro.
@@ -446,7 +446,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="velma-2-stt-streaming-english-v2",
         tags=(_STREAMING,),
         region="us",
-        status=_EARLY_ACCESS,
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -454,7 +454,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="velma-2-stt-streaming",
         tags=(_STREAMING, _MULTI, _DIAR),
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     # Pre-Velma-2 ids; retired so their orphaned result rows stay off the site.
     RegisteredModel(
