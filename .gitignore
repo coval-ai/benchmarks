@@ -57,8 +57,9 @@ scripts.local/
 # Internal provider docs / planning notes — never commit
 docs/providers/
 
-# Arena clips from the local-storage fallback (dev servers without GCS)
-runner/arena-audio/
+# Arena clips from the local-storage fallback (dev servers without GCS).
+# The default arena_audio_dir is CWD-relative, so match at any depth.
+arena-audio/
 
 # Package manager / toolchain caches (local)
 .pnpm-store/
