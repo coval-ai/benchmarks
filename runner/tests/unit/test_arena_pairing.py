@@ -18,9 +18,10 @@ from coval_bench.arena.pairing import (
     voice_for,
 )
 from coval_bench.config import Settings
+from coval_bench.db.model_state import ModelState, assume_all_active
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import Gender, ModelStatus, RegisteredModel, Voice
+from coval_bench.registries.models import Gender, RegisteredModel, Voice
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -30,7 +31,6 @@ def _model(name: str) -> RegisteredModel:
         provider=name,
         model=name,
         voice="v",
-        status=ModelStatus.ACTIVE,
     )
 
 
@@ -45,7 +45,6 @@ def _gendered_model(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-f", gender=Gender.FEMALE),
             Voice(id=f"{model}-m", gender=Gender.MALE),
         ),
-        status=ModelStatus.ACTIVE,
     )
 
 
@@ -157,20 +156,37 @@ def test_select_pair_rejects_non_positive_scale() -> None:
         select_pair(_MODELS, ratings, scale=0.0)
 
 
-def test_active_tts_models_are_tts_and_active() -> None:
-    roster = active_tts_models()
-    assert len(roster) >= 2
-    assert all(m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE for m in roster)
+def test_active_tts_models_selects_active_arena_enabled_tts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only running+shown, arena-enabled TTS models make the roster; a model
+    absent from the state map (missing-row Hidden default) sits out."""
+    registry = [
+        _gendered_model("alpha", "m-active"),
+        _gendered_model("beta", "m-hidden"),
+        _gendered_model("gamma", "m-paused"),
+        _gendered_model("delta", "m-optout").model_copy(update={"arena_enabled": False}),
+        _gendered_model("epsilon", "m-unmapped"),
+    ]
+    states = {
+        (Benchmark.TTS, "alpha", "m-active"): ModelState(running=True, shown=True),
+        (Benchmark.TTS, "beta", "m-hidden"): ModelState(running=True, shown=False),
+        (Benchmark.TTS, "gamma", "m-paused"): ModelState(running=False, shown=True),
+        (Benchmark.TTS, "delta", "m-optout"): ModelState(running=True, shown=True),
+    }
+    monkeypatch.setattr("coval_bench.arena.pairing.MODEL_REGISTRY", registry)
+    roster = active_tts_models(states)
+    assert [(m.provider, m.model) for m in roster] == [("alpha", "m-active")]
 
 
 def test_active_tts_models_excludes_arena_disabled() -> None:
-    assert all(m.arena_enabled for m in active_tts_models())
+    assert all(m.arena_enabled for m in active_tts_models(assume_all_active()))
 
 
 def test_provider_env_covers_arena_providers() -> None:
-    # Only providers the arena can actually synthesize with (ACTIVE + arena_enabled),
-    # matching active_tts_models() and the parity script — not every non-retired one.
-    providers = {m.provider for m in active_tts_models()}
+    # Every arena-enabled provider, whatever its current DB state: a superset of
+    # the live roster (state can flip without a deploy), matching the parity script.
+    providers = {m.provider for m in active_tts_models(assume_all_active())}
     missing = providers - PROVIDER_ENV.keys()
     assert not missing, f"arena providers with no PROVIDER_ENV entry: {sorted(missing)}"
 
@@ -182,25 +198,30 @@ def test_provider_env_names_match_settings_fields() -> None:
 
 
 def test_every_arena_model_can_field_both_genders() -> None:
-    """Any arena model must field both genders, or it silently sits out half the battles.
+    """An arena model with a gendered pool must field both genders, or it
+    silently sits out half the battles.
 
-    Palabra is the standing exception: its ``voices`` are quality tiers rather
-    than speakers, so it has no gendered pool to draw from.
+    Voiceless entries (palabra's quality tiers, legacy stopped models) have no
+    gendered pool at all and never enter a gendered roster, so only models with
+    at least one gendered voice are held to the both-genders bar.
     """
     incomplete = [
         f"{m.provider}/{m.model}"
-        for m in active_tts_models()
-        if {v.gender for v in m.voices} != {Gender.FEMALE, Gender.MALE} and m.provider != "palabra"
+        for m in active_tts_models(assume_all_active())
+        if {v.gender for v in m.voices}
+        and {v.gender for v in m.voices} != {Gender.FEMALE, Gender.MALE}
     ]
     assert incomplete == [], f"arena models missing a gendered voice: {incomplete}"
 
 
 def test_roster_for_keeps_only_models_with_that_gender() -> None:
     for gender in (Gender.FEMALE, Gender.MALE):
-        roster = roster_for(gender)
+        roster = roster_for(gender, assume_all_active())
         assert len(roster) >= 2
         assert all(any(v.gender is gender for v in m.voices) for m in roster)
-    assert {m.provider for m in roster_for(Gender.FEMALE)}.isdisjoint({"palabra"})
+    assert {m.provider for m in roster_for(Gender.FEMALE, assume_all_active())}.isdisjoint(
+        {"palabra"}
+    )
 
 
 def test_voice_for_returns_the_matching_half() -> None:
@@ -210,7 +231,6 @@ def test_voice_for_returns_the_matching_half() -> None:
         model="m",
         voice="v",
         voices=(Voice(id="她", gender=Gender.FEMALE), Voice(id="他", gender=Gender.MALE)),
-        status=ModelStatus.ACTIVE,
     )
     assert voice_for(model, Gender.FEMALE).id == "她"
     assert voice_for(model, Gender.MALE).id == "他"
@@ -223,7 +243,6 @@ def test_voice_for_raises_when_the_model_cannot_field_the_gender() -> None:
         model="m",
         voice="v",
         voices=(Voice(id="only-female", gender=Gender.FEMALE),),
-        status=ModelStatus.ACTIVE,
     )
     with pytest.raises(ValueError, match="no male voice"):
         voice_for(model, Gender.MALE)
@@ -263,9 +282,9 @@ class TestBenchedProviders:
             _gendered_model("beta", "m-beta"),
             _gendered_model("gamma", "m-gamma"),
         ]
-        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda: roster)
+        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda states: roster)
 
-        remaining = roster_for(Gender.FEMALE, frozenset({"beta"}))
+        remaining = roster_for(Gender.FEMALE, {}, frozenset({"beta"}))
 
         assert [m.provider for m in remaining] == ["alpha", "gamma"]
 
@@ -275,8 +294,8 @@ class TestBenchedProviders:
         # Too few to pair is the caller's problem to report; pairing a key already known
         # to be dead spends a paid call and fails the voter anyway.
         roster = [_gendered_model("alpha", "m-alpha"), _gendered_model("beta", "m-beta")]
-        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda: roster)
+        monkeypatch.setattr("coval_bench.arena.pairing.active_tts_models", lambda states: roster)
 
-        remaining = roster_for(Gender.FEMALE, frozenset({"beta"}))
+        remaining = roster_for(Gender.FEMALE, {}, frozenset({"beta"}))
 
         assert [m.provider for m in remaining] == ["alpha"]

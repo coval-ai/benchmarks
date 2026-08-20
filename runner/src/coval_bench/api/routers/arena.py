@@ -37,7 +37,13 @@ from psycopg_pool import AsyncConnectionPool
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
+from coval_bench.api.deps import (
+    capture_api_event,
+    get_model_states,
+    get_pool,
+    get_posthog,
+    get_settings,
+)
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ArenaLeaderboardResponse,
@@ -72,8 +78,9 @@ from coval_bench.arena.pairing import (
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
+from coval_bench.db.model_state import ModelKey, ModelState
 from coval_bench.db.models import VoteOutcome, VoterType
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
+from coval_bench.registries import Benchmark
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -103,15 +110,16 @@ _LEADERBOARD_SQL = """
     ORDER BY s.rating_elo DESC
 """
 
-# TTS models the site hides (retired/pending/early-access). Their votes still
-# feed the rating fit, but boards computed before a retirement must not keep
-# showing them.
-_HIDDEN_TTS_MODELS = frozenset(
-    (m.provider, m.model)
-    for m in MODEL_REGISTRY
-    if m.benchmark is Benchmark.TTS
-    and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
-)
+
+def _hidden_tts_models(states: dict[ModelKey, ModelState]) -> frozenset[tuple[str, str]]:
+    """TTS models the site hides (not ``shown``). Their votes still feed the
+    rating fit, but boards computed before a retirement must not keep showing
+    them."""
+    return frozenset(
+        (provider, model)
+        for (benchmark, provider, model), state in states.items()
+        if benchmark is Benchmark.TTS and not state.shown
+    )
 
 
 def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
@@ -265,6 +273,7 @@ async def get_arena_leaderboard(
     domain: str = Query(default="all"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
+    states: dict[ModelKey, ModelState] = Depends(get_model_states),
 ) -> ArenaLeaderboardResponse:
     """Return the latest computed board for ``metric``/``domain`` (empty if none)."""
     async with pool.connection() as conn:
@@ -272,10 +281,11 @@ async def get_arena_leaderboard(
         rows = await conn.execute(_LEADERBOARD_SQL, {"metric": metric, "domain": domain})
         board = await rows.fetchall()
 
+    hidden = _hidden_tts_models(states)
     entries = [
         LeaderboardEntryOut.model_validate(r)
         for r in board
-        if (r["provider"], r["model"]) not in _HIDDEN_TTS_MODELS
+        if (r["provider"], r["model"]) not in hidden
     ]
     capture_api_event(
         posthog_client,
@@ -343,6 +353,7 @@ async def create_battle(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
+    states: dict[ModelKey, ModelState] = Depends(get_model_states),
 ) -> BattleOut:
     """Generate a battle from a prompt: pick two models, synthesize, persist (blind).
 
@@ -397,11 +408,11 @@ async def create_battle(
     # Providers with a dead key — named by the last TTS benchmark, or with no key
     # configured here — sit out until that changes. This call also raises the alert,
     # since nothing downstream ever sees a provider that was filtered out here.
-    roster = [m.provider for m in active_tts_models()]
+    roster = [m.provider for m in active_tts_models(states)]
     benched = provider_health.unconfigured_providers(
         settings, roster
     ) | await provider_health.benchmark_benched_providers(pool)
-    models = roster_for(gender, benched)
+    models = roster_for(gender, states, benched)
     if len(models) < 2:
         raise HTTPException(503, "not enough healthy TTS models to form a battle")
     ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)

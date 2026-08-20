@@ -1,13 +1,14 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Who may see early-access models.
+"""Who may see hidden models.
 
-``EARLY_ACCESS`` models run on the normal schedule but are under embargo: every
-data endpoint strips them unless the caller proves it may see them. The one
-proof is a bearer Clerk session token (see ``clerk.py``): a coval.dev email
-sees everything, and a mapped provider org sees what its entry names. The
-grants live in settings, so a request can never widen its own view.
+Hidden models (``running`` without ``shown`` in ``model_state`` — the
+pre-launch embargo) run on the normal schedule but every data endpoint strips
+them unless the caller proves it may see them. The one proof is a bearer Clerk
+session token (see ``clerk.py``): a coval.dev email sees everything, and a
+mapped provider org sees what its entry names. The grants live in settings, so
+a request can never widen its own view.
 
 An absent or unknown proof yields the public view — the endpoints stay public
 either way, so there is nothing to 404 — and says so in ``X-EA-Token-Status``.
@@ -18,9 +19,10 @@ from __future__ import annotations
 from fastapi import Depends, Header, Response
 
 from coval_bench.api import clerk
-from coval_bench.api.deps import get_settings
+from coval_bench.api.deps import get_model_states, get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus
+from coval_bench.db.model_state import ModelKey, ModelState
+from coval_bench.registries import MODEL_REGISTRY
 
 # Which proof the response honoured: accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
@@ -50,10 +52,12 @@ _RETIRED_BOARD_KEYS: dict[tuple[str, str], tuple[str, str]] = {
 }
 
 
-def embargoed_pairs() -> frozenset[tuple[str, str]]:
-    """Every ``(provider, model)`` pair currently under embargo."""
+def embargoed_pairs(states: dict[ModelKey, ModelState]) -> frozenset[tuple[str, str]]:
+    """Every ``(provider, model)`` pair currently under embargo (Hidden state)."""
     return frozenset(
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+        (provider, model)
+        for (_, provider, model), state in states.items()
+        if state.running and not state.shown
     ) | frozenset(_RETIRED_BOARD_KEYS)
 
 
@@ -79,15 +83,11 @@ def all_registered_pairs() -> frozenset[tuple[str, str]]:
     return frozenset((m.provider, m.model) for m in MODEL_REGISTRY) | frozenset(_RETIRED_BOARD_KEYS)
 
 
-def hidden_models() -> frozenset[tuple[str, str]]:
-    """The pairs public API responses must not contain."""
-    return embargoed_pairs()
-
-
-def hidden_early_access(
+async def hidden_early_access(
     response: Response,
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
+    states: dict[ModelKey, ModelState] = Depends(get_model_states),
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
 
@@ -98,7 +98,7 @@ def hidden_early_access(
     # the route returns, and assignment here would be overwritten.
     response.headers.append("Vary", VARY_HEADERS)
 
-    embargoed = embargoed_pairs()
+    embargoed = embargoed_pairs(states)
     if authorization is None or settings.clerk_issuer is None:
         response.headers[EA_STATUS_HEADER] = "absent"
         return embargoed

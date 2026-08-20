@@ -21,9 +21,15 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api.cache import get_or_fill
 from coval_bench.config import Settings
+from coval_bench.db.model_state import ModelKey, ModelState, fetch_model_states
 
 logger = structlog.get_logger("coval_bench.api")
+
+# Cache key for the one model-state map entry (namespaced tuple, like the
+# response cache keys).
+MODEL_STATE_CACHE_KEY = ("model_states",)
 
 
 async def get_pool(request: Request) -> AsyncConnectionPool[Any]:
@@ -56,6 +62,21 @@ def get_cache(request: Request) -> TTLCache[Any, Any]:
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:
     """Return the per-app cache-key locks from app state."""
     return cast("defaultdict[Any, asyncio.Lock]", request.app.state.cache_locks)
+
+
+async def get_model_states(request: Request) -> dict[ModelKey, ModelState]:
+    """The state of every registry model, cached briefly per instance.
+
+    The short TTL (``cache.MODEL_STATE_TTL_SECONDS``) is the ceiling on how
+    long an admin toggle takes to reach every endpoint of this instance.
+    """
+    pool = await get_pool(request)
+    cache = cast("TTLCache[Any, Any]", request.app.state.model_state_cache)
+    locks = get_cache_locks(request)
+    states, _ = await get_or_fill(
+        cache, locks, MODEL_STATE_CACHE_KEY, lambda: fetch_model_states(pool)
+    )
+    return states
 
 
 def capture_api_event(client: Posthog | None, event: str, properties: dict[str, Any]) -> None:

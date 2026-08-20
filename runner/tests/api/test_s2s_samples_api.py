@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import psycopg
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
@@ -20,9 +21,9 @@ from httpx import AsyncClient
 
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
 from coval_bench.s2s.samples import AUDIO_URL_TTL
-from tests.api.conftest import INTERNAL_EMAIL, bearer
+from tests.api.conftest import INTERNAL_EMAIL, _make_db_url, bearer
 
 _BUCKET = "test-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
@@ -78,25 +79,31 @@ _OBJECTS: dict[str, Any] = {
 
 
 @pytest.fixture(autouse=True)
-def s2s_samples_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A two-model S2S roster — one live, one embargoed — over a stubbed bucket."""
+def s2s_samples_env(postgresql: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A two-model S2S roster — one live, one embargoed — over a stubbed bucket.
+
+    The live model gets an Active ``model_state`` row; the embargoed one gets
+    none, taking the missing-row default (Hidden) that is the embargo itself.
+    """
     patched = [
         *MODEL_REGISTRY,
-        RegisteredModel(
-            benchmark=Benchmark.S2S,
-            provider=_LIVE[0],
-            model=_LIVE[1],
-            status=ModelStatus.ACTIVE,
-        ),
-        RegisteredModel(
-            benchmark=Benchmark.S2S,
-            provider=_EMBARGOED[0],
-            model=_EMBARGOED[1],
-            status=ModelStatus.EARLY_ACCESS,
-        ),
+        RegisteredModel(benchmark=Benchmark.S2S, provider=_LIVE[0], model=_LIVE[1]),
+        RegisteredModel(benchmark=Benchmark.S2S, provider=_EMBARGOED[0], model=_EMBARGOED[1]),
     ]
     monkeypatch.setattr("coval_bench.api.internal.MODEL_REGISTRY", patched)
     monkeypatch.setattr("coval_bench.api.routers.s2s_samples.MODEL_REGISTRY", patched)
+    monkeypatch.setattr("coval_bench.db.model_state.MODEL_REGISTRY", patched)
+    with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+        conn.execute(
+            """
+            INSERT INTO benchmarks_v2.model_state
+                (benchmark, provider, model, running, shown, updated_by)
+            VALUES ('S2S', %s, %s, true, true, 'test-setup')
+            ON CONFLICT (benchmark, provider, model) DO UPDATE
+                SET running = true, shown = true
+            """,
+            _LIVE,
+        )
 
     def _read_json(bucket_name: str, key: str, **_: Any) -> Any:
         assert bucket_name == _BUCKET

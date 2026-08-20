@@ -21,6 +21,7 @@ from coval_bench.arena.tune_scale import (
     _true_strengths,
     tune_scale,
 )
+from coval_bench.db.model_state import assume_all_active
 
 
 def _fast(seed: int) -> list[ScaleResult]:
@@ -75,7 +76,7 @@ def test_davidson_is_symmetric_under_swap() -> None:
 
 
 def test_true_strengths_span_the_requested_elo_spread() -> None:
-    roster = active_tts_models()
+    roster = active_tts_models(assume_all_active())
     theta = _true_strengths(roster, elo_spread=800.0, rng=random.Random(0))
     elo_range = (max(theta.values()) - min(theta.values())) * _ELO_SCALE
     assert math.isclose(elo_range, 800.0, rel_tol=1e-9)

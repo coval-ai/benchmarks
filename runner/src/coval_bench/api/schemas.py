@@ -123,6 +123,50 @@ class ProvidersResponse(BaseModel):
     tag_categories: list[TagCategoryOut]
 
 
+class ModelStateOut(BaseModel):
+    """One model's lifecycle state. ``updated_*`` are None while the model
+    still sits on the missing-row default (Hidden)."""
+
+    running: bool
+    shown: bool
+    updated_by: str | None = None
+    updated_at: datetime | None = None
+
+
+class ModelStateChangeOut(BaseModel):
+    """One recorded state change; old values are None when no row existed."""
+
+    old_running: bool | None
+    old_shown: bool | None
+    new_running: bool
+    new_shown: bool
+    changed_by: str
+    changed_at: datetime
+
+
+class AdminModelOut(BaseModel):
+    """A registry model with its state and recent history, for the admin page."""
+
+    benchmark: BenchmarkLiteral
+    provider: str
+    model: str
+    state: ModelStateOut
+    history: list[ModelStateChangeOut] = []
+
+
+class AdminModelsResponse(BaseModel):
+    """Response schema for GET /v1/admin/models. Registry order."""
+
+    models: list[AdminModelOut]
+
+
+class ModelStatePatch(BaseModel):
+    """Request body for PATCH /v1/admin/models/{benchmark}/{provider}/{model}."""
+
+    running: bool
+    shown: bool
+
+
 class ResultsResponse(BaseModel):
     """Response schema for GET /v1/results."""
 

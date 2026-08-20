@@ -176,6 +176,27 @@ def _claims(token: str, settings: Settings) -> dict[str, Any] | None:
     return claims
 
 
+def internal_email(authorization: str | None, settings: Settings) -> str | None:
+    """The verified coval.dev email this token proves, or ``None``.
+
+    The admin gate: unlike the data endpoints' visibility rules, an active
+    partner org never narrows it — a coval dev previewing a partner view can
+    still administer. Anything short of a verified internal email is ``None``.
+    """
+    if authorization is None:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    claims = _claims(token.strip(), settings)
+    if claims is None:
+        return None
+    email = claims.get("email")
+    if isinstance(email, str) and email.endswith(_INTERNAL_EMAIL_SUFFIX):
+        return email
+    return None
+
+
 def allowed_pairs(
     authorization: str, settings: Settings, embargoed: frozenset[tuple[str, str]]
 ) -> frozenset[tuple[str, str]] | None:

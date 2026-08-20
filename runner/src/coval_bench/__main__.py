@@ -403,12 +403,16 @@ def arena_seed_battles(per_domain: int) -> None:
     from coval_bench.config import get_settings
     from coval_bench.db.arena_store import ArenaStore
     from coval_bench.db.conn import lifespan_pool
+    from coval_bench.db.model_state import fetch_model_states
     from coval_bench.db.models import Battle
 
     async def _run() -> list[Battle]:
         settings = get_settings()
         async with lifespan_pool(settings) as pool:
-            return await seed_demo_battles(settings, ArenaStore(pool), per_domain=per_domain)
+            states = await fetch_model_states(pool)
+            return await seed_demo_battles(
+                settings, ArenaStore(pool), states, per_domain=per_domain
+            )
 
     battles = asyncio.run(_run())
     attempted = sum(min(per_domain, len(prompts)) for prompts in EXAMPLE_PROMPTS.values())

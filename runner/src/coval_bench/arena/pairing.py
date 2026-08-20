@@ -15,12 +15,12 @@ import math
 import random
 from collections.abc import Mapping, Sequence
 
+from coval_bench.db.model_state import ModelKey, ModelState
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
     MODEL_REGISTRY,
     Gender,
-    ModelStatus,
     RegisteredModel,
     Voice,
 )
@@ -36,16 +36,30 @@ PAIRING_METRIC = "naturalness"
 PAIRING_DOMAIN = "all"
 
 
-def active_tts_models() -> list[RegisteredModel]:
-    """The arena roster: every ACTIVE, arena-enabled TTS model in the registry."""
+def active_tts_models(states: Mapping[ModelKey, ModelState]) -> list[RegisteredModel]:
+    """The arena roster: every Active (running and shown), arena-enabled TTS model.
+
+    *states* comes from ``model_state`` (``fetch_model_states``); offline tools
+    with no database pass ``assume_all_active()``. A model absent from the map
+    sits out — the missing-row default is Hidden, and a hidden model in a public
+    blind test would leak by voice.
+    """
     return [
         m
         for m in MODEL_REGISTRY
-        if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE and m.arena_enabled
+        if m.benchmark is Benchmark.TTS
+        and m.arena_enabled
+        and (state := states.get((m.benchmark, m.provider, m.model))) is not None
+        and state.running
+        and state.shown
     ]
 
 
-def roster_for(gender: Gender, benched: frozenset[str] = frozenset()) -> list[RegisteredModel]:
+def roster_for(
+    gender: Gender,
+    states: Mapping[ModelKey, ModelState],
+    benched: frozenset[str] = frozenset(),
+) -> list[RegisteredModel]:
     """The arena roster restricted to models that can render a *gender* battle.
 
     A model without a voice of that gender cannot take a side, so it sits the
@@ -56,7 +70,7 @@ def roster_for(gender: Gender, benched: frozenset[str] = frozenset()) -> list[Re
     call on a key already known to be dead and hand the voter an error anyway; the caller
     reports the arena as unavailable instead.
     """
-    eligible = [m for m in active_tts_models() if any(v.gender is gender for v in m.voices)]
+    eligible = [m for m in active_tts_models(states) if any(v.gender is gender for v in m.voices)]
     if not benched:
         return eligible
     return [m for m in eligible if m.provider not in benched]

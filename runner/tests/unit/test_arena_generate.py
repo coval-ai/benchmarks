@@ -21,7 +21,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Battle
 from coval_bench.providers.base import TTSResult
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import Gender, ModelStatus, RegisteredModel, Voice
+from coval_bench.registries.models import Gender, RegisteredModel, Voice
 
 
 def _model(provider: str, model: str) -> RegisteredModel:
@@ -34,7 +34,6 @@ def _model(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-f", gender=Gender.FEMALE),
             Voice(id=f"{model}-m", gender=Gender.MALE),
         ),
-        status=ModelStatus.ACTIVE,
     )
 
 
@@ -187,7 +186,6 @@ async def test_generate_battle_refuses_a_model_without_that_gender(
         model="model-b",
         voice="v",
         voices=(Voice(id="model-b-f", gender=Gender.FEMALE),),
-        status=ModelStatus.ACTIVE,
     )
     models = (_model("provider-a", "model-a"), female_only)
     provider = _fake_provider_cls(tmp_path, fail_models=set())
@@ -447,7 +445,6 @@ async def test_a_stand_in_without_that_gender_is_never_drawn(
         model="model-female-only",
         voice="v",
         voices=(Voice(id="model-female-only-f", gender=Gender.FEMALE),),
-        status=ModelStatus.ACTIVE,
     )
     standin = _model("provider-standin", "model-standin")
     _register(

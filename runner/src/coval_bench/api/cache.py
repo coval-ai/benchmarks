@@ -31,6 +31,9 @@ from cachetools import TTLCache
 CACHE_TTL_SECONDS = 900
 # How long one fill failure is shared before the query is retried.
 FAILURE_TTL_SECONDS = 5
+# Model lifecycle state is admin-toggled and must land fast: an admin toggle
+# is visible to every endpoint within this window.
+MODEL_STATE_TTL_SECONDS = 10
 
 CacheStatus = Literal["hit", "coalesced", "miss"]
 
@@ -42,6 +45,11 @@ def new_response_cache() -> TTLCache[Any, Any]:
     window) aggregates param combinations.
     """
     return TTLCache(maxsize=64, ttl=CACHE_TTL_SECONDS)
+
+
+def new_model_state_cache() -> TTLCache[Any, Any]:
+    """Build the per-app model-state cache (one key: the whole state map)."""
+    return TTLCache(maxsize=2, ttl=MODEL_STATE_TTL_SECONDS)
 
 
 def new_cache_locks() -> defaultdict[Any, asyncio.Lock]:

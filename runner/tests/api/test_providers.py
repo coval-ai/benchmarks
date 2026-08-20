@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
-from tests.api.conftest import INTERNAL_EMAIL, bearer
+from coval_bench.registries.models import MODEL_REGISTRY
+from tests.api.conftest import INTERNAL_EMAIL, _make_db_url, bearer
 
 
 async def test_providers_200(client: AsyncClient) -> None:
@@ -155,7 +156,9 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     assert qwen_labels[("licensing", "open-weight")] == "Open-weight"
 
 
-async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) -> None:
+async def test_early_access_flag_marks_only_embargoed_rows(
+    client: AsyncClient, postgresql: object
+) -> None:
     """Authorized callers can tell embargoed rows apart; public rows never carry the flag."""
     public = (await client.get("/v1/providers")).json()
     assert not any(
@@ -174,11 +177,19 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
         for m in entry["models"]
         if m["early_access"]
     }
-    # Registry-derived, not embargoed_pairs(): retired board keys stay embargoed
-    # for stored artefacts but are not registry entries, so they never appear here.
-    assert flagged == {
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-    }
+    # Expected set from model_state (running and not shown), intersected with
+    # the registry: retired board keys stay embargoed for stored artefacts but
+    # are not registry entries, so they never appear here.
+    aconn = await psycopg.AsyncConnection.connect(_make_db_url(postgresql))
+    try:
+        cur = await aconn.execute(
+            "SELECT provider, model FROM benchmarks_v2.model_state WHERE running AND NOT shown"
+        )
+        hidden_rows = {(provider, model) for provider, model in await cur.fetchall()}
+    finally:
+        await aconn.close()
+    registered = {(m.provider, m.model) for m in MODEL_REGISTRY}
+    assert flagged == hidden_rows & registered
 
     baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
@@ -250,11 +261,13 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert ("source", "shared-inference") in orpheus_facets
 
 
-async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The /v1/providers endpoint never acquires a DB connection.
+async def test_providers_fails_closed_without_db(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With no pool, /v1/providers errors rather than guesses.
 
-    We verify this by removing the pool from app.state and confirming the
-    endpoint still returns 200.
+    Model state lives in the database now; a fabricated default could leak a
+    hidden model, so the endpoint 503s until the pool is back.
     """
     original_pool = app.state.pool
     app.state.pool = None
@@ -267,4 +280,4 @@ async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.Monk
     finally:
         app.state.pool = original_pool
 
-    assert response.status_code == 200
+    assert response.status_code == 503

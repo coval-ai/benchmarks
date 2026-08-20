@@ -9,7 +9,6 @@ from coval_bench.registries import (
     TAG_CATEGORIES,
     Benchmark,
     Licensing,
-    ModelStatus,
     ModelTag,
     RegisteredModel,
     Source,
@@ -26,9 +25,7 @@ def test_registry_keys_unique() -> None:
 
 
 def test_registered_model_defaults() -> None:
-    m = RegisteredModel(
-        benchmark=Benchmark.STT, provider="deepgram", model="nova-3", status=ModelStatus.ACTIVE
-    )
+    m = RegisteredModel(benchmark=Benchmark.STT, provider="deepgram", model="nova-3")
     assert m.voice is None
     assert m.creator is None
     assert m.tags == ()
@@ -43,11 +40,18 @@ def test_every_model_has_exactly_one_mode() -> None:
         assert len(set(m.tags) & modes) == 1, f"{m.provider}/{m.model} needs one mode tag"
 
 
-def test_active_tts_models_have_voices() -> None:
-    # The runner can't synthesize without a voice; only non-ACTIVE entries may omit one.
+# Legacy entries kept only for their historical rows; both are stopped in
+# model_state and must never be flipped running without gaining a voice.
+_VOICELESS_TTS = {("openai", "gpt-realtime-2025-08-28"), ("cartesia", "sonic")}
+
+
+def test_tts_models_have_voices() -> None:
+    # The runner can't synthesize without a voice. Run-state lives in the DB,
+    # so the registry can't tell which entries are live — every TTS entry
+    # outside the pinned legacy set must carry one.
     for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE:
-            assert m.voice is not None, f"{m.provider}/{m.model} is ACTIVE but has no voice"
+        if m.benchmark is Benchmark.TTS and (m.provider, m.model) not in _VOICELESS_TTS:
+            assert m.voice is not None, f"{m.provider}/{m.model} has no voice"
 
 
 def test_stt_models_have_no_voice() -> None:

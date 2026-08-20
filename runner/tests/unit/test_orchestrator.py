@@ -41,9 +41,10 @@ from posthog import Posthog
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
+from coval_bench.db.model_state import ModelState
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel, Source
+from coval_bench.registries import MODEL_REGISTRY, RegisteredModel, Source
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
@@ -74,6 +75,12 @@ _TEST_SETTINGS = Settings(
 # ---------------------------------------------------------------------------
 
 
+# Run-state side table served by the faked model_state fetch (see the autouse
+# fixture below). Keys the orchestrator does not find here fall back to its
+# absent-means-run rule, mirroring prod's registry/override behavior.
+_RUN_STATES: dict[tuple[Benchmark, str, str], bool] = {}
+
+
 def _stt_entry(
     provider: str,
     model: str,
@@ -81,22 +88,22 @@ def _stt_entry(
     active: bool = True,
     source: Source = Source.OFFICIAL_API,
 ) -> RegisteredModel:
+    _RUN_STATES[(Benchmark.STT, provider, model)] = active
     return RegisteredModel(
         benchmark=Benchmark.STT,
         provider=provider,
         model=model,
         source=source,
-        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
     )
 
 
 def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) -> RegisteredModel:
+    _RUN_STATES[(Benchmark.TTS, provider, model)] = active
     return RegisteredModel(
         benchmark=Benchmark.TTS,
         provider=provider,
         model=model,
         voice=voice,
-        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
     )
 
 
@@ -109,12 +116,30 @@ def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
 
 
 def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
-    """Pause every registered model for *benchmark*, as an override base."""
-    return [
-        m.model_copy(update={"status": ModelStatus.PAUSED})
-        for m in MODEL_REGISTRY
-        if m.benchmark is benchmark
-    ]
+    """Pause every registered model for *benchmark* (via the run-state table)."""
+    entries = [m for m in MODEL_REGISTRY if m.benchmark is benchmark]
+    for m in entries:
+        _RUN_STATES[(m.benchmark, m.provider, m.model)] = False
+    return entries
+
+
+def _activate(entry: RegisteredModel) -> RegisteredModel:
+    """Mark *entry* running in the run-state table (undoes ``_paused_registry``)."""
+    _RUN_STATES[(entry.benchmark, entry.provider, entry.model)] = True
+    return entry
+
+
+@pytest.fixture(autouse=True)
+def _fake_model_states(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve ``_RUN_STATES`` in place of the model_state DB read."""
+    _RUN_STATES.clear()
+
+    async def _fetch(pool: Any) -> dict[tuple[Benchmark, str, str], ModelState]:
+        return {
+            key: ModelState(running=running, shown=True) for key, running in _RUN_STATES.items()
+        }
+
+    monkeypatch.setattr("coval_bench.runner.orchestrator._get_fetch_model_states", lambda: _fetch)
 
 
 def _make_run(run_id: int = 1) -> Run:
@@ -1964,7 +1989,7 @@ async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings
     # Activate exactly one hume entry; pause the rest of the TTS registry.
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+        _activate(hume_entry),
     ]
 
     run = _make_run()
@@ -2019,7 +2044,7 @@ async def test_tts_provider_error_wins_over_contamination(
 
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+        _activate(hume_entry),
     ]
 
     run = _make_run()
@@ -2118,7 +2143,7 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            _activate(hume_entry),
         ]
 
         run = _make_run()
@@ -2177,7 +2202,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            _activate(hume_entry),
         ]
 
         run = _make_run()
@@ -2425,7 +2450,7 @@ async def test_tts_transport_gate_nulls_without_failing(settings: Settings) -> N
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            _activate(hume_entry),
         ]
 
         run = _make_run()
