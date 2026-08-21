@@ -61,7 +61,6 @@ from coval_bench.registries import (
     MODEL_REGISTRY,
     Benchmark,
     Metric,
-    ModelStatus,
     RegisteredModel,
     Source,
 )
@@ -308,6 +307,12 @@ def _get_db_symbols() -> tuple[Any, Any, Any, Any]:
         models_mod.RunStatus,
         models_mod,
     )
+
+
+def _get_fetch_model_states() -> Any:
+    """Return ``db.model_state.fetch_model_states`` at call time (lazy, like the
+    other DB symbols, and a patch point for tests)."""
+    return importlib.import_module("coval_bench.db.model_state").fetch_model_states
 
 
 def _get_metrics() -> tuple[Any, Any]:
@@ -1092,24 +1097,33 @@ async def run_benchmarks(
             if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                 (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-    # EARLY_ACCESS models run on the normal schedule; only the API hides them.
-    scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
     dedicated = source == "dedicated"
-    enabled_stt = [
-        e
-        for e in stt_matrix
-        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
-    ]
-    enabled_tts = [
-        e
-        for e in tts_matrix
-        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
-    ]
 
     # ------------------------------------------------------------------
     # 2. Open DB pool + start run row
     # ------------------------------------------------------------------
     async with lifespan_pool(settings) as pool:
+        # Which models run comes from model_state, read once per run. Hidden
+        # models run on the normal schedule; only the API hides them. A key
+        # absent from the map is an override-added model, and an override is an
+        # explicit request to run.
+        model_states = await _get_fetch_model_states()(pool)
+
+        def _runs(entry: RegisteredModel) -> bool:
+            state = model_states.get((entry.benchmark, entry.provider, entry.model))
+            return state.running if state is not None else True
+
+        enabled_stt = [
+            e
+            for e in stt_matrix
+            if _runs(e) and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+        ]
+        enabled_tts = [
+            e
+            for e in tts_matrix
+            if _runs(e) and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+        ]
+
         writer = RunWriter(pool)
 
         # A TTS-only run never touches the configured STT dataset; a 'both'

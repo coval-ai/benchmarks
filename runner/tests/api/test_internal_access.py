@@ -16,7 +16,7 @@ import pytest
 from httpx import AsyncClient
 
 from coval_bench.api.internal import VARY_HEADERS
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
 from tests.api.conftest import (
     EA_MODEL,
     EA_MODEL_OTHER,
@@ -44,25 +44,22 @@ def _internal_headers() -> dict[str, str]:
 
 @pytest.fixture
 def early_access_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extend the registry with two EARLY_ACCESS STT models for the duration of a test.
+    """Extend the registry with two embargoed STT models for the duration of a test.
 
     Both sit on one provider so a per-model grant can be told apart from a
-    per-provider one.
+    per-provider one. Neither gets a ``model_state`` row, so both take the
+    missing-row default — Hidden, exactly the embargo under test.
     """
     patched = [
         *MODEL_REGISTRY,
         *(
-            RegisteredModel(
-                benchmark=Benchmark.STT,
-                provider=_EA_PROVIDER,
-                model=model,
-                status=ModelStatus.EARLY_ACCESS,
-            )
+            RegisteredModel(benchmark=Benchmark.STT, provider=_EA_PROVIDER, model=model)
             for model in (_EA_MODEL, EA_MODEL_OTHER)
         ),
     ]
     monkeypatch.setattr("coval_bench.api.internal.MODEL_REGISTRY", patched)
     monkeypatch.setattr("coval_bench.api.routers.providers.MODEL_REGISTRY", patched)
+    monkeypatch.setattr("coval_bench.db.model_state.MODEL_REGISTRY", patched)
 
 
 async def _seed_ea_and_public_rows(postgresql: Any) -> None:

@@ -20,6 +20,7 @@ pool per test instead of reusing the singleton.
 
 from __future__ import annotations
 
+import importlib
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -45,9 +46,16 @@ from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
-from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
+from coval_bench.db.model_state import assume_all_active
+from coval_bench.registries import MODEL_REGISTRY, Benchmark
 from coval_bench.registries.provider_keys import PROVIDER_ENV
+
+# The model_state seed snapshot ships inside the migration (its module name
+# starts with a digit, so importlib rather than an import statement).
+_MODEL_STATE_MIGRATION = importlib.import_module(
+    "coval_bench.db.migrations.versions.20260820_0019_model_state"
+)
 
 ARENA_LABELER_KEY = "test-labeler-key"
 
@@ -220,6 +228,46 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, bucket_at)
             )
         """)
+        # Model lifecycle state (mirrors migration 20260820_0019), seeded with
+        # the same registry snapshot the migration ships, so the suite's
+        # baseline matches prod. Tests about other states set their own rows
+        # (or rely on the missing-row Hidden default for models they patch
+        # into the registry).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.model_state (
+                benchmark   text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                provider    text NOT NULL,
+                model       text NOT NULL,
+                running     boolean NOT NULL,
+                shown       boolean NOT NULL,
+                updated_by  text NOT NULL,
+                updated_at  timestamptz NOT NULL DEFAULT now(),
+                PRIMARY KEY (benchmark, provider, model)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.model_state_history (
+                id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                benchmark   text NOT NULL,
+                provider    text NOT NULL,
+                model       text NOT NULL,
+                old_running boolean,
+                old_shown   boolean,
+                new_running boolean NOT NULL,
+                new_shown   boolean NOT NULL,
+                changed_by  text NOT NULL,
+                changed_at  timestamptz NOT NULL DEFAULT now()
+            )
+        """)
+        seed_values = _MODEL_STATE_MIGRATION._SEED_VALUES.strip()  # noqa: SLF001
+        conn.execute(f"""
+            INSERT INTO benchmarks_v2.model_state
+                (benchmark, provider, model, running, shown, updated_by)
+            SELECT v.benchmark, v.provider, v.model, v.running, v.shown, 'conftest-seed'
+            FROM (VALUES {seed_values}) AS v(benchmark, provider, model, running, shown)
+            ON CONFLICT (benchmark, provider, model) DO NOTHING
+        """)  # noqa: S608 — literal snapshot from the migration module
+        conn.commit()
 
 
 postgresql_proc = factories.postgresql_proc(load=[_load_schema])
@@ -262,8 +310,11 @@ async def app(
     # Arena pairing drops providers whose key is not configured, so a service with no
     # keys has no roster and every battle is a 503. Prod mounts all of them — CI's
     # check_arena_keys.py enforces it — so the fixture models that. OPENAI_API_KEY stays
-    # unset on purpose above, which simply leaves openai out of the roster.
-    for model in active_tts_models():
+    # unset on purpose above, which simply leaves openai out of the roster. Every
+    # arena-enabled TTS provider gets a key (a superset of the DB-driven roster).
+    for model in MODEL_REGISTRY:
+        if model.benchmark is not Benchmark.TTS or not model.arena_enabled:
+            continue
         env_var = PROVIDER_ENV.get(model.provider)
         if env_var is not None and env_var != "OPENAI_API_KEY":
             monkeypatch.setenv(env_var, "test-provider-key")
@@ -333,7 +384,12 @@ def app_factory(
         async def stub_lifespan_pool(s: Settings) -> AsyncIterator[MagicMock]:
             yield MagicMock()
 
+        async def stub_model_states(pool: Any) -> Any:
+            return assume_all_active()
+
         monkeypatch.setattr("coval_bench.api.app.lifespan_pool", stub_lifespan_pool)
+        # The stub pool cannot serve queries; state reads get the all-active map.
+        monkeypatch.setattr("coval_bench.api.deps.fetch_model_states", stub_model_states)
         return create_app(Settings())
 
     return _factory
@@ -423,6 +479,34 @@ async def _insert_result(
         result = await row.fetchone()
         assert result is not None
         return int(result[0])
+    finally:
+        await aconn.close()
+
+
+async def _set_model_state(
+    postgresql: Any,
+    benchmark: str,
+    provider: str,
+    model: str,
+    *,
+    running: bool,
+    shown: bool,
+) -> None:
+    """Upsert a model_state row directly — test setup, bypassing the admin API."""
+    dsn = _make_db_url(postgresql)
+    aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
+    try:
+        await aconn.execute(
+            """
+            INSERT INTO benchmarks_v2.model_state
+                (benchmark, provider, model, running, shown, updated_by)
+            VALUES (%s, %s, %s, %s, %s, 'test-setup')
+            ON CONFLICT (benchmark, provider, model) DO UPDATE
+                SET running = EXCLUDED.running, shown = EXCLUDED.shown,
+                    updated_by = EXCLUDED.updated_by, updated_at = now()
+            """,
+            (benchmark, provider, model, running, shown),
+        )
     finally:
         await aconn.close()
 

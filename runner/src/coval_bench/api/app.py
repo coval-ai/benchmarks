@@ -36,12 +36,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
-from coval_bench.api.cache import new_cache_locks, new_response_cache
+from coval_bench.api.cache import new_cache_locks, new_model_state_cache, new_response_cache
 from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.internal import never_shared
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
+    admin_models,
     aggregates,
     arena,
     health,
@@ -134,19 +135,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # CORS — allowlist read from settings; never hard-coded (ADR-015).
     # Headers are explicit: the `*` wildcard never covers Authorization.
+    # PATCH + Content-Type serve the admin model-state endpoints.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved.cors_origins,
         allow_origin_regex=resolved.cors_origin_regex,
         allow_credentials=False,
-        allow_methods=["GET", "OPTIONS"],
-        allow_headers=["Authorization"],
+        allow_methods=["GET", "PATCH", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type"],
         max_age=600,
     )
 
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips",))
 
     app.state.response_cache = new_response_cache()
+    app.state.model_state_cache = new_model_state_cache()
     app.state.cache_locks = new_cache_locks()
 
     # Error responses carry the same caller-scoped cache policy as successful ones.
@@ -171,6 +174,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(providers.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
+    app.include_router(admin_models.router, prefix="/v1")
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).

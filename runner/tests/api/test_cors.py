@@ -61,6 +61,22 @@ async def test_cors_methods_include_get_options(client: AsyncClient) -> None:
     assert "GET" in methods_header
 
 
+async def test_cors_preflight_allows_admin_patch(client: AsyncClient) -> None:
+    """Preflight passes for the admin PATCH with a JSON body."""
+    response = await client.options(
+        "/v1/admin/models/STT/deepgram/nova-3",
+        headers={
+            "Origin": "https://benchmarks.coval.ai",
+            "Access-Control-Request-Method": "PATCH",
+            "Access-Control-Request-Headers": "authorization, content-type",
+        },
+    )
+    assert response.status_code in (200, 204)
+    assert "PATCH" in response.headers.get("access-control-allow-methods", "")
+    allowed = response.headers.get("access-control-allow-headers", "").lower()
+    assert "content-type" in allowed
+
+
 async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> None:
     """Preflight passes for the bearer proof; `*` never covers Authorization."""
     response = await client.options(

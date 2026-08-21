@@ -3,12 +3,13 @@
 
 """Provider-org early access via Clerk session tokens (JWKS stubbed).
 
-Assertions derive the embargoed set from the registry, so they keep holding
-as the roster changes status.
+The embargoed set comes from a synthetic model-state map (two hidden models on
+two providers), so assertions keep holding as the real roster changes state.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from typing import Any
 
 import jwt
 import pytest
+import structlog
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Response
@@ -31,6 +33,8 @@ from coval_bench.api.internal import (
     with_retired_keys,
 )
 from coval_bench.config import Settings
+from coval_bench.db.model_state import ModelState, assume_all_active
+from coval_bench.registries import Benchmark
 
 _ISSUER = "https://clerk.example.com"
 _PARTY = "https://benchmarks.example.com"
@@ -45,12 +49,37 @@ _PUBLIC_PEM = _PRIVATE_KEY.public_key().public_bytes(
 _INTERNAL_EMAIL = "someone@coval.dev"
 _ORG_ID = "org_2abc123"
 
+# Every registry model Active, then a handful re-marked Hidden (embargoed).
+# Real registry keys, because exclusive grants resolve against the registry:
+# two on one provider (so a per-model grant can be told apart from a
+# per-provider one), one on another (so grants separate providers), and the
+# current key of the retired-board-key rename (so history stays embargoed).
+_STATES = {
+    **assume_all_active(),
+    (Benchmark.STT, "deepgram", "nova-2"): ModelState(running=True, shown=False),
+    (Benchmark.STT, "deepgram", "nova-3"): ModelState(running=True, shown=False),
+    (Benchmark.STT, "google", "chirp_2"): ModelState(running=True, shown=False),
+    (Benchmark.S2S, "xai", "grok-voice-think-fast-1.0"): ModelState(running=True, shown=False),
+}
+
 
 @pytest.fixture(autouse=True)
 def _stub_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
     signing_key = SimpleNamespace(key=_PUBLIC_PEM)
     client = SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key)
     monkeypatch.setattr(clerk, "_jwks", lambda issuer: client)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_clerk_logger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A per-test clerk logger, so ``capture_logs`` sees its output.
+
+    ``configure_logging`` runs with ``cache_logger_on_first_use=True``: any
+    earlier test that makes the module's logger emit freezes its processor
+    chain, and ``capture_logs``'s temporary processors never fire. A fresh
+    lazy proxy binds against whatever configuration the test installs.
+    """
+    monkeypatch.setattr(clerk, "logger", structlog.get_logger("coval_bench.api.clerk"))
 
 
 def _settings(
@@ -96,17 +125,20 @@ def _resolve(
 ) -> tuple[frozenset[tuple[str, str]], str]:
     """This caller's hidden set and the status header it got."""
     response = Response()
-    hidden = hidden_early_access(
-        response=response,
-        authorization=authorization,
-        settings=settings,
+    hidden = asyncio.run(
+        hidden_early_access(
+            response=response,
+            authorization=authorization,
+            settings=settings,
+            states=_STATES,
+        )
     )
     return hidden, response.headers[EA_STATUS_HEADER]
 
 
 def _embargoed_provider() -> str:
     """Any provider with an embargoed model, or skip."""
-    providers = sorted({provider for provider, _ in embargoed_pairs()})
+    providers = sorted({provider for provider, _ in embargoed_pairs(_STATES)})
     if not providers:
         pytest.skip("no embargoed models in the registry")
     return providers[0]
@@ -114,7 +146,7 @@ def _embargoed_provider() -> str:
 
 def _two_embargoed_providers() -> tuple[str, str]:
     """Two distinct providers with embargoed models, or skip."""
-    providers = sorted({provider for provider, _ in embargoed_pairs()})
+    providers = sorted({provider for provider, _ in embargoed_pairs(_STATES)})
     if len(providers) < 2:
         pytest.skip("fewer than two providers have embargoed models")
     return providers[0], providers[1]
@@ -128,15 +160,15 @@ def test_org_sees_its_own_providers_models_and_no_others(
     token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == frozenset(pair for pair in embargoed_pairs() if pair[0] != mine)
+    assert hidden == frozenset(pair for pair in embargoed_pairs(_STATES) if pair[0] != mine)
     assert all(provider != mine for provider, _ in hidden)
     assert any(provider == theirs for provider, _ in hidden)
 
 
 def test_org_entry_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    pair = sorted(embargoed_pairs())[0]
+    pair = sorted(embargoed_pairs(_STATES))[0]
     provider, model = pair
-    siblings = {p for p in embargoed_pairs() if p[0] == provider and p != pair}
+    siblings = {p for p in embargoed_pairs(_STATES) if p[0] == provider and p != pair}
     if not siblings:
         pytest.skip("no embargoed provider has two models")
     settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: [f"{provider}/{model}"]}))
@@ -162,7 +194,7 @@ def test_mapped_org_naming_nothing_unlocks_nothing(monkeypatch: pytest.MonkeyPat
     token = _mint({"org_id": _ORG_ID, "email": _INTERNAL_EMAIL})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == with_retired_keys(embargoed_pairs())
+    assert hidden == with_retired_keys(embargoed_pairs(_STATES))
 
 
 def test_malformed_org_entry_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,12 +202,12 @@ def test_malformed_org_entry_is_dropped(monkeypatch: pytest.MonkeyPatch) -> None
     settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: [provider, 7]}))
     token = _mint({"org_id": _ORG_ID, "email": "partner@example.com"})
     hidden, _ = _resolve(settings, f"Bearer {token}")
-    assert hidden == with_retired_keys(embargoed_pairs())
+    assert hidden == with_retired_keys(embargoed_pairs(_STATES))
 
 
 def _public_pair() -> tuple[str, str]:
     """Any registered pair that is not embargoed, or skip."""
-    public = sorted(all_registered_pairs() - embargoed_pairs())
+    public = sorted(all_registered_pairs() - embargoed_pairs(_STATES))
     if not public:
         pytest.skip("every registered model is embargoed")
     return public[0]
@@ -183,7 +215,9 @@ def _public_pair() -> tuple[str, str]:
 
 def test_exclusive_org_sees_only_its_own_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = _embargoed_provider()
-    mine = {pair for pair in embargoed_pairs() if pair[0] == provider}
+    # An exclusive provider grant resolves against every registered pair, not
+    # just the embargoed ones, so "mine" is the provider's whole catalogue.
+    mine = {pair for pair in all_registered_pairs() if pair[0] == provider}
     settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [provider]}))
     token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
@@ -195,7 +229,7 @@ def test_exclusive_org_sees_only_its_own_provider(monkeypatch: pytest.MonkeyPatc
 
 
 def test_exclusive_org_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider, model = sorted(embargoed_pairs())[0]
+    provider, model = sorted(embargoed_pairs(_STATES))[0]
     settings = _settings(monkeypatch, org_exclusive=json.dumps({_ORG_ID: [f"{provider}/{model}"]}))
     token = _mint({"org_id": _ORG_ID})
     hidden, _ = _resolve(settings, f"Bearer {token}")
@@ -288,10 +322,13 @@ def test_unknown_exclusive_entry_grants_nothing_and_warns(
     token = _mint({"org_id": _ORG_ID})
     response = Response()
     with capture_logs() as logs:
-        hidden = hidden_early_access(
-            response=response,
-            authorization=f"Bearer {token}",
-            settings=settings,
+        hidden = asyncio.run(
+            hidden_early_access(
+                response=response,
+                authorization=f"Bearer {token}",
+                settings=settings,
+                states=_STATES,
+            )
         )
 
     assert hidden == all_registered_pairs()
@@ -317,7 +354,7 @@ def test_mapped_org_scopes_even_a_coval_email(monkeypatch: pytest.MonkeyPatch) -
     token = _mint({"email": _INTERNAL_EMAIL, "org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == frozenset(pair for pair in embargoed_pairs() if pair[0] != provider)
+    assert hidden == frozenset(pair for pair in embargoed_pairs(_STATES) if pair[0] != provider)
 
 
 def test_coval_email_in_an_unmapped_org_still_sees_everything(
@@ -338,7 +375,7 @@ def test_lookalike_email_domain_unlocks_nothing(monkeypatch: pytest.MonkeyPatch)
     token = _mint({"email": "someone@notcoval.dev"})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_session_without_the_claims_keeps_the_public_view(
@@ -348,7 +385,7 @@ def test_session_without_the_claims_keeps_the_public_view(
     token = _mint({})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_signed_in_user_without_an_org_keeps_the_public_view(
@@ -358,7 +395,7 @@ def test_signed_in_user_without_an_org_keeps_the_public_view(
     token = _mint({"email": "user@example.com", "org_id": None})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_unmapped_org_keeps_the_public_view(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,7 +405,7 @@ def test_unmapped_org_keeps_the_public_view(monkeypatch: pytest.MonkeyPatch) -> 
     token = _mint({"org_id": "org_2someoneelse"})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_org_without_a_configured_map_keeps_the_public_view(
@@ -378,7 +415,7 @@ def test_org_without_a_configured_map_keeps_the_public_view(
     token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_claims_of_the_wrong_shape_unlock_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -387,7 +424,7 @@ def test_claims_of_the_wrong_shape_unlock_nothing(monkeypatch: pytest.MonkeyPatc
     token = _mint({"email": [_INTERNAL_EMAIL], "org_id": [_ORG_ID]})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_expired_token_keeps_the_public_view(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -396,7 +433,7 @@ def test_expired_token_keeps_the_public_view(monkeypatch: pytest.MonkeyPatch) ->
     token = _mint({"email": _INTERNAL_EMAIL}, iat=now - 120, exp=now - 60)
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_token_signed_by_another_key_keeps_the_public_view(
@@ -406,7 +443,7 @@ def test_token_signed_by_another_key_keeps_the_public_view(
     token = _mint({"email": _INTERNAL_EMAIL}, key=_OTHER_KEY)
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_token_from_another_issuer_keeps_the_public_view(
@@ -416,7 +453,7 @@ def test_token_from_another_issuer_keeps_the_public_view(
     token = _mint({"email": _INTERNAL_EMAIL}, iss="https://not-clerk.example.com")
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_azp_outside_the_allowlist_keeps_the_public_view(
@@ -426,7 +463,7 @@ def test_azp_outside_the_allowlist_keeps_the_public_view(
     token = _mint({"email": _INTERNAL_EMAIL}, azp="https://elsewhere.example.com")
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_azp_in_the_allowlist_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -442,12 +479,16 @@ def test_unset_authorized_parties_rejects_every_token(monkeypatch: pytest.Monkey
     token = _mint({"email": _INTERNAL_EMAIL})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def _headers(settings: Settings, authorization: str) -> dict[str, str]:
     response = Response()
-    hidden_early_access(response=response, authorization=authorization, settings=settings)
+    asyncio.run(
+        hidden_early_access(
+            response=response, authorization=authorization, settings=settings, states=_STATES
+        )
+    )
     return dict(response.headers)
 
 
@@ -474,7 +515,7 @@ def test_bearer_is_ignored_when_clerk_is_not_configured(
     token = _mint({"email": _INTERNAL_EMAIL})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "absent"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_non_bearer_authorization_keeps_the_public_view(
@@ -483,7 +524,7 @@ def test_non_bearer_authorization_keeps_the_public_view(
     settings = _settings(monkeypatch)
     hidden, status = _resolve(settings, "Basic dXNlcjpwYXNz")
     assert status == "unknown"
-    assert hidden == embargoed_pairs()
+    assert hidden == embargoed_pairs(_STATES)
 
 
 def test_retired_board_keys_stay_embargoed() -> None:
@@ -493,8 +534,8 @@ def test_retired_board_keys_stay_embargoed() -> None:
     old string, and the embargo matches on what is stored -- so losing the old
     key would publish every recording and row published under that name.
     """
-    assert ("xai", "grok-realtime") in embargoed_pairs()
-    assert ("xai", "grok-voice-think-fast-1.0") in embargoed_pairs()
+    assert ("xai", "grok-realtime") in embargoed_pairs(_STATES)
+    assert ("xai", "grok-voice-think-fast-1.0") in embargoed_pairs(_STATES)
 
 
 def test_org_grant_for_a_renamed_model_also_sees_its_history(

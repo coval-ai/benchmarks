@@ -18,6 +18,7 @@ from httpx import AsyncClient
 from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
+from coval_bench.db.model_state import assume_all_active
 from coval_bench.providers.base import TTSResult
 from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
 
@@ -709,7 +710,7 @@ def _fake_tts_providers(fail_models: set[str]) -> dict[str, type]:
                 error=None,
             )
 
-    return {m.provider: _FakeTTS for m in active_tts_models()}
+    return {m.provider: _FakeTTS for m in active_tts_models(assume_all_active())}
 
 
 async def test_create_battle_returns_blind_battle(
@@ -763,7 +764,7 @@ async def test_create_battle_502_when_synthesis_fails(
 ) -> None:
     """If synthesis fails, no battle is persisted and the endpoint returns 502."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    every_model = {m.model for m in active_tts_models()}
+    every_model = {m.model for m in active_tts_models(assume_all_active())}
     monkeypatch.setattr(
         "coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(every_model)
     )

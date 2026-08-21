@@ -40,6 +40,7 @@ from coval_bench.arena.rating import (
     ConvergenceError,
     compute_ratings,
 )
+from coval_bench.db.model_state import assume_all_active
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.models import Gender, RegisteredModel
 
@@ -193,8 +194,9 @@ def tune_scale(
     # One gender's roster, because that is what production pairs within — never
     # the union. Both genders currently field the same models, so either stands
     # in for the regime; simulating the union would model a larger pool than any
-    # real battle draws from.
-    roster = roster_for(Gender.FEMALE)
+    # real battle draws from. Offline tool: every registry model counts as
+    # active rather than reading model_state from a database.
+    roster = roster_for(Gender.FEMALE, assume_all_active())
     if len(roster) < 2:
         raise ValueError("need at least two active TTS models to simulate")
 

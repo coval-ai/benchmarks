@@ -9,7 +9,7 @@ benchmarks-api from Secret Manager. Two infra layouts are understood:
 the mount) and the older ``modules/cloud_run_service/main.tf`` (inline env
 blocks with ``secret_key_ref``). Fails if any provider the arena would
 synthesize lacks its key on the service — the cross-repo parity gate, and the
-only failing condition. An ACTIVE provider opted out with
+only failing condition. A provider opted out entirely with
 ``arena_enabled=False`` while its key IS mounted only warns: the registry owns
 arena membership, so a deliberate exclusion must not need an infra change to
 keep CI green. Opted-out providers without a ``PROVIDER_ENV`` mapping (e.g.
@@ -26,8 +26,9 @@ import sys
 import hcl2
 
 from coval_bench.arena.pairing import active_tts_models
+from coval_bench.db.model_state import assume_all_active
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
+from coval_bench.registries.models import MODEL_REGISTRY
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -86,7 +87,9 @@ def main(tf_path: str) -> int:
 
     required: set[str] = set()
     unmapped: set[str] = set()
-    for m in active_tts_models():
+    # Run-state lives in the DB and can flip without a deploy, so the check
+    # covers every arena-enabled provider, not just the currently live roster.
+    for m in active_tts_models(assume_all_active()):
         env_var = PROVIDER_ENV.get(m.provider)
         if env_var is None:
             unmapped.add(m.provider)
@@ -98,7 +101,7 @@ def main(tf_path: str) -> int:
         return 1
 
     if not required:
-        print("ERROR: arena roster is empty — no ACTIVE, arena_enabled TTS providers to verify.")
+        print("ERROR: arena roster is empty — no arena_enabled TTS providers to verify.")
         return 1
 
     missing = sorted(required - mounted)
@@ -110,13 +113,16 @@ def main(tf_path: str) -> int:
         )
         return 1
 
+    enabled_providers = {
+        m.provider for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS and m.arena_enabled
+    }
     mounted_opt_outs = sorted(
         {
             m.provider
             for m in MODEL_REGISTRY
             if m.benchmark is Benchmark.TTS
-            and m.status is ModelStatus.ACTIVE
             and not m.arena_enabled
+            and m.provider not in enabled_providers
             and PROVIDER_ENV.get(m.provider) in mounted
         }
     )
