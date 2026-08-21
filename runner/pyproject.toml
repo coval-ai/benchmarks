@@ -51,6 +51,11 @@ google-stt = ["google-cloud-speech>=2.27"]
 google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS streaming
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
+timestamp-benchmark = [
+    "huggingface-hub==0.36.2",
+    "torch==2.8.0",
+    "transformers==4.56.2",
+]
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"
@@ -144,6 +149,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "hume.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["huggingface_hub.*", "torch.*", "transformers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["allophant.*", "pandas.io.parsers.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

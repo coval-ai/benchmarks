@@ -1,0 +1,88 @@
+{
+  "schema_version": "TimestampBenchmarkBundleV1",
+  "benchmark_id": "invented-word-boundaries-v1",
+  "dataset_id": "invented-audio-v1",
+  "mode": "human_ground_truth",
+  "kind": "word_aligner",
+  "fixture_only": true,
+  "candidate_ids": [
+    "invented-word-aligner"
+  ],
+  "candidate_specs": [
+    {
+      "schema_version": "CandidateSpecV1",
+      "candidate_id": "invented-word-aligner",
+      "kind": "word_aligner",
+      "implementation": "invented-fixture",
+      "implementation_revision": "invented-revision-001",
+      "model_name": "invented-word-aligner",
+      "model_revision": "invented-revision-001",
+      "assets": [
+        {
+          "path": "invented-weights.bin",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "decoder": "invented-decoder-v1",
+      "resampler": "invented-resampler-v1",
+      "normalization_version": "word-nfkc-casefold-alnum-v1",
+      "phone_inventory_version": null,
+      "freely_predicts_words": false,
+      "license_id": null,
+      "commercial_use_allowed": null,
+      "redistribution_allowed": null,
+      "benchmark_eligible": false,
+      "license_eligible_for_production": false,
+      "eligibility_notes": [
+        "Invented fixture only."
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "schema_version": "WordGroundTruthCaseV1",
+      "reference": {
+        "schema_version": "WordGroundTruthV1",
+        "analysis_id": "invented-001",
+        "audio_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duration_ms": 1000,
+        "annotation_revision": "invented-human-v1",
+        "words": [
+          {
+            "text": "hello",
+            "start_ms": 100,
+            "end_ms": 300
+          }
+        ]
+      },
+      "outputs": [
+        {
+          "candidate_id": "invented-word-aligner",
+          "freely_predicted_words": false,
+          "artifact": {
+            "schema_version": "WordTimestampsV1",
+            "analysis_id": "invented-001",
+            "audio_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "transcript_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "duration_ms": 1000,
+            "processor": {
+              "aligner_name": "invented-word-aligner",
+              "aligner_revision": "invented-revision-001",
+              "normalization_version": "word-nfkc-casefold-alnum-v1"
+            },
+            "words": [
+              {
+                "text": "hello",
+                "start_ms": 110,
+                "end_ms": 310,
+                "confidence": 0.9
+              }
+            ],
+            "warnings": []
+          }
+        }
+      ],
+      "failures": []
+    }
+  ]
+}

@@ -62,6 +62,10 @@ docs/providers/
 .uv-cache/
 runner/.uv-cache/
 
+# BENCH-668 licensed/private timestamp benchmark evidence
+runner/.timestamp-benchmark-private/
+runner/timestamp-benchmark-results/
+
 # Playground internal docs (per Loren's PR #26 R4-1 review)
 PLAYGROUND.md
 .env*.local
