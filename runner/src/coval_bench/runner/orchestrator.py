@@ -83,6 +83,12 @@ _STT_SILENT_FAILURE = "provider closed the stream without sending a transcript o
 _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is unbounded
 # but huge stack traces choke log pipelines)
 
+# Items a fully-failed provider must have run before RUN_PARTIAL calls it dead;
+# see _dead_providers. Sized to the scheduler's shard mix (1/4/10 items): small
+# enough that every multi-item shard can still page, large enough that the
+# dominant single-item shards never do.
+_MIN_DEAD_ITEMS = 3
+
 
 # ---------------------------------------------------------------------------
 # Public result type
@@ -192,6 +198,15 @@ def _dead_providers(
     registered under more than one modality; keying on the provider alone would let a
     dead model be masked by that provider's healthy rows in the other benchmark. The
     reason is the most common error across the rows, so the alert names a cause.
+
+    A provider only counts as dead when it failed at least ``_MIN_DEAD_ITEMS`` items.
+    Most scheduled runs shard the dataset down to a single item per model, so without
+    a floor one transient blip reads as "failed every item it ran" and pages. Each
+    item yields at most one row per metric, so the busiest metric counts the items
+    actually run — items can't be counted from rows directly because one item fans
+    out to several metric rows, nor from ``audio_filename``, which TTS render
+    failures leave unset. The deliberate consequence: a genuinely dead provider
+    stays silent on the single-item shards and pages via the next larger run.
     """
     rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for r in results:
@@ -200,6 +215,9 @@ def _dead_providers(
     dead: list[str] = []
     for (benchmark, provider, model), group in sorted(rows.items()):
         if not all(row.status == result_status.FAILED for row in group):
+            continue
+        items_run = max(Counter(row.metric_type for row in group).values())
+        if items_run < _MIN_DEAD_ITEMS:
             continue
         ranked = Counter(row.error for row in group if row.error).most_common(1)
         reason = ranked[0][0] if ranked else "no reason reported"
@@ -232,11 +250,13 @@ def _log_run_outcome(
     twice.
 
     A partial run reports ``RUN_PARTIAL`` **only when some provider failed every one
-    of its items**, not on every partial run. Scattered item failures are normal —
-    providers routinely lose one clip out of thirty — so paging on those would bury
-    the signal and the alert would be muted. The consequence is deliberate: a run
-    where many providers fail most of their items without any single one being fully
-    dead stays silent here, and is caught only by the run's own metrics.
+    of at least ``_MIN_DEAD_ITEMS`` items**, not on every partial run. Scattered item
+    failures are normal — providers routinely lose one clip out of thirty — so paging
+    on those would bury the signal and the alert would be muted; the item floor keeps
+    the dominant single-item shards from paging on one transient blip. The consequence
+    is deliberate: a run where many providers fail most of their items without any
+    single one being fully dead stays silent here, and is caught only by the run's
+    own metrics.
     """
     if final_status is run_status.FAILED:
         log_run_failed(
