@@ -59,8 +59,10 @@ _LOOKAHEAD_FLUSH_MODELS = frozenset(
 _TAIL_SILENCE_S = 1.6
 
 # After commit, wait this long for the forced final before closing, so the
-# close can't race the final.
-_FINAL_WAIT_S = 5.0
+# close can't race the final. Elapses in full only when no final ever arrives;
+# 5 s proved too tight under serverless load and made slow finals read as
+# silent failures (nemotron especially).
+_FINAL_WAIT_S = 15.0
 
 
 class TogetherSTTProvider(STTProvider):
