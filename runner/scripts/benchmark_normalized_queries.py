@@ -525,7 +525,8 @@ def _buffer_totals(plan: dict[str, Any]) -> tuple[int, int]:
 def _explain(conn: psycopg.Connection[Any], query: str, params: dict[str, Any]) -> PlanSample:
     statement = sql.SQL("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ") + sql.SQL(query)
     with conn.cursor() as cur:
-        cur.execute(statement, params)
+        # Prevent psycopg from switching plan preparation partway through the samples.
+        cur.execute(statement, params, prepare=False)
         row = cur.fetchone()
     if row is None:
         raise RuntimeError("EXPLAIN returned no plan")

@@ -72,11 +72,11 @@ uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-li
 uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 100000 --candidate-indexes
 ```
 
-In a local PostgreSQL 16 run, dashboard series measured about 2.50 ms for
-legacy, 3.21 ms for normalized baseline, and 2.61 ms with the composite series
-index. At a 1,000-row limit, normalized recent results improved from about 21.5
-ms to 4.9 ms with the observation index. At 100,000 rows, normalized recent
-results measured about 129.2 ms and PostgreSQL ignored that index; this is the
+In a local PostgreSQL 16 run, dashboard series measured about 2.63 ms for
+legacy, 3.29 ms for normalized baseline, and 2.86 ms with the composite series
+index. At a 1,000-row limit, normalized recent results improved from about 23.3
+ms to 6.3 ms with the observation index. At 100,000 rows, normalized recent
+results measured about 154.0 ms and PostgreSQL ignored that index; this is the
 negative/control case. The benchmarks web app currently requests
 `/v1/results/aggregates`, not `/v1/results`, so the observation index prepares
 for a future normalized paginated-results cutover; the series index maps to the
