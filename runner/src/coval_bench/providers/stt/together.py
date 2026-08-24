@@ -60,7 +60,7 @@ _TAIL_SILENCE_S = 1.6
 
 # After commit, wait this long for the forced final before closing, so the
 # close can't race the final.
-_FINAL_WAIT_S = 5.0
+_FINAL_WAIT_S = 15.0
 
 
 class TogetherSTTProvider(STTProvider):

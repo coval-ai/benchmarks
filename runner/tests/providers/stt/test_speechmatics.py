@@ -87,6 +87,36 @@ async def test_speechmatics_enhanced(fake_api_key: SecretStr, audio_pcm_bytes: b
 
 
 # ---------------------------------------------------------------------------
+# Happy path — linden-1 (Agent STT)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_speechmatics_linden_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    events = load_fixture_events("speechmatics", "events-agent-success")
+    provider = SpeechmaticsProvider(api_key=fake_api_key, model="linden-1")
+
+    with patch(
+        "coval_bench.providers.stt.speechmatics.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    assert result.ttft_seconds is not None
+    assert result.first_token_content == "hello"  # noqa: S105 - transcript fixture text
+    assert result.audio_to_final_seconds is not None
+    assert result.complete_transcript == "hello world how are you"
+    assert result.word_count == 5
+
+
+# ---------------------------------------------------------------------------
 # Transcript field — punctuation spacing
 # ---------------------------------------------------------------------------
 
@@ -133,6 +163,19 @@ def test_extract_transcript_fallback_without_transcript_field() -> None:
     assert p._extract_transcript(msg) == "hello world"
 
 
+def test_extract_transcript_segment_messages() -> None:
+    p = make_provider("linden-1")
+    for msg_type in ("AddSegment", "AddPartialSegment"):
+        msg = {
+            "message": msg_type,
+            "segment": {"transcript": "Hello, world.", "speaker": "S1"},
+            "metadata": {"start_time": 0.1, "end_time": 0.8},
+        }
+        assert p._extract_transcript(msg) == "Hello, world."
+    assert p._extract_transcript({"message": "AddSegment", "segment": {}}) == ""
+    assert p._extract_transcript({"message": "EndOfTurn", "metadata": {"end_time": 2.0}}) == ""
+
+
 # ---------------------------------------------------------------------------
 # StartRecognition config
 # ---------------------------------------------------------------------------
@@ -152,6 +195,14 @@ def test_start_recognition_config_enhanced() -> None:
     assert cfg["transcription_config"]["operating_point"] == "enhanced"
 
 
+def test_start_recognition_config_linden() -> None:
+    p = make_provider("linden-1")
+    cfg = p._build_start_recognition_config(16000)
+    assert cfg["transcription_config"]["model"] == "linden-1"
+    assert "operating_point" not in cfg["transcription_config"]
+    assert "domain" not in cfg["transcription_config"]
+
+
 # ---------------------------------------------------------------------------
 # Provider name
 # ---------------------------------------------------------------------------
@@ -165,6 +216,11 @@ def test_provider_name_default() -> None:
 def test_provider_name_enhanced() -> None:
     p = make_provider("enhanced")
     assert p.name == "speechmatics-enhanced"
+
+
+def test_provider_name_linden() -> None:
+    p = make_provider("linden-1")
+    assert p.name == "speechmatics-linden-1"
 
 
 # ---------------------------------------------------------------------------

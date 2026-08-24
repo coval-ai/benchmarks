@@ -2667,7 +2667,8 @@ async def test_partial_run_emits_run_partial_with_cause(
 
     async with _orchestrator_env(
         audio_path=audio_file,
-        stt_items=[_make_dataset_item(audio_file)],
+        # Enough items to clear _MIN_DEAD_ITEMS — smaller shards never page.
+        stt_items=[_make_dataset_item(audio_file) for _ in range(3)],
         stt_providers={
             "deepgram": MagicMock(return_value=provider_ok),
             "elevenlabs": MagicMock(return_value=provider_bad),
@@ -2676,10 +2677,11 @@ async def test_partial_run_emits_run_partial_with_cause(
         writer=writer,
     ) as _:
         with structlog.testing.capture_logs() as captured:
+            # smoke=True would slice the dataset back down to one item.
             summary = await run_benchmarks(
                 settings=settings,
                 benchmark_kind="stt",
-                smoke=True,
+                smoke=False,
                 matrix_overrides=[
                     _stt_entry("deepgram", "nova-2"),
                     _stt_entry("elevenlabs", "scribe_v2_realtime"),
@@ -2728,13 +2730,19 @@ async def test_healthy_run_emits_no_run_event(audio_file: Path, settings: Settin
     assert _events(captured, "RUN_PARTIAL") == []
 
 
-def _result(provider: str, benchmark: Benchmark, status: ResultStatus, error: str | None) -> Result:
+def _result(
+    provider: str,
+    benchmark: Benchmark,
+    status: ResultStatus,
+    error: str | None,
+    metric_type: str = "TTFT",
+) -> Result:
     return Result(
         run_id=1,
         provider=provider,
         model="m1",
         benchmark=benchmark,
-        metric_type="TTFT",
+        metric_type=metric_type,
         metric_value=None if status is ResultStatus.FAILED else 1.0,
         metric_units="ms",
         status=status,
@@ -2745,6 +2753,7 @@ def _result(provider: str, benchmark: Benchmark, status: ResultStatus, error: st
 def test_dead_providers_keyed_by_benchmark() -> None:
     """A dead TTS model is not masked by the same provider's healthy STT rows."""
     results = [
+        _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio"),
         _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio"),
         _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio"),
         _result("openai", Benchmark.STT, ResultStatus.SUCCESS, None),
@@ -2780,9 +2789,39 @@ def test_dead_providers_skips_partly_healthy_provider() -> None:
 
 def test_dead_providers_handles_missing_reason() -> None:
     """A failed row with no error still names the provider rather than crashing."""
-    results = [_result("rime", Benchmark.TTS, ResultStatus.FAILED, None)]
+    results = [_result("rime", Benchmark.TTS, ResultStatus.FAILED, None) for _ in range(3)]
 
     assert _dead_providers(results, ResultStatus) == ["TTS:rime/m1 (no reason reported)"]
+
+
+def test_dead_providers_ignores_small_shards() -> None:
+    """Failing every item of a sub-threshold shard is a blip, not a dead provider.
+
+    Most scheduled runs give each model a single item; one transient failure
+    there must not page. The metric fan-out is the trap: one failed item
+    produces several FAILED rows, which must count as one item, not many.
+    """
+    one_item_fanned_out = [
+        _result("together", Benchmark.STT, ResultStatus.FAILED, "503", metric_type=m)
+        for m in ("TTFT", "AudioToFinal", "RTF")
+    ]
+
+    assert _dead_providers(one_item_fanned_out, ResultStatus) == []
+
+
+def test_dead_providers_counts_items_by_busiest_metric() -> None:
+    """Threshold items are counted per metric, so fan-out doesn't inflate them.
+
+    Three items × two metrics is six FAILED rows but only three items — exactly
+    at the floor, so the provider is reported.
+    """
+    results = [
+        _result("together", Benchmark.STT, ResultStatus.FAILED, "503", metric_type=m)
+        for m in ("TTFT", "AudioToFinal")
+        for _ in range(3)
+    ]
+
+    assert _dead_providers(results, ResultStatus) == ["STT:together/m1 (503)"]
 
 
 def test_stt_silent_failure_stamps_a_reason_when_nothing_was_produced() -> None:
@@ -2967,7 +3006,8 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
 
     async with _orchestrator_env(
         audio_path=audio_file,
-        stt_items=[_make_dataset_item(audio_file)],
+        # Enough items to clear _MIN_DEAD_ITEMS — smaller shards never page.
+        stt_items=[_make_dataset_item(audio_file) for _ in range(3)],
         tts_items=[_make_tts_item("hello world")],
         stt_providers={"elevenlabs": MagicMock(return_value=stt_bad)},
         tts_providers={"cartesia": MagicMock(return_value=tts_slow)},
@@ -2975,10 +3015,11 @@ async def test_sigterm_reports_dead_provider_from_a_completed_phase(
         writer=writer,
     ) as _:
         with structlog.testing.capture_logs() as captured:
+            # smoke=True would slice the dataset back down to one item.
             summary = await run_benchmarks(
                 settings=settings,
                 benchmark_kind="both",
-                smoke=True,
+                smoke=False,
                 matrix_overrides=[
                     *_paused_registry(Benchmark.STT),
                     *_paused_registry(Benchmark.TTS),

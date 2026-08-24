@@ -3,7 +3,7 @@
 
 """Speechmatics real-time STT provider.
 
-Supports models: default, enhanced, broadcast.
+Supports models: default, enhanced, broadcast, linden-1 (Agent STT preview).
 Wire protocol: WebSocket, wss://global.rt.speechmatics.com/v2
 Auth: Authorization: Bearer <key>
 Start: {"message": "StartRecognition", ...}
@@ -27,12 +27,13 @@ from coval_bench.providers.stt._pacing import paced_chunks
 logger = structlog.get_logger(__name__)
 
 _WS_URL = "wss://global.rt.speechmatics.com/v2"
+_AGENT_WS_URL = "wss://preview.rt.speechmatics.com/v2/agent"
 
 
 class SpeechmaticsProvider(STTProvider):
     """Speechmatics real-time STT provider."""
 
-    _VALID_MODELS = frozenset({"default", "enhanced", "broadcast"})
+    _VALID_MODELS = frozenset({"default", "enhanced", "broadcast", "linden-1"})
 
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
         if not self._model_supported(model):
@@ -41,6 +42,7 @@ class SpeechmaticsProvider(STTProvider):
             )
         self._api_key = api_key
         self._model = model
+        self._is_agent = model == "linden-1"
 
     @property
     def name(self) -> str:
@@ -61,6 +63,9 @@ class SpeechmaticsProvider(STTProvider):
             transcription_config["operating_point"] = "enhanced"
         elif self._model == "broadcast":
             transcription_config["domain"] = "broadcast"
+        elif self._is_agent:
+            # Required: without it the /agent endpoint falls back to the RT API.
+            transcription_config["model"] = self._model
 
         return {
             "message": "StartRecognition",
@@ -85,7 +90,8 @@ class SpeechmaticsProvider(STTProvider):
 
         try:
             headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
-            async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
+            ws_url = _AGENT_WS_URL if self._is_agent else _WS_URL
+            async with ws_client.connect(ws_url, additional_headers=headers) as ws:
                 # Send StartRecognition before streaming audio
                 start_config = self._build_start_recognition_config(sample_rate)
                 await ws.send(json.dumps(start_config))
@@ -199,7 +205,8 @@ class SpeechmaticsProvider(STTProvider):
                         result.first_token_content = transcript
                     result.partial_transcripts.append(transcript)
 
-                if msg_type == "AddTranscript":
+                final_type = "AddSegment" if self._is_agent else "AddTranscript"
+                if msg_type == final_type:
                     final_transcripts.append(transcript)
                     last_final_time = now
 
@@ -224,6 +231,9 @@ class SpeechmaticsProvider(STTProvider):
 
     def _extract_transcript(self, msg: dict[str, Any]) -> str:
         msg_type: str = msg.get("message", "")
+        if msg_type in ("AddSegment", "AddPartialSegment"):
+            segment: dict[str, Any] = msg.get("segment", {})
+            return str(segment.get("transcript", "")).strip()
         if msg_type not in ("AddTranscript", "AddPartialTranscript"):
             return ""
         # Prefer the pre-formatted transcript field — it handles punctuation

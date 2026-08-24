@@ -253,6 +253,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_STT,
+        provider="speechmatics",
+        model="linden-1",
+        tags=(_STREAMING, _MULTI, _VAD, _DIAR),
+        region="eu",
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
         provider="gradium",
         model="default",
         tags=(_STREAMING, _MULTI, _VAD),
@@ -978,7 +986,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
-        status=_PAUSED,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -991,7 +999,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
-        status=_PAUSED,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
