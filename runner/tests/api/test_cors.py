@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
 from httpx import AsyncClient
 
 
@@ -77,29 +76,41 @@ async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> No
     assert "authorization" in allowed, f"authorization missing from {allowed!r}"
 
 
-@pytest.mark.parametrize("header", ["x-internal-key", "x-ea-token"])
-async def test_cors_preflight_rejects_the_retired_proof_headers(
-    client: AsyncClient, header: str
-) -> None:
-    """The retired proofs must stay off the allowlist, and be rejected outright.
+async def test_cors_allowed_headers_are_exactly_the_expected_set(client: AsyncClient) -> None:
+    """Pin the allowlist itself, in both directions.
 
-    A browser only sends a request carrying an unlisted header after the preflight
-    approves it, so a stale caller is not merely denied early access — the request is
-    never sent at all, and every leaderboard renders empty, public rows included.
-    Nothing reaches a server, so no log records it. That is how the last regression
-    escaped notice; this asserts the contract that failed.
+    Widening it is how a retired proof gets quietly resurrected. Narrowing it is how
+    the last outage happened: #521 dropped X-EA-Token and X-Internal-Key while the
+    dashboard still sent them, and a browser only sends a request whose headers the
+    preflight approved — so every request was cancelled before it left the browser,
+    every leaderboard rendered empty including the public rows, and nothing reached a
+    server to log it.
+
+    Asserting the exact set means either direction fails here and has to be argued for
+    in the diff. Changing this list is a client contract change: check what still sends
+    the header before editing the expectation.
     """
     response = await client.options(
         "/v1/results",
         headers={
             "Origin": "https://benchmarks.coval.ai",
             "Access-Control-Request-Method": "GET",
-            "Access-Control-Request-Headers": header,
+            "Access-Control-Request-Headers": "authorization",
         },
     )
-    assert response.status_code == 400
-    allowed = response.headers.get("access-control-allow-headers", "").lower()
-    assert header not in allowed, f"{header} is back on the allowlist: {allowed!r}"
+    assert response.status_code in (200, 204)
+    allowed = {
+        h.strip().lower()
+        for h in response.headers.get("access-control-allow-headers", "").split(",")
+        if h.strip()
+    }
+    assert allowed == {
+        "accept",
+        "accept-language",
+        "authorization",
+        "content-language",
+        "content-type",
+    }, f"CORS allowlist changed: {sorted(allowed)}"
 
 
 async def test_cors_vercel_canonical_allowed(client: AsyncClient) -> None:
