@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, call
 from uuid import uuid4
 
 import psycopg
@@ -1641,6 +1643,97 @@ async def test_evaluation_delete_lifecycle_and_observation_cascade(
             await conn.commit()
     finally:
         await pool.close()
+
+
+def test_dashboard_read_indexes_migrate_and_downgrade(pg_conn: psycopg.Connection[Any]) -> None:
+    """The dashboard indexes are additive and retain the bucket-writer index."""
+    _migrate(pg_conn, "20260818_0018")
+    config = AlembicConfig(str(_INI_PATH))
+    config.set_main_option(
+        "sqlalchemy.url", _dsn(pg_conn).replace("postgresql://", "postgresql+psycopg://")
+    )
+    pg_conn.autocommit = True
+
+    def index_names() -> set[str]:
+        with pg_conn.cursor() as cur:
+            cur.execute("SELECT indexname FROM pg_indexes WHERE schemaname = 'benchmarks_v2'")
+            return {row[0] for row in cur.fetchall()}
+
+    new_indexes = {
+        "benchmark_observations_recent_results_idx",
+        "metric_values_by_bucket_series_idx",
+    }
+    assert not new_indexes & index_names()
+    assert "metric_values_by_bucket_bucket_at" in index_names()
+
+    alembic_command.upgrade(config, "20260824_0019")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT indexrel.relname,
+                   array_agg(attribute.attname ORDER BY key.ordinality),
+                   pg_get_expr(index_data.indpred, index_data.indrelid)
+            FROM pg_index AS index_data
+            JOIN pg_class AS indexrel ON indexrel.oid = index_data.indexrelid
+            JOIN pg_class AS table_rel ON table_rel.oid = index_data.indrelid
+            JOIN pg_namespace AS namespace ON namespace.oid = table_rel.relnamespace
+            CROSS JOIN LATERAL unnest(index_data.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+            JOIN pg_attribute AS attribute
+              ON attribute.attrelid = table_rel.oid AND attribute.attnum = key.attnum
+            WHERE namespace.nspname = 'benchmarks_v2'
+              AND indexrel.relname IN (%s, %s)
+            GROUP BY indexrel.relname, index_data.indpred, index_data.indrelid
+            """,
+            tuple(sorted(new_indexes)),
+        )
+        indexes = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+    assert indexes == {
+        "benchmark_observations_recent_results_idx": (
+            ["benchmark", "dataset_id", "captured_at", "id"],
+            "(status = 'succeeded'::text)",
+        ),
+        "metric_values_by_bucket_series_idx": (
+            [
+                "benchmark",
+                "dataset_id",
+                "metric_version",
+                "evaluation_variant",
+                "value_key",
+                "bucket_at",
+            ],
+            None,
+        ),
+    }
+    assert "metric_values_by_bucket_bucket_at" in index_names()
+
+    alembic_command.downgrade(config, "20260818_0018")
+    assert not new_indexes & index_names()
+    assert "metric_values_by_bucket_bucket_at" in index_names()
+
+
+def test_dashboard_read_index_downgrade_runs_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The downgrade removes each dashboard index outside the migration transaction."""
+    migration = import_module(
+        "coval_bench.db.migrations.versions.20260824_0019_dashboard_read_indexes"
+    )
+    context = MagicMock()
+    fake_op = MagicMock()
+    fake_op.get_context.return_value = context
+    monkeypatch.setattr(migration, "op", fake_op)
+
+    migration.downgrade()
+
+    fake_op.get_context.assert_called_once_with()
+    context.autocommit_block.assert_called_once_with()
+    context.autocommit_block.return_value.__enter__.assert_called_once_with()
+    context.autocommit_block.return_value.__exit__.assert_called_once_with(None, None, None)
+    assert fake_op.execute.call_args_list == [
+        call(
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "benchmarks_v2.benchmark_observations_recent_results_idx"
+        ),
+        call("DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.metric_values_by_bucket_series_idx"),
+    ]
 
 
 def test_migration_conditionally_revokes_api_access(pg_conn: psycopg.Connection[Any]) -> None:

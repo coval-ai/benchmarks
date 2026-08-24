@@ -59,4 +59,27 @@ Normalized observation dual writes are additive, private, and disabled by defaul
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
 enable the STT/TTS rollout; legacy result writes remain the source of truth.
 
+### Normalized read-index benchmark
+
+With Docker Postgres running, compare the baseline and the two candidate indexes
+against one million synthetic metric rows and a pagination-sized result limit:
+
+```bash
+docker compose up -d db
+cd runner
+uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 1000
+uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 1000 --candidate-indexes
+uv run python scripts/benchmark_normalized_queries.py --rows 1000000 --result-limit 100000 --candidate-indexes
+```
+
+In a local PostgreSQL 16 run, dashboard series measured about 2.63 ms for
+legacy, 3.29 ms for normalized baseline, and 2.86 ms with the composite series
+index. At a 1,000-row limit, normalized recent results improved from about 23.3
+ms to 6.3 ms with the observation index. At 100,000 rows, normalized recent
+results measured about 154.0 ms and PostgreSQL ignored that index; this is the
+negative/control case. The benchmarks web app currently requests
+`/v1/results/aggregates`, not `/v1/results`, so the observation index prepares
+for a future normalized paginated-results cutover; the series index maps to the
+current dashboard request shape.
+
 Apache-2.0.
