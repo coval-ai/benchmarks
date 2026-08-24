@@ -18,6 +18,30 @@ separate ``gradium_api_key`` for the STT provider), so it maps to
 
 from __future__ import annotations
 
+import functools
+import importlib.util
+import pkgutil
+from typing import Literal
+
+
+@functools.cache
+def provider_names(kind: Literal["stt", "tts"]) -> frozenset[str]:
+    """Provider names for a modality, listed from the provider package's modules.
+
+    A provider module is named exactly its registry key; shared helpers start
+    with an underscore. Listing files skips the class imports, so the answer
+    does not depend on which optional SDK extras are installed.
+    """
+    spec = importlib.util.find_spec(f"coval_bench.providers.{kind}")
+    if spec is None or spec.submodule_search_locations is None:  # pragma: no cover
+        raise RuntimeError(f"provider package coval_bench.providers.{kind} not found")
+    return frozenset(
+        module.name
+        for module in pkgutil.iter_modules(spec.submodule_search_locations)
+        if not module.name.startswith("_")
+    )
+
+
 PROVIDER_ENV: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "cartesia": "CARTESIA_API_KEY",

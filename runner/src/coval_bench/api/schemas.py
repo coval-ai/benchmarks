@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
-from coval_bench.registries import TagCategory
+from coval_bench.registries import Benchmark, Licensing, Source, TagCategory, Voice
 
 
 class RunOut(BaseModel):
@@ -363,3 +363,103 @@ class RevealOut(BaseModel):
 
     a: RevealModelOut
     b: RevealModelOut
+
+
+class TagOut(BaseModel):
+    """A MODE or FEATURES vocabulary entry."""
+
+    value: str = Field(min_length=1)
+    category: Literal["mode", "features"]
+    label: str = Field(min_length=1)
+
+
+class TagsResponse(BaseModel):
+    """Response schema for GET /v1/tags."""
+
+    tags: list[TagOut]
+
+
+class AdminChangeOut(BaseModel):
+    """One history row, embedded under its model. ``old`` is NULL on create."""
+
+    id: int
+    old: dict[str, Any] | None = None
+    new: dict[str, Any]
+    changed_by_user_id: str
+    changed_by_org_id: str | None = None
+    changed_by_email: str | None = None
+    changed_at: datetime
+
+
+class AdminModelOut(BaseModel):
+    """A registered model with full state, provenance, and recent history."""
+
+    id: int
+    modality: Benchmark
+    provider: str
+    model: str
+    voice: str | None = None
+    voices: list[Voice] = []
+    creator: str | None = None
+    source: Source
+    licensing: Licensing
+    on_prem: bool
+    region: Literal["us", "eu", "asia"] | None = None
+    arena_enabled: bool
+    collected: bool
+    published: bool
+    tags: list[str] = []
+    updated_by_user_id: str
+    updated_by_email: str | None = None
+    updated_at: datetime
+    history: list[AdminChangeOut] = []
+
+
+class AdminModelsResponse(BaseModel):
+    """Response schema for GET /v1/admin/models."""
+
+    models: list[AdminModelOut]
+
+
+class AdminModelCreate(BaseModel):
+    """POST body for /v1/admin/models. The defaults land the model Hidden."""
+
+    modality: Benchmark
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    voice: str | None = Field(default=None, min_length=1)
+    voices: list[Voice] = []
+    creator: str | None = Field(default=None, min_length=1)
+    source: Source = Source.OFFICIAL_API
+    licensing: Licensing = Licensing.PROPRIETARY
+    on_prem: bool = False
+    region: Literal["us", "eu", "asia"] | None = None
+    arena_enabled: bool = True
+    collected: bool = True
+    published: bool = False
+    tags: list[str] = []
+
+
+class AdminModelPatch(BaseModel):
+    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged."""
+
+    provider: str | None = Field(default=None, min_length=1)
+    model: str | None = Field(default=None, min_length=1)
+    voice: str | None = Field(default=None, min_length=1)
+    voices: list[Voice] | None = None
+    creator: str | None = Field(default=None, min_length=1)
+    source: Source | None = None
+    licensing: Licensing | None = None
+    on_prem: bool | None = None
+    region: Literal["us", "eu", "asia"] | None = None
+    arena_enabled: bool | None = None
+    collected: bool | None = None
+    published: bool | None = None
+    tags: list[str] | None = None
+
+
+class AdminModelUpdateResponse(BaseModel):
+    """PATCH response: the updated model plus warnings a rename leaves behind."""
+
+    model: AdminModelOut
+    warnings: list[str] = []

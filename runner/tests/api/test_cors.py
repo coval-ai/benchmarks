@@ -131,3 +131,33 @@ async def test_cors_vercel_other_project_disallowed(client: AsyncClient) -> None
     )
     acao = response.headers.get("access-control-allow-origin", "")
     assert acao != "https://other-project-covalai.vercel.app"
+
+
+async def _admin_preflight(client: AsyncClient, method: str, headers: str) -> dict[str, str]:
+    response = await client.options(
+        "/v1/admin/models",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": method,
+            "Access-Control-Request-Headers": headers,
+        },
+    )
+    return dict(response.headers)
+
+
+async def test_admin_write_methods_preflight(client: AsyncClient) -> None:
+    for method in ("POST", "PATCH"):
+        headers = await _admin_preflight(client, method, "authorization,content-type")
+        assert headers["access-control-allow-origin"] == "http://localhost:3000"
+        assert method in headers["access-control-allow-methods"]
+        assert "content-type" in headers["access-control-allow-headers"].lower()
+
+
+async def test_the_precondition_header_preflights(client: AsyncClient) -> None:
+    headers = await _admin_preflight(client, "PATCH", "authorization,if-unmodified-since")
+    assert "if-unmodified-since" in headers["access-control-allow-headers"].lower()
+
+
+async def test_delete_stays_disallowed(client: AsyncClient) -> None:
+    headers = await _admin_preflight(client, "DELETE", "authorization")
+    assert "DELETE" not in headers.get("access-control-allow-methods", "")

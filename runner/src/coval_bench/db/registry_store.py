@@ -362,6 +362,18 @@ class RegistryStore:
             ) from exc
         return before, after
 
+    async def history(self, model_id: int, limit: int = 5) -> list[ModelChange]:
+        """The newest *limit* history rows for one model, newest first."""
+        sql = """
+            SELECT * FROM benchmarks_v2.model_history
+            WHERE model_id = %s
+            ORDER BY changed_at DESC, id DESC
+            LIMIT %s
+        """
+        async with self._pool.connection() as conn:
+            rows = await (await conn.execute(sql, (model_id, limit))).fetchall()
+        return [ModelChange.model_validate(dict(row)) for row in rows]
+
     async def recent_history(self, per_model: int = 5) -> dict[int, list[ModelChange]]:
         """The newest *per_model* history rows for every model that has any."""
         sql = """

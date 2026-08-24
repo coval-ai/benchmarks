@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 from coval_bench.registries import (
     MODEL_REGISTRY,
     TAG_CATEGORIES,
@@ -14,6 +16,7 @@ from coval_bench.registries import (
     RegisteredModel,
     Source,
 )
+from coval_bench.registries.provider_keys import provider_names
 
 
 def test_every_tag_has_a_category() -> None:
@@ -54,3 +57,23 @@ def test_stt_models_have_no_voice() -> None:
     for m in MODEL_REGISTRY:
         if m.benchmark is Benchmark.STT:
             assert m.voice is None
+
+
+def test_provider_names_cover_the_class_registries() -> None:
+    """Every loadable provider class is reachable by its module name."""
+    stt_classes = set(importlib.import_module("coval_bench.providers.stt").STT_PROVIDERS)
+    tts_classes = set(importlib.import_module("coval_bench.providers.tts").TTS_PROVIDERS)
+    assert stt_classes <= provider_names("stt")
+    assert tts_classes <= provider_names("tts")
+    # Names with no loadable class must be exactly the optional-SDK providers.
+    assert provider_names("stt") - stt_classes <= {"google"}
+    assert provider_names("tts") - tts_classes <= {"google", "hume"}
+
+
+def test_registry_models_use_implemented_providers() -> None:
+    """Every benchmarked model's provider resolves without SDK imports."""
+    for model in MODEL_REGISTRY:
+        if model.benchmark is Benchmark.STT:
+            assert model.provider in provider_names("stt"), model.provider
+        elif model.benchmark is Benchmark.TTS:
+            assert model.provider in provider_names("tts"), model.provider
