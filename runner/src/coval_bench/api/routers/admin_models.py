@@ -163,7 +163,9 @@ async def create_admin_model(
 
 
 def _etag(record: ModelRecord) -> str:
-    return f'"{record.updated_at.isoformat()}"'
+    """Quoted updated_at, via pydantic so it is byte-identical to the JSON body."""
+    stamp = record.model_dump(mode="json")["updated_at"]
+    return f'"{stamp}"'
 
 
 @router.patch("/admin/models/{model_id}", response_model=AdminModelUpdateResponse)
