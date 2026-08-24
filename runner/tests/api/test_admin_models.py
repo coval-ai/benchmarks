@@ -304,7 +304,7 @@ async def _patch(
 ) -> Any:
     headers = _admin_headers()
     if stamp is not None:
-        headers["If-Unmodified-Since"] = stamp
+        headers["If-Match"] = stamp
     return await client.patch(f"/v1/admin/models/{model_id}", json=body, headers=headers)
 
 
@@ -320,12 +320,22 @@ async def test_patch_flips_state_and_records_history(client: AsyncClient) -> Non
     assert (newest["old"]["published"], newest["new"]["published"]) == (False, True)
 
 
-async def test_patch_requires_the_precondition_stamp(client: AsyncClient) -> None:
+async def test_patch_requires_the_precondition_tag(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     assert (await _patch(client, created["id"], None, {"published": True})).status_code == 428
-    assert (await _patch(client, created["id"], "not-a-time", {})).status_code == 400
-    naive = "2026-01-01T00:00:00"
-    assert (await _patch(client, created["id"], naive, {})).status_code == 400
+    assert (await _patch(client, created["id"], "*", {})).status_code == 400
+    # An unreadable or foreign tag matches nothing, same as a stale one.
+    assert (await _patch(client, created["id"], "not-a-time", {})).status_code == 412
+    assert (await _patch(client, created["id"], "2026-01-01T00:00:00", {})).status_code == 412
+
+
+async def test_the_response_etag_round_trips(client: AsyncClient) -> None:
+    response = await _post_model(client)
+    etag = response.headers["ETag"]
+    assert etag == f'"{response.json()["updated_at"]}"'
+    patched = await _patch(client, response.json()["id"], etag, {"published": True})
+    assert patched.status_code == 200
+    assert patched.headers["ETag"] == f'"{patched.json()["model"]["updated_at"]}"'
 
 
 async def test_patch_from_a_stale_stamp_is_412(client: AsyncClient) -> None:

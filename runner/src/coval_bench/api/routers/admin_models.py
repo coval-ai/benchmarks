@@ -158,7 +158,12 @@ async def create_admin_model(
         )
     except DuplicateKey as exc:
         raise HTTPException(409, str(exc)) from exc
+    response.headers["ETag"] = _etag(record)
     return _model_out(record, await store.history(record.id))
+
+
+def _etag(record: ModelRecord) -> str:
+    return f'"{record.updated_at.isoformat()}"'
 
 
 @router.patch("/admin/models/{model_id}", response_model=AdminModelUpdateResponse)
@@ -166,24 +171,21 @@ async def update_admin_model(
     model_id: int,
     body: AdminModelPatch,
     response: Response,
-    if_unmodified_since: str | None = Header(default=None),
+    if_match: str | None = Header(default=None),
     admin: CovalAdmin = Depends(require_coval_admin),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> AdminModelUpdateResponse:
     """Partially update a model; the history's ``old`` is what the editor saw."""
     never_shared(response)
-    if if_unmodified_since is None:
-        raise HTTPException(
-            428, "If-Unmodified-Since is required: send the model's last-seen updated_at"
-        )
+    if if_match is None:
+        raise HTTPException(428, "If-Match is required: send the model's last-seen ETag")
+    if if_match.strip() == "*":
+        raise HTTPException(400, "If-Match must name the last-seen ETag, not *")
     try:
-        expected = datetime.fromisoformat(if_unmodified_since)
+        expected = datetime.fromisoformat(if_match.strip().removeprefix("W/").strip('"'))
     except ValueError as exc:
-        raise HTTPException(
-            400, "If-Unmodified-Since must be the updated_at timestamp in ISO 8601"
-        ) from exc
-    if expected.tzinfo is None:
-        raise HTTPException(400, "If-Unmodified-Since must carry a timezone")
+        # An unreadable tag matches nothing, exactly like a readable stale one.
+        raise HTTPException(412, "the If-Match tag matches no version of the model") from exc
 
     changes = body.model_dump(exclude_unset=True)
     null_forbidden = [
@@ -217,6 +219,7 @@ async def update_admin_model(
     if result is None:  # pragma: no cover — the row was read above
         raise HTTPException(404, "no such model")
     before, after = result
+    response.headers["ETag"] = _etag(after)
     history = await store.history(model_id)
     return AdminModelUpdateResponse(
         model=_model_out(after, history), warnings=_rename_warnings(before, after)

@@ -154,8 +154,8 @@ async def test_admin_write_methods_preflight(client: AsyncClient) -> None:
 
 
 async def test_the_precondition_header_preflights(client: AsyncClient) -> None:
-    headers = await _admin_preflight(client, "PATCH", "authorization,if-unmodified-since")
-    assert "if-unmodified-since" in headers["access-control-allow-headers"].lower()
+    headers = await _admin_preflight(client, "PATCH", "authorization,if-match")
+    assert "if-match" in headers["access-control-allow-headers"].lower()
 
 
 async def test_delete_stays_disallowed(client: AsyncClient) -> None:
