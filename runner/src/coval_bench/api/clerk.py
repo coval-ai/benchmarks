@@ -27,10 +27,13 @@ logger = structlog.get_logger("coval_bench.api.clerk")
 
 @dataclass(frozen=True)
 class CovalAdmin:
-    """The verified caller behind an admin request, as stamped into model history."""
+    """The verified caller behind an admin request, as stamped into model history.
+
+    Carries no org: admin callers are coval staff by construction, and history
+    records staff as ``changed_by_org_id = NULL``.
+    """
 
     user_id: str
-    org_id: str
     email: str | None
 
 

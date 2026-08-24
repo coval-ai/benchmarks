@@ -109,7 +109,7 @@ def test_unset_coval_org_is_403_for_everyone(monkeypatch: pytest.MonkeyPatch) ->
 def test_coval_org_token_yields_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch)
     admin = _admin(settings, _bearer(sub="user_1", org_id=COVAL_ORG, email="cale@coval.dev"))
-    assert admin == clerk.CovalAdmin(user_id="user_1", org_id=COVAL_ORG, email="cale@coval.dev")
+    assert admin == clerk.CovalAdmin(user_id="user_1", email="cale@coval.dev")
 
 
 @pytest.mark.parametrize("claims", [{}, {"email": ""}, {"email": 7}])

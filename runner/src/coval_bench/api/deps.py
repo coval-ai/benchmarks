@@ -73,7 +73,6 @@ def require_coval_admin(
     email = claims.get("email")
     return clerk.CovalAdmin(
         user_id=user_id,
-        org_id=org_id,
         email=email if isinstance(email, str) and email else None,
     )
 
