@@ -16,11 +16,12 @@ from typing import Any, cast
 
 import structlog
 from cachetools import TTLCache
-from fastapi import HTTPException
+from fastapi import Depends, Header, HTTPException
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench.api import clerk
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api")
@@ -41,6 +42,40 @@ def get_settings(request: Request) -> Settings:
     """Return the Settings instance from app state."""
     settings: Settings = request.app.state.settings
     return settings
+
+
+def require_coval_admin(
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> clerk.CovalAdmin:
+    """The verified coval caller: 401 without a proven token, 403 outside the coval org."""
+    claims = clerk.bearer_claims(authorization, settings)
+    if claims is None:
+        raise HTTPException(
+            401,
+            "a valid Clerk session token is required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    user_id = claims.get("sub")
+    if not isinstance(user_id, str) or not user_id:
+        raise HTTPException(
+            401,
+            "the session token names no subject",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    org_id = claims.get("org_id")
+    if (
+        not isinstance(org_id, str)
+        or not settings.clerk_coval_org
+        or org_id != settings.clerk_coval_org
+    ):
+        raise HTTPException(403, "the coval org must be active on the token")
+    email = claims.get("email")
+    return clerk.CovalAdmin(
+        user_id=user_id,
+        org_id=org_id,
+        email=email if isinstance(email, str) and email else None,
+    )
 
 
 def get_posthog(request: Request) -> Posthog | None:
