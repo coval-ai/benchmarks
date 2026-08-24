@@ -97,7 +97,6 @@ def _stub_writer() -> MagicMock:
     writer.start_run = AsyncMock(
         return_value=Run(
             id=1,
-            runner_sha="test",
             dataset_id="s2s-v1",
             dataset_sha256="x",
             status=RunStatus.RUNNING,
@@ -119,7 +118,6 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
         spec=SPEC,
         agent_id="a1",
         metric_ids=LATENCY_IDS,
-        runner_sha="test",
         period_seconds=10_800,
         stale_grace_seconds=5_400,
     )
@@ -175,7 +173,6 @@ async def test_backfill_ingests_only_named_runs() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             only_run_ids=frozenset({"R1"}),
@@ -199,7 +196,6 @@ async def test_backfill_reports_matches_and_ignores_staleness() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             only_run_ids=frozenset({"R1", "R9"}),
@@ -229,7 +225,6 @@ async def test_backfill_matches_errored_run() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             only_run_ids=frozenset({"R1"}),
@@ -253,7 +248,6 @@ async def test_backfill_does_not_match_failed_ingest() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             only_run_ids=frozenset({"R1"}),
@@ -279,7 +273,6 @@ async def test_backfill_publishes_no_samples() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -364,7 +357,6 @@ async def test_ingest_run_slots_by_create_time() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=created),
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -389,7 +381,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             spec=SPEC,
             coval_run=run,
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
@@ -403,7 +394,6 @@ async def test_ingest_run_partial_and_failed() -> None:
             spec=SPEC,
             coval_run=run,
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.FAILED
@@ -423,7 +413,6 @@ async def test_ingest_run_skips_before_any_write() -> None:
                 spec=SPEC,
                 coval_run=run,
                 metric_ids=LATENCY_IDS,
-                runner_sha="test",
                 period_seconds=10_800,
             )
             is None
@@ -440,7 +429,6 @@ async def test_ingest_run_skips_before_any_write() -> None:
                 spec=SPEC,
                 coval_run=run,
                 metric_ids=LATENCY_IDS,
-                runner_sha="test",
                 period_seconds=10_800,
             )
             is None
@@ -461,7 +449,6 @@ async def test_ingest_run_ignores_error_status() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -485,7 +472,6 @@ async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
@@ -516,7 +502,6 @@ async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -534,7 +519,6 @@ async def test_fetch_one_provider_ingests_every_new_run() -> None:
         side_effect=[
             Run(
                 id=i,
-                runner_sha="t",
                 dataset_id="s2s-v1",
                 dataset_sha256="x",
                 status=RunStatus.RUNNING,
@@ -621,7 +605,6 @@ async def test_optional_metric_alone_does_not_prove_freshness() -> None:
             agent_id="a1",
             metric_ids=IDS,
             test_set_id="TS1",
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
         )
@@ -648,7 +631,6 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
         side_effect=[
             Run(
                 id=i,
-                runner_sha="t",
                 dataset_id="s2s-v1",
                 dataset_sha256="x",
                 status=RunStatus.RUNNING,
@@ -681,7 +663,6 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     # gemini agent id left unset (None) -> that provider is skipped.
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
     )
@@ -712,7 +693,6 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
     )
@@ -753,7 +733,6 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -786,7 +765,6 @@ async def test_embargoed_agent_never_becomes_a_sample_candidate() -> None:
             spec=embargoed,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -814,7 +792,6 @@ async def test_each_bucket_contributes_its_own_sample_candidate() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -844,7 +821,6 @@ async def test_one_bucket_keeps_only_its_newest_candidate() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -869,7 +845,6 @@ async def test_stale_provider_lends_no_sample_candidate() -> None:
             spec=SPEC,
             agent_id="a1",
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -1018,7 +993,6 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
             metric_ids=IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
         )
@@ -1057,7 +1031,6 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
             metric_ids=LATENCY_IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -1069,7 +1042,6 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
 async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> None:
     # Without a test set the persona split can never fire, so fail loudly.
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_noisy_persona_id="PN",
@@ -1082,7 +1054,6 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
     # Blank would skip its agents with only a warning, indistinguishable from unset.
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_happypath_test_set_id="   ",
@@ -1100,7 +1071,6 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     del mappers[Metric.INTERRUPTION_RATE]
     monkeypatch.setattr(fetch_v2v, "_VALUE_MAPPERS", mappers)
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_test_set_id="TS1",
@@ -1148,7 +1118,6 @@ async def test_ingest_run_writes_interruption_rows() -> None:
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=ALL_IDS,
             condition=condition_for(DATASET_ID_MULTITURN),
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -1183,7 +1152,6 @@ async def test_ingest_run_writes_instruction_rows() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     # Run status reflects latency (all numeric) -> SUCCEEDED.
@@ -1228,7 +1196,6 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED  # latency intact
@@ -1248,7 +1215,6 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED  # latency kept
@@ -1260,7 +1226,6 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
 async def test_fetch_and_write_requires_id_pair(monkeypatch: pytest.MonkeyPatch) -> None:
     # instruction id set but test-set id missing -> startup failure (must be paired).
     settings = Settings(
-        runner_sha="test",
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_instruction_metric_id="IID",
@@ -1283,7 +1248,6 @@ async def test_ingest_run_backfill_instruction_only() -> None:
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -1305,7 +1269,6 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
             pending=frozenset({Metric.INSTRUCTION_FOLLOWING}),
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is None  # nothing to write -> no run row, stays retryable
@@ -1328,7 +1291,6 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -1352,7 +1314,6 @@ async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN),
             dataset_id=DATASET_ID_MULTITURN,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is None
@@ -1378,7 +1339,6 @@ async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is None
@@ -1407,7 +1367,6 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
             metric_ids=IDS,
             condition=condition_for(DATASET_ID_MULTITURN_NOISY),
             dataset_id=DATASET_ID_MULTITURN_NOISY,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is None
@@ -1438,7 +1397,6 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
             metric_ids=IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
         )
@@ -1467,7 +1425,6 @@ async def test_run_skipped_when_the_required_metric_is_unconfigured() -> None:
             metric_ids=LATENCY_IDS,
             test_set_id="TS1",
             noisy_persona_id="PN",
-            runner_sha="test",
             period_seconds=10_800,
             stale_grace_seconds=5_400,
             sampled_runs=sampled,
@@ -1489,7 +1446,6 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is None
@@ -1509,7 +1465,6 @@ async def test_ingest_run_without_instruction_metric_id() -> None:
             spec=SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids=LATENCY_IDS,
-            runner_sha="test",
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED

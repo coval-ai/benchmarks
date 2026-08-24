@@ -78,7 +78,6 @@ class Settings(BaseSettings):
     dataset_sample_size: int = 10
 
     # --- Runner ---
-    runner_sha: str = "dev"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     # Scheduler period in seconds. The runner floors its start time to this grid

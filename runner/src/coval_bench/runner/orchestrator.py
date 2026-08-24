@@ -1134,7 +1134,6 @@ async def run_benchmarks(
         epoch = int(datetime.now(tz=UTC).timestamp())
         scheduled_at = datetime.fromtimestamp(epoch - epoch % period, tz=UTC)
         run = await writer.start_run(
-            runner_sha=settings.runner_sha,
             dataset_id=run_dataset_id,
             dataset_sha256=dataset_sha256,
             scheduled_at=scheduled_at,
@@ -1150,7 +1149,6 @@ async def run_benchmarks(
             benchmark_kind=benchmark_kind,
             smoke=smoke,
             source=source,
-            runner_sha=settings.runner_sha,
         )
 
         all_results: list[Any] = []

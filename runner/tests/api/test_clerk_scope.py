@@ -63,7 +63,6 @@ def _settings(
     monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "stt-v1")
-    monkeypatch.setenv("RUNNER_SHA", "test-sha")
     if org_providers is None:
         monkeypatch.delenv("CLERK_ORG_PROVIDERS", raising=False)
     else:

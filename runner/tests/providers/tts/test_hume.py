@@ -300,7 +300,6 @@ def test_hume_missing_api_key() -> None:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         hume_api_key=None,
     )
     with pytest.raises(ValueError, match="hume_api_key"):

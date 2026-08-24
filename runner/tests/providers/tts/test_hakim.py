@@ -24,7 +24,6 @@ def _settings() -> Settings:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
         hakimai_api_key="test-hakim-key",
     )
@@ -196,7 +195,6 @@ def test_hakim_tts_missing_key_raises() -> None:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
     )
     with pytest.raises(ValueError, match="hakimai_api_key"):
@@ -208,7 +206,6 @@ def test_hakim_tts_empty_key_raises() -> None:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
         hakimai_api_key="",
     )

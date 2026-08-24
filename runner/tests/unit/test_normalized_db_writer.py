@@ -83,9 +83,7 @@ async def _observation(
     run_dataset: str = "run-dataset",
     observation_dataset: str = "observation-dataset",
 ) -> tuple[int, Observation]:
-    run = await writer.start_run(
-        runner_sha="sha", dataset_id=run_dataset, dataset_sha256=_SHA, scheduled_at=_NOW
-    )
+    run = await writer.start_run(dataset_id=run_dataset, dataset_sha256=_SHA, scheduled_at=_NOW)
     observation = await writer.insert_observation(
         Observation(
             run_id=_required(run.id),

@@ -57,7 +57,7 @@ class RunWriter:
     Lifecycle::
 
         writer = RunWriter(pool)
-        run = await writer.start_run(runner_sha=..., dataset_id=..., dataset_sha256=...)
+        run = await writer.start_run(dataset_id=..., dataset_sha256=...)
         await writer.record_result(result)
         await writer.record_results([result1, result2, ...])
         await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
@@ -74,7 +74,6 @@ class RunWriter:
     async def start_run(
         self,
         *,
-        runner_sha: str,
         dataset_id: str,
         dataset_sha256: str,
         scheduled_at: datetime | None = None,
@@ -87,8 +86,8 @@ class RunWriter:
         sql = """
             INSERT INTO benchmarks_v2.runs
                 (runner_sha, dataset_id, dataset_sha256, status, scheduled_at, persona_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id, started_at, finished_at, scheduled_at, runner_sha,
+            VALUES ('untracked', %s, %s, %s, %s, %s)
+            RETURNING id, started_at, finished_at, scheduled_at,
                       dataset_id, dataset_sha256, status, error, persona_id
         """
         async with self._pool.connection() as conn:
@@ -96,7 +95,6 @@ class RunWriter:
                 await cur.execute(
                     sql,
                     (
-                        runner_sha,
                         dataset_id,
                         dataset_sha256,
                         RunStatus.RUNNING,

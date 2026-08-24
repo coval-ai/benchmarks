@@ -206,7 +206,6 @@ def test_xai_tts_missing_api_key_raises() -> None:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
         xai_api_key=None,
     )

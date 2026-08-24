@@ -473,7 +473,6 @@ async def _ingest_run(
     pending: frozenset[Metric] | None = None,
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
-    runner_sha: str,
     period_seconds: int,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
@@ -581,7 +580,6 @@ async def _ingest_run(
 
         scheduled_at = _bucket_start(coval_run.create_time or datetime.now(tz=UTC), period_seconds)
         run_row = await writer.start_run(
-            runner_sha=runner_sha,
             dataset_id=dataset_id,
             dataset_sha256=dataset_sha256 or _dataset_sha256(),
             scheduled_at=scheduled_at,
@@ -697,7 +695,6 @@ async def _fetch_one_provider(
     test_set_id: str | None = None,
     noisy_persona_id: str | None = None,
     persona_conditions: Mapping[str, Condition] | None = None,
-    runner_sha: str,
     period_seconds: int,
     stale_grace_seconds: int,
     sampled_runs: list[SampleRun] | None = None,
@@ -811,7 +808,6 @@ async def _fetch_one_provider(
                 pending=pending,
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
-                runner_sha=runner_sha,
                 period_seconds=period_seconds,
             )
             if status is None:
@@ -960,7 +956,6 @@ async def fetch_and_write_v2v(
                 test_set_id=spec_test_set,
                 noisy_persona_id=noisy_persona_id,
                 persona_conditions=persona_conditions,
-                runner_sha=settings.runner_sha,
                 period_seconds=settings.s2s_fetch_period_seconds,
                 stale_grace_seconds=settings.s2s_stale_grace_seconds,
                 sampled_runs=sampled_runs,

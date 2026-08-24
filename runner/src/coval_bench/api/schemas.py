@@ -28,7 +28,6 @@ class RunOut(BaseModel):
     started_at: datetime
     finished_at: datetime | None
     status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
-    runner_sha: str
     dataset_id: str
     dataset_sha256: str
     error: str | None

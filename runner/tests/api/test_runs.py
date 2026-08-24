@@ -29,8 +29,10 @@ async def test_three_runs_returned_newest_first(client: AsyncClient, postgresql:
 
     response = await client.get("/v1/runs")
     assert response.status_code == 200
-    run_ids = [r["id"] for r in response.json()["runs"]]
+    runs = response.json()["runs"]
+    run_ids = [run["id"] for run in runs]
     assert run_ids == [id3, id2, id1]
+    assert all("runner_sha" not in run for run in runs)
 
 
 async def test_cursor_pagination(client: AsyncClient, postgresql: Any) -> None:

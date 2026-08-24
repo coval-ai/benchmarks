@@ -215,7 +215,6 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
         try:
             writer = RunWriter(pool)
             run: Run = await writer.start_run(
-                runner_sha="abc123",
                 dataset_id="stt-v1",
                 dataset_sha256="deadbeef",
             )
@@ -234,13 +233,14 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
         pg_conn.autocommit = True
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT status, finished_at FROM benchmarks_v2.runs WHERE id = %s",
+                "SELECT status, finished_at, runner_sha FROM benchmarks_v2.runs WHERE id = %s",
                 (run.id,),
             )
             row = cur.fetchone()
         assert row is not None
         assert row[0] == "succeeded"
         assert row[1] is not None
+        assert row[2] == "untracked"
 
         with pg_conn.cursor() as cur:
             cur.execute(
@@ -262,9 +262,7 @@ def test_record_results_batch(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             results = [_make_result(run.id, idx=i) for i in range(50)]
             await writer.record_results(results)
@@ -293,9 +291,7 @@ def test_partial_run(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             await writer.record_results(
                 [
@@ -326,9 +322,7 @@ def test_run_with_error(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             await writer.finish_run(
                 run.id,
@@ -358,9 +352,7 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             results = [
                 Result(
@@ -411,9 +403,7 @@ def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             results = [
                 Result(
@@ -459,9 +449,7 @@ def test_records_http_diagnostics(pg_conn: psycopg.Connection[Any]) -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="tts-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="tts-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             await writer.record_results(
                 [
@@ -575,9 +563,7 @@ def test_record_results_batch_rollback_on_failure(pg_conn: psycopg.Connection[An
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             good = _make_result(run.id, idx=0)
             bad = Result(
@@ -636,7 +622,6 @@ def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
         try:
             writer = RunWriter(pool)
             run = await writer.start_run(
-                runner_sha="abc123",
                 dataset_id="stt-v1",
                 dataset_sha256="deadbeef",
                 scheduled_at=scheduled,
@@ -651,7 +636,6 @@ def test_refresh_bucket(pg_conn: psycopg.Connection[Any]) -> None:
             # Second run in the same bucket — refresh recomputes over both
             # runs' rows.
             run2 = await writer.start_run(
-                runner_sha="abc123",
                 dataset_id="stt-v1",
                 dataset_sha256="deadbeef",
                 scheduled_at=scheduled,
@@ -711,7 +695,6 @@ def test_refresh_bucket_excludes_series_excluded_metrics(
         try:
             writer = RunWriter(pool)
             run = await writer.start_run(
-                runner_sha="abc123",
                 dataset_id="tts-v1",
                 dataset_sha256="deadbeef",
                 scheduled_at=scheduled,
@@ -755,7 +738,6 @@ def test_refresh_bucket_splits_datasets(pg_conn: psycopg.Connection[Any]) -> Non
             writer = RunWriter(pool)
             for dataset_id, values in (("stt-v1", [1.0]), ("stt-v3", [3.0, 5.0])):
                 run = await writer.start_run(
-                    runner_sha="abc123",
                     dataset_id=dataset_id,
                     dataset_sha256="deadbeef",
                     scheduled_at=scheduled,
@@ -798,7 +780,6 @@ def test_refresh_bucket_excludes_failed_run(pg_conn: psycopg.Connection[Any]) ->
         try:
             writer = RunWriter(pool)
             run = await writer.start_run(
-                runner_sha="abc123",
                 dataset_id="stt-v1",
                 dataset_sha256="deadbeef",
                 scheduled_at=scheduled,
@@ -828,9 +809,7 @@ def test_record_results_rejects_unknown_metric_type(pg_conn: psycopg.Connection[
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(
-                runner_sha="abc123", dataset_id="stt-v1", dataset_sha256="deadbeef"
-            )
+            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             good = _make_result(run.id, idx=0)
             bad = _make_result(run.id, idx=1).model_copy(update={"metric_type": "NOPE"})

@@ -36,6 +36,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
+from coval_bench import __version__
 from coval_bench.api.cache import new_cache_locks, new_response_cache
 from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.internal import never_shared
@@ -96,7 +97,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         configure_logging(level=resolved.log_level)
-        logger.info("api_startup", runner_sha=resolved.runner_sha)
+        logger.info("api_startup")
         posthog_client: Posthog | None = None
         if not resolved.posthog_disabled and resolved.posthog_project_token:
             try:
@@ -126,7 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="Coval Benchmarks API",
-        version=resolved.runner_sha,
+        version=__version__,
         lifespan=lifespan,
         docs_url="/docs",
         openapi_url="/openapi.json",
