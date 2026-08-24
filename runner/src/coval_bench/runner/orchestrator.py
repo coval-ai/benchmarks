@@ -84,9 +84,6 @@ _MAX_ERROR_LEN = 4000  # truncate error messages stored in DB (Postgres text is 
 # but huge stack traces choke log pipelines)
 
 # Items a fully-failed provider must have run before RUN_PARTIAL calls it dead;
-# see _dead_providers. Sized to the scheduler's shard mix (1/4/10 items): small
-# enough that every multi-item shard can still page, large enough that the
-# dominant single-item shards never do.
 _MIN_DEAD_ITEMS = 3
 
 
@@ -200,13 +197,6 @@ def _dead_providers(
     reason is the most common error across the rows, so the alert names a cause.
 
     A provider only counts as dead when it failed at least ``_MIN_DEAD_ITEMS`` items.
-    Most scheduled runs shard the dataset down to a single item per model, so without
-    a floor one transient blip reads as "failed every item it ran" and pages. Each
-    item yields at most one row per metric, so the busiest metric counts the items
-    actually run — items can't be counted from rows directly because one item fans
-    out to several metric rows, nor from ``audio_filename``, which TTS render
-    failures leave unset. The deliberate consequence: a genuinely dead provider
-    stays silent on the single-item shards and pages via the next larger run.
     """
     rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for r in results:
@@ -250,14 +240,7 @@ def _log_run_outcome(
     twice.
 
     A partial run reports ``RUN_PARTIAL`` **only when some provider failed every one
-    of at least ``_MIN_DEAD_ITEMS`` items**, not on every partial run. Scattered item
-    failures are normal — providers routinely lose one clip out of thirty — so paging
-    on those would bury the signal and the alert would be muted; the item floor keeps
-    the dominant single-item shards from paging on one transient blip. The consequence
-    is deliberate: a run where many providers fail most of their items without any
-    single one being fully dead stays silent here, and is caught only by the run's
-    own metrics.
-    """
+    of at least ``_MIN_DEAD_ITEMS`` items**, not on every partial run."""
     if final_status is run_status.FAILED:
         log_run_failed(
             f"all {fail_count} result rows failed"
