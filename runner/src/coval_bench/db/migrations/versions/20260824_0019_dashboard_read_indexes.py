@@ -38,6 +38,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop only the normalized dashboard-read indexes."""
-    op.execute("DROP INDEX IF EXISTS benchmarks_v2.benchmark_observations_recent_results_idx")
-    op.execute("DROP INDEX IF EXISTS benchmarks_v2.metric_values_by_bucket_series_idx")
+    """Remove the normalized dashboard-read indexes without blocking writers."""
+    with op.get_context().autocommit_block():
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "benchmarks_v2.benchmark_observations_recent_results_idx"
+        )
+        op.execute(
+            "DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.metric_values_by_bucket_series_idx"
+        )

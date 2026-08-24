@@ -5,8 +5,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock, call
 from uuid import uuid4
 
 import psycopg
@@ -1709,6 +1711,31 @@ def test_dashboard_read_indexes_migrate_and_downgrade(pg_conn: psycopg.Connectio
     alembic_command.downgrade(config, "20260818_0018")
     assert not new_indexes & index_names()
     assert "metric_values_by_bucket_bucket_at" in index_names()
+
+
+def test_dashboard_read_index_downgrade_runs_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The downgrade removes each dashboard index outside the migration transaction."""
+    migration = import_module(
+        "coval_bench.db.migrations.versions.20260824_0019_dashboard_read_indexes"
+    )
+    context = MagicMock()
+    fake_op = MagicMock()
+    fake_op.get_context.return_value = context
+    monkeypatch.setattr(migration, "op", fake_op)
+
+    migration.downgrade()
+
+    fake_op.get_context.assert_called_once_with()
+    context.autocommit_block.assert_called_once_with()
+    context.autocommit_block.return_value.__enter__.assert_called_once_with()
+    context.autocommit_block.return_value.__exit__.assert_called_once_with(None, None, None)
+    assert fake_op.execute.call_args_list == [
+        call(
+            "DROP INDEX CONCURRENTLY IF EXISTS "
+            "benchmarks_v2.benchmark_observations_recent_results_idx"
+        ),
+        call("DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.metric_values_by_bucket_series_idx"),
+    ]
 
 
 def test_migration_conditionally_revokes_api_access(pg_conn: psycopg.Connection[Any]) -> None:
