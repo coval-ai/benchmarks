@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -74,6 +75,31 @@ async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> No
     assert response.status_code in (200, 204)
     allowed = response.headers.get("access-control-allow-headers", "").lower()
     assert "authorization" in allowed, f"authorization missing from {allowed!r}"
+
+
+@pytest.mark.parametrize("header", ["x-internal-key", "x-ea-token"])
+async def test_cors_preflight_rejects_the_retired_proof_headers(
+    client: AsyncClient, header: str
+) -> None:
+    """The retired proofs must stay off the allowlist, and be rejected outright.
+
+    A browser only sends a request carrying an unlisted header after the preflight
+    approves it, so a stale caller is not merely denied early access — the request is
+    never sent at all, and every leaderboard renders empty, public rows included.
+    Nothing reaches a server, so no log records it. That is how the last regression
+    escaped notice; this asserts the contract that failed.
+    """
+    response = await client.options(
+        "/v1/results",
+        headers={
+            "Origin": "https://benchmarks.coval.ai",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": header,
+        },
+    )
+    assert response.status_code == 400
+    allowed = response.headers.get("access-control-allow-headers", "").lower()
+    assert header not in allowed, f"{header} is back on the allowlist: {allowed!r}"
 
 
 async def test_cors_vercel_canonical_allowed(client: AsyncClient) -> None:
