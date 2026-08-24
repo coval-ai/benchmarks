@@ -91,8 +91,8 @@ spellings to American, and strips diacritics and punctuation.
 
 **Version constant.** `wer.NORM_VERSION` (currently `"2"`) is bumped on any
 behavioural change to the pipeline. The constant is included on every
-`WERResult` as `norm_version`, so a result row can be unambiguously
-attributed to the pipeline version that produced it.
+`WERResult` as `norm_version` while the metric is computed, but is not
+persisted with the result row.
 
 **Methodology change (2026-07).** Version `"1"` was a hand-rolled pipeline
 that corrupted many number forms (e.g. "thirty six" → `3006`, reported in
@@ -100,8 +100,9 @@ that corrupted many number forms (e.g. "thirty six" → `3006`, reported in
 WER floor under providers whose inverse text normalization emits digits while
 leaving spelled-out-number providers unaffected. It was replaced wholesale
 with `EnglishTextNormalizer` per [ADR-021](#adr-references). WER values
-before and after the change are **not comparable** — rows are distinguished
-by the `runner_sha` on the run.
+before and after the change are **not comparable**. Because result rows do not
+carry a normalization-version marker, historical rows cannot be reliably
+segmented by normalization pipeline version.
 
 ## 4. Latency metrics (TTFA)
 
@@ -128,7 +129,8 @@ This shifts every provider's reported TTFA upward by its leading-silence offset
 for those that front-load silence), so numbers recorded before the change are
 **not comparable** with later ones. There is no schema or metric-name change —
 the existing `TTFA` metric simply carries the perceived definition from this
-point forward, distinguished by the `runner_sha` on the run.
+point forward. Historical rows before the change are not source-versioned, so
+comparisons must exclude data from before the methodology change.
 
 ## 5. Library versions
 
@@ -213,12 +215,11 @@ distribution, so its median and tail don't mean what they do elsewhere.
 Withholding it is more honest than scoring it. The signature is a first-token
 time that barely moves across clips with different audio.
 
-## Reproducing a result
+## Rerunning the current methodology
 
-To reproduce a single `(provider, model, voice, metric)` cell:
+To produce a fresh `(provider, model, voice, metric)` measurement:
 
-1. Clone the repo at the commit SHA from the leaderboard row
-   (`/v1/runs/<id>` exposes `runner_sha`).
+1. Clone the current repository.
 2. `uv sync` inside `runner/`.
 3. Set the relevant provider API key in `.env`.
 4. `coval-bench run --kind stt --providers <provider> --models <model>`
@@ -226,8 +227,11 @@ To reproduce a single `(provider, model, voice, metric)` cell:
    GCS, verifies the SHA, runs against the same model identifier, and applies
    the same normalization pipeline.
 
-Numbers should match the leaderboard within provider-side variance (latency
-metrics in particular are session-dependent).
+The result is comparable to current measurements, but it does not reproduce a
+leaderboard cell: leaderboard values aggregate multiple runs over a time
+window, and each runner invocation draws a new random dataset sample. Runs
+created by current runner versions also do not record a source commit, so
+exact source reproduction for those rows is unsupported.
 
 ## ADR references
 

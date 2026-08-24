@@ -25,7 +25,6 @@ def _settings() -> Settings:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
         murfai_api_key="test-murf-key",
     )
@@ -174,7 +173,6 @@ def test_murf_tts_missing_key_raises() -> None:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
     )
     with pytest.raises(ValueError, match="murfai_api_key"):

@@ -243,7 +243,6 @@ async def app(
     monkeypatch.setenv("DATABASE_URL", dsn)
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
-    monkeypatch.setenv("RUNNER_SHA", "test-sha")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
@@ -324,7 +323,6 @@ def app_factory(
         monkeypatch.setenv("DATABASE_URL", "postgresql://runner:password@localhost:5432/benchmarks")
         monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
         monkeypatch.setenv("DATASET_ID", "stt-v1")
-        monkeypatch.setenv("RUNNER_SHA", "test-sha")
         monkeypatch.setenv("POSTHOG_DISABLED", "true")
         monkeypatch.setenv("ARENA_AUDIO_DIR", str(tmp_path / "arena-audio"))
         for key, value in (extra_env or {}).items():

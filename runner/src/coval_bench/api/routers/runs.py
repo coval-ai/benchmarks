@@ -28,7 +28,7 @@ router = APIRouter(tags=["runs"])
 
 _SQL = """
 SELECT id, started_at, finished_at, upper(status) AS status,
-       runner_sha, dataset_id, dataset_sha256, error
+       dataset_id, dataset_sha256, error
 FROM benchmarks_v2.runs
 WHERE %(before)s::bigint IS NULL OR id < %(before)s
 ORDER BY id DESC

@@ -51,7 +51,6 @@ def fake_settings(tmp_path: Path) -> Settings:
         database_url="postgresql://runner:password@localhost:5432/benchmarks",
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         log_level="DEBUG",
         openai_api_key=SecretStr("sk-test-openai"),
         cartesia_api_key=SecretStr("test-cartesia-key"),

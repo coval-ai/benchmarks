@@ -24,7 +24,6 @@ def _settings(**overrides: object) -> Settings:
         "database_url": "postgresql://runner:password@localhost:5432/benchmarks",
         "dataset_bucket": "test-bucket",
         "dataset_id": "stt-v1",
-        "runner_sha": "test",
         "log_level": "DEBUG",
         "fishaudio_api_key": SecretStr("test-fishaudio-key"),
     }

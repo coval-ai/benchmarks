@@ -322,7 +322,6 @@ def test_deepgram_missing_api_key() -> None:
     settings_no_key = Settings(
         dataset_bucket="test-bucket",
         dataset_id="stt-v1",
-        runner_sha="test",
         deepgram_api_key=None,
     )
     with pytest.raises(ValueError, match="deepgram_api_key"):

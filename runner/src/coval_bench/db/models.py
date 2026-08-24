@@ -332,7 +332,6 @@ class Run(BaseModel):
     started_at: datetime | None = None  # set by DB default (now())
     finished_at: datetime | None = None
     scheduled_at: datetime | None = None  # cron trigger time, floored to the scheduler period
-    runner_sha: str
     dataset_id: str
     dataset_sha256: str
     status: RunStatus
