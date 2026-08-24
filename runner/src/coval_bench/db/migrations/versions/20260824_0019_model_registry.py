@@ -27,9 +27,10 @@ the API boundary; only modality, region and tag category are constrained here.
 
 Notes
 -----
-DB roles (``runner``, ``api``) and GRANTs are managed by Terraform. The ``api``
-role needs INSERT and UPDATE on these four tables: admin writes happen in the
-API process.
+DB roles (``runner``, ``api``) and GRANTs are managed by Terraform. Admin writes
+happen in the API process, so the ``api`` role needs SELECT and INSERT on all
+four tables, UPDATE on ``models``, and DELETE on ``model_tags`` — tag
+replacement rewrites the link rows. Nothing else is ever updated or deleted.
 """
 
 from __future__ import annotations
