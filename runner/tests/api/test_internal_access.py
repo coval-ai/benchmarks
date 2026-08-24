@@ -4,8 +4,8 @@
 """Tests for the early-access embargo over HTTP.
 
 EARLY_ACCESS models must never appear in public responses of the data
-endpoints. The one proof is a Clerk bearer session token: a coval.dev email
-sees them everywhere, and a mapped provider org sees what its grant names.
+endpoints. The one proof is a Clerk bearer session token: the coval org sees
+them everywhere, and a mapped provider org sees what its grant names.
 """
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ from httpx import AsyncClient
 from coval_bench.api.internal import VARY_HEADERS
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from tests.api.conftest import (
+    COVAL_ORG,
     EA_MODEL,
     EA_MODEL_OTHER,
     EA_ORG,
     EA_ORG_OTHER,
     EA_PROVIDER,
-    INTERNAL_EMAIL,
     _fill_buckets,
     _insert_result,
     _insert_run,
@@ -39,7 +39,7 @@ _EA_MODEL = EA_MODEL
 
 
 def _internal_headers() -> dict[str, str]:
-    return bearer(email=INTERNAL_EMAIL)
+    return bearer(org_id=COVAL_ORG)
 
 
 @pytest.fixture
@@ -92,7 +92,7 @@ async def test_results_hides_early_access_from_public(client: AsyncClient, postg
 async def test_results_serves_early_access_to_internal(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """A coval.dev session unlocks EARLY_ACCESS rows on /v1/results."""
+    """A coval org session unlocks EARLY_ACCESS rows on /v1/results."""
     await _seed_ea_and_public_rows(postgresql)
 
     response = await client.get("/v1/results", headers=_internal_headers())

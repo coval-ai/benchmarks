@@ -22,7 +22,7 @@ from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 from coval_bench.s2s.samples import AUDIO_URL_TTL
-from tests.api.conftest import INTERNAL_EMAIL, bearer
+from tests.api.conftest import COVAL_ORG, bearer
 
 _BUCKET = "test-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
@@ -34,7 +34,7 @@ _ORG_PROVIDERS = f'{{"{_PARTNER_ORG}": ["acme/secret-s2s"]}}'
 
 
 def _internal() -> dict[str, str]:
-    return bearer(email=INTERNAL_EMAIL)
+    return bearer(org_id=COVAL_ORG)
 
 
 def _partner() -> dict[str, str]:

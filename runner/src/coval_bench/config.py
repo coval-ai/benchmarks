@@ -207,6 +207,11 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     # Allowed azp claim values; bearer tokens are rejected while empty.
     clerk_authorized_parties: list[str] = []
+    # The coval staff org id: a token with this org active sees every embargoed
+    # model. A clerk_org_providers or clerk_org_exclusive entry for this org takes
+    # precedence and narrows it like any other org. Unset means no org gets the
+    # staff view.
+    clerk_coval_org: str | None = None
     # Clerk org id -> what it unlocks, as a JSON object. A value is a provider or a
     # list of providers and provider/model pairs: {"org_abc": "deepgram"},
     # {"org_def": ["colors/gray", "colors/red"]}. Keyed by the immutable org id, not
