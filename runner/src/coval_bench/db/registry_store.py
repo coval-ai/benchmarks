@@ -168,7 +168,8 @@ def _record(row: Mapping[str, Any]) -> ModelRecord:
 
 
 def _snapshot(record: ModelRecord) -> Jsonb:
-    return Jsonb(record.model_dump(mode="json"))
+    """The row minus the email label: scrubbing must not leave copies in history."""
+    return Jsonb(record.model_dump(mode="json", exclude={"updated_by_email"}))
 
 
 class RegistryStore:

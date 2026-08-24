@@ -109,6 +109,7 @@ def test_insert_model_roundtrips_and_writes_history(
         (change,) = history[created.id]
         assert change.old is None
         assert change.new["provider"] == "acme"
+        assert "updated_by_email" not in change.new
         assert change.new["tags"] == ["streaming"]
         assert change.changed_by_user_id == "user_editor"
         assert change.changed_by_org_id is None
