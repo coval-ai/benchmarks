@@ -58,7 +58,7 @@ ARENA_LABELER_KEY = "test-labeler-key"
 # grants separate callers by model, not just by vendor.
 CLERK_ISSUER = "https://clerk.test.example.com"
 CLERK_PARTY = "https://benchmarks.test.example.com"
-INTERNAL_EMAIL = "tests@coval.dev"
+COVAL_ORG = "org_test_coval"
 
 EA_PROVIDER = "acme"
 EA_MODEL = "unreleased-stt"
@@ -249,6 +249,7 @@ async def app(
     monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
+    monkeypatch.setenv("CLERK_COVAL_ORG", COVAL_ORG)
     # Resolve token signatures against the fixture key instead of the network.
     signing_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
     monkeypatch.setattr(

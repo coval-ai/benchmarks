@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
-from tests.api.conftest import INTERNAL_EMAIL, bearer
+from tests.api.conftest import COVAL_ORG, bearer
 
 
 async def test_providers_200(client: AsyncClient) -> None:
@@ -145,7 +145,7 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
 
     # Baseten's dedicated endpoints are EARLY_ACCESS, so their facets are only
     # visible on the internal view.
-    internal = await client.get("/v1/providers", headers=bearer(email=INTERNAL_EMAIL))
+    internal = await client.get("/v1/providers", headers=bearer(org_id=COVAL_ORG))
     internal_data = internal.json()
     baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
@@ -165,7 +165,7 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
         for m in entry["models"]
     )
 
-    internal = await client.get("/v1/providers", headers=bearer(email=INTERNAL_EMAIL))
+    internal = await client.get("/v1/providers", headers=bearer(org_id=COVAL_ORG))
     internal_data = internal.json()
     flagged = {
         (entry["provider"], m["model"])

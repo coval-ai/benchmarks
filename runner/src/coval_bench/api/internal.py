@@ -5,9 +5,9 @@
 
 ``EARLY_ACCESS`` models run on the normal schedule but are under embargo: every
 data endpoint strips them unless the caller proves it may see them. The one
-proof is a bearer Clerk session token (see ``clerk.py``): a coval.dev email
-sees everything, and a mapped provider org sees what its entry names. The
-grants live in settings, so a request can never widen its own view.
+proof is a bearer Clerk session token (see ``clerk.py``): the coval org sees
+everything, and a mapped provider org sees what its entry names. The grants
+live in settings, so a request can never widen its own view.
 
 An absent or unknown proof yields the public view — the endpoints stay public
 either way, so there is nothing to 404 — and says so in ``X-EA-Token-Status``.

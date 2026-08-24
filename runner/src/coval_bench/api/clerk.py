@@ -4,9 +4,9 @@
 """Resolve a Clerk session token to the embargoed models its holder may see.
 
 Verified against the instance JWKS (public — no secret involved). A mapped
-``org_id`` scopes the caller to what its entry names — even for coval.dev emails,
-so switching into a partner org previews exactly their view. Outside a mapped
-org, a coval.dev ``email`` sees everything.
+``org_id`` scopes the caller to what its entry names — even for coval staff, so
+switching into a partner org previews exactly their view. The coval org
+(``clerk_coval_org``) sees everything.
 """
 
 from __future__ import annotations
@@ -22,8 +22,6 @@ import structlog
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
-
-_INTERNAL_EMAIL_SUFFIX = "@coval.dev"
 
 
 @functools.lru_cache(maxsize=4)
@@ -189,7 +187,7 @@ def allowed_pairs(
     org_unlocked = _org_unlocked(claims, settings, embargoed)
     if org_unlocked is not None:
         return org_unlocked
-    email = claims.get("email")
-    if isinstance(email, str) and email.endswith(_INTERNAL_EMAIL_SUFFIX):
+    org_id = claims.get("org_id")
+    if settings.clerk_coval_org and org_id == settings.clerk_coval_org:
         return embargoed
     return frozenset()
