@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import importlib
+import tomllib
+from pathlib import Path
 
 from coval_bench.registries import (
     MODEL_REGISTRY,
@@ -77,3 +79,13 @@ def test_registry_models_use_implemented_providers() -> None:
             assert model.provider in provider_names("stt"), model.provider
         elif model.benchmark is Benchmark.TTS:
             assert model.provider in provider_names("tts"), model.provider
+
+
+def test_the_runner_image_installs_every_provider_extra() -> None:
+    """The API accepts any provider with a module, so the runner must load them all."""
+    runner_root = Path(__file__).parents[2]
+    pyproject = tomllib.loads((runner_root / "pyproject.toml").read_text())
+    extras = set(pyproject["project"]["optional-dependencies"]) - {"hf-parquet"}  # build-time only
+    dockerfile = (runner_root / "Dockerfile").read_text()
+    missing = sorted(extra for extra in extras if f"--extra {extra}" not in dockerfile)
+    assert not missing, f"provider extras absent from the runner image: {missing}"
