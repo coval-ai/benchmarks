@@ -4,7 +4,7 @@
 """Speechmatics real-time STT provider.
 
 Supports models: default, enhanced, broadcast, linden-1 (Agent STT preview).
-Wire protocol: WebSocket, wss://eu2.rt.speechmatics.com/v2
+Wire protocol: WebSocket, wss://global.rt.speechmatics.com/v2
 Auth: Authorization: Bearer <key>
 Start: {"message": "StartRecognition", ...}
 Close: {"message": "EndOfStream", "last_seq_no": N}
@@ -26,7 +26,7 @@ from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
-_WS_URL = "wss://eu2.rt.speechmatics.com/v2"
+_WS_URL = "wss://global.rt.speechmatics.com/v2"
 _AGENT_WS_URL = "wss://preview.rt.speechmatics.com/v2/agent"
 
 
