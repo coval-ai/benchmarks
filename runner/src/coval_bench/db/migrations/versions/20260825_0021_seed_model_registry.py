@@ -383,11 +383,17 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove only the rows this migration seeded; model_tags cascade."""
+    """Undo the seed, leaving anything this migration does not own.
+
+    A model an admin has since edited no longer carries the seed actor, and a
+    model created through the API never did, so both survive along with the tag
+    values they still reference. Links belonging to deleted models cascade.
+    """
     op.get_bind().exec_driver_sql(
         """
         DELETE FROM benchmarks_v2.models WHERE updated_by_user_id = 'migration:20260825_0021';
-        DELETE FROM benchmarks_v2.tags WHERE value IN (
+        DELETE FROM benchmarks_v2.tags t
+        WHERE t.value IN (
             'multilingual',
             'vad',
             'diarization',
@@ -396,6 +402,7 @@ def downgrade() -> None:
             'keyterm-biasing',
             'voice-cloning',
             'emotion-control'
-        );
+        )
+          AND NOT EXISTS (SELECT 1 FROM benchmarks_v2.model_tags mt WHERE mt.tag = t.value);
         """
     )
