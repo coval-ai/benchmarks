@@ -37,7 +37,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from coval_bench import __version__
-from coval_bench.api.cache import new_cache_locks, new_response_cache
+from coval_bench.api.cache import new_cache_locks, new_response_cache, new_roster_cache
 from coval_bench.api.compression import SelectiveGZipMiddleware
 from coval_bench.api.internal import never_shared
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
@@ -150,6 +150,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips",))
 
     app.state.response_cache = new_response_cache()
+    app.state.roster_cache = new_roster_cache()
     app.state.cache_locks = new_cache_locks()
 
     # Error responses carry the same caller-scoped cache policy as successful ones.

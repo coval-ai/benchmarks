@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends
 from posthog import Posthog
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_posthog
+from coval_bench.api.deps import capture_api_event, get_models, get_posthog
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -34,7 +34,6 @@ from coval_bench.api.schemas import (
 )
 from coval_bench.registries import (
     CATEGORY_LABELS,
-    MODEL_REGISTRY,
     PROVIDER_VALUED_CATEGORIES,
     TAG_CATEGORIES,
     Benchmark,
@@ -131,6 +130,7 @@ async def get_providers(
     request: Request,
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    models: Sequence[RegisteredModel] = Depends(get_models),
 ) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
@@ -139,7 +139,7 @@ async def get_providers(
     hide or grey out models that are known but not actively benchmarked.
     An early-access model appears only for a caller whose allowlist names it.
     """
-    response = _describe(MODEL_REGISTRY, hidden)
+    response = _describe(models, hidden)
     capture_api_event(
         posthog_client,
         "providers_listed",

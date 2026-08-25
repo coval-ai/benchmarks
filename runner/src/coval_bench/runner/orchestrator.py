@@ -52,13 +52,13 @@ import structlog
 from posthog import Posthog
 from pydantic import BaseModel
 
+from coval_bench.db.registry_store import fetch_models
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.providers.base import Provider
 from coval_bench.registries import (
     METRIC_EXCLUSIONS,
     METRIC_SPECS,
-    MODEL_REGISTRY,
     Benchmark,
     Metric,
     ModelStatus,
@@ -1077,44 +1077,48 @@ async def run_benchmarks(
             posthog_client = None
 
     # ------------------------------------------------------------------
-    # 1. Resolve + filter the model registry
-    # ------------------------------------------------------------------
-    models = MODEL_REGISTRY
-    stt_matrix = [m for m in models if m.benchmark is Benchmark.STT]
-    tts_matrix = [m for m in models if m.benchmark is Benchmark.TTS]
-
-    if matrix_overrides:
-        override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {
-            (e.benchmark, e.provider, e.model): e for e in matrix_overrides
-        }
-        stt_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix]
-        tts_matrix = [override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix]
-
-        # Also apply any overrides that add *new* models
-        existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
-        for ov in matrix_overrides:
-            if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
-                (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
-
-    # EARLY_ACCESS models run on the normal schedule; only the API hides them.
-    scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
-    dedicated = source == "dedicated"
-    enabled_stt = [
-        e
-        for e in stt_matrix
-        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
-    ]
-    enabled_tts = [
-        e
-        for e in tts_matrix
-        if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
-    ]
-
-    # ------------------------------------------------------------------
     # 2. Open DB pool + start run row
     # ------------------------------------------------------------------
     async with lifespan_pool(settings) as pool:
         writer = RunWriter(pool)
+
+        # ------------------------------------------------------------------
+        # 1. Resolve + filter the model registry
+        # ------------------------------------------------------------------
+        models = await fetch_models(pool)
+        stt_matrix = [m for m in models if m.benchmark is Benchmark.STT]
+        tts_matrix = [m for m in models if m.benchmark is Benchmark.TTS]
+
+        if matrix_overrides:
+            override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {
+                (e.benchmark, e.provider, e.model): e for e in matrix_overrides
+            }
+            stt_matrix = [
+                override_map.get((e.benchmark, e.provider, e.model), e) for e in stt_matrix
+            ]
+            tts_matrix = [
+                override_map.get((e.benchmark, e.provider, e.model), e) for e in tts_matrix
+            ]
+
+            # Also apply any overrides that add *new* models
+            existing_keys = {(e.benchmark, e.provider, e.model) for e in stt_matrix + tts_matrix}
+            for ov in matrix_overrides:
+                if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
+                    (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
+
+        # EARLY_ACCESS models run on the normal schedule; only the API hides them.
+        scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
+        dedicated = source == "dedicated"
+        enabled_stt = [
+            e
+            for e in stt_matrix
+            if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+        ]
+        enabled_tts = [
+            e
+            for e in tts_matrix
+            if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+        ]
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id (its TTS rows are attributed to

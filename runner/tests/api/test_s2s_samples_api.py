@@ -20,9 +20,9 @@ from httpx import AsyncClient
 
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
 from coval_bench.s2s.samples import AUDIO_URL_TTL
-from tests.api.conftest import COVAL_ORG, bearer
+from tests.api.conftest import COVAL_ORG, add_models, bearer
 
 _BUCKET = "test-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
@@ -78,10 +78,10 @@ _OBJECTS: dict[str, Any] = {
 
 
 @pytest.fixture(autouse=True)
-def s2s_samples_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def s2s_samples_env(monkeypatch: pytest.MonkeyPatch, postgresql: Any) -> None:
     """A two-model S2S roster — one live, one embargoed — over a stubbed bucket."""
-    patched = [
-        *MODEL_REGISTRY,
+    add_models(
+        postgresql,
         RegisteredModel(
             benchmark=Benchmark.S2S,
             provider=_LIVE[0],
@@ -94,9 +94,7 @@ def s2s_samples_env(monkeypatch: pytest.MonkeyPatch) -> None:
             model=_EMBARGOED[1],
             status=ModelStatus.EARLY_ACCESS,
         ),
-    ]
-    monkeypatch.setattr("coval_bench.api.internal.MODEL_REGISTRY", patched)
-    monkeypatch.setattr("coval_bench.api.routers.s2s_samples.MODEL_REGISTRY", patched)
+    )
 
     def _read_json(bucket_name: str, key: str, **_: Any) -> Any:
         assert bucket_name == _BUCKET

@@ -20,11 +20,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api.clerk import CovalAdmin
-from coval_bench.api.deps import get_pool, require_coval_admin
+from coval_bench.api.deps import clear_roster_cache, get_pool, require_coval_admin
 from coval_bench.api.internal import _RETIRED_BOARD_KEYS, never_shared
 from coval_bench.api.schemas import (
     AdminChangeOut,
@@ -145,6 +145,7 @@ async def list_admin_models(
 
 @router.post("/admin/models", response_model=AdminModelOut, status_code=201)
 async def create_admin_model(
+    request: Request,
     body: AdminModelCreate,
     response: Response,
     admin: CovalAdmin = Depends(require_coval_admin),
@@ -161,6 +162,7 @@ async def create_admin_model(
         )
     except DuplicateKey as exc:
         raise HTTPException(409, str(exc)) from exc
+    clear_roster_cache(request)
     response.headers["ETag"] = _etag(record)
     return _model_out(record, await store.history(record.id))
 
@@ -173,6 +175,7 @@ def _etag(record: ModelRecord) -> str:
 
 @router.patch("/admin/models/{model_id}", response_model=AdminModelUpdateResponse)
 async def update_admin_model(
+    request: Request,
     model_id: int,
     body: AdminModelPatch,
     response: Response,
@@ -224,6 +227,7 @@ async def update_admin_model(
     if result is None:  # pragma: no cover — the row was read above
         raise HTTPException(404, "no such model")
     before, after = result
+    clear_roster_cache(request)
     response.headers["ETag"] = _etag(after)
     history = await store.history(model_id)
     return AdminModelUpdateResponse(

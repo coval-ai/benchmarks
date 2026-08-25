@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg_pool import AsyncConnectionPool
 
-from coval_bench.api.deps import get_pool, require_coval_admin
+from coval_bench.api.deps import clear_roster_cache, get_pool, require_coval_admin
 from coval_bench.api.schemas import TagOut, TagsResponse
 from coval_bench.db.registry_store import DuplicateKey, RegistryStore, TagRecord
 
@@ -37,6 +37,7 @@ async def list_tags(
     dependencies=[Depends(require_coval_admin)],
 )
 async def create_tag(
+    request: Request,
     body: TagOut,
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> TagOut:
@@ -45,4 +46,5 @@ async def create_tag(
         await RegistryStore(pool).insert_tag(TagRecord.model_validate(body.model_dump()))
     except DuplicateKey as exc:
         raise HTTPException(409, str(exc)) from exc
+    clear_roster_cache(request)
     return body

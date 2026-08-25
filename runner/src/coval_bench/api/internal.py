@@ -20,9 +20,9 @@ from collections.abc import Sequence
 from fastapi import Depends, Header, Response
 
 from coval_bench.api import clerk
-from coval_bench.api.deps import get_settings
+from coval_bench.api.deps import get_models, get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel
+from coval_bench.registries import ModelStatus, RegisteredModel
 
 # Which proof the response honoured: accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
@@ -85,6 +85,7 @@ def hidden_early_access(
     response: Response,
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
+    models: Sequence[RegisteredModel] = Depends(get_models),
 ) -> frozenset[tuple[str, str]]:
     """The pairs this caller's responses must not contain.
 
@@ -95,7 +96,6 @@ def hidden_early_access(
     # the route returns, and assignment here would be overwritten.
     response.headers.append("Vary", VARY_HEADERS)
 
-    models = MODEL_REGISTRY
     embargoed = embargoed_pairs(models)
     if authorization is None or settings.clerk_issuer is None:
         response.headers[EA_STATUS_HEADER] = "absent"

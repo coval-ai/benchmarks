@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from coval_bench.api.internal import embargoed_pairs
+from coval_bench.api.routers.providers import _describe
 from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
 from tests.api.conftest import COVAL_ORG, bearer
 
@@ -249,11 +253,13 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert ("source", "shared-inference") in orpheus_facets
 
 
-async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The /v1/providers endpoint never acquires a DB connection.
+async def test_providers_without_a_database_is_503(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catalogue comes from the database, so it fails closed without one.
 
-    We verify this by removing the pool from app.state and confirming the
-    endpoint still returns 200.
+    Serving a stale or invented roster could publish an embargoed model, so
+    there is no fallback: the endpoint reports the registry as unavailable.
     """
     original_pool = app.state.pool
     app.state.pool = None
@@ -266,4 +272,30 @@ async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.Monk
     finally:
         app.state.pool = original_pool
 
-    assert response.status_code == 200
+    assert response.status_code == 503
+
+
+def _sorted_tags(payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload with each model's tags ordered, so only content is compared.
+
+    Tag order is not part of the contract: the database returns a model's tags
+    alphabetized, the literals carry the order they were typed in, and the site
+    tests tag membership per facet rather than reading the sequence.
+    """
+    for modality in ("stt", "tts", "s2s"):
+        for provider in payload[modality]:
+            for model in provider["models"]:
+                model["tags"] = sorted(model["tags"], key=lambda t: (t["category"], t["value"]))
+    return payload
+
+
+async def test_the_catalogue_matches_the_registry(client: AsyncClient) -> None:
+    """The database-driven payload is what the code registry would have served.
+
+    The gate on sourcing the catalogue from Postgres: same providers, same
+    models, same order, same flags and facets.
+    """
+    live = (await client.get("/v1/providers")).json()
+    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY)).model_dump(mode="json")
+
+    assert _sorted_tags(live) == _sorted_tags(expected)

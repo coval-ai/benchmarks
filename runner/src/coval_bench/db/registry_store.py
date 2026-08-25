@@ -20,14 +20,34 @@ from typing import Any, Literal
 import psycopg
 import psycopg.errors
 import psycopg.rows
+import structlog
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, field_validator
 
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import Licensing, Source, Voice
+from coval_bench.registries.models import (
+    Licensing,
+    ModelStatus,
+    RegisteredModel,
+    Source,
+    Voice,
+)
+from coval_bench.registries.tags import ModelTag
 
 RegistryPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
+
+logger = structlog.get_logger("coval_bench.db.registry_store")
+
+# The two state booleans a legacy status stood for. RETIRED and PENDING were
+# both "neither collected nor published" and every consumer treated them alike,
+# so the pair maps back to RETIRED alone.
+_STATUS_BY_STATE: dict[tuple[bool, bool], ModelStatus] = {
+    (True, True): ModelStatus.ACTIVE,
+    (True, False): ModelStatus.EARLY_ACCESS,
+    (False, True): ModelStatus.PAUSED,
+    (False, False): ModelStatus.RETIRED,
+}
 
 # Columns a PATCH may change. The modality is immutable: it selects the
 # pipeline, so a modality flip is a new model, not an edit.
@@ -409,3 +429,47 @@ class RegistryStore:
                 "INSERT INTO benchmarks_v2.model_tags (model_id, tag) VALUES (%s, %s)",
                 [(model_id, tag) for tag in tags],
             )
+
+
+def _registered(record: ModelRecord) -> RegisteredModel:
+    """One row as the frozen object every consumer already expects.
+
+    A tag the code vocabulary does not know is dropped rather than raised on: a
+    tag added through the admin API must not take the catalogue down, it just
+    does not surface until the vocabulary knows it.
+    """
+    tags: list[ModelTag] = []
+    for value in record.tags:
+        try:
+            tags.append(ModelTag(value))
+        except ValueError:
+            logger.warning(
+                "registry_unknown_tag",
+                provider=record.provider,
+                model=record.model,
+                tag=value,
+            )
+    return RegisteredModel(
+        benchmark=record.modality,
+        provider=record.provider,
+        model=record.model,
+        voice=record.voice,
+        voices=record.voices,
+        creator=record.creator,
+        tags=tuple(tags),
+        source=record.source,
+        licensing=record.licensing,
+        on_prem=record.on_prem,
+        region=record.region,
+        status=_STATUS_BY_STATE[(record.collected, record.published)],
+        arena_enabled=record.arena_enabled,
+    )
+
+
+async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
+    """Every registered model, in catalogue order.
+
+    Row id order is the order the models were created in, which is the order
+    ``/v1/providers`` serves per modality.
+    """
+    return [_registered(record) for record in await RegistryStore(pool).list_models()]

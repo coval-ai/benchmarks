@@ -16,7 +16,7 @@ import pytest
 from httpx import AsyncClient
 
 from coval_bench.api.internal import VARY_HEADERS
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
 from tests.api.conftest import (
     COVAL_ORG,
     EA_MODEL,
@@ -28,6 +28,7 @@ from tests.api.conftest import (
     _insert_result,
     _insert_run,
     _refresh_mv,
+    add_models,
     bearer,
 )
 
@@ -43,14 +44,14 @@ def _internal_headers() -> dict[str, str]:
 
 
 @pytest.fixture
-def early_access_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Extend the registry with two EARLY_ACCESS STT models for the duration of a test.
+def early_access_registry(postgresql: Any) -> None:
+    """Add two EARLY_ACCESS STT models to this test's registry tables.
 
     Both sit on one provider so a per-model grant can be told apart from a
     per-provider one.
     """
-    patched = [
-        *MODEL_REGISTRY,
+    add_models(
+        postgresql,
         *(
             RegisteredModel(
                 benchmark=Benchmark.STT,
@@ -60,9 +61,7 @@ def early_access_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             )
             for model in (_EA_MODEL, EA_MODEL_OTHER)
         ),
-    ]
-    monkeypatch.setattr("coval_bench.api.internal.MODEL_REGISTRY", patched)
-    monkeypatch.setattr("coval_bench.api.routers.providers.MODEL_REGISTRY", patched)
+    )
 
 
 async def _seed_ea_and_public_rows(postgresql: Any) -> None:

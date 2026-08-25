@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +40,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql import factories
 
@@ -47,7 +48,13 @@ from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY
+from coval_bench.registries import (
+    MODEL_REGISTRY,
+    TAG_CATEGORIES,
+    ModelStatus,
+    RegisteredModel,
+    tag_value_label,
+)
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
@@ -280,7 +287,76 @@ def _load_schema(**connect_kwargs: Any) -> None:
         """)
 
 
-postgresql_proc = factories.postgresql_proc(load=[_load_schema])
+def _seed_registry(**connect_kwargs: Any) -> None:
+    """Fill the registry tables from the code registry, as the seed migration does.
+
+    The API reads its roster from these tables, so every catalogue-facing test
+    needs them populated. Loaded into the template database once.
+    """
+    with psycopg.connect(**connect_kwargs) as conn:
+        for tag, category in TAG_CATEGORIES.items():
+            conn.execute(
+                "INSERT INTO benchmarks_v2.tags (value, category, label) VALUES (%s, %s, %s)"
+                " ON CONFLICT DO NOTHING",
+                (str(tag), category.value, tag_value_label(category, str(tag))),
+            )
+        _insert_models(conn, MODEL_REGISTRY)
+        conn.commit()
+
+
+_STATE_BY_STATUS = {
+    ModelStatus.ACTIVE: (True, True),
+    ModelStatus.EARLY_ACCESS: (True, False),
+    ModelStatus.PAUSED: (False, True),
+    ModelStatus.RETIRED: (False, False),
+    ModelStatus.PENDING: (False, False),
+}
+
+
+def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredModel]) -> None:
+    """Insert registry objects as rows, mapping status onto the state booleans."""
+    for model in models:
+        collected, published = _STATE_BY_STATUS[model.status]
+        row = conn.execute(
+            """
+            INSERT INTO benchmarks_v2.models
+                (modality, provider, model, voice, voices, creator, source, licensing,
+                 on_prem, region, arena_enabled, collected, published, updated_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+            RETURNING id
+            """,
+            (
+                str(model.benchmark),
+                model.provider,
+                model.model,
+                model.voice,
+                Jsonb([v.model_dump(mode="json") for v in model.voices]),
+                model.creator,
+                str(model.source),
+                str(model.licensing),
+                model.on_prem,
+                model.region,
+                model.arena_enabled,
+                collected,
+                published,
+            ),
+        ).fetchone()
+        assert row is not None
+        for tag in model.tags:
+            conn.execute(
+                "INSERT INTO benchmarks_v2.model_tags (model_id, tag) VALUES (%s, %s)",
+                (row[0], str(tag)),
+            )
+
+
+def add_models(postgresql: Any, *models: RegisteredModel) -> None:
+    """Add models to one test's database, on top of the seeded registry."""
+    with psycopg.connect(_make_db_url(postgresql)) as conn:
+        _insert_models(conn, models)
+        conn.commit()
+
+
+postgresql_proc = factories.postgresql_proc(load=[_load_schema, _seed_registry])
 postgresql = factories.postgresql("postgresql_proc")
 
 

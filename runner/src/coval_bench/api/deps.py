@@ -22,7 +22,10 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api import clerk
+from coval_bench.api.cache import get_or_fill
 from coval_bench.config import Settings
+from coval_bench.db.registry_store import fetch_models
+from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -85,6 +88,38 @@ def get_posthog(request: Request) -> Posthog | None:
 def get_cache(request: Request) -> TTLCache[Any, Any]:
     """Return the per-app response TTL cache from app state."""
     return cast("TTLCache[Any, Any]", request.app.state.response_cache)
+
+
+def get_roster_cache(request: Request) -> TTLCache[Any, Any]:
+    """Return the per-app model roster cache from app state."""
+    return cast("TTLCache[Any, Any]", request.app.state.roster_cache)
+
+
+def clear_roster_cache(request: Request) -> None:
+    """Drop this instance's cached roster after an admin write.
+
+    Only this instance: other instances serve their own copy until it ages out.
+    """
+    request.app.state.roster_cache.clear()
+
+
+async def get_models(
+    request: Request,
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> list[RegisteredModel]:
+    """The model roster, cached briefly and shared by every reader.
+
+    Raises 503 rather than falling back to a default: a made-up roster could
+    serve an embargoed model to the public.
+    """
+    cache = get_roster_cache(request)
+    locks = get_cache_locks(request)
+    try:
+        models, _ = await get_or_fill(cache, locks, "roster", lambda: fetch_models(pool))
+    except Exception as exc:
+        logger.error("model_roster_unavailable", exc_info=True)
+        raise HTTPException(503, "the model registry is unavailable") from exc
+    return models
 
 
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:
