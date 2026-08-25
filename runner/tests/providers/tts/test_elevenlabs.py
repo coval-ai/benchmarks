@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the ElevenLabs Text to Dialogue WebSocket TTS provider."""
+"""Tests for the ElevenLabs WebSocket TTS provider."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
 from .conftest import FakeWebSocket, make_pcm_bytes
 
 _MODEL = "eleven_v3_conversational"
+_FLASH_MODEL = "eleven_flash_v2_5"
 _VOICE = "IKne3meq5aSn9XLyUdCD"
 
 
@@ -26,6 +27,14 @@ def _dialogue_events(pcm_chunks: list[bytes]) -> list[str | bytes]:
         json.dumps({"audio": base64.b64encode(chunk).decode()}) for chunk in pcm_chunks
     ]
     events.append(json.dumps({"is_final": True}))
+    return events
+
+
+def _stream_input_events(pcm_chunks: list[bytes]) -> list[str | bytes]:
+    events: list[str | bytes] = [
+        json.dumps({"audio": base64.b64encode(chunk).decode()}) for chunk in pcm_chunks
+    ]
+    events.append(json.dumps({"isFinal": True}))
     return events
 
 
@@ -135,6 +144,67 @@ async def test_elevenlabs_ttfa_on_first_chunk(fake_settings: Settings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stream-input WebSocket (eleven_flash_v2_5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_flash_happy_path(fake_settings: Settings) -> None:
+    ws = FakeWebSocket(_stream_input_events([make_pcm_bytes(240)]))
+    provider = ElevenLabsTTSProvider(fake_settings, model=_FLASH_MODEL, voice=_VOICE)
+
+    with patch("coval_bench.providers.tts.elevenlabs.ws_client.connect", return_value=ws):
+        result = await provider.synthesize("Hello from Eleven Flash")
+
+    assert result.error is None, result.error
+    assert result.ttfa_ms is not None and 0 < result.ttfa_ms < 60_000
+    assert result.audio_path is not None and result.audio_path.exists()
+    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    assert result.provider == "elevenlabs"
+    assert result.model == _FLASH_MODEL
+    assert result.voice == _VOICE
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_flash_url_and_frames(fake_settings: Settings) -> None:
+    ws = FakeWebSocket(_stream_input_events([make_pcm_bytes(240)]))
+    captured: dict[str, object] = {}
+
+    def connect_side_effect(url: str, **kwargs: object) -> FakeWebSocket:
+        captured["url"] = url
+        captured["headers"] = kwargs.get("additional_headers")
+        return ws
+
+    provider = ElevenLabsTTSProvider(fake_settings, model=_FLASH_MODEL, voice=_VOICE)
+
+    with patch(
+        "coval_bench.providers.tts.elevenlabs.ws_client.connect",
+        side_effect=connect_side_effect,
+    ):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    parts = urlsplit(str(captured["url"]))
+    assert parts.scheme == "wss"
+    assert parts.netloc == "api.elevenlabs.io"
+    assert parts.path == f"/v1/text-to-speech/{_VOICE}/stream-input"
+    assert parse_qs(parts.query) == {
+        "model_id": [_FLASH_MODEL],
+        "output_format": ["pcm_24000"],
+    }
+    assert captured["headers"] == {"xi-api-key": "test-elevenlabs-key"}
+    sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
+    assert sent == [
+        {"text": " "},
+        {"text": "Hello world "},
+        {"text": ""},
+    ]
+    if result.audio_path is not None:
+        result.audio_path.unlink()
+
+
+# ---------------------------------------------------------------------------
 # Error path
 # ---------------------------------------------------------------------------
 
@@ -219,7 +289,7 @@ def test_elevenlabs_name_and_model(fake_settings: Settings) -> None:
 
 def test_elevenlabs_rejects_unsupported_model(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Unsupported ElevenLabs model"):
-        ElevenLabsTTSProvider(fake_settings, model="eleven_flash_v2_5", voice="v")
+        ElevenLabsTTSProvider(fake_settings, model="eleven_turbo_v2_5", voice="v")
 
 
 # ---------------------------------------------------------------------------
