@@ -153,9 +153,12 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.INSTRUCTION_FOLLOWING,
         optional=frozenset({Metric.INTERRUPTION_RATE}),
     ),
+    # Anchored like its happy-path sibling: the same accented persona's runs are
+    # scored without V2V there, and anchoring on a metric the runs lack would
+    # skip every one of them and leave the condition silently empty.
     DATASET_ID_DENTAL_ACCENTED: DatasetMetrics(
-        required=Metric.V2V,
-        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.INTERRUPTION_RATE}),
     ),
 }
 
