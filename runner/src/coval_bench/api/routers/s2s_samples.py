@@ -21,6 +21,7 @@ its path from a filtered manifest.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from urllib.parse import quote
 
@@ -35,7 +36,7 @@ from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import S2SSampleAudioOut, S2SSampleOut, S2SSampleRecordingOut
 from coval_bench.config import Settings
 from coval_bench.gcs import signed_url
-from coval_bench.registries import MODEL_REGISTRY, Benchmark
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
 from coval_bench.s2s.samples import (
     AUDIO_URL_TTL,
     audio_object_key,
@@ -50,10 +51,10 @@ router = APIRouter(tags=["s2s"])
 _SAMPLE_ID = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
 
 
-def _sees_any_s2s_model(hidden: frozenset[tuple[str, str]]) -> bool:
-    return any(
-        m.benchmark is Benchmark.S2S and (m.provider, m.model) not in hidden for m in MODEL_REGISTRY
-    )
+def _sees_any_s2s_model(
+    models: Sequence[RegisteredModel], hidden: frozenset[tuple[str, str]]
+) -> bool:
+    return any(m.benchmark is Benchmark.S2S and (m.provider, m.model) not in hidden for m in models)
 
 
 def _audio_path(sample_id: str, provider: str, model: str) -> str:
@@ -73,7 +74,7 @@ async def list_s2s_samples(
 ) -> list[str]:
     """Sample ids newest-first, empty when the caller may see no S2S model at all."""
     never_shared(response)
-    if not settings.s2s_samples_bucket or not _sees_any_s2s_model(hidden):
+    if not settings.s2s_samples_bucket or not _sees_any_s2s_model(MODEL_REGISTRY, hidden):
         return []
     return await asyncio.to_thread(load_sample_ids, settings.s2s_samples_bucket)
 

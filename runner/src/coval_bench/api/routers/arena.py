@@ -26,6 +26,7 @@ import asyncio
 import hmac
 import secrets
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import psycopg.rows
@@ -73,7 +74,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -103,15 +104,19 @@ _LEADERBOARD_SQL = """
     ORDER BY s.rating_elo DESC
 """
 
-# TTS models the site hides (retired/pending/early-access). Their votes still
-# feed the rating fit, but boards computed before a retirement must not keep
-# showing them.
-_HIDDEN_TTS_MODELS = frozenset(
-    (m.provider, m.model)
-    for m in MODEL_REGISTRY
-    if m.benchmark is Benchmark.TTS
-    and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
-)
+
+def _hidden_tts_models(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
+    """TTS models the site hides (retired/pending/early-access).
+
+    Their votes still feed the rating fit, but boards computed before a
+    retirement must not keep showing them.
+    """
+    return frozenset(
+        (m.provider, m.model)
+        for m in models
+        if m.benchmark is Benchmark.TTS
+        and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
+    )
 
 
 def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
@@ -272,10 +277,11 @@ async def get_arena_leaderboard(
         rows = await conn.execute(_LEADERBOARD_SQL, {"metric": metric, "domain": domain})
         board = await rows.fetchall()
 
+    hidden = _hidden_tts_models(MODEL_REGISTRY)
     entries = [
         LeaderboardEntryOut.model_validate(r)
         for r in board
-        if (r["provider"], r["model"]) not in _HIDDEN_TTS_MODELS
+        if (r["provider"], r["model"]) not in hidden
     ]
     capture_api_event(
         posthog_client,
@@ -397,11 +403,11 @@ async def create_battle(
     # Providers with a dead key — named by the last TTS benchmark, or with no key
     # configured here — sit out until that changes. This call also raises the alert,
     # since nothing downstream ever sees a provider that was filtered out here.
-    roster = [m.provider for m in active_tts_models()]
+    roster = [m.provider for m in active_tts_models(MODEL_REGISTRY)]
     benched = provider_health.unconfigured_providers(
         settings, roster
     ) | await provider_health.benchmark_benched_providers(pool)
-    models = roster_for(gender, benched)
+    models = roster_for(MODEL_REGISTRY, gender, benched)
     if len(models) < 2:
         raise HTTPException(503, "not enough healthy TTS models to form a battle")
     ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)

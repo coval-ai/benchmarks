@@ -15,6 +15,8 @@ No DB hit is made by this endpoint.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import structlog
 from fastapi import APIRouter, Depends
 from posthog import Posthog
@@ -82,7 +84,9 @@ def _tag_categories() -> list[TagCategoryOut]:
 
 
 def _build_provider_map(
-    benchmark: Benchmark, hidden: frozenset[tuple[str, str]]
+    models: Sequence[RegisteredModel],
+    benchmark: Benchmark,
+    hidden: frozenset[tuple[str, str]],
 ) -> dict[str, list[ModelInfo]]:
     """Build an ordered {provider: [ModelInfo, ...]} map from the model registry.
 
@@ -90,7 +94,7 @@ def _build_provider_map(
     whose allowlist names it.
     """
     result: dict[str, list[ModelInfo]] = {}
-    for m in MODEL_REGISTRY:
+    for m in models:
         if m.benchmark is not benchmark:
             continue
         if (m.provider, m.model) in hidden:
@@ -106,10 +110,12 @@ def _build_provider_map(
     return result
 
 
-def _describe(hidden: frozenset[tuple[str, str]]) -> ProvidersResponse:
-    stt_map = _build_provider_map(Benchmark.STT, hidden)
-    tts_map = _build_provider_map(Benchmark.TTS, hidden)
-    s2s_map = _build_provider_map(Benchmark.S2S, hidden)
+def _describe(
+    models: Sequence[RegisteredModel], hidden: frozenset[tuple[str, str]]
+) -> ProvidersResponse:
+    stt_map = _build_provider_map(models, Benchmark.STT, hidden)
+    tts_map = _build_provider_map(models, Benchmark.TTS, hidden)
+    s2s_map = _build_provider_map(models, Benchmark.S2S, hidden)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
@@ -133,7 +139,7 @@ async def get_providers(
     hide or grey out models that are known but not actively benchmarked.
     An early-access model appears only for a caller whose allowlist names it.
     """
-    response = _describe(hidden)
+    response = _describe(MODEL_REGISTRY, hidden)
     capture_api_event(
         posthog_client,
         "providers_listed",

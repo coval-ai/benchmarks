@@ -1079,8 +1079,9 @@ async def run_benchmarks(
     # ------------------------------------------------------------------
     # 1. Resolve + filter the model registry
     # ------------------------------------------------------------------
-    stt_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.STT]
-    tts_matrix = [m for m in MODEL_REGISTRY if m.benchmark is Benchmark.TTS]
+    models = MODEL_REGISTRY
+    stt_matrix = [m for m in models if m.benchmark is Benchmark.STT]
+    tts_matrix = [m for m in models if m.benchmark is Benchmark.TTS]
 
     if matrix_overrides:
         override_map: dict[tuple[Benchmark, str, str], RegisteredModel] = {

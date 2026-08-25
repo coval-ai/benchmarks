@@ -20,6 +20,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import Battle
+from coval_bench.registries import MODEL_REGISTRY
 from coval_bench.registries.models import Gender
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
@@ -46,7 +47,7 @@ async def seed_demo_battles(
     for domain, prompts in EXAMPLE_PROMPTS.items():
         for prompt in prompts[:per_domain]:
             gender = gender_for_next_battle(counts, rng=picker)
-            pair = select_pair(roster_for(gender), {}, rng=picker)
+            pair = select_pair(roster_for(MODEL_REGISTRY, gender), {}, rng=picker)
             battle = await generate_battle(
                 settings,
                 store,

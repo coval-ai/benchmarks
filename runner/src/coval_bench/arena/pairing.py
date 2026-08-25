@@ -18,7 +18,6 @@ from collections.abc import Mapping, Sequence
 from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
-    MODEL_REGISTRY,
     Gender,
     ModelStatus,
     RegisteredModel,
@@ -36,16 +35,20 @@ PAIRING_METRIC = "naturalness"
 PAIRING_DOMAIN = "all"
 
 
-def active_tts_models() -> list[RegisteredModel]:
+def active_tts_models(models: Sequence[RegisteredModel]) -> list[RegisteredModel]:
     """The arena roster: every ACTIVE, arena-enabled TTS model in the registry."""
     return [
         m
-        for m in MODEL_REGISTRY
+        for m in models
         if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE and m.arena_enabled
     ]
 
 
-def roster_for(gender: Gender, benched: frozenset[str] = frozenset()) -> list[RegisteredModel]:
+def roster_for(
+    models: Sequence[RegisteredModel],
+    gender: Gender,
+    benched: frozenset[str] = frozenset(),
+) -> list[RegisteredModel]:
     """The arena roster restricted to models that can render a *gender* battle.
 
     A model without a voice of that gender cannot take a side, so it sits the
@@ -56,7 +59,7 @@ def roster_for(gender: Gender, benched: frozenset[str] = frozenset()) -> list[Re
     call on a key already known to be dead and hand the voter an error anyway; the caller
     reports the arena as unavailable instead.
     """
-    eligible = [m for m in active_tts_models() if any(v.gender is gender for v in m.voices)]
+    eligible = [m for m in active_tts_models(models) if any(v.gender is gender for v in m.voices)]
     if not benched:
         return eligible
     return [m for m in eligible if m.provider not in benched]
