@@ -35,7 +35,7 @@ _SAMPLE_RATE = 48000
 class GradiumTTSProvider(TTSProvider):
     """Gradium TTS provider using WebSocket streaming."""
 
-    _VALID_MODELS = frozenset({"default"})
+    _VALID_MODELS = frozenset({"default", "gradium-tts-beta"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if not self._model_supported(model):

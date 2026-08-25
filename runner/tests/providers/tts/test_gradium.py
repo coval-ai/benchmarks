@@ -111,6 +111,24 @@ async def test_gradium_sends_setup_text_eos(fake_settings: Settings) -> None:
     assert eos_msg == {"type": "end_of_stream"}
 
 
+@pytest.mark.asyncio
+async def test_gradium_beta_model_name_on_the_wire(fake_settings: Settings) -> None:
+    """The beta model id is accepted and sent as model_name in setup."""
+    ws = FakeWebSocket(_audio_events([make_pcm_bytes(240)]))
+    provider = GradiumTTSProvider(fake_settings, model="gradium-tts-beta", voice="test-voice-id")
+
+    with patch(
+        "coval_bench.providers.tts.gradium.ws_client.connect",
+        return_value=ws,
+    ):
+        result = await provider.synthesize("beta test")
+
+    assert result.model == "gradium-tts-beta"
+    assert json.loads(ws.sent[0])["model_name"] == "gradium-tts-beta"
+    if result.audio_path:
+        result.audio_path.unlink()
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
