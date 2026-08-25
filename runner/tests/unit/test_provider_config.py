@@ -42,12 +42,6 @@ def test_registered_model_defaults() -> None:
     assert m.on_prem is False
 
 
-def test_every_model_has_exactly_one_mode() -> None:
-    modes = {ModelTag.STREAMING}
-    for m in MODEL_REGISTRY:
-        assert len(set(m.tags) & modes) == 1, f"{m.provider}/{m.model} needs one mode tag"
-
-
 def test_active_tts_models_have_voices() -> None:
     # The runner can't synthesize without a voice; only non-ACTIVE entries may omit one.
     for m in MODEL_REGISTRY:

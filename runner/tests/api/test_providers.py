@@ -225,7 +225,6 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     categories = data["tag_categories"]
     assert [c["category"] for c in categories] == [
         "type",
-        "mode",
         "host",
         "creator",
         "features",
@@ -239,7 +238,7 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     # Host/creator values are provider ids the frontend formats itself.
     assert by_category["host"]["provider_valued"] is True
     assert by_category["creator"]["provider_valued"] is True
-    assert by_category["mode"]["provider_valued"] is False
+    assert by_category["features"]["provider_valued"] is False
 
     # groq hosts canopylabs' orpheus, so the creator override drives creator and source.
     groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")

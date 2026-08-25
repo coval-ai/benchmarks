@@ -55,6 +55,11 @@ def _with_store(
     conn: psycopg.Connection[Any], scenario: Callable[[RegistryStore], Awaitable[None]]
 ) -> None:
     apply_migrations(conn)
+    # The store's behaviour is what is under test here, not the seeded roster.
+    with conn.transaction():
+        conn.execute("DELETE FROM benchmarks_v2.model_history")
+        conn.execute("DELETE FROM benchmarks_v2.models")
+        conn.execute("DELETE FROM benchmarks_v2.tags")
 
     async def _run() -> None:
         pool = await open_pool(conn)
@@ -67,7 +72,7 @@ def _with_store(
 
 
 def _streaming_tag() -> TagRecord:
-    return TagRecord(value="streaming", category="mode", label="Streaming")
+    return TagRecord(value="streaming", category="features", label="Streaming")
 
 
 def test_tags_roundtrip_and_reject_duplicates(registry_pg: psycopg.Connection[Any]) -> None:
