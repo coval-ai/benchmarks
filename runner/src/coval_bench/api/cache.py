@@ -29,10 +29,6 @@ from cachetools import TTLCache
 
 # 15 min cache for no real reason.
 CACHE_TTL_SECONDS = 900
-# The model roster is edited through the admin API and read by every request.
-# Short enough that a missed invalidation self-heals, long enough to keep the
-# catalogue off the hot path.
-ROSTER_TTL_SECONDS = 10
 # How long one fill failure is shared before the query is retried.
 FAILURE_TTL_SECONDS = 5
 
@@ -46,11 +42,6 @@ def new_response_cache() -> TTLCache[Any, Any]:
     window) aggregates param combinations.
     """
     return TTLCache(maxsize=64, ttl=CACHE_TTL_SECONDS)
-
-
-def new_roster_cache() -> TTLCache[Any, Any]:
-    """Build the per-app model roster cache. One key holds the whole roster."""
-    return TTLCache(maxsize=2, ttl=ROSTER_TTL_SECONDS)
 
 
 def new_cache_locks() -> defaultdict[Any, asyncio.Lock]:
