@@ -666,6 +666,19 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     ),
     RegisteredModel(
         benchmark=_TTS,
+        provider="gradium",
+        model="gradium-tts-beta",
+        voice="YTpq7expH9539ERJ",
+        voices=(
+            Voice(id="NbpkqMVS3CJeq2j8", gender=Gender.FEMALE),
+            Voice(id="6MFfc37kq0sBjBjy", gender=Gender.MALE),
+        ),
+        tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
         provider="palabra",
         model="palabra-tts-v1",
         voice="default_low",
