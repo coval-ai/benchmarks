@@ -531,7 +531,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_STREAMING, _MULTI, _CLONE, _EMOTION, _STREAM),
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
