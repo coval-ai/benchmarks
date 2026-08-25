@@ -366,10 +366,10 @@ class RevealOut(BaseModel):
 
 
 class TagOut(BaseModel):
-    """A MODE or FEATURES vocabulary entry."""
+    """A FEATURES vocabulary entry."""
 
     value: str = Field(min_length=1)
-    category: Literal["mode", "features"]
+    category: Literal["features"]
     label: str = Field(min_length=1)
 
 

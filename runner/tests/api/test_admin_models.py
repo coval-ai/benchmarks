@@ -144,7 +144,7 @@ async def test_empty_registry_reads_as_empty(client: AsyncClient) -> None:
 
 
 async def test_models_list_state_tags_and_history(client: AsyncClient, postgresql: Any) -> None:
-    await _seed_tag(postgresql, "streaming", "mode")
+    await _seed_tag(postgresql, "streaming", "features")
     await _seed_tag(postgresql, "vad", "features")
     first = await _seed_model(
         postgresql,
@@ -184,13 +184,13 @@ async def test_models_list_state_tags_and_history(client: AsyncClient, postgresq
 
 async def test_the_tag_vocabulary_is_public(client: AsyncClient, postgresql: Any) -> None:
     await _seed_tag(postgresql, "vad", "features")
-    await _seed_tag(postgresql, "streaming", "mode")
+    await _seed_tag(postgresql, "streaming", "features")
 
     response = await client.get("/v1/tags")
     assert response.status_code == 200
     assert response.json() == {
         "tags": [
-            {"value": "streaming", "category": "mode", "label": "Streaming"},
+            {"value": "streaming", "category": "features", "label": "Streaming"},
             {"value": "vad", "category": "features", "label": "Vad"},
         ]
     }
@@ -301,10 +301,10 @@ async def test_empty_strings_are_rejected_before_the_database(client: AsyncClien
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"], created["updated_at"], {"voice": ""})
     assert response.status_code == 422
-    body = {"value": "", "category": "mode", "label": "Streaming"}
+    body = {"value": "", "category": "features", "label": "Streaming"}
     admin = _admin_headers()
     assert (await client.post("/v1/tags", json=body, headers=admin)).status_code == 422
-    body = {"value": "streaming", "category": "mode", "label": ""}
+    body = {"value": "streaming", "category": "features", "label": ""}
     assert (await client.post("/v1/tags", json=body, headers=admin)).status_code == 422
 
 

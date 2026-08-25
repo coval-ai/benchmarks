@@ -11,12 +11,11 @@ class TagCategory(StrEnum):
     """Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
 
     TYPE/HOST/CREATOR are derived from registry columns and SOURCE/LICENSING/
-    DEPLOYMENT from model attributes, all at the API boundary; only MODE and
-    FEATURES draw their values from ``ModelTag``.
+    DEPLOYMENT from model attributes, all at the API boundary; only FEATURES
+    draws its values from ``ModelTag``.
     """
 
     TYPE = "type"
-    MODE = "mode"
     HOST = "host"
     CREATOR = "creator"
     FEATURES = "features"
@@ -27,17 +26,14 @@ class TagCategory(StrEnum):
 
 
 class ModelTag(StrEnum):
-    """Curated model attributes surfaced as MODE and FEATURES filter chips.
+    """Curated model attributes surfaced as FEATURES filter chips.
 
     KEYTERM_BIASING means expected vocabulary or a static context prompt
-    supplied at session start biases recognition; CONVERSATIONAL_CONTEXT means
-    the model conditions on prior turns of the live session as the dialog
-    evolves; CODE_SWITCHING means intra-sentence language mixing in one
-    stream — session-level language identification or switching does not
-    qualify.
+    supplied at session start biases recognition; CODE_SWITCHING means
+    intra-sentence language mixing in one stream — session-level language
+    identification or switching does not qualify.
     """
 
-    STREAMING = "streaming"
     MULTILINGUAL = "multilingual"
     VAD = "vad"
     DIARIZATION = "diarization"
@@ -46,12 +42,9 @@ class ModelTag(StrEnum):
     KEYTERM_BIASING = "keyterm-biasing"
     VOICE_CLONING = "voice-cloning"
     EMOTION_CONTROL = "emotion-control"
-    STREAMING_INPUT = "streaming-input"
-    CONVERSATIONAL_CONTEXT = "conversational-context"
 
 
 TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
-    ModelTag.STREAMING: TagCategory.MODE,
     ModelTag.MULTILINGUAL: TagCategory.FEATURES,
     ModelTag.VAD: TagCategory.FEATURES,
     ModelTag.DIARIZATION: TagCategory.FEATURES,
@@ -60,8 +53,6 @@ TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
     ModelTag.KEYTERM_BIASING: TagCategory.FEATURES,
     ModelTag.VOICE_CLONING: TagCategory.FEATURES,
     ModelTag.EMOTION_CONTROL: TagCategory.FEATURES,
-    ModelTag.STREAMING_INPUT: TagCategory.FEATURES,
-    ModelTag.CONVERSATIONAL_CONTEXT: TagCategory.FEATURES,
 }
 
 if TAG_CATEGORIES.keys() != set(ModelTag):
@@ -72,7 +63,6 @@ if TAG_CATEGORIES.keys() != set(ModelTag):
 # Display label per category.
 CATEGORY_LABELS: dict[TagCategory, str] = {
     TagCategory.TYPE: "Type",
-    TagCategory.MODE: "Mode",
     TagCategory.HOST: "Host",
     TagCategory.CREATOR: "Creator",
     TagCategory.FEATURES: "Features",
@@ -107,8 +97,6 @@ _VALUE_LABELS: dict[str, str] = {
     ModelTag.KEYTERM_BIASING.value: "Keyterm biasing",
     ModelTag.VOICE_CLONING.value: "Voice cloning",
     ModelTag.EMOTION_CONTROL.value: "Emotion control",
-    ModelTag.STREAMING_INPUT.value: "Streaming input",
-    ModelTag.CONVERSATIONAL_CONTEXT.value: "Conversational context",
 }
 
 

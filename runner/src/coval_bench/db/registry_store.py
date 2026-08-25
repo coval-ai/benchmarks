@@ -66,7 +66,7 @@ class TagRecord(BaseModel):
     """A row in ``benchmarks_v2.tags``."""
 
     value: str
-    category: Literal["mode", "features"]
+    category: Literal["features"]
     label: str
 
 
