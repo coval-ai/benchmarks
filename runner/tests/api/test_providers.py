@@ -7,14 +7,17 @@ from __future__ import annotations
 
 from typing import Any
 
+import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from coval_bench.api.internal import embargoed_pairs
 from coval_bench.api.routers.providers import _describe
+from coval_bench.db.registry_store import TagRecord
+from coval_bench.registries import TAG_CATEGORIES, tag_value_label
 from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
-from tests.api.conftest import COVAL_ORG, bearer
+from tests.api.conftest import COVAL_ORG, _make_db_url, bearer
 
 
 async def test_providers_200(client: AsyncClient) -> None:
@@ -275,6 +278,16 @@ async def test_providers_without_a_database_is_503(
     assert response.status_code == 503
 
 
+async def _exec_sql(postgresql: Any, sql: str, params: tuple[Any, ...]) -> None:
+    """Run one statement against this test's database."""
+    conn = psycopg.connect(_make_db_url(postgresql))
+    try:
+        conn.execute(sql, params)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _sorted_tags(payload: dict[str, Any]) -> dict[str, Any]:
     """The payload with each model's tags ordered, so only content is compared.
 
@@ -296,6 +309,52 @@ async def test_the_catalogue_matches_the_registry(client: AsyncClient) -> None:
     models, same order, same flags and facets.
     """
     live = (await client.get("/v1/providers")).json()
-    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY)).model_dump(mode="json")
+    # The expected side resolves tag metadata from code, the live side from the
+    # tags table; matching payloads means the two vocabularies agree.
+    vocabulary = {
+        str(tag): TagRecord(
+            value=str(tag),
+            category=category.value,
+            label=tag_value_label(category, str(tag)),
+        )
+        for tag, category in TAG_CATEGORIES.items()
+    }
+    expected = _describe(MODEL_REGISTRY, vocabulary, embargoed_pairs(MODEL_REGISTRY)).model_dump(
+        mode="json"
+    )
 
     assert _sorted_tags(live) == _sorted_tags(expected)
+
+
+async def test_a_tag_added_through_the_api_reaches_the_catalogue(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Vocabulary lives in the database, so a new tag needs no code change."""
+    admin = bearer(sub="user_admin", org_id=COVAL_ORG, email="admin@coval.dev")
+    created = await client.post(
+        "/v1/tags",
+        json={"value": "barge-in", "category": "features", "label": "Barge-in"},
+        headers=admin,
+    )
+    assert created.status_code == 201
+
+    model = MODEL_REGISTRY[0]
+    await _exec_sql(
+        postgresql,
+        """
+        INSERT INTO benchmarks_v2.model_tags (model_id, tag)
+        SELECT id, 'barge-in' FROM benchmarks_v2.models
+        WHERE provider = %s AND model = %s
+        """,
+        (model.provider, model.model),
+    )
+
+    catalogue = (await client.get("/v1/providers")).json()
+    entry = next(
+        m
+        for provider in catalogue[str(model.benchmark).lower()]
+        if provider["provider"] == model.provider
+        for m in provider["models"]
+        if m["model"] == model.model
+    )
+    assert {"category": "features", "value": "barge-in", "label": "Barge-in"} in entry["tags"]

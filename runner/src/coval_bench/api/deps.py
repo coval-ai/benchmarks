@@ -23,7 +23,7 @@ from starlette.requests import Request
 
 from coval_bench.api import clerk
 from coval_bench.config import Settings
-from coval_bench.db.registry_store import fetch_models
+from coval_bench.db.registry_store import TagRecord, fetch_models, fetch_tags
 from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
@@ -107,6 +107,17 @@ async def get_models(
     except Exception as exc:
         logger.error("model_roster_unavailable", exc_info=True)
         raise HTTPException(503, "the model registry is unavailable") from exc
+
+
+async def get_tags(
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> dict[str, TagRecord]:
+    """The tag vocabulary, read fresh so a newly added tag surfaces at once."""
+    try:
+        return await fetch_tags(pool)
+    except Exception as exc:
+        logger.error("tag_vocabulary_unavailable", exc_info=True)
+        raise HTTPException(503, "the tag vocabulary is unavailable") from exc
 
 
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:

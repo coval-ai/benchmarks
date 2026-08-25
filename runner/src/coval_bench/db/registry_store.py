@@ -33,7 +33,6 @@ from coval_bench.registries.models import (
     Source,
     Voice,
 )
-from coval_bench.registries.tags import ModelTag
 
 RegistryPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
 
@@ -432,23 +431,7 @@ class RegistryStore:
 
 
 def _registered(record: ModelRecord) -> RegisteredModel:
-    """One row as the frozen object every consumer already expects.
-
-    A tag the code vocabulary does not know is dropped rather than raised on: a
-    tag added through the admin API must not take the catalogue down, it just
-    does not surface until the vocabulary knows it.
-    """
-    tags: list[ModelTag] = []
-    for value in record.tags:
-        try:
-            tags.append(ModelTag(value))
-        except ValueError:
-            logger.warning(
-                "registry_unknown_tag",
-                provider=record.provider,
-                model=record.model,
-                tag=value,
-            )
+    """One row as the frozen object every consumer already expects."""
     return RegisteredModel(
         benchmark=record.modality,
         provider=record.provider,
@@ -456,7 +439,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         voice=record.voice,
         voices=record.voices,
         creator=record.creator,
-        tags=tuple(tags),
+        tags=record.tags,
         source=record.source,
         licensing=record.licensing,
         on_prem=record.on_prem,
@@ -473,3 +456,8 @@ async def fetch_models(pool: RegistryPool) -> list[RegisteredModel]:
     ``/v1/providers`` serves per modality.
     """
     return [_registered(record) for record in await RegistryStore(pool).list_models()]
+
+
+async def fetch_tags(pool: RegistryPool) -> dict[str, TagRecord]:
+    """The tag vocabulary keyed by value, for resolving a model's facet chips."""
+    return {tag.value: tag for tag in await RegistryStore(pool).list_tags()}

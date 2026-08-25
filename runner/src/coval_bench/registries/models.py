@@ -89,7 +89,7 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # see :class:`Voice` for why nothing pairs on it yet.
     voices: tuple[Voice, ...] = ()
     creator: str | None = None  # who makes the model; None means same as provider
-    tags: tuple[ModelTag, ...] = ()
+    tags: tuple[str, ...] = ()
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment

@@ -15,14 +15,14 @@ No DB hit is made by this endpoint.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import structlog
 from fastapi import APIRouter, Depends
 from posthog import Posthog
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_models, get_posthog
+from coval_bench.api.deps import capture_api_event, get_models, get_posthog, get_tags
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -32,10 +32,10 @@ from coval_bench.api.schemas import (
     ProvidersResponse,
     TagCategoryOut,
 )
+from coval_bench.db.registry_store import TagRecord
 from coval_bench.registries import (
     CATEGORY_LABELS,
     PROVIDER_VALUED_CATEGORIES,
-    TAG_CATEGORIES,
     Benchmark,
     RegisteredModel,
     TagCategory,
@@ -52,8 +52,12 @@ def _tag(category: TagCategory, value: str) -> ModelTagOut:
     return ModelTagOut(category=category, value=value, label=tag_value_label(category, value))
 
 
-def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
-    """Flatten a model's facets: derived columns/attributes plus curated tags."""
+def _model_tags(m: RegisteredModel, vocabulary: Mapping[str, TagRecord]) -> list[ModelTagOut]:
+    """Flatten a model's facets: derived columns/attributes plus curated tags.
+
+    Curated tags carry the category and label stored beside them, so a tag added
+    through the admin API surfaces without a code change.
+    """
     deployment = "on-prem" if m.on_prem else "cloud"
     return [
         _tag(TagCategory.TYPE, m.benchmark),
@@ -63,7 +67,15 @@ def _model_tags(m: RegisteredModel) -> list[ModelTagOut]:
         _tag(TagCategory.LICENSING, m.licensing),
         _tag(TagCategory.DEPLOYMENT, deployment),
         *([_tag(TagCategory.REGION, m.region)] if m.region else []),
-        *(_tag(TAG_CATEGORIES[t], t) for t in m.tags),
+        *(
+            ModelTagOut(
+                category=TagCategory(vocabulary[t].category),
+                value=t,
+                label=vocabulary[t].label,
+            )
+            for t in m.tags
+            if t in vocabulary
+        ),
     ]
 
 
@@ -81,6 +93,7 @@ def _tag_categories() -> list[TagCategoryOut]:
 
 def _build_provider_map(
     models: Sequence[RegisteredModel],
+    vocabulary: Mapping[str, TagRecord],
     benchmark: Benchmark,
     hidden: frozenset[tuple[str, str]],
 ) -> dict[str, list[ModelInfo]]:
@@ -100,18 +113,20 @@ def _build_provider_map(
                 model=m.model,
                 disabled=not m.collected and not m.published,
                 early_access=m.collected and not m.published,
-                tags=_model_tags(m),
+                tags=_model_tags(m, vocabulary),
             )
         )
     return result
 
 
 def _describe(
-    models: Sequence[RegisteredModel], hidden: frozenset[tuple[str, str]]
+    models: Sequence[RegisteredModel],
+    vocabulary: Mapping[str, TagRecord],
+    hidden: frozenset[tuple[str, str]],
 ) -> ProvidersResponse:
-    stt_map = _build_provider_map(models, Benchmark.STT, hidden)
-    tts_map = _build_provider_map(models, Benchmark.TTS, hidden)
-    s2s_map = _build_provider_map(models, Benchmark.S2S, hidden)
+    stt_map = _build_provider_map(models, vocabulary, Benchmark.STT, hidden)
+    tts_map = _build_provider_map(models, vocabulary, Benchmark.TTS, hidden)
+    s2s_map = _build_provider_map(models, vocabulary, Benchmark.S2S, hidden)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
@@ -128,6 +143,7 @@ async def get_providers(
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     models: Sequence[RegisteredModel] = Depends(get_models),
+    vocabulary: Mapping[str, TagRecord] = Depends(get_tags),
 ) -> ProvidersResponse:
     """Return the catalogue of benchmarked providers and models.
 
@@ -136,7 +152,7 @@ async def get_providers(
     hide or grey out models that are known but not actively benchmarked.
     An early-access model appears only for a caller whose allowlist names it.
     """
-    response = _describe(models, hidden)
+    response = _describe(models, vocabulary, hidden)
     capture_api_event(
         posthog_client,
         "providers_listed",
