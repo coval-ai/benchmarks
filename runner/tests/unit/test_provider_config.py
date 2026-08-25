@@ -72,9 +72,15 @@ def test_provider_names_cover_the_class_registries() -> None:
     assert provider_names("tts") - tts_classes <= {"google", "hume"}
 
 
-def test_registry_models_use_implemented_providers() -> None:
-    """Every benchmarked model's provider resolves without SDK imports."""
+def test_scheduled_models_use_implemented_providers() -> None:
+    """Every model the orchestrator may schedule resolves without SDK imports.
+
+    Stopped models are exempt: their rows outlive their provider's code.
+    """
+    scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
     for model in MODEL_REGISTRY:
+        if model.status not in scheduled:
+            continue
         if model.benchmark is Benchmark.STT:
             assert model.provider in provider_names("stt"), model.provider
         elif model.benchmark is Benchmark.TTS:

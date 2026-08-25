@@ -253,6 +253,15 @@ async def test_create_rejects_duplicates_and_bad_input(client: AsyncClient) -> N
     assert (await _post_model(client, model="tagged", tags=["mystery"])).status_code == 422
 
 
+async def test_a_stopped_model_may_name_a_dead_provider(client: AsyncClient) -> None:
+    """History rows for providers whose code is gone stay importable, never collectable."""
+    created = await _post_model(client, provider="gone", collected=False, published=False)
+    assert created.status_code == 201
+    body = created.json()
+    revive = await _patch(client, body["id"], f'"{body["updated_at"]}"', {"collected": True})
+    assert revive.status_code == 422
+
+
 async def test_create_s2s_skips_the_provider_check(client: AsyncClient) -> None:
     response = await _post_model(client, modality="S2S", provider="anyone", model="s2s-1")
     assert response.status_code == 201

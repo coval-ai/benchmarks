@@ -8,9 +8,10 @@ every response is marked private: rows carry unpublished models and staff
 emails, so a shared cache must never hold one. The tag vocabulary is public
 and lives in ``tags.py``.
 
-Writes enforce what the pydantic registry used to: the provider implementation
-must exist for the modality (S2S is exempt; its data is fetched, not
-synthesized here), tags must be in the vocabulary, a collected TTS model needs
+Writes enforce what the pydantic registry used to: a collected model's
+provider implementation must exist for the modality (S2S is exempt; its data
+is fetched, not synthesized here — and a Stopped row may outlive its
+provider's code), tags must be in the vocabulary, a collected TTS model needs
 a voice, and a non-empty voice pool is exactly one female and one male voice.
 """
 
@@ -72,9 +73,11 @@ def _implemented_providers(modality: Benchmark) -> frozenset[str] | None:
 async def _validate_model(candidate: NewModel | ModelRecord, store: RegistryStore) -> None:
     """The write-time rules the registry's review used to enforce; 422 on violation."""
     implemented = _implemented_providers(candidate.modality)
-    if implemented is not None and candidate.provider not in implemented:
+    if candidate.collected and implemented is not None and candidate.provider not in implemented:
         raise HTTPException(
-            422, f"no {candidate.modality} provider implementation named {candidate.provider!r}"
+            422,
+            f"no {candidate.modality} provider implementation named {candidate.provider!r}; "
+            "without one a model can only exist uncollected",
         )
     vocabulary = {tag.value for tag in await store.list_tags()}
     unknown = [tag for tag in candidate.tags if tag not in vocabulary]
