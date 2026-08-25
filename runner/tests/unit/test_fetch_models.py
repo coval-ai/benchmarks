@@ -19,7 +19,7 @@ import psycopg
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.registry_store import fetch_models
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel
+from coval_bench.registries import MODEL_REGISTRY, RegisteredModel
 
 from .conftest import apply_migrations, open_pool
 
@@ -40,17 +40,13 @@ def _fetched(conn: psycopg.Connection[Any]) -> list[Any]:
 
 
 def _comparable(model: RegisteredModel) -> RegisteredModel:
-    """The model normalized to what consumers actually distinguish.
+    """The model with tags in a canonical order.
 
-    Two differences are expected and behaviour-neutral. ``model_tags`` has no
-    position column, so the database returns a model's tags alphabetized while
-    the literals carry the order they were typed in — nothing reads that order,
-    the site tests tag membership per facet. And the two state booleans cannot
-    tell ``PENDING`` from ``RETIRED``, which every consumer already treats
-    alike: both are excluded from collection and marked disabled.
+    ``model_tags`` has no position column, so the database returns a model's
+    tags alphabetized while the literals carry the order they were typed in.
+    Nothing reads that order: the site tests tag membership per facet.
     """
-    status = ModelStatus.RETIRED if model.status is ModelStatus.PENDING else model.status
-    return model.model_copy(update={"tags": tuple(sorted(model.tags)), "status": status})
+    return model.model_copy(update={"tags": tuple(sorted(model.tags))})
 
 
 def _key(model: RegisteredModel) -> tuple[str, str, str]:

@@ -28,7 +28,6 @@ from pydantic import BaseModel, field_validator
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
     Licensing,
-    ModelStatus,
     RegisteredModel,
     Source,
     Voice,
@@ -39,15 +38,6 @@ RegistryPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]
 
 logger = structlog.get_logger("coval_bench.db.registry_store")
 
-# The two state booleans a legacy status stood for. RETIRED and PENDING were
-# both "neither collected nor published" and every consumer treated them alike,
-# so the pair maps back to RETIRED alone.
-_STATUS_BY_STATE: dict[tuple[bool, bool], ModelStatus] = {
-    (True, True): ModelStatus.ACTIVE,
-    (True, False): ModelStatus.EARLY_ACCESS,
-    (False, True): ModelStatus.PAUSED,
-    (False, False): ModelStatus.RETIRED,
-}
 
 # Columns a PATCH may change. The modality is immutable: it selects the
 # pipeline, so a modality flip is a new model, not an edit.
@@ -461,7 +451,8 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         licensing=record.licensing,
         on_prem=record.on_prem,
         region=record.region,
-        status=_STATUS_BY_STATE[(record.collected, record.published)],
+        collected=record.collected,
+        published=record.published,
         arena_enabled=record.arena_enabled,
     )
 

@@ -319,19 +319,20 @@ def test_registry_entry_is_early_access_off_arena_and_shared_inference() -> None
     voice-quality A/B.
     """
     from coval_bench.registries import MODEL_REGISTRY
-    from coval_bench.registries.models import ModelStatus, Source
+    from coval_bench.registries.models import Source
 
     rows = [m for m in MODEL_REGISTRY if m.provider == "atlas"]
     assert len(rows) == 1
     assert rows[0].model == _MODEL
     assert rows[0].voice == _VOICE
-    assert rows[0].status is ModelStatus.EARLY_ACCESS
+    assert rows[0].collected is True
+    assert rows[0].published is False
     assert rows[0].source is Source.SHARED_INFERENCE
     assert rows[0].arena_enabled is False
 
 
 def test_atlas_has_a_provider_env_entry() -> None:
-    """Without this, promoting Atlas to ACTIVE breaks the arena key parity check."""
+    """Without this, publishing Atlas breaks the arena key parity check."""
     from coval_bench.registries.provider_keys import PROVIDER_ENV
 
     assert PROVIDER_ENV["atlas"] == "ATLAS_API_KEY"

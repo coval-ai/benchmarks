@@ -21,7 +21,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import PairingRating
 from coval_bench.registries import MODEL_REGISTRY
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import Gender, ModelStatus, RegisteredModel, Voice
+from coval_bench.registries.models import Gender, RegisteredModel, Voice
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -31,7 +31,8 @@ def _model(name: str) -> RegisteredModel:
         provider=name,
         model=name,
         voice="v",
-        status=ModelStatus.ACTIVE,
+        collected=True,
+        published=True,
     )
 
 
@@ -46,7 +47,8 @@ def _gendered_model(provider: str, model: str) -> RegisteredModel:
             Voice(id=f"{model}-f", gender=Gender.FEMALE),
             Voice(id=f"{model}-m", gender=Gender.MALE),
         ),
-        status=ModelStatus.ACTIVE,
+        collected=True,
+        published=True,
     )
 
 
@@ -161,7 +163,7 @@ def test_select_pair_rejects_non_positive_scale() -> None:
 def test_active_tts_models_are_tts_and_active() -> None:
     roster = active_tts_models(MODEL_REGISTRY)
     assert len(roster) >= 2
-    assert all(m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE for m in roster)
+    assert all(m.benchmark is Benchmark.TTS and m.collected and m.published for m in roster)
 
 
 def test_active_tts_models_excludes_arena_disabled() -> None:
@@ -211,7 +213,8 @@ def test_voice_for_returns_the_matching_half() -> None:
         model="m",
         voice="v",
         voices=(Voice(id="她", gender=Gender.FEMALE), Voice(id="他", gender=Gender.MALE)),
-        status=ModelStatus.ACTIVE,
+        collected=True,
+        published=True,
     )
     assert voice_for(model, Gender.FEMALE).id == "她"
     assert voice_for(model, Gender.MALE).id == "他"
@@ -224,7 +227,8 @@ def test_voice_for_raises_when_the_model_cannot_field_the_gender() -> None:
         model="m",
         voice="v",
         voices=(Voice(id="only-female", gender=Gender.FEMALE),),
-        status=ModelStatus.ACTIVE,
+        collected=True,
+        published=True,
     )
     with pytest.raises(ValueError, match="no male voice"):
         voice_for(model, Gender.MALE)

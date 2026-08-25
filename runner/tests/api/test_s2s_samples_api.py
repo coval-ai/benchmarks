@@ -20,7 +20,7 @@ from httpx import AsyncClient
 
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 from coval_bench.s2s.samples import AUDIO_URL_TTL
 from tests.api.conftest import COVAL_ORG, add_models, bearer
 
@@ -86,13 +86,15 @@ def s2s_samples_env(monkeypatch: pytest.MonkeyPatch, postgresql: Any) -> None:
             benchmark=Benchmark.S2S,
             provider=_LIVE[0],
             model=_LIVE[1],
-            status=ModelStatus.ACTIVE,
+            collected=True,
+            published=True,
         ),
         RegisteredModel(
             benchmark=Benchmark.S2S,
             provider=_EMBARGOED[0],
             model=_EMBARGOED[1],
-            status=ModelStatus.EARLY_ACCESS,
+            collected=True,
+            published=False,
         ),
     )
 

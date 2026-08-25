@@ -21,17 +21,6 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.tags import ModelTag
 
 
-class ModelStatus(StrEnum):
-    """Whether a model is benchmarked and whether the site shows it."""
-
-    ACTIVE = "active"  # benchmarked and shown
-    PAUSED = "paused"  # shown, not currently benchmarked
-    RETIRED = "retired"  # not benchmarked, hidden even if old data exists
-    PENDING = "pending"  # implemented but waiting on credits; hidden like retired
-    # Pre-launch embargo: run normally, served only to internal-key requests.
-    EARLY_ACCESS = "early-access"
-
-
 class Source(StrEnum):
     """Where the benchmarked endpoint lives: the creator's own API or an inference host."""
 
@@ -97,18 +86,18 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # unknown. Geo- or globally routed endpoints record where our runner's
     # traffic lands.
     region: Literal["us", "eu", "asia"] | None = None
-    status: ModelStatus
-    arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
+    # Do we spend money measuring it: the orchestrator schedules runs for it and
+    # the arena may pair it.
+    collected: bool
+    # Are its results public. An unpublished model's results are served only to
+    # the org its grant names, never to everyone.
+    published: bool
+    arena_enabled: bool = True  # in the arena roster? independent of `collected`
 
 
 _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
-_ACTIVE = ModelStatus.ACTIVE
-_PAUSED = ModelStatus.PAUSED
-_RETIRED = ModelStatus.RETIRED
-_PENDING = ModelStatus.PENDING
-_EARLY_ACCESS = ModelStatus.EARLY_ACCESS
 _MULTI = ModelTag.MULTILINGUAL
 _VAD = ModelTag.VAD
 _DIAR = ModelTag.DIARIZATION
@@ -131,7 +120,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -140,7 +130,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -149,7 +140,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_VAD, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -158,7 +150,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -166,7 +159,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="scribe_v2_realtime",
         tags=(_MULTI, _VAD, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -174,7 +168,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gpt-realtime-whisper",
         tags=(_MULTI,),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -182,7 +177,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gpt-4o-transcribe",
         tags=(_MULTI, _VAD, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -190,7 +186,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gpt-4o-mini-transcribe",
         tags=(_MULTI, _VAD, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -199,7 +196,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_VAD, _DIAR, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -208,7 +206,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     # No longer offered on AssemblyAI's streaming API (u3-rt-pro); superseded by
     # universal-3.5-pro.
@@ -219,7 +218,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -228,7 +228,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _CODESW, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -237,7 +238,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         on_prem=True,
         region="eu",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -246,7 +248,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         on_prem=True,
         region="eu",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -254,7 +257,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="linden-1",
         tags=(_MULTI, _VAD, _DIAR),
         region="eu",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -262,7 +266,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="default",
         tags=(_MULTI, _VAD),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -270,7 +275,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="solaria-1",
         tags=(_MULTI, _VAD, _TRANS, _CODESW, _KEYTERM),
         region="eu",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -278,7 +284,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="stt-rt-v4",
         tags=(_MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -286,7 +293,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="stt-rt-v5",
         tags=(_MULTI, _VAD, _DIAR, _TRANS, _CODESW, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -294,7 +302,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="inworld-stt-1",
         tags=(_MULTI, _VAD, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -302,7 +311,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="grok-stt",
         tags=(_MULTI, _VAD, _DIAR, _KEYTERM),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -310,7 +320,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="pulse",
         tags=(_MULTI, _DIAR, _CODESW),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -319,7 +330,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_VAD,),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -328,7 +340,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         licensing=_OPEN,
         region="eu",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Baseten dedicated endpoint (Whisper Large V3). Benchmarked nightly by the
     # dedicated runner job during Baseten's test window; EARLY_ACCESS keeps it
@@ -343,7 +356,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -355,7 +369,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
     RegisteredModel(
@@ -366,7 +381,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _DIAR, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -375,7 +391,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -384,7 +401,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD, _KEYTERM),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Gemini Live API (API-key auth), not Cloud Speech v2 like the `google` provider.
     RegisteredModel(
@@ -394,7 +412,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="google",
         tags=(_MULTI, _VAD, _KEYTERM),
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -404,7 +423,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_KEYTERM,),
         on_prem=True,
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     # Together AI serverless realtime endpoints (open-weight models).
     RegisteredModel(
@@ -416,7 +436,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(),
         licensing=_OPEN,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -427,7 +448,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         licensing=_OPEN,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -438,7 +460,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         licensing=_OPEN,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -449,7 +472,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _VAD),
         licensing=_OPEN,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Reson8's realtime endpoint takes no model id, so the slug names the endpoint
     # and leaves room for their separate turn-level one. TTFT is grid-quantized
@@ -461,7 +485,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="realtime",
         tags=(_MULTI, _DIAR, _KEYTERM),
         region="eu",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Modulate Velma-2 real-time streaming; ids are the endpoint path segments.
     # The empty-frame EOS is a genuine finalize: the complete transcript lands
@@ -473,7 +498,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="velma-2-stt-streaming-english-v2",
         tags=(),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -481,7 +507,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="velma-2-stt-streaming",
         tags=(_MULTI, _DIAR),
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     # Pre-Velma-2 ids; retired so their orphaned result rows stay off the site.
     RegisteredModel(
@@ -490,7 +517,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="english-fast-transcription-streaming",
         tags=(),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -498,7 +526,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="multilingual-transcription-streaming",
         tags=(_MULTI, _DIAR),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -506,7 +535,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="scribe",
         tags=(_MULTI, _VAD),
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     #######
     # TTS #
@@ -522,7 +552,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -531,7 +562,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="IKne3meq5aSn9XLyUdCD",
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -540,7 +572,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="IKne3meq5aSn9XLyUdCD",
         tags=(_MULTI,),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -549,7 +582,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="IKne3meq5aSn9XLyUdCD",
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -562,7 +596,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -572,7 +607,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="shimmer", gender=Gender.FEMALE), Voice(id="onyx", gender=Gender.MALE)),
         tags=(_MULTI, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -581,7 +617,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="alloy",
         tags=(_MULTI,),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -590,7 +627,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="alloy",
         tags=(_MULTI,),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -600,7 +638,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -624,7 +663,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -648,7 +688,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -660,7 +701,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -674,7 +716,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -688,7 +731,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(),
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -703,7 +747,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -716,7 +761,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -726,7 +772,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Rime — all three on /ws3 WebSocket.
     # "arcana" resolves server-side to Arcana v3; "coda" to May 2026 flagship.
@@ -739,7 +786,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -749,7 +797,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _EMOTION),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -760,7 +809,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         on_prem=True,
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -770,7 +820,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -779,7 +830,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="176a55b1-4468-4736-8878-db82729667c1",
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -788,7 +840,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="176a55b1-4468-4736-8878-db82729667c1",
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -798,7 +851,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="carina", gender=Gender.FEMALE), Voice(id="altair", gender=Gender.MALE)),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -808,7 +862,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="kelsey", gender=Gender.FEMALE), Voice(id="spencer", gender=Gender.MALE)),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -821,7 +876,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -834,7 +890,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -844,7 +901,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -854,7 +912,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -864,7 +923,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="Emma", gender=Gender.FEMALE), Voice(id="Daniel", gender=Gender.MALE)),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -875,7 +935,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="Emma", gender=Gender.FEMALE), Voice(id="Daniel", gender=Gender.MALE)),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     # Azure AI Speech real-time (raw WebSocket). "neural" is the standard
@@ -894,7 +955,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _EMOTION),
         on_prem=True,
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -918,7 +980,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         creator="microsoft",
         tags=(_MULTI,),
         region="us",
-        status=_PAUSED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -929,7 +992,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         source=Source.SHARED_INFERENCE,
         tags=(_EMOTION,),
         region="us",
-        status=_PENDING,
+        collected=False,
+        published=False,
         arena_enabled=False,
     ),
     # Google TTS: Gemini buffers input until half-close, hence no streaming-input
@@ -950,7 +1014,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI,),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -960,7 +1025,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="Kore",
         tags=(_MULTI, _EMOTION),
         region="us",
-        status=_PENDING,
+        collected=False,
+        published=False,
         arena_enabled=False,
     ),
     # Baseten dedicated endpoint (Qwen3-TTS 1.7B). Same treatment as the
@@ -976,7 +1042,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         licensing=_OPEN,
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -986,7 +1053,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="Cherry", gender=Gender.FEMALE), Voice(id="Ethan", gender=Gender.MALE)),
         tags=(_MULTI,),
         region="asia",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Fish Audio. Voice ids are library reference_ids, not names.
     RegisteredModel(
@@ -1000,7 +1068,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1013,7 +1082,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1026,7 +1096,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # MiniMax. Voice is the English narrator MiniMax's own docs use in examples.
     RegisteredModel(
@@ -1040,7 +1111,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1053,7 +1125,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1066,7 +1139,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -1080,7 +1154,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     # No model id on the wire, only a voice, so "vui" is the bare surface name.
@@ -1095,7 +1170,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_CLONE, _EMOTION),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -1106,7 +1182,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="leah", gender=Gender.FEMALE), Voice(id="caleb", gender=Gender.MALE)),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # Deepdub eTTS. Voices are preset voice-prompt ids from Deepdub's docs:
     # Alice Sanders (female) and Peter Jenkins (male).
@@ -1121,7 +1198,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE, _EMOTION),
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1131,7 +1209,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voices=(Voice(id="Amara", gender=Gender.FEMALE), Voice(id="Gordon", gender=Gender.MALE)),
         tags=(_MULTI,),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
         arena_enabled=False,
     ),
     RegisteredModel(
@@ -1145,7 +1224,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="eu",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
         arena_enabled=False,
     ),
     # gpt-realtime is a speech-to-speech LLM, not a TTS provider: driving it
@@ -1158,7 +1238,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gpt-realtime-2025-08-28",
         tags=(_MULTI,),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1166,7 +1247,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="sonic",
         tags=(_MULTI,),
         region="us",
-        status=_RETIRED,
+        collected=False,
+        published=True,
     ),
     # Atlas exposes no model id of its own: /v1/models returns voices, not models,
     # and a model field in the request body is accepted and ignored, so "atlas-tts"
@@ -1183,7 +1265,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         voice="dax",
         source=Source.SHARED_INFERENCE,
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
         # Out of the voice arena: an arena entry needs a gendered voice pool, and
         # pitting an undisclosed proxy against first-party models in a blind A/B
         # would attribute the upstream's quality to Atlas.
@@ -1200,7 +1283,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gpt-realtime",
         tags=(_MULTI,),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     RegisteredModel(
         benchmark=_S2S,
@@ -1208,7 +1292,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="gemini-live",
         tags=(_MULTI,),
         region="us",
-        status=_ACTIVE,
+        collected=True,
+        published=True,
     ),
     # xAI stays under the early-access embargo while they are unresponsive to
     # outreach: runs and fetches normally, but every data endpoint strips both
@@ -1220,7 +1305,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="grok-voice-think-fast-1.0",
         tags=(_MULTI,),
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_S2S,
@@ -1228,7 +1314,8 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         model="grok-voice-think-fast-2.0",
         tags=(_MULTI,),
         region="us",
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     # Pre-launch models named by codename only: these strings reach the results
     # table and every surface built on it, so they carry no vendor identity of
@@ -1239,14 +1326,16 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="colors",
         model="gray",
         tags=(_MULTI,),
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
     RegisteredModel(
         benchmark=_S2S,
         provider="colors",
         model="red",
         tags=(_MULTI,),
-        status=_EARLY_ACCESS,
+        collected=True,
+        published=False,
     ),
 ]
 

@@ -51,7 +51,6 @@ from coval_bench.config import Settings
 from coval_bench.registries import (
     MODEL_REGISTRY,
     TAG_CATEGORIES,
-    ModelStatus,
     RegisteredModel,
     tag_value_label,
 )
@@ -321,19 +320,9 @@ def _seed_registry(**connect_kwargs: Any) -> None:
         conn.commit()
 
 
-_STATE_BY_STATUS = {
-    ModelStatus.ACTIVE: (True, True),
-    ModelStatus.EARLY_ACCESS: (True, False),
-    ModelStatus.PAUSED: (False, True),
-    ModelStatus.RETIRED: (False, False),
-    ModelStatus.PENDING: (False, False),
-}
-
-
 def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredModel]) -> None:
-    """Insert registry objects as rows, mapping status onto the state booleans."""
+    """Insert registry objects as rows."""
     for model in models:
-        collected, published = _STATE_BY_STATUS[model.status]
         row = conn.execute(
             """
             INSERT INTO benchmarks_v2.models
@@ -354,8 +343,8 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.on_prem,
                 model.region,
                 model.arena_enabled,
-                collected,
-                published,
+                model.collected,
+                model.published,
             ),
         ).fetchone()
         assert row is not None

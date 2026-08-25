@@ -3,14 +3,11 @@
 
 """GET /v1/providers — catalogue of benchmarked providers and models.
 
-The catalogue is sourced from the model registry
-(``coval_bench.registries.MODEL_REGISTRY``) — the same source of truth the
-orchestrator runs from, so the website can never drift from the runner's
-reality. ``RETIRED``/``PENDING`` models come back ``disabled=true``;
-``EARLY_ACCESS`` models are omitted for public callers (a disabled entry
-would still leak existence) and included enabled for internal ones.
-
-No DB hit is made by this endpoint.
+The catalogue is read from the registry tables in Postgres — the same source
+of truth the orchestrator runs from, so the website can never drift from the
+runner's reality. Uncollected models come back ``disabled=true``; unpublished
+models are omitted for public callers (a disabled entry would still leak
+existence) and included for callers entitled to them.
 """
 
 from __future__ import annotations
@@ -37,7 +34,6 @@ from coval_bench.registries import (
     PROVIDER_VALUED_CATEGORIES,
     TAG_CATEGORIES,
     Benchmark,
-    ModelStatus,
     RegisteredModel,
     TagCategory,
     tag_value_label,
@@ -46,8 +42,6 @@ from coval_bench.registries import (
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["providers"])
-
-_HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
 
 
 def _tag(category: TagCategory, value: str) -> ModelTagOut:
@@ -101,8 +95,8 @@ def _build_provider_map(
         result.setdefault(m.provider, []).append(
             ModelInfo(
                 model=m.model,
-                disabled=m.status in _HIDDEN_STATUSES,
-                early_access=m.status is ModelStatus.EARLY_ACCESS,
+                disabled=not m.collected,
+                early_access=not m.published,
                 tags=_model_tags(m),
             )
         )

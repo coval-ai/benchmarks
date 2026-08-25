@@ -16,7 +16,7 @@ import pytest
 from httpx import AsyncClient
 
 from coval_bench.api.internal import VARY_HEADERS
-from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 from tests.api.conftest import (
     COVAL_ORG,
     EA_MODEL,
@@ -57,7 +57,8 @@ def early_access_registry(postgresql: Any) -> None:
                 benchmark=Benchmark.STT,
                 provider=_EA_PROVIDER,
                 model=model,
-                status=ModelStatus.EARLY_ACCESS,
+                collected=True,
+                published=False,
             )
             for model in (_EA_MODEL, EA_MODEL_OTHER)
         ),

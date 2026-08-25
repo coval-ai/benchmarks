@@ -80,7 +80,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
-from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -112,16 +112,16 @@ _LEADERBOARD_SQL = """
 
 
 def _hidden_tts_models(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
-    """TTS models the site hides (retired/pending/early-access).
+    """TTS models the arena board leaves out.
 
-    Their votes still feed the rating fit, but boards computed before a
-    retirement must not keep showing them.
+    The board ranks what the arena currently pairs, so a model that stopped
+    being collected drops off it even though its votes still feed the rating
+    fit, and an unpublished one never appears at all.
     """
     return frozenset(
         (m.provider, m.model)
         for m in models
-        if m.benchmark is Benchmark.TTS
-        and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
+        if m.benchmark is Benchmark.TTS and not (m.collected and m.published)
     )
 
 

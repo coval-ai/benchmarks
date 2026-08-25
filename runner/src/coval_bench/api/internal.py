@@ -22,7 +22,7 @@ from fastapi import Depends, Header, Response
 from coval_bench.api import clerk
 from coval_bench.api.deps import get_models, get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import ModelStatus, RegisteredModel
+from coval_bench.registries import RegisteredModel
 
 # Which proof the response honoured: accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
@@ -54,9 +54,9 @@ _RETIRED_BOARD_KEYS: dict[tuple[str, str], tuple[str, str]] = {
 
 def embargoed_pairs(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
-    return frozenset(
-        (m.provider, m.model) for m in models if m.status is ModelStatus.EARLY_ACCESS
-    ) | frozenset(_RETIRED_BOARD_KEYS)
+    return frozenset((m.provider, m.model) for m in models if not m.published) | frozenset(
+        _RETIRED_BOARD_KEYS
+    )
 
 
 def with_retired_keys(allowed: frozenset[tuple[str, str]]) -> frozenset[tuple[str, str]]:

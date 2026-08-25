@@ -45,7 +45,7 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel, Source
+from coval_bench.registries import MODEL_REGISTRY, RegisteredModel, Source
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
@@ -89,7 +89,8 @@ def _stt_entry(
         provider=provider,
         model=model,
         source=source,
-        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
+        collected=active,
+        published=True,
     )
 
 
@@ -99,7 +100,8 @@ def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) ->
         provider=provider,
         model=model,
         voice=voice,
-        status=ModelStatus.ACTIVE if active else ModelStatus.PAUSED,
+        collected=active,
+        published=True,
     )
 
 
@@ -114,7 +116,7 @@ def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
 def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
     """Pause every registered model for *benchmark*, as an override base."""
     return [
-        m.model_copy(update={"status": ModelStatus.PAUSED})
+        m.model_copy(update={"collected": False, "published": True})
         for m in MODEL_REGISTRY
         if m.benchmark is benchmark
     ]
@@ -1966,7 +1968,7 @@ async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings
     # Activate exactly one hume entry; pause the rest of the TTS registry.
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+        hume_entry.model_copy(update={"collected": True, "published": True}),
     ]
 
     run = _make_run()
@@ -2021,7 +2023,7 @@ async def test_tts_provider_error_wins_over_contamination(
 
     matrix = [
         *_paused_registry(Benchmark.TTS),
-        hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+        hume_entry.model_copy(update={"collected": True, "published": True}),
     ]
 
     run = _make_run()
@@ -2120,7 +2122,7 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            hume_entry.model_copy(update={"collected": True, "published": True}),
         ]
 
         run = _make_run()
@@ -2179,7 +2181,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            hume_entry.model_copy(update={"collected": True, "published": True}),
         ]
 
         run = _make_run()
@@ -2427,7 +2429,7 @@ async def test_tts_transport_gate_nulls_without_failing(settings: Settings) -> N
 
         matrix = [
             *_paused_registry(Benchmark.TTS),
-            hume_entry.model_copy(update={"status": ModelStatus.ACTIVE}),
+            hume_entry.model_copy(update={"collected": True, "published": True}),
         ]
 
         run = _make_run()
@@ -3303,7 +3305,8 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
         provider="baseten",
         model="qwen3-asr-1.7b",
         source=Source.DEDICATED_INFERENCE,
-        status=ModelStatus.EARLY_ACCESS,
+        collected=True,
+        published=False,
     )
     item = SimpleNamespace(
         path=audio_file,
