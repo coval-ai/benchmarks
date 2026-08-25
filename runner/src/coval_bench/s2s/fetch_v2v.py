@@ -32,7 +32,7 @@ from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
-    FAMILY_HAPPYPATH,
+    FAMILY_DENTAL,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -96,16 +96,16 @@ AGENTS: tuple[AgentSpec, ...] = (
         agent_id_attr="coval_s2s_gray_agent_id",
         provider="colors",
         model="gray",
-        test_set_id_attr="coval_s2s_happypath_test_set_id",
-        family=FAMILY_HAPPYPATH,
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
         publish_samples=False,
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_red_agent_id",
         provider="colors",
         model="red",
-        test_set_id_attr="coval_s2s_happypath_test_set_id",
-        family=FAMILY_HAPPYPATH,
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
         publish_samples=False,
     ),
 )
@@ -900,6 +900,19 @@ async def fetch_and_write_v2v(
     raw_happypath = settings.coval_s2s_happypath_test_set_id
     if raw_happypath is not None and not raw_happypath.strip():
         raise RuntimeError("coval_s2s_happypath_test_set_id must not be blank")
+    raw_dental = settings.coval_s2s_dental_test_set_id
+    if raw_dental is not None and not raw_dental.strip():
+        raise RuntimeError("coval_s2s_dental_test_set_id must not be blank")
+    # A family's test set is required once one of its agents is configured;
+    # unset would otherwise skip the agent with a warning that reads the same
+    # as never having configured it.
+    for spec in AGENTS:
+        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr):
+            continue
+        if not (getattr(settings, spec.test_set_id_attr) or "").strip():
+            raise RuntimeError(
+                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
+            )
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.
     raw_noisy = settings.coval_s2s_noisy_persona_id

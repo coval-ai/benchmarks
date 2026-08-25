@@ -1063,6 +1063,30 @@ async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fetch_and_write_rejects_a_blank_dental_test_set() -> None:
+    # gray/red read this one, so blank would strand both with only a warning.
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="   ",
+    )
+    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id must not be blank"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_requires_a_dental_test_set_for_a_dental_agent() -> None:
+    # Unset skipped the agent with only a warning, which is how gray and red
+    # went five days without ingesting a row.
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_gray_agent_id="a2",
+    )
+    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id is required"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
 async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
