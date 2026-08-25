@@ -21,12 +21,16 @@ from coval_bench.registries import Metric
 
 __all__ = [
     "DATASET_ID",
+    "DATASET_ID_DENTAL",
+    "DATASET_ID_DENTAL_ACCENTED",
+    "DATASET_ID_DENTAL_NOISY",
     "DATASET_ID_HAPPYPATH",
     "DATASET_ID_HAPPYPATH_ACCENTED",
     "DATASET_ID_HAPPYPATH_NOISY",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
+    "FAMILY_DENTAL",
     "FAMILY_HAPPYPATH",
     "FAMILY_MULTITURN",
     "Condition",
@@ -56,6 +60,10 @@ class Condition(StrEnum):
 # same 30 conversations either way.
 FAMILY_MULTITURN = "s2s-multiturn"  # customer-service, the shared board
 FAMILY_HAPPYPATH = "s2s-happypath"
+# Dental appointment booking, its own domain and its own 50 cases. Separate from
+# happy-path on purpose: pooling two populations under one dataset id would break
+# the one-dataset-id = one-condition = one-population anchor the metrics rest on.
+FAMILY_DENTAL = "s2s-dental"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -68,6 +76,10 @@ DATASET_ID_HAPPYPATH = "s2s-happypath-v1"
 DATASET_ID_HAPPYPATH_NOISY = "s2s-happypath-noisy-v1"
 DATASET_ID_HAPPYPATH_ACCENTED = "s2s-happypath-accented-v1"
 
+DATASET_ID_DENTAL = "s2s-dental-v1"
+DATASET_ID_DENTAL_NOISY = "s2s-dental-noisy-v1"
+DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
+
 # Unlisted pairs are a configuration error, not a silent skip.
 DATASET_IDS: dict[tuple[str, Condition], str] = {
     (FAMILY_MULTITURN, Condition.CLEAN): DATASET_ID_MULTITURN,
@@ -75,6 +87,9 @@ DATASET_IDS: dict[tuple[str, Condition], str] = {
     (FAMILY_HAPPYPATH, Condition.CLEAN): DATASET_ID_HAPPYPATH,
     (FAMILY_HAPPYPATH, Condition.NOISY): DATASET_ID_HAPPYPATH_NOISY,
     (FAMILY_HAPPYPATH, Condition.ACCENTED): DATASET_ID_HAPPYPATH_ACCENTED,
+    (FAMILY_DENTAL, Condition.CLEAN): DATASET_ID_DENTAL,
+    (FAMILY_DENTAL, Condition.NOISY): DATASET_ID_DENTAL_NOISY,
+    (FAMILY_DENTAL, Condition.ACCENTED): DATASET_ID_DENTAL_ACCENTED,
 }
 
 
@@ -129,6 +144,18 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     DATASET_ID_HAPPYPATH_ACCENTED: DatasetMetrics(
         required=Metric.INSTRUCTION_FOLLOWING,
         optional=frozenset({Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_DENTAL: DatasetMetrics(
+        required=Metric.V2V,
+        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_DENTAL_NOISY: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_DENTAL_ACCENTED: DatasetMetrics(
+        required=Metric.V2V,
+        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
     ),
 }
 

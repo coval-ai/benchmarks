@@ -165,6 +165,10 @@ class Settings(BaseSettings):
     # Test set for agents evaluated on the happy-path scenarios instead of the
     # shared one above. Opaque id, not secret.
     coval_s2s_happypath_test_set_id: str | None = None
+    # Test set for agents evaluated on the dental-appointment scenarios. Its own
+    # field, not a repoint of the happy-path one: the two are different domains
+    # and different populations. Opaque id, not secret.
+    coval_s2s_dental_test_set_id: str | None = None
     # The caller persona whose audio carries background noise; its runs land
     # under their own dataset instead of pooling into the clean numbers. Unset
     # means every persona is clean. Superseded by coval_s2s_condition_personas.
