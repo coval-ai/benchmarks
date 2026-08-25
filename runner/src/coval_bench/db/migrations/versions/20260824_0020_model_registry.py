@@ -4,8 +4,8 @@
 
 """Model and tag registry tables: models, tags, model_tags, model_history.
 
-Revision ID: 20260824_0019
-Revises:     20260818_0018
+Revision ID: 20260824_0020
+Revises:     20260824_0019
 Create Date: 2026-08-24
 
 The model registry (BENCH-710 design doc). No seed: rows are loaded through the
@@ -37,8 +37,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "20260824_0019"
-down_revision = "20260818_0018"
+revision = "20260824_0020"
+down_revision = "20260824_0019"
 branch_labels = None
 depends_on = None
 

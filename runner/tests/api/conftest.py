@@ -220,7 +220,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, bucket_at)
             )
         """)
-        # Model/tag registry tables (mirrors migration 20260824_0019).
+        # Model/tag registry tables (mirrors migration 20260824_0020).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
                 id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
