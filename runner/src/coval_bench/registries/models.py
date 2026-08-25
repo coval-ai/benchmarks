@@ -489,9 +489,13 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         provider="elevenlabs",
         model="eleven_flash_v2_5",
         voice="IKne3meq5aSn9XLyUdCD",
+        voices=(
+            Voice(id="21m00Tcm4TlvDq8ikWAM", gender=Gender.FEMALE, name="Rachel"),
+            Voice(id="29vD33N1CtxCmqQRPOHJ", gender=Gender.MALE, name="Drew"),
+        ),
         tags=(_STREAMING, _MULTI, _CLONE, _STREAM),
         region="us",
-        status=_RETIRED,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
