@@ -14,6 +14,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import jwt
@@ -22,6 +23,18 @@ import structlog
 from coval_bench.config import Settings
 
 logger = structlog.get_logger("coval_bench.api.clerk")
+
+
+@dataclass(frozen=True)
+class CovalAdmin:
+    """The verified caller behind an admin request, as stamped into model history.
+
+    Carries no org: admin callers are coval staff by construction, and history
+    records staff as ``changed_by_org_id = NULL``.
+    """
+
+    user_id: str
+    email: str | None
 
 
 @functools.lru_cache(maxsize=4)
@@ -125,10 +138,7 @@ def exclusive_pairs(
     """
     if settings.clerk_org_exclusive is None:
         return None
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        return None
-    claims = _claims(token.strip(), settings)
+    claims = bearer_claims(authorization, settings)
     if claims is None:
         return None
     org_id = claims.get("org_id")
@@ -174,14 +184,21 @@ def _claims(token: str, settings: Settings) -> dict[str, Any] | None:
     return claims
 
 
+def bearer_claims(authorization: str | None, settings: Settings) -> dict[str, Any] | None:
+    """Verified claims behind a Bearer authorization header, or ``None``."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return _claims(token.strip(), settings)
+
+
 def allowed_pairs(
     authorization: str, settings: Settings, embargoed: frozenset[tuple[str, str]]
 ) -> frozenset[tuple[str, str]] | None:
     """The embargoed pairs this bearer token unlocks, or ``None`` if it proves nothing."""
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token.strip():
-        return None
-    claims = _claims(token.strip(), settings)
+    claims = bearer_claims(authorization, settings)
     if claims is None:
         return None
     org_unlocked = _org_unlocked(claims, settings, embargoed)

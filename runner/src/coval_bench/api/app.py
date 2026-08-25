@@ -43,6 +43,7 @@ from coval_bench.api.internal import never_shared
 from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
+    admin_models,
     aggregates,
     arena,
     health,
@@ -52,6 +53,7 @@ from coval_bench.api.routers import (
     robots,
     runs,
     s2s_samples,
+    tags,
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
@@ -140,8 +142,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=resolved.cors_origins,
         allow_origin_regex=resolved.cors_origin_regex,
         allow_credentials=False,
-        allow_methods=["GET", "OPTIONS"],
-        allow_headers=["Authorization"],
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "If-Match"],
         max_age=600,
     )
 
@@ -170,8 +172,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
+    app.include_router(tags.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
+    app.include_router(admin_models.router, prefix="/v1")
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).

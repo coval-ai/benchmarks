@@ -220,6 +220,63 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, bucket_at)
             )
         """)
+        # Model/tag registry tables (mirrors migration 20260824_0020).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
+                id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                modality      text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                provider      text NOT NULL CHECK (provider <> ''),
+                model         text NOT NULL CHECK (model <> ''),
+                voice         text CHECK (voice IS NULL OR voice <> ''),
+                voices        jsonb NOT NULL DEFAULT '[]' CHECK (jsonb_typeof(voices) = 'array'),
+                creator       text CHECK (creator IS NULL OR creator <> ''),
+                source        text NOT NULL DEFAULT 'official-api' CHECK (source <> ''),
+                licensing     text NOT NULL DEFAULT 'proprietary' CHECK (licensing <> ''),
+                on_prem       boolean NOT NULL DEFAULT false,
+                region        text CHECK (region IN ('us','eu','asia')),
+                arena_enabled boolean NOT NULL DEFAULT true,
+                collected     boolean NOT NULL,
+                published     boolean NOT NULL,
+                updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
+                updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
+                updated_at    timestamptz NOT NULL DEFAULT now(),
+                UNIQUE (modality, provider, model)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.tags (
+                value    text PRIMARY KEY CHECK (value <> ''),
+                category text NOT NULL CHECK (category IN ('mode','features')),
+                label    text NOT NULL CHECK (label <> '')
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.model_tags (
+                model_id bigint NOT NULL REFERENCES benchmarks_v2.models(id) ON DELETE CASCADE,
+                tag      text NOT NULL REFERENCES benchmarks_v2.tags(value),
+                PRIMARY KEY (model_id, tag)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (
+                id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                model_id  bigint NOT NULL,
+                modality  text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                provider  text NOT NULL CHECK (provider <> ''),
+                model     text NOT NULL CHECK (model <> ''),
+                old       jsonb CHECK (old IS NULL OR jsonb_typeof(old) = 'object'),
+                new       jsonb NOT NULL CHECK (jsonb_typeof(new) = 'object'),
+                changed_by_user_id text NOT NULL CHECK (changed_by_user_id <> ''),
+                changed_by_org_id  text
+                    CHECK (changed_by_org_id IS NULL OR changed_by_org_id <> ''),
+                changed_by_email   text CHECK (changed_by_email IS NULL OR changed_by_email <> ''),
+                changed_at timestamptz NOT NULL DEFAULT now()
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
+                ON benchmarks_v2.model_history (model_id, changed_at DESC)
+        """)
 
 
 postgresql_proc = factories.postgresql_proc(load=[_load_schema])
