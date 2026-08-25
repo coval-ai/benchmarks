@@ -165,6 +165,22 @@ async def test_aggregates_embargo_and_cache_isolation(client: AsyncClient, postg
 
 
 @pytest.mark.usefixtures("early_access_registry")
+async def test_timeline_embargo_and_cache_isolation(client: AsyncClient, postgresql: Any) -> None:
+    """Timeline cache entries keep the caller's embargo scope, like aggregates."""
+    await _seed_ea_and_public_rows(postgresql)
+    await _fill_buckets(postgresql)
+    params = {"benchmark": "STT", "window": "24h"}
+
+    internal = await client.get("/v1/results/timeline", params=params, headers=_internal_headers())
+    assert internal.status_code == 200
+    assert (_EA_PROVIDER, _EA_MODEL) in _models_in(internal.json()["points"])
+
+    public = await client.get("/v1/results/timeline", params=params)
+    assert public.status_code == 200
+    assert (_EA_PROVIDER, _EA_MODEL) not in _models_in(public.json()["points"])
+
+
+@pytest.mark.usefixtures("early_access_registry")
 async def test_aggregates_by_dataset_embargo_and_cache_isolation(
     client: AsyncClient, postgresql: Any
 ) -> None:
@@ -235,6 +251,7 @@ async def test_the_retired_x_headers_prove_nothing(client: AsyncClient) -> None:
         ("/v1/results", None),
         ("/v1/leaderboard", {"metric": "WER", "benchmark": "STT"}),
         ("/v1/results/aggregates", {"benchmark": "STT"}),
+        ("/v1/results/timeline", {"benchmark": "STT"}),
         ("/v1/results/aggregates/by-dataset", {"benchmark": "STT"}),
     ],
 )

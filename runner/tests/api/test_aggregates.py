@@ -670,3 +670,142 @@ async def test_by_dataset_stats_carry_the_flag(client: AsyncClient, postgresql: 
     assert thin["model_stats"][0]["sample_count"] == 1
     assert full["model_stats"][0]["insufficient_samples"] is False
     assert full["model_stats"][0]["sample_count"] == MIN_SCORED_SAMPLES["STT"]
+
+
+async def test_include_series_false_keeps_stats_and_skips_series_sql(
+    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lightweight aggregate path must not even prepare a series query."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v1")
+    await _insert_result(postgresql, run_id, metric_value=2.0)
+    await _refresh_mv(postgresql)
+
+    monkeypatch.setattr(
+        "coval_bench.api.routers.aggregates._SERIES_SQL", "SELECT invalid_series_sql"
+    )
+    monkeypatch.setattr(
+        "coval_bench.api.routers.aggregates._COMPACT_SERIES_SQL",
+        "SELECT invalid_compact_series_sql",
+    )
+    response = await client.get(
+        "/v1/results/aggregates",
+        params={"benchmark": "STT", "window": "30d", "include_series": "false"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["series"] == []
+    assert body["datasets"] == ["stt-v1"]
+    assert body["model_stats"][0]["avg_value"] == pytest.approx(2.0)
+
+
+async def test_include_series_cache_variants_do_not_cross_serve(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    run_id = await _insert_run(postgresql)
+    await _insert_result(postgresql, run_id, metric_value=1.0)
+    await _refresh_mv(postgresql)
+    await _fill_buckets(postgresql)
+
+    no_series = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "include_series": "false"}
+    )
+    with_series = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert no_series.json()["series"] == []
+    assert len(with_series.json()["series"]) == 1
+
+
+async def test_timeline_uses_weighted_wer_and_latency_p50(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    scheduled = datetime.now(dt.UTC).replace(microsecond=0)
+    run_id = await _insert_run(postgresql, scheduled_at=scheduled)
+    await _insert_result(postgresql, run_id, metric_type="WER", metric_value=2.0)
+    await _insert_result(postgresql, run_id, metric_type="WER", metric_value=4.0)
+    await _insert_result(postgresql, run_id, metric_type="TTFS", metric_value=1.0)
+    await _insert_result(postgresql, run_id, metric_type="TTFS", metric_value=9.0)
+    await _fill_buckets(postgresql)
+
+    response = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    values = {point["metric_type"]: point["value"] for point in response.json()["points"]}
+    assert values["WER"] == pytest.approx(3.0)
+    assert values["TTFS"] == pytest.approx(5.0)
+
+
+async def test_timeline_short_windows_keep_all_buckets(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    now = datetime.now(dt.UTC).replace(microsecond=0)
+    for hours_ago in (1, 24 * 3):
+        run_id = await _insert_run(postgresql, scheduled_at=now - timedelta(hours=hours_ago))
+        await _insert_result(postgresql, run_id, metric_value=float(hours_ago))
+    await _fill_buckets(postgresql)
+
+    seven_days = await client.get(
+        "/v1/results/timeline", params={"benchmark": "STT", "window": "7d"}
+    )
+    assert len(seven_days.json()["points"]) == 2
+    one_day = await client.get("/v1/results/timeline", params={"benchmark": "STT", "window": "24h"})
+    assert len(one_day.json()["points"]) == 1
+
+
+async def test_timeline_30d_caps_each_group_and_preserves_endpoints(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    now = datetime.now(dt.UTC).replace(microsecond=0)
+    for index in range(241):
+        scheduled = now - timedelta(hours=index)
+        run_id = await _insert_run(postgresql, scheduled_at=scheduled)
+        deepgram_value = -100.0 if index == 80 else 1000.0 if index == 160 else float(index % 37)
+        await _insert_result(postgresql, run_id, metric_value=deepgram_value)
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="assemblyai",
+            model="best",
+            metric_value=float(index),
+        )
+    await _fill_buckets(postgresql)
+
+    response = await client.get(
+        "/v1/results/timeline", params={"benchmark": "STT", "window": "30d"}
+    )
+    assert response.status_code == 200
+    points = response.json()["points"]
+    assert points == sorted(
+        points,
+        key=lambda p: (p["scheduled_at"], p["provider"], p["model"], p["metric_type"]),
+    )
+    by_model: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for point in points:
+        by_model.setdefault((point["provider"], point["model"]), []).append(point)
+
+    assert set(by_model) == {("assemblyai", "best"), ("deepgram", "nova-3")}
+    for group in by_model.values():
+        assert len(group) <= 240
+        timestamps = {datetime.fromisoformat(point["scheduled_at"]) for point in group}
+        assert now in timestamps
+        assert now - timedelta(hours=240) in timestamps
+
+    deepgram_values = [point["value"] for point in by_model[("deepgram", "nova-3")]]
+    assert min(deepgram_values) == -100
+    assert max(deepgram_values) == 1000
+    assembly_values = [point["value"] for point in by_model[("assemblyai", "best")]]
+    assert min(assembly_values) == 0
+    assert max(assembly_values) == 240
+
+    repeated = await client.get(
+        "/v1/results/timeline", params={"benchmark": "STT", "window": "30d"}
+    )
+    assert repeated.json() == response.json()
+
+    legacy = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
+    )
+    legacy_groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for point in legacy.json()["series"]:
+        legacy_groups.setdefault((point["provider"], point["model"]), []).append(point)
+    assert all(len(group) <= 240 for group in legacy_groups.values())
+    assert {"min_value", "p25", "p50", "p75", "max_value", "value_sum", "sample_count"} <= set(
+        legacy.json()["series"][0]
+    )
