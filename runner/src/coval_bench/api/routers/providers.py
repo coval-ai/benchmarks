@@ -37,7 +37,6 @@ from coval_bench.registries import (
     PROVIDER_VALUED_CATEGORIES,
     TAG_CATEGORIES,
     Benchmark,
-    ModelStatus,
     RegisteredModel,
     TagCategory,
     tag_value_label,
@@ -46,8 +45,6 @@ from coval_bench.registries import (
 logger = structlog.get_logger("coval_bench.api")
 
 router = APIRouter(tags=["providers"])
-
-_HIDDEN_STATUSES = frozenset({ModelStatus.RETIRED, ModelStatus.PENDING})
 
 
 def _tag(category: TagCategory, value: str) -> ModelTagOut:
@@ -101,8 +98,8 @@ def _build_provider_map(
         result.setdefault(m.provider, []).append(
             ModelInfo(
                 model=m.model,
-                disabled=m.status in _HIDDEN_STATUSES,
-                early_access=m.status is ModelStatus.EARLY_ACCESS,
+                disabled=not m.collected and not m.published,
+                early_access=m.collected and not m.published,
                 tags=_model_tags(m),
             )
         )

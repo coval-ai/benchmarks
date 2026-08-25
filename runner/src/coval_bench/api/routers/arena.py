@@ -80,7 +80,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
-from coval_bench.registries import Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -118,10 +118,7 @@ def _hidden_tts_models(models: Sequence[RegisteredModel]) -> frozenset[tuple[str
     retirement must not keep showing them.
     """
     return frozenset(
-        (m.provider, m.model)
-        for m in models
-        if m.benchmark is Benchmark.TTS
-        and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
+        (m.provider, m.model) for m in models if m.benchmark is Benchmark.TTS and not m.published
     )
 
 

@@ -89,3 +89,20 @@ def test_the_runner_image_installs_every_provider_extra() -> None:
     dockerfile = (runner_root / "Dockerfile").read_text()
     missing = sorted(extra for extra in extras if f"--extra {extra}" not in dockerfile)
     assert not missing, f"provider extras absent from the runner image: {missing}"
+
+
+def test_the_state_booleans_match_the_status_they_replace() -> None:
+    """Each status maps onto the collected/published pair the design table names."""
+    expected = {
+        ModelStatus.ACTIVE: (True, True),
+        ModelStatus.EARLY_ACCESS: (True, False),
+        ModelStatus.PAUSED: (False, True),
+        ModelStatus.RETIRED: (False, False),
+        ModelStatus.PENDING: (False, False),
+    }
+    assert set(expected) == set(ModelStatus), "a new status needs a state pair"
+    for status, pair in expected.items():
+        model = RegisteredModel(
+            benchmark=Benchmark.STT, provider="acme", model="stt-1", status=status
+        )
+        assert (model.collected, model.published) == pair, status

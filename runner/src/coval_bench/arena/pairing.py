@@ -19,7 +19,6 @@ from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
     Gender,
-    ModelStatus,
     RegisteredModel,
     Voice,
 )
@@ -40,7 +39,7 @@ def active_tts_models(models: Sequence[RegisteredModel]) -> list[RegisteredModel
     return [
         m
         for m in models
-        if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE and m.arena_enabled
+        if m.benchmark is Benchmark.TTS and m.collected and m.published and m.arena_enabled
     ]
 
 

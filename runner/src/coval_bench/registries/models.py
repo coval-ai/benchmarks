@@ -100,6 +100,16 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     status: ModelStatus
     arena_enabled: bool = True  # in the arena roster? independent of dashboard `status`
 
+    @property
+    def collected(self) -> bool:
+        """The orchestrator schedules benchmark runs for it."""
+        return self.status in (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
+
+    @property
+    def published(self) -> bool:
+        """The public site shows it."""
+        return self.status in (ModelStatus.ACTIVE, ModelStatus.PAUSED)
+
 
 _STT = Benchmark.STT
 _TTS = Benchmark.TTS

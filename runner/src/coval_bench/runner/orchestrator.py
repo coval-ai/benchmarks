@@ -61,7 +61,6 @@ from coval_bench.registries import (
     METRIC_SPECS,
     Benchmark,
     Metric,
-    ModelStatus,
     RegisteredModel,
     Source,
 )
@@ -1106,18 +1105,18 @@ async def run_benchmarks(
                 if (ov.benchmark, ov.provider, ov.model) not in existing_keys:
                     (stt_matrix if ov.benchmark is Benchmark.STT else tts_matrix).append(ov)
 
-        # EARLY_ACCESS models run on the normal schedule; only the API hides them.
-        scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
+        # A collected model runs on the normal schedule whether or not it is
+        # published; only the API hides the unpublished ones.
         dedicated = source == "dedicated"
         enabled_stt = [
             e
             for e in stt_matrix
-            if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+            if e.collected and (e.source is Source.DEDICATED_INFERENCE) == dedicated
         ]
         enabled_tts = [
             e
             for e in tts_matrix
-            if e.status in scheduled and (e.source is Source.DEDICATED_INFERENCE) == dedicated
+            if e.collected and (e.source is Source.DEDICATED_INFERENCE) == dedicated
         ]
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
