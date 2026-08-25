@@ -174,7 +174,7 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
         for m in entry["models"]
         if m["early_access"]
     }
-    # Registry-derived, not embargoed_pairs(): retired board keys stay embargoed
+    # Registry-derived, not embargoed_pairs(MODEL_REGISTRY): retired board keys stay embargoed
     # for stored artefacts but are not registry entries, so they never appear here.
     assert flagged == {
         (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS

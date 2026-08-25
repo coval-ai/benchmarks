@@ -47,6 +47,7 @@ from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
+from coval_bench.registries import MODEL_REGISTRY
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
@@ -320,7 +321,7 @@ async def app(
     # keys has no roster and every battle is a 503. Prod mounts all of them — CI's
     # check_arena_keys.py enforces it — so the fixture models that. OPENAI_API_KEY stays
     # unset on purpose above, which simply leaves openai out of the roster.
-    for model in active_tts_models():
+    for model in active_tts_models(MODEL_REGISTRY):
         env_var = PROVIDER_ENV.get(model.provider)
         if env_var is not None and env_var != "OPENAI_API_KEY":
             monkeypatch.setenv(env_var, "test-provider-key")

@@ -15,12 +15,14 @@ either way, so there is nothing to 404 — and says so in ``X-EA-Token-Status``.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from fastapi import Depends, Header, Response
 
 from coval_bench.api import clerk
 from coval_bench.api.deps import get_settings
 from coval_bench.config import Settings
-from coval_bench.registries import MODEL_REGISTRY, ModelStatus
+from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel
 
 # Which proof the response honoured: accepted, unknown, or absent.
 EA_STATUS_HEADER = "X-EA-Token-Status"
@@ -50,10 +52,10 @@ _RETIRED_BOARD_KEYS: dict[tuple[str, str], tuple[str, str]] = {
 }
 
 
-def embargoed_pairs() -> frozenset[tuple[str, str]]:
+def embargoed_pairs(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
     """Every ``(provider, model)`` pair currently under embargo."""
     return frozenset(
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
+        (m.provider, m.model) for m in models if m.status is ModelStatus.EARLY_ACCESS
     ) | frozenset(_RETIRED_BOARD_KEYS)
 
 
@@ -70,18 +72,13 @@ def with_retired_keys(allowed: frozenset[tuple[str, str]]) -> frozenset[tuple[st
     )
 
 
-def all_registered_pairs() -> frozenset[tuple[str, str]]:
+def all_registered_pairs(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
     """Every pair the registry knows, embargoed or not, plus the retired keys.
 
     The universe an exclusive org's view is subtracted from. A pair that was never
     registered cannot be subtracted, so it stays visible.
     """
-    return frozenset((m.provider, m.model) for m in MODEL_REGISTRY) | frozenset(_RETIRED_BOARD_KEYS)
-
-
-def hidden_models() -> frozenset[tuple[str, str]]:
-    """The pairs public API responses must not contain."""
-    return embargoed_pairs()
+    return frozenset((m.provider, m.model) for m in models) | frozenset(_RETIRED_BOARD_KEYS)
 
 
 def hidden_early_access(
@@ -98,14 +95,15 @@ def hidden_early_access(
     # the route returns, and assignment here would be overwritten.
     response.headers.append("Vary", VARY_HEADERS)
 
-    embargoed = embargoed_pairs()
+    models = MODEL_REGISTRY
+    embargoed = embargoed_pairs(models)
     if authorization is None or settings.clerk_issuer is None:
         response.headers[EA_STATUS_HEADER] = "absent"
         return embargoed
 
     # Exclusive orgs are resolved first and never widened: nothing may add to a
     # view whose whole point is what it leaves out.
-    universe = all_registered_pairs()
+    universe = all_registered_pairs(models)
     only = clerk.exclusive_pairs(authorization, settings, universe)
     if only is not None:
         response.headers[EA_STATUS_HEADER] = "accepted"

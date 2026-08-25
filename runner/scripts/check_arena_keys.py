@@ -86,7 +86,7 @@ def main(tf_path: str) -> int:
 
     required: set[str] = set()
     unmapped: set[str] = set()
-    for m in active_tts_models():
+    for m in active_tts_models(MODEL_REGISTRY):
         env_var = PROVIDER_ENV.get(m.provider)
         if env_var is None:
             unmapped.add(m.provider)
