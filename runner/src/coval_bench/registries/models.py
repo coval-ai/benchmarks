@@ -386,6 +386,16 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         status=_ACTIVE,
     ),
+    # Gemini Live API (API-key auth), not Cloud Speech v2 like the `google` provider.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="gemini",
+        model="gemini-3.5-transcribe-live",
+        creator="google",
+        tags=(_MULTI, _VAD, _KEYTERM),
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
     RegisteredModel(
         benchmark=_STT,
         provider="revai",

@@ -1,0 +1,13 @@
+[
+  {"setupComplete": {}},
+  {"serverContent": {}},
+  {"serverContent": {"interimInputTranscription": {"text": "hello"}}},
+  {"serverContent": {"interimInputTranscription": {"text": "hello world"}}},
+  {"serverContent": {"inputTranscription": {"text": "hello world"}}},
+  {"serverContent": {"generationComplete": true}},
+  {"serverContent": {}},
+  {"serverContent": {"interimInputTranscription": {"text": "how are"}}},
+  {"serverContent": {"inputTranscription": {"text": "how are you"}}},
+  {"serverContent": {"generationComplete": true}},
+  {"serverContent": {}}
+]
