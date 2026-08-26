@@ -312,8 +312,8 @@ def _population_mismatch(
 ) -> dict[str, object] | None:
     """None if *other_values* covers the same conversations as the anchor.
 
-    Ids, not counts: equal counts can be different conversations. A mismatch skips
-    that metric for the run.
+    Ids, not counts: equal counts can be different conversations. The caller trims
+    to the overlap; only duplicates skip the metric for the run.
     """
     other_set = {v.get("simulation_output_id") for v in other_values}
     anchor_set = {v.get("simulation_output_id") for v in anchor_values}
@@ -536,8 +536,6 @@ async def _ingest_run(
                 continue
             mismatch = _population_mismatch(anchor_values, values)
             if mismatch is not None:
-                # A different conversation population than the anchor would make
-                # the rate incomparable, so drop this metric and keep the anchor.
                 logger.warning(
                     "metric_population_mismatch",
                     provider=spec.provider,
@@ -545,7 +543,18 @@ async def _ingest_run(
                     metric=metric.value,
                     **mismatch,
                 )
-                continue
+                # Trim to the conversations both cover rather than discarding the
+                # metric for the whole run: one unmeasured call should cost that
+                # call, not the other forty-nine. Row-level parity with the anchor
+                # was never exact anyway — an UNKNOWN verdict writes no row — so a
+                # coverage gap is thinner data, not corrupt data. Duplicates are
+                # corrupt: one conversation would carry twice its weight.
+                if mismatch["duplicate_ids"]:
+                    continue
+                anchor_ids = {v.get("simulation_output_id") for v in anchor_values}
+                values = [v for v in values if v.get("simulation_output_id") in anchor_ids]
+                if not values:
+                    continue
             writable[metric] = values
         # Same mapper the rows are built from, so "would this write anything?"
         # cannot drift from what actually gets written.
