@@ -1224,7 +1224,95 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
         )
     assert status is RunStatus.SUCCEEDED  # latency intact
     rows = writer.record_results.await_args.args[0]
-    assert all(r.metric_type == Metric.V2V for r in rows)  # instruction skipped on mismatch
+    # s1 is unscored and s2 unmeasured, so only s0 is covered by both.
+    instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
+    assert len(instruction_rows) == 1
+    assert instruction_rows[0].audio_filename.endswith("s0")
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_extra_ids_are_trimmed_not_dropped() -> None:
+    # A call the anchor never measured (agent silent, so no turn gap) still gets a
+    # judge verdict. That one conversation is trimmed; the rest are kept.
+    writer = _stub_writer()
+    latency = [
+        {"simulation_output_id": "s0", "value": 0.5},
+        {"simulation_output_id": "s1", "value": 0.5},
+    ]
+    instruction = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"simulation_output_id": "s1", "value": "NO"},
+        {"simulation_output_id": "s2", "value": "YES"},  # unmeasured by the anchor
+    ]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=IDS,
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
+    assert len(instruction_rows) == 2
+    assert not any(r.audio_filename.endswith("s2") for r in instruction_rows)
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_drops_id_less_values_before_trimming() -> None:
+    # Two values with no simulation_output_id are not the same conversation, so
+    # neither may be matched against the other.
+    writer = _stub_writer()
+    latency: list[dict[str, Any]] = [
+        {"simulation_output_id": "s0", "value": 0.5},
+        {"value": 0.5},
+    ]
+    instruction: list[dict[str, Any]] = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"value": "NO"},
+    ]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=IDS,
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
+    assert len(instruction_rows) == 1
+    assert instruction_rows[0].audio_filename.endswith("s0")
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_duplicate_ids_still_drop_the_metric() -> None:
+    writer = _stub_writer()
+    latency = [
+        {"simulation_output_id": "s0", "value": 0.5},
+        {"simulation_output_id": "s1", "value": 0.5},
+    ]
+    instruction = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"simulation_output_id": "s0", "value": "NO"},
+        {"simulation_output_id": "s1", "value": "YES"},
+    ]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=IDS,
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert all(r.metric_type == Metric.V2V for r in rows)
 
 
 @pytest.mark.asyncio
