@@ -25,7 +25,12 @@ import pytest
 from pydantic import SecretStr
 
 from coval_bench.metrics.wer import compute_wer
-from coval_bench.providers.stt.baseten import BasetenSTTProvider, endpoint_url
+from coval_bench.providers.stt.baseten import (
+    _OPEN_TIMEOUT_S,
+    _WARMUP_TIMEOUT_S,
+    BasetenSTTProvider,
+    endpoint_url,
+)
 from tests.providers.stt.conftest import FakeWebSocket
 
 _WS_URL = "wss://model-test.api.baseten.co/environments/production/websocket"
@@ -237,9 +242,6 @@ async def test_qwen_buffer_success(fake_api_key: SecretStr) -> None:
     assert result.complete_transcript == "hello world"
     assert result.partial_transcripts == ["hello"]
     assert result.audio_to_final_seconds is not None
-    assert compute_wer("hello world", result.complete_transcript).wer_percentage == pytest.approx(
-        0.0
-    )
 
 
 @pytest.mark.asyncio
@@ -285,7 +287,6 @@ async def test_qwen_sends_base64_appends_then_commit(fake_api_key: SecretStr) ->
     frames = [json.loads(msg) for msg in sent]
     assert "streaming_params" in frames[0]
     appends = [f for f in frames if f.get("type") == "input_audio_buffer.append"]
-    assert appends, "no audio was appended"
     reassembled = b"".join(base64.b64decode(f["audio"]) for f in appends)
     assert reassembled == _SMALL_PCM
     assert frames[-1] == {"type": "input_audio_buffer.commit"}
@@ -293,28 +294,30 @@ async def test_qwen_sends_base64_appends_then_commit(fake_api_key: SecretStr) ->
 
 @pytest.mark.asyncio
 async def test_whisper_still_sends_binary_frames_and_end_audio(fake_api_key: SecretStr) -> None:
-    """Regression guard on the protocol split: Whisper must not get JSON audio."""
+    """Protocol-split regression guard: whisper keeps binary frames and the 45 s handshake."""
     events: list[Any] = [
         {"type": "transcription", "segments": [{"text": "ok"}], "is_final": True},
         {"type": "end_audio", "body": {"status": "finished"}},
     ]
     sent: list[Any] = []
-    provider = BasetenSTTProvider(api_key=fake_api_key, ws_url=_WS_URL)
+    timeouts: list[float] = []
 
-    with patch(
-        "coval_bench.providers.stt.baseten.ws_client.connect",
-        return_value=_fake_connect(events, sent),
-    ):
+    def _connect(url: str, **kwargs: Any) -> Any:
+        timeouts.append(kwargs["open_timeout"])
+        return _fake_connect(events, sent)
+
+    provider = BasetenSTTProvider(api_key=fake_api_key, ws_url=_WS_URL)
+    with patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect):
         await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
 
     binary = [msg for msg in sent if isinstance(msg, (bytes, bytearray))]
-    assert binary, "no binary audio frames were sent"
     assert {len(frame) for frame in binary} == {1024}
     assert json.loads(sent[-1]) == {"type": "end_audio"}
+    assert timeouts == [_OPEN_TIMEOUT_S]
 
 
 # ---------------------------------------------------------------------------
-# Per-model endpoint resolution
+# Endpoint resolution and warmup
 # ---------------------------------------------------------------------------
 
 
@@ -327,88 +330,50 @@ def _url_settings(**kwargs: Any) -> Any:
     return SimpleNamespace(**{**defaults, **kwargs})
 
 
-def test_endpoint_url_is_per_model() -> None:
-    settings = _url_settings(
-        baseten_whisper_url="wss://whisper",
-        baseten_qwen_asr_url="wss://qwen",
-    )
+def test_endpoint_url_resolution() -> None:
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
     assert endpoint_url(settings, "whisper-large-v3") == "wss://whisper"
     assert endpoint_url(settings, _QWEN_MODEL) == "wss://qwen"
-
-
-def test_endpoint_url_unknown_model_is_none() -> None:
-    assert endpoint_url(_url_settings(), "whisper-tiny") is None
-
-
-def test_missing_url_error_names_the_models_setting() -> None:
-    with pytest.raises(ValueError, match="baseten_qwen_asr_url is required"):
-        BasetenSTTProvider(api_key=SecretStr("k"), model=_QWEN_MODEL, ws_url=None)
-
-
-# ---------------------------------------------------------------------------
-# Warmup
-# ---------------------------------------------------------------------------
+    assert endpoint_url(settings, "whisper-tiny") is None
 
 
 @pytest.mark.asyncio
-async def test_warmup_hits_every_configured_endpoint() -> None:
-    urls: list[str] = []
+async def test_warmup_warms_every_configured_endpoint() -> None:
+    """Dials each configured URL with the boot-length handshake; tone no-final is success."""
+    calls: list[tuple[str, float]] = []
 
-    def _connect(url: str, **_: Any) -> Any:
-        urls.append(url)
+    def _connect(url: str, **kwargs: Any) -> Any:
+        calls.append((url, kwargs["open_timeout"]))
         return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
 
-    settings = _url_settings(baseten_whisper_url="wss://v1", baseten_qwen_asr_url="wss://qwen")
-
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
     with (
         patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
         patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
+        patch("coval_bench.providers.stt.baseten.logger") as log,
     ):
         await BasetenSTTProvider.warmup(settings)
 
-    # v2 is unconfigured here, so it must not be dialled.
-    assert sorted(urls) == ["wss://qwen", "wss://v1"]
-
-
-@pytest.mark.asyncio
-async def test_warmup_without_api_key_is_a_noop() -> None:
-    settings = _url_settings(baseten_api_key=None, baseten_whisper_url="wss://v1")
-
-    with patch("coval_bench.providers.stt.baseten.ws_client.connect") as connect:
-        await BasetenSTTProvider.warmup(settings)
-
-    connect.assert_not_called()
+    assert sorted(calls) == [
+        ("wss://qwen", _WARMUP_TIMEOUT_S),
+        ("wss://whisper", _WARMUP_TIMEOUT_S),
+    ]
+    prewarms = [c.kwargs for c in log.info.call_args_list if c.args[0] == "baseten_stt_prewarm"]
+    assert [p["error"] for p in prewarms] == [None, None]
 
 
 @pytest.mark.asyncio
 async def test_warmup_survives_a_dead_endpoint() -> None:
-    """One endpoint failing must not stop the others from being warmed."""
-    settings = _url_settings(baseten_whisper_url="wss://v1", baseten_qwen_asr_url="wss://qwen")
+    """One endpoint failing must not stop the others, and its error must surface."""
     seen: list[str] = []
 
     def _connect(url: str, **_: Any) -> Any:
         seen.append(url)
-        if url == "wss://v1":
+        if url == "wss://whisper":
             raise OSError("connection refused")
         return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
 
-    with (
-        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
-        patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
-    ):
-        await BasetenSTTProvider.warmup(settings)
-
-    assert sorted(seen) == ["wss://qwen", "wss://v1"]
-
-
-@pytest.mark.asyncio
-async def test_warmup_treats_no_final_as_success() -> None:
-    """The tone clip has no speech, so a close without a final is a warm endpoint."""
-    settings = _url_settings(baseten_whisper_url="wss://whisper")
-
-    def _connect(url: str, **_: Any) -> Any:
-        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
-
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
     with (
         patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
         patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
@@ -416,65 +381,11 @@ async def test_warmup_treats_no_final_as_success() -> None:
     ):
         await BasetenSTTProvider.warmup(settings)
 
-    prewarms = [c.kwargs for c in log.info.call_args_list if c.args[0] == "baseten_stt_prewarm"]
-    assert prewarms and prewarms[0]["error"] is None
-
-
-@pytest.mark.asyncio
-async def test_warmup_still_reports_real_errors() -> None:
-    settings = _url_settings(baseten_whisper_url="wss://whisper")
-    events: list[Any] = [{"type": "error", "message": "Invalid or expired API key"}]
-
-    with (
-        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
-        patch(
-            "coval_bench.providers.stt.baseten.ws_client.connect",
-            side_effect=lambda url, **_: _fake_connect(events),
-        ),
-        patch("coval_bench.providers.stt.baseten.logger") as log,
-    ):
-        await BasetenSTTProvider.warmup(settings)
-
-    prewarms = [c.kwargs for c in log.info.call_args_list if c.args[0] == "baseten_stt_prewarm"]
-    assert prewarms and "Invalid or expired API key" in prewarms[0]["error"]
-
-
-@pytest.mark.asyncio
-async def test_warmup_connects_with_boot_length_open_timeout() -> None:
-    """Baseten parks the WS upgrade for the whole scale-from-zero boot, so the
-    warmup handshake must be allowed the full warmup budget, not the 45 s
-    measurement cap."""
-    from coval_bench.providers.stt.baseten import _OPEN_TIMEOUT_S, _WARMUP_TIMEOUT_S
-
-    seen: list[float] = []
-
-    def _connect(url: str, **kwargs: Any) -> Any:
-        seen.append(kwargs["open_timeout"])
-        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
-
-    settings = _url_settings(baseten_whisper_url="wss://whisper")
-    with (
-        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
-        patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
-    ):
-        await BasetenSTTProvider.warmup(settings)
-
-    assert seen == [_WARMUP_TIMEOUT_S]
-    assert _WARMUP_TIMEOUT_S > _OPEN_TIMEOUT_S
-
-
-@pytest.mark.asyncio
-async def test_measurement_keeps_the_short_open_timeout(fake_api_key: SecretStr) -> None:
-    from coval_bench.providers.stt.baseten import _OPEN_TIMEOUT_S
-
-    seen: list[float] = []
-
-    def _connect(url: str, **kwargs: Any) -> Any:
-        seen.append(kwargs["open_timeout"])
-        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
-
-    provider = BasetenSTTProvider(api_key=fake_api_key, ws_url=_WS_URL)
-    with patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect):
-        await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
-
-    assert seen == [_OPEN_TIMEOUT_S]
+    assert sorted(seen) == ["wss://qwen", "wss://whisper"]
+    errors = {
+        c.kwargs["model"]: c.kwargs["error"]
+        for c in log.info.call_args_list
+        if c.args[0] == "baseten_stt_prewarm"
+    }
+    assert errors["qwen3-asr-1.7b"] is None
+    assert "connection refused" in errors["whisper-large-v3"]

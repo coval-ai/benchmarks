@@ -378,7 +378,6 @@ async def _run_stt_item(
             kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
-        provider = provider_cls(**kwargs)
 
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
@@ -403,6 +402,9 @@ async def _run_stt_item(
         transcription_result = None
         item_error: str | None = None
         try:
+            # Inside the try so a config error (e.g. unset endpoint URL) lands
+            # as error rows instead of vanishing into the gather.
+            provider = provider_cls(**kwargs)
             async with asyncio.timeout(_STT_TIMEOUT_S):
                 transcription_result = await with_retry(
                     lambda: provider.measure_ttft(
@@ -759,11 +761,11 @@ async def _run_tts_item(
             return []
 
         transcript: str = item.transcript
-        provider = provider_cls(settings=settings, model=entry.model, voice=voice)
 
         tts_result = None
         item_error: str | None = None
         try:
+            provider = provider_cls(settings=settings, model=entry.model, voice=voice)
             async with asyncio.timeout(_TTS_TIMEOUT_S):
                 tts_result = await with_retry(
                     lambda: provider.synthesize(transcript),

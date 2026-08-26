@@ -105,12 +105,7 @@ async def _run_model(
 
 
 async def _warmup(models: list[RegisteredModel], settings: Settings) -> None:
-    """Run ``Provider.warmup()`` for the selected models, as ``run_benchmarks`` does.
-
-    Without this a probe charges cold-start to whichever item ran first, which
-    is exactly the number a probe of a single-replica dedicated endpoint is
-    trying to measure. Failures are logged, never fatal.
-    """
+    """Run ``Provider.warmup()`` for the selected models, as ``run_benchmarks`` does."""
     stt_providers = _get_stt_providers()
     tts_providers = _get_tts_providers()
     classes: set[Any] = set()
@@ -155,8 +150,7 @@ async def run_probe(
             results=results,
         )
     finally:
-        # Warmup may prime the shared HTTP pools; mirror run_benchmarks so a
-        # probe never leaves clients bound to this (about to close) event loop.
+        # Warmup can prime the shared HTTP pools.
         await _close_http_clients()
     return results
 

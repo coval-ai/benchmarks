@@ -53,28 +53,17 @@ _FRAME_SAMPLES = 512
 _FRAME_BYTES = _FRAME_SAMPLES * 2
 _SAMPLE_RATE = 16000
 _BYTE_RATE = _SAMPLE_RATE * 2  # 16 kHz mono 16-bit
-# input_audio_buffer.append carries 100 ms per message.
 _APPEND_BYTES = int(_SAMPLE_RATE * 0.1) * 2
 _MAX_WS_SIZE = 16 * 1024 * 1024
-# Measurement handshake cap. By measurement time warmup has already booted the
-# replica, so 45 s is a degraded-endpoint tripwire; warmup itself connects with
-# its own budget-length open timeout, since Baseten parks the upgrade request
-# for the whole scale-from-zero boot.
+# Measurement handshake cap; warmup connects with its own budget-length timeout.
 _OPEN_TIMEOUT_S = 45
-# Partial cadence. Held identical across every Baseten endpoint: TTFS measures
-# time to the first partial, so a per-endpoint cadence would show up as a
-# latency difference that is really just configuration.
+# Identical across endpoints so latency deltas are model, not configuration.
 _PARTIAL_INTERVAL_S = 0.3
-# Warmup streams this much synthetic audio to wake a scaled-down replica.
 _WARMUP_SECONDS = 1.0
-# A stream the server closes without ever sending a final. During measurement
-# this is a failure; during warmup it is the expected outcome for the tone clip
-# (no speech for the VAD to finalize), so warmup maps it back to success.
+# A measurement failure; warmup maps it to success (the tone has no speech).
 _NO_FINAL_ERROR = "Baseten stream ended before a final transcription was received"
 
-# Baseten runs these deployments on demand-scaled autoscaling with no schedule:
-# our warmup request IS the scale-up trigger, so the budget must outlast a full
-# scale-from-zero boot (~166 s measured) with slack for slow provisioning.
+# The warmup is the scale-up trigger; must outlast a boot (~253 s observed).
 _WARMUP_TIMEOUT_S = 360
 
 
@@ -111,7 +100,7 @@ def endpoint_url(settings: Settings, model: str) -> str | None:
 def _warmup_pcm() -> bytes:
     """A quiet tone, not silence — silence can pass under VAD without inference."""
     n = int(_SAMPLE_RATE * _WARMUP_SECONDS)
-    amplitude = 3000  # ~ -21 dBFS: loud enough to trip VAD, quiet enough to be junk
+    amplitude = 3000
     return struct.pack(
         f"<{n}h",
         *(int(amplitude * math.sin(2 * math.pi * 220 * i / _SAMPLE_RATE)) for i in range(n)),
@@ -155,13 +144,7 @@ class BasetenSTTProvider(STTProvider):
 
     @classmethod
     async def warmup(cls, settings: Settings) -> None:
-        """Stream a throwaway clip to every configured endpoint, concurrently.
-
-        Baseten pins these deployments at one replica and asked us to warm them
-        before each test, since they plan to drop their own warmup when
-        autoscaling moves off GitHub Actions. A cold replica would otherwise
-        charge its load time to whichever dataset item drew it first.
-        """
+        """Wake and warm every configured endpoint concurrently; never fatal."""
         api_key = settings.baseten_api_key
         if api_key is None or not api_key.get_secret_value().strip():
             return
@@ -226,7 +209,6 @@ class BasetenSTTProvider(STTProvider):
                 max_size=_MAX_WS_SIZE,
                 open_timeout=self._open_timeout_s,
             ) as ws:
-                # First message configures the stream, on both protocols.
                 await ws.send(
                     json.dumps(
                         {

@@ -47,6 +47,7 @@ from coval_bench.registries import MODEL_REGISTRY, ModelStatus, RegisteredModel,
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
+    _run_stt_item,
     _run_tts_item,
     _stt_silent_failure,
     run_benchmarks,
@@ -3285,3 +3286,37 @@ async def test_tts_cancellation_propagates_after_audio_cleanup(
 
     assert not audio_file.exists()
     writer.record_results.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stt_missing_endpoint_url_yields_error_rows(
+    audio_file: Path, settings: Settings
+) -> None:
+    """A provider config hole must land as FAILED rows, not vanish into the gather."""
+    from types import SimpleNamespace
+
+    entry = RegisteredModel(
+        benchmark=Benchmark.STT,
+        provider="baseten",
+        model="qwen3-asr-1.7b",
+        source=Source.DEDICATED_INFERENCE,
+        status=ModelStatus.EARLY_ACCESS,
+    )
+    item = SimpleNamespace(
+        path=audio_file,
+        transcript="hello",
+        duration_sec=0.032,
+        speech_end_offset_ms=None,
+        sample_id=None,
+    )
+    cfg = settings.model_copy(
+        update={"baseten_api_key": SecretStr("test-key"), "baseten_qwen_asr_url": None}
+    )
+
+    rows = await _run_stt_item(
+        entry=entry, item=item, run_id=0, sem=asyncio.Semaphore(1), settings=cfg, writer=None
+    )
+
+    assert rows
+    assert all(r.status is ResultStatus.FAILED for r in rows)
+    assert "baseten_qwen_asr_url is required" in (rows[0].error or "")

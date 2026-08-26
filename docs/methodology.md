@@ -161,10 +161,13 @@ non-persisting probe (`coval-bench probe`) warms the same way, so its numbers
 are comparable to a scheduled run's.
 
 Dedicated endpoints warm differently: rather than a connection, what needs
-warming is the replica behind it. The Baseten STT provider streams a one-second
-synthetic clip to every configured endpoint before t0, because those
-deployments are pinned at a single replica whose load time would otherwise be
-charged to whichever dataset item happened to draw it first.
+warming is the replica behind it. Baseten scales these deployments on demand,
+so the warmup request is also the scale-up trigger. The STT provider streams a
+one-second synthetic clip to every configured endpoint and the TTS provider
+synthesizes (then deletes) a throwaway phrase, each connecting with a
+six-minute handshake budget so a scale-from-zero boot (~3-4 minutes observed)
+completes before t0. Measurement traffic keeps the tighter 45-second handshake
+cap as a degraded-endpoint tripwire.
 
 ### HTTP/2 for the HTTP TTS cohort
 

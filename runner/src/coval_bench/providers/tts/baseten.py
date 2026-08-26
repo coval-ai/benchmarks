@@ -29,10 +29,9 @@ _VALID_MODELS = ("qwen3-tts-1.7b",)
 _VALID_VOICES = ("lisa", "jim")
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
-# Cold replicas exceed the 10 s websockets default for the handshake.
+# Measurement handshake cap; warmup connects with its own budget-length timeout.
 _OPEN_TIMEOUT_S = 45
-# Our warmup request is the scale-up trigger for a demand-scaled deployment;
-# the budget must outlast a full boot (~166 s measured) with provisioning slack.
+# The warmup is the scale-up trigger; must outlast a boot (~253 s observed).
 _WARMUP_TIMEOUT_S = 360
 
 
@@ -73,12 +72,7 @@ class BasetenTTSProvider(TTSProvider):
 
     @classmethod
     async def warmup(cls, settings: Settings) -> None:
-        """Synthesize a throwaway phrase so the single pinned replica is hot.
-
-        Mirrors the Baseten STT warmup: Baseten is retiring its own scheduled
-        warmup traffic and asked us to warm endpoints before testing. The audio
-        artifact is deleted here — the orchestrator only cleans up items it ran.
-        """
+        """Wake and warm the endpoint; deletes its own artifact; never fatal."""
         api_key = settings.baseten_api_key
         if api_key is None or not api_key.get_secret_value().strip():
             return
