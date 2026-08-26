@@ -37,8 +37,6 @@ def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
 
 
 _SUCCESS_EVENTS: list[Any] = [
-    {"type": "transcription.delta", "delta": "hello"},
-    {"type": "transcription.delta", "delta": "hello wor"},
     {
         "type": "transcription.completed",
         "item_id": "item-1",
@@ -79,7 +77,7 @@ async def test_zoom_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> 
     assert result.error is None
     assert result.ttft_seconds is not None
     assert result.ttft_seconds >= 0
-    assert result.first_token_content == "hello"  # noqa: S105 - transcript fixture text
+    assert result.first_token_content == "hello world"  # noqa: S105 - transcript fixture text
     assert result.complete_transcript == "hello world how are you"
     assert result.word_count == 5
     assert result.audio_to_final_seconds is not None
@@ -90,9 +88,9 @@ async def test_zoom_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> 
 
 
 @pytest.mark.asyncio
-async def test_zoom_deltas_stay_out_of_the_transcript(
-    fake_api_key: SecretStr, audio_pcm_bytes: bytes
-) -> None:
+async def test_zoom_ignores_delta_events(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+    """Deltas never arrive under the working config; if one does, it must not
+    count as a first token — a set TTFT would mask a missing-final failure."""
     events: list[Any] = [
         {"type": "transcription.delta", "delta": "wrong guess"},
         {"type": "transcription.completed", "transcript": "hello world"},
@@ -114,8 +112,8 @@ async def test_zoom_deltas_stay_out_of_the_transcript(
 
     assert result.error is None
     assert result.complete_transcript == "hello world"
-    assert result.partial_transcripts == ["wrong guess"]
-    assert result.first_token_content == "wrong guess"  # noqa: S105 - transcript fixture text
+    assert result.partial_transcripts == []
+    assert result.first_token_content == "hello world"  # noqa: S105 - transcript fixture text
 
 
 @pytest.mark.asyncio
@@ -146,7 +144,12 @@ async def test_zoom_non_fatal_error_does_not_end_the_run(
 
 
 @pytest.mark.asyncio
-async def test_zoom_fatal_error_event(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
+async def test_zoom_fatal_error_stops_the_send(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """A fatal error closes the socket, so the sender stops instead of pacing
+    out the rest of the clip; the fatal message survives the send failure."""
+    sent: list[Any] = []
     events: list[Any] = [
         {"type": "error", "error": {"code": "unauthorized", "message": "bad token", "fatal": True}}
     ]
@@ -154,7 +157,7 @@ async def test_zoom_fatal_error_event(fake_api_key: SecretStr, audio_pcm_bytes: 
 
     with patch(
         "coval_bench.providers.stt.zoom.ws_client.connect",
-        return_value=_fake_connect(events),
+        return_value=_fake_connect(events, sent),
     ):
         result = await provider.measure_ttft(
             audio_data=audio_pcm_bytes,
@@ -166,6 +169,7 @@ async def test_zoom_fatal_error_event(fake_api_key: SecretStr, audio_pcm_bytes: 
 
     assert result.error == "bad token"
     assert result.complete_transcript is None
+    assert json.dumps({"type": "session.close"}) not in sent
 
 
 def test_zoom_requires_both_credentials(fake_api_key: SecretStr) -> None:

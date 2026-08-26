@@ -84,6 +84,8 @@ class FakeWebSocket:
         self._events.clear()
 
     async def send(self, msg: bytes | str) -> None:
+        if self._closed.is_set():
+            raise ConnectionError("send on a closed FakeWebSocket")
         self._sent.append(msg)
         if self._on_send is not None:
             self._on_send(msg)

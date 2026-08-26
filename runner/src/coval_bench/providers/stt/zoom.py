@@ -184,19 +184,19 @@ class ZoomSTTProvider(STTProvider):
                     code = error.get("code")
                     result.error = str(error.get("message") or f"Zoom Scribe error (code {code})")
                     logger.warning("zoom_stt_error", provider="zoom", model=self._model, msg=msg)
+                    # Unblocks the send task: its next frame raises ConnectionClosed.
+                    await ws.close()
                     break
 
-                if msg_type == "transcription.delta":
-                    text = str(msg.get("delta", "")).strip()
-                    if text:
-                        self._mark_first_token(result, text, now)
-                        result.partial_transcripts.append(text)
-
-                elif msg_type == "transcription.completed":
+                if msg_type == "transcription.completed":
                     final_event.set()
                     text = str(msg.get("transcript", "")).strip()
                     if text:
-                        self._mark_first_token(result, text, now)
+                        if result.ttft_seconds is None and result.audio_start_time is not None:
+                            result.ttft_seconds = now - result.audio_start_time
+                            result.first_token_content = (
+                                text[:30] + "..." if len(text) > 30 else text
+                            )
                         final_parts.append(text)
                         if result.audio_start_time is not None:
                             result.audio_to_final_seconds = now - result.audio_start_time
@@ -215,9 +215,3 @@ class ZoomSTTProvider(STTProvider):
         if result.complete_transcript:
             result.transcript_length = len(result.complete_transcript)
             result.word_count = len(result.complete_transcript.split())
-
-    @staticmethod
-    def _mark_first_token(result: TranscriptionResult, text: str, now: float) -> None:
-        if result.ttft_seconds is None and result.audio_start_time is not None:
-            result.ttft_seconds = now - result.audio_start_time
-            result.first_token_content = text[:30] + "..." if len(text) > 30 else text
