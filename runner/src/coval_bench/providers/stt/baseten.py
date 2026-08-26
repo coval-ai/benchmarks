@@ -1,20 +1,40 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Baseten dedicated-endpoint STT provider (Whisper Large V3 over WebSocket).
+"""Baseten dedicated-endpoint STT provider (Whisper Large V3, Qwen3-ASR).
 
-The server runs a Silero VAD that consumes audio in fixed 512-sample frames
-(32 ms @ 16 kHz). Raw PCM must be sent as binary frames of exactly 512 samples
-(1024 bytes); other frame sizes are not processed correctly. The endpoint URL
-embeds a private model id, so it is injected from settings rather than hardcoded.
+Baseten fronts several dedicated deployments under one provider name, and they
+do not all speak the same wire protocol:
+
+``binary``
+    Whisper deployments. Raw PCM as binary frames of exactly 512 samples
+    (1024 bytes) — the Silero VAD frame size; other frame sizes are not
+    processed correctly — finalized with ``{"type": "end_audio"}``. The server
+    answers ``end_audio`` twice ("acknowledged", then "finished") and never
+    closes the session itself.
+
+``buffer``
+    Qwen3-ASR deployments. Binary frames are rejected; PCM goes base64-encoded
+    inside ``input_audio_buffer.append`` messages, finalized with
+    ``input_audio_buffer.commit``. The last transcription carries
+    ``is_end_of_audio_flush``; no ``end_audio`` message is ever sent.
+
+Both protocols open with the same session frame and return the same
+``transcription`` message shape. Endpoint URLs embed private, pre-launch model
+ids, so they are injected from settings rather than hardcoded.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
+import math
+import struct
 import time
-from typing import Any
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 import structlog
 import websockets.asyncio.client as ws_client
@@ -23,21 +43,82 @@ from pydantic import SecretStr
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
 
+if TYPE_CHECKING:
+    from coval_bench.config import Settings
+
 logger = structlog.get_logger(__name__)
 
 # Silero VAD frame: 512 samples * 2 bytes = 1024 bytes; other sizes are rejected.
 _FRAME_SAMPLES = 512
 _FRAME_BYTES = _FRAME_SAMPLES * 2
-_BYTE_RATE = 16000 * 2  # 16 kHz mono 16-bit
+_SAMPLE_RATE = 16000
+_BYTE_RATE = _SAMPLE_RATE * 2  # 16 kHz mono 16-bit
+# input_audio_buffer.append carries 100 ms per message.
+_APPEND_BYTES = int(_SAMPLE_RATE * 0.1) * 2
 _MAX_WS_SIZE = 16 * 1024 * 1024
 # Cold replicas exceed the 10 s websockets default for the handshake.
 _OPEN_TIMEOUT_S = 45
+# Partial cadence. Held identical across every Baseten endpoint: TTFS measures
+# time to the first partial, so a per-endpoint cadence would show up as a
+# latency difference that is really just configuration.
+_PARTIAL_INTERVAL_S = 0.3
+# Warmup streams this much synthetic audio to wake a scaled-down replica.
+_WARMUP_SECONDS = 1.0
+# A stream the server closes without ever sending a final. During measurement
+# this is a failure; during warmup it is the expected outcome for the tone clip
+# (no speech for the VAD to finalize), so warmup maps it back to success.
+_NO_FINAL_ERROR = "Baseten stream ended before a final transcription was received"
+
+# Baseten runs these deployments on demand-scaled autoscaling with no schedule:
+# our warmup request IS the scale-up trigger, so the budget must outlast a full
+# scale-from-zero boot (~166 s measured) with slack for slow provisioning.
+_WARMUP_TIMEOUT_S = 360
+
+
+class _Protocol(StrEnum):
+    """How a deployment wants its audio framed."""
+
+    BINARY = "binary"
+    BUFFER = "buffer"
+
+
+@dataclass(frozen=True)
+class _Endpoint:
+    """Where a model is deployed and how to talk to it."""
+
+    url_attr: str  # Settings attribute holding the wss:// URL
+    protocol: _Protocol
+
+
+_ENDPOINTS: dict[str, _Endpoint] = {
+    "whisper-large-v3": _Endpoint("baseten_whisper_url", _Protocol.BINARY),
+    "qwen3-asr-1.7b": _Endpoint("baseten_qwen_asr_url", _Protocol.BUFFER),
+}
+
+
+def endpoint_url(settings: Settings, model: str) -> str | None:
+    """The configured WebSocket URL for *model*, or None if unknown/unset."""
+    endpoint = _ENDPOINTS.get(model)
+    if endpoint is None:
+        return None
+    url: str | None = getattr(settings, endpoint.url_attr, None)
+    return url
+
+
+def _warmup_pcm() -> bytes:
+    """A quiet tone, not silence — silence can pass under VAD without inference."""
+    n = int(_SAMPLE_RATE * _WARMUP_SECONDS)
+    amplitude = 3000  # ~ -21 dBFS: loud enough to trip VAD, quiet enough to be junk
+    return struct.pack(
+        f"<{n}h",
+        *(int(amplitude * math.sin(2 * math.pi * 220 * i / _SAMPLE_RATE)) for i in range(n)),
+    )
 
 
 class BasetenSTTProvider(STTProvider):
-    """Baseten streaming STT provider (Whisper Large V3)."""
+    """Baseten streaming STT provider (Whisper Large V3, Qwen3-ASR)."""
 
-    _VALID_MODELS = frozenset({"whisper-large-v3"})
+    _VALID_MODELS = frozenset(_ENDPOINTS)
 
     def __init__(
         self,
@@ -51,11 +132,13 @@ class BasetenSTTProvider(STTProvider):
             )
         if api_key is None or not api_key.get_secret_value().strip():
             raise ValueError("baseten_api_key is required for the Baseten STT provider")
+        endpoint = _ENDPOINTS[model]
         if not ws_url:
-            raise ValueError("baseten_whisper_url is required for the Baseten STT provider")
+            raise ValueError(f"{endpoint.url_attr} is required for the Baseten STT provider")
         self._api_key = api_key
         self._model = model
         self._ws_url = ws_url
+        self._protocol = endpoint.protocol
 
     @property
     def name(self) -> str:
@@ -64,6 +147,48 @@ class BasetenSTTProvider(STTProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Stream a throwaway clip to every configured endpoint, concurrently.
+
+        Baseten pins these deployments at one replica and asked us to warm them
+        before each test, since they plan to drop their own warmup when
+        autoscaling moves off GitHub Actions. A cold replica would otherwise
+        charge its load time to whichever dataset item drew it first.
+        """
+        api_key = settings.baseten_api_key
+        if api_key is None or not api_key.get_secret_value().strip():
+            return
+        pcm = _warmup_pcm()
+
+        async def _warm(model: str, url: str) -> None:
+            provider = cls(api_key=api_key, model=model, ws_url=url)
+            t0 = time.monotonic()
+            error: str | None = None
+            try:
+                async with asyncio.timeout(_WARMUP_TIMEOUT_S):
+                    result = await provider.measure_ttft(pcm, 1, 2, _SAMPLE_RATE)
+                error = None if result.error == _NO_FINAL_ERROR else result.error
+            except TimeoutError:
+                error = f"warmup timed out after {_WARMUP_TIMEOUT_S}s; endpoint still not up"
+            logger.info(
+                "baseten_stt_prewarm",
+                provider="baseten",
+                model=model,
+                warmup_ms=round((time.monotonic() - t0) * 1000, 1),
+                error=error,
+            )
+
+        targets = [
+            (model, url)
+            for model in _ENDPOINTS
+            if (url := endpoint_url(settings, model)) is not None
+        ]
+        if targets:
+            await asyncio.gather(
+                *(_warm(model, url) for model, url in targets), return_exceptions=True
+            )
 
     async def measure_ttft(
         self,
@@ -74,7 +199,7 @@ class BasetenSTTProvider(STTProvider):
         realtime_resolution: float = 0.1,
     ) -> TranscriptionResult:
         result = TranscriptionResult(provider=self.name)
-        if sample_rate != 16000:
+        if sample_rate != _SAMPLE_RATE:
             result.error = f"Baseten requires 16 kHz PCM input; got {sample_rate} Hz"
             return result
         if channels != 1 or sample_width != 2:
@@ -94,13 +219,13 @@ class BasetenSTTProvider(STTProvider):
                 max_size=_MAX_WS_SIZE,
                 open_timeout=_OPEN_TIMEOUT_S,
             ) as ws:
-                # First message configures the stream: partials at a 300 ms cadence.
+                # First message configures the stream, on both protocols.
                 await ws.send(
                     json.dumps(
                         {
                             "streaming_params": {
                                 "enable_partial_transcripts": True,
-                                "partial_transcript_interval_s": 0.3,
+                                "partial_transcript_interval_s": _PARTIAL_INTERVAL_S,
                             }
                         }
                     )
@@ -120,9 +245,7 @@ class BasetenSTTProvider(STTProvider):
                             result.error = str(outcome)
                             break
                     else:
-                        result.error = (
-                            "Baseten stream ended before a final transcription was received"
-                        )
+                        result.error = _NO_FINAL_ERROR
 
         except Exception as exc:
             logger.warning(
@@ -139,18 +262,31 @@ class BasetenSTTProvider(STTProvider):
         audio_data: bytes,
         result: TranscriptionResult,
     ) -> None:
+        binary = self._protocol is _Protocol.BINARY
+        chunk_bytes = _FRAME_BYTES if binary else _APPEND_BYTES
         try:
-            async for chunk, start in paced_chunks(audio_data, _FRAME_BYTES, _BYTE_RATE):
+            async for chunk, start in paced_chunks(audio_data, chunk_bytes, _BYTE_RATE):
                 # Stop early if _receive already recorded a protocol/auth error.
                 if result.error is not None:
                     break
                 result.audio_start_time = start
-                frame = chunk
-                if len(frame) < _FRAME_BYTES:  # pad the final short frame to 512 samples
-                    frame += b"\x00" * (_FRAME_BYTES - len(frame))
-                await ws.send(frame)
+                if binary:
+                    frame = chunk
+                    if len(frame) < _FRAME_BYTES:  # pad the final short frame to 512 samples
+                        frame += b"\x00" * (_FRAME_BYTES - len(frame))
+                    await ws.send(frame)
+                else:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "type": "input_audio_buffer.append",
+                                "audio": base64.b64encode(chunk).decode(),
+                            }
+                        )
+                    )
             # Signal end of audio so the server flushes the final transcript.
-            await ws.send(json.dumps({"type": "end_audio"}))
+            terminator = "end_audio" if binary else "input_audio_buffer.commit"
+            await ws.send(json.dumps({"type": terminator}))
         except Exception as exc:
             logger.warning(
                 "baseten_send_error", provider="baseten", model=self._model, exc_info=exc
@@ -177,7 +313,7 @@ class BasetenSTTProvider(STTProvider):
                         break
                     continue
                 if msg_type == "error":
-                    result.error = str(msg.get("message") or msg)
+                    result.error = str(msg.get("message") or msg.get("body") or msg)
                     logger.warning(
                         "baseten_stt_error", provider="baseten", model=self._model, msg=msg
                     )
@@ -186,19 +322,21 @@ class BasetenSTTProvider(STTProvider):
                     continue
 
                 text = " ".join(str(seg.get("text", "")) for seg in msg.get("segments", [])).strip()
-                if not text:
-                    continue
+                if text:
+                    if result.ttft_seconds is None and result.audio_start_time is not None:
+                        result.ttft_seconds = now - result.audio_start_time
+                        result.first_token_content = text[:30] + "..." if len(text) > 30 else text
 
-                if result.ttft_seconds is None and result.audio_start_time is not None:
-                    result.ttft_seconds = now - result.audio_start_time
-                    result.first_token_content = text[:30] + "..." if len(text) > 30 else text
+                    if msg.get("is_final"):
+                        final_parts.append(text)
+                        if result.audio_start_time is not None:
+                            result.audio_to_final_seconds = now - result.audio_start_time
+                    else:
+                        result.partial_transcripts.append(text)
 
-                if msg.get("is_final"):
-                    final_parts.append(text)
-                    if result.audio_start_time is not None:
-                        result.audio_to_final_seconds = now - result.audio_start_time
-                else:
-                    result.partial_transcripts.append(text)
+                # The buffer protocol's end-of-stream marker; it sends no end_audio.
+                if msg.get("is_end_of_audio_flush"):
+                    break
 
         except Exception as exc:
             logger.warning(

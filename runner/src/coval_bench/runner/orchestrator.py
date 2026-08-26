@@ -288,6 +288,12 @@ def _get_tts_providers() -> dict[str, Any]:
     return mod.TTS_PROVIDERS  # type: ignore[no-any-return]
 
 
+def _get_baseten_stt_url() -> Any:
+    """Resolve the Baseten per-model endpoint lookup at call time (lazy import)."""
+    mod = importlib.import_module("coval_bench.providers.stt.baseten")
+    return mod.endpoint_url
+
+
 def _get_load_dataset() -> Any:  # noqa: ANN401
     """Resolve ``load_dataset`` at call time (lazy import)."""
     mod = importlib.import_module("coval_bench.datasets")
@@ -369,7 +375,7 @@ async def _run_stt_item(
         if entry.provider == "google":
             kwargs["project_id"] = settings.google_project_id
         elif entry.provider == "baseten":
-            kwargs["ws_url"] = settings.baseten_whisper_url
+            kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
         provider = provider_cls(**kwargs)

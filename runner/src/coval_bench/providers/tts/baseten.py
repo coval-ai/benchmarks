@@ -11,6 +11,7 @@ private model id, so it is read from settings rather than hardcoded.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -30,6 +31,9 @@ _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
 # Cold replicas exceed the 10 s websockets default for the handshake.
 _OPEN_TIMEOUT_S = 45
+# Our warmup request is the scale-up trigger for a demand-scaled deployment;
+# the budget must outlast a full boot (~166 s measured) with provisioning slack.
+_WARMUP_TIMEOUT_S = 360
 
 
 class BasetenTTSProvider(TTSProvider):
@@ -59,6 +63,38 @@ class BasetenTTSProvider(TTSProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Synthesize a throwaway phrase so the single pinned replica is hot.
+
+        Mirrors the Baseten STT warmup: Baseten is retiring its own scheduled
+        warmup traffic and asked us to warm endpoints before testing. The audio
+        artifact is deleted here — the orchestrator only cleans up items it ran.
+        """
+        api_key = settings.baseten_api_key
+        if api_key is None or not api_key.get_secret_value().strip():
+            return
+        if not settings.baseten_qwen_url:
+            return
+        provider = cls(settings, _VALID_MODELS[0], _VALID_VOICES[0])
+        t0 = time.monotonic()
+        error: str | None = None
+        try:
+            async with asyncio.timeout(_WARMUP_TIMEOUT_S):
+                result = await provider.synthesize("Warm up.")
+            if result.audio_path is not None:
+                result.audio_path.unlink(missing_ok=True)
+            error = result.error
+        except TimeoutError:
+            error = f"warmup timed out after {_WARMUP_TIMEOUT_S}s; endpoint still not up"
+        logger.info(
+            "baseten_tts_prewarm",
+            provider="baseten",
+            model=_VALID_MODELS[0],
+            warmup_ms=round((time.monotonic() - t0) * 1000, 1),
+            error=error,
+        )
 
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []

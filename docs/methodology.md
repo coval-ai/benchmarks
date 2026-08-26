@@ -156,7 +156,15 @@ but the rule is the same.
 HTTP-pool warming lives in `runner/src/coval_bench/providers/_http_session.py`.
 Providers opt in by overriding `Provider.warmup()` in `providers/base.py`; the
 orchestrator invokes warmup on every enabled provider class before the
-dataset loop runs and tears down the pool in the run's `finally` block.
+dataset loop runs and tears down the pool in the run's `finally` block. The
+non-persisting probe (`coval-bench probe`) warms the same way, so its numbers
+are comparable to a scheduled run's.
+
+Dedicated endpoints warm differently: rather than a connection, what needs
+warming is the replica behind it. The Baseten STT provider streams a one-second
+synthetic clip to every configured endpoint before t0, because those
+deployments are pinned at a single replica whose load time would otherwise be
+charged to whichever dataset item happened to draw it first.
 
 ### HTTP/2 for the HTTP TTS cohort
 

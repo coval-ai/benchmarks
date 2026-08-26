@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
+from coval_bench.providers.tts import _common
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 
 from .conftest import FakeWebSocket, make_pcm_bytes
@@ -169,3 +171,42 @@ def test_baseten_tts_provider_name(baseten_settings: Settings) -> None:
     provider = BasetenTTSProvider(baseten_settings, model="qwen3-tts-1.7b", voice="lisa")
     assert provider.name == "baseten-qwen3-tts-1.7b"
     assert provider.model == "qwen3-tts-1.7b"
+
+
+@pytest.mark.asyncio
+async def test_warmup_synthesizes_and_cleans_up(baseten_settings: Settings) -> None:
+    """Warmup hits the endpoint once and leaves no audio artifact behind."""
+    ws = FakeWebSocket(_done_events([make_pcm_bytes(240)]))
+    made: list[Path] = []
+    real_write = _common._write_wav
+
+    def _tracking_write(pcm: bytes, sample_rate: int) -> Path:
+        path = real_write(pcm, sample_rate)
+        made.append(path)
+        return path
+
+    with (
+        patch("coval_bench.providers.tts.baseten.ws_client.connect", return_value=ws),
+        patch.object(_common, "_write_wav", _tracking_write),
+    ):
+        await BasetenTTSProvider.warmup(baseten_settings)
+
+    assert made, "warmup never synthesized"
+    assert not made[0].exists(), "warmup left its audio artifact on disk"
+
+
+@pytest.mark.asyncio
+async def test_warmup_without_key_or_url_is_a_noop() -> None:
+    for settings in (_settings(baseten_api_key=None), _settings(baseten_qwen_url=None)):
+        with patch("coval_bench.providers.tts.baseten.ws_client.connect") as connect:
+            await BasetenTTSProvider.warmup(settings)
+        connect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_warmup_error_result_does_not_raise(baseten_settings: Settings) -> None:
+    """A refused endpoint surfaces in the result, and warmup stays non-fatal."""
+    ws = FakeWebSocket([json.dumps({"type": "error", "message": "no replicas"})])
+
+    with patch("coval_bench.providers.tts.baseten.ws_client.connect", return_value=ws):
+        await BasetenTTSProvider.warmup(baseten_settings)
