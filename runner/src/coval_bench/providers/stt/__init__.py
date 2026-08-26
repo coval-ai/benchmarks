@@ -34,6 +34,7 @@ from coval_bench.providers.stt.soniox import SonioxSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
 from coval_bench.providers.stt.together import TogetherSTTProvider
 from coval_bench.providers.stt.xai import XaiSTTProvider
+from coval_bench.providers.stt.zoom import ZoomSTTProvider
 
 # Google is optional — gated on the ``google-stt`` extra
 try:
@@ -64,6 +65,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "speechmatics": SpeechmaticsProvider,
     "together": TogetherSTTProvider,
     "xai": XaiSTTProvider,
+    "zoom": ZoomSTTProvider,
 }
 
 if GoogleSTTProvider is not None:
@@ -91,5 +93,6 @@ __all__ = [
     "SpeechmaticsProvider",
     "TogetherSTTProvider",
     "XaiSTTProvider",
+    "ZoomSTTProvider",
     "GoogleSTTProvider",
 ]

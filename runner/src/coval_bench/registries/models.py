@@ -490,6 +490,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         status=_RETIRED,
     ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="zoom",
+        model="scribe",
+        tags=(_MULTI, _VAD),
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
     #######
     # TTS #
     #######

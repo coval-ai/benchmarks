@@ -378,6 +378,8 @@ async def _run_stt_item(
             kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
+        elif entry.provider == "zoom":
+            kwargs["api_secret"] = settings.zoom_api_secret
 
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
