@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "google",
+    "model": "chirp_2",
+    "unit": "per_minute",
+    "price_usd": "0.016",
+    "effective_from": "2026-08-24",
+    "source_url": "https://cloud.google.com/speech-to-text/pricing",
+    "notes": "Speech-to-Text V2 Recognition standard rate, first volume tier (0-500k min/month); V2 prices all standard models, Chirp included, at this one rate. Volume tiers drop to $0.004/min above 2M."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "google",
+    "model": "chirp_3",
+    "unit": "per_minute",
+    "price_usd": "0.016",
+    "effective_from": "2026-08-24",
+    "source_url": "https://cloud.google.com/speech-to-text/pricing",
+    "notes": "Speech-to-Text V2 Recognition standard rate, first volume tier (0-500k min/month); same single V2 SKU as chirp_2."
+  }
+]

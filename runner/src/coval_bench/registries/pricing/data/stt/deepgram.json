@@ -1,0 +1,32 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "deepgram",
+    "model": "nova-3",
+    "unit": "per_minute",
+    "price_usd": "0.0048",
+    "effective_from": "2026-08-24",
+    "source_url": "https://deepgram.com/pricing",
+    "notes": "Pay As You Go monolingual (English) streaming rate, listed as a limited-time promotional price; regular price $0.0077/min. Multilingual streaming is $0.0058/min (regular $0.0092)."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "deepgram",
+    "model": "flux-general-en",
+    "unit": "per_minute",
+    "price_usd": "0.0065",
+    "effective_from": "2026-08-24",
+    "source_url": "https://deepgram.com/pricing",
+    "notes": "Pay As You Go streaming rate, listed as a limited-time promotional price; regular price $0.0077/min."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "deepgram",
+    "model": "flux-general-multi",
+    "unit": "per_minute",
+    "price_usd": "0.0078",
+    "effective_from": "2026-08-24",
+    "source_url": "https://deepgram.com/pricing",
+    "notes": "Pay As You Go streaming rate."
+  }
+]

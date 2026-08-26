@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "minimax",
+    "model": "speech-2.8-hd",
+    "unit": "per_1m_chars",
+    "price_usd": "100",
+    "effective_from": "2026-08-10",
+    "source_url": "https://platform.minimax.io/docs/guides/pricing-paygo.md",
+    "notes": "International-platform pay-as-you-go rate."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "minimax",
+    "model": "speech-2.8-turbo",
+    "unit": "per_1m_chars",
+    "price_usd": "60",
+    "effective_from": "2026-08-10",
+    "source_url": "https://platform.minimax.io/docs/guides/pricing-paygo.md",
+    "notes": "International-platform pay-as-you-go rate."
+  }
+]

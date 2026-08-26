@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "xai",
+    "model": "grok-tts",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-10",
+    "source_url": "https://docs.x.ai/developers/pricing",
+    "notes": "Voice pricing 'Text to Speech' rate; xAI prices the service, not model variants."
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "assemblyai",
+    "model": "universal-streaming",
+    "unit": "per_hour",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.assemblyai.com/pricing",
+    "notes": "Pay-as-you-go Universal-Streaming rate (English and Multilingual both $0.15/hr); AssemblyAI bills streaming on session duration, not audio duration."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "assemblyai",
+    "model": "universal-3.5-pro",
+    "unit": "per_hour",
+    "price_usd": "0.45",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.assemblyai.com/pricing",
+    "notes": "Pay-as-you-go Universal-3.5 Pro Realtime base streaming rate — the endpoint we benchmark; the async pre-recorded tier is $0.21/hr."
+  }
+]

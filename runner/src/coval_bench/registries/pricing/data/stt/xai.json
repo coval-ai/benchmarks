@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "xai",
+    "model": "grok-stt",
+    "unit": "per_hour",
+    "price_usd": "0.20",
+    "effective_from": "2026-08-24",
+    "source_url": "https://docs.x.ai/developers/pricing",
+    "notes": "Streaming speech-to-text rate — the endpoint we benchmark; the REST tier is $0.10/hr. Published as a generic Speech to Text row, not by model id."
+  }
+]

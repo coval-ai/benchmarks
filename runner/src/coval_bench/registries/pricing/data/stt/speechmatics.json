@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "speechmatics",
+    "model": "default",
+    "unit": "per_hour",
+    "price_usd": "0.24",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.speechmatics.com/pricing",
+    "notes": "Pro pay-as-you-go rate for real-time transcription, Standard operating point."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "speechmatics",
+    "model": "enhanced",
+    "unit": "per_hour",
+    "price_usd": "0.43",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.speechmatics.com/pricing",
+    "notes": "Pro pay-as-you-go rate for real-time transcription, Enhanced operating point."
+  }
+]

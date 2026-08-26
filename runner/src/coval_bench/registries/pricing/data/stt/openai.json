@@ -1,0 +1,32 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "openai",
+    "model": "gpt-4o-mini-transcribe",
+    "unit": "per_minute",
+    "price_usd": "0.003",
+    "effective_from": "2026-08-24",
+    "source_url": "https://developers.openai.com/api/docs/pricing",
+    "notes": "OpenAI's published estimated per-minute cost; underlying token rates are $1.25/1M input tokens and $5.00/1M output tokens."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "openai",
+    "model": "gpt-4o-transcribe",
+    "unit": "per_minute",
+    "price_usd": "0.006",
+    "effective_from": "2026-08-24",
+    "source_url": "https://developers.openai.com/api/docs/pricing",
+    "notes": "OpenAI's published estimated per-minute cost; underlying token rates are $2.50/1M input tokens and $10.00/1M output tokens."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "openai",
+    "model": "gpt-realtime-whisper",
+    "unit": "per_minute",
+    "price_usd": "0.017",
+    "effective_from": "2026-08-24",
+    "source_url": "https://developers.openai.com/api/docs/pricing",
+    "notes": "Published per-minute live-transcription rate; OpenAI lists no token pricing for this model."
+  }
+]

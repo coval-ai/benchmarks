@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "mistral",
+    "model": "voxtral-mini-transcribe-realtime-2602",
+    "unit": "per_minute",
+    "price_usd": "0.006",
+    "effective_from": "2026-08-24",
+    "source_url": "https://mistral.ai/pricing/api",
+    "notes": "La Plateforme pay-as-you-go audio-input rate for Voxtral Mini Transcribe Realtime; the batch Transcribe tier is $0.003/min."
+  }
+]

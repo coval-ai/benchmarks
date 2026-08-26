@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "elevenlabs",
+    "model": "scribe_v2_realtime",
+    "unit": "per_hour",
+    "price_usd": "0.39",
+    "effective_from": "2026-08-24",
+    "source_url": "https://elevenlabs.io/pricing/api",
+    "notes": "Pay-as-you-go API rate for Scribe v2 Realtime; subscription tiers change only the included hours, not the rate."
+  }
+]

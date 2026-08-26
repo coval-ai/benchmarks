@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "elevenlabs",
+    "model": "eleven_flash_v2_5",
+    "unit": "per_1k_chars",
+    "price_usd": "0.05",
+    "effective_from": "2026-08-10",
+    "source_url": "https://elevenlabs.io/pricing/api",
+    "notes": "API pricing 'Flash / Turbo' row; same rate across tiers."
+  }
+]

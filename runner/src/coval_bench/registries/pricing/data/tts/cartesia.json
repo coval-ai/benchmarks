@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "cartesia",
+    "model": "sonic-3.5",
+    "unit": "per_1m_chars",
+    "price_usd": "65",
+    "effective_from": "2026-08-10",
+    "source_url": "https://cartesia.ai/pricing",
+    "notes": "Entry paid (Pro) overage rate; 1 credit = 1 character, $65 per 1M credits. Higher tiers publish lower rates. The page's FAQ carries the rate; its TTS model is now labeled Sonic-3.6, same per-credit price."
+  }
+]

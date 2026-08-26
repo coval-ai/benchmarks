@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "inworld",
+    "model": "inworld-tts-2",
+    "unit": "per_1m_chars",
+    "price_usd": "25",
+    "effective_from": "2026-08-10",
+    "source_url": "https://inworld.ai/pricing",
+    "notes": "On-demand (pay-as-you-go) rate; subscription plans publish lower rates."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "inworld",
+    "model": "inworld-tts-2-flash",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-24",
+    "source_url": "https://inworld.ai/pricing",
+    "notes": "On-demand (pay-as-you-go) rate; subscription plans publish lower rates. TTS 1.5 Max/Mini are no longer published on the page, so the retired models carry no rate."
+  }
+]

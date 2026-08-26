@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "gladia",
+    "model": "solaria-1",
+    "unit": "per_hour",
+    "price_usd": "0.75",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.gladia.io/pricing",
+    "notes": "Starter pay-as-you-go real-time rate; Gladia prices real-time generically and Solaria is its real-time model."
+  }
+]
