@@ -1,0 +1,108 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""The contract must not change by accident, and a dropped pin must fail loudly."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from pydantic import ValidationError
+
+from coval_bench.contracts import (
+    LlmPin,
+    Stack,
+    contract_sha256,
+    load_stack,
+    read_contract_file,
+    stack_as_dict,
+)
+from coval_bench.variants.platforms import redact_identifiers
+
+# Bump deliberately, in the same commit that changes a contract file or a pin.
+# A failure here means someone edited the contract without versioning it, which
+# would silently repoint every published number at a different agent.
+EXPECTED_CONTRACT_SHA = "146ac237d7ef007c"
+
+
+def test_stack_loads_and_pins_are_what_the_design_doc_says() -> None:
+    stack = load_stack()
+    assert (stack.llm.provider, stack.llm.model, stack.llm.temperature) == ("openai", "gpt-4.1", 0)
+    assert (stack.stt.provider, stack.stt.model, stack.stt.fallback_model) == (
+        "deepgram",
+        "nova-3",
+        "general",
+    )
+    assert stack.tts.model == "eleven_flash_v2"
+    assert stack.tts.voice_id == "EXAVITQu4vr4xnSDxMaL"
+    assert (stack.media.codec, stack.media.sample_rate_hz) == ("PCMU", 8000)
+    assert stack.turn_taking.end_of_turn_target_ms == 800
+    # Both must be off or the benchmark measures the vendor's rubric and timer.
+    assert stack.platform_behaviour.native_auto_hangup is False
+    assert stack.platform_behaviour.vendor_post_call_analysis is False
+
+
+def test_contract_hash_is_pinned() -> None:
+    assert contract_sha256("dental").startswith(EXPECTED_CONTRACT_SHA), (
+        "The dental contract or the pinned stack changed. If that was deliberate, "
+        "update EXPECTED_CONTRACT_SHA in the same commit."
+    )
+
+
+def test_rationale_keys_are_allowed_and_survive_load() -> None:
+    stack = load_stack()
+    assert (stack.llm.__pydantic_extra__ or {}).get("_why")
+
+
+def test_mistyped_key_is_rejected_rather_than_dropping_the_pin() -> None:
+    # The dangerous case: `model` goes missing and the platform keeps its default.
+    with pytest.raises(ValidationError):
+        LlmPin.model_validate({"provider": "openai", "modle": "gpt-4.1", "temperature": 0})
+
+
+def test_unknown_non_underscore_key_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="must start with '_'"):
+        LlmPin.model_validate(
+            {"provider": "openai", "model": "gpt-4.1", "temperature": 0, "notes": "x"}
+        )
+
+
+def test_codec_is_constrained_to_what_coval_accepts() -> None:
+    with pytest.raises(ValidationError):
+        Stack.model_validate(
+            {
+                **load_stack().model_dump(mode="json"),
+                "media": {"codec": "OPUS", "sample_rate_hz": 48000},
+            }
+        )
+
+
+def test_vendor_payload_excludes_rationale() -> None:
+    payload = stack_as_dict(load_stack())
+    assert all(not key.startswith("_") for section in payload.values() for key in section)
+    assert payload["llm"] == {"provider": "openai", "model": "gpt-4.1", "temperature": 0}
+
+
+def test_identifiers_are_withheld_from_the_committed_dumps() -> None:
+    """This repo is public. A live dial target must never reach it."""
+    agent = json.loads(read_contract_file("dental", "_source/coval-agent.json"))
+    assert agent["phone_number"] == "[REDACTED]"
+    assert agent["id"] == "[REDACTED]"
+    assert agent["customer_agent_id"] == "[REDACTED]"
+    # Methodology stays: a reader needs to know which voice was used.
+    assert agent["metadata"]["voice_id"]
+    assert agent["display_name"]
+
+
+def test_redact_identifiers_leaves_methodology_alone() -> None:
+    found: list[str] = []
+    out = redact_identifiers(
+        {"id": "abc", "display_name": "keep", "nested": [{"phone_number": "sip:x@y"}]}, found
+    )
+    assert out == {
+        "id": "[REDACTED]",
+        "display_name": "keep",
+        "nested": [{"phone_number": "[REDACTED]"}],
+    }
+    assert found == ["id", "nested[0].phone_number"]

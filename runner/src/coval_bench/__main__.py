@@ -22,6 +22,7 @@ from coval_bench.db.cli import db_check, db_migrate
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.s2s.fetch_v2v import fetch_s2s
+from coval_bench.variants.pull import pull_contract
 
 # Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
 # for a cold dedicated endpoint (handshake + cold inference); the production paths
@@ -98,6 +99,7 @@ migrate.add_command(import_legacy_cli, name="import-legacy")
 
 # S2S is fetch-only, so a standalone command rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
+cli.add_command(pull_contract, name="pull-contract")
 
 
 @cli.command(name="tts-smoke")
