@@ -40,8 +40,10 @@ _SETUP_TIMEOUT_S = 30.0
 
 # The server never ends the session itself (verified live 2026-08): it holds the
 # socket open after ``audioStreamEnd``, and ``generationComplete`` fires per
-# utterance, not per session. The sender waits this long for the post-stream-end
-# completion before closing, so the close can't race the last final.
+# utterance, not per session. Transcriptions also stream independently of other
+# server content with no ordering guarantee, so the sender waits this long for
+# BOTH the post-stream-end final and its completion before closing — a close on
+# the completion alone could race a reordered final and truncate the transcript.
 _FINAL_WAIT_S = 5.0
 
 
@@ -115,13 +117,22 @@ class GeminiSTTProvider(STTProvider):
             async with ws_client.connect(url) as ws:
                 await self._wait_for_setup_complete(ws)
 
-                final_event = asyncio.Event()
+                final_seen = asyncio.Event()
+                complete_seen = asyncio.Event()
                 send_task = asyncio.create_task(
                     self._send_audio(
-                        ws, audio_data, sample_rate, result, realtime_resolution, final_event
+                        ws,
+                        audio_data,
+                        sample_rate,
+                        result,
+                        realtime_resolution,
+                        final_seen,
+                        complete_seen,
                     )
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
+                recv_task = asyncio.create_task(
+                    self._receive(ws, result, final_seen, complete_seen)
+                )
                 tasks = (send_task, recv_task)
                 done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
                 if any(not task.cancelled() and task.exception() is not None for task in done):
@@ -171,7 +182,8 @@ class GeminiSTTProvider(STTProvider):
         sample_rate: int,
         result: TranscriptionResult,
         realtime_resolution: float,
-        final_event: asyncio.Event,
+        final_seen: asyncio.Event,
+        complete_seen: asyncio.Event,
     ) -> None:
         bytes_per_second = sample_rate * 2  # 16-bit mono
         chunk_size = int(bytes_per_second * realtime_resolution)
@@ -190,19 +202,26 @@ class GeminiSTTProvider(STTProvider):
                         }
                     )
                 )
-            # Completions seen mid-audio belong to earlier utterances; only one
+            # Events seen mid-audio belong to earlier utterances; only ones
             # arriving after this clear can be the stream-end flush.
-            final_event.clear()
+            final_seen.clear()
+            complete_seen.clear()
             await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
+                async with asyncio.timeout(_FINAL_WAIT_S):
+                    await final_seen.wait()
+                    await complete_seen.wait()
             await ws.close()
         except Exception as exc:
             logger.warning("gemini_send_error", provider="gemini", model=self._model, exc_info=exc)
             raise
 
     async def _receive(
-        self, ws: Any, result: TranscriptionResult, final_event: asyncio.Event
+        self,
+        ws: Any,
+        result: TranscriptionResult,
+        final_seen: asyncio.Event,
+        complete_seen: asyncio.Event,
     ) -> None:
         final_parts: list[str] = []
 
@@ -232,9 +251,10 @@ class GeminiSTTProvider(STTProvider):
                     final_parts.append(final)
                     if result.audio_start_time is not None:
                         result.audio_to_final_seconds = now - result.audio_start_time
+                    final_seen.set()
 
                 if server_content.get("generationComplete"):
-                    final_event.set()
+                    complete_seen.set()
 
         except Exception as exc:
             logger.warning(

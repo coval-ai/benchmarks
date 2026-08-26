@@ -95,6 +95,28 @@ async def test_gemini_decodes_binary_frames(
 
 
 @pytest.mark.asyncio
+async def test_gemini_completion_before_final(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """Transcriptions have no ordering guarantee vs other server content: a
+    ``generationComplete`` arriving ahead of its final must not end the session
+    early or drop the reordered final segment."""
+    events: list[Any] = [
+        {"setupComplete": {}},
+        {"serverContent": {"interimInputTranscription": {"text": "hello"}}},
+        {"serverContent": {"generationComplete": True}},
+        {"serverContent": {"inputTranscription": {"text": "hello world"}}},
+    ]
+    provider = GeminiSTTProvider(api_key=fake_api_key)
+
+    result, _ = await _measure(provider, events, audio_pcm_bytes)
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
 async def test_gemini_stream_error(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
     events: list[Any] = [
         {"setupComplete": {}},
