@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "gradium",
+    "model": "default",
+    "unit": "per_second_audio_in",
+    "price_usd": "0.000207",
+    "effective_from": "2026-08-24",
+    "source_url": "https://gradium.ai/pricing",
+    "notes": "Entry (XS) plan add-on credit rate: 3 credits per second of audio at $6.9 per 100k credits, exact conversion; larger plans publish lower credit rates. No standalone pay-as-you-go tier."
+  }
+]

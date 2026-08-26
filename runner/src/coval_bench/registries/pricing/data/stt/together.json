@@ -1,0 +1,32 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "together",
+    "model": "nemotron-3.5-asr-streaming-0.6b",
+    "unit": "per_minute",
+    "price_usd": "0.0045",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.together.ai/models/nvidia-nemotron-35-asr",
+    "notes": "Serverless pay-as-you-go per-audio-minute rate; the model page prints this price against the API string nvidia/nemotron-3.5-asr-streaming-0.6b (the pricing page's 'NVIDIA Nemotron 3.5 ASR' row). Not the older 'Nemotron 3 ASR Streaming 0.6B' row at $0.0015/min."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "together",
+    "model": "parakeet-tdt-0.6b-v3",
+    "unit": "per_minute",
+    "price_usd": "0.0015",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.together.ai/pricing",
+    "notes": "Serverless pay-as-you-go per-audio-minute rate for NVIDIA Parakeet TDT 0.6B v3."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "together",
+    "model": "whisper-large-v3",
+    "unit": "per_minute",
+    "price_usd": "0.0035",
+    "effective_from": "2026-08-24",
+    "source_url": "https://www.together.ai/pricing",
+    "notes": "Whisper Large v3 (Streaming) rate — we benchmark over Together's realtime API; the non-streaming Transcribe tier is $0.0015/min."
+  }
+]

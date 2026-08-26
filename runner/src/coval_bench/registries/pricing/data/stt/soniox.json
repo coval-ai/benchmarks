@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "soniox",
+    "model": "stt-rt-v5",
+    "unit": "per_hour",
+    "price_usd": "0.12",
+    "effective_from": "2026-08-24",
+    "source_url": "https://soniox.com/pricing",
+    "notes": "Soniox's page-printed per-hour equivalent for real-time streaming; canonical billing is $2.00 per 1M input audio tokens (~30,000 tokens per hour of audio)."
+  }
+]

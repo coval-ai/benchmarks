@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "smallest",
+    "model": "pulse",
+    "unit": "per_minute",
+    "price_usd": "0.008",
+    "effective_from": "2026-08-24",
+    "source_url": "https://docs.smallest.ai/models/model-cards/speech-to-text/pulse",
+    "notes": "Standard Plan realtime rate from the official Pulse model card; batch is $0.005/min. Marketing pages print only approximate figures."
+  }
+]

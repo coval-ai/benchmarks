@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "inworld",
+    "model": "inworld-stt-1",
+    "unit": "per_hour",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-24",
+    "source_url": "https://inworld.ai/pricing",
+    "notes": "On-Demand pay-as-you-go base rate; paid subscription tiers discount to $0.10/hr."
+  }
+]

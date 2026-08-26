@@ -11,7 +11,8 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,6 +121,50 @@ class ProvidersResponse(BaseModel):
     s2s: list[ProviderInfo]
     # Facet vocabulary in display order, shared across STT, TTS, and S2S.
     tag_categories: list[TagCategoryOut]
+
+
+class PricingRateOut(BaseModel):
+    """One model's rate as recorded in the pricing registry.
+
+    ``price_usd`` is the provider's native figure in ``unit``, served as the
+    registry's exact decimal (a JSON string — floats would strip trailing
+    zeros and misquote the printed price, e.g. $0.20 → $0.2); the two
+    normalized fields are exact arithmetic from it and ``None`` where no
+    conversion exists without assuming a speaking rate.
+    """
+
+    benchmark: BenchmarkLiteral
+    provider: str
+    model: str
+    unit: str
+    price_usd: Decimal
+    price_per_1m_chars: float | None = None
+    price_per_1k_minutes: float | None = None
+    effective_from: date
+    source_url: str
+    notes: str | None = None
+
+
+class DatasetUsageOut(BaseModel):
+    """What one full pass of a packaged dataset consumes, from its manifest.
+
+    Exactly one of ``audio_minutes``/``characters`` is set: STT datasets are
+    billed on audio in, TTS datasets on characters spoken.
+    """
+
+    dataset_id: str
+    benchmark: BenchmarkLiteral
+    items: int
+    audio_minutes: float | None = None
+    characters: int | None = None
+
+
+class PricingRegistryResponse(BaseModel):
+    """Response schema for GET /v1/pricing: rates in force plus fixture usage."""
+
+    as_of: date
+    rates: list[PricingRateOut]
+    usage: list[DatasetUsageOut]
 
 
 class ResultsResponse(BaseModel):

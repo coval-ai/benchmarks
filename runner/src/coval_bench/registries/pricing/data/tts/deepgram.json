@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "deepgram",
+    "model": "aura-2-thalia-en",
+    "unit": "per_1k_chars",
+    "price_usd": "0.030",
+    "effective_from": "2026-08-10",
+    "source_url": "https://deepgram.com/pricing",
+    "notes": "Aura-2 Pay As You Go rate."
+  }
+]

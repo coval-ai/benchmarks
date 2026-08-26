@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "speechify",
+    "model": "simba-3.2",
+    "unit": "per_1m_chars",
+    "price_usd": "10",
+    "effective_from": "2026-08-10",
+    "source_url": "https://speechify.ai/pricing",
+    "notes": "Entry (Starter) plan rate; no per-model rate variation, larger plans publish lower rates."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "speechify",
+    "model": "simba-3.0",
+    "unit": "per_1m_chars",
+    "price_usd": "10",
+    "effective_from": "2026-08-10",
+    "source_url": "https://speechify.ai/pricing",
+    "notes": "Entry (Starter) plan rate; no per-model rate variation, larger plans publish lower rates."
+  }
+]

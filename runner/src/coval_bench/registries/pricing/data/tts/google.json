@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "google",
+    "model": "chirp-3-hd",
+    "unit": "per_1m_chars",
+    "price_usd": "30",
+    "effective_from": "2026-08-10",
+    "source_url": "https://cloud.google.com/text-to-speech/pricing",
+    "notes": "Pay-as-you-go rate for Chirp 3: HD voices, billed per character sent for synthesis."
+  }
+]

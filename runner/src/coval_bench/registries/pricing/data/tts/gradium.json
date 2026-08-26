@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "gradium",
+    "model": "default",
+    "unit": "per_1m_chars",
+    "price_usd": "69",
+    "effective_from": "2026-08-10",
+    "source_url": "https://gradium.ai/pricing",
+    "notes": "Entry (XS) plan add-on credit rate, 1 credit = 1 character; larger plans publish lower rates. No standalone pay-as-you-go tier."
+  }
+]

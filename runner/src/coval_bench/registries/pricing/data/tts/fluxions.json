@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "fluxions",
+    "model": "vui",
+    "unit": "per_1m_chars",
+    "price_usd": "10",
+    "effective_from": "2026-08-10",
+    "source_url": "https://fluxions.ai/pricing",
+    "notes": "Pay-as-you-go rate for expressive VUI text-to-speech."
+  }
+]

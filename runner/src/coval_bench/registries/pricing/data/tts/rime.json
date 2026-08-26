@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "rime",
+    "model": "coda",
+    "unit": "per_1k_chars",
+    "price_usd": "0.05",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.rime.ai/pricing",
+    "notes": "Pay-as-you-go Starter rate. Arcana has no published rate and is deliberately absent."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "rime",
+    "model": "mistv3",
+    "unit": "per_1k_chars",
+    "price_usd": "0.03",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.rime.ai/pricing",
+    "notes": "Pay-as-you-go Starter rate."
+  }
+]

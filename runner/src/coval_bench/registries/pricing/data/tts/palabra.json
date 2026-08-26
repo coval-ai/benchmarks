@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "palabra",
+    "model": "palabra-tts-v1",
+    "unit": "per_1k_chars",
+    "price_usd": "0.03",
+    "effective_from": "2026-08-10",
+    "source_url": "https://www.palabra.ai/pricing",
+    "notes": "TTS API pay-as-you-go rate."
+  }
+]
