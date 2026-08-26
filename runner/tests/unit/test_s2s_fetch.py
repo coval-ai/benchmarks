@@ -1261,6 +1261,35 @@ async def test_ingest_run_extra_ids_are_trimmed_not_dropped() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ingest_run_drops_id_less_values_before_trimming() -> None:
+    # Two values with no simulation_output_id are not the same conversation, so
+    # neither may be matched against the other.
+    writer = _stub_writer()
+    latency: list[dict[str, Any]] = [
+        {"simulation_output_id": "s0", "value": 0.5},
+        {"value": 0.5},
+    ]
+    instruction: list[dict[str, Any]] = [
+        {"simulation_output_id": "s0", "value": "YES"},
+        {"value": "NO"},
+    ]
+    async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=IDS,
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
+    assert len(instruction_rows) == 1
+    assert instruction_rows[0].audio_filename.endswith("s0")
+
+
+@pytest.mark.asyncio
 async def test_ingest_run_duplicate_ids_still_drop_the_metric() -> None:
     writer = _stub_writer()
     latency = [

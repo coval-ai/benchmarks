@@ -312,11 +312,13 @@ def _population_mismatch(
 ) -> dict[str, object] | None:
     """None if *other_values* covers the same conversations as the anchor.
 
-    Ids, not counts: equal counts can be different conversations. The caller trims
-    to the overlap; only duplicates skip the metric for the run.
+    Ids, not counts: equal counts can be different conversations. Values with no id
+    are excluded from both sides — two of them are not the same conversation, so
+    matching them would invent an overlap. The caller trims to the overlap; only
+    duplicates skip the metric for the run.
     """
-    other_set = {v.get("simulation_output_id") for v in other_values}
-    anchor_set = {v.get("simulation_output_id") for v in anchor_values}
+    other_set = {sid for v in other_values if (sid := v.get("simulation_output_id"))}
+    anchor_set = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
     missing = sorted(str(x) for x in anchor_set - other_set)
     extra = sorted(str(x) for x in other_set - anchor_set)
     duplicate = _has_duplicate_ids(other_values)
@@ -534,6 +536,10 @@ async def _ingest_run(
                     metric=metric.value,
                 )
                 continue
+            # An id-less value cannot be reconciled against the anchor or deduped,
+            # and its positional key is not stable across metrics, so it is
+            # rejected before the populations are compared.
+            values = [v for v in values if v.get("simulation_output_id")]
             mismatch = _population_mismatch(anchor_values, values)
             if mismatch is not None:
                 logger.warning(
@@ -551,7 +557,7 @@ async def _ingest_run(
                 # corrupt: one conversation would carry twice its weight.
                 if mismatch["duplicate_ids"]:
                     continue
-                anchor_ids = {v.get("simulation_output_id") for v in anchor_values}
+                anchor_ids = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
                 values = [v for v in values if v.get("simulation_output_id") in anchor_ids]
                 if not values:
                     continue
