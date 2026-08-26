@@ -361,6 +361,16 @@ class Result(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
+    # The configuration arm that produced this row. `pinned` marks components Coval
+    # chose for comparability; a vendor-submitted or otherwise-configured arm carries
+    # its own id. Orchestration platforms are variants of S2S, not their own benchmark.
+    variant_id: str = "pinned"
+    # Call-shape dimensions, null outside the orchestration runs that set them:
+    # `transport` the carrier path, `test_case_id` the scenario, `iteration` the
+    # repeat within one run.
+    transport: str | None = None
+    test_case_id: str | None = None
+    iteration: int | None = None
 
 
 class VoteOutcome(StrEnum):
