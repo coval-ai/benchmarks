@@ -72,3 +72,14 @@ PLAYGROUND.md
 
 # Internal benchmarking doc — never commit (also matches global *-benchmarking.md)
 docs/providers/cartesia-sonic-3.5-benchmarking.md
+
+# The evaluator never leaves the machine. Scenario scripts, assertions, and the
+# mock fixtures derived from them would let a platform optimise for the test
+# rather than the task. The tool schemas stay public: those are the interface
+# both the agent and the mock service bind to, and a reader needs them to audit
+# a result. The answers do not.
+runner/src/coval_bench/contracts/*/_private/
+
+# Local scratch audio from arena runs. Large, regenerable, and easy to sweep
+# into a commit by accident.
+runner/arena-audio/

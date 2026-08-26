@@ -1,0 +1,91 @@
+[
+  {
+    "name": "lookup_patient",
+    "description": "Identify the caller by looking up their patient record by phone number. Call this ONCE, at the start of every call, with the caller's phone number. Returns the patient record (including patient_id) and any upcoming appointments. A no-match means no record was found; it does not create a patient. For a booking request with no match, use the new-patient callback path. For reschedule, cancellation, or appointment lookup with no match, do not proceed with the requested action; offer a callback from the front desk. Do not call this again once the caller is identified.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "phone": {
+          "type": "string",
+          "description": "The caller's phone number as exactly 10 digits, with no separators, spaces, or country code. Normalize whatever format the caller provides into this form before calling."
+        }
+      },
+      "required": ["phone"]
+    }
+  },
+  {
+    "name": "check_availability",
+    "description": "Return the open appointment slots for one specific date. Call this during the Book or Reschedule playbooks once you know a concrete date to check. An empty slot list means that date is fully booked. If the caller gives a date range, ask which date to check first. If the caller wants a specific provider, choose only that provider's slots from the returned results. Never describe a slot as available until this tool has returned it.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "date": {
+          "type": "string",
+          "description": "The requested date in YYYY-MM-DD format."
+        },
+        "appointment_type": {
+          "type": "string",
+          "description": "The kind of visit being scheduled. Slot length and eligible provider depend on it.",
+          "enum": ["cleaning", "checkup", "filling", "crown", "root_canal_consult", "emergency", "whitening_consult"]
+        }
+      },
+      "required": ["date", "appointment_type"]
+    }
+  },
+  {
+    "name": "book_appointment",
+    "description": "Book an appointment for the identified caller. Call this ONLY after (1) the caller is identified via lookup_patient, (2) you have offered slots returned by check_availability, and (3) the caller has explicitly confirmed a specific slot you read back to them. This is the success action - never call it without confirmation, and never claim success unless it returns a confirmation_number. For a reschedule, book the confirmed replacement BEFORE cancelling the old appointment.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "patient_id": {
+          "type": "string",
+          "description": "The patient_id returned by lookup_patient for the identified caller."
+        },
+        "datetime": {
+          "type": "string",
+          "description": "The slot the caller explicitly confirmed, in ISO 8601 format (YYYY-MM-DDTHH:MM:SS). Use the exact date and time the caller agreed to - never a placeholder or example value."
+        },
+        "appointment_type": {
+          "type": "string",
+          "description": "The kind of visit being booked. Must match what was passed to check_availability.",
+          "enum": ["cleaning", "checkup", "filling", "crown", "root_canal_consult", "emergency", "whitening_consult"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "The caller's stated reason for the visit, in their own words. Free text; not used for matching."
+        }
+      },
+      "required": ["patient_id", "datetime", "appointment_type"]
+    }
+  },
+  {
+    "name": "cancel_appointment",
+    "description": "Cancel an existing appointment. Call this ONLY after (1) the caller is identified via lookup_patient, (2) you have read back the exact date, time and provider of the appointment being cancelled, and (3) the caller has explicitly confirmed. Never cancel an appointment the caller has not confirmed. During a reschedule this must run AFTER the replacement booking succeeded - never cancel first.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "appointment_id": {
+          "type": "string",
+          "description": "The appointment_id from the upcoming_appointments list returned by lookup_patient."
+        }
+      },
+      "required": ["appointment_id"]
+    }
+  },
+  {
+    "name": "transfer_to_front_desk",
+    "description": "Hand the caller to a human at the front desk. Use this when the request is outside scheduling (billing disputes, insurance claims, clinical questions requiring a dentist, complaints), when a tool has failed twice, or when the caller explicitly asks for a person. Do NOT use it to avoid a task you can complete. Announce the transfer to the caller before calling this.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Why the call is being transferred.",
+          "enum": ["billing", "insurance", "clinical_question", "complaint", "tool_failure", "caller_request"]
+        }
+      },
+      "required": ["reason"]
+    }
+  }
+]

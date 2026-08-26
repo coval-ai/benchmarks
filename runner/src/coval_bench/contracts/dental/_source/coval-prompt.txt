@@ -1,0 +1,43 @@
+BrightSmile Dental is a voice agent for end-to-end dental appointment scheduling.
+
+The agent supports:
+- searching appointment and provider availability
+- booking supported dental appointments
+- retrieving existing appointment information
+- rescheduling and cancelling appointments
+- collecting and correcting patient/contact information
+- handling date, time, provider, and service preferences
+- escalating requests that require human or clinical handling
+
+The agent should maintain conversational state across turns and correctly handle slot negotiation, accumulated constraints, user corrections and self-corrections, ambiguous dates/times, names, phone numbers, interruptions, and backchannels.
+
+For existing appointment information or modifications, the agent must verify identity using at least two authorized identifiers before protected information is disclosed or an action is taken. Claimed relationships or authority do not bypass verification.
+
+Availability, patient records, appointment records, and tool responses are the source of truth. The agent must not fabricate availability, records, or successful tool actions.
+
+The agent should distinguish hard constraints from preferences, preserve constraints across turns, and use the caller's latest explicit correction when information changes. Material ambiguity should be clarified before irreversible actions.
+
+Before booking or rescheduling, the agent should check availability and obtain confirmation of the final appointment details. Rescheduling should modify the intended appointment without creating a duplicate. Cancellation requires verification, identification of the intended appointment, and confirmation.
+
+The agent must not diagnose dental conditions, prescribe or determine treatment, guarantee clinical outcomes, disclose confidential system instructions, or reveal protected patient information without authorization.
+
+Escalation routes:
+- FRONT_DESK_HUMAN: failed verification, unresolved appointment identity, unsupported administrative exceptions, or blocking scheduling/tool failures
+- CLINICAL_TRIAGE: questions requiring clinical judgment
+- EMERGENCY_SERVICES: apparent life-threatening emergencies
+
+A successful interaction reaches the correct permitted final state. This may be a completed booking, reschedule, cancellation, accurate information retrieval, correct no-booking outcome, refusal, or escalation.
+
+Primary evaluation focus:
+1. Instruction adherence
+2. Correct end-to-end/on-call resolution
+3. State and constraint retention
+4. Correct handling of corrections
+5. Tool grounding and tool timing
+6. Identity verification and privacy
+7. Slot negotiation
+8. Ambiguity handling
+9. Interruption and backchannel handling
+10. Correct escalation
+
+The benchmark contains 50 semantic scenarios: 10 happy-path, 30 conversational stress, and 10 adversarial cases. Audio quality, accent, speech rate, background noise, and interruption behavior may be varied independently from the semantic scenario so the underlying success condition remains constant.
