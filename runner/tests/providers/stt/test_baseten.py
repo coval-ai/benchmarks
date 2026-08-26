@@ -437,3 +437,44 @@ async def test_warmup_still_reports_real_errors() -> None:
 
     prewarms = [c.kwargs for c in log.info.call_args_list if c.args[0] == "baseten_stt_prewarm"]
     assert prewarms and "Invalid or expired API key" in prewarms[0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_warmup_connects_with_boot_length_open_timeout() -> None:
+    """Baseten parks the WS upgrade for the whole scale-from-zero boot, so the
+    warmup handshake must be allowed the full warmup budget, not the 45 s
+    measurement cap."""
+    from coval_bench.providers.stt.baseten import _OPEN_TIMEOUT_S, _WARMUP_TIMEOUT_S
+
+    seen: list[float] = []
+
+    def _connect(url: str, **kwargs: Any) -> Any:
+        seen.append(kwargs["open_timeout"])
+        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
+
+    settings = _url_settings(baseten_whisper_url="wss://whisper")
+    with (
+        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
+        patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
+    ):
+        await BasetenSTTProvider.warmup(settings)
+
+    assert seen == [_WARMUP_TIMEOUT_S]
+    assert _WARMUP_TIMEOUT_S > _OPEN_TIMEOUT_S
+
+
+@pytest.mark.asyncio
+async def test_measurement_keeps_the_short_open_timeout(fake_api_key: SecretStr) -> None:
+    from coval_bench.providers.stt.baseten import _OPEN_TIMEOUT_S
+
+    seen: list[float] = []
+
+    def _connect(url: str, **kwargs: Any) -> Any:
+        seen.append(kwargs["open_timeout"])
+        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
+
+    provider = BasetenSTTProvider(api_key=fake_api_key, ws_url=_WS_URL)
+    with patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect):
+        await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
+
+    assert seen == [_OPEN_TIMEOUT_S]

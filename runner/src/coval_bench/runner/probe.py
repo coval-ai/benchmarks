@@ -21,6 +21,7 @@ import structlog
 
 from coval_bench.datasets.loader import load_stt_dataset, load_tts_dataset
 from coval_bench.db.models import ResultStatus
+from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
 from coval_bench.runner.orchestrator import (
     _get_stt_providers,
@@ -145,6 +146,29 @@ async def run_probe(
     sem = asyncio.Semaphore(concurrency)
     results: dict[str, dict[str, Any]] = {}
 
+    try:
+        await _run(
+            models=models,
+            settings=settings,
+            sample_size=sample_size,
+            sem=sem,
+            results=results,
+        )
+    finally:
+        # Warmup may prime the shared HTTP pools; mirror run_benchmarks so a
+        # probe never leaves clients bound to this (about to close) event loop.
+        await _close_http_clients()
+    return results
+
+
+async def _run(
+    *,
+    models: list[RegisteredModel],
+    settings: Settings,
+    sample_size: int,
+    sem: asyncio.Semaphore,
+    results: dict[str, dict[str, Any]],
+) -> None:
     await _warmup(models, settings)
 
     stt_models = [m for m in models if m.benchmark is Benchmark.STT]
@@ -182,4 +206,3 @@ async def run_probe(
                 sem=sem,
                 settings=settings,
             )
-    return results

@@ -210,3 +210,41 @@ async def test_warmup_error_result_does_not_raise(baseten_settings: Settings) ->
 
     with patch("coval_bench.providers.tts.baseten.ws_client.connect", return_value=ws):
         await BasetenTTSProvider.warmup(baseten_settings)
+
+
+@pytest.mark.asyncio
+async def test_warmup_connects_with_boot_length_open_timeout(baseten_settings: Settings) -> None:
+    from coval_bench.providers.tts.baseten import _OPEN_TIMEOUT_S, _WARMUP_TIMEOUT_S
+
+    seen: list[float] = []
+
+    def _connect(url: str, **kwargs: object) -> FakeWebSocket:
+        assert isinstance(kwargs["open_timeout"], (int, float))
+        seen.append(float(kwargs["open_timeout"]))
+        return FakeWebSocket(_done_events([make_pcm_bytes(240)]))
+
+    with patch("coval_bench.providers.tts.baseten.ws_client.connect", side_effect=_connect):
+        await BasetenTTSProvider.warmup(baseten_settings)
+
+    assert seen == [float(_WARMUP_TIMEOUT_S)]
+    assert _WARMUP_TIMEOUT_S > _OPEN_TIMEOUT_S
+
+
+@pytest.mark.asyncio
+async def test_synthesize_keeps_the_short_open_timeout(baseten_settings: Settings) -> None:
+    from coval_bench.providers.tts.baseten import _OPEN_TIMEOUT_S
+
+    seen: list[float] = []
+
+    def _connect(url: str, **kwargs: object) -> FakeWebSocket:
+        assert isinstance(kwargs["open_timeout"], (int, float))
+        seen.append(float(kwargs["open_timeout"]))
+        return FakeWebSocket(_done_events([make_pcm_bytes(240)]))
+
+    provider = BasetenTTSProvider(baseten_settings, model="qwen3-tts-1.7b", voice="lisa")
+    with patch("coval_bench.providers.tts.baseten.ws_client.connect", side_effect=_connect):
+        result = await provider.synthesize("hello")
+    if result.audio_path is not None:
+        result.audio_path.unlink(missing_ok=True)
+
+    assert seen == [float(_OPEN_TIMEOUT_S)]

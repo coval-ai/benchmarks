@@ -56,7 +56,10 @@ _BYTE_RATE = _SAMPLE_RATE * 2  # 16 kHz mono 16-bit
 # input_audio_buffer.append carries 100 ms per message.
 _APPEND_BYTES = int(_SAMPLE_RATE * 0.1) * 2
 _MAX_WS_SIZE = 16 * 1024 * 1024
-# Cold replicas exceed the 10 s websockets default for the handshake.
+# Measurement handshake cap. By measurement time warmup has already booted the
+# replica, so 45 s is a degraded-endpoint tripwire; warmup itself connects with
+# its own budget-length open timeout, since Baseten parks the upgrade request
+# for the whole scale-from-zero boot.
 _OPEN_TIMEOUT_S = 45
 # Partial cadence. Held identical across every Baseten endpoint: TTFS measures
 # time to the first partial, so a per-endpoint cadence would show up as a
@@ -125,6 +128,7 @@ class BasetenSTTProvider(STTProvider):
         api_key: SecretStr | None,
         model: str = "whisper-large-v3",
         ws_url: str | None = None,
+        open_timeout_s: float = _OPEN_TIMEOUT_S,
     ) -> None:
         if not self._model_supported(model):
             raise ValueError(
@@ -139,6 +143,7 @@ class BasetenSTTProvider(STTProvider):
         self._model = model
         self._ws_url = ws_url
         self._protocol = endpoint.protocol
+        self._open_timeout_s = open_timeout_s
 
     @property
     def name(self) -> str:
@@ -163,7 +168,9 @@ class BasetenSTTProvider(STTProvider):
         pcm = _warmup_pcm()
 
         async def _warm(model: str, url: str) -> None:
-            provider = cls(api_key=api_key, model=model, ws_url=url)
+            provider = cls(
+                api_key=api_key, model=model, ws_url=url, open_timeout_s=_WARMUP_TIMEOUT_S
+            )
             t0 = time.monotonic()
             error: str | None = None
             try:
@@ -217,7 +224,7 @@ class BasetenSTTProvider(STTProvider):
                 self._ws_url,
                 additional_headers=headers,
                 max_size=_MAX_WS_SIZE,
-                open_timeout=_OPEN_TIMEOUT_S,
+                open_timeout=self._open_timeout_s,
             ) as ws:
                 # First message configures the stream, on both protocols.
                 await ws.send(

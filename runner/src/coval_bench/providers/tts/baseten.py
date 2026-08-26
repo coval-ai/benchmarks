@@ -39,7 +39,13 @@ _WARMUP_TIMEOUT_S = 360
 class BasetenTTSProvider(TTSProvider):
     """Baseten TTS provider using WebSocket streaming (Qwen3-TTS)."""
 
-    def __init__(self, settings: Settings, model: str, voice: str) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        model: str,
+        voice: str,
+        open_timeout_s: float = _OPEN_TIMEOUT_S,
+    ) -> None:
         if model not in _VALID_MODELS:
             raise ValueError(f"Invalid Baseten TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
@@ -55,6 +61,7 @@ class BasetenTTSProvider(TTSProvider):
         if not settings.baseten_qwen_url:
             raise ValueError("baseten_qwen_url is required in Settings")
         self._ws_url = settings.baseten_qwen_url
+        self._open_timeout_s = open_timeout_s
 
     @property
     def name(self) -> str:
@@ -77,7 +84,9 @@ class BasetenTTSProvider(TTSProvider):
             return
         if not settings.baseten_qwen_url:
             return
-        provider = cls(settings, _VALID_MODELS[0], _VALID_VOICES[0])
+        provider = cls(
+            settings, _VALID_MODELS[0], _VALID_VOICES[0], open_timeout_s=_WARMUP_TIMEOUT_S
+        )
         t0 = time.monotonic()
         error: str | None = None
         try:
@@ -107,7 +116,7 @@ class BasetenTTSProvider(TTSProvider):
                 self._ws_url,
                 additional_headers=headers,
                 max_size=_MAX_WS_SIZE,
-                open_timeout=_OPEN_TIMEOUT_S,
+                open_timeout=self._open_timeout_s,
             ) as ws:
                 # Clock starts post-handshake so TTFA excludes connect (cohort parity).
                 start = time.monotonic()
