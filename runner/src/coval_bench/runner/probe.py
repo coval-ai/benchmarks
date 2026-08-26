@@ -21,8 +21,14 @@ import structlog
 
 from coval_bench.datasets.loader import load_stt_dataset, load_tts_dataset
 from coval_bench.db.models import ResultStatus
+from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
-from coval_bench.runner.orchestrator import _run_stt_item, _run_tts_item
+from coval_bench.runner.orchestrator import (
+    _get_stt_providers,
+    _get_tts_providers,
+    _run_stt_item,
+    _run_tts_item,
+)
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
@@ -98,6 +104,28 @@ async def _run_model(
     }
 
 
+async def _warmup(models: list[RegisteredModel], settings: Settings) -> None:
+    """Run ``Provider.warmup()`` for the selected models, as ``run_benchmarks`` does."""
+    stt_providers = _get_stt_providers()
+    tts_providers = _get_tts_providers()
+    classes: set[Any] = set()
+    for entry in models:
+        registry = stt_providers if entry.benchmark is Benchmark.STT else tts_providers
+        cls = registry.get(entry.provider)
+        if cls is not None:
+            classes.add(cls)
+    if not classes:
+        return
+
+    ordered = list(classes)
+    outcomes = await asyncio.gather(
+        *(cls.warmup(settings=settings) for cls in ordered), return_exceptions=True
+    )
+    for cls, outcome in zip(ordered, outcomes, strict=False):
+        if isinstance(outcome, BaseException):
+            logger.warning("probe_warmup_failed", provider=cls.__name__, exc_info=outcome)
+
+
 async def run_probe(
     *,
     settings: Settings,
@@ -112,6 +140,30 @@ async def run_probe(
     """
     sem = asyncio.Semaphore(concurrency)
     results: dict[str, dict[str, Any]] = {}
+
+    try:
+        await _run(
+            models=models,
+            settings=settings,
+            sample_size=sample_size,
+            sem=sem,
+            results=results,
+        )
+    finally:
+        # Warmup can prime the shared HTTP pools.
+        await _close_http_clients()
+    return results
+
+
+async def _run(
+    *,
+    models: list[RegisteredModel],
+    settings: Settings,
+    sample_size: int,
+    sem: asyncio.Semaphore,
+    results: dict[str, dict[str, Any]],
+) -> None:
+    await _warmup(models, settings)
 
     stt_models = [m for m in models if m.benchmark is Benchmark.STT]
     tts_models = [m for m in models if m.benchmark is Benchmark.TTS]
@@ -148,4 +200,3 @@ async def run_probe(
                 sem=sem,
                 settings=settings,
             )
-    return results

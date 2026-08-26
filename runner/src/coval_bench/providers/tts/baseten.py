@@ -11,6 +11,7 @@ private model id, so it is read from settings rather than hardcoded.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -28,14 +29,22 @@ _VALID_MODELS = ("qwen3-tts-1.7b",)
 _VALID_VOICES = ("lisa", "jim")
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
-# Cold replicas exceed the 10 s websockets default for the handshake.
+# Measurement handshake cap; warmup connects with its own budget-length timeout.
 _OPEN_TIMEOUT_S = 45
+# The warmup is the scale-up trigger; must outlast a boot (~253 s observed).
+_WARMUP_TIMEOUT_S = 360
 
 
 class BasetenTTSProvider(TTSProvider):
     """Baseten TTS provider using WebSocket streaming (Qwen3-TTS)."""
 
-    def __init__(self, settings: Settings, model: str, voice: str) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        model: str,
+        voice: str,
+        open_timeout_s: float = _OPEN_TIMEOUT_S,
+    ) -> None:
         if model not in _VALID_MODELS:
             raise ValueError(f"Invalid Baseten TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
@@ -51,6 +60,7 @@ class BasetenTTSProvider(TTSProvider):
         if not settings.baseten_qwen_url:
             raise ValueError("baseten_qwen_url is required in Settings")
         self._ws_url = settings.baseten_qwen_url
+        self._open_timeout_s = open_timeout_s
 
     @property
     def name(self) -> str:
@@ -59,6 +69,35 @@ class BasetenTTSProvider(TTSProvider):
     @property
     def model(self) -> str:
         return self._model
+
+    @classmethod
+    async def warmup(cls, settings: Settings) -> None:
+        """Wake and warm the endpoint; deletes its own artifact; never fatal."""
+        api_key = settings.baseten_api_key
+        if api_key is None or not api_key.get_secret_value().strip():
+            return
+        if not settings.baseten_qwen_url:
+            return
+        provider = cls(
+            settings, _VALID_MODELS[0], _VALID_VOICES[0], open_timeout_s=_WARMUP_TIMEOUT_S
+        )
+        t0 = time.monotonic()
+        error: str | None = None
+        try:
+            async with asyncio.timeout(_WARMUP_TIMEOUT_S):
+                result = await provider.synthesize("Warm up.")
+            if result.audio_path is not None:
+                result.audio_path.unlink(missing_ok=True)
+            error = result.error
+        except TimeoutError:
+            error = f"warmup timed out after {_WARMUP_TIMEOUT_S}s; endpoint still not up"
+        logger.info(
+            "baseten_tts_prewarm",
+            provider="baseten",
+            model=_VALID_MODELS[0],
+            warmup_ms=round((time.monotonic() - t0) * 1000, 1),
+            error=error,
+        )
 
     async def synthesize(self, text: str) -> TTSResult:
         audio_chunks: list[bytes] = []
@@ -71,7 +110,7 @@ class BasetenTTSProvider(TTSProvider):
                 self._ws_url,
                 additional_headers=headers,
                 max_size=_MAX_WS_SIZE,
-                open_timeout=_OPEN_TIMEOUT_S,
+                open_timeout=self._open_timeout_s,
             ) as ws:
                 # Clock starts post-handshake so TTFA excludes connect (cohort parity).
                 start = time.monotonic()

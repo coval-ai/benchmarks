@@ -268,10 +268,16 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
     if provider == "google":
         kwargs["project_id"] = settings.google_project_id
     elif provider == "baseten":
-        kwargs["ws_url"] = settings.baseten_whisper_url
+        from coval_bench.providers.stt.baseten import endpoint_url
+
+        kwargs["ws_url"] = endpoint_url(settings, model)
     elif provider == "azure":
         kwargs["region"] = settings.azure_region
-    instance = provider_cls(**kwargs)
+    try:
+        instance = provider_cls(**kwargs)
+    except ValueError as exc:
+        click.echo(f"Provider configuration error: {exc}", err=True)
+        sys.exit(2)
 
     with wave.open(wav, "rb") as w:
         if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:

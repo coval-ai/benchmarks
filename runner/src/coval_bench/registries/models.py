@@ -345,6 +345,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         status=_EARLY_ACCESS,
     ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="baseten",
+        model="qwen3-asr-1.7b",
+        creator="alibaba",
+        tags=(_MULTI, _VAD),
+        source=Source.DEDICATED_INFERENCE,
+        licensing=_OPEN,
+        on_prem=True,
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
     RegisteredModel(
         benchmark=_STT,
