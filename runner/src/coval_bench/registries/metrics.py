@@ -308,6 +308,9 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # Reson8 emits interims on a fixed ~1.1s grid, so first-token timing
             # tracks the emission interval.
             ("reson8", "realtime"),
+            # Scribe emits no partials — the first token is the turn-final, so
+            # first-token timing tracks utterance length.
+            ("zoom", "scribe"),
         }
     ),
     Metric.TTFS: frozenset(
@@ -325,6 +328,10 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
             # tracks the pad length, not the engine.
             ("together", "nemotron-3-asr-streaming-0.6b"),
             ("together", "nemotron-3.5-asr-streaming-0.6b"),
+            # Scribe has no force-finalize (session.close drops the pending turn);
+            # the client pads trailing silence, so the final's timing bundles
+            # endpoint detection.
+            ("zoom", "scribe"),
         }
     ),
 }

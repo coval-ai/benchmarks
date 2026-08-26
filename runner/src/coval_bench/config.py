@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
     deepdub_api_key: SecretStr | None = None
+    zoom_api_key: SecretStr | None = None
+    zoom_api_secret: SecretStr | None = None
 
     # Azure region hosting the Speech resource (e.g. "eastus"). Determines the
     # region-scoped WebSocket host; required only when the Azure STT provider runs.
