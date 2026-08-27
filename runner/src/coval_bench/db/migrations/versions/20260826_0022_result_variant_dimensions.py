@@ -16,6 +16,10 @@ bug. Every existing row is Coval-pinned, so the default is also the backfill.
 ``transport``, ``test_case_id`` and ``iteration`` stay nullable and cannot be
 backfilled, which is why this lands before the first row worth keeping.
 
+Replay order within one simulation is ``(created_at, id)``, never ``created_at``
+alone: ``now()`` is constant across a transaction, so a batch of calls shares one
+timestamp and only the serial id separates them.
+
 ``mock_tool_calls`` is deliberately its own table rather than rows in ``results``:
 a tool call is an event carrying arguments and a response, not a numeric metric,
 and ``results.metric_value`` is DOUBLE PRECISION with the rollups filtering on it
@@ -64,10 +68,14 @@ def upgrade() -> None:
         )
         """
     )
-    # The ingest join: every tool call for one simulation, in order.
+    # The ingest join: every tool call for one simulation, in order. `now()` is the
+    # transaction start time, so calls written in one transaction share a
+    # `created_at` and the timestamp alone cannot recover the order they fired in.
+    # `id` is the tiebreak, and the index carries it so `(created_at, id)` — the
+    # order replay must use — is served without a sort.
     op.execute(
         "CREATE INDEX mock_tool_calls_simulation_idx "
-        "ON benchmarks_v2.mock_tool_calls (simulation_id, created_at)"
+        "ON benchmarks_v2.mock_tool_calls (simulation_id, created_at, id)"
     )
     # Correlation fallback for platforms that drop unknown SIP headers.
     op.execute(
