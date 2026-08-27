@@ -364,7 +364,7 @@ async def _publish_one_bucket(
     pool: list[tuple[str, str]] = []
     for persona_id, model_runs in runs_by_persona.items():
         if set(model_runs) != expected:
-            logger.error(
+            logger.warning(
                 "samples_persona_incomplete",
                 persona=persona_id,
                 missing=model_labels(expected - set(model_runs)),
@@ -380,7 +380,7 @@ async def _publish_one_bucket(
                     list_sims, provider=provider, what="sims_list"
                 )
             except Exception:
-                logger.error(
+                logger.warning(
                     "samples_provider_missing",
                     missing=model_labels({(provider, model)}),
                     exc_info=True,
