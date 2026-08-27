@@ -21,6 +21,7 @@ from coval_bench.providers.stt.baseten import BasetenSTTProvider
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
+from coval_bench.providers.stt.gemini import GeminiSTTProvider
 from coval_bench.providers.stt.gladia import GladiaSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
 from coval_bench.providers.stt.inworld import InworldSTTProvider
@@ -52,6 +53,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "azure": AzureSTTProvider,
     "baseten": BasetenSTTProvider,
     "elevenlabs": ElevenLabsSTTProvider,
+    "gemini": GeminiSTTProvider,
     "gladia": GladiaSTTProvider,
     "gradium": GradiumSTTProvider,
     "inworld": InworldSTTProvider,
@@ -80,6 +82,7 @@ __all__ = [
     "AzureSTTProvider",
     "BasetenSTTProvider",
     "ElevenLabsSTTProvider",
+    "GeminiSTTProvider",
     "GladiaSTTProvider",
     "GradiumSTTProvider",
     "InworldSTTProvider",

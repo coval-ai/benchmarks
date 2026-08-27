@@ -96,6 +96,7 @@ class Settings(BaseSettings):
     hume_api_key: SecretStr | None = None
     rime_api_key: SecretStr | None = None
     gladia_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
     gradium_api_key: SecretStr | None = None
     gradium_tts_api_key: SecretStr | None = None
     mistral_api_key: SecretStr | None = None
