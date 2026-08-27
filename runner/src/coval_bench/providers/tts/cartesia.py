@@ -29,7 +29,7 @@ OUTPUT_FORMAT: dict[str, Any] = {
 class CartesiaTTSProvider(TTSProvider):
     """Cartesia TTS provider using WebSocket streaming (cartesia SDK v2)."""
 
-    _VALID_MODELS = frozenset({"sonic-3", "sonic-3.5", "sonic-preview"})
+    _VALID_MODELS = frozenset({"sonic-3", "sonic-3.5", "sonic-3.6", "sonic-preview"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model

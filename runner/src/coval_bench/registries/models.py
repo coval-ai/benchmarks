@@ -629,9 +629,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS,
         provider="cartesia",
-        # Rolling pointer to Cartesia's next unreleased model; rename to the
-        # GA model id before promoting past EARLY_ACCESS.
-        model="sonic-preview",
+        model="sonic-3.6",
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
         voices=(
             Voice(
@@ -650,7 +648,19 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="cartesia",
+        # Rolling pointer to Cartesia's next unreleased model; retired at the
+        # sonic-3.6 GA (2026-08-27), which entered as its own entry above.
+        model="sonic-preview",
+        voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        tags=(_MULTI, _CLONE, _EMOTION),
+        on_prem=True,
+        region="us",
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
