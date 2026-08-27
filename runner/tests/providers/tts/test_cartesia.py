@@ -101,6 +101,15 @@ def test_cartesia_supports_sonic_3_5(fake_settings: Settings) -> None:
     assert p._model_supported("sonic-3.5")
 
 
+def test_cartesia_supports_sonic_3_6(fake_settings: Settings) -> None:
+    """sonic-3.6 (the public matrix entry) must pass the model-support guard."""
+    p = CartesiaTTSProvider(
+        fake_settings, model="sonic-3.6", voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4"
+    )
+    assert p.name == "cartesia-sonic-3.6"
+    assert p._model_supported("sonic-3.6")
+
+
 def test_cartesia_supports_sonic_preview(fake_settings: Settings) -> None:
     """sonic-preview (the early-access entry) must pass the model-support guard."""
     p = CartesiaTTSProvider(
