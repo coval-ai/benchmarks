@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from coval_bench.providers.base import TTSProvider
 from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
+from coval_bench.providers.tts.atlas import AtlasTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
@@ -55,6 +56,7 @@ except ImportError:
 
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
+    "atlas": AtlasTTSProvider,
     "cartesia": CartesiaTTSProvider,
     "elevenlabs": ElevenLabsTTSProvider,
     "gradium": GradiumTTSProvider,
@@ -90,6 +92,7 @@ __all__ = [
     "HUME_AVAILABLE",
     "GOOGLE_TTS_AVAILABLE",
     "AlibabaTTSProvider",
+    "AtlasTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
     "DeepdubTTSProvider",

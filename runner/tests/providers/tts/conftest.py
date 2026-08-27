@@ -55,6 +55,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         openai_api_key=SecretStr("sk-test-openai"),
         cartesia_api_key=SecretStr("test-cartesia-key"),
         elevenlabs_api_key=SecretStr("test-elevenlabs-key"),
+        atlas_api_key=SecretStr("test-atlas-key"),
         deepgram_api_key=SecretStr("test-deepgram-key"),
         hume_api_key=SecretStr("test-hume-key"),
         rime_api_key=SecretStr("test-rime-key"),
