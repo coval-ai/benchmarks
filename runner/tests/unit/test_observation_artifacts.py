@@ -11,10 +11,20 @@ from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 
 from coval_bench.observation_artifacts import (
+    prepare_provider_transcript,
+    prepare_timing_events,
     snapshot_generated_audio,
     upload_generated_audio,
     upload_provider_transcript,
 )
+
+
+def test_prepared_descriptors_are_canonical_without_storage() -> None:
+    transcript = prepare_provider_transcript("secret transcript")
+    timing = prepare_timing_events({"ttfa_ms": 12.5})
+    assert transcript[0].value == "provider_transcript"
+    assert transcript[1] == b'{"schema_version":"v1","transcript":"secret transcript"}'
+    assert timing[1] == b'{"events":{"ttfa_ms":12.5},"schema_version":"v1"}'
 
 
 class Blob:
