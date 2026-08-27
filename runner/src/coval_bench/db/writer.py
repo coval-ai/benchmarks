@@ -139,9 +139,10 @@ class RunWriter:
                 (run_id, provider, model, voice, benchmark, metric_type,
                  metric_value, metric_units, audio_filename, transcript,
                  status, error, http_version, submit_to_headers_ms,
-                 wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct)
+                 wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
+                 variant_id, transport, test_case_id, iteration)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s)
         """
         params = [
             (
@@ -162,6 +163,10 @@ class RunWriter:
                 r.wer_insertions_pct,
                 r.wer_deletions_pct,
                 r.wer_substitutions_pct,
+                r.variant_id,
+                r.transport,
+                r.test_case_id,
+                r.iteration,
             )
             for r in results
         ]

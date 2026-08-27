@@ -283,6 +283,45 @@ def test_record_results_batch(pg_conn: psycopg.Connection[Any]) -> None:
     asyncio.run(_run())
 
 
+def test_record_results_persists_variant_dimensions(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """A non-default variant survives the insert; an unset one defaults to pinned."""
+    _apply_migrations(pg_conn)
+
+    async def _run() -> None:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            run = await writer.start_run(dataset_id="s2s-dental-v1", dataset_sha256="deadbeef")
+            assert run.id is not None
+            tagged = _make_result(run.id, idx=0)
+            tagged = tagged.model_copy(
+                update={
+                    "variant_id": "vapi-baseline-v1",
+                    "transport": "sip",
+                    "test_case_id": "TC1",
+                    "iteration": 2,
+                }
+            )
+            await writer.record_results([tagged, _make_result(run.id, idx=1)])
+            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
+        finally:
+            await pool.close()
+
+        pg_conn.autocommit = True
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                "SELECT variant_id, transport, test_case_id, iteration"
+                " FROM benchmarks_v2.results WHERE run_id = %s ORDER BY metric_value",
+                (run.id,),
+            )
+            rows = cur.fetchall()
+        assert rows == [("vapi-baseline-v1", "sip", "TC1", 2), ("pinned", None, None, None)]
+
+    asyncio.run(_run())
+
+
 def test_partial_run(pg_conn: psycopg.Connection[Any]) -> None:
     """1 success + 1 failed result → finish_run('partial') → status persists."""
     _apply_migrations(pg_conn)
