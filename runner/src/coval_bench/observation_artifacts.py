@@ -26,6 +26,36 @@ def _artifact_key(artifact_type: ObservationArtifactType, digest: str, extension
     return f"observation-artifacts/v1/{artifact_type}/{digest[:2]}/{digest}.{extension}"
 
 
+def prepare_provider_transcript(
+    transcript: str,
+) -> tuple[ObservationArtifactType, bytes, str, str, str]:
+    """Return the canonical, upload-independent transcript descriptor.
+
+    Keeping preparation separate lets migrations determine their exact dry-run
+    payload without constructing a storage client.
+    """
+    return (
+        ObservationArtifactType.PROVIDER_TRANSCRIPT,
+        _canonical_json({"schema_version": "v1", "transcript": transcript}),
+        "json",
+        "application/json",
+        "ProviderTranscript",
+    )
+
+
+def prepare_timing_events(
+    events: dict[str, Any],
+) -> tuple[ObservationArtifactType, bytes, str, str, str]:
+    """Return the canonical, upload-independent timing-events descriptor."""
+    return (
+        ObservationArtifactType.TIMING_EVENTS,
+        _canonical_json({"schema_version": "v1", "events": events}),
+        "json",
+        "application/json",
+        "TimingEvents",
+    )
+
+
 def _upload(
     client: storage.Client,
     bucket_name: str,
@@ -69,28 +99,32 @@ def _upload(
 def upload_provider_transcript(
     client: storage.Client, bucket_name: str, transcript: str
 ) -> ObservationArtifact:
+    artifact_type, payload, extension, content_type, schema_name = prepare_provider_transcript(
+        transcript
+    )
     return _upload(
         client,
         bucket_name,
-        ObservationArtifactType.PROVIDER_TRANSCRIPT,
-        _canonical_json({"schema_version": "v1", "transcript": transcript}),
-        extension="json",
-        content_type="application/json",
-        schema_name="ProviderTranscript",
+        artifact_type,
+        payload,
+        extension=extension,
+        content_type=content_type,
+        schema_name=schema_name,
     )
 
 
 def upload_timing_events(
     client: storage.Client, bucket_name: str, events: dict[str, Any]
 ) -> ObservationArtifact:
+    artifact_type, payload, extension, content_type, schema_name = prepare_timing_events(events)
     return _upload(
         client,
         bucket_name,
-        ObservationArtifactType.TIMING_EVENTS,
-        _canonical_json({"schema_version": "v1", "events": events}),
-        extension="json",
-        content_type="application/json",
-        schema_name="TimingEvents",
+        artifact_type,
+        payload,
+        extension=extension,
+        content_type=content_type,
+        schema_name=schema_name,
     )
 
 

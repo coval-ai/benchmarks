@@ -19,6 +19,7 @@ import click
 
 from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
+from coval_bench.migrations.backfill_normalized_storage import backfill_normalized_storage_cli
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.s2s.fetch_v2v import fetch_s2s
@@ -95,6 +96,7 @@ def migrate() -> None:
 
 
 migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
+migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 
 # S2S is fetch-only, so a standalone command rather than a `run --kind` value.
