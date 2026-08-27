@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
+    atlas_api_key: SecretStr | None = None
     cartesia_api_key: SecretStr | None = None
     deepgram_api_key: SecretStr | None = None
     assemblyai_api_key: SecretStr | None = None

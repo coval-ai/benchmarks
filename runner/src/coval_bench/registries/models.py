@@ -1148,6 +1148,27 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         status=_RETIRED,
     ),
+    # Atlas exposes no model id of its own: /v1/models returns voices, not models,
+    # and a model field in the request body is accepted and ignored, so "atlas-tts"
+    # is our name for the single synthesiser behind it. Early-access rather than
+    # active on purpose - Atlas is a gateway over an undisclosed third-party
+    # synthesiser (its server-timing attributes each request to "upstream", and
+    # its error envelope is typed "proxy_error"), so a row here may not be
+    # independent of another provider already on the board. Benchmark it, but do
+    # not publish it beside first-party models until the upstream is named.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="atlas",
+        model="atlas-tts",
+        voice="dax",
+        source=Source.SHARED_INFERENCE,
+        region="us",
+        status=_EARLY_ACCESS,
+        # Out of the voice arena: an arena entry needs a gendered voice pool, and
+        # pitting an undisclosed proxy against first-party models in a blind A/B
+        # would attribute the upstream's quality to Atlas.
+        arena_enabled=False,
+    ),
     #######
     # S2S #
     #######
