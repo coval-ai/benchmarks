@@ -665,6 +665,7 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     settings = Settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
     )
 
     writer = _stub_writer()
@@ -695,6 +696,7 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     settings = Settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
     )
 
     writer = _stub_writer()
@@ -1044,6 +1046,7 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
     settings = Settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
         coval_s2s_noisy_persona_id="PN",
     )
     with pytest.raises(RuntimeError, match="requires coval_s2s_test_set_id"):
@@ -1098,6 +1101,7 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_test_set_id="TS1",
+        coval_s2s_dental_test_set_id="TSD",
         coval_s2s_instruction_metric_id="IID",
         coval_s2s_interruption_metric_id="RID",
     )

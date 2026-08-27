@@ -76,19 +76,37 @@ class CovalRun:
     persona_id: str = ""
 
 
-# Agent ids resolved from Settings; model strings are display labels.
+# Agent ids resolved from Settings; model strings are display labels. Every agent
+# now runs the dental test set: the shared multi-turn set stays queryable but is
+# no longer written to, so a spec left on it would go stale rather than idle.
 AGENTS: tuple[AgentSpec, ...] = (
-    AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
-    AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
+    AgentSpec(
+        agent_id_attr="coval_s2s_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_gemini_agent_id",
+        provider="google",
+        model="gemini-live",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_agent_id",
         provider="xai",
         model="grok-voice-think-fast-1.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
         provider="xai",
         model="grok-voice-think-fast-2.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     # Pre-launch models under codenames: the provider and model strings are what
     # land in the results table, so they carry no vendor identity of their own.
