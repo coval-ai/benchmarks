@@ -157,12 +157,12 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
 
 
-async def test_s2s_leaderboard_uses_clean_multiturn_dataset(
+async def test_s2s_leaderboard_uses_the_clean_primary_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """The headline S2S board excludes robustness conditions such as noisy speech."""
-    clean_run = await _insert_run(postgresql, dataset_id="s2s-multiturn-v1")
-    noisy_run = await _insert_run(postgresql, dataset_id="s2s-multiturn-noisy-v1")
+    clean_run = await _insert_run(postgresql, dataset_id="s2s-dental-v1")
+    noisy_run = await _insert_run(postgresql, dataset_id="s2s-dental-noisy-v1")
     await _insert_result(
         postgresql,
         clean_run,

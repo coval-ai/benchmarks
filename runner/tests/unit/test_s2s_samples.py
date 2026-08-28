@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
@@ -173,6 +174,20 @@ async def _publish(
         download_client=client,
         expected_models=expected_models,
     )
+
+
+@pytest.mark.asyncio
+async def test_manifest_labels_the_set_the_runs_came_from() -> None:
+    # Agents no longer share one test set, so the manifest must name the set the
+    # recordings came from rather than whatever the caller was configured with.
+    storage_client, bucket = _fake_storage()
+    runs = [replace(run, test_set_id="OWN_SET") for run in _runs()]
+    cases = {"RO_F": ["b", "c"], "RG_F": ["b", "c"], "RO_M": ["b", "c"], "RG_M": ["b", "c"]}
+    async with _fake_client(cases) as client:
+        await _publish(client, storage_client, runs)
+
+    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    assert manifest["test_set_id"] == "OWN_SET"
 
 
 @pytest.mark.asyncio

@@ -52,10 +52,11 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("V2V", "S2S"),
 }
 
-# The headline S2S board is the clean multi-turn condition.  ``__all__`` remains
-# available to aggregate callers that explicitly want every S2S condition pooled,
-# including robustness datasets such as the noisy persona.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": "s2s-multiturn-v1"}
+# The headline S2S board is the clean dental condition, which every agent now runs.
+# The multi-turn set is frozen rather than retired: no agent writes to it, but it
+# stays reachable through the aggregates ``dataset`` param, as does ``__all__`` for
+# callers that want every S2S condition pooled.
+_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": "s2s-dental-v1"}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,

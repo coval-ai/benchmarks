@@ -76,19 +76,37 @@ class CovalRun:
     persona_id: str = ""
 
 
-# Agent ids resolved from Settings; model strings are display labels.
+# Agent ids resolved from Settings; model strings are display labels. Every agent
+# now runs the dental test set: the shared multi-turn set stays queryable but is
+# no longer written to, so a spec left on it would go stale rather than idle.
 AGENTS: tuple[AgentSpec, ...] = (
-    AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
-    AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
+    AgentSpec(
+        agent_id_attr="coval_s2s_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_gemini_agent_id",
+        provider="google",
+        model="gemini-live",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_agent_id",
         provider="xai",
         model="grok-voice-think-fast-1.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
         provider="xai",
         model="grok-voice-think-fast-2.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     # Pre-launch models under codenames: the provider and model strings are what
     # land in the results table, so they carry no vendor identity of their own.
@@ -757,6 +775,7 @@ async def _fetch_one_provider(
             bucket_at=bucket_at,
             persona_id=coval_run.persona_id,
             agent_id=agent_id,
+            test_set_id=test_set_id or "",
         )
 
     try:
@@ -1006,7 +1025,14 @@ async def fetch_and_write_v2v(
                 f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
             )
 
-        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
+        # The set the sampled recordings actually came from, which is what labels
+        # the manifest. Gating on the shared ``coval_s2s_test_set_id`` instead would
+        # stop publishing entirely once every agent carries its own set, filling
+        # sampled_runs and then never shipping them.
+        sample_test_set_id = next(
+            (r.test_set_id for r in sampled_runs if r.test_set_id), test_set_id
+        )
+        if settings.s2s_samples_bucket and sampled_runs and sample_test_set_id:
             expected = _expected_sample_models(settings)
             missing = expected - {r.key for r in sampled_runs}
             if missing:
@@ -1016,7 +1042,7 @@ async def fetch_and_write_v2v(
             await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
-                test_set_id=test_set_id,
+                test_set_id=sample_test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
