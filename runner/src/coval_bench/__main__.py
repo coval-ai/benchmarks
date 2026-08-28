@@ -36,9 +36,17 @@ _SMOKE_TIMEOUT_S = 120
 def cli() -> None:
     """Coval voice-AI benchmarks runner."""
     from coval_bench.config import get_settings
+    from coval_bench.fixture_sources import install_fixture_providers
     from coval_bench.logging import configure_logging
 
-    configure_logging(level=get_settings().log_level)
+    settings = get_settings()
+    configure_logging(level=settings.log_level)
+    # Every command that reads or hashes a contract gets the same fixture sources
+    # the API has. `pull-contract` prints the hash today and the voice-agent
+    # ingest will write it onto result rows; a runner that could not see the
+    # fixtures would publish the hash of a run that had none, which is the one
+    # thing the hash exists to prevent.
+    install_fixture_providers(settings)
 
 
 @cli.command(name="run")

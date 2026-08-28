@@ -43,9 +43,11 @@ vendor rejecting it at apply time; a mistyped key would silently drop the pin.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.resources
 import json
+from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -58,6 +60,8 @@ __all__ = [
     "read_contract_file",
     "has_private_contract",
     "read_private_fixture",
+    "FixtureProvider",
+    "register_fixture_provider",
     "AnnotatedModel",
 ]
 
@@ -168,8 +172,13 @@ def read_contract_file(suite: str, filename: str) -> str:
     return _read_bytes(suite, filename).decode()
 
 
-def _digest(suite: str, filenames: tuple[str, ...]) -> str:
-    """SHA-256 over the pinned stack plus the named suite files, skipping absentees."""
+def _digest(suite: str, filenames: tuple[str, ...], extra: bytes | None = None) -> str:
+    """SHA-256 over the pinned stack, the named suite files, and any trailing bytes.
+
+    ``extra`` carries the private fixtures, which do not come from ``_read_bytes``
+    on a deployment that fetched them from a provider. Appending them last keeps
+    the digest byte-order identical to reading them as the final filename.
+    """
     digest = hashlib.sha256()
     digest.update(_read_bytes("stack.json"))
     for filename in filenames:
@@ -177,6 +186,8 @@ def _digest(suite: str, filenames: tuple[str, ...]) -> str:
             digest.update(_read_bytes(suite, *filename.split("/")))
         except (FileNotFoundError, NotADirectoryError):
             continue
+    if extra is not None:
+        digest.update(extra)
     return digest.hexdigest()
 
 
@@ -199,7 +210,14 @@ def contract_sha256(suite: str) -> str:
     ``stack.json`` too, because changing a pin changes what the agent is just
     as surely as changing its prompt.
     """
-    return _digest(suite, (*PUBLIC_CONTRACT_FILES, *PRIVATE_CONTRACT_FILES))
+    # The private half goes through `read_private_fixture`, not `_read_bytes`, so
+    # the hash covers whatever the service actually loaded. Reading the checkout
+    # directly here would make a deployment that fetched its fixtures from a
+    # provider publish the fixture-less hash while serving the fixtures.
+    private: bytes | None = None
+    with contextlib.suppress(FileNotFoundError, NotADirectoryError):
+        private = read_private_fixture(suite)
+    return _digest(suite, PUBLIC_CONTRACT_FILES, extra=private)
 
 
 def has_private_contract(suite: str) -> bool:
@@ -215,14 +233,50 @@ def has_private_contract(suite: str) -> bool:
     return True
 
 
-def read_private_fixture(suite: str) -> bytes:
-    """Read the suite's uncommitted mock fixtures.
+# A source of fixtures that is not the local checkout. The deployed image cannot
+# carry `_private/` — it is gitignored, and the build context is a git checkout —
+# so production reads the seeded world from somewhere else. That somewhere
+# registers itself here rather than being imported, because this module is
+# deliberately dependency-light and has no business knowing about object storage.
+FixtureProvider = Callable[[str], bytes]
 
-    Raises ``FileNotFoundError`` in a fresh checkout and in CI, where
-    ``_private/`` does not exist. Callers that can run without the seeded world
-    should ask ``has_private_contract`` first.
+_FIXTURE_PROVIDERS: list[FixtureProvider] = []
+
+
+def register_fixture_provider(provider: FixtureProvider) -> None:
+    """Add a fallback source, consulted in registration order when local is absent.
+
+    A provider raises ``FileNotFoundError`` for a suite it does not carry, and
+    the chain moves on.
     """
-    return _read_bytes(suite, "_private", "mock-tools.json")
+    _FIXTURE_PROVIDERS.append(provider)
+
+
+def read_private_fixture(suite: str) -> bytes:
+    """Read the suite's uncommitted mock fixtures: local checkout, then providers.
+
+    Local wins, so that editing the file is what a developer sees take effect.
+
+    **Every reader goes through here, `contract_sha256` included, and that is the
+    point.** The hash covers the seeded world, so a fallback wired only into the
+    mock service would leave production serving the right fixtures while
+    publishing a hash computed as though it had none — a different "what ran"
+    number on every result, with nothing to notice it.
+
+    Raises ``FileNotFoundError`` when neither the checkout nor any provider has
+    it. Callers that can run without the seeded world should ask
+    ``has_private_contract`` first.
+    """
+    try:
+        return _read_bytes(suite, "_private", "mock-tools.json")
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    for provider in _FIXTURE_PROVIDERS:
+        try:
+            return provider(suite)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+    raise FileNotFoundError(f"no mock fixtures for suite {suite!r}, locally or from a provider")
 
 
 def stack_as_dict(stack: Stack) -> dict[str, Any]:

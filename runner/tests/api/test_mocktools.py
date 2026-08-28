@@ -16,6 +16,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+import coval_bench.contracts as contracts_module
 from coval_bench.mocktools.dispatch import Dispatcher, load_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url
@@ -107,6 +108,32 @@ async def test_an_unconfigured_secret_closes_the_appliance(
     mock_app.state.settings = mock_app.state.settings.model_copy(update={"mock_tools_secret": None})
     response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
     assert response.status_code == 503
+
+
+async def test_unloaded_fixtures_answer_503_without_reaching_storage(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Startup owns the build, so a request never retries it.
+
+    Retrying per request would put a round trip in front of every tool call, in
+    the middle of a live conversation, and a miss is not something a cache
+    prevents. A provider registered here must never be consulted.
+    """
+    app.state.mock_dispatcher = None
+    consulted = False
+
+    def never(suite: str) -> bytes:
+        nonlocal consulted
+        consulted = True
+        raise FileNotFoundError(suite)
+
+    contracts_module._FIXTURE_PROVIDERS.append(never)
+    try:
+        response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    finally:
+        contracts_module._FIXTURE_PROVIDERS.remove(never)
+    assert response.status_code == 503
+    assert not consulted
 
 
 # --- answers ---------------------------------------------------------------

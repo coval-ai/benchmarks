@@ -41,6 +41,20 @@ def read_json(
     return decoded
 
 
+def read_bytes(
+    bucket_name: str,
+    key: str,
+    *,
+    storage_client: storage.Client | None = None,
+) -> bytes | None:
+    """The object's bytes, or ``None`` when it is not there."""
+    gcs = storage_client if storage_client is not None else client()
+    try:
+        return bytes(gcs.bucket(bucket_name).blob(key).download_as_bytes())
+    except NotFound:
+        return None
+
+
 def signed_url(
     bucket_name: str,
     key: str,
