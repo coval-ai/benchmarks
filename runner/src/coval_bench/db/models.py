@@ -366,11 +366,11 @@ class Result(BaseModel):
     # its own id. Orchestration platforms are variants of S2S, not their own benchmark.
     variant_id: str = "pinned"
     # Call-shape dimensions, null outside the orchestration runs that set them:
-    # `transport` the carrier path, `test_case_id` the scenario, `iteration` the
-    # repeat within one run.
+    # `transport` the carrier path, `test_case_id` the scenario. Neither survives
+    # the run it was measured in, so both are stored rather than derived. The repeat
+    # index within a run is not: it falls out of (created_at, id) when it is wanted.
     transport: str | None = None
     test_case_id: str | None = None
-    iteration: int | None = None
 
 
 class VoteOutcome(StrEnum):

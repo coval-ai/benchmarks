@@ -13,8 +13,12 @@ Coval fixed for comparability. Nullable would leave "unset" ambiguous between a
 row predating variants and one somebody forgot to tag, and only the second is a
 bug. Every existing row is Coval-pinned, so the default is also the backfill.
 
-``transport``, ``test_case_id`` and ``iteration`` stay nullable and cannot be
-backfilled, which is why this lands before the first row worth keeping.
+``transport`` and ``test_case_id`` stay nullable and cannot be backfilled, which
+is why this lands before the first row worth keeping. The repeat index within a run
+is deliberately not a column: unlike those two it is recoverable after the fact, as
+``row_number() over (partition by run_id, variant_id, test_case_id order by
+created_at, id)``, so storing it would buy only the ability to tell a skipped
+attempt from a short run.
 
 Replay order within one simulation is ``(created_at, id)``, never ``created_at``
 alone: ``now()`` is constant across a transaction, so a batch of calls shares one
@@ -46,8 +50,7 @@ def upgrade() -> None:
         ALTER TABLE benchmarks_v2.results
             ADD COLUMN variant_id   TEXT NOT NULL DEFAULT 'pinned',
             ADD COLUMN transport    TEXT,
-            ADD COLUMN test_case_id TEXT,
-            ADD COLUMN iteration    INTEGER
+            ADD COLUMN test_case_id TEXT
         """
     )
 
@@ -91,7 +94,6 @@ def downgrade() -> None:
     op.execute(
         """
         ALTER TABLE benchmarks_v2.results
-            DROP COLUMN IF EXISTS iteration,
             DROP COLUMN IF EXISTS test_case_id,
             DROP COLUMN IF EXISTS transport,
             DROP COLUMN IF EXISTS variant_id

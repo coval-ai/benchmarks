@@ -140,9 +140,9 @@ class RunWriter:
                  metric_value, metric_units, audio_filename, transcript,
                  status, error, http_version, submit_to_headers_ms,
                  wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
-                 variant_id, transport, test_case_id, iteration)
+                 variant_id, transport, test_case_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s)
         """
         params = [
             (
@@ -166,7 +166,6 @@ class RunWriter:
                 r.variant_id,
                 r.transport,
                 r.test_case_id,
-                r.iteration,
             )
             for r in results
         ]

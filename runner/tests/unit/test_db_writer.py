@@ -301,7 +301,6 @@ def test_record_results_persists_variant_dimensions(
                     "variant_id": "vapi-baseline-v1",
                     "transport": "sip",
                     "test_case_id": "TC1",
-                    "iteration": 2,
                 }
             )
             await writer.record_results([tagged, _make_result(run.id, idx=1)])
@@ -312,12 +311,12 @@ def test_record_results_persists_variant_dimensions(
         pg_conn.autocommit = True
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT variant_id, transport, test_case_id, iteration"
+                "SELECT variant_id, transport, test_case_id"
                 " FROM benchmarks_v2.results WHERE run_id = %s ORDER BY metric_value",
                 (run.id,),
             )
             rows = cur.fetchall()
-        assert rows == [("vapi-baseline-v1", "sip", "TC1", 2), ("pinned", None, None, None)]
+        assert rows == [("vapi-baseline-v1", "sip", "TC1"), ("pinned", None, None)]
 
     asyncio.run(_run())
 
