@@ -153,6 +153,15 @@ class Settings(BaseSettings):
     # convention used by the STT/TTS orchestrator.
     vapi_api_key: SecretStr | None = None
     telnyx_api_key: SecretStr | None = None
+    # --- Mock tools appliance ---
+    # The shared secret every platform's tool runner presents. Absent means the
+    # endpoint refuses every call: an open mock would let anyone write rows into
+    # the tool-call log.
+    mock_tools_secret: SecretStr | None = None
+    # The fixed latency every mock tool answer is held to, so tool time is a
+    # constant across variants instead of a property of the seed that answered.
+    mock_tools_latency_ms: float = Field(default=50.0, ge=0)
+    mock_tools_suite: str = "dental"
     coval_api_base: str = "https://api.coval.dev/v1"
     # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None
