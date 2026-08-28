@@ -10,6 +10,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
+import coval_bench.contracts as contracts_module
 from coval_bench.contracts import (
     LlmPin,
     Stack,
@@ -18,6 +19,8 @@ from coval_bench.contracts import (
     load_stack,
     public_contract_sha256,
     read_contract_file,
+    read_private_fixture,
+    register_fixture_provider,
     stack_as_dict,
 )
 from coval_bench.variants.platforms import redact_identifiers
@@ -123,3 +126,90 @@ def test_redact_identifiers_leaves_methodology_alone() -> None:
         "nested": [{"phone_number": "[REDACTED]"}],
     }
     assert found == ["id", "nested[0].phone_number"]
+
+
+# --- the fixture fallback chain ---------------------------------------------
+#
+# `_private/` is gitignored and the image is built from a git checkout, so the
+# deployed service can never carry the seeded world. It reads it from elsewhere,
+# and that elsewhere registers itself here.
+
+SEEDED = b'{"tools": {}}'
+
+
+@pytest.fixture
+def no_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty chain, so one test cannot leak a provider into the next."""
+    monkeypatch.setattr(contracts_module, "_FIXTURE_PROVIDERS", [])
+
+
+@pytest.fixture
+def checkout_without_fixtures(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A checkout where only `_private/` is missing, as in CI and in the image."""
+    real = contracts_module._read_bytes
+
+    def missing_private(*parts: str) -> bytes:
+        if "_private" in parts:
+            raise FileNotFoundError("/".join(parts))
+        return real(*parts)
+
+    monkeypatch.setattr(contracts_module, "_read_bytes", missing_private)
+
+
+def test_a_provider_answers_when_the_checkout_has_none(
+    no_providers: None, checkout_without_fixtures: None
+) -> None:
+    register_fixture_provider(lambda suite: SEEDED)
+    assert read_private_fixture("dental") == SEEDED
+
+
+def test_the_local_checkout_wins_over_a_provider(no_providers: None) -> None:
+    """Editing the file is what a developer expects to take effect."""
+    if not has_private_contract("dental"):
+        pytest.skip("local fixtures are not installed")
+    register_fixture_provider(lambda suite: SEEDED)
+    assert read_private_fixture("dental") != SEEDED
+
+
+def test_a_provider_without_the_suite_falls_through(
+    no_providers: None, checkout_without_fixtures: None
+) -> None:
+    def absent(suite: str) -> bytes:
+        raise FileNotFoundError(suite)
+
+    register_fixture_provider(absent)
+    register_fixture_provider(lambda suite: SEEDED)
+    assert read_private_fixture("dental") == SEEDED
+
+
+def test_an_empty_chain_still_raises(no_providers: None, checkout_without_fixtures: None) -> None:
+    with pytest.raises(FileNotFoundError):
+        read_private_fixture("dental")
+
+
+def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
+    no_providers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reason the fallback lives in the reader and not in the mock service.
+
+    `contract_sha256` reads through the same function. A fallback wired only into
+    dispatch would leave production serving the right fixtures while publishing a
+    hash computed as though it had none — a different "what ran" number on every
+    result, and nothing to notice it.
+    """
+    if not has_private_contract("dental"):
+        pytest.skip("local fixtures are not installed")
+    from_disk = contract_sha256("dental")
+    seeded = read_private_fixture("dental")
+
+    real = contracts_module._read_bytes
+
+    def missing_private(*parts: str) -> bytes:
+        if "_private" in parts:
+            raise FileNotFoundError("/".join(parts))
+        return real(*parts)
+
+    monkeypatch.setattr(contracts_module, "_read_bytes", missing_private)
+    register_fixture_provider(lambda suite: seeded)
+    assert contract_sha256("dental") == from_disk
+    assert contract_sha256("dental") != public_contract_sha256("dental")
