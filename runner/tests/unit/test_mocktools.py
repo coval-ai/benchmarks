@@ -140,6 +140,31 @@ def test_a_wrong_identifier_vetoes_a_seed_it_shares_text_with() -> None:
     assert resolution.mode == "fallback"
 
 
+def test_a_different_enum_value_vetoes_a_seed() -> None:
+    """`crown` is not a misspelling of `checkup`, it is a different visit type.
+
+    Scored as free text against an exactly matching date it averages well over
+    the threshold, and the wrong day's slots come back as if they were right.
+    """
+    fixture = _fixture(_seed("nov12", date="2030-11-12", appointment_type="checkup"))
+    resolution = resolve(
+        fixture,
+        {"date": "2030-11-12", "appointment_type": "crown"},
+        categorical_keys=frozenset({"appointment_type"}),
+    )
+    assert resolution.mode == "fallback"
+
+
+def test_an_enum_key_still_matches_its_own_value() -> None:
+    fixture = _fixture(_seed("nov12", date="2030-11-12", appointment_type="checkup"))
+    resolution = resolve(
+        fixture,
+        {"date": "2030-11-12", "appointment_type": "checkup"},
+        categorical_keys=frozenset({"appointment_type"}),
+    )
+    assert (resolution.seed.id, resolution.mode) == ("nov12", "exact")
+
+
 def test_the_veto_does_not_block_mere_format_drift() -> None:
     fixture = _fixture(_seed("nov12", date="2030-11-12", appointment_type="checkup"))
     resolution = resolve(fixture, {"date": "2030/11/12", "appointment_type": "checkup"})
@@ -218,6 +243,45 @@ def test_missing_required_argument_answers_422() -> None:
     outcome = _dispatcher().call("lookup_patient", {})
     assert outcome.http_status == 422
     assert outcome.response["missing"] == ["phone"]
+
+
+def test_a_wrongly_typed_argument_answers_422() -> None:
+    """`2065550180` is not `"2065550180"`.
+
+    Stringifying it would find the seeded patient and hide a tool call the agent
+    got wrong, which is exactly the kind of mistake the suite is measuring.
+    """
+    outcome = _dispatcher().call("lookup_patient", {"phone": 2065550180})
+    assert outcome.http_status == 422
+    assert outcome.response["invalid"] == [{"name": "phone", "expected": "string"}]
+
+
+def test_a_boolean_is_not_accepted_where_a_number_is_declared() -> None:
+    specs = parse_tool_specs(
+        json.dumps(
+            [
+                {
+                    "name": "lookup_patient",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"phone": {"type": "number"}},
+                        "required": ["phone"],
+                    },
+                },
+                {
+                    "name": "check_availability",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"date": {"type": "string"}},
+                        "required": [],
+                    },
+                },
+            ]
+        )
+    )
+    dispatcher = Dispatcher(specs, _covering_fixtures())
+    assert dispatcher.call("lookup_patient", {"phone": True}).http_status == 422
+    assert dispatcher.call("lookup_patient", {"phone": 2065550180}).http_status == 200
 
 
 def test_a_seeded_failure_is_returned_with_its_status() -> None:

@@ -113,12 +113,35 @@ def _similarity(supplied: str, seeded: str) -> float:
     return fuzz.ratio(supplied, seeded)
 
 
+def _vetoed(seed: Seed, args: dict[str, Any], categorical_keys: frozenset[str]) -> bool:
+    """Whether a seed is disqualified outright rather than scored.
+
+    Two kinds of value are closed: an identifier names one thing, and an enum is
+    one of a declared set. ``crown`` is not a misspelling of ``cleaning`` — it is
+    a different visit type, and scoring their resemblance against an exactly
+    matching date averages to well over the threshold, handing back the wrong
+    day's slots as if they were the right ones.
+    """
+    for key in _shared_keys(seed, args):
+        supplied, seeded = _as_text(args[key]), _as_text(seed.match[key])
+        if key in categorical_keys and supplied != seeded:
+            return True
+        if _identifier_mismatch(supplied, seeded):
+            return True
+    return False
+
+
 def _shared_keys(seed: Seed, args: dict[str, Any]) -> tuple[str, ...]:
     """The keys a seed declares that this call also supplied."""
     return tuple(key for key in seed.match if key in args)
 
 
-def resolve(fixture: ToolFixture, args: dict[str, Any]) -> Resolution:
+def resolve(
+    fixture: ToolFixture,
+    args: dict[str, Any],
+    *,
+    categorical_keys: frozenset[str] = frozenset(),
+) -> Resolution:
     """Pick the seed that answers *args*, by the three-stage rule above."""
     exact: list[tuple[int, Seed, tuple[str, ...]]] = []
     for seed in fixture.seeds:
@@ -137,9 +160,7 @@ def resolve(fixture: ToolFixture, args: dict[str, Any]) -> Resolution:
         shared = _shared_keys(seed, args)
         if not shared:
             continue
-        if any(
-            _identifier_mismatch(_as_text(args[key]), _as_text(seed.match[key])) for key in shared
-        ):
+        if _vetoed(seed, args, categorical_keys):
             continue
         score = sum(
             _similarity(_as_text(args[key]), _as_text(seed.match[key])) for key in shared

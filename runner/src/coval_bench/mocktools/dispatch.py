@@ -27,6 +27,28 @@ from coval_bench.mocktools.resolver import Resolution, resolve
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
 
+# JSON Schema types the contract can declare, mapped to what the transport
+# actually delivers once the body is parsed.
+_JSON_TYPES: dict[str, type | tuple[type, ...]] = {
+    "string": str,
+    "boolean": bool,
+    "integer": int,
+    "number": (int, float),
+    "array": list,
+    "object": dict,
+}
+
+
+def _type_matches(value: object, declared: str) -> bool:
+    """Whether a supplied value has the shape the contract declared for it."""
+    expected = _JSON_TYPES.get(declared)
+    if expected is None:
+        return True
+    # `bool` subclasses `int`, so True would otherwise pass as a number.
+    if declared in ("integer", "number") and isinstance(value, bool):
+        return False
+    return isinstance(value, expected)
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -35,6 +57,9 @@ class ToolSpec:
     name: str
     properties: frozenset[str]
     required: frozenset[str]
+    # Declared JSON types, so a value of the wrong shape is a rejected call rather
+    # than one silently coerced into matching a seed.
+    types: dict[str, str] = field(default_factory=dict)
     # Declared value sets, kept for keyterm extraction: an enum in the contract is
     # domain vocabulary the STT has to hear correctly.
     enums: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -64,6 +89,11 @@ def parse_tool_specs(raw: str | bytes) -> dict[str, ToolSpec]:
             name=entry["name"],
             properties=frozenset(properties),
             required=frozenset(parameters.get("required") or ()),
+            types={
+                name: schema["type"]
+                for name, schema in properties.items()
+                if isinstance(schema, dict) and isinstance(schema.get("type"), str)
+            },
             enums=enums,
         )
     return specs
@@ -102,7 +132,24 @@ class Dispatcher:
                 response={"error": "missing_required_arguments", "missing": missing},
                 http_status=422,
             )
-        resolution = resolve(self._fixtures.tools[tool], args)
+        mistyped = sorted(
+            key
+            for key, value in args.items()
+            if key in spec.types and not _type_matches(value, spec.types[key])
+        )
+        if mistyped:
+            # `2065550180` is not `"2065550180"`. Stringifying it would find the
+            # seeded patient and hide a tool call the agent got wrong.
+            return Outcome(
+                response={
+                    "error": "invalid_argument_types",
+                    "invalid": [{"name": key, "expected": spec.types[key]} for key in mistyped],
+                },
+                http_status=422,
+            )
+        resolution = resolve(
+            self._fixtures.tools[tool], args, categorical_keys=frozenset(spec.enums)
+        )
         return Outcome(
             response=resolution.seed.response,
             http_status=resolution.seed.http_status,
