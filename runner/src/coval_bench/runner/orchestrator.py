@@ -259,7 +259,9 @@ async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
     """Transcribe *audio_path* with OpenAI ``whisper-1`` and return the text.
 
     Used by the TTS path to compute WER against the synthesized audio.
-    Raises on API error — caller handles and records as a failed Result.
+    Retries once on OpenAI's transient gateway 404s (the SDK retries 429/5xx
+    itself but not 404); otherwise raises on API error — caller handles and
+    records as a failed Result.
     """
     import openai
 
@@ -268,12 +270,16 @@ async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
         raise RuntimeError("openai_api_key is required for TTS-WER computation")
 
     client = openai.AsyncOpenAI(api_key=api_key.get_secret_value())
-    with audio_path.open("rb") as fh:
-        response = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=fh,
-        )
-    return str(response.text)
+
+    async def attempt() -> str:
+        with audio_path.open("rb") as fh:
+            response = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=fh,
+            )
+        return str(response.text)
+
+    return await with_retry(attempt, max_attempts=2, retry_on=(openai.NotFoundError,))
 
 
 def _get_stt_providers() -> dict[str, Any]:

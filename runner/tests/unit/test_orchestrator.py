@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
+import httpx
+import openai
 import pytest
 import structlog
 from posthog import Posthog
@@ -50,6 +52,7 @@ from coval_bench.runner.orchestrator import (
     _run_stt_item,
     _run_tts_item,
     _stt_silent_failure,
+    _transcribe_with_whisper,
     run_benchmarks,
 )
 from coval_bench.runner.retry import with_retry
@@ -3320,3 +3323,67 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
     assert rows
     assert all(r.status is ResultStatus.FAILED for r in rows)
     assert "baseten_qwen_asr_url is required" in (rows[0].error or "")
+
+
+# ---------------------------------------------------------------------------
+# _transcribe_with_whisper — transient 404 retry
+# ---------------------------------------------------------------------------
+
+
+def _whisper_404() -> openai.NotFoundError:
+    request = httpx.Request("POST", "https://api.openai.com/v1/audio/transcriptions")
+    return openai.NotFoundError(
+        "Invalid URL", response=httpx.Response(404, request=request), body=None
+    )
+
+
+def _whisper_client(*outcomes: Any) -> MagicMock:
+    client = MagicMock()
+    client.audio.transcriptions.create = AsyncMock(side_effect=list(outcomes))
+    return client
+
+
+@pytest.mark.asyncio
+async def test_transcribe_retries_transient_404(tmp_path: Path) -> None:
+    """A single gateway 404 is retried and the second attempt's text is returned."""
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFF")
+    client = _whisper_client(_whisper_404(), MagicMock(text="hello world"))
+
+    with (
+        patch("openai.AsyncOpenAI", return_value=client),
+        patch("coval_bench.runner.retry.asyncio.sleep", AsyncMock()),
+    ):
+        assert await _transcribe_with_whisper(audio, _TEST_SETTINGS) == "hello world"
+    assert client.audio.transcriptions.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_transcribe_raises_after_second_404(tmp_path: Path) -> None:
+    """The retry is single-shot: a second 404 propagates to the caller."""
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFF")
+    client = _whisper_client(_whisper_404(), _whisper_404())
+
+    with (
+        patch("openai.AsyncOpenAI", return_value=client),
+        patch("coval_bench.runner.retry.asyncio.sleep", AsyncMock()),
+        pytest.raises(openai.NotFoundError),
+    ):
+        await _transcribe_with_whisper(audio, _TEST_SETTINGS)
+    assert client.audio.transcriptions.create.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_transcribe_does_not_retry_other_errors(tmp_path: Path) -> None:
+    """Only the transient 404 is retried; anything else propagates immediately."""
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(b"RIFF")
+    client = _whisper_client(RuntimeError("boom"))
+
+    with (
+        patch("openai.AsyncOpenAI", return_value=client),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        await _transcribe_with_whisper(audio, _TEST_SETTINGS)
+    assert client.audio.transcriptions.create.await_count == 1
