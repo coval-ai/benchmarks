@@ -14,16 +14,23 @@ from coval_bench.contracts import (
     LlmPin,
     Stack,
     contract_sha256,
+    has_private_contract,
     load_stack,
+    public_contract_sha256,
     read_contract_file,
     stack_as_dict,
 )
 from coval_bench.variants.platforms import redact_identifiers
 
-# Bump deliberately, in the same commit that changes a contract file or a pin.
-# A failure here means someone edited the contract without versioning it, which
-# would silently repoint every published number at a different agent.
-EXPECTED_CONTRACT_SHA = "146ac237d7ef007c"
+# Bump deliberately, in the same commit that changes a committed contract file or
+# a pin. A failure here means someone edited the contract without versioning it,
+# which would silently repoint every published number at a different agent.
+#
+# This pins the *public* hash. The full hash also covers `_private/`, which is
+# never committed, so its value differs between a machine holding the fixtures
+# and CI, which never does — pinning that would be red for exactly the people
+# doing the work and vacuous everywhere else.
+EXPECTED_PUBLIC_CONTRACT_SHA = "146ac237d7ef007c"
 
 
 def test_stack_loads_and_pins_are_what_the_design_doc_says() -> None:
@@ -43,11 +50,21 @@ def test_stack_loads_and_pins_are_what_the_design_doc_says() -> None:
     assert stack.platform_behaviour.vendor_post_call_analysis is False
 
 
-def test_contract_hash_is_pinned() -> None:
-    assert contract_sha256("dental").startswith(EXPECTED_CONTRACT_SHA), (
+def test_public_contract_hash_is_pinned() -> None:
+    assert public_contract_sha256("dental").startswith(EXPECTED_PUBLIC_CONTRACT_SHA), (
         "The dental contract or the pinned stack changed. If that was deliberate, "
-        "update EXPECTED_CONTRACT_SHA in the same commit."
+        "update EXPECTED_PUBLIC_CONTRACT_SHA in the same commit."
     )
+
+
+def test_the_published_hash_also_covers_the_private_fixtures() -> None:
+    """What ran is identified by the fixtures too, not just the committed files.
+
+    Skips in CI and a fresh checkout, where `_private/` does not exist.
+    """
+    if not has_private_contract("dental"):
+        pytest.skip("private fixtures are not installed")
+    assert contract_sha256("dental") != public_contract_sha256("dental")
 
 
 def test_rationale_keys_are_allowed_and_survive_load() -> None:
