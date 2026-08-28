@@ -245,7 +245,7 @@ def test_cli_rejects_the_local_placeholder_before_connecting(
 
     monkeypatch.setattr(migration, "get_settings", lambda: Settings())
     monkeypatch.setattr(
-        migration.psycopg, "connect", lambda *_: pytest.fail("must not connect to placeholder")
+        psycopg, "connect", lambda *_: pytest.fail("must not connect to placeholder")
     )
     result = CliRunner().invoke(backfill_normalized_storage_cli, ["--max-result-id", "1"])
     assert result.exit_code == 1
@@ -390,7 +390,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 
     monkeypatch.setattr(migration, "_complete_pages", pages)
     monkeypatch.setattr(migration, "_page_plans", lambda *_: [plan])
-    monkeypatch.setattr(migration.storage, "Client", lambda: object())
+    monkeypatch.setattr(gcs_storage, "Client", lambda: object())
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
 
     def insert(*_args: Any, **kwargs: Any) -> None:
@@ -401,12 +401,12 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
     monkeypatch.setattr(migration, "_stored_plan_matches", lambda *_: False)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
     report = migration.backfill(
-        Conn(),
+        Conn(),  # type: ignore[arg-type]
         min_result_id=1,
         max_result_id=1,
         batch_size=1,
         apply=True,
-        artifact_bucket="bucket",  # type: ignore[arg-type]
+        artifact_bucket="bucket",
     )
     assert len(passes) == 2
     assert mismatch_flags == [False]
@@ -435,15 +435,15 @@ def test_apply_bucket_preflight_fails_before_lock_page_or_write(
             events.append("lock")
             return nullcontext()
 
-    monkeypatch.setattr(migration.storage, "Client", lambda: Storage())
+    monkeypatch.setattr(gcs_storage, "Client", lambda: Storage())
     with pytest.raises(click.ClickException, match="storage.objects.create"):
         migration.backfill(
-            Conn(),
+            Conn(),  # type: ignore[arg-type]
             min_result_id=1,
             max_result_id=1,
             batch_size=1,
             apply=True,
-            artifact_bucket="bucket",  # type: ignore[arg-type]
+            artifact_bucket="bucket",
         )
     assert events == ["preflight"]
 
