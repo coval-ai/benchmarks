@@ -5,7 +5,7 @@
 #   docker compose up -d db     # bring up Postgres only
 #   docker compose run --rm migrate
 #   docker compose up api       # FastAPI on http://localhost:8000
-#   docker compose run --rm runner coval-bench run --smoke --kind tts
+#   docker compose run --rm runner run --smoke --kind tts
 #
 # The `runner` and `migrate` services have profiles so `docker compose up` only
 # starts long-running services (db, api). One-shot commands are invoked via
@@ -36,7 +36,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-benchmarks}
-    command: ["coval-bench", "db", "migrate"]
+    command: ["db", "migrate"]
     depends_on:
       db:
         condition: service_healthy

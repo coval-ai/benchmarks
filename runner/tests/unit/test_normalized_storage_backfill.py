@@ -411,6 +411,101 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
     assert len(passes) == 2
     assert mismatch_flags == [False]
     assert report["parity_mismatch_count"] == 1
+    assert report["verification_skipped_by_reason"] == {}
+
+
+@pytest.mark.parametrize("verification_reason", ["split_window_run", "scheduled_at_missing"])
+def test_apply_verification_skips_are_reported_and_block_readiness(
+    monkeypatch: pytest.MonkeyPatch, verification_reason: str
+) -> None:
+    row = replace(_row("WER", 1.0), benchmark="STT")
+    verification_row = replace(row, scheduled_at=None)
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [],
+    )
+    verification_plan = replace(plan, rows=[verification_row])
+    page_calls = 0
+
+    def pages(
+        _conn: Any,
+        _low: int,
+        _high: int,
+        _batch_size: int,
+        skipped: Counter[str],
+    ) -> Any:
+        nonlocal page_calls
+        page_calls += 1
+        if page_calls == 1:
+            yield [row], [row]
+        elif verification_reason == "split_window_run":
+            skipped[verification_reason] += 1
+        else:
+            yield [verification_row], [verification_row]
+
+    def plans(rows: list[LegacyRow], _: Counter[str]) -> list[migration.Planned]:
+        return [verification_plan if rows[0].scheduled_at is None else plan]
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, *_: Any) -> None:
+            return None
+
+    class Conn:
+        def commit(self) -> None:
+            return None
+
+        def rollback(self) -> None:
+            return None
+
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+        def transaction(self) -> Any:
+            return nullcontext()
+
+    monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_page_plans", plans)
+    monkeypatch.setattr(gcs_storage, "Client", lambda: object())
+    monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "_insert_plan", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
+
+    report = migration.backfill(
+        Conn(),  # type: ignore[arg-type]
+        min_result_id=1,
+        max_result_id=1,
+        batch_size=1,
+        apply=True,
+        artifact_bucket="bucket",
+    )
+
+    assert report["skipped_by_reason"] == {}
+    assert report["verification_skipped_by_reason"] == {verification_reason: 1}
+    assert report["parity_mismatch_count"] == 0
+    assert not report["cutover_ready"]
+
+
+def test_dry_run_report_has_no_verification_skips() -> None:
+    report = migration._report()
+    report["eligible"] = 1
+    migration._set_ready(report, dry_run=True)
+    assert report["verification_skipped_by_reason"] == {}
+    assert not report["cutover_ready"]
 
 
 def test_apply_bucket_preflight_fails_before_lock_page_or_write(
@@ -492,6 +587,18 @@ def test_runner_image_allows_cloud_run_to_override_the_default_command() -> None
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
     assert 'ENTRYPOINT ["python", "-m", "coval_bench"]' in dockerfile
     assert 'CMD ["run"]' in dockerfile
+
+
+def test_repository_owned_container_overrides_use_the_image_entrypoint() -> None:
+    root = Path(__file__).parents[2]
+    overrides = {
+        "docker-compose.yml": root / ".." / "docker-compose.yml",
+        "runner README": root / "README.md",
+        "arena snapshot": root / ".." / "scripts" / "arena-local.sh",
+    }
+    for name, path in overrides.items():
+        assert "docker compose run --rm runner coval-bench" not in path.read_text(), name
+    assert 'command: ["coval-bench"' not in overrides["docker-compose.yml"].read_text()
 
 
 def test_apply_reconciles_artifacts_inputs_values_and_rollups(

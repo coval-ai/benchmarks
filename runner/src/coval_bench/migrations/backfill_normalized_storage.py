@@ -174,6 +174,7 @@ def _report() -> dict[str, Any]:
         "artifacts": 0,
         "buckets": 0,
         "skipped_by_reason": Counter(),
+        "verification_skipped_by_reason": Counter(),
         "parity_mismatches": [],
         "parity_mismatch_count": 0,
         "parity_mismatches_truncated": False,
@@ -1053,11 +1054,13 @@ def _preflight_artifact_bucket(client: storage.Client, bucket_name: str) -> None
 
 def _set_ready(report: dict[str, Any], *, dry_run: bool) -> None:
     report["skipped_by_reason"] = dict(report["skipped_by_reason"])
+    report["verification_skipped_by_reason"] = dict(report["verification_skipped_by_reason"])
     report["cutover_ready"] = (
         (not dry_run or not report["eligible"])
         and report["parity_mismatch_count"] == 0
         and report["rollup_mismatch_count"] == 0
         and not report["skipped_by_reason"]
+        and not report["verification_skipped_by_reason"]
     )
 
 
@@ -1138,12 +1141,13 @@ def backfill(
                             _refresh_bucket(cur, bucket_at)
                         report["buckets"] += 1
         # Re-plan from a fresh bounded pass; never retain first-pass plans.
-        verification_skipped: Counter[str] = Counter()
+        verification_skipped: Counter[str] = report["verification_skipped_by_reason"]
         for _, complete in _complete_pages(
             conn, min_result_id, max_result_id, batch_size, verification_skipped
         ):
             for plan in _page_plans(complete, verification_skipped):
                 if plan.first.scheduled_at is None:
+                    verification_skipped["scheduled_at_missing"] += 1
                     continue
                 with conn.cursor() as cur:
                     cur.execute(
