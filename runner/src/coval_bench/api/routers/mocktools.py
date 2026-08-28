@@ -31,7 +31,7 @@ from starlette.responses import JSONResponse
 from coval_bench.api.deps import get_pool, get_settings
 from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
-from coval_bench.mocktools.dispatch import Dispatcher, build_dispatcher
+from coval_bench.mocktools.dispatch import Dispatcher
 
 logger = structlog.get_logger("coval_bench.mocktools")
 
@@ -61,18 +61,18 @@ def require_mock_secret(
         raise HTTPException(401, f"a valid {SECRET_HEADER} is required")
 
 
-def get_dispatcher(request: Request, settings: Settings = Depends(get_settings)) -> Dispatcher:
-    """The suite's dispatcher, built once per process from the contract and fixtures."""
-    existing: Dispatcher | None = getattr(request.app.state, "mock_dispatcher", None)
-    if existing is not None:
-        return existing
-    try:
-        dispatcher = build_dispatcher(settings.mock_tools_suite)
-    except (FileNotFoundError, NotADirectoryError) as exc:
-        raise HTTPException(503, "mock tool fixtures are not installed") from exc
-    except ValueError as exc:
-        raise HTTPException(503, f"mock tool fixtures are unusable: {exc}") from exc
-    request.app.state.mock_dispatcher = dispatcher
+def get_dispatcher(request: Request) -> Dispatcher:
+    """The dispatcher the lifespan built, or 503.
+
+    Deliberately does not build one here. Loading the fixtures can mean a call
+    out to object storage, and a service that failed to load them at startup will
+    not succeed on request four hundred — retrying per request would put a round
+    trip in front of every tool call, in the middle of a live conversation, and a
+    miss is not something a cache prevents. Startup has already logged why.
+    """
+    dispatcher: Dispatcher | None = getattr(request.app.state, "mock_dispatcher", None)
+    if dispatcher is None:
+        raise HTTPException(503, "mock tool fixtures are not loaded")
     return dispatcher
 
 

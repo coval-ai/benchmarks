@@ -58,6 +58,7 @@ from coval_bench.api.routers import (
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
 
@@ -119,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # fixtures inside a live call would put that cost on the agent's turn.
         # Absent fixtures are normal in CI and a fresh checkout, so the route
         # answers 503 rather than the service refusing to start.
+        install_fixture_providers(resolved)
         try:
             app.state.mock_dispatcher = build_dispatcher(resolved.mock_tools_suite)
         except (FileNotFoundError, NotADirectoryError):

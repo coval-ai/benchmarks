@@ -162,6 +162,10 @@ class Settings(BaseSettings):
     # constant across variants instead of a property of the seed that answered.
     mock_tools_latency_ms: float = Field(default=50.0, ge=0)
     mock_tools_suite: str = "dental"
+    # Where the deployed service reads the seeded world, since the image is
+    # built from a git checkout and `_private/` is never in one. Empty means
+    # local-only, which is every developer machine.
+    mock_fixtures_bucket: str = ""
     coval_api_base: str = "https://api.coval.dev/v1"
     # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None
