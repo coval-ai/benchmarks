@@ -775,6 +775,7 @@ async def _fetch_one_provider(
             bucket_at=bucket_at,
             persona_id=coval_run.persona_id,
             agent_id=agent_id,
+            test_set_id=test_set_id or "",
         )
 
     try:
