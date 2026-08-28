@@ -1025,7 +1025,14 @@ async def fetch_and_write_v2v(
                 f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
             )
 
-        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
+        # The set the sampled recordings actually came from, which is what labels
+        # the manifest. Gating on the shared ``coval_s2s_test_set_id`` instead would
+        # stop publishing entirely once every agent carries its own set, filling
+        # sampled_runs and then never shipping them.
+        sample_test_set_id = next(
+            (r.test_set_id for r in sampled_runs if r.test_set_id), test_set_id
+        )
+        if settings.s2s_samples_bucket and sampled_runs and sample_test_set_id:
             expected = _expected_sample_models(settings)
             missing = expected - {r.key for r in sampled_runs}
             if missing:
@@ -1035,7 +1042,7 @@ async def fetch_and_write_v2v(
             await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
-                test_set_id=test_set_id,
+                test_set_id=sample_test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,

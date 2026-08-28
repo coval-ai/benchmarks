@@ -689,6 +689,47 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+async def test_samples_publish_without_the_shared_test_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dental-only deployment still publishes: the gate reads the run's own set.
+
+    ``coval_s2s_test_set_id`` is deliberately unset here. Gating publication on it
+    would fill ``sampled_runs`` and then silently never ship them, leaving the
+    public sample card frozen while ingestion looked healthy.
+    """
+    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
+        s2s_samples_bucket="bucket",
+    )
+    assert settings.coval_s2s_test_set_id is None
+
+    writer = _stub_writer()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    client = _fake_client(list_json, _run_json(values))
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    publish = AsyncMock(return_value=1)
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "publish_tick_sample", publish)
+
+    await fetch_v2v.fetch_and_write_v2v(settings)
+
+    publish.assert_awaited_once()
+    assert publish.await_args is not None
+    assert publish.await_args.kwargs["test_set_id"] == "TSD"
+
+
+@pytest.mark.asyncio
 async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
