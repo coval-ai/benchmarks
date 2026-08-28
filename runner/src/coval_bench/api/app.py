@@ -48,6 +48,7 @@ from coval_bench.api.routers import (
     arena,
     health,
     leaderboard,
+    mocktools,
     providers,
     results,
     robots,
@@ -58,6 +59,7 @@ from coval_bench.api.routers import (
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.logging import configure_logging
+from coval_bench.mocktools.dispatch import build_dispatcher
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -113,6 +115,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("posthog_init_failed", exc_info=True)
                 posthog_client = None
         app.state.posthog = posthog_client
+        # Built here rather than on first request: loading and cross-checking the
+        # fixtures inside a live call would put that cost on the agent's turn.
+        # Absent fixtures are normal in CI and a fresh checkout, so the route
+        # answers 503 rather than the service refusing to start.
+        try:
+            app.state.mock_dispatcher = build_dispatcher(resolved.mock_tools_suite)
+        except (FileNotFoundError, NotADirectoryError):
+            app.state.mock_dispatcher = None
+            logger.info("mock_tools_fixtures_absent", suite=resolved.mock_tools_suite)
+        except ValueError:
+            app.state.mock_dispatcher = None
+            logger.warning("mock_tools_fixtures_unusable", exc_info=True)
         try:
             async with lifespan_pool(resolved) as pool:
                 app.state.pool = pool
@@ -147,7 +161,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
 
-    app.add_middleware(SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips",))
+    # /mock is excluded alongside /clips: compressing a tool answer would add a
+    # variable cost to a response the suite deliberately holds to a fixed latency.
+    app.add_middleware(
+        SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips", "/mock")
+    )
 
     app.state.response_cache = new_response_cache()
     app.state.cache_locks = new_cache_locks()
@@ -176,6 +194,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
+    # Not under /v1 and not rate limited: an appliance the agents call, not
+    # public read API. slowapi carries no default limit, so /mock is exempt by
+    # construction — a 429 mid-conversation would be graded as the agent failing.
+    app.include_router(mocktools.router)
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).

@@ -57,6 +57,8 @@ __all__ = [
     "public_contract_sha256",
     "read_contract_file",
     "has_private_contract",
+    "read_private_fixture",
+    "AnnotatedModel",
 ]
 
 _CONTRACTS_PACKAGE = "coval_bench.contracts"
@@ -92,6 +94,12 @@ class _Annotated(BaseModel):
                 "rationale keys must start with '_'"
             )
         return self
+
+
+# Public name for the convention above. The mock fixtures are contract-adjacent
+# and carry the same "required fields plus `_`-prefixed rationale" rule, so they
+# subclass this rather than restating it.
+AnnotatedModel = _Annotated
 
 
 class LlmPin(_Annotated):
@@ -201,10 +209,20 @@ def has_private_contract(suite: str) -> bool:
     Callers that need the fixtures should skip rather than fail.
     """
     try:
-        _read_bytes(suite, "_private", "mock-tools.json")
+        read_private_fixture(suite)
     except (FileNotFoundError, NotADirectoryError):
         return False
     return True
+
+
+def read_private_fixture(suite: str) -> bytes:
+    """Read the suite's uncommitted mock fixtures.
+
+    Raises ``FileNotFoundError`` in a fresh checkout and in CI, where
+    ``_private/`` does not exist. Callers that can run without the seeded world
+    should ask ``has_private_contract`` first.
+    """
+    return _read_bytes(suite, "_private", "mock-tools.json")
 
 
 def stack_as_dict(stack: Stack) -> dict[str, Any]:
