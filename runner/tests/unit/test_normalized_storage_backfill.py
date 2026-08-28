@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from dataclasses import replace
-from datetime import UTC, datetime
+from contextlib import nullcontext
+from dataclasses import astuple, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import click
 import psycopg
 import pytest
 from alembic import command as alembic_command
@@ -107,6 +109,9 @@ class _Bucket:
 
     def blob(self, key: str) -> _Blob:
         return self.blobs.setdefault(key, _Blob(key))
+
+    def test_iam_permissions(self, permissions: list[str]) -> list[str]:
+        return permissions
 
 
 class _Storage:
@@ -230,6 +235,263 @@ def test_cli_apply_requires_explicit_frozen_maximum() -> None:
     result = CliRunner().invoke(backfill_normalized_storage_cli, ["--apply"])
     assert result.exit_code == 2
     assert "--apply requires an explicit --max-result-id" in result.output
+
+
+def test_cli_rejects_the_local_placeholder_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Settings:
+        database_url = "postgresql://unused:unused@127.0.0.1:5432/unused"
+
+    monkeypatch.setattr(migration, "get_settings", lambda: Settings())
+    monkeypatch.setattr(
+        migration.psycopg, "connect", lambda *_: pytest.fail("must not connect to placeholder")
+    )
+    result = CliRunner().invoke(backfill_normalized_storage_cli, ["--max-result-id", "1"])
+    assert result.exit_code == 1
+    assert "DATABASE_URL is required" in result.output
+
+
+def test_run_pages_keyset_by_run_id_not_interleaved_result_ids() -> None:
+    first = replace(_row("WER", 1.0), id=1, run_id=10, benchmark="STT")
+    second = replace(_row("WER", 2.0), id=2, run_id=20, benchmark="STT")
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.result: list[tuple[Any, ...]] = []
+            self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, sql: str, params: tuple[Any, ...]) -> None:
+            self.calls.append((sql, params))
+            if sql == migration._PAGE_RUN_IDS_SQL:
+                after = int(params[2])
+                self.result = [(run_id,) for run_id in (10, 20) if run_id > after][: int(params[3])]
+            else:
+                self.result = [astuple(first) if params[0] == [10] else astuple(second)]
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return self.result
+
+    class Conn:
+        def __init__(self) -> None:
+            self.value = Cursor()
+
+        def cursor(self) -> Cursor:
+            return self.value
+
+    conn = Conn()
+    ids, rows = migration._run_page(conn, 1, 99, 0, 1)  # type: ignore[arg-type]
+    next_ids, next_rows = migration._run_page(conn, 1, 99, ids[-1], 1)  # type: ignore[arg-type]
+    assert (ids, [row.run_id for row in rows]) == ([10], [10])
+    assert (next_ids, [row.run_id for row in next_rows]) == ([20], [20])
+    assert [call[1][2] for call in conn.value.calls if call[0] == migration._PAGE_RUN_IDS_SQL] == [
+        0,
+        10,
+    ]
+
+
+def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None:
+    later = _NOW + timedelta(hours=1)
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.calls: list[tuple[Any, ...]] = []
+            self.result: list[tuple[datetime, int]] = []
+
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, _: str, params: tuple[Any, ...]) -> None:
+            self.calls.append(params)
+            cursor = params[4]
+            self.result = (
+                [(_NOW, 10)] if cursor is None else [(later, 20)] if cursor == _NOW else []
+            )
+
+        def fetchall(self) -> list[tuple[datetime, int]]:
+            return self.result
+
+    class Conn:
+        def __init__(self) -> None:
+            self.value = Cursor()
+
+        def commit(self) -> None:
+            return None
+
+        def cursor(self) -> Cursor:
+            return self.value
+
+    conn = Conn()
+    assert list(migration._scheduled_buckets(conn, 1, 99, 1)) == [_NOW, later]  # type: ignore[arg-type]
+    assert conn.value.calls == [
+        (1, 99, 1, 99, None, None, 0, 1),
+        (1, 99, 1, 99, _NOW, _NOW, 10, 1),
+        (1, 99, 1, 99, later, later, 20, 1),
+    ]
+
+
+def test_apply_replans_for_fresh_verification_without_retaining_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = replace(_row("WER", 1.0), benchmark="STT")
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [],
+    )
+    passes: list[int] = []
+    mismatch_flags: list[bool] = []
+
+    def pages(*_: Any) -> Any:
+        passes.append(1)
+        yield [row], [row]
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, *_: Any) -> None:
+            return None
+
+        def fetchone(self) -> tuple[Any, ...]:
+            return (plan.id,)
+
+    class Conn:
+        def commit(self) -> None:
+            return None
+
+        def rollback(self) -> None:
+            return None
+
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+        def transaction(self) -> Any:
+            return nullcontext()
+
+    monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_page_plans", lambda *_: [plan])
+    monkeypatch.setattr(migration.storage, "Client", lambda: object())
+    monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
+
+    def insert(*_args: Any, **kwargs: Any) -> None:
+        mismatch_flags.append(kwargs["report_mismatch"])
+
+    monkeypatch.setattr(migration, "_insert_plan", insert)
+    monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "_stored_plan_matches", lambda *_: False)
+    monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
+    report = migration.backfill(
+        Conn(),
+        min_result_id=1,
+        max_result_id=1,
+        batch_size=1,
+        apply=True,
+        artifact_bucket="bucket",  # type: ignore[arg-type]
+    )
+    assert len(passes) == 2
+    assert mismatch_flags == [False]
+    assert report["parity_mismatch_count"] == 1
+
+
+def test_apply_bucket_preflight_fails_before_lock_page_or_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class Bucket:
+        def test_iam_permissions(self, _: list[str]) -> list[str]:
+            events.append("preflight")
+            return []
+
+    class Storage:
+        def bucket(self, _: str) -> Bucket:
+            return Bucket()
+
+    class Conn:
+        def commit(self) -> None:
+            events.append("commit")
+
+        def cursor(self) -> Any:
+            events.append("lock")
+            return nullcontext()
+
+    monkeypatch.setattr(migration.storage, "Client", lambda: Storage())
+    with pytest.raises(click.ClickException, match="storage.objects.create"):
+        migration.backfill(
+            Conn(),
+            min_result_id=1,
+            max_result_id=1,
+            batch_size=1,
+            apply=True,
+            artifact_bucket="bucket",  # type: ignore[arg-type]
+        )
+    assert events == ["preflight"]
+
+
+def test_packaged_manifest_index_preserves_ambiguity_and_is_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration._packaged_manifest.cache_clear()
+    reads = 0
+
+    class Resource:
+        def read_bytes(self) -> bytes:
+            nonlocal reads
+            reads += 1
+            return (
+                b'{"items":[{"path":"audio/a.wav","sample_id":"sample"},'
+                b'{"testcase_id":"T1","transcript":"prompt"},'
+                b'{"testcase_id":"T2","transcript":"prompt"}]}'
+            )
+
+    class Package:
+        def joinpath(self, _: str) -> Resource:
+            return Resource()
+
+    monkeypatch.setattr(migration, "files", lambda _: Package())
+    index = migration._packaged_manifest("tts-v1")
+    assert index is not None
+    assert migration._stt_sample("tts-v1", index.sha256, "a.wav") == "sample"
+    assert migration._tts_sample("tts-v1", index.sha256, "prompt") is None
+    assert reads == 1
+    migration._packaged_manifest.cache_clear()
+
+
+def test_mismatch_details_are_capped_but_counts_remain_exact() -> None:
+    report = migration._report()
+    for index in range(101):
+        migration._append_mismatch(report, "parity_mismatches", {"index": index})
+    migration._set_ready(report, dry_run=False)
+    assert report["parity_mismatch_count"] == 101
+    assert len(report["parity_mismatches"]) == 100
+    assert report["parity_mismatches_truncated"]
+    assert not report["cutover_ready"]
+
+
+def test_runner_image_allows_cloud_run_to_override_the_default_command() -> None:
+    dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
+    assert 'ENTRYPOINT ["python", "-m", "coval_bench"]' in dockerfile
+    assert 'CMD ["run"]' in dockerfile
 
 
 def test_apply_reconciles_artifacts_inputs_values_and_rollups(

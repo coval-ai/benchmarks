@@ -17,16 +17,16 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from importlib.resources import files
 from typing import Any
 
 import click
 import psycopg
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import storage
 
 from coval_bench.config import get_settings
-from coval_bench.datasets.loader import _load_manifest
-from coval_bench.datasets.manifest import STTManifestItem, TTSManifestItem
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
@@ -40,6 +40,7 @@ _OBS_NAMESPACE = uuid.UUID("6edc052c-4d05-5b64-9621-cc6f6343b6cd")
 _EVAL_NAMESPACE = uuid.UUID("e7f9ce4b-8f66-572c-bf9e-4f67b044422e")
 _ARTIFACT_NAMESPACE = uuid.UUID("64478df1-0d13-5996-a3ca-96c421f772c9")
 _LOCK = "normalized_storage_backfill"
+_MISMATCH_DETAIL_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -99,12 +100,34 @@ def _valid_sha(value: str) -> bool:
     return len(value) == 64 and all(char in "0123456789abcdef" for char in value)
 
 
-def _manifest_sha(dataset_id: str) -> str | None:
+@dataclass(frozen=True)
+class _PackagedManifest:
+    sha256: str
+    stt_samples: dict[str, tuple[str, ...]]
+    tts_samples: dict[str, tuple[str, ...]]
+
+
+@lru_cache(maxsize=64)
+def _packaged_manifest(dataset_id: str) -> _PackagedManifest | None:
+    """Index packaged bytes once per dataset; never cache historical observations."""
     try:
         raw = files("coval_bench.datasets.manifests").joinpath(f"{dataset_id}.json").read_bytes()
     except FileNotFoundError:
         return None
-    return hashlib.sha256(raw).hexdigest()
+    payload = json.loads(raw)
+    stt: dict[str, list[str]] = defaultdict(list)
+    tts: dict[str, list[str]] = defaultdict(list)
+    for item in payload.get("items", []):
+        if "path" in item:
+            identity = item.get("sample_id") or item["path"]
+            stt[item["path"].rsplit("/", 1)[-1]].append(identity)
+        if "transcript" in item and "testcase_id" in item:
+            tts[item["transcript"]].append(item["testcase_id"])
+    return _PackagedManifest(
+        hashlib.sha256(raw).hexdigest(),
+        {key: tuple(value) for key, value in stt.items()},
+        {key: tuple(value) for key, value in tts.items()},
+    )
 
 
 def _legacy_sample(dataset_id: str, filename: str) -> str:
@@ -114,38 +137,27 @@ def _legacy_sample(dataset_id: str, filename: str) -> str:
 def _stt_sample(dataset_id: str, dataset_sha256: str, filename: str) -> str | None:
     if not filename:
         return None
-    try:
-        manifest = _load_manifest(dataset_id)
-    except FileNotFoundError:
+    manifest = _packaged_manifest(dataset_id)
+    if manifest is None:
         return _legacy_sample(dataset_id, filename)
     # A filename alone is not provenance.  Packaged identities are valid only
     # when the historical run pins these exact manifest bytes.
-    if _manifest_sha(dataset_id) != dataset_sha256:
+    if manifest.sha256 != dataset_sha256:
         return _legacy_sample(dataset_id, filename)
-    matches = [
-        x
-        for x in manifest.items
-        if isinstance(x, STTManifestItem) and x.path.rsplit("/", 1)[-1] == filename
-    ]
+    matches = manifest.stt_samples.get(filename, ())
     if len(matches) != 1:
         return _legacy_sample(dataset_id, filename)
-    item = matches[0]
-    return item.sample_id or item.path
+    return matches[0]
 
 
 def _tts_sample(dataset_id: str, sha: str, prompt: str) -> str | None:
     # A current tts-v1 prompt is usable only if the historical run proves it
     # used the exact packaged manifest bytes.
-    if dataset_id != "tts-v1" or _manifest_sha(dataset_id) != sha:
+    manifest = _packaged_manifest(dataset_id)
+    if dataset_id != "tts-v1" or manifest is None or manifest.sha256 != sha:
         return None
-    try:
-        manifest = _load_manifest(dataset_id)
-    except FileNotFoundError:
-        return None
-    matches = [
-        x for x in manifest.items if isinstance(x, TTSManifestItem) and x.transcript == prompt
-    ]
-    return matches[0].testcase_id if len(matches) == 1 else None
+    matches = manifest.tts_samples.get(prompt, ())
+    return matches[0] if len(matches) == 1 else None
 
 
 def _report() -> dict[str, Any]:
@@ -163,24 +175,44 @@ def _report() -> dict[str, Any]:
         "buckets": 0,
         "skipped_by_reason": Counter(),
         "parity_mismatches": [],
+        "parity_mismatch_count": 0,
+        "parity_mismatches_truncated": False,
         "rollup_mismatches": [],
+        "rollup_mismatch_count": 0,
+        "rollup_mismatches_truncated": False,
         "cutover_ready": False,
     }
 
 
-_ROWS_SQL = """
+_PAGE_RUN_IDS_SQL = """
+SELECT DISTINCT r.run_id
+FROM benchmarks_v2.results r
+WHERE r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS') AND r.run_id > %s
+ORDER BY r.run_id
+LIMIT %s
+"""
+
+_RUN_ROWS_SQL = """
 SELECT r.id,r.run_id,n.dataset_id,n.dataset_sha256,n.scheduled_at,r.provider,r.model,r.voice,
  r.benchmark,r.metric_type,r.metric_value,r.metric_units,r.audio_filename,r.transcript,r.status,
  r.error,r.http_version,r.submit_to_headers_ms,r.created_at,r.wer_insertions_pct,r.wer_deletions_pct,r.wer_substitutions_pct
 FROM benchmarks_v2.results r JOIN benchmarks_v2.runs n ON n.id=r.run_id
-WHERE r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS') ORDER BY r.id
+WHERE r.run_id=ANY(%s) AND r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS')
+ORDER BY r.run_id,r.id
 """
 
 
-def _rows(conn: psycopg.Connection, low: int, high: int) -> list[LegacyRow]:
+def _run_page(
+    conn: psycopg.Connection, low: int, high: int, after_run_id: int, batch_size: int
+) -> tuple[list[int], list[LegacyRow]]:
+    """Read one bounded, run-keyset page from the frozen result-id window."""
     with conn.cursor() as cur:
-        cur.execute(_ROWS_SQL, (low, high))
-        return [LegacyRow(*row) for row in cur.fetchall()]
+        cur.execute(_PAGE_RUN_IDS_SQL, (low, high, after_run_id, batch_size))
+        run_ids = [int(row[0]) for row in cur.fetchall()]
+        if not run_ids:
+            return [], []
+        cur.execute(_RUN_ROWS_SQL, (run_ids, low, high))
+        return run_ids, [LegacyRow(*row) for row in cur.fetchall()]
 
 
 def _complete_window_rows(
@@ -206,6 +238,28 @@ def _complete_window_rows(
                 skipped["run_not_terminal"] += 1
                 bad.add(run_id)
     return [row for row in rows if row.run_id not in bad]
+
+
+def _page_plans(rows: list[LegacyRow], skipped: Counter[str]) -> list[Planned]:
+    """Plan complete runs independently so TTS attachment scans stay page-bounded."""
+    by_run: dict[int, list[LegacyRow]] = defaultdict(list)
+    for row in rows:
+        by_run[row.run_id].append(row)
+    plans: list[Planned] = []
+    for run_rows in by_run.values():
+        plans.extend(_stt_plans((r for r in run_rows if r.benchmark == "STT"), skipped))
+        plans.extend(_tts_plans((r for r in run_rows if r.benchmark == "TTS"), skipped))
+    return plans
+
+
+def _append_mismatch(report: dict[str, Any], kind: str, detail: dict[str, Any]) -> None:
+    """Retain bounded diagnostics while reporting the exact mismatch total."""
+    count_key = "parity_mismatch_count" if kind == "parity_mismatches" else "rollup_mismatch_count"
+    report[count_key] += 1
+    if len(report[kind]) < _MISMATCH_DETAIL_LIMIT:
+        report[kind].append(detail)
+    else:
+        report[f"{kind}_truncated"] = True
 
 
 def _stt_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned]:
@@ -683,6 +737,8 @@ def _insert_plan(
     bucket: str | None,
     client: storage.Client | None,
     report: dict[str, Any],
+    *,
+    report_mismatch: bool = True,
 ) -> None:
     r = plan.first
     with conn.cursor() as cur:
@@ -697,17 +753,21 @@ def _insert_plan(
             report["live_owned"] += 1
             if _stored_plan_matches(cur, plan, found[0]):
                 report["reconciled"] += 1
-            else:
-                report["parity_mismatches"].append(
-                    {"natural_key": list(plan.natural), "reason": "live_owned_payload_mismatch"}
+            elif report_mismatch:
+                _append_mismatch(
+                    report,
+                    "parity_mismatches",
+                    {"natural_key": list(plan.natural), "reason": "live_owned_payload_mismatch"},
                 )
             return
         if found:
             if _stored_plan_matches(cur, plan, found[0]):
                 report["reconciled"] += 1
-            else:
-                report["parity_mismatches"].append(
-                    {"natural_key": list(plan.natural), "reason": "backfill_payload_mismatch"}
+            elif report_mismatch:
+                _append_mismatch(
+                    report,
+                    "parity_mismatches",
+                    {"natural_key": list(plan.natural), "reason": "backfill_payload_mismatch"},
                 )
             return
         report["eligible"] += 1
@@ -890,27 +950,115 @@ WHERE bucket_at=%(bucket)s
 
 
 def _rollup_mismatches(
-    conn: psycopg.Connection, buckets: Iterable[datetime]
-) -> list[dict[str, Any]]:
+    conn: psycopg.Connection, buckets: Iterable[datetime], report: dict[str, Any]
+) -> None:
     """Compare materialized rollups with a fresh aggregate over immutable values."""
-    mismatches: list[dict[str, Any]] = []
     with conn.cursor() as cur:
-        for bucket_at in sorted(set(buckets)):
+        for bucket_at in buckets:
             params = {"bucket": bucket_at}
             cur.execute(_ROLLUP_PAYLOAD_SQL, params)
             expected = sorted((tuple(row) for row in cur.fetchall()), key=repr)
             cur.execute(_STORED_ROLLUP_SQL, params)
             actual = sorted((tuple(row) for row in cur.fetchall()), key=repr)
             if actual != expected:
-                mismatches.append(
+                _append_mismatch(
+                    report,
+                    "rollup_mismatches",
                     {
                         "bucket_at": bucket_at.isoformat(),
                         "expected_rows": len(expected),
                         "actual_rows": len(actual),
                         "reason": "stored_bucket_payload_mismatch",
-                    }
+                    },
                 )
-    return mismatches
+
+
+_BUCKET_PAGE_SQL = """
+WITH buckets AS (
+  SELECT n.scheduled_at, min(n.id) AS first_run_id
+  FROM benchmarks_v2.runs n
+  WHERE n.status IN ('succeeded','partial','failed') AND n.scheduled_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1 FROM benchmarks_v2.results r
+      WHERE r.run_id=n.id AND r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM benchmarks_v2.results r WHERE r.run_id=n.id AND (r.id < %s OR r.id > %s)
+    )
+  GROUP BY n.scheduled_at
+)
+SELECT scheduled_at,first_run_id FROM buckets
+WHERE (%s::timestamptz IS NULL OR (scheduled_at,first_run_id) > (%s,%s))
+ORDER BY scheduled_at,first_run_id LIMIT %s
+"""
+
+
+def _complete_pages(
+    conn: psycopg.Connection, low: int, high: int, batch_size: int, skipped: Counter[str]
+) -> Iterable[tuple[list[LegacyRow], list[LegacyRow]]]:
+    """Yield raw and complete bounded run pages, ending each read transaction."""
+    after_run_id = 0
+    while True:
+        run_ids, rows = _run_page(conn, low, high, after_run_id, batch_size)
+        if not run_ids:
+            conn.commit()
+            return
+        after_run_id = run_ids[-1]
+        complete = _complete_window_rows(conn, rows, low, high, skipped)
+        conn.commit()
+        yield rows, complete
+
+
+def _scheduled_buckets(
+    conn: psycopg.Connection, low: int, high: int, batch_size: int
+) -> Iterable[datetime]:
+    """Keyset distinct buckets by timestamp and a stable representative run id."""
+    after: tuple[datetime, int] | None = None
+    while True:
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute(
+                _BUCKET_PAGE_SQL,
+                (
+                    low,
+                    high,
+                    low,
+                    high,
+                    after[0] if after else None,
+                    *(after or (None, 0)),
+                    batch_size,
+                ),
+            )
+            page = [(row[0], int(row[1])) for row in cur.fetchall()]
+        conn.commit()
+        if not page:
+            return
+        for bucket, _ in page:
+            yield bucket
+        after = page[-1]
+
+
+def _preflight_artifact_bucket(client: storage.Client, bucket_name: str) -> None:
+    """Prove the configured bucket permits the recoverable artifact contract."""
+    required = {"storage.objects.create", "storage.objects.get"}
+    try:
+        granted = set(client.bucket(bucket_name).test_iam_permissions(list(required)))
+    except GoogleAPIError as exc:
+        raise click.ClickException("cannot validate BENCHMARK_ARTIFACT_BUCKET access") from exc
+    if not required.issubset(granted):
+        raise click.ClickException(
+            "BENCHMARK_ARTIFACT_BUCKET requires storage.objects.create and storage.objects.get"
+        )
+
+
+def _set_ready(report: dict[str, Any], *, dry_run: bool) -> None:
+    report["skipped_by_reason"] = dict(report["skipped_by_reason"])
+    report["cutover_ready"] = (
+        (not dry_run or not report["eligible"])
+        and report["parity_mismatch_count"] == 0
+        and report["rollup_mismatch_count"] == 0
+        and not report["skipped_by_reason"]
+    )
 
 
 def backfill(
@@ -930,90 +1078,103 @@ def backfill(
         "max_result_id": max_result_id,
         "batch_size": batch_size,
     }
-    rows = _rows(conn, min_result_id, max_result_id)
-    report["source_rows"] = len(rows)
-    rows = _complete_window_rows(
-        conn, rows, min_result_id, max_result_id, report["skipped_by_reason"]
-    )
-    plans = _stt_plans(
-        (r for r in rows if r.benchmark == "STT"), report["skipped_by_reason"]
-    ) + _tts_plans((r for r in rows if r.benchmark == "TTS"), report["skipped_by_reason"])
-    report["source_groups"] = len(plans)
-    missing_schedule = sum(plan.first.scheduled_at is None for plan in plans)
-    if missing_schedule:
-        report["skipped_by_reason"]["scheduled_at_missing"] += missing_schedule
-        plans = [plan for plan in plans if plan.first.scheduled_at is not None]
-    buckets = {plan.first.scheduled_at for plan in plans}
-    scheduled_buckets = {bucket for bucket in buckets if bucket is not None}
-    if not apply:
-        for p in plans:
-            _insert_plan(conn, p, False, artifact_bucket, None, report)
-        report["rollup_mismatches"] = _rollup_mismatches(conn, scheduled_buckets)
-        report["skipped_by_reason"] = dict(report["skipped_by_reason"])
-        report["cutover_ready"] = (
-            not report["eligible"]
-            and not report["parity_mismatches"]
-            and not report["rollup_mismatches"]
-            and not report["skipped_by_reason"]
-        )
-        return report
-    # End planning's implicit transaction before taking a *session* lock.  Each
-    # transaction below is now a real commit boundary, not a savepoint.
+    if apply and not artifact_bucket:
+        raise click.ClickException("BENCHMARK_ARTIFACT_BUCKET is required for --apply")
+    # Fail GCS setup before the first committed page, even if this prefix happens
+    # not to contain an artifact-bearing observation.
+    client = storage.Client() if apply else None
+    if client is not None and artifact_bucket is not None:
+        _preflight_artifact_bucket(client, artifact_bucket)
     conn.commit()
-    needs_artifacts = any(p.artifacts for p in plans)
-    if needs_artifacts and not artifact_bucket:
-        raise click.ClickException(
-            "BENCHMARK_ARTIFACT_BUCKET is required for recoverable artifacts"
+    if not apply:
+        for rows, complete in _complete_pages(
+            conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
+        ):
+            report["source_rows"] += len(rows)
+            plans = _page_plans(complete, report["skipped_by_reason"])
+            report["source_groups"] += len(plans)
+            for plan in plans:
+                if plan.first.scheduled_at is None:
+                    report["skipped_by_reason"]["scheduled_at_missing"] += 1
+                else:
+                    _insert_plan(conn, plan, False, artifact_bucket, None, report)
+        _rollup_mismatches(
+            conn,
+            _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
+            report,
         )
-    client = storage.Client() if needs_artifacts else None
+        _set_ready(report, dry_run=True)
+        return report
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
     # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
     # transaction now so each following ``conn.transaction`` is top-level.
     conn.commit()
     try:
-        for start in range(0, len(plans), batch_size):
-            with conn.transaction():
-                for p in plans[start : start + batch_size]:
-                    _insert_plan(conn, p, True, artifact_bucket, client, report)
-                buckets = {p.first.scheduled_at for p in plans[start : start + batch_size]}
-                for bucket_at in buckets:
-                    if bucket_at is None:  # guarded by the pre-write plan filter above.
-                        raise RuntimeError("scheduled_at changed during immutable plan execution")
-                    with conn.cursor() as cur:
-                        _refresh_bucket(cur, bucket_at)
-                    report["buckets"] += 1
-        # The decision is based on a fresh immutable snapshot, not optimistic
-        # INSERT success.  This also detects trigger/DB representation drift.
-        with conn.cursor() as cur:
-            for plan in plans:
-                cur.execute(
-                    """SELECT id FROM benchmarks_v2.benchmark_observations
-                       WHERE run_id=%s AND sample_id=%s AND provider=%s AND model=%s
-                         AND voice IS NOT DISTINCT FROM %s""",
-                    plan.natural,
-                )
-                found = cur.fetchone()
-                reason = (
-                    "post_write_observation_missing"
-                    if found is None
-                    else "post_write_payload_mismatch"
-                    if not _stored_plan_matches(cur, plan, found[0])
-                    else None
-                )
-                if reason is not None:
-                    report["parity_mismatches"].append(
-                        {"natural_key": list(plan.natural), "reason": reason}
+        for rows, complete in _complete_pages(
+            conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
+        ):
+            report["source_rows"] += len(rows)
+            plans = _page_plans(complete, report["skipped_by_reason"])
+            report["source_groups"] += len(plans)
+            missing_schedule = [plan for plan in plans if plan.first.scheduled_at is None]
+            if missing_schedule:
+                report["skipped_by_reason"]["scheduled_at_missing"] += len(missing_schedule)
+            plans = [plan for plan in plans if plan.first.scheduled_at is not None]
+            for start in range(0, len(plans), batch_size):
+                batch = plans[start : start + batch_size]
+                with conn.transaction():
+                    for p in batch:
+                        _insert_plan(
+                            conn, p, True, artifact_bucket, client, report, report_mismatch=False
+                        )
+                    buckets = {p.first.scheduled_at for p in batch}
+                    for bucket_at in buckets:
+                        if bucket_at is None:
+                            raise RuntimeError(
+                                "scheduled_at changed during immutable plan execution"
+                            )
+                        with conn.cursor() as cur:
+                            _refresh_bucket(cur, bucket_at)
+                        report["buckets"] += 1
+        # Re-plan from a fresh bounded pass; never retain first-pass plans.
+        verification_skipped: Counter[str] = Counter()
+        for _, complete in _complete_pages(
+            conn, min_result_id, max_result_id, batch_size, verification_skipped
+        ):
+            for plan in _page_plans(complete, verification_skipped):
+                if plan.first.scheduled_at is None:
+                    continue
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """SELECT id FROM benchmarks_v2.benchmark_observations
+                           WHERE run_id=%s AND sample_id=%s AND provider=%s AND model=%s
+                             AND voice IS NOT DISTINCT FROM %s""",
+                        plan.natural,
                     )
-        report["rollup_mismatches"] = _rollup_mismatches(conn, scheduled_buckets)
-        report["skipped_by_reason"] = dict(report["skipped_by_reason"])
-        report["cutover_ready"] = (
-            not report["parity_mismatches"]
-            and not report["rollup_mismatches"]
-            and not report["skipped_by_reason"]
+                    found = cur.fetchone()
+                    reason = (
+                        "post_write_observation_missing"
+                        if found is None
+                        else "post_write_payload_mismatch"
+                        if not _stored_plan_matches(cur, plan, found[0])
+                        else None
+                    )
+                    if reason is not None:
+                        _append_mismatch(
+                            report,
+                            "parity_mismatches",
+                            {"natural_key": list(plan.natural), "reason": reason},
+                        )
+        _rollup_mismatches(
+            conn,
+            _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
+            report,
         )
+        _set_ready(report, dry_run=False)
         return report
     finally:
+        conn.rollback()
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (_LOCK,))
         conn.commit()
@@ -1031,6 +1192,10 @@ def backfill_normalized_storage_cli(
     if apply and max_result_id is None:
         raise click.UsageError("--apply requires an explicit --max-result-id")
     url = str(get_settings().database_url)
+    if url == "postgresql://unused:unused@127.0.0.1:5432/unused":
+        raise click.ClickException(
+            "DATABASE_URL is required for this production migration; set a non-local production URL"
+        )
     with psycopg.connect(url) as conn:
         if max_result_id is None:
             with conn.cursor() as cur:
