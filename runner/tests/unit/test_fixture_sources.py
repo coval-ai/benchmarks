@@ -103,3 +103,36 @@ def test_nothing_is_registered_without_a_bucket(no_providers: None) -> None:
 def test_a_configured_bucket_registers_one_provider(no_providers: None) -> None:
     install_fixture_providers(Settings(mock_fixtures_bucket=BUCKET))
     assert len(contracts_module._FIXTURE_PROVIDERS) == 1
+
+
+# --- every entry point, not just the API ------------------------------------
+
+
+def test_the_cli_installs_the_same_providers_the_api_does(
+    no_providers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runner hashes contracts too.
+
+    `pull-contract` prints the hash today and the voice-agent ingest will write
+    it onto result rows. A runner that could not see the fixtures would publish
+    the hash of a run that had none — the one thing the hash exists to prevent.
+    """
+    from click.testing import CliRunner
+
+    from coval_bench.__main__ import cli
+    from coval_bench.config import get_settings
+
+    monkeypatch.setenv("MOCK_FIXTURES_BUCKET", BUCKET)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@localhost:5432/db")
+    monkeypatch.setenv("DATASET_BUCKET", "b")
+    monkeypatch.setenv("DATASET_ID", "d")
+    get_settings.cache_clear()
+    try:
+        # A subcommand's help runs the group callback first, then exits before
+        # the subcommand does anything. `--help` on the *group* would not: click
+        # handles that eagerly and never reaches the callback.
+        result = CliRunner().invoke(cli, ["pull-contract", "--help"])
+        assert result.exit_code == 0, result.output
+        assert len(contracts_module._FIXTURE_PROVIDERS) == 1
+    finally:
+        get_settings.cache_clear()
