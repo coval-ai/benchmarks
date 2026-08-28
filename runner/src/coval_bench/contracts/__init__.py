@@ -54,6 +54,7 @@ __all__ = [
     "Stack",
     "load_stack",
     "contract_sha256",
+    "public_contract_sha256",
     "read_contract_file",
     "has_private_contract",
 ]
@@ -159,6 +160,29 @@ def read_contract_file(suite: str, filename: str) -> str:
     return _read_bytes(suite, filename).decode()
 
 
+def _digest(suite: str, filenames: tuple[str, ...]) -> str:
+    """SHA-256 over the pinned stack plus the named suite files, skipping absentees."""
+    digest = hashlib.sha256()
+    digest.update(_read_bytes("stack.json"))
+    for filename in filenames:
+        try:
+            digest.update(_read_bytes(suite, *filename.split("/")))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+    return digest.hexdigest()
+
+
+def public_contract_sha256(suite: str) -> str:
+    """The hash over committed files only, so every checkout agrees on it.
+
+    This is the one a test can pin. ``contract_sha256`` covers the uncommitted
+    fixtures too, so its value legitimately differs between a machine holding the
+    answer key and CI, which never does — pinning *that* would fail for exactly
+    the people doing the work while guarding nothing where it runs.
+    """
+    return _digest(suite, PUBLIC_CONTRACT_FILES)
+
+
 def contract_sha256(suite: str) -> str:
     """One SHA-256 over the pinned stack, the public suite files, and the fixtures.
 
@@ -167,14 +191,7 @@ def contract_sha256(suite: str) -> str:
     ``stack.json`` too, because changing a pin changes what the agent is just
     as surely as changing its prompt.
     """
-    digest = hashlib.sha256()
-    digest.update(_read_bytes("stack.json"))
-    for filename in (*PUBLIC_CONTRACT_FILES, *PRIVATE_CONTRACT_FILES):
-        try:
-            digest.update(_read_bytes(suite, *filename.split("/")))
-        except (FileNotFoundError, NotADirectoryError):
-            continue
-    return digest.hexdigest()
+    return _digest(suite, (*PUBLIC_CONTRACT_FILES, *PRIVATE_CONTRACT_FILES))
 
 
 def has_private_contract(suite: str) -> bool:
