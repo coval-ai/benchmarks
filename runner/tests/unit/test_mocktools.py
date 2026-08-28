@@ -11,7 +11,14 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from coval_bench.mocktools.dispatch import Dispatcher, parse_tool_specs
+from coval_bench.contracts import has_private_contract
+from coval_bench.mocktools.dispatch import (
+    Dispatcher,
+    ToolSpec,
+    build_dispatcher,
+    load_tool_specs,
+    parse_tool_specs,
+)
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.keyterms import extract_keyterms
 from coval_bench.mocktools.resolver import FUZZY_THRESHOLD, resolve
@@ -391,3 +398,78 @@ def test_a_tool_without_a_fallback_is_refused() -> None:
     """Every tool needs an answer of last resort; a failed call measures our fixtures."""
     with pytest.raises(ValidationError):
         parse_fixtures(json.dumps({"tools": {"lookup_patient": {"seeds": []}}}))
+
+
+# --- the committed contract, exercised in CI --------------------------------
+#
+# The seeded world is the answer key and is never committed, so the tests above
+# build their own fixtures. That leaves the real load path — the committed
+# `tool-definitions.json` driving dispatch — unexercised exactly where tests run.
+# These cover it without needing the private file.
+
+SUITE = "dental"
+
+
+def _plausible(spec: ToolSpec, name: str) -> Any:
+    """A value of the type the contract declares for *name*."""
+    if name in spec.enums:
+        return spec.enums[name][0]
+    return {"string": "x", "boolean": True, "integer": 1, "number": 1.0}.get(
+        spec.types.get(name, "string"), "x"
+    )
+
+
+def _fixtures_covering(specs: dict[str, ToolSpec]) -> MockFixtures:
+    return MockFixtures(
+        tools={
+            name: ToolFixture(fallback=Seed(id=f"{name}_fallback", response={"ok": True}))
+            for name in specs
+        }
+    )
+
+
+def test_the_committed_contract_parses_into_specs() -> None:
+    specs = load_tool_specs(SUITE)
+    assert specs, "the committed tool-definitions.json declares no tools"
+    for spec in specs.values():
+        assert spec.required <= spec.properties, (
+            f"{spec.name} requires arguments it does not declare: "
+            f"{sorted(spec.required - spec.properties)}"
+        )
+
+
+def test_every_committed_tool_is_callable_through_dispatch() -> None:
+    """Drives the real contract through resolution, including types and enums."""
+    specs = load_tool_specs(SUITE)
+    dispatcher = Dispatcher(specs, _fixtures_covering(specs))
+    assert dispatcher.tools == frozenset(specs)
+    for name, spec in specs.items():
+        args = {arg: _plausible(spec, arg) for arg in sorted(spec.required)}
+        outcome = dispatcher.call(name, args)
+        assert outcome.http_status == 200, (
+            f"{name} answered {outcome.http_status}: {outcome.response}"
+        )
+        assert outcome.resolution is not None
+
+
+def test_a_committed_tool_called_without_its_arguments_is_rejected() -> None:
+    specs = load_tool_specs(SUITE)
+    dispatcher = Dispatcher(specs, _fixtures_covering(specs))
+    required = {n: s for n, s in specs.items() if s.required}
+    assert required, "expected at least one tool with required arguments"
+    name = sorted(required)[0]
+    assert dispatcher.call(name, {}).http_status == 422
+
+
+def test_build_dispatcher_says_so_when_the_fixtures_are_not_installed() -> None:
+    """The production load path, on the branch CI actually takes."""
+    if has_private_contract(SUITE):
+        pytest.skip("private fixtures are installed; the absent branch cannot be taken")
+    with pytest.raises((FileNotFoundError, NotADirectoryError)):
+        build_dispatcher(SUITE)
+
+
+def test_build_dispatcher_covers_the_contract_when_the_fixtures_are_installed() -> None:
+    if not has_private_contract(SUITE):
+        pytest.skip("private fixtures are not installed")
+    assert build_dispatcher(SUITE).tools == frozenset(load_tool_specs(SUITE))
