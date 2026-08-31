@@ -703,7 +703,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -716,7 +716,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
