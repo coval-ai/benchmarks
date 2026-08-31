@@ -583,21 +583,22 @@ def test_mismatch_details_are_capped_but_counts_remain_exact() -> None:
     assert not report["cutover_ready"]
 
 
-def test_runner_image_has_no_entrypoint_so_args_overrides_are_whole_commands() -> None:
+def test_runner_image_allows_cloud_run_to_override_the_default_command() -> None:
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
-    assert "ENTRYPOINT" not in dockerfile
-    assert 'CMD ["python", "-m", "coval_bench", "run"]' in dockerfile
+    assert 'ENTRYPOINT ["python", "-m", "coval_bench"]' in dockerfile
+    assert 'CMD ["run"]' in dockerfile
 
 
-def test_repository_owned_container_overrides_spell_the_whole_command() -> None:
+def test_repository_owned_container_overrides_use_the_image_entrypoint() -> None:
     root = Path(__file__).parents[2]
     compose = (root / ".." / "docker-compose.yml").read_text()
-    assert 'command: ["coval-bench", "db", "migrate"]' in compose
-    assert "docker compose run --rm runner coval-bench run" in (root / "README.md").read_text()
-    assert (
-        "docker compose run --rm runner coval-bench arena snapshot"
-        in (root / ".." / "scripts" / "arena-local.sh").read_text()
-    )
+    readme = (root / "README.md").read_text()
+    arena = (root / ".." / "scripts" / "arena-local.sh").read_text()
+    assert 'command: ["db", "migrate"]' in compose
+    assert "docker compose run --rm runner run --smoke --kind tts" in compose
+    assert "docker compose run --rm runner run --smoke --kind tts" in readme
+    assert "docker compose run --rm runner tts-smoke" in readme
+    assert "docker compose run --rm runner arena snapshot" in arena
 
 
 def test_apply_reconciles_artifacts_inputs_values_and_rollups(
