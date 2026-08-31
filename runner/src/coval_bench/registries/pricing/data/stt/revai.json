@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "revai",
+    "model": "reverb",
+    "unit": "per_hour",
+    "price_usd": "0.20",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.rev.ai/pricing",
+    "notes": "'Reverb Transcription $0.20 per hour' — Rev AI publishes one rate per product with no streaming/async split; usage is rounded up to the nearest second with a 15-second minimum. Reverb Turbo is $0.10/hr and foreign-language transcription $0.30/hr."
+  }
+]

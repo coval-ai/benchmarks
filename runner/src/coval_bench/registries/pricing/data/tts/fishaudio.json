@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "fishaudio",
+    "model": "s1",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits",
+    "notes": "Printed as '$15.00 / M UTF-8 bytes' — one byte per character for the English text we benchmark. s2.1-pro-free is listed at $0.00 and stays unpriced here (the registry cannot carry a zero rate)."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "fishaudio",
+    "model": "s2.1-pro",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits",
+    "notes": "Printed as '$15.00 / M UTF-8 bytes', same as s1; billed pay-as-you-go from the first call."
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "openai",
+    "model": "tts-1",
+    "unit": "per_1m_chars",
+    "price_usd": "15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://developers.openai.com/api/docs/pricing",
+    "notes": "Printed as '$15.00 / 1M characters' in the audio-generation pricing table (the row is collapsed behind the table's expander). gpt-4o-mini-tts and the realtime models bill in tokens only and stay unpriced here."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "openai",
+    "model": "tts-1-hd",
+    "unit": "per_1m_chars",
+    "price_usd": "30",
+    "effective_from": "2026-08-31",
+    "source_url": "https://developers.openai.com/api/docs/pricing",
+    "notes": "Printed as '$30.00 / 1M characters' in the audio-generation pricing table (collapsed row), twice the tts-1 rate."
+  }
+]

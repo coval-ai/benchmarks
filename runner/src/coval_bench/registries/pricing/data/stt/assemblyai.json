@@ -18,5 +18,15 @@
     "effective_from": "2026-08-24",
     "source_url": "https://www.assemblyai.com/pricing",
     "notes": "AssemblyAI sells three separate APIs and prices Universal-3.5 Pro differently on each. This is the Realtime Speech-to-Text API rate, listed as 'Universal-3.5 Pro Realtime' at $0.45/hr — the endpoint we benchmark, over wss://streaming.assemblyai.com/v3/ws. The similarly named async model on the Pre-recorded API is $0.21/hr and the Sync API is $0.45/hr; neither is what we measure. Billed on session duration like the Universal-Streaming rate above."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "assemblyai",
+    "model": "universal-streaming-multilingual",
+    "unit": "per_hour",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.assemblyai.com/pricing",
+    "notes": "'Universal-Streaming Multilingual' row on the Realtime Speech-to-Text API, same $0.15/hr as the English tier. Billed on session duration like the rates above."
   }
 ]

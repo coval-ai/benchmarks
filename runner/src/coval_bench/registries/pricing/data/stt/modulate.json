@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "modulate",
+    "model": "english-fast-transcription-streaming",
+    "unit": "per_hour",
+    "price_usd": "0.05",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.modulate.ai/api-pricing",
+    "notes": "'English Fast Speech-to-Text' streaming (real-time WebSocket) rate; the batch REST tier is $0.025/hr."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "modulate",
+    "model": "multilingual-transcription-streaming",
+    "unit": "per_hour",
+    "price_usd": "0.06",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.modulate.ai/api-pricing",
+    "notes": "'Multilingual Speech-to-Text' streaming (real-time WebSocket) rate; batch is $0.03/hr, and emotion, accent, and PII tagging bill as separate add-ons. Modulate's page prices these two products only — the velma-2 model ids have no printed row and stay unpriced."
+  }
+]

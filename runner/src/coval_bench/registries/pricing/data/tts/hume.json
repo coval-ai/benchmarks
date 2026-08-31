@@ -1,0 +1,22 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "hume",
+    "model": "octave-tts",
+    "unit": "per_1k_chars",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.hume.ai/pricing",
+    "notes": "Creator plan ($7/mo) 'Additional characters cost' overage rate — the entry tier that prints one; Hume publishes no pay-as-you-go tier, and larger plans overage at $0.12/$0.10/$0.05 per 1K. Octave 1 and Octave 2 are priced jointly."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "hume",
+    "model": "octave-2",
+    "unit": "per_1k_chars",
+    "price_usd": "0.15",
+    "effective_from": "2026-08-31",
+    "source_url": "https://www.hume.ai/pricing",
+    "notes": "Same Creator-plan overage rate as octave-tts above; the pricing page covers 'Octave 1 | Octave 2' with one set of figures."
+  }
+]

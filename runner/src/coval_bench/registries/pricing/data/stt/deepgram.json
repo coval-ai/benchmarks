@@ -28,5 +28,15 @@
     "effective_from": "2026-08-24",
     "source_url": "https://deepgram.com/pricing",
     "notes": "Pay As You Go streaming rate."
+  },
+  {
+    "benchmark": "STT",
+    "provider": "deepgram",
+    "model": "nova-2",
+    "unit": "per_hour",
+    "price_usd": "0.35",
+    "effective_from": "2026-08-31",
+    "source_url": "https://deepgram.com/pricing",
+    "notes": "FAQ rate: 'Nova-2 streaming at $0.35/hour', kept unchanged for existing deployments; Nova-2 no longer appears in the main rate tables. Growth plan rates are about 12.5% lower."
   }
 ]

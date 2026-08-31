@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "TTS",
+    "provider": "murf",
+    "model": "falcon-2",
+    "unit": "per_1k_chars",
+    "price_usd": "0.01",
+    "effective_from": "2026-08-31",
+    "source_url": "https://murf.ai/api/pricing",
+    "notes": "Pay-as-you-go plan card: '$0.01/1000 characters for Falcon'. The page renders client-side; the figure ships in its own pricing config and API."
+  }
+]

@@ -1,0 +1,12 @@
+[
+  {
+    "benchmark": "STT",
+    "provider": "azure",
+    "model": "default",
+    "unit": "per_hour",
+    "price_usd": "1",
+    "effective_from": "2026-08-31",
+    "source_url": "https://azure.microsoft.com/en-us/pricing/details/cognitive-services/speech-services/",
+    "notes": "Pay-as-you-go 'S1 Speech To Text' standard real-time meter, $1.00 per hour in East US (the pricing page renders after region selection; figure verified via the Azure retail prices API). Batch and commitment tiers are cheaper."
+  }
+]
