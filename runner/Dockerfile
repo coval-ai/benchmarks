@@ -71,9 +71,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/tmp
 
 COPY --from=build --chown=65532:65532 /app /app
-COPY --chmod=0755 entrypoint.sh /entrypoint.sh
 
 USER 65532:65532
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["python", "-m", "coval_bench"]
 CMD ["run"]

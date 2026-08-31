@@ -5,8 +5,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import subprocess
 from collections import Counter
 from contextlib import nullcontext
 from dataclasses import astuple, replace
@@ -585,38 +583,10 @@ def test_mismatch_details_are_capped_but_counts_remain_exact() -> None:
     assert not report["cutover_ready"]
 
 
-def test_runner_image_wraps_the_cli_behind_the_tolerant_entrypoint() -> None:
+def test_runner_image_allows_cloud_run_to_override_the_default_command() -> None:
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text()
-    assert 'ENTRYPOINT ["/entrypoint.sh"]' in dockerfile
+    assert 'ENTRYPOINT ["python", "-m", "coval_bench"]' in dockerfile
     assert 'CMD ["run"]' in dockerfile
-
-
-def _invoke_entrypoint(tmp_path: Path, *args: str) -> list[str]:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    log = tmp_path / "argv.txt"
-    for name in ("python", "coval-bench"):
-        stub = bin_dir / name
-        stub.write_text(f'#!/bin/sh\nprintf "%s\\n" "{name}" "$@" > "{log}"\n')
-        stub.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
-    script = Path(__file__).parents[2] / "entrypoint.sh"
-    subprocess.run(  # noqa: S603 — argv is test-owned literals
-        ["/bin/sh", str(script), *args], env=env, check=True
-    )
-    return log.read_text().splitlines()
-
-
-def test_entrypoint_normalizes_both_caller_shapes(tmp_path: Path) -> None:
-    short = _invoke_entrypoint(tmp_path, "run", "--kind", "stt")
-    full = _invoke_entrypoint(tmp_path, "python", "-m", "coval_bench", "run", "--kind", "stt")
-    assert short == ["python", "-m", "coval_bench", "run", "--kind", "stt"]
-    assert full == short
-    assert _invoke_entrypoint(tmp_path, "coval-bench", "db", "migrate") == [
-        "coval-bench",
-        "db",
-        "migrate",
-    ]
 
 
 def test_repository_owned_container_overrides_use_the_image_entrypoint() -> None:
