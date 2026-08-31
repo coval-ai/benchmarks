@@ -208,6 +208,22 @@ class Settings(BaseSettings):
     # Public bucket for per-tick sample recordings; empty disables sampling.
     s2s_samples_bucket: str = ""
 
+    # --- Coval API (LLM fetch job) ---
+    # Per-provider Coval agent ids for the chat (MODEL_TYPE_CHAT) benchmark.
+    coval_llm_openai_agent_id: str | None = None
+    coval_llm_openai_mini_agent_id: str | None = None
+    coval_llm_anthropic_agent_id: str | None = None
+    coval_llm_google_agent_id: str | None = None
+    # The instruction-adherence metric id for the LLM benchmark. Required.
+    coval_llm_instruction_metric_id: str | None = None
+    # Restrict the fetch to one Coval test set. Required: without it, other
+    # sims on the same agents would be ingested and pooled.
+    coval_llm_test_set_id: str | None = None
+    # Fetch grid, in seconds; default = 3h (matches S2S).
+    llm_fetch_period_seconds: int = Field(default=10_800, gt=0)
+    # Staleness threshold = fetch period + this grace.
+    llm_stale_grace_seconds: int = Field(default=0, ge=0)
+
     # --- Analytics ---
     posthog_project_token: str = ""
     posthog_host: str = "https://us.i.posthog.com"

@@ -98,6 +98,7 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
 _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
+_LLM = Benchmark.LLM
 _MULTI = ModelTag.MULTILINGUAL
 _VAD = ModelTag.VAD
 _DIAR = ModelTag.DIARIZATION
@@ -1336,6 +1337,43 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         collected=True,
         published=False,
+    ),
+    #######
+    # LLM #
+    #######
+    # LLM chat models. Instruction-following scores are fetched from Coval
+    # (MODEL_TYPE_CHAT simulator, no local provider client).
+    RegisteredModel(
+        benchmark=_LLM,
+        provider="openai",
+        model="gpt-4o",
+        region="us",
+        collected=True,
+        published=True,
+    ),
+    RegisteredModel(
+        benchmark=_LLM,
+        provider="openai",
+        model="gpt-4o-mini",
+        region="us",
+        collected=True,
+        published=True,
+    ),
+    RegisteredModel(
+        benchmark=_LLM,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        region="us",
+        collected=True,
+        published=True,
+    ),
+    RegisteredModel(
+        benchmark=_LLM,
+        provider="google",
+        model="gemini-2.5-flash",
+        region="us",
+        collected=True,
+        published=True,
     ),
 ]
 
