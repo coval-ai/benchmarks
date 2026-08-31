@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from coval_bench.api import deps
+from coval_bench.api.routers import pricing as pricing_router
 from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
 from coval_bench.registries.pricing import PRICING, PricingEntry
 from tests.api.conftest import EA_MODEL, EA_ORG, EA_PROVIDER, bearer
@@ -52,8 +53,11 @@ def _serve_model(
         published=published,
     )
     app.dependency_overrides[deps.get_models] = lambda: [*MODEL_REGISTRY, model]
-    priced = {**PRICING, (entry.benchmark, entry.provider, entry.model): entry}
-    monkeypatch.setattr("coval_bench.api.routers.pricing.PRICING", priced)
+    # The router serves the shapes it precomputed at import, so the patch
+    # extends those rather than PRICING, which is only read at import time.
+    key = (entry.benchmark, entry.provider, entry.model)
+    rates = (*pricing_router._RATES, (key, entry.effective_from, pricing_router._rate_out(entry)))
+    monkeypatch.setattr(pricing_router, "_RATES", rates)
 
 
 def _listed_keys() -> set[tuple[str, str, str]]:

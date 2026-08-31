@@ -83,7 +83,9 @@ def test_minutes_normalization(
     unit: PricingUnit, price: Decimal, normalized: Decimal | None
 ) -> None:
     """Duration units normalize to $/1k minutes; character units never estimate one."""
-    assert _entry(unit=unit, price_usd=price).price_per_1k_minutes == normalized
+    stt = unit in (PricingUnit.PER_MINUTE, PricingUnit.PER_HOUR, PricingUnit.PER_SECOND_AUDIO_IN)
+    entry = _entry(unit=unit, price_usd=price, benchmark=Benchmark.STT if stt else Benchmark.TTS)
+    assert entry.price_per_1k_minutes == normalized
 
 
 def test_duplicate_key_raises() -> None:
@@ -103,12 +105,31 @@ def test_unregistered_model_raises() -> None:
     [
         {"price_usd": Decimal("0")},
         {"price_usd": Decimal("-1")},
+        # A bare JSON number silently drops trailing zeros (0.20 → 0.2) — the
+        # misquote the decimal-string convention exists to prevent.
+        {"price_usd": 0.20},
+        {"price_usd": 1},
         {"source_url": "not a url"},
         {"unit": "per_word"},
+        # A duration unit cannot bill TTS input, nor a character unit STT.
+        {"benchmark": Benchmark.STT},
+        {"unit": PricingUnit.PER_HOUR},
         {"currency": "EUR"},
     ],
 )
 def test_schema_rejects_invalid_entries(overrides: dict[str, object]) -> None:
-    """Zero/negative rates, bad URLs, unknown units, and stray fields all fail validation."""
+    """Zero/negative/numeric rates, bad URLs, unit-benchmark mismatches, and stray fields fail."""
     with pytest.raises(ValidationError):
         _entry(**overrides)
+
+
+def test_no_shipped_rate_is_future_dated() -> None:
+    """The registry holds one entry per model, so a future-dated entry replaces
+    the rate still in force and the model serves no price until the date
+    arrives. Date entries at or before the day the PR can merge."""
+    future = sorted(
+        f"{b}:{p}/{m}"
+        for (b, p, m), entry in PRICING.items()
+        if entry.effective_from > date.today()
+    )
+    assert future == [], f"ratesheets carry future-dated rates: {', '.join(future)}"

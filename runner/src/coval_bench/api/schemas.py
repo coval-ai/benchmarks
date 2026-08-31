@@ -128,9 +128,10 @@ class PricingRateOut(BaseModel):
 
     ``price_usd`` is the provider's native figure in ``unit``, served as the
     registry's exact decimal (a JSON string — floats would strip trailing
-    zeros and misquote the printed price, e.g. $0.20 → $0.2); the two
-    normalized fields are exact arithmetic from it and ``None`` where no
-    conversion exists without assuming a speaking rate.
+    zeros and misquote the printed price, e.g. $0.20 → $0.2). The two
+    normalized fields scale it exactly, except hourly rates, whose ÷60 rounds
+    half-up to a millionth; both are ``None`` where no conversion exists
+    without assuming a speaking rate.
     """
 
     benchmark: BenchmarkLiteral
@@ -149,7 +150,9 @@ class DatasetUsageOut(BaseModel):
     """What one full pass of a packaged dataset consumes, from its manifest.
 
     Exactly one of ``audio_minutes``/``characters`` is set: STT datasets are
-    billed on audio in, TTS datasets on characters spoken.
+    billed on audio in, TTS datasets on characters spoken. Every packaged
+    dataset is listed, retired ones included — cost a current pass against
+    the datasets the site reports, not this whole list.
     """
 
     dataset_id: str

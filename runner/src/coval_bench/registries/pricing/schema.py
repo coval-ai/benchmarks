@@ -14,7 +14,7 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 
@@ -44,6 +44,28 @@ class PricingUnit(StrEnum):
     PER_SECOND_AUDIO_IN = "per_second_audio_in"
 
 
+# Which units bill which benchmark's input — the pairing CONTRIBUTING's table
+# states, enforced here so a mismatched entry fails at import with the entry
+# named, not later as a bare assert in a data test.
+_UNITS_BY_BENCHMARK: dict[Benchmark, frozenset[PricingUnit]] = {
+    Benchmark.TTS: frozenset(
+        {
+            PricingUnit.PER_1M_CHARS,
+            PricingUnit.PER_1K_CHARS,
+            PricingUnit.PER_CHAR,
+            PricingUnit.PER_SECOND_AUDIO_OUT,
+        }
+    ),
+    Benchmark.STT: frozenset(
+        {
+            PricingUnit.PER_MINUTE,
+            PricingUnit.PER_HOUR,
+            PricingUnit.PER_SECOND_AUDIO_IN,
+        }
+    ),
+}
+
+
 class PricingEntry(BaseModel, frozen=True, extra="forbid"):
     """One model's published rate, keyed like the model registry."""
 
@@ -55,6 +77,25 @@ class PricingEntry(BaseModel, frozen=True, extra="forbid"):
     effective_from: date
     source_url: HttpUrl
     notes: str | None = None
+
+    @field_validator("price_usd", mode="before")
+    @classmethod
+    def _price_written_as_string(cls, value: object) -> object:
+        # A bare JSON number silently drops trailing zeros (0.20 → 0.2) — the
+        # exact misquote the decimal-string convention exists to prevent.
+        # Decimal itself stays accepted for entries built in code.
+        if isinstance(value, float | int):
+            raise ValueError('write price_usd as a string so the decimal is exact, e.g. "0.20"')
+        return value
+
+    @model_validator(mode="after")
+    def _unit_bills_this_benchmark(self) -> PricingEntry:
+        if self.unit not in _UNITS_BY_BENCHMARK.get(self.benchmark, frozenset()):
+            raise ValueError(
+                f"{self.unit} does not bill {self.benchmark} input; "
+                "see the unit table in CONTRIBUTING.md"
+            )
+        return self
 
     @property
     def price_per_1m_chars(self) -> Decimal | None:
