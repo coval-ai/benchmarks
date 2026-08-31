@@ -7,19 +7,6 @@
 Revision ID: 20260831_0023
 Revises:     20260826_0022
 Create Date: 2026-08-31
-
-The registry freeze covered seed day only; registry commits kept landing
-between the seed and the reader switch. This migration reconciles the tables:
-five new models, and three state changes — sonic-preview retired at the
-sonic-3.6 GA (its voice pool moved to the GA entry), gradium default paused,
-gradium-tts-beta activated. The registry stays the source of truth until the
-switch, so the updates assert its state unconditionally, like the seed.
-
-The inserts take ids after the seeded rows, so these models list at the end of
-their provider's catalogue entry rather than where the literal sits — which is
-where every model created through the admin API will land once the registry is
-gone. Like the seed, no ``model_history`` rows: these mirror code-registry
-commits whose audit trail is git.
 """
 
 from __future__ import annotations
@@ -33,7 +20,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    """Insert 5 models and their tag links; apply 3 state changes."""
+    """Insert the post-seed models and apply the state changes."""
     op.get_bind().exec_driver_sql(
         """
         INSERT INTO benchmarks_v2.models
@@ -85,12 +72,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Undo the sync, leaving anything this migration does not own.
-
-    Rows edited through the admin API since no longer carry this migration's
-    actor and survive untouched, mirroring the seed's downgrade. Tag links of
-    deleted models cascade; the tag vocabulary predates this migration.
-    """
+    """Undo the sync, skipping rows the admin API has edited since."""
     op.get_bind().exec_driver_sql(
         """
         DELETE FROM benchmarks_v2.models

@@ -5,10 +5,9 @@
 
 The comparison is the gate on switching every consumer over: if the database
 answers differ from the literals in any field, the switch would change
-behaviour. Both sides are compared sorted by natural key: models registered
-after the seed take ids at the end regardless of where their literal sits, so
-roster position is id order, not literal order — the order every model created
-through the admin API gets. Deleted with the registry it compares against.
+behaviour. Both sides are sorted by natural key — post-seed models take ids at
+the end, so id order diverges from literal order. Deleted with the registry it
+compares against.
 """
 
 from __future__ import annotations
