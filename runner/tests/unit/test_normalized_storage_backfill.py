@@ -594,9 +594,10 @@ def test_repository_owned_container_overrides_spell_the_whole_command() -> None:
     compose = (root / ".." / "docker-compose.yml").read_text()
     assert 'command: ["coval-bench", "db", "migrate"]' in compose
     assert "docker compose run --rm runner coval-bench run" in (root / "README.md").read_text()
-    assert "docker compose run --rm runner coval-bench arena snapshot" in (
-        root / ".." / "scripts" / "arena-local.sh"
-    ).read_text()
+    assert (
+        "docker compose run --rm runner coval-bench arena snapshot"
+        in (root / ".." / "scripts" / "arena-local.sh").read_text()
+    )
 
 
 def test_apply_reconciles_artifacts_inputs_values_and_rollups(
