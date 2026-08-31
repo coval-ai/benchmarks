@@ -4,8 +4,11 @@
 """``fetch_models`` reproduces the code registry from the seeded tables.
 
 The comparison is the gate on switching every consumer over: if the database
-answers differ from the literals in any field or in order, the switch would
-change behaviour. Deleted with the registry it compares against.
+answers differ from the literals in any field, the switch would change
+behaviour. Both sides are compared sorted by natural key: models registered
+after the seed take ids at the end regardless of where their literal sits, so
+roster position is id order, not literal order — the order every model created
+through the admin API gets. Deleted with the registry it compares against.
 """
 
 from __future__ import annotations
@@ -51,8 +54,13 @@ def _comparable(model: RegisteredModel) -> RegisteredModel:
     return model.model_copy(update={"tags": tuple(sorted(model.tags)), "status": status})
 
 
+def _key(model: RegisteredModel) -> tuple[str, str, str]:
+    return (model.benchmark.value, model.provider, model.model)
+
+
 def test_the_database_reproduces_the_registry(fetch_pg: psycopg.Connection[Any]) -> None:
     models = _fetched(fetch_pg)
     assert len(models) == len(MODEL_REGISTRY)
-    for fetched, literal in zip(models, MODEL_REGISTRY, strict=True):
+    literals = sorted(MODEL_REGISTRY, key=_key)
+    for fetched, literal in zip(sorted(models, key=_key), literals, strict=True):
         assert _comparable(fetched) == _comparable(literal), f"{literal.provider}/{literal.model}"
