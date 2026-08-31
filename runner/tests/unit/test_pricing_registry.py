@@ -71,6 +71,9 @@ def test_normalization(unit: PricingUnit, price: Decimal, normalized: Decimal | 
     [
         (PricingUnit.PER_MINUTE, Decimal("0.0043"), Decimal("4.3")),
         (PricingUnit.PER_HOUR, Decimal("0.36"), Decimal("6")),
+        # The hourly conversion divides, so a rate that does not terminate
+        # lands on a fixed scale rather than the Decimal context's tail.
+        (PricingUnit.PER_HOUR, Decimal("0.43"), Decimal("7.166667")),
         (PricingUnit.PER_SECOND_AUDIO_IN, Decimal("0.0001"), Decimal("6")),
         (PricingUnit.PER_1K_CHARS, Decimal("0.030"), None),
         (PricingUnit.PER_SECOND_AUDIO_OUT, Decimal("0.001"), None),

@@ -7,6 +7,6 @@
     "price_usd": "0.12",
     "effective_from": "2026-08-24",
     "source_url": "https://soniox.com/pricing",
-    "notes": "Soniox's page-printed per-hour equivalent for real-time streaming; canonical billing is $2.00 per 1M input audio tokens (~30,000 tokens per hour of audio)."
+    "notes": "Soniox's page-printed per-hour rate for real-time streaming, which is the all-in figure: canonical billing is token-based, and the page's own conversions add up to it — ~30,000 input audio tokens per hour at $2.00 per 1M ($0.06) plus ~15,000 output text tokens per hour at $4.00 per 1M ($0.06)."
   }
 ]

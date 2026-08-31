@@ -23,7 +23,18 @@ The prices shown on [benchmarks.coval.ai](https://benchmarks.coval.ai) live in t
    ]
    ```
 
-2. Use your *native* published unit — characters for TTS (`per_1m_chars`, `per_1k_chars`, `per_char`, `per_second_audio_out`), duration of input audio for STT (`per_minute`, `per_hour`, `per_second_audio_in`). The API normalizes server-side to the figure the site shows: $ per 1M characters for TTS, $ per 1,000 minutes for STT — never across the two, which would take an assumed speaking rate. Write `price_usd` as a string so the decimal is exact. `source_url` must point at your public pricing page, and `effective_from` is the date the rate took effect. For STT, use the rate of the tier we benchmark: streaming/real-time pay-as-you-go, and say so in `notes`.
-3. Open a PR. CI validates the schema and that every entry matches a registered model; a model without a pricing entry simply shows no price on the site — never submit an estimated rate.
+2. Use your *native* published unit, and write `price_usd` as a string so the decimal is exact. The API normalizes server-side to the one figure the site compares models on — $ per 1M characters for TTS, $ per 1,000 minutes of input audio for STT — never across the two, which would take an assumed speaking rate:
+
+   | Benchmark | Units | Normalized to |
+   |---|---|---|
+   | TTS | `per_1m_chars`, `per_1k_chars`, `per_char` | $ / 1M characters |
+   | STT | `per_minute`, `per_hour`, `per_second_audio_in` | $ / 1,000 minutes |
+   | TTS | `per_second_audio_out` | nothing — see below |
+
+   `per_second_audio_out` bills synthesized audio rather than characters sent, so it has no character equivalence without assuming a speaking rate. A rate in it is served and shown in its own unit, but it is left out of the $ / 1M characters figure and so out of the comparison charts. Prefer a character unit if you publish one.
+
+3. Price the tier we benchmark, and name it in `notes`: for STT that is your streaming/real-time pay-as-you-go rate. If you publish no pay-as-you-go rate at all, use the *marginal* rate on your entry-level paid plan — the add-on or overage price of usage past what the plan includes — and say which plan it is. `source_url` must point at the public page that prints the figure, and `effective_from` is the date the rate took effect. Do not submit a rate computed from a plan's price divided by its included allowance, or from a credit rate we would have to look up elsewhere: if your public pricing does not state a usage rate, leave the model unpriced until it does.
+
+4. Open a PR. CI validates the schema and that every entry matches a registered model; a model without a pricing entry simply shows no price on the site — never submit an estimated rate.
 
 The new price appears on the site with the next deploy — no code change needed.

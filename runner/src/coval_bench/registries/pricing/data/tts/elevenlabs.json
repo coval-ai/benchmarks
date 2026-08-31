@@ -8,5 +8,15 @@
     "effective_from": "2026-08-10",
     "source_url": "https://elevenlabs.io/pricing/api",
     "notes": "API pricing 'Flash / Turbo' row; same rate across tiers."
+  },
+  {
+    "benchmark": "TTS",
+    "provider": "elevenlabs",
+    "model": "eleven_v3_conversational",
+    "unit": "per_1k_chars",
+    "price_usd": "0.05",
+    "effective_from": "2026-08-28",
+    "source_url": "https://elevenlabs.io/pricing/api",
+    "notes": "API pricing 'v3 Conversational' row — a distinct model from plain v3, which is $0.10 per 1K characters. Same rate across tiers."
   }
 ]

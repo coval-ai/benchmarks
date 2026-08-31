@@ -17,7 +17,7 @@
     "price_usd": "0.0015",
     "effective_from": "2026-08-24",
     "source_url": "https://www.together.ai/pricing",
-    "notes": "Serverless pay-as-you-go per-audio-minute rate for NVIDIA Parakeet TDT 0.6B v3."
+    "notes": "Serverless per-audio-minute rate for NVIDIA Parakeet TDT 0.6B v3. Together's per-audio-minute table is headed 'Batch API price' and carries no realtime row for this model, unlike Whisper Large v3 which has a separate (Streaming) row \u2014 so this is the only per-minute figure published for it, and it may understate the realtime endpoint we benchmark. The 'Parakeet TDT 0.6B V3 Realtime $0.0035' row sits in the per-1M-characters table beside the TTS models, so it is not a per-minute audio rate."
   },
   {
     "benchmark": "STT",
@@ -27,6 +27,6 @@
     "price_usd": "0.0035",
     "effective_from": "2026-08-24",
     "source_url": "https://www.together.ai/pricing",
-    "notes": "Whisper Large v3 (Streaming) rate — we benchmark over Together's realtime API; the non-streaming Transcribe tier is $0.0015/min."
+    "notes": "Whisper Large v3 (Streaming) rate \u2014 we benchmark over Together's realtime API; the non-streaming Transcribe tier is $0.0015/min."
   }
 ]

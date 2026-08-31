@@ -7,7 +7,7 @@
     "price_usd": "0.15",
     "effective_from": "2026-08-24",
     "source_url": "https://www.assemblyai.com/pricing",
-    "notes": "Pay-as-you-go Universal-Streaming rate (English and Multilingual both $0.15/hr); AssemblyAI bills streaming on session duration, not audio duration."
+    "notes": "Pay-as-you-go rate for Universal-Streaming on the Realtime Speech-to-Text API (English and Multilingual both $0.15/hr). AssemblyAI bills streaming on session duration — WebSocket open time, not audio sent — and we stream each clip in real time and close, so a benchmarked session is one clip's audio plus a brief wait for the final transcript."
   },
   {
     "benchmark": "STT",
@@ -17,6 +17,6 @@
     "price_usd": "0.45",
     "effective_from": "2026-08-24",
     "source_url": "https://www.assemblyai.com/pricing",
-    "notes": "Pay-as-you-go Universal-3.5 Pro Realtime base streaming rate — the endpoint we benchmark; the async pre-recorded tier is $0.21/hr."
+    "notes": "AssemblyAI sells three separate APIs and prices Universal-3.5 Pro differently on each. This is the Realtime Speech-to-Text API rate, listed as 'Universal-3.5 Pro Realtime' at $0.45/hr — the endpoint we benchmark, over wss://streaming.assemblyai.com/v3/ws. The similarly named async model on the Pre-recorded API is $0.21/hr and the Sync API is $0.45/hr; neither is what we measure. Billed on session duration like the Universal-Streaming rate above."
   }
 ]

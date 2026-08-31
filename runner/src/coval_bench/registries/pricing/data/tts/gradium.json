@@ -7,6 +7,6 @@
     "price_usd": "69",
     "effective_from": "2026-08-10",
     "source_url": "https://gradium.ai/pricing",
-    "notes": "Entry (XS) plan add-on credit rate, 1 credit = 1 character; larger plans publish lower rates. No standalone pay-as-you-go tier."
+    "notes": "Entry (XS) plan add-on credit rate — the marginal price of usage: $6.9 per 100k credits at 1 credit per character. Gradium has no standalone pay-as-you-go tier; larger plans publish lower add-on rates, and usage inside the XS plan's own 225k-credit allowance works out to about $57.78 per 1M."
   }
 ]

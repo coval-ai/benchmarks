@@ -7,7 +7,7 @@
     "price_usd": "10",
     "effective_from": "2026-08-10",
     "source_url": "https://speechify.ai/pricing",
-    "notes": "Entry (Starter) plan rate; no per-model rate variation, larger plans publish lower rates."
+    "notes": "Starter plan's rate past its 1M included characters — the entry published rate; Pro is $8 and Scale $6 per 1M. Billed per character at the same rate for every Simba model. The per-minute figure Speechify also publishes prices their bundled voice-agent product, not the TTS API."
   },
   {
     "benchmark": "TTS",
@@ -17,6 +17,6 @@
     "price_usd": "10",
     "effective_from": "2026-08-10",
     "source_url": "https://speechify.ai/pricing",
-    "notes": "Entry (Starter) plan rate; no per-model rate variation, larger plans publish lower rates."
+    "notes": "Starter plan's rate past its 1M included characters — the entry published rate; Pro is $8 and Scale $6 per 1M. Billed per character at the same rate for every Simba model. The per-minute figure Speechify also publishes prices their bundled voice-agent product, not the TTS API."
   }
 ]

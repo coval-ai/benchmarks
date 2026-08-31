@@ -11,20 +11,28 @@ STT) happens here, never in the files.
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 
 from pydantic import BaseModel, Field, HttpUrl
 
 from coval_bench.registries.benchmarks import Benchmark
 
+# Scale for the one normalization that divides ($/hour → $/1,000 minutes, which
+# is × 1000 ÷ 60 and rarely terminates). Rounding it deliberately beats letting
+# the ambient Decimal context decide where the tail falls: a millionth of a
+# dollar per 1,000 minutes is finer than any published rate's own precision, and
+# the served figure is then identical everywhere. Every other unit scales by a
+# power of ten and stays exact.
+_DIVIDED_SCALE = Decimal("0.000001")
+
 
 class PricingUnit(StrEnum):
     """The native unit a provider publishes its rate in.
 
-    Character units bill TTS input, duration units bill STT input. Both
-    normalize by exact arithmetic within their own denominator; nothing
-    converts across the two, which would take an assumed speaking rate.
+    Character units bill TTS input, duration units bill STT input. Each
+    normalizes within its own denominator; nothing converts across the two,
+    which would take an assumed speaking rate.
     """
 
     PER_1M_CHARS = "per_1m_chars"
@@ -75,11 +83,14 @@ class PricingEntry(BaseModel, frozen=True, extra="forbid"):
         different denominator, and character units have no duration
         equivalence without assuming a speaking rate — both return None
         rather than an estimate.
+
+        Per-minute and per-second rates scale exactly; the hourly conversion
+        divides and so rounds to ``_DIVIDED_SCALE``.
         """
         if self.unit is PricingUnit.PER_MINUTE:
             return self.price_usd * 1000
         if self.unit is PricingUnit.PER_HOUR:
-            return self.price_usd * 1000 / 60
+            return (self.price_usd * 1000 / 60).quantize(_DIVIDED_SCALE, rounding=ROUND_HALF_UP)
         if self.unit is PricingUnit.PER_SECOND_AUDIO_IN:
             return self.price_usd * 60_000
         return None
