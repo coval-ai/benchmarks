@@ -74,5 +74,4 @@ COPY --from=build --chown=65532:65532 /app /app
 
 USER 65532:65532
 
-ENTRYPOINT ["python", "-m", "coval_bench"]
-CMD ["run"]
+CMD ["python", "-m", "coval_bench", "run"]
