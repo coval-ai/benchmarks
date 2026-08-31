@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # invalid deployment rather than a silent partial capture.
     benchmark_artifact_bucket: str = ""
     normalized_dual_write_enabled: bool = False
+    # Dashboard reads can be validated independently from additive capture.
+    normalized_dashboard_reads_enabled: bool = False
 
     @field_validator("dataset_id")
     @classmethod

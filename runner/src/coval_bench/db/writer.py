@@ -773,7 +773,9 @@ class RunWriter:
                     JOIN benchmarks_v2.benchmark_observations observation
                       ON observation.id = evaluation.observation_id
                     JOIN benchmarks_v2.runs run ON run.id = observation.run_id
-                    WHERE evaluation.status = 'succeeded' AND run.status IN ('succeeded', 'partial')
+                    WHERE observation.status = 'succeeded'
+                      AND evaluation.status = 'succeeded'
+                      AND run.status IN ('succeeded', 'partial')
                       AND run.scheduled_at = %(bucket)s
                     GROUP BY GROUPING SETS (
                       (observation.provider, observation.model, observation.benchmark,

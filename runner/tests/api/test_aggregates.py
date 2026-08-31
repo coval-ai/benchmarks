@@ -10,6 +10,7 @@ import datetime as dt
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, get_args
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -21,8 +22,109 @@ from coval_bench.api.common import (
     WINDOW_VIEWS,
     WindowLiteral,
 )
+from coval_bench.api.routers.aggregates import (
+    _NORMALIZED_SERIES_SQL,
+    _NORMALIZED_STATS_BY_DATASET_SQL,
+    _NORMALIZED_STATS_SQL,
+    _NORMALIZED_TIMELINE_SQL,
+)
 from coval_bench.registries import MODEL_REGISTRY
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
+
+
+async def _insert_normalized_metric(
+    postgresql: Any,
+    run_id: int,
+    *,
+    dataset_id: str,
+    metric_type: str,
+    values: dict[str, float],
+    benchmark: str = "STT",
+    observation_status: str = "succeeded",
+    evaluation_status: str = "succeeded",
+    metric_version: str = "v1",
+    evaluation_variant: str = "default",
+) -> None:
+    """Seed one normalized evaluation for cutover tests."""
+    import psycopg
+
+    from tests.api.conftest import _make_db_url
+
+    observation_id, evaluation_id = uuid4(), uuid4()
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        await conn.execute(
+            """INSERT INTO benchmarks_v2.benchmark_observations
+               (id, run_id, dataset_id, provider, model, benchmark, captured_at, status)
+               VALUES (%s, %s, %s, 'deepgram', 'nova-3', %s, now(), %s)""",
+            (observation_id, run_id, dataset_id, benchmark, observation_status),
+        )
+        await conn.execute(
+            """INSERT INTO benchmarks_v2.metric_evaluations
+               (id, observation_id, metric_type, metric_version, evaluation_variant, status)
+               VALUES (%s, %s, %s, %s, %s, %s)""",
+            (
+                evaluation_id,
+                observation_id,
+                metric_type,
+                metric_version,
+                evaluation_variant,
+                evaluation_status,
+            ),
+        )
+        for key, component in values.items():
+            await conn.execute(
+                """INSERT INTO benchmarks_v2.metric_values
+                   (metric_evaluation_id, value_key, unit, value, value_role)
+                   VALUES (%s, %s, 'percent', %s, %s)""",
+                (evaluation_id, key, component, "primary" if key == "primary" else "component"),
+            )
+
+
+async def _insert_normalized_wer(
+    postgresql: Any, run_id: int, *, dataset_id: str, value: float
+) -> None:
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id=dataset_id,
+        metric_type="WER",
+        values={
+            "primary": value,
+            "insertions": 1.0,
+            "deletions": 2.0,
+            "substitutions": value - 3.0,
+        },
+    )
+
+
+async def _insert_normalized_bucket(
+    postgresql: Any,
+    *,
+    dataset_id: str,
+    value_key: str = "primary",
+    metric_version: str = "v1",
+    value_sum: float = 6.0,
+    sample_count: int = 2,
+) -> None:
+    import psycopg
+
+    from tests.api.conftest import _make_db_url
+
+    bucket = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        await conn.execute(
+            """INSERT INTO benchmarks_v2.metric_values_by_bucket
+               (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
+                p75, max_value, value_sum, sample_count)
+               VALUES ('deepgram', 'nova-3', 'STT', %s, 'WER', %s, 'default', %s,
+                       'percent', %s, 1, 2, 3, 4, 5, %s, %s)""",
+            (dataset_id, metric_version, value_key, bucket, value_sum, sample_count),
+        )
 
 
 def test_intervals_cover_every_window() -> None:
@@ -30,6 +132,17 @@ def test_intervals_cover_every_window() -> None:
     added to the literal but not the dicts 500s after validation."""
     assert set(WINDOW_INTERVALS) == set(get_args(WindowLiteral))
     assert set(WINDOW_VIEWS) == set(get_args(WindowLiteral))
+
+
+def test_normalized_query_constants_start_with_sql() -> None:
+    """Comments beside triple-quote openers must not become literal SQL."""
+    for query in (
+        _NORMALIZED_STATS_SQL,
+        _NORMALIZED_STATS_BY_DATASET_SQL,
+        _NORMALIZED_SERIES_SQL,
+        _NORMALIZED_TIMELINE_SQL,
+    ):
+        assert query.lstrip().startswith(("SELECT", "WITH"))
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:
@@ -217,6 +330,113 @@ async def test_dataset_filter_splits_and_default_pools(
     ).json()
     assert missing["model_stats"] == []
     assert missing["datasets"] == ["stt-v1", "stt-v3"]
+
+
+async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The default remains legacy; enabling reads uses only normalized rows."""
+    legacy_run = await _insert_run(postgresql, dataset_id="legacy")
+    await _insert_result(postgresql, legacy_run, metric_value=99.0)
+    await _refresh_mv(postgresql)
+    normalized_run = await _insert_run(postgresql, dataset_id="stt-v2")
+    await _insert_normalized_wer(postgresql, normalized_run, dataset_id="stt-v2", value=6.0)
+
+    # The app fixture builds one Settings instance, so mutating its test-only
+    # state exercises the same dependency path as the Cloud Run env flag.
+    app = client._transport.app  # type: ignore[attr-defined]
+    assert app.state.settings.normalized_dashboard_reads_enabled is False
+    legacy = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert legacy.json()["model_stats"][0]["avg_value"] == pytest.approx(99.0)
+    app.state.settings.normalized_dashboard_reads_enabled = True
+
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dataset"] == "__all__"
+    assert body["datasets"] == ["stt-v2"]
+    assert body["model_stats"][0]["avg_value"] == pytest.approx(6.0)
+    assert body["model_stats"][0]["wer_insertions_pct"] == pytest.approx(1.0)
+
+    scoped = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v2"}
+    )
+    assert scoped.json()["model_stats"][0]["sample_count"] == 1
+
+    by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    assert [block["dataset"] for block in by_dataset.json()["blocks"]] == ["stt-v2"]
+
+    raw = await client.get("/v1/results", params={"metric_type": "WER"})
+    assert [result["metric_value"] for result in raw.json()["results"]] == [99.0]
+
+
+async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    valid_run = await _insert_run(postgresql, dataset_id="tts-v1")
+    await _insert_normalized_metric(
+        postgresql,
+        valid_run,
+        dataset_id="tts-v1",
+        benchmark="TTS",
+        metric_type="TTFA",
+        values={"primary": 120.0, "roundtrip": 75.0, "leading_silence": 45.0},
+    )
+    for overrides in (
+        {"observation_status": "failed"},
+        {"evaluation_status": "failed"},
+        {"metric_version": "v2"},
+        {"evaluation_variant": "ensemble"},
+    ):
+        await _insert_normalized_metric(
+            postgresql,
+            valid_run,
+            dataset_id="tts-v1",
+            benchmark="TTS",
+            metric_type="WER",
+            values={"primary": 999.0},
+            **overrides,
+        )
+    failed_run = await _insert_run(postgresql, dataset_id="tts-v1", status="failed")
+    await _insert_normalized_metric(
+        postgresql,
+        failed_run,
+        dataset_id="tts-v1",
+        benchmark="TTS",
+        metric_type="WER",
+        values={"primary": 999.0},
+    )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    response = await client.get("/v1/results/aggregates", params={"benchmark": "TTS"})
+    stats = {row["metric_type"]: row for row in response.json()["model_stats"]}
+    assert set(stats) == {"TTFA", "TTFARoundtrip", "TTFALeadingSilence"}
+    assert stats["TTFA"]["avg_value"] == pytest.approx(120.0)
+    assert stats["TTFARoundtrip"]["avg_value"] == pytest.approx(75.0)
+    assert stats["TTFALeadingSilence"]["avg_value"] == pytest.approx(45.0)
+
+
+async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    await _insert_normalized_bucket(postgresql, dataset_id="__all__")
+    await _insert_normalized_bucket(postgresql, dataset_id="stt-v2", value_sum=4.0, sample_count=1)
+    await _insert_normalized_bucket(postgresql, dataset_id="__all__", value_key="insertions")
+    await _insert_normalized_bucket(postgresql, dataset_id="__all__", metric_version="v2")
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+
+    scoped = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v2"}
+    )
+    assert len(scoped.json()["series"]) == 1
+    assert scoped.json()["series"][0]["value_sum"] == pytest.approx(4.0)
+
+    timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
+    assert len(timeline.json()["points"]) == 1
+    assert timeline.json()["points"][0]["value"] == pytest.approx(3.0)
 
 
 async def test_tts_rows_attributed_to_tts_dataset(client: AsyncClient, postgresql: Any) -> None:

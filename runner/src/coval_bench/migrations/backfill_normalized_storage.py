@@ -931,7 +931,8 @@ FROM benchmarks_v2.metric_values v
 JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
 JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
 JOIN benchmarks_v2.runs r ON r.id=o.run_id
-WHERE e.status='succeeded' AND r.status IN ('succeeded','partial')
+WHERE o.status='succeeded' AND e.status='succeeded'
+  AND r.status IN ('succeeded','partial')
   AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
   (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,

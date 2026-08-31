@@ -1487,15 +1487,35 @@ async def test_rollup_is_idempotent_and_cascades(pg_conn: psycopg.Connection[Any
             values=_wer_values(evaluation_id),
             finished_at=_NOW + timedelta(seconds=1),
         )
+        failed_run_id, failed_observation = await _observation(writer, sample="failed-sample")
+        failed_evaluation = await _evaluation(writer, failed_observation)
+        failed_evaluation_id = _required(failed_evaluation.id)
+        await writer.complete_metric_evaluation(
+            failed_evaluation_id,
+            values=_wer_values(failed_evaluation_id),
+            finished_at=_NOW + timedelta(seconds=1),
+        )
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE benchmarks_v2.benchmark_observations
+                   SET status = 'failed', error = 'capture failed', failure_origin = 'provider'
+                   WHERE id = %s""",
+                (_required(failed_observation.id),),
+            )
+            await conn.commit()
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+        await writer.finish_run(failed_run_id, status=RunStatus.SUCCEEDED)
         await writer.refresh_metric_values_bucket(run_id)
         await writer.refresh_metric_values_bucket(run_id)
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
-                "SELECT dataset_id FROM benchmarks_v2.metric_values_by_bucket ORDER BY dataset_id"
+                """SELECT dataset_id, sample_count
+                   FROM benchmarks_v2.metric_values_by_bucket ORDER BY dataset_id"""
             )
-            datasets = [row["dataset_id"] for row in await cur.fetchall()]
+            rows = await cur.fetchall()
+            datasets = [row["dataset_id"] for row in rows]
             assert datasets.count("__all__") == datasets.count("observation-dataset") == 4
+            assert {row["sample_count"] for row in rows} == {1}
             await cur.execute(
                 "DELETE FROM benchmarks_v2.benchmark_observations WHERE id = %s",
                 (_required(observation.id),),
