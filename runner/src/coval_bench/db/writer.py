@@ -112,7 +112,12 @@ class RunWriter:
         """Insert a single ``benchmarks_v2.results`` row in its own transaction."""
         await self.record_results([result])
 
-    async def record_results(self, results: Sequence[Result]) -> None:
+    async def record_results(
+        self,
+        results: Sequence[Result],
+        *,
+        created_at: datetime | None = None,
+    ) -> None:
         """Batch-insert ``results`` in a single transaction.
 
         All rows are inserted via ``executemany``.  If any row fails (e.g. a
@@ -140,9 +145,9 @@ class RunWriter:
                  metric_value, metric_units, audio_filename, transcript,
                  status, error, http_version, submit_to_headers_ms,
                  wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
-                 variant_id, transport, test_case_id)
+                 variant_id, transport, test_case_id, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
         """
         params = [
             (
@@ -166,6 +171,7 @@ class RunWriter:
                 r.variant_id,
                 r.transport,
                 r.test_case_id,
+                created_at,
             )
             for r in results
         ]

@@ -23,6 +23,7 @@ from coval_bench.api.common import (
     WindowLiteral,
 )
 from coval_bench.api.routers.aggregates import (
+    _NORMALIZED_DATASETS_SQL,
     _NORMALIZED_SERIES_SQL,
     _NORMALIZED_STATS_BY_DATASET_SQL,
     _NORMALIZED_STATS_SQL,
@@ -137,12 +138,17 @@ def test_intervals_cover_every_window() -> None:
 def test_normalized_query_constants_start_with_sql() -> None:
     """Comments beside triple-quote openers must not become literal SQL."""
     for query in (
+        _NORMALIZED_DATASETS_SQL,
         _NORMALIZED_STATS_SQL,
         _NORMALIZED_STATS_BY_DATASET_SQL,
         _NORMALIZED_SERIES_SQL,
         _NORMALIZED_TIMELINE_SQL,
     ):
         assert query.lstrip().startswith(("SELECT", "WITH"))
+
+
+def test_normalized_dataset_listing_excludes_pooled_sentinel() -> None:
+    assert "o.dataset_id <> %(sentinel)s" in _NORMALIZED_DATASETS_SQL
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:

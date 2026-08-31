@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import wave
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
@@ -184,6 +184,7 @@ def _artifact_ids(observation: Observation) -> dict[ObservationArtifactType, UUI
 @pytest.mark.asyncio
 async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> None:
     writer = _Writer()
+    captured_at = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
     results = [
         _result(Benchmark.STT, Metric.TTFT, 0.25, "seconds"),
         _result(
@@ -209,6 +210,7 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
         benchmark=Benchmark.STT,
         results=results,
         provider_error=None,
+        captured_at=captured_at,
         transcript="hello",
         timing_events={"ttft_seconds": 0.25},
     )
@@ -216,6 +218,7 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
     assert len(writer.observations) == 1
     observation = writer.observations[0]
     assert observation.source_kind is ObservationSourceKind.DATASET_AUDIO
+    assert observation.captured_at == captured_at
     artifacts = _artifact_ids(observation)
 
     wer_id, _ = _evaluation_by_metric(writer, Metric.WER)

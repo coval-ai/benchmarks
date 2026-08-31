@@ -652,9 +652,10 @@ async def _run_stt_item(
         item=audio_path.name,
     )
 
+    captured_at = datetime.now(UTC)
     if writer is not None and results:
         try:
-            await writer.record_results(results)
+            await writer.record_results(results, created_at=captured_at)
         except Exception as exc:
             logger.warning(
                 "stt_result_persist_failed",
@@ -680,6 +681,7 @@ async def _run_stt_item(
                     benchmark=Benchmark.STT,
                     results=results,
                     provider_error=item_error,
+                    captured_at=captured_at,
                     transcript=complete_transcript,
                     timing_events={
                         "ttft_seconds": ttft_seconds,
@@ -937,9 +939,10 @@ async def _run_tts_item(
                         )
             # The legacy rows remain the source of truth. Persist them before the optional
             # normalized path so cancellation during artifact upload cannot drop completed work.
+            captured_at = datetime.now(UTC)
             if writer is not None and results:
                 try:
-                    await writer.record_results(results)
+                    await writer.record_results(results, created_at=captured_at)
                 except Exception as exc:
                     logger.warning(
                         "tts_result_persist_failed",
@@ -964,6 +967,7 @@ async def _run_tts_item(
                         benchmark=Benchmark.TTS,
                         results=results,
                         provider_error=item_error,
+                        captured_at=captured_at,
                         timing_events={"ttfa_ms": ttfa_ms},
                         audio_path=audio_path,
                         voice=voice,

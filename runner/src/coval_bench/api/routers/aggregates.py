@@ -212,6 +212,7 @@ JOIN benchmarks_v2.runs r ON r.id = o.run_id
 WHERE o.status = 'succeeded' AND e.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
  AND e.metric_version = 'v1' AND e.evaluation_variant = 'default' AND o.benchmark = %(benchmark)s
  AND o.captured_at >= NOW() - %(interval)s::interval AND v.value_role = 'primary'
+ AND o.dataset_id <> %(sentinel)s
 ORDER BY o.dataset_id
 """
 
