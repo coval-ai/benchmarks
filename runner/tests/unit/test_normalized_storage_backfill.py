@@ -591,14 +591,14 @@ def test_runner_image_allows_cloud_run_to_override_the_default_command() -> None
 
 def test_repository_owned_container_overrides_use_the_image_entrypoint() -> None:
     root = Path(__file__).parents[2]
-    overrides = {
-        "docker-compose.yml": root / ".." / "docker-compose.yml",
-        "runner README": root / "README.md",
-        "arena snapshot": root / ".." / "scripts" / "arena-local.sh",
-    }
-    for name, path in overrides.items():
-        assert "docker compose run --rm runner coval-bench" not in path.read_text(), name
-    assert 'command: ["coval-bench"' not in overrides["docker-compose.yml"].read_text()
+    compose = (root / ".." / "docker-compose.yml").read_text()
+    readme = (root / "README.md").read_text()
+    arena = (root / ".." / "scripts" / "arena-local.sh").read_text()
+    assert 'command: ["db", "migrate"]' in compose
+    assert "docker compose run --rm runner run --smoke --kind tts" in compose
+    assert "docker compose run --rm runner run --smoke --kind tts" in readme
+    assert "docker compose run --rm runner tts-smoke" in readme
+    assert "docker compose run --rm runner arena snapshot" in arena
 
 
 def test_apply_reconciles_artifacts_inputs_values_and_rollups(
