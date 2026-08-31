@@ -44,10 +44,10 @@ docker compose run --rm migrate  # alembic upgrade head
 docker compose up -d api         # FastAPI on http://localhost:8000
 
 # Trigger a single-item benchmark run (writes to the local Postgres):
-docker compose run --rm runner run --smoke --kind tts
+docker compose run --rm runner coval-bench run --smoke --kind tts
 
 # Probe one TTS provider without DB writes:
-docker compose run --rm runner tts-smoke \
+docker compose run --rm runner coval-bench tts-smoke \
   --provider cartesia --model sonic-3 --voice <voice-id> --text "hello"
 ```
 

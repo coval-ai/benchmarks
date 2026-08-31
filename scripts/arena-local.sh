@@ -92,7 +92,7 @@ cmd_up() {
   wait_for_api
 }
 
-cmd_snapshot() { docker compose run --rm runner arena snapshot; }
+cmd_snapshot() { docker compose run --rm runner coval-bench arena snapshot; }
 
 cmd_status() {
   # Match how compose resolves these: shell env wins, then .env, then default.
