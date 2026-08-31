@@ -15,7 +15,7 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -26,13 +26,13 @@ DETAIL_LIMIT = 50
 
 
 class Cursor(Protocol):
-    def fetchone(self) -> tuple[Any, ...]: ...
+    def fetchone(self) -> tuple[Any, ...] | None: ...
 
     def fetchall(self) -> list[tuple[Any, ...]]: ...
 
 
 class Connection(Protocol):
-    def execute(self, query: str, params: object = None) -> Cursor: ...
+    def execute(self, query: str, params: Mapping[str, Any] | None = None) -> Cursor: ...
 
 
 _ELIGIBLE_BUCKETS_SQL = """
@@ -160,7 +160,10 @@ def evaluate_readiness(
 def check(conn: Connection, *, required_hours: int = MINIMUM_HOURS) -> dict[str, Any]:
     """Run every read in exactly one repeatable-read read-only transaction."""
     conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
-    as_of = conn.execute("SELECT now()").fetchone()[0]
+    as_of_row = conn.execute("SELECT now()").fetchone()
+    if as_of_row is None:
+        raise RuntimeError("SELECT now() returned no row")
+    as_of = as_of_row[0]
     start = as_of - timedelta(hours=required_hours)
     params = {"start": start, "as_of": as_of}
     buckets = [row[0] for row in conn.execute(_ELIGIBLE_BUCKETS_SQL, params).fetchall()]
