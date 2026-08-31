@@ -21,6 +21,7 @@ from coval_bench.api.common import (
     WINDOW_VIEWS,
     WindowLiteral,
 )
+from coval_bench.registries import MODEL_REGISTRY
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
 
 
@@ -378,6 +379,9 @@ async def test_concurrent_misses_coalesce(
                 yield conn
 
     app.dependency_overrides[deps.get_pool] = CountingPool
+    # The roster shares get_pool; serve it from memory so only the aggregates
+    # query is counted here.
+    app.dependency_overrides[deps.get_models] = lambda: list(MODEL_REGISTRY)
     try:
         responses = await asyncio.gather(
             *(client.get("/v1/results/aggregates", params={"benchmark": "STT"}) for _ in range(5))
@@ -408,6 +412,7 @@ async def test_failed_fill_shared_not_retried(client: AsyncClient, app: FastAPI)
             yield  # noqa: B901 — unreachable; makes this an async generator
 
     app.dependency_overrides[deps.get_pool] = FailingPool
+    app.dependency_overrides[deps.get_models] = lambda: list(MODEL_REGISTRY)
     try:
         with pytest.raises(RuntimeError, match="db down"):
             await client.get("/v1/results/aggregates", params={"benchmark": "STT"})

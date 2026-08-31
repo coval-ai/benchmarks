@@ -23,6 +23,8 @@ from starlette.requests import Request
 
 from coval_bench.api import clerk
 from coval_bench.config import Settings
+from coval_bench.db.registry_store import fetch_models
+from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -85,6 +87,26 @@ def get_posthog(request: Request) -> Posthog | None:
 def get_cache(request: Request) -> TTLCache[Any, Any]:
     """Return the per-app response TTL cache from app state."""
     return cast("TTLCache[Any, Any]", request.app.state.response_cache)
+
+
+async def get_models(
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> list[RegisteredModel]:
+    """The model roster, read fresh on every request.
+
+    Deliberately uncached. The roster decides who may see an embargoed model,
+    and a cached copy is per-instance: unpublishing one would stay visible on
+    every other instance until its copy aged out. The read is a few
+    milliseconds against a table of this size.
+
+    Raises 503 rather than falling back to a default: a made-up roster could
+    serve an embargoed model to the public.
+    """
+    try:
+        return await fetch_models(pool)
+    except Exception as exc:
+        logger.error("model_roster_unavailable", exc_info=True)
+        raise HTTPException(503, "the model registry is unavailable") from exc
 
 
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:

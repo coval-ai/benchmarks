@@ -30,13 +30,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Response
 from posthog import Posthog
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_posthog, get_settings
+from coval_bench.api.deps import capture_api_event, get_models, get_posthog, get_settings
 from coval_bench.api.internal import hidden_early_access, never_shared
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import S2SSampleAudioOut, S2SSampleOut, S2SSampleRecordingOut
 from coval_bench.config import Settings
 from coval_bench.gcs import signed_url
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 from coval_bench.s2s.samples import (
     AUDIO_URL_TTL,
     audio_object_key,
@@ -71,10 +71,11 @@ async def list_s2s_samples(
     response: Response,
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    models: Sequence[RegisteredModel] = Depends(get_models),
 ) -> list[str]:
     """Sample ids newest-first, empty when the caller may see no S2S model at all."""
     never_shared(response)
-    if not settings.s2s_samples_bucket or not _sees_any_s2s_model(MODEL_REGISTRY, hidden):
+    if not settings.s2s_samples_bucket or not _sees_any_s2s_model(models, hidden):
         return []
     return await asyncio.to_thread(load_sample_ids, settings.s2s_samples_bucket)
 

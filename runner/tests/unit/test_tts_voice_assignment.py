@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import MODEL_REGISTRY, Benchmark, RegisteredModel
 from coval_bench.registries.models import Gender, Voice
 from coval_bench.runner.orchestrator import _assign_tts_voices
 
@@ -22,7 +22,8 @@ def _entry(voices: tuple[str, ...] = ()) -> RegisteredModel:
         voices=tuple(
             Voice(id=v, gender=Gender.FEMALE if v.startswith("f") else Gender.MALE) for v in voices
         ),
-        status=ModelStatus.ACTIVE,
+        collected=True,
+        published=True,
     )
 
 
@@ -70,13 +71,12 @@ def test_no_pool_falls_back_to_pin() -> None:
 def test_registry_pools_are_f_m_pairs() -> None:
     """Every ``voices`` pool is a distinct (female, male) pair on a live TTS entry.
 
-    PAUSED entries keep their pool so resuming them needs no re-research."""
-    live = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS, ModelStatus.PAUSED)
+    An uncollected entry keeps its pool so resuming it needs no re-research."""
     pooled = [m for m in MODEL_REGISTRY if m.voices]
     assert pooled, "expected voice pools in the registry"
     for m in pooled:
         assert m.benchmark is Benchmark.TTS, f"{m.provider}/{m.model}: pool on non-TTS entry"
-        assert m.status in live, f"{m.provider}/{m.model}: pool on dead entry"
+        assert m.collected or m.published, f"{m.provider}/{m.model}: pool on dead entry"
         assert len(m.voices) == 2, f"{m.provider}/{m.model}: pool must be a (female, male) pair"
         ids = [v.id for v in m.voices]
         assert len(set(ids)) == 2, f"{m.provider}/{m.model}: duplicate voice in pool"
@@ -93,7 +93,8 @@ def test_active_tts_entries_have_pools() -> None:
         (m.provider, m.model)
         for m in MODEL_REGISTRY
         if m.benchmark is Benchmark.TTS
-        and m.status is ModelStatus.ACTIVE
+        and m.collected
+        and m.published
         and not m.voices
         and m.provider != "palabra"
     ]

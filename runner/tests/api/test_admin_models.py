@@ -25,6 +25,19 @@ _RETIRED_KEY, _CURRENT_KEY = next(iter(_RETIRED_BOARD_KEYS.items()))
 
 
 @pytest.fixture(autouse=True)
+def _empty_registry(postgresql: Any) -> None:
+    """These tests own the registry tables; the seeded roster is not theirs."""
+    conn = psycopg.connect(_make_db_url(postgresql))
+    try:
+        conn.execute("DELETE FROM benchmarks_v2.model_history")
+        conn.execute("DELETE FROM benchmarks_v2.models")
+        conn.execute("DELETE FROM benchmarks_v2.tags")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.fixture(autouse=True)
 def _fake_provider_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bypass the SDK-heavy provider imports; the real resolver has its own test."""
     implemented = frozenset({"acme", _EXCLUDED_PROVIDER})

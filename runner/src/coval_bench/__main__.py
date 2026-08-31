@@ -14,6 +14,7 @@ run status is FAILED.
 import asyncio
 import json
 import sys
+from typing import Any
 
 import click
 
@@ -221,21 +222,27 @@ def probe(selectors: tuple[str, ...], samples: int, concurrency: int) -> None:
     registered model.
     """
     from coval_bench.config import get_settings
-    from coval_bench.registries import MODEL_REGISTRY
+    from coval_bench.db.conn import lifespan_pool
+    from coval_bench.db.registry_store import fetch_models
     from coval_bench.runner.probe import run_probe
 
-    models = [m for m in MODEL_REGISTRY if f"{m.provider}/{m.model}" in set(selectors)]
-    matched = {f"{m.provider}/{m.model}" for m in models}
-    missing = sorted(set(selectors) - matched)
-    if missing:
-        known = sorted({f"{m.provider}/{m.model}" for m in MODEL_REGISTRY})
-        click.echo(f"Unknown model(s): {missing}. Known: {known}", err=True)
-        sys.exit(2)
-
     settings = get_settings()
-    results = asyncio.run(
-        run_probe(settings=settings, models=models, sample_size=samples, concurrency=concurrency)
-    )
+
+    async def _probe() -> Any:  # noqa: ANN401 — run_probe's aggregate payload
+        async with lifespan_pool(settings) as pool:
+            roster = await fetch_models(pool)
+            models = [m for m in roster if f"{m.provider}/{m.model}" in set(selectors)]
+            matched = {f"{m.provider}/{m.model}" for m in models}
+            missing = sorted(set(selectors) - matched)
+            if missing:
+                known = sorted({f"{m.provider}/{m.model}" for m in roster})
+                click.echo(f"Unknown model(s): {missing}. Known: {known}", err=True)
+                sys.exit(2)
+            return await run_probe(
+                settings=settings, models=models, sample_size=samples, concurrency=concurrency
+            )
+
+    results = asyncio.run(_probe())
     click.echo(json.dumps({"event": "probe_results", "samples": samples, "results": results}))
 
 
@@ -422,11 +429,15 @@ def arena_seed_battles(per_domain: int) -> None:
     from coval_bench.db.arena_store import ArenaStore
     from coval_bench.db.conn import lifespan_pool
     from coval_bench.db.models import Battle
+    from coval_bench.db.registry_store import fetch_models
 
     async def _run() -> list[Battle]:
         settings = get_settings()
         async with lifespan_pool(settings) as pool:
-            return await seed_demo_battles(settings, ArenaStore(pool), per_domain=per_domain)
+            models = await fetch_models(pool)
+            return await seed_demo_battles(
+                settings, ArenaStore(pool), models, per_domain=per_domain
+            )
 
     battles = asyncio.run(_run())
     attempted = sum(min(per_domain, len(prompts)) for prompts in EXAMPLE_PROMPTS.values())

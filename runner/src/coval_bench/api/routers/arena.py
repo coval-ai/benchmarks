@@ -38,7 +38,13 @@ from psycopg_pool import AsyncConnectionPool
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
+from coval_bench.api.deps import (
+    capture_api_event,
+    get_models,
+    get_pool,
+    get_posthog,
+    get_settings,
+)
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     ArenaLeaderboardResponse,
@@ -74,7 +80,7 @@ from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.config import Settings
 from coval_bench.db.arena_store import ArenaStore
 from coval_bench.db.models import VoteOutcome, VoterType
-from coval_bench.registries import MODEL_REGISTRY, Benchmark, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -106,16 +112,16 @@ _LEADERBOARD_SQL = """
 
 
 def _hidden_tts_models(models: Sequence[RegisteredModel]) -> frozenset[tuple[str, str]]:
-    """TTS models the site hides (retired/pending/early-access).
+    """TTS models the arena board leaves out.
 
-    Their votes still feed the rating fit, but boards computed before a
-    retirement must not keep showing them.
+    The board ranks what the arena currently pairs, so a model that stopped
+    being collected drops off it even though its votes still feed the rating
+    fit, and an unpublished one never appears at all.
     """
     return frozenset(
         (m.provider, m.model)
         for m in models
-        if m.benchmark is Benchmark.TTS
-        and m.status in (ModelStatus.RETIRED, ModelStatus.PENDING, ModelStatus.EARLY_ACCESS)
+        if m.benchmark is Benchmark.TTS and not (m.collected and m.published)
     )
 
 
@@ -270,6 +276,7 @@ async def get_arena_leaderboard(
     domain: str = Query(default="all"),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
+    models: Sequence[RegisteredModel] = Depends(get_models),
 ) -> ArenaLeaderboardResponse:
     """Return the latest computed board for ``metric``/``domain`` (empty if none)."""
     async with pool.connection() as conn:
@@ -277,7 +284,7 @@ async def get_arena_leaderboard(
         rows = await conn.execute(_LEADERBOARD_SQL, {"metric": metric, "domain": domain})
         board = await rows.fetchall()
 
-    hidden = _hidden_tts_models(MODEL_REGISTRY)
+    hidden = _hidden_tts_models(models)
     entries = [
         LeaderboardEntryOut.model_validate(r)
         for r in board
@@ -349,6 +356,7 @@ async def create_battle(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     settings: Settings = Depends(get_settings),
     posthog_client: Posthog | None = Depends(get_posthog),
+    roster_models: Sequence[RegisteredModel] = Depends(get_models),
 ) -> BattleOut:
     """Generate a battle from a prompt: pick two models, synthesize, persist (blind).
 
@@ -403,11 +411,11 @@ async def create_battle(
     # Providers with a dead key — named by the last TTS benchmark, or with no key
     # configured here — sit out until that changes. This call also raises the alert,
     # since nothing downstream ever sees a provider that was filtered out here.
-    roster = [m.provider for m in active_tts_models(MODEL_REGISTRY)]
+    roster = [m.provider for m in active_tts_models(roster_models)]
     benched = provider_health.unconfigured_providers(
         settings, roster
     ) | await provider_health.benchmark_benched_providers(pool)
-    models = roster_for(MODEL_REGISTRY, gender, benched)
+    models = roster_for(roster_models, gender, benched)
     if len(models) < 2:
         raise HTTPException(503, "not enough healthy TTS models to form a battle")
     ratings = await store.get_latest_ratings(metric_name=PAIRING_METRIC, domain=PAIRING_DOMAIN)

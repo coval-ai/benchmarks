@@ -105,6 +105,7 @@ def _resolve(
         response=response,
         authorization=authorization,
         settings=settings,
+        models=MODEL_REGISTRY,
     )
     return hidden, response.headers[EA_STATUS_HEADER]
 
@@ -297,6 +298,7 @@ def test_unknown_exclusive_entry_grants_nothing_and_warns(
             response=response,
             authorization=f"Bearer {token}",
             settings=settings,
+            models=MODEL_REGISTRY,
         )
 
     assert hidden == all_registered_pairs(MODEL_REGISTRY)
@@ -471,7 +473,12 @@ def test_unset_authorized_parties_rejects_every_token(monkeypatch: pytest.Monkey
 
 def _headers(settings: Settings, authorization: str) -> dict[str, str]:
     response = Response()
-    hidden_early_access(response=response, authorization=authorization, settings=settings)
+    hidden_early_access(
+        response=response,
+        authorization=authorization,
+        settings=settings,
+        models=MODEL_REGISTRY,
+    )
     return dict(response.headers)
 
 

@@ -27,7 +27,7 @@ import hcl2
 
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
+from coval_bench.registries.models import MODEL_REGISTRY
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 
@@ -115,7 +115,8 @@ def main(tf_path: str) -> int:
             m.provider
             for m in MODEL_REGISTRY
             if m.benchmark is Benchmark.TTS
-            and m.status is ModelStatus.ACTIVE
+            and m.collected
+            and m.published
             and not m.arena_enabled
             and PROVIDER_ENV.get(m.provider) in mounted
         }

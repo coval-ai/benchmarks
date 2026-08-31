@@ -16,7 +16,7 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.db.models import ResultStatus
-from coval_bench.registries import Benchmark, Metric, ModelStatus, RegisteredModel
+from coval_bench.registries import Benchmark, Metric, RegisteredModel
 from coval_bench.runner import probe as probe_mod
 
 
@@ -69,13 +69,15 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
             benchmark=Benchmark.STT,
             provider="baseten",
             model="whisper-large-v3",
-            status=ModelStatus.PENDING,
+            collected=False,
+            published=False,
         ),
         RegisteredModel(
             benchmark=Benchmark.TTS,
             provider="baseten",
             model="qwen3-tts-1.7b",
-            status=ModelStatus.PENDING,
+            collected=False,
+            published=False,
         ),
     ]
     # settings is forwarded to the patched runners (which ignore it); cast a stub.
@@ -118,7 +120,8 @@ async def test_run_probe_closes_http_pools_even_on_failure(
             benchmark=Benchmark.STT,
             provider="baseten",
             model="whisper-large-v3",
-            status=ModelStatus.PENDING,
+            collected=False,
+            published=False,
         ),
     ]
     with pytest.raises(RuntimeError, match="dataset unavailable"):

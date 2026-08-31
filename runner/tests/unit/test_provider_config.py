@@ -13,7 +13,6 @@ from coval_bench.registries import (
     TAG_CATEGORIES,
     Benchmark,
     Licensing,
-    ModelStatus,
     ModelTag,
     RegisteredModel,
     Source,
@@ -32,7 +31,7 @@ def test_registry_keys_unique() -> None:
 
 def test_registered_model_defaults() -> None:
     m = RegisteredModel(
-        benchmark=Benchmark.STT, provider="deepgram", model="nova-3", status=ModelStatus.ACTIVE
+        benchmark=Benchmark.STT, provider="deepgram", model="nova-3", collected=True, published=True
     )
     assert m.voice is None
     assert m.creator is None
@@ -42,11 +41,11 @@ def test_registered_model_defaults() -> None:
     assert m.on_prem is False
 
 
-def test_active_tts_models_have_voices() -> None:
-    # The runner can't synthesize without a voice; only non-ACTIVE entries may omit one.
+def test_collected_tts_models_have_voices() -> None:
+    # The runner can't synthesize without a voice; only uncollected entries may omit one.
     for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.TTS and m.status is ModelStatus.ACTIVE:
-            assert m.voice is not None, f"{m.provider}/{m.model} is ACTIVE but has no voice"
+        if m.benchmark is Benchmark.TTS and m.collected:
+            assert m.voice is not None, f"{m.provider}/{m.model} is collected but has no voice"
 
 
 def test_stt_models_have_no_voice() -> None:
@@ -69,11 +68,10 @@ def test_provider_names_cover_the_class_registries() -> None:
 def test_scheduled_models_use_implemented_providers() -> None:
     """Every model the orchestrator may schedule resolves without SDK imports.
 
-    Stopped models are exempt: their rows outlive their provider's code.
+    Uncollected models are exempt: their rows outlive their provider's code.
     """
-    scheduled = (ModelStatus.ACTIVE, ModelStatus.EARLY_ACCESS)
     for model in MODEL_REGISTRY:
-        if model.status not in scheduled:
+        if not model.collected:
             continue
         if model.benchmark is Benchmark.STT:
             assert model.provider in provider_names("stt"), model.provider

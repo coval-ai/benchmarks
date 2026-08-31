@@ -5,11 +5,15 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from coval_bench.registries.models import MODEL_REGISTRY, ModelStatus
+from coval_bench.api.internal import embargoed_pairs
+from coval_bench.api.routers.providers import _describe
+from coval_bench.registries.models import MODEL_REGISTRY
 from tests.api.conftest import COVAL_ORG, bearer
 
 
@@ -136,17 +140,19 @@ async def test_capability_and_licensing_facets(client: AsyncClient) -> None:
     assert ("features", "translation") in sm_facets
     assert ("deployment", "on-prem") in sm_facets
 
-    groq = next(e for e in data["tts"] if e["provider"] == "groq")
+    # Unpublished models — baseten's dedicated endpoints, groq's unlaunched
+    # orpheus — are stripped from the public view, so their facets are only
+    # visible on the internal one.
+    internal = await client.get("/v1/providers", headers=bearer(org_id=COVAL_ORG))
+    internal_data = internal.json()
+
+    groq = next(e for e in internal_data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq["models"] if m["model"] == "canopylabs/orpheus-v1-english")
     orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
     labels = {(t["category"], t["value"]): t["label"] for t in orpheus["tags"]}
     assert ("features", "emotion-control") in orpheus_facets
     assert labels[("features", "emotion-control")] == "Emotion control"
 
-    # Baseten's dedicated endpoints are EARLY_ACCESS, so their facets are only
-    # visible on the internal view.
-    internal = await client.get("/v1/providers", headers=bearer(org_id=COVAL_ORG))
-    internal_data = internal.json()
     baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
     qwen_facets = {(t["category"], t["value"]) for t in qwen["tags"]}
@@ -176,9 +182,7 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
     }
     # Registry-derived, not embargoed_pairs(MODEL_REGISTRY): retired board keys stay embargoed
     # for stored artefacts but are not registry entries, so they never appear here.
-    assert flagged == {
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.status is ModelStatus.EARLY_ACCESS
-    }
+    assert flagged == {(m.provider, m.model) for m in MODEL_REGISTRY if not m.published}
 
     baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
@@ -240,8 +244,10 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert by_category["creator"]["provider_valued"] is True
     assert by_category["features"]["provider_valued"] is False
 
-    # groq hosts canopylabs' orpheus, so the creator override drives creator and source.
-    groq_entry = next(e for e in data["tts"] if e["provider"] == "groq")
+    # groq hosts canopylabs' orpheus, so the creator override drives creator and
+    # source. Orpheus is unpublished, so it shows only on the internal view.
+    internal_data = (await client.get("/v1/providers", headers=bearer(org_id=COVAL_ORG))).json()
+    groq_entry = next(e for e in internal_data["tts"] if e["provider"] == "groq")
     orpheus = next(m for m in groq_entry["models"] if m["model"] == "canopylabs/orpheus-v1-english")
     orpheus_facets = {(t["category"], t["value"]) for t in orpheus["tags"]}
     assert ("host", "groq") in orpheus_facets
@@ -249,11 +255,13 @@ async def test_tag_categories_metadata(client: AsyncClient) -> None:
     assert ("source", "shared-inference") in orpheus_facets
 
 
-async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The /v1/providers endpoint never acquires a DB connection.
+async def test_providers_without_a_database_is_503(
+    app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The catalogue comes from the database, so it fails closed without one.
 
-    We verify this by removing the pool from app.state and confirming the
-    endpoint still returns 200.
+    Serving a stale or invented roster could publish an embargoed model, so
+    there is no fallback: the endpoint reports the registry as unavailable.
     """
     original_pool = app.state.pool
     app.state.pool = None
@@ -266,4 +274,54 @@ async def test_providers_no_db_connection(app: FastAPI, monkeypatch: pytest.Monk
     finally:
         app.state.pool = original_pool
 
-    assert response.status_code == 200
+    assert response.status_code == 503
+
+
+def _sorted_tags(payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload with each model's tags ordered, so only content is compared.
+
+    Tag order is not part of the contract: the database returns a model's tags
+    alphabetized, the literals carry the order they were typed in, and the site
+    tests tag membership per facet rather than reading the sequence.
+    """
+    for modality in ("stt", "tts", "s2s"):
+        for provider in payload[modality]:
+            for model in provider["models"]:
+                model["tags"] = sorted(model["tags"], key=lambda t: (t["category"], t["value"]))
+    return payload
+
+
+async def test_the_catalogue_matches_the_registry(client: AsyncClient) -> None:
+    """The database-driven payload is what the code registry would have served.
+
+    The gate on sourcing the catalogue from Postgres: same providers, same
+    models, same order, same flags and facets.
+    """
+    live = (await client.get("/v1/providers")).json()
+    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY)).model_dump(mode="json")
+
+    assert _sorted_tags(live) == _sorted_tags(expected)
+
+
+async def test_publication_alone_decides_public_visibility(client: AsyncClient) -> None:
+    """`published` is the whole rule: stopping collection never exposes a model."""
+    public = (await client.get("/v1/providers")).json()
+    listed = {
+        (entry["provider"], m["model"])
+        for modality in ("stt", "tts", "s2s")
+        for entry in public[modality]
+        for m in entry["models"]
+    }
+    assert listed == {(m.provider, m.model) for m in MODEL_REGISTRY if m.published}
+
+    # Uncollected but published: listed, and marked so a client can grey it out.
+    greyed = {
+        (entry["provider"], m["model"])
+        for modality in ("stt", "tts", "s2s")
+        for entry in public[modality]
+        for m in entry["models"]
+        if m["disabled"]
+    }
+    assert greyed == {
+        (m.provider, m.model) for m in MODEL_REGISTRY if m.published and not m.collected
+    }
