@@ -69,6 +69,9 @@ class SampleRun:
     bucket_at: datetime
     persona_id: str = ""
     agent_id: str = ""
+    # The set this run actually came from. Agents no longer share one, so the
+    # manifest cannot label a recording with the caller-wide configured id.
+    test_set_id: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
@@ -364,7 +367,7 @@ async def _publish_one_bucket(
     pool: list[tuple[str, str]] = []
     for persona_id, model_runs in runs_by_persona.items():
         if set(model_runs) != expected:
-            logger.error(
+            logger.warning(
                 "samples_persona_incomplete",
                 persona=persona_id,
                 missing=model_labels(expected - set(model_runs)),
@@ -380,7 +383,7 @@ async def _publish_one_bucket(
                     list_sims, provider=provider, what="sims_list"
                 )
             except Exception:
-                logger.error(
+                logger.warning(
                     "samples_provider_missing",
                     missing=model_labels({(provider, model)}),
                     exc_info=True,
@@ -468,7 +471,9 @@ async def _publish_one_bucket(
         manifest = {
             "schema_version": 2,
             "bucket_at": tick_key,
-            "test_set_id": test_set_id,
+            # The recordings' own set, falling back to the configured one only when
+            # a run predates the field.
+            "test_set_id": next((r.test_set_id for r in runs if r.test_set_id), test_set_id),
             "test_case_id": test_case_id,
             "persona_name": _persona_label(persona_id),
             "recordings": recordings,

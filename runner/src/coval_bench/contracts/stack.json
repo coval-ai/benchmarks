@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "The pinned stack. Identical across every variant — this file is the single",
+    "source for the component layer, and every entry in config/platforms/ must",
+    "reference it rather than restating a value. `plan` refuses to launch when a",
+    "platform's live config diverges from what is declared here.",
+    "",
+    "Transport is deliberately absent: it is the one layer declared per platform",
+    "rather than pinned, and lives on the variant row."
+  ],
+
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1",
+    "temperature": 0,
+    "_why": "Pinnable on every platform under test, so model choice cannot explain a difference between them. Reasoning quality is not what this benchmark measures."
+  },
+
+  "stt": {
+    "provider": "deepgram",
+    "model": "nova-3",
+    "fallback_model": "general",
+    "keyterms_source": "agent/dental/mock-tools.json",
+    "_why": "Already benched on the Coval STT board, so its contribution is known. nova-2-medical is not available on any hosted platform, so domain vocabulary is recovered through keyterm prompting instead — generated from the mock fixtures, never hand-maintained.",
+    "_limitation": "Any platform that cannot serve nova-3 falls back to Deepgram general, and the substitution is recorded per variant in the published Limitations."
+  },
+
+  "tts": {
+    "provider": "elevenlabs",
+    "model": "eleven_flash_v2",
+    "voice_id": "EXAVITQu4vr4xnSDxMaL",
+    "voice_name": "Sarah",
+    "_why": "Reachable on every platform under test, either natively or as a third-party engine. Pinning synthesis keeps time-to-first-audio out of the latency comparison.",
+    "_verify": "Confirm voice_id resolves to Sarah in the ElevenLabs voice library before the first apply."
+  },
+
+  "turn_taking": {
+    "end_of_turn_target_ms": 800,
+    "_why": "Targeted on every platform that exposes a threshold. Platforms that do not expose one are named as a stated limit rather than silently left at a default.",
+    "_note": "This is the layer under test. It is targeted for parity, not tuned for performance — no benchmark-specific optimisation on any variant."
+  },
+
+  "media": {
+    "codec": "PCMU",
+    "sample_rate_hz": 8000,
+    "_why": "G.711 mu-law. Load-bearing rather than cosmetic: Telnyx offers L16 at 16 kHz and Coval's audio_codec accepts either, so an unpinned variant would face materially lower word error — landing straight on the identity-repair scenario class."
+  },
+
+  "platform_behaviour": {
+    "native_auto_hangup": false,
+    "vendor_post_call_analysis": false,
+    "_why": "Hangup must be prompt-driven so EndReasonMetric can verify the agent terminated cleanly. A vendor's own success evaluation must never run, or two different rubrics get published as one."
+  }
+}

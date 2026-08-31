@@ -6,13 +6,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
-from coval_bench.providers.tts.baseten import BasetenTTSProvider
+from coval_bench.providers.tts import _common
+from coval_bench.providers.tts.baseten import (
+    _OPEN_TIMEOUT_S,
+    _WARMUP_TIMEOUT_S,
+    BasetenTTSProvider,
+)
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
@@ -169,3 +175,50 @@ def test_baseten_tts_provider_name(baseten_settings: Settings) -> None:
     provider = BasetenTTSProvider(baseten_settings, model="qwen3-tts-1.7b", voice="lisa")
     assert provider.name == "baseten-qwen3-tts-1.7b"
     assert provider.model == "qwen3-tts-1.7b"
+
+
+@pytest.mark.asyncio
+async def test_warmup_synthesizes_with_boot_budget_and_cleans_up(
+    baseten_settings: Settings,
+) -> None:
+    """Warmup uses the boot-length handshake and leaves no audio artifact behind."""
+    made: list[Path] = []
+    timeouts: list[float] = []
+    real_write = _common._write_wav
+
+    def _tracking_write(pcm: bytes, sample_rate: int) -> Path:
+        path = real_write(pcm, sample_rate)
+        made.append(path)
+        return path
+
+    def _connect(url: str, **kwargs: object) -> FakeWebSocket:
+        assert isinstance(kwargs["open_timeout"], (int, float))
+        timeouts.append(float(kwargs["open_timeout"]))
+        return FakeWebSocket(_done_events([make_pcm_bytes(240)]))
+
+    with (
+        patch("coval_bench.providers.tts.baseten.ws_client.connect", side_effect=_connect),
+        patch.object(_common, "_write_wav", _tracking_write),
+    ):
+        await BasetenTTSProvider.warmup(baseten_settings)
+
+    assert timeouts == [float(_WARMUP_TIMEOUT_S)]
+    assert made and not made[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_keeps_the_short_open_timeout(baseten_settings: Settings) -> None:
+    timeouts: list[float] = []
+
+    def _connect(url: str, **kwargs: object) -> FakeWebSocket:
+        assert isinstance(kwargs["open_timeout"], (int, float))
+        timeouts.append(float(kwargs["open_timeout"]))
+        return FakeWebSocket(_done_events([make_pcm_bytes(240)]))
+
+    provider = BasetenTTSProvider(baseten_settings, model="qwen3-tts-1.7b", voice="lisa")
+    with patch("coval_bench.providers.tts.baseten.ws_client.connect", side_effect=_connect):
+        result = await provider.synthesize("hello")
+    if result.audio_path is not None:
+        result.audio_path.unlink(missing_ok=True)
+
+    assert timeouts == [float(_OPEN_TIMEOUT_S)]

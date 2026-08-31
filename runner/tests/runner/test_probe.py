@@ -95,3 +95,38 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stt["metrics"]["TTFS"]["median"] == pytest.approx(0.5)
     tts = results["baseten/qwen3-tts-1.7b"]
     assert tts["metrics"]["TTFA"]["mean"] == pytest.approx(300.0)
+
+
+@pytest.mark.asyncio
+async def test_run_probe_closes_http_pools_even_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe mirrors run_benchmarks: shared HTTP clients close in a finally."""
+    closed: list[bool] = []
+
+    async def fake_close() -> None:
+        closed.append(True)
+
+    def boom(*_: Any, **__: Any) -> Any:
+        raise RuntimeError("dataset unavailable")
+
+    monkeypatch.setattr(probe_mod, "_close_http_clients", fake_close)
+    monkeypatch.setattr(probe_mod, "load_stt_dataset", boom)
+
+    models = [
+        RegisteredModel(
+            benchmark=Benchmark.STT,
+            provider="baseten",
+            model="whisper-large-v3",
+            status=ModelStatus.PENDING,
+        ),
+    ]
+    with pytest.raises(RuntimeError, match="dataset unavailable"):
+        await probe_mod.run_probe(
+            settings=cast(Settings, SimpleNamespace(dataset_id="stt-v2")),
+            models=models,
+            sample_size=1,
+            concurrency=1,
+        )
+
+    assert closed == [True]

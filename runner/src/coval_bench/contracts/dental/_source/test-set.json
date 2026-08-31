@@ -1,0 +1,16 @@
+{
+  "create_time": "2026-08-20T21:30:29.321215Z",
+  "description": "dental_appointment",
+  "display_name": "dental_apt",
+  "id": "[REDACTED]",
+  "name": "[REDACTED]",
+  "parameters": {},
+  "slug": "dental_apt",
+  "tags": [],
+  "test_case_count": null,
+  "test_set_metadata": {
+    "simulationWrapperType": null
+  },
+  "test_set_type": "DEFAULT",
+  "update_time": "2026-08-20T22:36:53.332775Z"
+}

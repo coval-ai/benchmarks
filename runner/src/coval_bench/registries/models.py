@@ -345,6 +345,18 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         status=_EARLY_ACCESS,
     ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="baseten",
+        model="qwen3-asr-1.7b",
+        creator="alibaba",
+        tags=(_MULTI, _VAD),
+        source=Source.DEDICATED_INFERENCE,
+        licensing=_OPEN,
+        on_prem=True,
+        region="us",
+        status=_EARLY_ACCESS,
+    ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
     RegisteredModel(
         benchmark=_STT,
@@ -373,6 +385,16 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         on_prem=True,
         region="us",
         status=_ACTIVE,
+    ),
+    # Gemini Live API (API-key auth), not Cloud Speech v2 like the `google` provider.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="gemini",
+        model="gemini-3.5-transcribe-live",
+        creator="google",
+        tags=(_MULTI, _VAD, _KEYTERM),
+        region="us",
+        status=_EARLY_ACCESS,
     ),
     RegisteredModel(
         benchmark=_STT,
@@ -477,6 +499,14 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _DIAR),
         region="us",
         status=_RETIRED,
+    ),
+    RegisteredModel(
+        benchmark=_STT,
+        provider="zoom",
+        model="scribe",
+        tags=(_MULTI, _VAD),
+        region="us",
+        status=_EARLY_ACCESS,
     ),
     #######
     # TTS #
@@ -599,9 +629,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
     RegisteredModel(
         benchmark=_TTS,
         provider="cartesia",
-        # Rolling pointer to Cartesia's next unreleased model; rename to the
-        # GA model id before promoting past EARLY_ACCESS.
-        model="sonic-preview",
+        model="sonic-3.6",
         voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
         voices=(
             Voice(
@@ -620,7 +648,19 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI, _CLONE, _EMOTION),
         on_prem=True,
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
+    ),
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="cartesia",
+        # Rolling pointer to Cartesia's next unreleased model; retired at the
+        # sonic-3.6 GA (2026-08-27), which entered as its own entry above.
+        model="sonic-preview",
+        voice="db6b0ed5-d5d3-463d-ae85-518a07d3c2b4",
+        tags=(_MULTI, _CLONE, _EMOTION),
+        on_prem=True,
+        region="us",
+        status=_RETIRED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -663,7 +703,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_ACTIVE,
+        status=_PAUSED,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -676,7 +716,7 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         ),
         tags=(_MULTI, _CLONE),
         region="us",
-        status=_EARLY_ACCESS,
+        status=_ACTIVE,
     ),
     RegisteredModel(
         benchmark=_TTS,
@@ -1127,6 +1167,27 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         tags=(_MULTI,),
         region="us",
         status=_RETIRED,
+    ),
+    # Atlas exposes no model id of its own: /v1/models returns voices, not models,
+    # and a model field in the request body is accepted and ignored, so "atlas-tts"
+    # is our name for the single synthesiser behind it. Early-access rather than
+    # active on purpose - Atlas is a gateway over an undisclosed third-party
+    # synthesiser (its server-timing attributes each request to "upstream", and
+    # its error envelope is typed "proxy_error"), so a row here may not be
+    # independent of another provider already on the board. Benchmark it, but do
+    # not publish it beside first-party models until the upstream is named.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="atlas",
+        model="atlas-tts",
+        voice="dax",
+        source=Source.SHARED_INFERENCE,
+        region="us",
+        status=_EARLY_ACCESS,
+        # Out of the voice arena: an arena entry needs a gendered voice pool, and
+        # pitting an undisclosed proxy against first-party models in a blind A/B
+        # would attribute the upstream's quality to Atlas.
+        arena_enabled=False,
     ),
     #######
     # S2S #

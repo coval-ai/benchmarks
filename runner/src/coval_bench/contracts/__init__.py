@@ -1,0 +1,298 @@
+# Copyright 2026 The Coval Benchmarks Authors
+# SPDX-License-Identifier: Apache-2.0
+
+"""Benchmark contracts: the pinned stack and the per-suite task definition.
+
+Everything here ships inside the wheel and is read with ``importlib.resources``,
+the same way ``datasets/manifests`` is. That is not incidental: the mock-tool
+router runs inside the API container, which is built from ``runner/`` and copies
+only ``src/``, so a contract living at the repo root would not exist at request
+time.
+
+What is a contract here, and what is not
+----------------------------------------
+``tool-definitions.json`` and ``stack.json`` are contracts in the ordinary sense:
+an interface both sides bind to. The agent is configured against the tool names
+and argument schemas; the mock service dispatches from the same file. They are
+public, because a reader cannot audit a published result without them.
+
+``system-prompt.txt`` and ``first-message.txt`` are not contracts, they are the
+agent's configuration. Public for the same auditing reason.
+
+``<suite>/_private/`` is the evaluator: the scenario scripts, their assertions,
+and the mock fixtures derived from them. Never committed. Publishing the answers
+would let a platform optimise for the test rather than the task.
+
+Two rules the layout encodes:
+
+* ``stack.json`` and the public suite files are byte-identical across every
+  variant. A variant may not restate a pinned value; it references this.
+* ``platforms/`` holds the only permitted difference, published for audit.
+
+The ``_``-prefix convention
+---------------------------
+JSON has no comments, so rationale lives beside the value it explains under
+keys starting with ``_`` (``_why``, ``_verify``, ``_limitation``). Models accept
+those and reject anything else, so a mistyped *key* still fails loudly:
+
+    {"modle": "gpt-4.1"}   ->  ValidationError: field 'model' missing
+
+That is the failure worth catching. A mistyped *value* is caught later by the
+vendor rejecting it at apply time; a mistyped key would silently drop the pin.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import importlib.resources
+import json
+from collections.abc import Callable
+from typing import Any, Literal, cast
+
+from pydantic import BaseModel, ConfigDict, model_validator
+
+__all__ = [
+    "Stack",
+    "load_stack",
+    "contract_sha256",
+    "public_contract_sha256",
+    "read_contract_file",
+    "has_private_contract",
+    "read_private_fixture",
+    "FixtureProvider",
+    "register_fixture_provider",
+    "AnnotatedModel",
+]
+
+_CONTRACTS_PACKAGE = "coval_bench.contracts"
+
+# Files that make up a suite contract, in a fixed order so the hash is stable.
+# Missing entries are skipped, so the hash is meaningful before the contract is
+# complete and changes when a file is added.
+PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
+    "system-prompt.txt",
+    "first-message.txt",
+    "tool-definitions.json",
+)
+
+# Hashed but never committed. Including them means the published hash identifies
+# exactly which fixtures a run used without revealing what they contain; a
+# checkout without them produces a different hash, which is why the pinned test
+# skips rather than fails when the directory is absent.
+PRIVATE_CONTRACT_FILES: tuple[str, ...] = ("_private/mock-tools.json",)
+
+
+class _Annotated(BaseModel):
+    """Base for contract models: required fields, plus ``_``-prefixed notes."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    @model_validator(mode="after")
+    def _only_underscore_extras(self) -> _Annotated:
+        extras = self.__pydantic_extra__ or {}
+        unknown = sorted(k for k in extras if not k.startswith("_"))
+        if unknown:
+            raise ValueError(
+                f"unknown key(s) {unknown} in {type(self).__name__}; "
+                "rationale keys must start with '_'"
+            )
+        return self
+
+
+# Public name for the convention above. The mock fixtures are contract-adjacent
+# and carry the same "required fields plus `_`-prefixed rationale" rule, so they
+# subclass this rather than restating it.
+AnnotatedModel = _Annotated
+
+
+class LlmPin(_Annotated):
+    provider: str
+    model: str
+    temperature: float
+
+
+class SttPin(_Annotated):
+    provider: str
+    model: str
+    fallback_model: str
+    keyterms_source: str
+
+
+class TtsPin(_Annotated):
+    provider: str
+    model: str
+    voice_id: str
+    voice_name: str
+
+
+class TurnTakingPin(_Annotated):
+    end_of_turn_target_ms: int
+
+
+class MediaPin(_Annotated):
+    codec: Literal["PCMU", "L16"]
+    sample_rate_hz: int
+
+
+class PlatformBehaviourPin(_Annotated):
+    native_auto_hangup: bool
+    vendor_post_call_analysis: bool
+
+
+class Stack(_Annotated):
+    """The pinned component layer. One stack for every variant.
+
+    Transport is deliberately absent: it is declared per variant on the
+    registry row, not pinned here.
+    """
+
+    llm: LlmPin
+    stt: SttPin
+    tts: TtsPin
+    turn_taking: TurnTakingPin
+    media: MediaPin
+    platform_behaviour: PlatformBehaviourPin
+
+
+def _read_bytes(*parts: str) -> bytes:
+    ref = importlib.resources.files(_CONTRACTS_PACKAGE)
+    for part in parts:
+        ref = ref.joinpath(part)
+    return ref.read_bytes()
+
+
+def load_stack() -> Stack:
+    """Parse and validate ``contracts/stack.json``."""
+    return Stack.model_validate(json.loads(_read_bytes("stack.json")))
+
+
+def read_contract_file(suite: str, filename: str) -> str:
+    """Read one file from a suite contract as text."""
+    return _read_bytes(suite, filename).decode()
+
+
+def _digest(suite: str, filenames: tuple[str, ...], extra: bytes | None = None) -> str:
+    """SHA-256 over the pinned stack, the named suite files, and any trailing bytes.
+
+    ``extra`` carries the private fixtures, which do not come from ``_read_bytes``
+    on a deployment that fetched them from a provider. Appending them last keeps
+    the digest byte-order identical to reading them as the final filename.
+    """
+    digest = hashlib.sha256()
+    digest.update(_read_bytes("stack.json"))
+    for filename in filenames:
+        try:
+            digest.update(_read_bytes(suite, *filename.split("/")))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+    if extra is not None:
+        digest.update(extra)
+    return digest.hexdigest()
+
+
+def public_contract_sha256(suite: str) -> str:
+    """The hash over committed files only, so every checkout agrees on it.
+
+    This is the one a test can pin. ``contract_sha256`` covers the uncommitted
+    fixtures too, so its value legitimately differs between a machine holding the
+    answer key and CI, which never does — pinning *that* would fail for exactly
+    the people doing the work while guarding nothing where it runs.
+    """
+    return _digest(suite, PUBLIC_CONTRACT_FILES)
+
+
+def contract_sha256(suite: str) -> str:
+    """One SHA-256 over the pinned stack, the public suite files, and the fixtures.
+
+    Mirrors ``_dataset_sha256`` in the S2S fetcher: a single number that
+    identifies exactly what was run, published beside every result. Covers
+    ``stack.json`` too, because changing a pin changes what the agent is just
+    as surely as changing its prompt.
+    """
+    # The private half goes through `read_private_fixture`, not `_read_bytes`, so
+    # the hash covers whatever the service actually loaded. Reading the checkout
+    # directly here would make a deployment that fetched its fixtures from a
+    # provider publish the fixture-less hash while serving the fixtures.
+    private: bytes | None = None
+    with contextlib.suppress(FileNotFoundError, NotADirectoryError):
+        private = read_private_fixture(suite)
+    return _digest(suite, PUBLIC_CONTRACT_FILES, extra=private)
+
+
+def has_private_contract(suite: str) -> bool:
+    """Whether the evaluator is present locally.
+
+    False in a fresh checkout and in CI, since ``_private/`` is never committed.
+    Callers that need the fixtures should skip rather than fail.
+    """
+    try:
+        read_private_fixture(suite)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
+
+
+# A source of fixtures that is not the local checkout. The deployed image cannot
+# carry `_private/` — it is gitignored, and the build context is a git checkout —
+# so production reads the seeded world from somewhere else. That somewhere
+# registers itself here rather than being imported, because this module is
+# deliberately dependency-light and has no business knowing about object storage.
+FixtureProvider = Callable[[str], bytes]
+
+_FIXTURE_PROVIDERS: list[FixtureProvider] = []
+
+
+def register_fixture_provider(provider: FixtureProvider) -> None:
+    """Add a fallback source, consulted in registration order when local is absent.
+
+    A provider raises ``FileNotFoundError`` for a suite it does not carry, and
+    the chain moves on.
+    """
+    _FIXTURE_PROVIDERS.append(provider)
+
+
+def read_private_fixture(suite: str) -> bytes:
+    """Read the suite's uncommitted mock fixtures: local checkout, then providers.
+
+    Local wins, so that editing the file is what a developer sees take effect.
+
+    **Every reader goes through here, `contract_sha256` included, and that is the
+    point.** The hash covers the seeded world, so a fallback wired only into the
+    mock service would leave production serving the right fixtures while
+    publishing a hash computed as though it had none — a different "what ran"
+    number on every result, with nothing to notice it.
+
+    Raises ``FileNotFoundError`` when neither the checkout nor any provider has
+    it. Callers that can run without the seeded world should ask
+    ``has_private_contract`` first.
+    """
+    try:
+        return _read_bytes(suite, "_private", "mock-tools.json")
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    for provider in _FIXTURE_PROVIDERS:
+        try:
+            return provider(suite)
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+    raise FileNotFoundError(f"no mock fixtures for suite {suite!r}, locally or from a provider")
+
+
+def stack_as_dict(stack: Stack) -> dict[str, Any]:
+    """Serialise without the ``_``-prefixed rationale keys.
+
+    Use this when handing pins to a vendor API. The rationale is for readers of
+    the repo, not for request bodies.
+    """
+    raw = stack.model_dump(mode="json")
+
+    # A JSON tree is genuinely arbitrary; Any is the honest annotation here.
+    def strip(node: Any) -> Any:  # noqa: ANN401
+        if isinstance(node, dict):
+            return {k: strip(v) for k, v in node.items() if not k.startswith("_")}
+        if isinstance(node, list):
+            return [strip(v) for v in node]
+        return node
+
+    return cast("dict[str, Any]", strip(raw))

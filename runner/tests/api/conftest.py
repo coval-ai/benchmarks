@@ -58,6 +58,7 @@ from coval_bench.registries import (
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
+MOCK_TOOLS_KEY = "test-mock-tools-key"  # noqa: S105 — a fixture value, not a credential
 
 # The one early-access proof is a Clerk session token, so the app fixture wires a
 # whole stub instance: an issuer, an authorized party, a signing key the stubbed
@@ -158,6 +159,22 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 wer_insertions_pct    double precision,
                 wer_deletions_pct     double precision,
                 wer_substitutions_pct double precision
+            )
+        """)
+        # Mock tool-call log (mirrors migration 20260826_0022).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.mock_tool_calls (
+                id             bigserial PRIMARY KEY,
+                simulation_id  text,
+                caller_number  text,
+                tool           text NOT NULL CHECK (tool <> ''),
+                args           jsonb NOT NULL CHECK (jsonb_typeof(args) = 'object'),
+                matched_seed   text,
+                response       jsonb NOT NULL,
+                latency_ms     double precision NOT NULL
+                               CHECK (latency_ms >= 0 AND latency_ms NOT IN (
+                                   'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
+                created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
         # Per-window stats materialized views (model_stats + leaderboard).
@@ -379,6 +396,7 @@ async def app(
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
+    monkeypatch.setenv("MOCK_TOOLS_SECRET", MOCK_TOOLS_KEY)
     monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))

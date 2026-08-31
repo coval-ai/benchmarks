@@ -84,6 +84,8 @@ class FakeWebSocket:
         self._events.clear()
 
     async def send(self, msg: bytes | str) -> None:
+        if self._closed.is_set():
+            raise ConnectionError("send on a closed FakeWebSocket")
         self._sent.append(msg)
         if self._on_send is not None:
             self._on_send(msg)
@@ -142,6 +144,7 @@ _WAIT_PATCHES = (
     "coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S",
     "coval_bench.providers.stt.revai._EOT_SILENCE_S",
     "coval_bench.providers.stt.xai._FINAL_WAIT_S",
+    "coval_bench.providers.stt.gemini._FINAL_WAIT_S",
     "coval_bench.providers.stt.gradium._FLUSH_WAIT_S",
     "coval_bench.providers.stt.reson8._FLUSH_WAIT_S",
     "coval_bench.providers.stt.inworld._CLOSE_WAIT_S",

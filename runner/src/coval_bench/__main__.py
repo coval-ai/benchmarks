@@ -20,9 +20,11 @@ import click
 
 from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
+from coval_bench.migrations.backfill_normalized_storage import backfill_normalized_storage_cli
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.s2s.fetch_v2v import fetch_s2s
+from coval_bench.variants.pull import pull_contract
 
 # Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
 # for a cold dedicated endpoint (handshake + cold inference); the production paths
@@ -35,9 +37,17 @@ _SMOKE_TIMEOUT_S = 120
 def cli() -> None:
     """Coval voice-AI benchmarks runner."""
     from coval_bench.config import get_settings
+    from coval_bench.fixture_sources import install_fixture_providers
     from coval_bench.logging import configure_logging
 
-    configure_logging(level=get_settings().log_level)
+    settings = get_settings()
+    configure_logging(level=settings.log_level)
+    # Every command that reads or hashes a contract gets the same fixture sources
+    # the API has. `pull-contract` prints the hash today and the voice-agent
+    # ingest will write it onto result rows; a runner that could not see the
+    # fixtures would publish the hash of a run that had none, which is the one
+    # thing the hash exists to prevent.
+    install_fixture_providers(settings)
 
 
 @cli.command(name="run")
@@ -95,10 +105,12 @@ def migrate() -> None:
 
 
 migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
+migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 
 # S2S is fetch-only, so a standalone command rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
+cli.add_command(pull_contract, name="pull-contract")
 
 
 @cli.command(name="tts-smoke")
@@ -273,10 +285,16 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
     if provider == "google":
         kwargs["project_id"] = settings.google_project_id
     elif provider == "baseten":
-        kwargs["ws_url"] = settings.baseten_whisper_url
+        from coval_bench.providers.stt.baseten import endpoint_url
+
+        kwargs["ws_url"] = endpoint_url(settings, model)
     elif provider == "azure":
         kwargs["region"] = settings.azure_region
-    instance = provider_cls(**kwargs)
+    try:
+        instance = provider_cls(**kwargs)
+    except ValueError as exc:
+        click.echo(f"Provider configuration error: {exc}", err=True)
+        sys.exit(2)
 
     with wave.open(wav, "rb") as w:
         if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:

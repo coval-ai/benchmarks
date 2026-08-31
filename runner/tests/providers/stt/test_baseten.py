@@ -3,15 +3,21 @@
 
 """Tests for coval_bench.providers.stt.baseten (BasetenSTTProvider).
 
-All tests use FakeWebSocket — no live network calls. The fixtures mirror the
-Baseten Whisper wire protocol: ``transcription`` messages carry ``segments`` and
-an ``is_final`` flag, two ``end_audio`` messages bracket the stream
-(``acknowledged`` then ``finished``), and the receiver stops only on
-``finished``. A small PCM buffer keeps the real-time 512-sample pacing fast.
+All tests use FakeWebSocket — no live network calls. Two wire protocols are
+covered. Whisper endpoints (``binary``) take raw 512-sample frames and are
+bracketed by two ``end_audio`` messages (``acknowledged`` then ``finished``),
+and the receiver stops only on ``finished``. The Qwen3-ASR endpoint
+(``buffer``) takes base64 PCM in ``input_audio_buffer.append`` messages,
+finalizes with ``input_audio_buffer.commit``, and ends on a transcription
+flagged ``is_end_of_audio_flush``. Both share the ``transcription`` message
+shape. A small PCM buffer keeps the real-time pacing fast.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,10 +25,16 @@ import pytest
 from pydantic import SecretStr
 
 from coval_bench.metrics.wer import compute_wer
-from coval_bench.providers.stt.baseten import BasetenSTTProvider
+from coval_bench.providers.stt.baseten import (
+    _OPEN_TIMEOUT_S,
+    _WARMUP_TIMEOUT_S,
+    BasetenSTTProvider,
+    endpoint_url,
+)
 from tests.providers.stt.conftest import FakeWebSocket
 
 _WS_URL = "wss://model-test.api.baseten.co/environments/production/websocket"
+_QWEN_MODEL = "qwen3-asr-1.7b"
 
 # A few frames of PCM — enough to exercise framing/padding without the 3 s
 # fixture's real-time pacing dominating the test runtime.
@@ -33,8 +45,8 @@ def make_provider(api_key: SecretStr | None = None) -> BasetenSTTProvider:
     return BasetenSTTProvider(api_key=api_key or SecretStr("test-key"), ws_url=_WS_URL)
 
 
-def _fake_connect(events: list[Any]) -> Any:
-    ws = FakeWebSocket(events)
+def _fake_connect(events: list[Any], sent: list[Any] | None = None) -> Any:
+    ws = FakeWebSocket(events, on_send=None if sent is None else sent.append)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -195,3 +207,185 @@ async def test_baseten_connection_error(fake_api_key: SecretStr) -> None:
     assert result.error is not None
     assert "connection refused" in result.error
     assert result.complete_transcript is None
+
+
+# ---------------------------------------------------------------------------
+# Qwen3-ASR: the input_audio_buffer protocol
+# ---------------------------------------------------------------------------
+
+
+def _qwen_provider(api_key: SecretStr) -> BasetenSTTProvider:
+    return BasetenSTTProvider(api_key=api_key, model=_QWEN_MODEL, ws_url=_WS_URL)
+
+
+@pytest.mark.asyncio
+async def test_qwen_buffer_success(fake_api_key: SecretStr) -> None:
+    """The buffer protocol ends on is_end_of_audio_flush, never on end_audio."""
+    events: list[Any] = [
+        {"type": "transcription", "segments": [{"text": "hello"}], "is_final": False},
+        {
+            "type": "transcription",
+            "segments": [{"text": "hello world"}],
+            "is_final": True,
+            "is_end_of_audio_flush": True,
+        },
+    ]
+    provider = _qwen_provider(fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.baseten.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.partial_transcripts == ["hello"]
+    assert result.audio_to_final_seconds is not None
+
+
+@pytest.mark.asyncio
+async def test_qwen_flush_with_empty_segments_still_stops(fake_api_key: SecretStr) -> None:
+    """A flush carrying no text must end the stream rather than hang on it."""
+    events: list[Any] = [
+        {"type": "transcription", "segments": [{"text": "done"}], "is_final": True},
+        {"type": "transcription", "segments": [], "is_end_of_audio_flush": True},
+    ]
+    provider = _qwen_provider(fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.baseten.ws_client.connect",
+        return_value=_fake_connect(events),
+    ):
+        result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
+
+    assert result.error is None
+    assert result.complete_transcript == "done"
+
+
+@pytest.mark.asyncio
+async def test_qwen_sends_base64_appends_then_commit(fake_api_key: SecretStr) -> None:
+    """Audio goes out base64 in JSON, never as binary frames, and commit finalizes."""
+    events: list[Any] = [
+        {
+            "type": "transcription",
+            "segments": [{"text": "ok"}],
+            "is_final": True,
+            "is_end_of_audio_flush": True,
+        },
+    ]
+    sent: list[Any] = []
+    provider = _qwen_provider(fake_api_key)
+
+    with patch(
+        "coval_bench.providers.stt.baseten.ws_client.connect",
+        return_value=_fake_connect(events, sent),
+    ):
+        await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
+
+    assert not any(isinstance(msg, (bytes, bytearray)) for msg in sent)
+    frames = [json.loads(msg) for msg in sent]
+    assert "streaming_params" in frames[0]
+    appends = [f for f in frames if f.get("type") == "input_audio_buffer.append"]
+    reassembled = b"".join(base64.b64decode(f["audio"]) for f in appends)
+    assert reassembled == _SMALL_PCM
+    assert frames[-1] == {"type": "input_audio_buffer.commit"}
+
+
+@pytest.mark.asyncio
+async def test_whisper_still_sends_binary_frames_and_end_audio(fake_api_key: SecretStr) -> None:
+    """Protocol-split regression guard: whisper keeps binary frames and the 45 s handshake."""
+    events: list[Any] = [
+        {"type": "transcription", "segments": [{"text": "ok"}], "is_final": True},
+        {"type": "end_audio", "body": {"status": "finished"}},
+    ]
+    sent: list[Any] = []
+    timeouts: list[float] = []
+
+    def _connect(url: str, **kwargs: Any) -> Any:
+        timeouts.append(kwargs["open_timeout"])
+        return _fake_connect(events, sent)
+
+    provider = BasetenSTTProvider(api_key=fake_api_key, ws_url=_WS_URL)
+    with patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect):
+        await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
+
+    binary = [msg for msg in sent if isinstance(msg, (bytes, bytearray))]
+    assert {len(frame) for frame in binary} == {1024}
+    assert json.loads(sent[-1]) == {"type": "end_audio"}
+    assert timeouts == [_OPEN_TIMEOUT_S]
+
+
+# ---------------------------------------------------------------------------
+# Endpoint resolution and warmup
+# ---------------------------------------------------------------------------
+
+
+def _url_settings(**kwargs: Any) -> Any:
+    defaults = {
+        "baseten_api_key": SecretStr("test-key"),
+        "baseten_whisper_url": None,
+        "baseten_qwen_asr_url": None,
+    }
+    return SimpleNamespace(**{**defaults, **kwargs})
+
+
+def test_endpoint_url_resolution() -> None:
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
+    assert endpoint_url(settings, "whisper-large-v3") == "wss://whisper"
+    assert endpoint_url(settings, _QWEN_MODEL) == "wss://qwen"
+    assert endpoint_url(settings, "whisper-tiny") is None
+
+
+@pytest.mark.asyncio
+async def test_warmup_warms_every_configured_endpoint() -> None:
+    """Dials each configured URL with the boot-length handshake; tone no-final is success."""
+    calls: list[tuple[str, float]] = []
+
+    def _connect(url: str, **kwargs: Any) -> Any:
+        calls.append((url, kwargs["open_timeout"]))
+        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
+
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
+    with (
+        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
+        patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
+        patch("coval_bench.providers.stt.baseten.logger") as log,
+    ):
+        await BasetenSTTProvider.warmup(settings)
+
+    assert sorted(calls) == [
+        ("wss://qwen", _WARMUP_TIMEOUT_S),
+        ("wss://whisper", _WARMUP_TIMEOUT_S),
+    ]
+    prewarms = [c.kwargs for c in log.info.call_args_list if c.args[0] == "baseten_stt_prewarm"]
+    assert [p["error"] for p in prewarms] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_warmup_survives_a_dead_endpoint() -> None:
+    """One endpoint failing must not stop the others, and its error must surface."""
+    seen: list[str] = []
+
+    def _connect(url: str, **_: Any) -> Any:
+        seen.append(url)
+        if url == "wss://whisper":
+            raise OSError("connection refused")
+        return _fake_connect([{"type": "end_audio", "body": {"status": "finished"}}])
+
+    settings = _url_settings(baseten_whisper_url="wss://whisper", baseten_qwen_asr_url="wss://qwen")
+    with (
+        patch("coval_bench.providers.stt.baseten._WARMUP_SECONDS", 0.02),
+        patch("coval_bench.providers.stt.baseten.ws_client.connect", side_effect=_connect),
+        patch("coval_bench.providers.stt.baseten.logger") as log,
+    ):
+        await BasetenSTTProvider.warmup(settings)
+
+    assert sorted(seen) == ["wss://qwen", "wss://whisper"]
+    errors = {
+        c.kwargs["model"]: c.kwargs["error"]
+        for c in log.info.call_args_list
+        if c.args[0] == "baseten_stt_prewarm"
+    }
+    assert errors["qwen3-asr-1.7b"] is None
+    assert "connection refused" in errors["whisper-large-v3"]

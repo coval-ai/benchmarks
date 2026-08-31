@@ -259,7 +259,9 @@ async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
     """Transcribe *audio_path* with OpenAI ``whisper-1`` and return the text.
 
     Used by the TTS path to compute WER against the synthesized audio.
-    Raises on API error — caller handles and records as a failed Result.
+    Retries once on OpenAI's transient gateway 404s (the SDK retries 429/5xx
+    itself but not 404); otherwise raises on API error — caller handles and
+    records as a failed Result.
     """
     import openai
 
@@ -268,12 +270,16 @@ async def _transcribe_with_whisper(audio_path: Path, settings: Settings) -> str:
         raise RuntimeError("openai_api_key is required for TTS-WER computation")
 
     client = openai.AsyncOpenAI(api_key=api_key.get_secret_value())
-    with audio_path.open("rb") as fh:
-        response = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=fh,
-        )
-    return str(response.text)
+
+    async def attempt() -> str:
+        with audio_path.open("rb") as fh:
+            response = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=fh,
+            )
+        return str(response.text)
+
+    return await with_retry(attempt, max_attempts=2, retry_on=(openai.NotFoundError,))
 
 
 def _get_stt_providers() -> dict[str, Any]:
@@ -286,6 +292,12 @@ def _get_tts_providers() -> dict[str, Any]:
     """Resolve the TTS provider registry at call time (lazy import)."""
     mod = importlib.import_module("coval_bench.providers.tts")
     return mod.TTS_PROVIDERS  # type: ignore[no-any-return]
+
+
+def _get_baseten_stt_url() -> Any:
+    """Resolve the Baseten per-model endpoint lookup at call time (lazy import)."""
+    mod = importlib.import_module("coval_bench.providers.stt.baseten")
+    return mod.endpoint_url
 
 
 def _get_load_dataset() -> Any:  # noqa: ANN401
@@ -369,10 +381,11 @@ async def _run_stt_item(
         if entry.provider == "google":
             kwargs["project_id"] = settings.google_project_id
         elif entry.provider == "baseten":
-            kwargs["ws_url"] = settings.baseten_whisper_url
+            kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
-        provider = provider_cls(**kwargs)
+        elif entry.provider == "zoom":
+            kwargs["api_secret"] = settings.zoom_api_secret
 
         audio_path: Path = item.path
         transcript_ref: str = item.transcript
@@ -397,6 +410,9 @@ async def _run_stt_item(
         transcription_result = None
         item_error: str | None = None
         try:
+            # Inside the try so a config error (e.g. unset endpoint URL) lands
+            # as error rows instead of vanishing into the gather.
+            provider = provider_cls(**kwargs)
             async with asyncio.timeout(_STT_TIMEOUT_S):
                 transcription_result = await with_retry(
                     lambda: provider.measure_ttft(
@@ -753,11 +769,11 @@ async def _run_tts_item(
             return []
 
         transcript: str = item.transcript
-        provider = provider_cls(settings=settings, model=entry.model, voice=voice)
 
         tts_result = None
         item_error: str | None = None
         try:
+            provider = provider_cls(settings=settings, model=entry.model, voice=voice)
             async with asyncio.timeout(_TTS_TIMEOUT_S):
                 tts_result = await with_retry(
                     lambda: provider.synthesize(transcript),

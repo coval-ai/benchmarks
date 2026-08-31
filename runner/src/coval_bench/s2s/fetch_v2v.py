@@ -76,19 +76,37 @@ class CovalRun:
     persona_id: str = ""
 
 
-# Agent ids resolved from Settings; model strings are display labels.
+# Agent ids resolved from Settings; model strings are display labels. Every agent
+# now runs the dental test set: the shared multi-turn set stays queryable but is
+# no longer written to, so a spec left on it would go stale rather than idle.
 AGENTS: tuple[AgentSpec, ...] = (
-    AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime"),
-    AgentSpec(agent_id_attr="coval_s2s_gemini_agent_id", provider="google", model="gemini-live"),
+    AgentSpec(
+        agent_id_attr="coval_s2s_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_gemini_agent_id",
+        provider="google",
+        model="gemini-live",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+    ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_agent_id",
         provider="xai",
         model="grok-voice-think-fast-1.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
         provider="xai",
         model="grok-voice-think-fast-2.0",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
     ),
     # Pre-launch models under codenames: the provider and model strings are what
     # land in the results table, so they carry no vendor identity of their own.
@@ -312,11 +330,13 @@ def _population_mismatch(
 ) -> dict[str, object] | None:
     """None if *other_values* covers the same conversations as the anchor.
 
-    Ids, not counts: equal counts can be different conversations. A mismatch skips
-    that metric for the run.
+    Ids, not counts: equal counts can be different conversations. Values with no id
+    are excluded from both sides — two of them are not the same conversation, so
+    matching them would invent an overlap. The caller trims to the overlap; only
+    duplicates skip the metric for the run.
     """
-    other_set = {v.get("simulation_output_id") for v in other_values}
-    anchor_set = {v.get("simulation_output_id") for v in anchor_values}
+    other_set = {sid for v in other_values if (sid := v.get("simulation_output_id"))}
+    anchor_set = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
     missing = sorted(str(x) for x in anchor_set - other_set)
     extra = sorted(str(x) for x in other_set - anchor_set)
     duplicate = _has_duplicate_ids(other_values)
@@ -534,10 +554,12 @@ async def _ingest_run(
                     metric=metric.value,
                 )
                 continue
+            # An id-less value cannot be reconciled against the anchor or deduped,
+            # and its positional key is not stable across metrics, so it is
+            # rejected before the populations are compared.
+            values = [v for v in values if v.get("simulation_output_id")]
             mismatch = _population_mismatch(anchor_values, values)
             if mismatch is not None:
-                # A different conversation population than the anchor would make
-                # the rate incomparable, so drop this metric and keep the anchor.
                 logger.warning(
                     "metric_population_mismatch",
                     provider=spec.provider,
@@ -545,7 +567,18 @@ async def _ingest_run(
                     metric=metric.value,
                     **mismatch,
                 )
-                continue
+                # Trim to the conversations both cover rather than discarding the
+                # metric for the whole run: one unmeasured call should cost that
+                # call, not the other forty-nine. Row-level parity with the anchor
+                # was never exact anyway — an UNKNOWN verdict writes no row — so a
+                # coverage gap is thinner data, not corrupt data. Duplicates are
+                # corrupt: one conversation would carry twice its weight.
+                if mismatch["duplicate_ids"]:
+                    continue
+                anchor_ids = {sid for v in anchor_values if (sid := v.get("simulation_output_id"))}
+                values = [v for v in values if v.get("simulation_output_id") in anchor_ids]
+                if not values:
+                    continue
             writable[metric] = values
         # Same mapper the rows are built from, so "would this write anything?"
         # cannot drift from what actually gets written.
@@ -742,6 +775,7 @@ async def _fetch_one_provider(
             bucket_at=bucket_at,
             persona_id=coval_run.persona_id,
             agent_id=agent_id,
+            test_set_id=test_set_id or "",
         )
 
     try:
@@ -991,7 +1025,14 @@ async def fetch_and_write_v2v(
                 f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
             )
 
-        if settings.s2s_samples_bucket and sampled_runs and test_set_id:
+        # The set the sampled recordings actually came from, which is what labels
+        # the manifest. Gating on the shared ``coval_s2s_test_set_id`` instead would
+        # stop publishing entirely once every agent carries its own set, filling
+        # sampled_runs and then never shipping them.
+        sample_test_set_id = next(
+            (r.test_set_id for r in sampled_runs if r.test_set_id), test_set_id
+        )
+        if settings.s2s_samples_bucket and sampled_runs and sample_test_set_id:
             expected = _expected_sample_models(settings)
             missing = expected - {r.key for r in sampled_runs}
             if missing:
@@ -1001,7 +1042,7 @@ async def fetch_and_write_v2v(
             await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
-                test_set_id=test_set_id,
+                test_set_id=sample_test_set_id,
                 runs=sampled_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,

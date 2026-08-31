@@ -21,6 +21,7 @@ from coval_bench.providers.stt.baseten import BasetenSTTProvider
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
+from coval_bench.providers.stt.gemini import GeminiSTTProvider
 from coval_bench.providers.stt.gladia import GladiaSTTProvider
 from coval_bench.providers.stt.gradium import GradiumSTTProvider
 from coval_bench.providers.stt.inworld import InworldSTTProvider
@@ -34,6 +35,7 @@ from coval_bench.providers.stt.soniox import SonioxSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
 from coval_bench.providers.stt.together import TogetherSTTProvider
 from coval_bench.providers.stt.xai import XaiSTTProvider
+from coval_bench.providers.stt.zoom import ZoomSTTProvider
 
 # Google is optional — gated on the ``google-stt`` extra
 try:
@@ -51,6 +53,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "azure": AzureSTTProvider,
     "baseten": BasetenSTTProvider,
     "elevenlabs": ElevenLabsSTTProvider,
+    "gemini": GeminiSTTProvider,
     "gladia": GladiaSTTProvider,
     "gradium": GradiumSTTProvider,
     "inworld": InworldSTTProvider,
@@ -64,6 +67,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "speechmatics": SpeechmaticsProvider,
     "together": TogetherSTTProvider,
     "xai": XaiSTTProvider,
+    "zoom": ZoomSTTProvider,
 }
 
 if GoogleSTTProvider is not None:
@@ -78,6 +82,7 @@ __all__ = [
     "AzureSTTProvider",
     "BasetenSTTProvider",
     "ElevenLabsSTTProvider",
+    "GeminiSTTProvider",
     "GladiaSTTProvider",
     "GradiumSTTProvider",
     "InworldSTTProvider",
@@ -91,5 +96,6 @@ __all__ = [
     "SpeechmaticsProvider",
     "TogetherSTTProvider",
     "XaiSTTProvider",
+    "ZoomSTTProvider",
     "GoogleSTTProvider",
 ]
