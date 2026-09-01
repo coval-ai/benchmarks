@@ -17,6 +17,7 @@ from coval_bench.db.models import (
     MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
+    MetricExecutor,
     MetricValue,
     Observation,
     ObservationArtifact,
@@ -384,3 +385,32 @@ async def test_null_success_metric_is_excluded_instead_of_failed() -> None:
     assert not writer.evaluations
     assert not writer.completed
     assert not writer.failed
+
+
+@pytest.mark.asyncio
+async def test_s2s_uses_conversation_source_and_coval_executor() -> None:
+    writer = _Writer()
+
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=None,
+        bucket="",
+        run_id=1,
+        dataset_id="s2s-multiturn-v1",
+        dataset_sha256="e" * 64,
+        sample_id="R1/s1",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.S2S,
+        results=[_result(Benchmark.S2S, Metric.V2V, 500, "milliseconds")],
+        provider_error=None,
+        executor=MetricExecutor.COVAL_API,
+    )
+
+    observation = writer.observations[0]
+    assert observation.source_kind is ObservationSourceKind.CONVERSATION_AUDIO
+    evaluation_id, evaluation = _evaluation_by_metric(writer, Metric.V2V)
+    assert evaluation.executor is MetricExecutor.COVAL_API
+    assert writer.inputs[evaluation_id] == []
+    assert [(value.value_key, value.value) for value in writer.completed[evaluation_id]] == [
+        ("primary", 500.0)
+    ]
