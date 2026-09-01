@@ -315,8 +315,6 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
     ),
     Metric.TTFS: frozenset(
         {
-            ("deepgram", "flux-general-en"),
-            ("deepgram", "flux-general-multi"),
             ("assemblyai", "universal-streaming"),
             ("assemblyai", "universal-streaming-multilingual"),
             # Rev AI has no force-finalize; the tail final only lands after Reverb's

@@ -688,6 +688,31 @@ async def _run_stt_item(
                         "audio_to_final_seconds": audio_to_final,
                         "speech_end_offset_ms": speech_end_offset_ms,
                         "effective_duration_sec": duration_sec,
+                        "finalization_latency_seconds": (
+                            transcription_result.finalization_latency_seconds
+                            if transcription_result
+                            else None
+                        ),
+                        "finalization_trigger": (
+                            transcription_result.finalization_trigger
+                            if transcription_result
+                            else None
+                        ),
+                        "final_audio_window_end_seconds": (
+                            transcription_result.final_audio_window_end_seconds
+                            if transcription_result
+                            else None
+                        ),
+                        "finalization_warning_code": (
+                            transcription_result.finalization_warning_code
+                            if transcription_result
+                            else None
+                        ),
+                        "finalization_timed_out": (
+                            transcription_result.finalization_timed_out
+                            if transcription_result
+                            else False
+                        ),
                     },
                 )
             except Exception as exc:
