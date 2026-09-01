@@ -25,7 +25,7 @@ import structlog
 
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.models import Result, ResultStatus, RunStatus
+from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
@@ -151,6 +151,18 @@ def _dataset_sha256() -> str:
     except Exception:
         logger.warning("dataset_sha256_failed", dataset_id=DATASET_ID, exc_info=True)
         return "unknown"
+
+
+def _normalized_dataset_sha256(provenance: str) -> str:
+    """Return the normalized schema stable 64-hex dataset fingerprint.
+
+    Packaged datasets already carry a content SHA. Coval-hosted S2S datasets
+    carry immutable test-set/persona provenance in the legacy run column, so
+    fingerprint that identifier without changing the legacy representation.
+    """
+    if len(provenance) == 64 and all(character in "0123456789abcdef" for character in provenance):
+        return provenance
+    return hashlib.sha256(provenance.encode()).hexdigest()
 
 
 def _condition_for_persona(
@@ -494,6 +506,7 @@ async def _ingest_run(
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
     period_seconds: int,
+    normalized_dual_write_enabled: bool = False,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
@@ -648,7 +661,53 @@ async def _ingest_run(
         all_rows = [row for rows in by_metric.values() for row in rows]
         rows = by_metric.get(Metric.V2V, [])
         if all_rows:
-            await writer.record_results(all_rows)
+            captured_at = datetime.now(UTC)
+            await writer.record_results(all_rows, created_at=captured_at)
+            if normalized_dual_write_enabled:
+                from coval_bench.runner.normalized import dual_write
+
+                grouped: dict[str, list[Result]] = {}
+                for row in all_rows:
+                    if row.audio_filename is None:  # pragma: no cover -- S2S rows set it
+                        logger.warning(
+                            "normalized_s2s_sample_id_missing",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                        )
+                        continue
+                    grouped.setdefault(row.audio_filename, []).append(row)
+                normalized_sha256 = _normalized_dataset_sha256(dataset_sha256 or _dataset_sha256())
+                for sample_id, sample_rows in grouped.items():
+                    provider_error = None
+                    if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
+                        provider_error = next(
+                            (row.error for row in sample_rows if row.error),
+                            "Coval conversation produced no successful metric value",
+                        )
+                    try:
+                        await dual_write(
+                            writer=writer,
+                            storage_client=None,
+                            bucket="",
+                            run_id=run_pk,
+                            dataset_id=dataset_id,
+                            dataset_sha256=normalized_sha256,
+                            sample_id=sample_id,
+                            entry=spec,
+                            benchmark=Benchmark.S2S,
+                            results=sample_rows,
+                            provider_error=provider_error,
+                            captured_at=captured_at,
+                            executor=MetricExecutor.COVAL_API,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "normalized_s2s_dual_write_failed",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                            sample_id=sample_id,
+                            exc_info=True,
+                        )
         logger.info(
             "fetched_clips",
             provider=spec.provider,
@@ -741,6 +800,7 @@ async def _fetch_one_provider(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     matched_run_ids: set[str] | None = None,
+    normalized_dual_write_enabled: bool = False,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -849,6 +909,7 @@ async def _fetch_one_provider(
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
                 period_seconds=period_seconds,
+                normalized_dual_write_enabled=normalized_dual_write_enabled,
             )
             if status is None:
                 continue
@@ -1016,6 +1077,7 @@ async def fetch_and_write_v2v(
                 window_seconds=window_seconds,
                 page_size=page_size,
                 matched_run_ids=matched_run_ids,
+                normalized_dual_write_enabled=settings.normalized_dual_write_enabled,
             )
             total_ingested += ingested
 

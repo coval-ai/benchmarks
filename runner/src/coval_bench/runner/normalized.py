@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: ANN401 -- adapter composes lazy runtime collaborators from orchestrator.
-"""Best-effort additive persistence of legacy STT/TTS results."""
+"""Best-effort additive persistence of legacy STT/TTS/S2S results."""
 
 from __future__ import annotations
 
@@ -130,6 +130,7 @@ async def dual_write(
     timing_events: dict[str, Any] | None = None,
     audio_path: Any = None,
     voice: str | None = None,
+    executor: MetricExecutor = MetricExecutor.INLINE,
 ) -> None:
     """Persist one observation and its grouped normalized evaluations."""
     audio_snapshot = snapshot_generated_audio(audio_path) if audio_path is not None else None
@@ -153,11 +154,11 @@ async def dual_write(
                 audio_duration_ms,
             )
         )
-    source_kind = (
-        ObservationSourceKind.DATASET_AUDIO
-        if benchmark.value.upper() == "STT"
-        else ObservationSourceKind.GENERATED_AUDIO
-    )
+    source_kind = {
+        "STT": ObservationSourceKind.DATASET_AUDIO,
+        "TTS": ObservationSourceKind.GENERATED_AUDIO,
+        "S2S": ObservationSourceKind.CONVERSATION_AUDIO,
+    }[benchmark.value.upper()]
     observation = await writer.insert_observation(
         Observation(
             run_id=run_id,
@@ -199,7 +200,7 @@ async def dual_write(
                 observation_id=observation.id,
                 metric_type=metric,
                 metric_version="v1",
-                executor=MetricExecutor.INLINE,
+                executor=executor,
                 status=ProcessingStatus.QUEUED,
             ),
             inputs=_inputs(metric, artifact_ids, benchmark),

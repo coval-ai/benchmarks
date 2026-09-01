@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,7 +18,7 @@ from click.testing import CliRunner
 from structlog.testing import capture_logs
 
 from coval_bench.config import Settings
-from coval_bench.db.models import ResultStatus, Run, RunStatus
+from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Metric
 from coval_bench.s2s import fetch_v2v
@@ -1725,3 +1726,110 @@ def test_cli_no_providers_alerts_failed_exit_nonzero(monkeypatch: pytest.MonkeyP
     assert code != 0
     assert "RUN_FAILED" in events
     assert "RUN_PARTIAL" not in events
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_dual_writes_one_observation_per_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    dual_write = AsyncMock()
+    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
+    latency = [
+        {"simulation_output_id": "s1", "value": 0.5},
+        {"simulation_output_id": "s2", "value": 0.6},
+    ]
+    instruction = [
+        {"simulation_output_id": "s1", "value": "YES"},
+        {"simulation_output_id": "s2", "value": "NO"},
+    ]
+    fixture = {
+        "run": {
+            "results": {"metrics": {"MID": {"values": latency}, "IID": {"values": instruction}}}
+        }
+    }
+
+    async with _fake_client({}, fixture) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=IDS,
+            condition=condition_for(DATASET_ID_MULTITURN),
+            dataset_id=DATASET_ID_MULTITURN,
+            dataset_sha256="test-set:persona",
+            period_seconds=10_800,
+            normalized_dual_write_enabled=True,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    assert dual_write.await_count == 2
+    calls = {call.kwargs["sample_id"]: call.kwargs for call in dual_write.await_args_list}
+    assert set(calls) == {"R1/s1", "R1/s2"}
+    assert {row.metric_type for row in calls["R1/s1"]["results"]} == {
+        Metric.V2V,
+        Metric.INSTRUCTION_FOLLOWING,
+    }
+    assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
+    assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
+    assert calls["R1/s1"]["captured_at"] == writer.record_results.await_args.kwargs["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    dual_write = AsyncMock(side_effect=RuntimeError("normalized unavailable"))
+    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_dual_write_enabled=True,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.record_results.assert_awaited_once()
+    writer.finish_run.assert_awaited_once()
+    dual_write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_v2v_propagates_normalized_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
+        normalized_dual_write_enabled=True,
+        benchmark_artifact_bucket="private-artifacts",
+    )
+    client = _fake_client({}, {})
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _settings: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert fetch_one.await_args is not None
+    assert fetch_one.await_args.kwargs["normalized_dual_write_enabled"] is True
