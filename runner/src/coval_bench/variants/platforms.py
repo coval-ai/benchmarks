@@ -27,7 +27,7 @@ TIMEOUT_SECONDS = 30.0
 
 # Keys whose value is a live secret. `credentialIds` is deliberately absent: it
 # is an account-scoped reference that `apply` needs, and carries no key material.
-SECRET_KEY = re.compile(r"(api[_-]?key|secret|token|password|bearer|authorization)", re.I)
+SECRET_KEY = re.compile(r"(api[_-]?key|[_-]key$|secret|token|password|bearer|authorization)", re.I)
 
 
 # Keys whose value names a live object in someone's account. These are not
