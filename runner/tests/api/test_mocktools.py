@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -88,7 +89,7 @@ async def _rows(postgresql: Any) -> list[dict[str, Any]]:
 async def test_a_call_without_the_secret_is_rejected(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:
-    response = await client.post("/mock/lookup_patient", json={"phone": PHONE})
+    response = await client.post("/mock/generic/lookup_patient", json={"phone": PHONE})
     assert response.status_code == 401
 
 
@@ -96,7 +97,7 @@ async def test_a_call_with_the_wrong_secret_is_rejected(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:
     response = await client.post(
-        "/mock/lookup_patient", json={"phone": PHONE}, headers={"X-Mock-Tools-Key": "nope"}
+        "/mock/generic/lookup_patient", json={"phone": PHONE}, headers={"X-Mock-Tools-Key": "nope"}
     )
     assert response.status_code == 401
 
@@ -106,7 +107,9 @@ async def test_an_unconfigured_secret_closes_the_appliance(
 ) -> None:
     """Fails closed: an open mock would let anyone write into the tool-call log."""
     mock_app.state.settings = mock_app.state.settings.model_copy(update={"mock_tools_secret": None})
-    response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
+    )
     assert response.status_code == 503
 
 
@@ -129,7 +132,9 @@ async def test_unloaded_fixtures_answer_503_without_reaching_storage(
 
     contracts_module._FIXTURE_PROVIDERS.append(never)
     try:
-        response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+        response = await client.post(
+            "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
+        )
     finally:
         contracts_module._FIXTURE_PROVIDERS.remove(never)
     assert response.status_code == 503
@@ -140,7 +145,9 @@ async def test_unloaded_fixtures_answer_503_without_reaching_storage(
 
 
 async def test_a_seeded_call_returns_its_seed(client: AsyncClient, mock_app: FastAPI) -> None:
-    response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
+    )
     assert response.status_code == 200
     assert response.json()["patient_name"] == "Marcus Lee"
 
@@ -148,28 +155,34 @@ async def test_a_seeded_call_returns_its_seed(client: AsyncClient, mock_app: Fas
 async def test_an_unseeded_call_returns_the_fallback(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:
-    response = await client.post("/mock/lookup_patient", json={"phone": "5105550141"}, headers=AUTH)
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": "5105550141"}, headers=AUTH
+    )
     assert response.status_code == 200
     assert response.json() == {"found": False}
 
 
 async def test_a_seeded_failure_reaches_the_caller(client: AsyncClient, mock_app: FastAPI) -> None:
-    response = await client.post("/mock/lookup_patient", json={"phone": "0000000000"}, headers=AUTH)
-    assert response.status_code == 500
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": "0000000000"}, headers=AUTH
+    )
+    assert response.status_code == 200
     assert response.json()["error"] == "upstream_unavailable"
 
 
-async def test_an_unknown_tool_answers_404(client: AsyncClient, mock_app: FastAPI) -> None:
-    response = await client.post("/mock/read_chart", json={"phone": PHONE}, headers=AUTH)
-    assert response.status_code == 404
+async def test_an_unknown_tool_is_answered_not_refused(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/generic/read_chart", json={"phone": PHONE}, headers=AUTH)
+    assert response.status_code == 200
     assert response.json()["error"] == "unknown_tool"
 
 
-async def test_a_missing_required_argument_answers_422(
+async def test_a_missing_required_argument_is_named_in_the_answer(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:
-    response = await client.post("/mock/lookup_patient", json={}, headers=AUTH)
-    assert response.status_code == 422
+    response = await client.post("/mock/generic/lookup_patient", json={}, headers=AUTH)
+    assert response.status_code == 200
     assert response.json()["missing"] == ["phone"]
 
 
@@ -180,7 +193,7 @@ async def test_a_call_lands_a_row_carrying_the_simulation_id(
     client: AsyncClient, mock_app: FastAPI, postgresql: Any
 ) -> None:
     await client.post(
-        "/mock/lookup_patient",
+        "/mock/generic/lookup_patient",
         json={"phone": PHONE},
         headers={**AUTH, "X-Coval-Simulation-Id": SIMULATION_ID, "X-Coval-Caller-Number": PHONE},
     )
@@ -197,7 +210,7 @@ async def test_a_call_lands_a_row_carrying_the_simulation_id(
 async def test_a_fallback_row_names_no_seed(
     client: AsyncClient, mock_app: FastAPI, postgresql: Any
 ) -> None:
-    await client.post("/mock/lookup_patient", json={"phone": "5105550141"}, headers=AUTH)
+    await client.post("/mock/generic/lookup_patient", json={"phone": "5105550141"}, headers=AUTH)
     rows = await _rows(postgresql)
     assert rows[0]["matched_seed"] is None
 
@@ -206,7 +219,7 @@ async def test_a_rejected_call_is_still_recorded(
     client: AsyncClient, mock_app: FastAPI, postgresql: Any
 ) -> None:
     """An agent inventing a tool is evidence, not a reason to lose the row."""
-    await client.post("/mock/read_chart", json={"phone": PHONE}, headers=AUTH)
+    await client.post("/mock/generic/read_chart", json={"phone": PHONE}, headers=AUTH)
     rows = await _rows(postgresql)
     assert len(rows) == 1
     assert rows[0]["tool"] == "read_chart"
@@ -218,7 +231,9 @@ async def test_calls_are_recoverable_in_the_order_they_fired(
 ) -> None:
     """`now()` is constant within a transaction, so `id` is what orders a burst."""
     for _ in range(5):
-        await client.post("/mock/check_availability", json={"date": "2030-11-12"}, headers=AUTH)
+        await client.post(
+            "/mock/generic/check_availability", json={"date": "2030-11-12"}, headers=AUTH
+        )
     rows = await _rows(postgresql)
     assert [row["id"] for row in rows] == sorted(row["id"] for row in rows)
     assert len(rows) == 5
@@ -233,7 +248,9 @@ async def test_every_answer_is_held_to_the_latency_budget(
     app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
     app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 120.0})
     started = time.perf_counter()
-    response = await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    response = await client.post(
+        "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
+    )
     elapsed_ms = (time.perf_counter() - started) * 1000
     assert response.status_code == 200
     assert elapsed_ms >= 120.0
@@ -242,7 +259,7 @@ async def test_every_answer_is_held_to_the_latency_budget(
 async def test_the_budget_is_configurable(client: AsyncClient, mock_app: FastAPI) -> None:
     """Zeroed by the fixture: the budget is a setting, not a constant in the route."""
     started = time.perf_counter()
-    await client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    await client.post("/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH)
     assert (time.perf_counter() - started) * 1000 < 120.0
 
 
@@ -250,7 +267,7 @@ async def test_the_appliance_is_never_rate_limited(client: AsyncClient, mock_app
     """A burst of tool calls is a scenario working; a 429 would be graded as the agent failing."""
     responses = await asyncio.gather(
         *(
-            client.post("/mock/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+            client.post("/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH)
             for _ in range(80)
         )
     )
@@ -260,7 +277,7 @@ async def test_the_appliance_is_never_rate_limited(client: AsyncClient, mock_app
 async def test_answers_are_not_compressed(client: AsyncClient, mock_app: FastAPI) -> None:
     """Compression would add a variable cost to a deliberately fixed-latency response."""
     response = await client.post(
-        "/mock/lookup_patient",
+        "/mock/generic/lookup_patient",
         json={"phone": PHONE},
         headers={**AUTH, "Accept-Encoding": "gzip"},
     )
@@ -273,5 +290,156 @@ async def test_every_contract_tool_is_answerable(
     client: AsyncClient, mock_app: FastAPI, tool: str
 ) -> None:
     """Routes come from the contract, so no tool needs a hand-written one."""
-    response = await client.post(f"/mock/{tool}", json={}, headers=AUTH)
-    assert response.status_code in (200, 422)
+    response = await client.post(f"/mock/generic/{tool}", json={}, headers=AUTH)
+    assert response.status_code == 200
+
+
+# --- routing ---------------------------------------------------------------
+
+
+async def test_an_unknown_platform_names_the_known_set(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/retell/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    assert response.status_code == 404
+    assert "known: generic, telnyx, vapi" in response.json()["detail"]
+
+
+async def test_a_body_platform_rejects_the_path_shape_with_a_hint(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/vapi/lookup_patient", json={}, headers=AUTH)
+    assert response.status_code == 404
+    assert response.json()["detail"].endswith("/mock/vapi")
+
+
+async def test_a_path_platform_rejects_the_body_shape_with_a_hint(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/generic", json={"phone": PHONE}, headers=AUTH)
+    assert response.status_code == 404
+    assert response.json()["detail"].endswith("/mock/generic/{tool}")
+
+
+# --- vapi ------------------------------------------------------------------
+
+
+def _vapi(*entries: dict[str, Any]) -> dict[str, Any]:
+    return {"message": {"type": "tool-calls", "toolCallList": list(entries)}}
+
+
+async def test_vapi_gets_the_same_seed_wrapped_by_call_id(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    body = _vapi({"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}})
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    assert response.status_code == 200
+    (result,) = response.json()["results"]
+    assert (result["name"], result["toolCallId"]) == ("lookup_patient", "tc_1")
+    assert json.loads(result["result"]) == BULKY
+
+
+async def test_vapi_batch_writes_one_row_per_call_in_order(
+    client: AsyncClient, mock_app: FastAPI, postgresql: Any
+) -> None:
+    body = _vapi(
+        {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
+        {"id": "tc_2", "name": "lookup_patient", "arguments": {"phone": "5105550141"}},
+    )
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    results = response.json()["results"]
+    assert [r["toolCallId"] for r in results] == ["tc_1", "tc_2"]
+    assert json.loads(results[0]["result"]) == BULKY
+    assert json.loads(results[1]["result"]) == {"found": False}
+    rows = await _rows(postgresql)
+    assert [row["args"]["phone"] for row in rows] == [PHONE, "5105550141"]
+    assert [row["matched_seed"] for row in rows] == ["marcus_lee", None]
+
+
+async def test_vapi_batch_is_held_to_the_budget_per_call(client: AsyncClient, app: FastAPI) -> None:
+    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
+    app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 60.0})
+    body = _vapi(
+        {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
+        {"id": "tc_2", "name": "lookup_patient", "arguments": {"phone": PHONE}},
+    )
+    started = time.perf_counter()
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    assert response.status_code == 200
+    assert elapsed_ms >= 120.0
+
+
+async def test_vapi_with_no_calls_answers_empty_and_writes_nothing(
+    client: AsyncClient, app: FastAPI, postgresql: Any
+) -> None:
+    app.state.mock_dispatcher = Dispatcher(load_tool_specs("dental"), _test_fixtures())
+    app.state.settings = app.state.settings.model_copy(update={"mock_tools_latency_ms": 200.0})
+    started = time.perf_counter()
+    response = await client.post("/mock/vapi", json=_vapi(), headers=AUTH)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    assert response.json() == {"results": []}
+    assert elapsed_ms < 200.0
+    assert await _rows(postgresql) == []
+
+
+async def test_vapi_error_rides_inside_the_result(client: AsyncClient, mock_app: FastAPI) -> None:
+    body = _vapi({"id": "tc_1", "name": "read_chart", "arguments": {}})
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    assert response.status_code == 200
+    assert json.loads(response.json()["results"][0]["result"])["error"] == "unknown_tool"
+
+
+# --- transport edge cases --------------------------------------------------
+
+
+async def test_an_empty_body_is_a_call_with_no_arguments(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/generic/lookup_patient", headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()["missing"] == ["phone"]
+
+
+async def test_invalid_json_is_refused_at_the_door(client: AsyncClient, mock_app: FastAPI) -> None:
+    response = await client.post(
+        "/mock/generic/lookup_patient",
+        content=b"{not json",
+        headers={**AUTH, "Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+
+
+async def test_a_non_object_body_is_refused_at_the_door(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/generic/lookup_patient", json=[PHONE], headers=AUTH)
+    assert response.status_code == 422
+
+
+async def test_telnyx_control_id_never_lands_in_caller_number(
+    client: AsyncClient, mock_app: FastAPI, postgresql: Any
+) -> None:
+    await client.post(
+        "/mock/telnyx/lookup_patient",
+        json={"phone": PHONE},
+        headers={**AUTH, "x-telnyx-call-control-id": "v3:abc123"},
+    )
+    rows = await _rows(postgresql)
+    assert len(rows) == 1
+    assert rows[0]["caller_number"] is None
+    assert rows[0]["simulation_id"] is None
+
+
+async def test_vapi_nested_function_shape_reaches_the_seed(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    body = _vapi(
+        {
+            "id": "tc_1",
+            "type": "function",
+            "function": {"name": "lookup_patient", "arguments": json.dumps({"phone": PHONE})},
+        }
+    )
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    assert json.loads(response.json()["results"][0]["result"]) == BULKY

@@ -3,10 +3,11 @@
 
 """The mock tool endpoint the benchmarked agents call.
 
-``POST /mock/{tool}`` with the tool's arguments as a JSON object. The response
-is whichever seed the resolver picks, held to a fixed latency budget so that a
-tool call costs the same on every platform under test. Without that, a variant
-would be measured partly on how fast our mock happened to answer it.
+``POST /mock/{platform}/{tool}`` for platforms that name the tool in the URL and
+``POST /mock/{platform}`` for those that name it in the body. The platform's codec
+unwraps the request into tool calls, the dispatcher answers each from the seeded
+fixtures, and the codec wraps the answers back into that platform's reply shape.
+Nothing past the codec knows which platform asked.
 
 Mounted outside ``/v1``: this is not part of the public read API, it is an
 appliance the agents talk to. It carries a shared secret rather than Clerk —
@@ -31,14 +32,13 @@ from starlette.responses import JSONResponse
 from coval_bench.api.deps import get_pool, get_settings
 from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
+from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
 
 logger = structlog.get_logger("coval_bench.mocktools")
 
 router = APIRouter(prefix="/mock", tags=["mock-tools"])
 
-SIMULATION_HEADER = "X-Coval-Simulation-Id"
-CALLER_HEADER = "X-Coval-Caller-Number"
 SECRET_HEADER = "X-Mock-Tools-Key"  # noqa: S105 — a header name, not a credential
 
 
@@ -76,49 +76,93 @@ def get_dispatcher(request: Request) -> Dispatcher:
     return dispatcher
 
 
-@router.post("/{tool}", dependencies=[Depends(require_mock_secret)])
-async def call_tool(
-    tool: str,
+def get_codec(platform: str) -> Codec:
+    try:
+        return codec_for(platform)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+async def _answer(
+    codec: Codec,
+    tool: str | None,
+    body: dict[str, Any] | None,
+    request: Request,
     background: BackgroundTasks,
-    args: dict[str, Any] = Body(default=None),
-    x_coval_simulation_id: str | None = Header(default=None),
-    x_coval_caller_number: str | None = Header(default=None),
+    dispatcher: Dispatcher,
+    settings: Settings,
+    pool: AsyncConnectionPool[Any],
+) -> JSONResponse:
+    started = time.perf_counter()
+    calls = codec.decode(body, request.headers, tool)
+    correlation = codec.correlate(body, request.headers)
+    outcomes = [dispatcher.call(call.tool, call.args) for call in calls]
+
+    budget_s = len(calls) * settings.mock_tools_latency_ms / 1000
+    remaining = budget_s - (time.perf_counter() - started)
+    if remaining > 0:
+        await asyncio.sleep(remaining)
+    latency_ms = (time.perf_counter() - started) * 1000 / max(len(calls), 1)
+
+    for call, outcome in zip(calls, outcomes, strict=True):
+        background.add_task(
+            record_call,
+            pool,
+            tool=call.tool,
+            args=call.args,
+            response=outcome.response,
+            latency_ms=latency_ms,
+            matched_seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            simulation_id=correlation.simulation_id,
+            caller_number=correlation.caller_number,
+        )
+        logger.info(
+            "mock_tool_call",
+            platform=codec.name,
+            tool=call.tool,
+            status=outcome.http_status,
+            mode=outcome.resolution.mode if outcome.resolution else "rejected",
+            seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            simulation_id=correlation.simulation_id,
+            correlation_source=correlation.source,
+        )
+    if not calls:
+        logger.warning("mock_tool_call_empty", platform=codec.name)
+
+    payload, status = codec.encode(calls, outcomes)
+    return JSONResponse(payload, status_code=status)
+
+
+@router.post("/{platform}", dependencies=[Depends(require_mock_secret)])
+async def call_tools(
+    platform: str,
+    request: Request,
+    background: BackgroundTasks,
+    body: dict[str, Any] | None = Body(default=None),
     dispatcher: Dispatcher = Depends(get_dispatcher),
     settings: Settings = Depends(get_settings),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> JSONResponse:
-    """Answer one tool call, hold it to the latency budget, and log it."""
-    started = time.perf_counter()
-    call_args = args if args is not None else {}
-    outcome = dispatcher.call(tool, call_args)
+    codec = get_codec(platform)
+    if codec.tool_in_path:
+        raise HTTPException(
+            404, f"{platform} names the tool in the path: /mock/{platform}/{{tool}}"
+        )
+    return await _answer(codec, None, body, request, background, dispatcher, settings, pool)
 
-    # Hold every answer to the same budget so tool time is a constant across
-    # variants rather than a property of how much work this particular seed took.
-    budget_s = settings.mock_tools_latency_ms / 1000
-    remaining = budget_s - (time.perf_counter() - started)
-    if remaining > 0:
-        await asyncio.sleep(remaining)
-    latency_ms = (time.perf_counter() - started) * 1000
 
-    # Logged after the response goes out: the row is telemetry and must not be
-    # charged to the latency the platform observes.
-    background.add_task(
-        record_call,
-        pool,
-        tool=tool,
-        args=call_args,
-        response=outcome.response,
-        latency_ms=latency_ms,
-        matched_seed=outcome.resolution.matched_seed if outcome.resolution else None,
-        simulation_id=x_coval_simulation_id,
-        caller_number=x_coval_caller_number,
-    )
-    logger.info(
-        "mock_tool_call",
-        tool=tool,
-        status=outcome.http_status,
-        mode=outcome.resolution.mode if outcome.resolution else "rejected",
-        seed=outcome.resolution.matched_seed if outcome.resolution else None,
-        simulation_id=x_coval_simulation_id,
-    )
-    return JSONResponse(outcome.response, status_code=outcome.http_status)
+@router.post("/{platform}/{tool}", dependencies=[Depends(require_mock_secret)])
+async def call_tool(
+    platform: str,
+    tool: str,
+    request: Request,
+    background: BackgroundTasks,
+    body: dict[str, Any] | None = Body(default=None),
+    dispatcher: Dispatcher = Depends(get_dispatcher),
+    settings: Settings = Depends(get_settings),
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> JSONResponse:
+    codec = get_codec(platform)
+    if not codec.tool_in_path:
+        raise HTTPException(404, f"{platform} names the tool in the body: /mock/{platform}")
+    return await _answer(codec, tool, body, request, background, dispatcher, settings, pool)
