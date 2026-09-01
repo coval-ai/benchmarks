@@ -1337,6 +1337,15 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         collected=True,
         published=False,
     ),
+    RegisteredModel(
+        benchmark=_S2S,
+        provider="phonely",
+        model="phonely-agent",
+        region="us",
+        collected=True,
+        published=False,
+        arena_enabled=False,
+    ),
 ]
 
 _key_counts = Counter((m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY)

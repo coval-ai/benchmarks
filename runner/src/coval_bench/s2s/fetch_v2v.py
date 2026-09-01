@@ -65,6 +65,8 @@ class AgentSpec:
     family: str = FAMILY_MULTITURN
     # Whether this agent's recordings may reach the public samples card.
     publish_samples: bool = True
+    # Override the dataset's voice metric contract for a non-voice agent.
+    metric_contract: DatasetMetrics | None = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,15 @@ AGENTS: tuple[AgentSpec, ...] = (
         test_set_id_attr="coval_s2s_dental_test_set_id",
         family=FAMILY_DENTAL,
         publish_samples=False,
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_phonely_agent_id",
+        provider="phonely",
+        model="phonely-agent",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_DENTAL,
+        publish_samples=False,
+        metric_contract=DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
     ),
 )
 
@@ -803,7 +814,7 @@ async def _fetch_one_provider(
             if identity is None:
                 continue
             dataset_id, dataset_sha256 = identity
-            condition = condition_for(dataset_id)
+            condition = spec.metric_contract or condition_for(dataset_id)
             if condition.required not in metric_ids:
                 logger.warning(
                     "required_metric_unconfigured",

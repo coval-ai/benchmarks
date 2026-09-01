@@ -22,11 +22,14 @@ from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Metric
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
+    DATASET_ID_DENTAL,
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
+    FAMILY_DENTAL,
     FAMILY_HAPPYPATH,
     FAMILY_MULTITURN,
     Condition,
+    DatasetMetrics,
     condition_for,
 )
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
@@ -686,6 +689,40 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_text_agent_uses_instruction_as_the_clean_dental_anchor() -> None:
+    writer = _stub_writer()
+    spec = next(spec for spec in fetch_v2v.AGENTS if spec.provider == "phonely")
+    assert spec.family == FAMILY_DENTAL
+    assert spec.publish_samples is False
+    assert spec.metric_contract == DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+    )
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "P1"}
+    )
+    values = [{"simulation_output_id": "s1", "value": "YES"}]
+
+    async with _fake_client(list_json, _run_json(values, metric_id="IID")) as client:
+        status, ingested = await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=spec,
+            agent_id="a1",
+            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+            test_set_id="TSD",
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+        )
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_DENTAL
+    rows = writer.record_results.await_args.args[0]
+    assert [(row.metric_type, row.metric_value) for row in rows] == [
+        (Metric.INSTRUCTION_FOLLOWING, 100.0),
+    ]
 
 
 @pytest.mark.asyncio
