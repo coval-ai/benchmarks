@@ -242,6 +242,7 @@ async def test_flux_force_end_turn_before_close(fake_api_key: SecretStr) -> None
     assert result.finalization_timed_out is False
     assert sum(len(m) for m in ws.sent if isinstance(m, bytes)) == len(audio)
     text = [m for m in ws.sent if isinstance(m, str)]
+    assert not any("Finalize" in m for m in text)
     assert "ForceEndTurn" in text[-2]
     assert "CloseStream" in text[-1]
 
@@ -644,7 +645,7 @@ async def test_deepgram_flux_concatenates_multiple_turns(
             "type": "TurnInfo",
             "event": "EndOfTurn",
             "turn_index": 1,
-            "trigger": "manual",
+            "trigger": "model",
             "transcript": "how are you",
         },
         {"type": "TurnInfo", "event": "StartOfTurn", "turn_index": 0, "transcript": "hello"},
@@ -672,6 +673,8 @@ async def test_deepgram_flux_concatenates_multiple_turns(
 
     # Ordered by turn_index regardless of arrival order; both turns present.
     assert result.complete_transcript == "hello world how are you"
+    assert result.error is None
+    assert result.finalization_trigger == "manual"
 
 
 @pytest.mark.asyncio

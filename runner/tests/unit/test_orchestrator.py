@@ -1909,6 +1909,49 @@ async def test_stt_partial_keeps_real_ttft(audio_file: Path, settings: Settings)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        ({"finalization_timed_out": True}, "finalization timed out"),
+        (
+            {"finalization_warning_code": "FORCE_END_TURN_NO_ACTIVE_TURN"},
+            "finalization ignored: FORCE_END_TURN_NO_ACTIVE_TURN",
+        ),
+    ],
+)
+async def test_stt_missing_final_carries_finalization_reason(
+    fields: dict[str, Any], reason: str, audio_file: Path, settings: Settings
+) -> None:
+    unfinalized = TranscriptionResult(
+        provider="deepgram", ttft_seconds=0.42, partial_transcripts=["hello"], **fields
+    )
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=unfinalized)
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "flux-general-en"),
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFT"].status == ResultStatus.SUCCESS
+    assert by_metric["AudioToFinal"].error == reason
+    assert by_metric["TTFS"].error == reason
+    assert by_metric["RTF"].error == reason
+
+
+@pytest.mark.asyncio
 async def test_stt_normalized_timing_includes_finalization_diagnostics(
     audio_file: Path, settings: Settings
 ) -> None:
@@ -1948,6 +1991,7 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
                 artifact_client=object(),
             )
 
+    assert dual_write.await_args is not None
     timing = dual_write.await_args.kwargs["timing_events"]
     assert timing["finalization_latency_seconds"] == 0.12
     assert timing["finalization_trigger"] == "manual"

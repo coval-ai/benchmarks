@@ -272,10 +272,6 @@ class DeepgramProvider(STTProvider):
                             result.finalization_latency_seconds = max(
                                 0.0, now - result.finalization_start_time
                             )
-                        if trigger != "manual" and result.error is None:
-                            result.error = (
-                                f"Flux EndOfTurn was not manually triggered (trigger={trigger!r})"
-                            )
                         final_event.set()
                     continue
 
@@ -314,11 +310,18 @@ class DeepgramProvider(STTProvider):
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
-        # Build complete transcript
+        is_flux = self._model.startswith("flux-")
+        final_trigger = result.finalization_trigger
         if (
-            self._model in ("flux-general-en", "flux-general-multi")
-            and result.finalization_trigger == "manual"
+            is_flux
+            and last_final_time is not None
+            and final_trigger != "manual"
+            and result.error is None
         ):
+            result.error = f"Flux EndOfTurn was not manually triggered (trigger={final_trigger!r})"
+
+        # Build complete transcript
+        if is_flux and final_trigger == "manual":
             joined = " ".join(flux_turns[i] for i in sorted(flux_turns)).strip()
             result.complete_transcript = joined or None
         elif final_segments or pending_partial:
