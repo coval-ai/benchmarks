@@ -48,12 +48,7 @@ from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
-from coval_bench.registries import (
-    MODEL_REGISTRY,
-    TAG_CATEGORIES,
-    RegisteredModel,
-    tag_value_label,
-)
+from coval_bench.registries import MODEL_REGISTRY, RegisteredModel
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
@@ -270,7 +265,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.tags (
                 value    text PRIMARY KEY CHECK (value <> ''),
-                category text NOT NULL CHECK (category IN ('mode','features')),
+                category text NOT NULL CHECK (category = 'features'),
                 label    text NOT NULL CHECK (label <> '')
             )
         """)
@@ -303,6 +298,19 @@ def _load_schema(**connect_kwargs: Any) -> None:
         """)
 
 
+# The FEATURES vocabulary as migration 20260825_0021 seeds it.
+_TAG_VOCABULARY: tuple[tuple[str, str], ...] = (
+    ("multilingual", "Multilingual"),
+    ("vad", "VAD"),
+    ("diarization", "Diarization"),
+    ("translation", "Translation"),
+    ("code-switching", "Code switching"),
+    ("keyterm-biasing", "Keyterm biasing"),
+    ("voice-cloning", "Voice cloning"),
+    ("emotion-control", "Emotion control"),
+)
+
+
 def _seed_registry(**connect_kwargs: Any) -> None:
     """Fill the registry tables from the code registry, as the seed migration does.
 
@@ -310,11 +318,11 @@ def _seed_registry(**connect_kwargs: Any) -> None:
     needs them populated. Loaded into the template database once.
     """
     with psycopg.connect(**connect_kwargs) as conn:
-        for tag, category in TAG_CATEGORIES.items():
+        for value, label in _TAG_VOCABULARY:
             conn.execute(
                 "INSERT INTO benchmarks_v2.tags (value, category, label) VALUES (%s, %s, %s)"
                 " ON CONFLICT DO NOTHING",
-                (str(tag), category.value, tag_value_label(category, str(tag))),
+                (value, "features", label),
             )
         _insert_models(conn, MODEL_REGISTRY)
         conn.commit()

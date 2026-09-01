@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Model tag vocabulary surfaced as leaderboard filters."""
+"""Leaderboard facets derived from model columns; FEATURES lives in the tags table."""
 
 from __future__ import annotations
 
@@ -8,12 +8,7 @@ from enum import StrEnum
 
 
 class TagCategory(StrEnum):
-    """Faceted leaderboard filters. Within a facet tags OR; across facets they AND.
-
-    TYPE/HOST/CREATOR are derived from registry columns and SOURCE/LICENSING/
-    DEPLOYMENT from model attributes, all at the API boundary; only FEATURES
-    draws its values from ``ModelTag``.
-    """
+    """Faceted leaderboard filters. Within a facet tags OR; across facets they AND."""
 
     TYPE = "type"
     HOST = "host"
@@ -23,41 +18,6 @@ class TagCategory(StrEnum):
     LICENSING = "licensing"
     DEPLOYMENT = "deployment"
     REGION = "region"
-
-
-class ModelTag(StrEnum):
-    """Curated model attributes surfaced as FEATURES filter chips.
-
-    KEYTERM_BIASING means expected vocabulary or a static context prompt
-    supplied at session start biases recognition; CODE_SWITCHING means
-    intra-sentence language mixing in one stream — session-level language
-    identification or switching does not qualify.
-    """
-
-    MULTILINGUAL = "multilingual"
-    VAD = "vad"
-    DIARIZATION = "diarization"
-    TRANSLATION = "translation"
-    CODE_SWITCHING = "code-switching"
-    KEYTERM_BIASING = "keyterm-biasing"
-    VOICE_CLONING = "voice-cloning"
-    EMOTION_CONTROL = "emotion-control"
-
-
-TAG_CATEGORIES: dict[ModelTag, TagCategory] = {
-    ModelTag.MULTILINGUAL: TagCategory.FEATURES,
-    ModelTag.VAD: TagCategory.FEATURES,
-    ModelTag.DIARIZATION: TagCategory.FEATURES,
-    ModelTag.TRANSLATION: TagCategory.FEATURES,
-    ModelTag.CODE_SWITCHING: TagCategory.FEATURES,
-    ModelTag.KEYTERM_BIASING: TagCategory.FEATURES,
-    ModelTag.VOICE_CLONING: TagCategory.FEATURES,
-    ModelTag.EMOTION_CONTROL: TagCategory.FEATURES,
-}
-
-if TAG_CATEGORIES.keys() != set(ModelTag):
-    _missing = ", ".join(sorted(set(ModelTag) - TAG_CATEGORIES.keys()))
-    raise RuntimeError(f"TAG_CATEGORIES is missing categories for: {_missing}")
 
 
 # Display label per category.
@@ -92,16 +52,11 @@ _VALUE_LABELS: dict[str, str] = {
     "shared-inference": "Shared inference",
     "dedicated-inference": "Dedicated inference",
     "official-api": "Official API",
-    ModelTag.VAD.value: "VAD",
-    ModelTag.CODE_SWITCHING.value: "Code switching",
-    ModelTag.KEYTERM_BIASING.value: "Keyterm biasing",
-    ModelTag.VOICE_CLONING.value: "Voice cloning",
-    ModelTag.EMOTION_CONTROL.value: "Emotion control",
 }
 
 
 def tag_value_label(category: TagCategory, value: str) -> str:
-    """Display label for a tag value. Provider-valued categories keep the raw id."""
+    """Display label for a derived facet value. Provider-valued categories keep the raw id."""
     if category in PROVIDER_VALUED_CATEGORIES:
         return value
     if category is TagCategory.TYPE:

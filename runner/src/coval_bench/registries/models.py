@@ -18,7 +18,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.tags import ModelTag
 
 
 class Source(StrEnum):
@@ -78,7 +77,7 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # see :class:`Voice` for why nothing pairs on it yet.
     voices: tuple[Voice, ...] = ()
     creator: str | None = None  # who makes the model; None means same as provider
-    tags: tuple[ModelTag, ...] = ()
+    tags: tuple[str, ...] = ()  # FEATURES values; the vocabulary is the tags table
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
@@ -98,14 +97,14 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
 _STT = Benchmark.STT
 _TTS = Benchmark.TTS
 _S2S = Benchmark.S2S
-_MULTI = ModelTag.MULTILINGUAL
-_VAD = ModelTag.VAD
-_DIAR = ModelTag.DIARIZATION
-_TRANS = ModelTag.TRANSLATION
-_CODESW = ModelTag.CODE_SWITCHING
-_KEYTERM = ModelTag.KEYTERM_BIASING
-_CLONE = ModelTag.VOICE_CLONING
-_EMOTION = ModelTag.EMOTION_CONTROL
+_MULTI = "multilingual"
+_VAD = "vad"
+_DIAR = "diarization"
+_TRANS = "translation"
+_CODESW = "code-switching"
+_KEYTERM = "keyterm-biasing"
+_CLONE = "voice-cloning"
+_EMOTION = "emotion-control"
 _OPEN = Licensing.OPEN_WEIGHT
 
 # Per-benchmark order is the model order /v1/providers returns.

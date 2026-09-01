@@ -13,8 +13,9 @@ from httpx import ASGITransport, AsyncClient
 
 from coval_bench.api.internal import embargoed_pairs
 from coval_bench.api.routers.providers import _describe
+from coval_bench.db.registry_store import TagRecord
 from coval_bench.registries.models import MODEL_REGISTRY
-from tests.api.conftest import COVAL_ORG, bearer
+from tests.api.conftest import _TAG_VOCABULARY, COVAL_ORG, bearer
 
 
 async def test_providers_200(client: AsyncClient) -> None:
@@ -297,8 +298,14 @@ async def test_the_catalogue_matches_the_registry(client: AsyncClient) -> None:
     The gate on sourcing the catalogue from Postgres: same providers, same
     models, same order, same flags and facets.
     """
+    vocabulary = {
+        value: TagRecord(value=value, category="features", label=label)
+        for value, label in _TAG_VOCABULARY
+    }
     live = (await client.get("/v1/providers")).json()
-    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY)).model_dump(mode="json")
+    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY), vocabulary).model_dump(
+        mode="json"
+    )
 
     assert _sorted_tags(live) == _sorted_tags(expected)
 

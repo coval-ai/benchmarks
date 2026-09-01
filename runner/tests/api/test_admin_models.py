@@ -209,6 +209,32 @@ async def test_the_tag_vocabulary_is_public(client: AsyncClient, postgresql: Any
     }
 
 
+async def test_a_tag_added_through_the_api_reaches_the_catalogue(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A tag no Python file names still reaches the catalogue, labelled by its row."""
+    await client.post(
+        "/v1/tags",
+        json={"value": "turbo-mode", "category": "features", "label": "Turbo mode"},
+        headers=_admin_headers(),
+    )
+    await _seed_tag(postgresql, "keyterm-biasing", "features")
+    await _seed_model(
+        postgresql,
+        provider="acme",
+        model="stt-tagged",
+        published=True,
+        tags=("turbo-mode", "keyterm-biasing"),
+    )
+
+    entry = next(
+        e for e in (await client.get("/v1/providers")).json()["stt"] if e["provider"] == "acme"
+    )
+    tags = {(t["category"], t["value"]): t["label"] for t in entry["models"][0]["tags"]}
+    assert tags[("features", "turbo-mode")] == "Turbo mode"
+    assert tags[("features", "keyterm-biasing")] == "Keyterm-biasing"
+
+
 def _create_body(**overrides: Any) -> dict[str, Any]:
     body: dict[str, Any] = {"modality": "STT", "provider": "acme", "model": "stt-new"}
     body.update(overrides)

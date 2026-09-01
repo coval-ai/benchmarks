@@ -37,8 +37,6 @@ from coval_bench.registries.preprocessing import (
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
     PROVIDER_VALUED_CATEGORIES,
-    TAG_CATEGORIES,
-    ModelTag,
     TagCategory,
     tag_value_label,
 )
@@ -64,8 +62,6 @@ __all__ = [
     "Voice",
     "CATEGORY_LABELS",
     "PROVIDER_VALUED_CATEGORIES",
-    "TAG_CATEGORIES",
-    "ModelTag",
     "TagCategory",
     "is_metric_excluded",
     "validate_metric_contract",

@@ -10,18 +10,12 @@ from pathlib import Path
 
 from coval_bench.registries import (
     MODEL_REGISTRY,
-    TAG_CATEGORIES,
     Benchmark,
     Licensing,
-    ModelTag,
     RegisteredModel,
     Source,
 )
 from coval_bench.registries.provider_keys import provider_names
-
-
-def test_every_tag_has_a_category() -> None:
-    assert TAG_CATEGORIES.keys() == set(ModelTag)
 
 
 def test_registry_keys_unique() -> None:
