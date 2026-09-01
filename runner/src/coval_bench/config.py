@@ -162,7 +162,7 @@ class Settings(BaseSettings):
     mock_tools_secret: SecretStr | None = None
     # The fixed latency every mock tool answer is held to, so tool time is a
     # constant across variants instead of a property of the seed that answered.
-    mock_tools_latency_ms: float = Field(default=50.0, ge=0)
+    mock_tools_latency_ms: float = Field(default=0.0, ge=0, le=10_000)
     mock_tools_suite: str = "dental"
     # Where the deployed service reads the seeded world, since the image is
     # built from a git checkout and `_private/` is never in one. Empty means
