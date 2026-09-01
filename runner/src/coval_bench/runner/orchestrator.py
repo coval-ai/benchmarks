@@ -44,6 +44,7 @@ import random
 import signal
 import wave
 from collections import Counter, defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -1028,23 +1029,34 @@ _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
 
 
 async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
-    """Best-effort refresh of the run's series rollup bucket; never raises.
+    """Best-effort refresh of the run's legacy and normalized rollup bucket.
 
-    Transient failures are retried. A final failure leaves only this bucket
-    stale (a run sharing the slot recomputes it; the migration backfill is
-    the manual repair) — not worth failing the run.
+    Each rollup is retried independently so one stale table cannot suppress the
+    other. A run sharing the slot recomputes both tables; the migration backfill
+    is the manual repair after a final failure. Maintenance never fails the run.
     """
-    for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
-        try:
-            await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
-        except Exception:
-            if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                logger.warning("series_bucket_refresh_failed", exc_info=True)
-                return
-            logger.info("series_bucket_refresh_retry", attempt=attempt)
-            await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
-        else:
-            return
+    refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
+        (
+            "series_bucket",
+            lambda: writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds),
+        ),
+        (
+            "normalized_series_bucket",
+            lambda: writer.refresh_metric_values_bucket(run_id),
+        ),
+    )
+    for event_prefix, refresh in refreshes:
+        for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
+            try:
+                await refresh()
+            except Exception:
+                if attempt == _BUCKET_REFRESH_ATTEMPTS:
+                    logger.warning(f"{event_prefix}_refresh_failed", exc_info=True)
+                    break
+                logger.info(f"{event_prefix}_refresh_retry", attempt=attempt)
+                await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
+            else:
+                break
 
 
 async def run_benchmarks(

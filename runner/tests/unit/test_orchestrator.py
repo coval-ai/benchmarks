@@ -171,6 +171,7 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.finish_run = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
     writer.refresh_bucket = AsyncMock()
+    writer.refresh_metric_values_bucket = AsyncMock()
     return writer
 
 
@@ -348,6 +349,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +400,7 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
 
 # ---------------------------------------------------------------------------
@@ -446,38 +449,65 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     assert all(r.status == ResultStatus.FAILED for r in rows)
     assert all("always fails" in (r.error or "") for r in rows)
     writer.refresh_bucket.assert_not_awaited()
+    writer.refresh_metric_values_bucket.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_refresh_series_bucket_retries_transient_failure(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A transient refresh failure is retried; success stops the loop."""
+    """A transient normalized refresh failure is retried independently."""
     from coval_bench.runner import orchestrator
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
     writer = MagicMock()
-    writer.refresh_bucket = AsyncMock(side_effect=[RuntimeError("blip"), None])
+    writer.refresh_bucket = AsyncMock()
+    writer.refresh_metric_values_bucket = AsyncMock(side_effect=[RuntimeError("blip"), None])
 
     await orchestrator._refresh_series_bucket(writer, 1, settings)
 
-    assert writer.refresh_bucket.await_count == 2
+    writer.refresh_bucket.assert_awaited_once_with(
+        1, period_seconds=settings.schedule_period_seconds
+    )
+    assert writer.refresh_metric_values_bucket.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_series_bucket_continues_after_legacy_failure(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exhausting the legacy refresh does not suppress the normalized refresh."""
+    from coval_bench.runner import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
+    writer = MagicMock()
+    writer.refresh_bucket = AsyncMock(side_effect=RuntimeError("legacy db down"))
+    writer.refresh_metric_values_bucket = AsyncMock()
+
+    await orchestrator._refresh_series_bucket(writer, 1, settings)
+
+    assert writer.refresh_bucket.await_count == 3
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
 async def test_refresh_series_bucket_never_raises(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Exhausting all attempts logs and returns instead of raising."""
+    """Exhausting normalized attempts logs and returns instead of raising."""
     from coval_bench.runner import orchestrator
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
     writer = MagicMock()
-    writer.refresh_bucket = AsyncMock(side_effect=RuntimeError("db down"))
+    writer.refresh_bucket = AsyncMock()
+    writer.refresh_metric_values_bucket = AsyncMock(side_effect=RuntimeError("db down"))
 
     await orchestrator._refresh_series_bucket(writer, 1, settings)
 
-    assert writer.refresh_bucket.await_count == 3
+    writer.refresh_bucket.assert_awaited_once_with(
+        1, period_seconds=settings.schedule_period_seconds
+    )
+    assert writer.refresh_metric_values_bucket.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -1726,6 +1756,7 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     writer.refresh_bucket.assert_awaited_once_with(
         run.id, period_seconds=settings.schedule_period_seconds
     )
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(run.id)
 
 
 # ---------------------------------------------------------------------------

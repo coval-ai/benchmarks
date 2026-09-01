@@ -676,6 +676,12 @@ async def _ingest_run(
                 await writer.refresh_bucket(run_pk, period_seconds=period_seconds)
             except Exception:
                 logger.warning("refresh_bucket_failed", provider=spec.provider, exc_info=True)
+            try:
+                await writer.refresh_metric_values_bucket(run_pk)
+            except Exception:
+                logger.warning(
+                    "normalized_bucket_refresh_failed", provider=spec.provider, exc_info=True
+                )
         return status
     except Exception as exc:
         if run_pk is not None:

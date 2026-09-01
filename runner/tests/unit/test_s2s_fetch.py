@@ -107,6 +107,7 @@ def _stub_writer() -> MagicMock:
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_bucket = AsyncMock()
+    writer.refresh_metric_values_bucket = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
     return writer
 
@@ -363,6 +364,7 @@ async def test_ingest_run_slots_by_create_time() -> None:
     assert writer.start_run.await_args.kwargs["scheduled_at"] == datetime(2026, 7, 7, 0, tzinfo=UTC)
     writer.record_results.assert_awaited_once()
     writer.refresh_bucket.assert_awaited_once()
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
 
 
@@ -384,6 +386,8 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
+    writer.refresh_bucket.assert_awaited_once()
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
     writer = _stub_writer()
     all_null: list[dict[str, Any]] = [{"simulation_output_id": "s1", "value": None}]
@@ -398,6 +402,33 @@ async def test_ingest_run_partial_and_failed() -> None:
         )
     assert status is RunStatus.FAILED
     writer.refresh_bucket.assert_not_awaited()
+    writer.refresh_metric_values_bucket.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_refresh", ["refresh_bucket", "refresh_metric_values_bucket"])
+async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
+    failing_refresh: str,
+) -> None:
+    """Either best-effort rollup failure leaves the completed run succeeded."""
+    writer = _stub_writer()
+    getattr(writer, failing_refresh).side_effect = RuntimeError("db down")
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids=LATENCY_IDS,
+            period_seconds=10_800,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED)
+    writer.refresh_bucket.assert_awaited_once()
+    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
