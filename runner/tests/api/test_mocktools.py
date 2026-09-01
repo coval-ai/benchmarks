@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -333,9 +334,9 @@ async def test_vapi_gets_the_same_seed_wrapped_by_call_id(
     body = _vapi({"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}})
     response = await client.post("/mock/vapi", json=body, headers=AUTH)
     assert response.status_code == 200
-    assert response.json() == {
-        "results": [{"toolCallId": "tc_1", "result": BULKY}],
-    }
+    (result,) = response.json()["results"]
+    assert (result["name"], result["toolCallId"]) == ("lookup_patient", "tc_1")
+    assert json.loads(result["result"]) == BULKY
 
 
 async def test_vapi_batch_writes_one_row_per_call_in_order(
@@ -348,8 +349,8 @@ async def test_vapi_batch_writes_one_row_per_call_in_order(
     response = await client.post("/mock/vapi", json=body, headers=AUTH)
     results = response.json()["results"]
     assert [r["toolCallId"] for r in results] == ["tc_1", "tc_2"]
-    assert results[0]["result"] == BULKY
-    assert results[1]["result"] == {"found": False}
+    assert json.loads(results[0]["result"]) == BULKY
+    assert json.loads(results[1]["result"]) == {"found": False}
     rows = await _rows(postgresql)
     assert [row["args"]["phone"] for row in rows] == [PHONE, "5105550141"]
     assert [row["matched_seed"] for row in rows] == ["marcus_lee", None]
@@ -386,7 +387,7 @@ async def test_vapi_error_rides_inside_the_result(client: AsyncClient, mock_app:
     body = _vapi({"id": "tc_1", "name": "read_chart", "arguments": {}})
     response = await client.post("/mock/vapi", json=body, headers=AUTH)
     assert response.status_code == 200
-    assert response.json()["results"][0]["result"]["error"] == "unknown_tool"
+    assert json.loads(response.json()["results"][0]["result"])["error"] == "unknown_tool"
 
 
 # --- transport edge cases --------------------------------------------------
@@ -428,3 +429,17 @@ async def test_telnyx_control_id_never_lands_in_caller_number(
     assert len(rows) == 1
     assert rows[0]["caller_number"] is None
     assert rows[0]["simulation_id"] is None
+
+
+async def test_vapi_nested_function_shape_reaches_the_seed(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    body = _vapi(
+        {
+            "id": "tc_1",
+            "type": "function",
+            "function": {"name": "lookup_patient", "arguments": json.dumps({"phone": PHONE})},
+        }
+    )
+    response = await client.post("/mock/vapi", json=body, headers=AUTH)
+    assert json.loads(response.json()["results"][0]["result"]) == BULKY

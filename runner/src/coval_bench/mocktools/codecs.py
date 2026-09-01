@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -102,6 +103,15 @@ TELNYX = Codec(
 )
 
 
+def _vapi_arguments(raw: object) -> dict[str, Any]:
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            return {}
+    return _as_args(raw)
+
+
 def _vapi_decode(body: Body, _headers: Mapping[str, str], _tool: str | None) -> list[ToolCall]:
     message = body.get("message") if body else None
     raw_calls = message.get("toolCallList") if isinstance(message, dict) else None
@@ -111,11 +121,14 @@ def _vapi_decode(body: Body, _headers: Mapping[str, str], _tool: str | None) -> 
     for entry in raw_calls[:MAX_TOOL_CALLS]:
         if not isinstance(entry, dict):
             continue
-        raw = entry.get("arguments", entry.get("parameters"))
+        function = entry.get("function")
+        if not isinstance(function, dict):
+            function = {}
+        raw = entry.get("arguments", entry.get("parameters", function.get("arguments")))
         calls.append(
             ToolCall(
-                tool=str(entry.get("name") or ""),
-                args=_as_args(raw),
+                tool=str(entry.get("name") or function.get("name") or ""),
+                args=_vapi_arguments(raw),
                 call_id=str(entry["id"]) if entry.get("id") else None,
             )
         )
@@ -140,7 +153,11 @@ def _vapi_correlate(body: Body, headers: Mapping[str, str]) -> Correlation:
 def _vapi_encode(calls: list[ToolCall], outcomes: list[Outcome]) -> tuple[Any, int]:
     return {
         "results": [
-            {"toolCallId": call.call_id, "result": outcome.response}
+            {
+                "name": call.tool,
+                "toolCallId": call.call_id,
+                "result": json.dumps(outcome.response, separators=(",", ":")),
+            }
             for call, outcome in zip(calls, outcomes, strict=True)
         ]
     }, 200

@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
-import structlog.testing
 
+import coval_bench.mocktools.codecs as codecs
 from coval_bench.mocktools.codecs import (
     CODECS,
     GENERIC,
@@ -132,7 +134,25 @@ def test_vapi_keeps_a_call_with_no_id() -> None:
     assert VAPI.decode(body, NO_HEADERS, None)[0].call_id is None
 
 
-def test_vapi_treats_non_object_arguments_as_none() -> None:
+def test_vapi_decodes_the_nested_function_shape_with_string_arguments() -> None:
+    body = _vapi_body(
+        {
+            "id": "tc_1",
+            "type": "function",
+            "function": {"name": "lookup_patient", "arguments": json.dumps({"phone": PHONE})},
+        }
+    )
+    assert VAPI.decode(body, NO_HEADERS, None) == [
+        ToolCall(tool="lookup_patient", args={"phone": PHONE}, call_id="tc_1")
+    ]
+
+
+def test_vapi_parses_string_arguments_on_the_flat_shape_too() -> None:
+    body = _vapi_body({"id": "tc_1", "name": "lookup_patient", "arguments": '{"phone": "1"}'})
+    assert VAPI.decode(body, NO_HEADERS, None)[0].args == {"phone": "1"}
+
+
+def test_vapi_treats_unparseable_arguments_as_none() -> None:
     body = _vapi_body({"id": "tc_1", "name": "lookup_patient", "arguments": "not json"})
     assert VAPI.decode(body, NO_HEADERS, None)[0].args == {}
 
@@ -167,12 +187,21 @@ def test_vapi_encodes_each_result_under_its_call_id_in_order() -> None:
     calls = [ToolCall("a", {}, "tc_1"), ToolCall("b", {}, "tc_2")]
     payload, status = VAPI.encode(calls, [FOUND, UNKNOWN])
     assert status == 200
-    assert payload == {
-        "results": [
-            {"toolCallId": "tc_1", "result": FOUND.response},
-            {"toolCallId": "tc_2", "result": UNKNOWN.response},
-        ]
-    }
+    assert [r["toolCallId"] for r in payload["results"]] == ["tc_1", "tc_2"]
+    assert [r["name"] for r in payload["results"]] == ["a", "b"]
+
+
+def test_vapi_encodes_the_result_as_a_json_string() -> None:
+    payload, _ = VAPI.encode([ToolCall("a", {}, "tc_1")], [FOUND])
+    result = payload["results"][0]["result"]
+    assert isinstance(result, str)
+    assert json.loads(result) == FOUND.response
+
+
+def test_vapi_encodes_an_error_inside_the_result_string() -> None:
+    payload, _ = VAPI.encode([ToolCall("read_chart", {}, "tc_1")], [UNKNOWN])
+    assert json.loads(payload["results"][0]["result"])["error"] == "unknown_tool"
+    assert "error" not in payload["results"][0]
 
 
 def test_vapi_encodes_a_missing_id_as_null() -> None:
@@ -197,20 +226,24 @@ def test_vapi_correlates_from_the_coval_header_when_present() -> None:
     assert (found.simulation_id, found.source) == (SIM, "simulation_header")
 
 
-def test_vapi_without_a_header_logs_the_envelope_shape_and_not_its_values() -> None:
+def test_vapi_without_a_header_logs_the_envelope_shape_and_not_its_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = MagicMock()
+    monkeypatch.setattr(codecs, "logger", fake)
     body = _vapi_body(
         {"id": "tc_1", "name": "lookup_patient", "arguments": {"phone": PHONE}},
         call={"id": "call_9", "customer": {"number": PHONE}},
     )
-    with structlog.testing.capture_logs() as captured:
-        found = VAPI.correlate(body, NO_HEADERS)
+    found = VAPI.correlate(body, NO_HEADERS)
     assert found.source == "none"
-    events = [e for e in captured if e["event"] == "mock_tool_call_uncorrelated"]
-    assert len(events) == 1
-    assert events[0]["message_keys"] == ["call", "toolCallList", "type"]
-    assert events[0]["call_keys"] == ["customer", "id"]
-    assert PHONE not in repr(events[0])
-    assert "call_9" not in repr(events[0])
+    fake.warning.assert_called_once()
+    assert fake.warning.call_args.args == ("mock_tool_call_uncorrelated",)
+    kwargs = fake.warning.call_args.kwargs
+    assert kwargs["message_keys"] == ["call", "toolCallList", "type"]
+    assert kwargs["call_keys"] == ["customer", "id"]
+    assert PHONE not in repr(kwargs)
+    assert "call_9" not in repr(kwargs)
 
 
 # --- registry --------------------------------------------------------------
