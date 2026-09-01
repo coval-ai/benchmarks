@@ -110,6 +110,7 @@ def test_grouped_counts_cancel_globally_across_slices() -> None:
     count, details = readiness._summarize_counter(counter)
     assert count == 0
     assert details == []
+    assert not counter
 
 
 def test_duplicate_residual_count_is_exact_while_details_are_bounded() -> None:

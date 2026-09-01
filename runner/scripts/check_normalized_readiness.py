@@ -341,7 +341,10 @@ def _apply_grouped_counts(
         if not row:
             raise ReadinessOperationalError("parity", "count query returned an empty row")
         *public_row, multiplicity = row
-        counter[tuple(public_row)] += sign * int(multiplicity)
+        key = tuple(public_row)
+        counter[key] += sign * int(multiplicity)
+        if counter[key] == 0:
+            del counter[key]
 
 
 def _row_sort_key(row: tuple[Any, ...]) -> tuple[tuple[str, str], ...]:
