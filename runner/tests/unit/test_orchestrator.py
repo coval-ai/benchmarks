@@ -1610,10 +1610,10 @@ async def test_incremental_flush_persists_completed_tasks(
 
     original_record = writer.record_results
 
-    async def _record_and_observe(results: Any) -> None:
+    async def _record_and_observe(results: Any, **kwargs: Any) -> None:
         # Snapshot how many calls had completed when each call lands.
         record_calls_when_b_started.append(original_record.await_count)
-        await original_record(results)
+        await original_record(results, **kwargs)
 
     writer.record_results = AsyncMock(side_effect=_record_and_observe)
 
@@ -3230,7 +3230,13 @@ async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_res
     dual_write.assert_awaited_once()
     assert audio_existed_during_write == [True]
     assert not audio_file.exists()
-    writer.record_results.assert_awaited_once_with(results)
+    writer.record_results.assert_awaited_once()
+    legacy_call = writer.record_results.await_args
+    normalized_call = dual_write.await_args
+    assert legacy_call is not None
+    assert normalized_call is not None
+    assert legacy_call.args == (results,)
+    assert legacy_call.kwargs["created_at"] == normalized_call.kwargs["captured_at"]
 
 
 @pytest.mark.asyncio

@@ -255,8 +255,9 @@ def test_run_lifecycle(pg_conn: psycopg.Connection[Any]) -> None:
 
 
 def test_record_results_batch(pg_conn: psycopg.Connection[Any]) -> None:
-    """Insert 50 results in one call; assert all rows present."""
+    """Insert 50 results in one call with one shared explicit timestamp."""
     _apply_migrations(pg_conn)
+    created_at = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
 
     async def _run() -> None:
         pool = await _make_pool(pg_conn)
@@ -265,7 +266,7 @@ def test_record_results_batch(pg_conn: psycopg.Connection[Any]) -> None:
             run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
             assert run.id is not None
             results = [_make_result(run.id, idx=i) for i in range(50)]
-            await writer.record_results(results)
+            await writer.record_results(results, created_at=created_at)
             await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
         finally:
             await pool.close()
@@ -273,12 +274,14 @@ def test_record_results_batch(pg_conn: psycopg.Connection[Any]) -> None:
         pg_conn.autocommit = True
         with pg_conn.cursor() as cur:
             cur.execute(
-                "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
+                "SELECT count(*), min(created_at), max(created_at)"
+                " FROM benchmarks_v2.results WHERE run_id = %s",
                 (run.id,),
             )
             row = cur.fetchone()
         assert row is not None
         assert row[0] == 50
+        assert row[1:] == (created_at, created_at)
 
     asyncio.run(_run())
 

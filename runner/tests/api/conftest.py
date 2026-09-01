@@ -176,6 +176,36 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
+        # Additive normalized storage (mirrors migration 20260818_0018).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.benchmark_observations (
+                id uuid PRIMARY KEY, run_id bigint NOT NULL REFERENCES benchmarks_v2.runs(id),
+                dataset_id text NOT NULL, provider text NOT NULL, model text NOT NULL,
+                benchmark text NOT NULL, captured_at timestamptz NOT NULL DEFAULT now(),
+                status text NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_evaluations (
+                id uuid PRIMARY KEY,
+                observation_id uuid NOT NULL REFERENCES benchmarks_v2.benchmark_observations(id),
+                metric_type text NOT NULL, metric_version text NOT NULL,
+                evaluation_variant text NOT NULL, status text NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_values (
+                metric_evaluation_id uuid NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id),
+                value_key text NOT NULL, unit text NOT NULL, value double precision NOT NULL,
+                value_role text NOT NULL, PRIMARY KEY (metric_evaluation_id, value_key)
+            );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_values_by_bucket (
+                provider text NOT NULL, model text NOT NULL, benchmark text NOT NULL,
+                dataset_id text NOT NULL, metric_type text NOT NULL, metric_version text NOT NULL,
+                evaluation_variant text NOT NULL, value_key text NOT NULL, unit text NOT NULL,
+                bucket_at timestamptz NOT NULL, min_value double precision NOT NULL,
+                p25 double precision NOT NULL, p50 double precision NOT NULL,
+                p75 double precision NOT NULL,
+                max_value double precision NOT NULL, value_sum double precision NOT NULL,
+                sample_count integer NOT NULL
+            )
+        """)
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
