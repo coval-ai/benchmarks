@@ -431,6 +431,28 @@ async def test_telnyx_control_id_never_lands_in_caller_number(
     assert rows[0]["simulation_id"] is None
 
 
+async def test_telnyx_preset_body_fields_correlate_and_never_reach_the_args(
+    client: AsyncClient, mock_app: FastAPI, postgresql: Any
+) -> None:
+    response = await client.post(
+        "/mock/telnyx/lookup_patient",
+        json={
+            "phone": PHONE,
+            "_coval_simulation_id": SIMULATION_ID,
+            "_coval_caller_number": "+14045550710",
+        },
+        headers={**AUTH, "x-telnyx-call-control-id": "v3:abc123"},
+    )
+    assert response.status_code == 200
+    assert response.json() == BULKY
+    rows = await _rows(postgresql)
+    assert len(rows) == 1
+    assert rows[0]["simulation_id"] == SIMULATION_ID
+    assert rows[0]["caller_number"] == "+14045550710"
+    assert rows[0]["args"] == {"phone": PHONE}
+    assert rows[0]["matched_seed"] == "marcus_lee"
+
+
 async def test_vapi_nested_function_shape_reaches_the_seed(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:

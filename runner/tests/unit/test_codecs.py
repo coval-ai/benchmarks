@@ -14,6 +14,8 @@ from coval_bench.mocktools.codecs import (
     CODECS,
     GENERIC,
     MAX_TOOL_CALLS,
+    PRESET_CALLER,
+    PRESET_SIMULATION,
     TELNYX,
     VAPI,
     ToolCall,
@@ -84,17 +86,49 @@ def test_generic_without_headers_is_uncorrelated() -> None:
 # --- telnyx ----------------------------------------------------------------
 
 
-def test_telnyx_shares_the_generic_wire_shape() -> None:
-    assert TELNYX.decode is GENERIC.decode
+def test_telnyx_shares_the_generic_response_shape_but_not_decode() -> None:
+    assert TELNYX.decode is not GENERIC.decode
     assert TELNYX.encode is GENERIC.encode
     assert TELNYX.tool_in_path
 
 
+def test_telnyx_strips_preset_body_fields_before_dispatch() -> None:
+    body = {"phone": PHONE, PRESET_SIMULATION: SIM, PRESET_CALLER: "+14045550710"}
+    (call,) = TELNYX.decode(body, NO_HEADERS, "lookup_patient")
+    assert call == ToolCall(tool="lookup_patient", args={"phone": PHONE})
+
+
 def test_telnyx_prefers_the_coval_header() -> None:
     found = TELNYX.correlate(
-        {}, {"x-coval-simulation-id": SIM, "x-telnyx-call-control-id": "v3:abc"}
+        {PRESET_SIMULATION: "other"},
+        {"x-coval-simulation-id": SIM, "x-telnyx-call-control-id": "v3:abc"},
     )
     assert (found.simulation_id, found.source) == (SIM, "simulation_header")
+
+
+def test_telnyx_correlates_from_the_preset_body() -> None:
+    found = TELNYX.correlate({"phone": PHONE, PRESET_SIMULATION: SIM, PRESET_CALLER: "+1404"}, {})
+    assert (found.simulation_id, found.caller_number, found.source) == (
+        SIM,
+        "+1404",
+        "telnyx_preset_body",
+    )
+
+
+def test_telnyx_falls_back_to_the_preset_caller_alone() -> None:
+    found = TELNYX.correlate({PRESET_CALLER: "+1404"}, {})
+    assert (found.simulation_id, found.caller_number, found.source) == (
+        None,
+        "+1404",
+        "telnyx_preset_caller",
+    )
+
+
+def test_telnyx_treats_an_unrendered_template_as_absent() -> None:
+    found = TELNYX.correlate(
+        {PRESET_SIMULATION: "{{coval_simulation_id}}", PRESET_CALLER: "+1404"}, {}
+    )
+    assert (found.simulation_id, found.source) == (None, "telnyx_preset_caller")
 
 
 def test_telnyx_control_id_is_noted_but_never_stored_as_a_number() -> None:
