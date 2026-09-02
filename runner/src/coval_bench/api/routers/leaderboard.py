@@ -6,7 +6,10 @@
 Metric/benchmark compatibility:
 - WER  + STT
 - TTFT + STT
+- TTFS + STT
 - TTFA + TTS
+- V2V  + S2S
+- TTFT + LLM
 
 Every window queries its materialized view (``benchmarks_v2.results_24h``/
 ``results_7d``/``results_30d``), refreshed by the runner at the end of each
@@ -36,6 +39,7 @@ from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL
 from coval_bench.registries import is_metric_excluded
+from coval_bench.s2s.conditions import DATASET_ID_DENTAL, DATASET_ID_LLM_DENTAL
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -50,13 +54,15 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFS", "STT"),
     ("TTFA", "TTS"),
     ("V2V", "S2S"),
+    ("TTFT", "LLM"),
 }
 
 # The headline S2S board is the clean dental condition, which every agent now runs.
 # The multi-turn set is frozen rather than retired: no agent writes to it, but it
 # stays reachable through the aggregates ``dataset`` param, as does ``__all__`` for
-# callers that want every S2S condition pooled.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": "s2s-dental-v1"}
+# callers that want every S2S condition pooled. LLM runs the same dental scenario
+# over text.
+_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_DENTAL, "LLM": DATASET_ID_LLM_DENTAL}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,
@@ -100,7 +106,7 @@ async def get_leaderboard(
         raise HTTPException(
             400,
             f"metric={metric!r} is not compatible with benchmark={benchmark!r}. "
-            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S.",
+            f"Valid combinations: WER+STT, TTFT+STT, TTFS+STT, TTFA+TTS, V2V+S2S, TTFT+LLM.",
         )
 
     params: dict[str, Any] = {

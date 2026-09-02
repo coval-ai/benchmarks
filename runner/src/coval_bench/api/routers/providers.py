@@ -109,11 +109,13 @@ def _describe(
     stt_map = _build_provider_map(models, Benchmark.STT, hidden)
     tts_map = _build_provider_map(models, Benchmark.TTS, hidden)
     s2s_map = _build_provider_map(models, Benchmark.S2S, hidden)
+    llm_map = _build_provider_map(models, Benchmark.LLM, hidden)
 
     return ProvidersResponse(
         stt=[ProviderInfo(provider=p, models=m) for p, m in sorted(stt_map.items())],
         tts=[ProviderInfo(provider=p, models=m) for p, m in sorted(tts_map.items())],
         s2s=[ProviderInfo(provider=p, models=m) for p, m in sorted(s2s_map.items())],
+        llm=[ProviderInfo(provider=p, models=m) for p, m in sorted(llm_map.items())],
         tag_categories=_tag_categories(),
     )
 

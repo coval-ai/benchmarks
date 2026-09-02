@@ -146,7 +146,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 provider       text NOT NULL,
                 model          text NOT NULL,
                 voice          text,
-                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
                 metric_type    text NOT NULL,
                 metric_value   double precision,
                 metric_units   text,
@@ -260,7 +260,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
                 provider      text NOT NULL,
                 model         text NOT NULL,
-                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
                 dataset_id    text NOT NULL,
                 metric_type   text NOT NULL,
                 bucket_at     timestamptz NOT NULL,
@@ -278,7 +278,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
                 id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                modality      text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                modality      text NOT NULL CHECK (modality IN ('STT','TTS','S2S','LLM')),
                 provider      text NOT NULL CHECK (provider <> ''),
                 model         text NOT NULL CHECK (model <> ''),
                 voice         text CHECK (voice IS NULL OR voice <> ''),
@@ -315,7 +315,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (
                 id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 model_id  bigint NOT NULL,
-                modality  text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                modality  text NOT NULL CHECK (modality IN ('STT','TTS','S2S','LLM')),
                 provider  text NOT NULL CHECK (provider <> ''),
                 model     text NOT NULL CHECK (model <> ''),
                 old       jsonb CHECK (old IS NULL OR jsonb_typeof(old) = 'object'),

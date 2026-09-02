@@ -27,6 +27,7 @@ __all__ = [
     "DATASET_ID_HAPPYPATH",
     "DATASET_ID_HAPPYPATH_ACCENTED",
     "DATASET_ID_HAPPYPATH_NOISY",
+    "DATASET_ID_LLM_DENTAL",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
@@ -79,6 +80,10 @@ DATASET_ID_HAPPYPATH_ACCENTED = "s2s-happypath-accented-v1"
 DATASET_ID_DENTAL = "s2s-dental-v1"
 DATASET_ID_DENTAL_NOISY = "s2s-dental-noisy-v1"
 DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
+
+# The same Coval dental test set driven over text: a separate population, never
+# pooled with the voice rows.
+DATASET_ID_LLM_DENTAL = "llm-dental-v1"
 
 # Unlisted pairs are a configuration error, not a silent skip.
 DATASET_IDS: dict[tuple[str, Condition], str] = {
