@@ -479,7 +479,6 @@ CASES = [
                 "voice_settings.voice",
                 "voice_settings.api_key_ref",
                 "voice_settings.expressive_mode",
-                "tool_ids",
                 "telephony_settings.recording_settings.enabled",
                 "interruption_settings.start_speaking_plan.wait_seconds",
             }
