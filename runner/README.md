@@ -90,6 +90,69 @@ remains 100. Compare candidate sizes in production only with sequential dry
 runs over the same frozen window, using each phase's elapsed time and throughput
 together with Cloud Run peak memory.
 
+### Normalized S2S-storage backfill operator runbook
+
+S2S has a separate, database-only backfill: it never instantiates GCS and it
+never writes artifacts, preprocessing artifacts, evaluation inputs, or metric
+artifacts. Start with this read-only dry run; it freezes and reports the S2S
+maximum result ID only. Progress JSON is written to stderr and the final report
+is stdout's final line.
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=24h \
+  --wait \
+  --args='migrate,backfill-normalized-s2s-storage,--min-result-id=1,--batch-size=100'
+```
+
+An apply requires explicit approval and the frozen maximum from the dry run:
+add `--max-result-id=N,--apply`. Progress phases are `qualifying_run_count`,
+`source_reconciliation`, `post_write_verification`, `public_parity`, and
+`rollup_verification`, bracketed by the `operation` phase. Events include both
+completed and durably committed run/result checkpoints. On failure, restart the
+same frozen window: deterministic backfill IDs and exact natural-key
+reconciliation make committed pages idempotent.
+
+The default is 100 run IDs/page. A page bounds planning memory and one top-level
+write transaction; a failed page rolls back its observations, evaluations,
+values, and bucket refreshes together while earlier pages remain committed.
+Larger pages reduce query and checkpoint overhead but increase memory,
+transaction duration, rollback work, and the distance between durable
+checkpoints. Each affected scheduled bucket is refreshed under the existing
+per-bucket advisory transaction lock.
+
+The final verification is independent of source-pass counters. It freshly
+re-plans the frozen complete-run cohort, compares the complete normalized S2S
+observation population, compares public legacy values with normalized primary
+values exactly, and compares every stored rollup field (including `value_sum`)
+with a fresh aggregate. Bounded mismatch details accompany exact mismatch
+counts. `backfill_complete` means this frozen migration window reconciles; it
+does not claim global cutover readiness.
+
+The local helper creates, migrates, seeds, benchmarks, and removes a uniquely
+named disposable database. Its default seed uses 450 runs, 50 conversations per
+run, and one to three metrics per conversation; each batch size runs in a fresh
+child process so peak RSS is comparable. Query duration is cumulative
+client-observed SQL execution time. The administrative URL must be loopback and
+its role must be allowed to create and drop databases.
+
+```bash
+uv run python scripts/benchmark_normalized_s2s_backfill.py \
+  --admin-database-url postgresql://postgres:postgres@127.0.0.1:5432/postgres \
+  --batch-sizes 25,100,400 \
+  --warmups 1 \
+  --iterations 1 \
+  --format markdown
+```
+
+No production-size measurement is recorded here yet, so 100 remains the
+conservative default. Roll out the read-only dry run, obtain explicit approval
+for the frozen apply, then use the separate readiness/cutover process. Do not
+enable normalized dashboard reads, broaden the STT/TTS backfill, or combine
+this runbook with the asynchronous-runner follow-up.
+
 ### Normalized read-index benchmark
 
 With Docker Postgres running, compare the baseline and the two candidate indexes
