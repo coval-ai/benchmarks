@@ -439,6 +439,7 @@ class Case:
     expected_drift: frozenset[str]
     pins: dict[str, Any]
     wraps_in_data: bool
+    echo: Any = None
 
 
 CASES = [
@@ -495,6 +496,14 @@ CASES = [
             "interruption_settings.start_speaking_plan.wait_seconds": 0.8,
         },
         wraps_in_data=True,
+        echo=lambda patched: {
+            **patched,
+            "tool_ids": None,
+            "tools": [
+                {**tool, "tool_id": f"tool-{i}", "shared": False, "timeout_ms": 5000}
+                for i, tool in enumerate(patched.get("tools", []))
+            ],
+        },
     ),
 ]
 
@@ -526,7 +535,9 @@ def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
             return httpx.Response(200, json=agent(state.get("live", case.live)))
         if request.url.path == case.agent_path:
             state["patched"] = json.loads(request.content)
-            return httpx.Response(200, json=agent(state["patched"]))
+            echoed = case.echo(state["patched"]) if case.echo else state["patched"]
+            state["live"] = {**case.live, **echoed}
+            return httpx.Response(200, json=agent(state["live"]))
         if request.url.path == "/v2/integration_secrets" and request.method == "GET":
             return httpx.Response(200, json={"data": [{"identifier": i} for i in state["secrets"]]})
         if request.url.path == "/v2/integration_secrets":
@@ -592,7 +603,8 @@ def test_every_platform_pins_what_its_row_declares(case: Case) -> None:
 
 
 def test_plan_flags_exactly_the_drift_on_the_live_agent(case: Case) -> None:
-    result = plan(case.live, desired(spec_for(case.key), BASE))
+    spec = spec_for(case.key)
+    result = plan(case.live, desired(spec, BASE), platform_for(spec).canon)
     assert set(result.update) == set(case.expected_drift)
 
 
@@ -607,7 +619,6 @@ def test_dry_run_reports_without_writing_then_apply_converges(case: Case) -> Non
         applied = apply(client, spec, wanted)
         assert (case.update_method, case.agent_path) in state["calls"]
         assert set(applied.update) == set(case.expected_drift)
-        state["live"] = {**case.live, **state["patched"]}
         assert drift(client, spec, BASE) == []
 
 
@@ -716,3 +727,13 @@ def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env
         prepare_telnyx(client, spec, False)
         assert prepare_telnyx(client, spec, False) == []
     assert state["recv"] == "from_anyone"
+
+
+def test_telnyx_canon_ignores_what_the_server_adds_to_tools(telnyx_env: Case) -> None:
+    from coval_bench.platform_assets import TELNYX_CANON
+
+    (tool, *_) = desired(spec_for("telnyx-dental"), BASE)["tools"]
+    echoed = [{**tool, "tool_id": "tool-1", "shared": False, "timeout_ms": 5000}]
+    assert TELNYX_CANON["tools"](echoed) == [tool]
+    assert TELNYX_CANON["tool_ids"](None) == []
+    assert TELNYX_CANON["tool_ids"](["t"]) == ["t"]

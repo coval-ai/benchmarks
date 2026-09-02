@@ -81,6 +81,7 @@ class AgentClient(Protocol):
 
 ToolRenderer = Callable[[list[dict[str, Any]], str, str], list[dict[str, Any]]]
 Pin = Callable[[Stack], Any]
+Canon = Callable[[Any], Any]
 ClientFactory = Callable[[str, str], AgentClient]
 Prepare = Callable[[AgentClient, PlatformAgentSpec, bool], list[str]]
 
@@ -95,6 +96,7 @@ class Platform:
     tools_path: str
     render_tools: ToolRenderer
     pins: Mapping[str, Pin] = field(default_factory=dict)
+    canon: Mapping[str, Canon] = field(default_factory=dict)
     prepare: Prepare | None = None
 
 
@@ -247,6 +249,26 @@ TELNYX_PINS: dict[str, Pin] = {
 }
 
 
+TELNYX_SERVER_TOOL_KEYS = frozenset({"tool_id", "shared", "timeout_ms"})
+
+
+def _telnyx_canon_tools(live: Any) -> Any:  # noqa: ANN401
+    if not isinstance(live, list):
+        return live
+    return [
+        {k: v for k, v in tool.items() if k not in TELNYX_SERVER_TOOL_KEYS}
+        if isinstance(tool, dict)
+        else tool
+        for tool in live
+    ]
+
+
+TELNYX_CANON: dict[str, Canon] = {
+    "tools": _telnyx_canon_tools,
+    "tool_ids": lambda live: live or [],
+}
+
+
 def sip_subdomain(dial_target: str) -> str:
     """The Telnyx subdomain a ``sip:user@<sub>.sip.telnyx.com`` target names."""
     host = dial_target.split("@", 1)[-1].split(":", 1)[0].lower()
@@ -341,6 +363,7 @@ PLATFORMS: dict[str, Platform] = {
         tools_path="tools",
         render_tools=render_telnyx_tools,
         pins=TELNYX_PINS,
+        canon=TELNYX_CANON,
         prepare=prepare_telnyx,
     ),
 }
@@ -436,10 +459,15 @@ def desired(spec: PlatformAgentSpec, mock_base_url: str) -> dict[str, Any]:
     return wanted
 
 
-def plan(live: dict[str, Any], wanted: dict[str, Any]) -> Plan:
+def plan(
+    live: dict[str, Any], wanted: dict[str, Any], canon: Mapping[str, Canon] | None = None
+) -> Plan:
+    """Compare each managed path, after the platform's canonicaliser strips what the vendor adds."""
     result = Plan()
     for path, value in wanted.items():
         current = _get_path(live, path)
+        if canon and path in canon:
+            current = canon[path](current)
         if current == value:
             result.unchanged.append(path)
         else:
@@ -467,7 +495,7 @@ def apply(
     prepared = platform.prepare(client, spec, dry_run) if platform.prepare else []
     agent_id = spec.agent_id.resolve()
     live = client.get_agent(agent_id)
-    result = plan(live, wanted)
+    result = plan(live, wanted, platform.canon)
     result.prepared = prepared
     if result.update and not dry_run:
         client.update_agent(agent_id, patch_body(live, wanted))
