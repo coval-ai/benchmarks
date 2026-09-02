@@ -20,6 +20,7 @@ __all__ = [
     "PRESET_PREFIX",
     "Codec",
     "Correlation",
+    "Request",
     "ToolCall",
     "codec_for",
 ]
@@ -50,12 +51,31 @@ class Correlation:
 
 
 @dataclass(frozen=True)
+class Request:
+    """One tool call as the platform would put it on the wire, minus the shared secret."""
+
+    path: str
+    headers: dict[str, str]
+    body: Any
+
+
+@dataclass(frozen=True)
 class Codec:
     name: str
     tool_in_path: bool
     decode: Callable[[Body, Mapping[str, str], str | None], list[ToolCall]]
     correlate: Callable[[Body, Mapping[str, str]], Correlation]
     encode: Callable[[list[ToolCall], list[Outcome]], tuple[Any, int]]
+    encode_request: Callable[[str, dict[str, Any], Correlation], Request]
+
+
+def _coval_header_values(correlation: Correlation) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if correlation.simulation_id:
+        headers[SIMULATION_HEADER] = correlation.simulation_id
+    if correlation.caller_number:
+        headers[CALLER_HEADER] = correlation.caller_number
+    return headers
 
 
 def _coval_headers(headers: Mapping[str, str]) -> Correlation:
@@ -80,12 +100,17 @@ def _generic_encode(_calls: list[ToolCall], outcomes: list[Outcome]) -> tuple[An
     return outcomes[0].response, 200
 
 
+def _generic_request(tool: str, args: dict[str, Any], correlation: Correlation) -> Request:
+    return Request(f"/mock/generic/{tool}", _coval_header_values(correlation), dict(args))
+
+
 GENERIC = Codec(
     name="generic",
     tool_in_path=True,
     decode=_generic_decode,
     correlate=lambda _body, headers: _coval_headers(headers),
     encode=_generic_encode,
+    encode_request=_generic_request,
 )
 
 
@@ -116,12 +141,22 @@ def _telnyx_correlate(body: Body, headers: Mapping[str, str]) -> Correlation:
     return Correlation()
 
 
+def _telnyx_request(tool: str, args: dict[str, Any], correlation: Correlation) -> Request:
+    body = dict(args)
+    if correlation.simulation_id:
+        body[PRESET_SIMULATION] = correlation.simulation_id
+    if correlation.caller_number:
+        body[PRESET_CALLER] = correlation.caller_number
+    return Request(f"/mock/telnyx/{tool}", {}, body)
+
+
 TELNYX = Codec(
     name="telnyx",
     tool_in_path=True,
     decode=_telnyx_decode,
     correlate=_telnyx_correlate,
     encode=_generic_encode,
+    encode_request=_telnyx_request,
 )
 
 
@@ -185,12 +220,30 @@ def _vapi_encode(calls: list[ToolCall], outcomes: list[Outcome]) -> tuple[Any, i
     }, 200
 
 
+def _vapi_request(tool: str, args: dict[str, Any], correlation: Correlation) -> Request:
+    call_id = f"{correlation.simulation_id or 'call'}-1"
+    body = {
+        "message": {
+            "type": "tool-calls",
+            "toolCallList": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": tool, "arguments": json.dumps(args)},
+                }
+            ],
+        }
+    }
+    return Request("/mock/vapi", _coval_header_values(correlation), body)
+
+
 VAPI = Codec(
     name="vapi",
     tool_in_path=False,
     decode=_vapi_decode,
     correlate=_vapi_correlate,
     encode=_vapi_encode,
+    encode_request=_vapi_request,
 )
 
 

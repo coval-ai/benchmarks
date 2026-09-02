@@ -18,6 +18,7 @@ from coval_bench.mocktools.codecs import (
     PRESET_SIMULATION,
     TELNYX,
     VAPI,
+    Correlation,
     ToolCall,
     codec_for,
 )
@@ -295,3 +296,30 @@ def test_codec_for_names_the_known_set_on_a_miss() -> None:
 def test_each_codec_declares_where_the_tool_name_lives(name: str, tool_in_path: bool) -> None:
     assert codec_for(name).tool_in_path is tool_in_path
     assert CODECS[name].name == name
+
+
+# --- encode_request: the client side of every codec ------------------------
+
+
+@pytest.mark.parametrize("codec", list(CODECS.values()), ids=lambda c: c.name)
+def test_encode_request_round_trips_through_decode_and_correlate(codec: codecs.Codec) -> None:
+    request = codec.encode_request("lookup_patient", {"phone": PHONE}, Correlation(SIM, "+1404"))
+    tool = "lookup_patient" if codec.tool_in_path else None
+    (call,) = codec.decode(request.body, request.headers, tool)
+    assert (call.tool, call.args) == ("lookup_patient", {"phone": PHONE})
+    found = codec.correlate(request.body, request.headers)
+    assert (found.simulation_id, found.caller_number) == (SIM, "+1404")
+
+
+@pytest.mark.parametrize("codec", list(CODECS.values()), ids=lambda c: c.name)
+def test_encode_request_names_the_route_the_router_serves(codec: codecs.Codec) -> None:
+    path = codec.encode_request("lookup_patient", {}, Correlation()).path
+    assert path == (
+        f"/mock/{codec.name}/lookup_patient" if codec.tool_in_path else f"/mock/{codec.name}"
+    )
+
+
+def test_encode_request_never_carries_the_shared_secret() -> None:
+    for codec in CODECS.values():
+        request = codec.encode_request("lookup_patient", {}, Correlation(SIM))
+        assert "x-mock-tools-key" not in {k.lower() for k in request.headers}

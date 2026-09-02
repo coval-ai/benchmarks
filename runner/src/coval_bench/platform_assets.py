@@ -6,7 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -17,17 +17,21 @@ from pydantic import BaseModel, Field
 from coval_bench.assets import SecretRef
 from coval_bench.config import Settings
 from coval_bench.contracts import (
+    Stack,
     contract_sha256,
     has_private_contract,
     load_stack,
     read_contract_file,
 )
 from coval_bench.fixture_sources import install_fixture_providers
+from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
 from coval_bench.variants.platforms import redact
 
 TOOL_TIMEOUT_SECONDS = 20
 SIMULATION_HEADER_TEMPLATE = "{{coval-simulation-id}}"
 TOOLS_PATH = "model.tools"
+TELNYX_SIP_SUFFIX = ".sip.telnyx.com"
+TELNYX_SIP_RECEIVE = "from_anyone"
 COVAL_API_BASE = "https://api.coval.dev/v1"
 COVAL_MODEL_TYPE = "MODEL_TYPE_VOICE"
 COVAL_PROMPT_FILE = "_source/coval-prompt.txt"
@@ -36,6 +40,22 @@ _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 COVAL_API_KEY = SecretRef(
     name="COVAL_API_KEY", purpose="the Coval API key for the benchmarking org"
 )
+
+
+TELNYX_SECRETS: dict[str, SecretRef] = {
+    "coval-bench-openai": SecretRef(
+        name="OPENAI_API_KEY", purpose="the OpenAI key Telnyx bills LLM calls to"
+    ),
+    "coval-bench-elevenlabs": SecretRef(
+        name="ELEVENLABS_API_KEY", purpose="the ElevenLabs key Telnyx synthesises with"
+    ),
+    "coval-bench-mock": SecretRef(
+        name="MOCK_TOOLS_SECRET", purpose="the shared secret the mock tool endpoint requires"
+    ),
+}
+TELNYX_LLM_REF = "coval-bench-openai"
+TELNYX_TTS_REF = "coval-bench-elevenlabs"
+TELNYX_MOCK_REF = "coval-bench-mock"
 
 
 class SyncError(RuntimeError):
@@ -59,19 +79,24 @@ class AgentClient(Protocol):
     def update_agent(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]: ...
 
 
-Renderer = Callable[[PlatformAgentSpec, str, str], dict[str, Any]]
+ToolRenderer = Callable[[list[dict[str, Any]], str, str], list[dict[str, Any]]]
+Pin = Callable[[Stack], Any]
+Canon = Callable[[Any], Any]
 ClientFactory = Callable[[str, str], AgentClient]
 Prepare = Callable[[AgentClient, PlatformAgentSpec, bool], list[str]]
-Probe = Callable[[dict[str, Any], dict[str, Any], str, str], tuple[str, dict[str, str], Any]]
 
 
 @dataclass(frozen=True)
 class Platform:
+    """One vendor: where its API is, how a tool is spelled, and which paths carry the pin."""
+
     name: str
     api_base: str
-    render: Renderer
     client: ClientFactory
-    probe: Probe
+    tools_path: str
+    render_tools: ToolRenderer
+    pins: Mapping[str, Pin] = field(default_factory=dict)
+    canon: Mapping[str, Canon] = field(default_factory=dict)
     prepare: Prepare | None = None
 
 
@@ -155,30 +180,6 @@ def render_vapi_tools(
     ]
 
 
-def render_vapi(spec: PlatformAgentSpec, mock_base_url: str, secret: str) -> dict[str, Any]:
-    definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
-    return {TOOLS_PATH: render_vapi_tools(definitions, mock_base_url, secret)}
-
-
-def probe_vapi(
-    tool: dict[str, Any], args: dict[str, Any], secret: str, simulation_id: str
-) -> tuple[str, dict[str, str], Any]:
-    headers = {"X-Mock-Tools-Key": secret, "X-Coval-Simulation-Id": simulation_id}
-    body = {
-        "message": {
-            "type": "tool-calls",
-            "toolCallList": [
-                {
-                    "id": f"{simulation_id}-1",
-                    "type": "function",
-                    "function": {"name": tool["function"]["name"], "arguments": json.dumps(args)},
-                }
-            ],
-        }
-    }
-    return str(tool["server"]["url"]), headers, body
-
-
 class VapiClient(_JsonClient):
     def __init__(
         self, api_key: str, base_url: str, transport: httpx.BaseTransport | None = None
@@ -195,6 +196,155 @@ class VapiClient(_JsonClient):
         return self._request("PATCH", f"/assistant/{agent_id}", body)
 
 
+# --- telnyx ----------------------------------------------------------------
+
+
+def _mustache_secret(identifier: str) -> str:
+    return f"{{{{#integration_secret}}}}{identifier}{{{{/integration_secret}}}}"
+
+
+def render_telnyx_tools(
+    definitions: list[dict[str, Any]], mock_base_url: str, _secret: str
+) -> list[dict[str, Any]]:
+    base = mock_base_url.rstrip("/")
+    return [
+        {
+            "type": "webhook",
+            "webhook": {
+                "name": definition["name"],
+                "description": definition["description"],
+                "url": f"{base}/mock/telnyx/{definition['name']}",
+                "method": "POST",
+                "headers": [
+                    {"name": "X-Mock-Tools-Key", "value": _mustache_secret(TELNYX_MOCK_REF)}
+                ],
+                "body_parameters": definition["parameters"],
+                "preset_body_fields": {
+                    PRESET_SIMULATION: "{{coval_simulation_id}}",
+                    PRESET_CALLER: "{{telnyx_end_user_target}}",
+                },
+                "timeout_ms": TOOL_TIMEOUT_SECONDS * 1000,
+                "async": False,
+            },
+        }
+        for definition in definitions
+    ]
+
+
+TELNYX_PINS: dict[str, Pin] = {
+    "model": lambda stack: f"{stack.llm.provider}/{stack.llm.model}",
+    "llm_api_key_ref": lambda _stack: TELNYX_LLM_REF,
+    "transcription.model": lambda stack: f"{stack.stt.provider}/{stack.stt.model}",
+    "transcription.language": lambda _stack: "en",
+    "voice_settings.voice": lambda stack: f"ElevenLabs.{stack.tts.model}.{stack.tts.voice_id}",
+    "voice_settings.api_key_ref": lambda _stack: TELNYX_TTS_REF,
+    "voice_settings.expressive_mode": lambda _stack: False,
+    "tool_ids": lambda _stack: [],
+    "telephony_settings.recording_settings.enabled": (
+        lambda stack: stack.platform_behaviour.vendor_post_call_analysis
+    ),
+    "interruption_settings.start_speaking_plan.wait_seconds": (
+        lambda stack: stack.turn_taking.end_of_turn_target_ms / 1000
+    ),
+}
+
+
+TELNYX_SERVER_TOOL_KEYS = frozenset({"tool_id", "shared", "timeout_ms"})
+
+
+def _telnyx_canon_tools(live: Any) -> Any:  # noqa: ANN401
+    if not isinstance(live, list):
+        return live
+    return [
+        {k: v for k, v in tool.items() if k not in TELNYX_SERVER_TOOL_KEYS}
+        if isinstance(tool, dict)
+        else tool
+        for tool in live
+    ]
+
+
+TELNYX_CANON: dict[str, Canon] = {
+    "tools": _telnyx_canon_tools,
+    "tool_ids": lambda live: live or [],
+}
+
+
+def sip_subdomain(dial_target: str) -> str:
+    """The Telnyx subdomain a ``sip:user@<sub>.sip.telnyx.com`` target names."""
+    host = dial_target.split("@", 1)[-1].split(":", 1)[0].lower()
+    if not dial_target.lower().startswith("sip:") or not host.endswith(TELNYX_SIP_SUFFIX):
+        raise SyncError(f"{dial_target!r} is not a sip:...@<sub>{TELNYX_SIP_SUFFIX} target")
+    return host.removesuffix(TELNYX_SIP_SUFFIX)
+
+
+class TelnyxClient(_JsonClient):
+    def __init__(
+        self, api_key: str, base_url: str, transport: httpx.BaseTransport | None = None
+    ) -> None:
+        super().__init__(base_url, {"Authorization": f"Bearer {api_key}"}, transport)
+
+    def __enter__(self) -> TelnyxClient:
+        return self
+
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        return _unwrap(self._request("GET", f"/ai/assistants/{agent_id}"))
+
+    def update_agent(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        return _unwrap(self._request("POST", f"/ai/assistants/{agent_id}", body))
+
+    def secret_identifiers(self) -> set[str]:
+        payload = self._request("GET", "/integration_secrets", params={"page[size]": 250})
+        return {str(item.get("identifier")) for item in payload.get("data", [])}
+
+    def create_secret(self, identifier: str, token: str) -> None:
+        self._request(
+            "POST",
+            "/integration_secrets",
+            {"identifier": identifier, "type": "bearer", "token": token},
+        )
+
+    def get_texml_app(self, app_id: str) -> dict[str, Any]:
+        return _unwrap(self._request("GET", f"/texml_applications/{app_id}"))
+
+    def set_sip_subdomain(self, app_id: str, subdomain: str) -> None:
+        self._request(
+            "PATCH",
+            f"/texml_applications/{app_id}",
+            {
+                "inbound": {
+                    "sip_subdomain": subdomain,
+                    "sip_subdomain_receive_settings": TELNYX_SIP_RECEIVE,
+                }
+            },
+        )
+
+
+def prepare_telnyx(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) -> list[str]:
+    """Ensure the integration secrets and SIP subdomain exist before the assistant is patched."""
+    if not isinstance(client, TelnyxClient):
+        raise SyncError("telnyx prepare needs a TelnyxClient")
+    pending: list[str] = []
+    present = client.secret_identifiers()
+    for identifier, ref in TELNYX_SECRETS.items():
+        if identifier in present:
+            continue
+        pending.append(f"integration_secret:{identifier}")
+        if not dry_run:
+            client.create_secret(identifier, ref.resolve())
+    wanted = sip_subdomain(spec.dial_target.resolve())
+    live = client.get_agent(spec.agent_id.resolve())
+    app_id = str(_get_path(live, "telephony_settings.default_texml_app_id") or "")
+    if not app_id:
+        raise SyncError("the assistant has no telephony_settings.default_texml_app_id")
+    inbound = _get_path(client.get_texml_app(app_id), "inbound") or {}
+    current = (inbound.get("sip_subdomain"), inbound.get("sip_subdomain_receive_settings"))
+    if current != (wanted, TELNYX_SIP_RECEIVE):
+        pending.append(f"sip_subdomain:{app_id}={wanted}:{TELNYX_SIP_RECEIVE}")
+        if not dry_run:
+            client.set_sip_subdomain(app_id, wanted)
+    return pending
+
+
 # --- the table -------------------------------------------------------------
 
 
@@ -202,9 +352,19 @@ PLATFORMS: dict[str, Platform] = {
     "vapi": Platform(
         name="vapi",
         api_base="https://api.vapi.ai",
-        render=render_vapi,
         client=VapiClient,
-        probe=probe_vapi,
+        tools_path=TOOLS_PATH,
+        render_tools=render_vapi_tools,
+    ),
+    "telnyx": Platform(
+        name="telnyx",
+        api_base="https://api.telnyx.com/v2",
+        client=TelnyxClient,
+        tools_path="tools",
+        render_tools=render_telnyx_tools,
+        pins=TELNYX_PINS,
+        canon=TELNYX_CANON,
+        prepare=prepare_telnyx,
     ),
 }
 
@@ -225,6 +385,26 @@ AGENTS: tuple[PlatformAgentSpec, ...] = (
         dial_target=SecretRef(
             name="VAPI_DENTAL_DIAL_TARGET",
             purpose="the sip: URI Coval dials to reach the Vapi dental assistant",
+        ),
+    ),
+    PlatformAgentSpec(
+        key="telnyx-dental",
+        platform="telnyx",
+        suite="dental",
+        agent_id=SecretRef(
+            name="TELNYX_DENTAL_ASSISTANT_ID",
+            purpose="the Telnyx assistant id for the dental suite",
+        ),
+        api_key=SecretRef(
+            name="TELNYX_API_KEY", purpose="the Telnyx v2 API key for the benchmark account"
+        ),
+        mock_secret=SecretRef(
+            name="MOCK_TOOLS_SECRET",
+            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
+        ),
+        dial_target=SecretRef(
+            name="TELNYX_DENTAL_DIAL_TARGET",
+            purpose="the sip:...@<sub>.sip.telnyx.com URI Coval dials; names the subdomain",
         ),
     ),
 )
@@ -268,13 +448,26 @@ def _set_path(body: dict[str, Any], path: str, value: Any) -> None:  # noqa: ANN
 
 
 def desired(spec: PlatformAgentSpec, mock_base_url: str) -> dict[str, Any]:
-    return platform_for(spec).render(spec, mock_base_url, spec.mock_secret.resolve())
+    """Every managed path and the value the contract says it should hold."""
+    platform = platform_for(spec)
+    stack = load_stack()
+    definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
+    wanted: dict[str, Any] = {path: pin(stack) for path, pin in platform.pins.items()}
+    wanted[platform.tools_path] = platform.render_tools(
+        definitions, mock_base_url, spec.mock_secret.resolve()
+    )
+    return wanted
 
 
-def plan(live: dict[str, Any], wanted: dict[str, Any]) -> Plan:
+def plan(
+    live: dict[str, Any], wanted: dict[str, Any], canon: Mapping[str, Canon] | None = None
+) -> Plan:
+    """Compare each managed path, after the platform's canonicaliser strips what the vendor adds."""
     result = Plan()
     for path, value in wanted.items():
         current = _get_path(live, path)
+        if canon and path in canon:
+            current = canon[path](current)
         if current == value:
             result.unchanged.append(path)
         else:
@@ -302,7 +495,7 @@ def apply(
     prepared = platform.prepare(client, spec, dry_run) if platform.prepare else []
     agent_id = spec.agent_id.resolve()
     live = client.get_agent(agent_id)
-    result = plan(live, wanted)
+    result = plan(live, wanted, platform.canon)
     result.prepared = prepared
     if result.update and not dry_run:
         client.update_agent(agent_id, patch_body(live, wanted))
@@ -539,21 +732,18 @@ def assets_apply(agent_key: str, mock_base_url: str, api_base: str | None, yes: 
 def assets_smoke(agent_key: str, mock_base_url: str, tool: str, args: tuple[str, ...]) -> None:
     """Fire one tool call at /mock exactly as this platform would, and print the answer."""
     spec = spec_for(agent_key)
-    platform = platform_for(spec)
-    rendered = desired(spec, mock_base_url)
-    tools = rendered.get(TOOLS_PATH) or rendered.get("tools") or []
-    wanted = next(
-        (t for t in tools if (t.get("function") or t.get("webhook") or {}).get("name") == tool),
-        None,
-    )
-    if wanted is None:
+    codec = codec_for(spec.platform)
+    definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
+    if tool not in {d["name"] for d in definitions}:
         raise click.ClickException(f"{tool!r} is not in the {spec.suite} contract")
     call_args = dict(item.split("=", 1) for item in args)
     simulation_id = f"smoke-{spec.key}-{int(time.time())}"
-    url, headers, body = platform.probe(
-        wanted, call_args, spec.mock_secret.resolve(), simulation_id
+    request = codec.encode_request(
+        tool, call_args, Correlation(simulation_id, "+15550100000", source="smoke")
     )
-    response = httpx.post(url, headers=headers, json=body, timeout=_TIMEOUT)
+    headers = {**request.headers, "X-Mock-Tools-Key": spec.mock_secret.resolve()}
+    url = f"{mock_base_url.rstrip('/')}{request.path}"
+    response = httpx.post(url, headers=headers, json=request.body, timeout=_TIMEOUT)
     click.echo(f"POST {url} -> {response.status_code}")
     click.echo(response.text[:800])
     click.echo(f"simulation_id sent: {simulation_id}")
