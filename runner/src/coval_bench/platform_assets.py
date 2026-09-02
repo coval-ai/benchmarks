@@ -15,7 +15,14 @@ import httpx
 from pydantic import BaseModel, Field
 
 from coval_bench.assets import SecretRef
-from coval_bench.contracts import contract_sha256, load_stack, read_contract_file
+from coval_bench.config import Settings
+from coval_bench.contracts import (
+    contract_sha256,
+    has_private_contract,
+    load_stack,
+    read_contract_file,
+)
+from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.variants.platforms import redact
 
 TOOL_TIMEOUT_SECONDS = 20
@@ -356,7 +363,21 @@ class CovalClient(_JsonClient):
         return run if isinstance(run, dict) else payload
 
 
-COVAL_MANAGED = ("phone_number", "prompt", "metadata", "attributes")
+COVAL_MANAGED = ("phone_number", "prompt", "metadata", "attributes", "display_name", "tags")
+
+
+def published_contract_sha256(suite: str) -> str:
+    """The hash a run or agent may be labelled with; refuses when the fixtures are unreadable here.
+
+    ``contract_sha256`` falls back to the public files alone, which would label the
+    run with a number that does not describe the seeded world the mock answered from.
+    """
+    if not has_private_contract(suite):
+        raise SyncError(
+            f"no mock fixtures for {suite!r} here (checkout or MOCK_FIXTURES_BUCKET); "
+            "the contract hash would omit the seeded world"
+        )
+    return contract_sha256(suite)
 
 
 def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
@@ -373,7 +394,7 @@ def coval_agent_body(spec: PlatformAgentSpec) -> dict[str, Any]:
         "attributes": {
             "platform": spec.platform,
             "suite": spec.suite,
-            "contract_sha256": contract_sha256(spec.suite),
+            "contract_sha256": published_contract_sha256(spec.suite),
         },
         "tags": ["orchestration", spec.suite, spec.platform],
     }
@@ -390,6 +411,11 @@ def register(
         if dry_run:
             return "", result
         return str(client.create_agent(wanted)["id"]), result
+    if live.get("model_type") != COVAL_MODEL_TYPE:
+        raise SyncError(
+            f"coval agent {live.get('id')} is {live.get('model_type')!r}, not {COVAL_MODEL_TYPE}; "
+            "model_type cannot be patched, so this record is not ours to reconcile"
+        )
     result = plan(live, {path: wanted[path] for path in COVAL_MANAGED})
     if result.update and not dry_run:
         client.update_agent(str(live["id"]), {path: wanted[path] for path in result.update})
@@ -411,7 +437,7 @@ def launch_body(
     sample: int,
     seed: int,
 ) -> dict[str, Any]:
-    sha = contract_sha256(spec.suite)
+    sha = published_contract_sha256(spec.suite)
     return {
         "agent_id": agent_id,
         "persona_id": persona_id,
@@ -540,6 +566,7 @@ def assets_smoke(agent_key: str, mock_base_url: str, tool: str, args: tuple[str,
 def assets_register(agent_key: str, coval_api_base: str, yes: bool) -> None:
     """Create or reconcile the Coval agent that dials this variant."""
     spec = spec_for(agent_key)
+    install_fixture_providers(Settings())
     with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
         agent_id, preview = register(client, spec, dry_run=True)
         _echo_plan(preview)
@@ -581,27 +608,31 @@ def assets_launch(
     wait: bool,
     allow_drift: bool,
 ) -> None:
-    """Launch one Coval run against this variant's registered agent, once the platform matches."""
+    """Launch one Coval run against this variant, once both the platform and Coval agent match."""
     spec = spec_for(agent_key)
+    install_fixture_providers(Settings())
     platform = platform_for(spec)
     with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
         pending = drift(client, spec, mock_base_url)
-    if pending:
-        message = f"{agent_key} drifts from the contract: {pending}; run apply first"
-        if not allow_drift:
-            raise click.ClickException(message)
-        click.echo(f"warning: {message}")
-    with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
-        agent = client.find_agent(spec.key)
-        if agent is None:
+    with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as coval:
+        agent_id, coval_plan = register(coval, spec, dry_run=True)
+        if not agent_id:
             raise click.ClickException(f"no Coval agent for {agent_key}; run register first")
-        run = client.launch_run(
-            launch_body(str(agent["id"]), spec, persona_id, test_set_id, metric_ids, sample, seed)
+        pending += [f"coval:{path}" for path in sorted(coval_plan.update)]
+        if pending:
+            message = (
+                f"{agent_key} drifts from the contract: {pending}; run apply and register first"
+            )
+            if not allow_drift:
+                raise click.ClickException(message)
+            click.echo(f"warning: {message}")
+        run = coval.launch_run(
+            launch_body(agent_id, spec, persona_id, test_set_id, metric_ids, sample, seed)
         )
         run_id = str(run.get("run_id") or run.get("id"))
         click.echo(f"run_id: {run_id} status: {run.get('status')}")
         click.echo("open this run id in the Coval UI to watch the simulation")
         while wait and run.get("status") not in {"COMPLETED", "FAILED", "CANCELLED", "DELETED"}:
             time.sleep(30)
-            run = client.get_run(run_id)
+            run = coval.get_run(run_id)
             click.echo(f"status: {run.get('status')} progress: {run.get('progress')}")

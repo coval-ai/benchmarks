@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import pytest
 
+import coval_bench.platform_assets as platform_assets
 from coval_bench.assets import SecretRef
 from coval_bench.contracts import read_contract_file
 from coval_bench.platform_assets import (
@@ -59,6 +60,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAPI_API_KEY", "vapi-key")
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
     monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:appointment-dental@sip.vapi.ai")
+    monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: True)
 
 
 def _client(handler: Any) -> VapiClient:  # noqa: ANN401
@@ -338,7 +340,7 @@ def test_register_creates_the_coval_agent_when_absent(env: None) -> None:
     with _coval_client(state) as client:
         agent_id, result = register(client, DENTAL)
     assert agent_id == "A" * 22
-    assert set(result.update) == {"phone_number", "prompt", "metadata", "attributes"}
+    assert set(result.update) == set(platform_assets.COVAL_MANAGED)
     assert state["agents"][0]["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
 
 
@@ -366,7 +368,7 @@ def test_register_dry_run_writes_nothing(env: None) -> None:
     with _coval_client(state) as client:
         agent_id, result = register(client, DENTAL, dry_run=True)
     assert agent_id == ""
-    assert len(result.update) == 4
+    assert len(result.update) == len(platform_assets.COVAL_MANAGED) == 6
     assert all(method == "GET" for method, _ in state["calls"])
 
 
@@ -408,3 +410,34 @@ def test_drift_is_empty_once_the_platform_matches(env: None) -> None:
     synced = {**LIVE, "model": {**LIVE["model"], "tools": desired(DENTAL, BASE)["model.tools"]}}
     with _client(lambda r: httpx.Response(200, json=synced)) as client:
         assert drift(client, DENTAL, BASE) == []
+
+
+def test_register_reconciles_display_name_and_tags_too(env: None) -> None:
+    live = {**coval_agent_body(DENTAL), "id": "A", "display_name": "old name", "tags": []}
+    state: dict[str, Any] = {"agents": [live]}
+    with _coval_client(state) as client:
+        _, result = register(client, DENTAL)
+    assert sorted(result.update) == ["display_name", "tags"]
+    assert state["patched"] == {
+        "display_name": "vapi-dental",
+        "tags": ["orchestration", "dental", "vapi"],
+    }
+
+
+def test_register_refuses_a_non_voice_agent_with_our_customer_id(env: None) -> None:
+    live = {**coval_agent_body(DENTAL), "id": "A", "model_type": "MODEL_TYPE_SMS"}
+    with (
+        _coval_client({"agents": [live]}) as client,
+        pytest.raises(SyncError, match="MODEL_TYPE_SMS"),
+    ):
+        register(client, DENTAL)
+
+
+def test_contract_hash_refuses_to_label_without_the_fixtures(
+    env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: False)
+    with pytest.raises(SyncError, match="seeded world"):
+        coval_agent_body(DENTAL)
+    with pytest.raises(SyncError, match="seeded world"):
+        launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 1)
