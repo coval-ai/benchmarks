@@ -37,6 +37,7 @@
     "type": "TurnInfo",
     "request_id": "test-flux-request-001",
     "event": "EndOfTurn",
+    "trigger": "manual",
     "turn_index": 0,
     "audio_window_start": 0.0,
     "audio_window_end": 1.8,

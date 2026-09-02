@@ -514,8 +514,6 @@ async def test_refresh_series_bucket_never_raises(
 @pytest.mark.parametrize(
     ("provider_name", "model"),
     [
-        ("deepgram", "flux-general-en"),
-        ("deepgram", "flux-general-multi"),
         ("assemblyai", "universal-streaming"),
         ("assemblyai", "universal-streaming-multilingual"),
     ],
@@ -525,8 +523,8 @@ async def test_non_finalizing_models_excluded_from_ttfs(
 ) -> None:
     """Models that don't finalize on our end-of-speech signal get no TTFS row.
 
-    Flux has no client finalize; the AssemblyAI universal-streaming models ack
-    ForceEndpoint without flushing the tail. The other metrics still run.
+    The AssemblyAI universal-streaming models ack ForceEndpoint without
+    flushing the tail. The other metrics still run.
     """
     provider = MagicMock()
     provider.measure_ttft = AsyncMock(return_value=_good_transcription())
@@ -556,6 +554,43 @@ async def test_non_finalizing_models_excluded_from_ttfs(
     metric_types = {r.metric_type for r in _recorded_rows(writer)}
     assert "TTFS" not in metric_types
     assert metric_types == {"TTFT", "AudioToFinal", "RTF", "WER"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["flux-general-en", "flux-general-multi"])
+async def test_flux_models_included_in_ttfs(
+    model: str, audio_file: Path, settings: Settings
+) -> None:
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=_good_transcription())
+    matrix = [
+        *_paused_registry(Benchmark.STT),
+        _stt_entry("deepgram", model),
+    ]
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=matrix,
+        )
+
+    assert {r.metric_type for r in _recorded_rows(writer)} == {
+        "TTFT",
+        "AudioToFinal",
+        "RTF",
+        "TTFS",
+        "WER",
+    }
 
 
 @pytest.mark.asyncio
@@ -1900,7 +1935,100 @@ async def test_stt_partial_keeps_real_ttft(audio_file: Path, settings: Settings)
     assert by_metric["TTFT"].metric_value == 0.42
     assert by_metric["AudioToFinal"].status == ResultStatus.FAILED
     assert by_metric["RTF"].status == ResultStatus.FAILED
+    assert "WER" not in by_metric
     assert summary.status == str(RunStatus.PARTIAL)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "reason"),
+    [
+        ({"finalization_timed_out": True}, "finalization timed out"),
+        (
+            {"finalization_warning_code": "FORCE_END_TURN_NO_ACTIVE_TURN"},
+            "finalization ignored: FORCE_END_TURN_NO_ACTIVE_TURN",
+        ),
+    ],
+)
+async def test_stt_missing_final_carries_finalization_reason(
+    fields: dict[str, Any], reason: str, audio_file: Path, settings: Settings
+) -> None:
+    unfinalized = TranscriptionResult(
+        provider="deepgram", ttft_seconds=0.42, partial_transcripts=["hello"], **fields
+    )
+    provider_inst = MagicMock()
+    provider_inst.measure_ttft = AsyncMock(return_value=unfinalized)
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file)],
+        stt_providers={"deepgram": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ) as _:
+        await run_benchmarks(
+            settings=settings,
+            benchmark_kind="stt",
+            smoke=True,
+            matrix_overrides=_only_stt_matrix("deepgram", "flux-general-en"),
+        )
+
+    by_metric = {r.metric_type: r for r in _recorded_rows(writer)}
+    assert by_metric["TTFT"].status == ResultStatus.SUCCESS
+    assert by_metric["AudioToFinal"].error == reason
+    assert by_metric["TTFS"].error == reason
+    assert by_metric["RTF"].error == reason
+
+
+@pytest.mark.asyncio
+async def test_stt_normalized_timing_includes_finalization_diagnostics(
+    audio_file: Path, settings: Settings
+) -> None:
+    configured = settings.model_copy(
+        update={
+            "benchmark_artifact_bucket": "private-artifacts",
+            "normalized_dual_write_enabled": True,
+        }
+    )
+    transcription = _good_transcription()
+    transcription.finalization_latency_seconds = 0.12
+    transcription.finalization_trigger = "manual"
+    transcription.final_audio_window_end_seconds = 1.8
+    transcription.finalization_warning_code = None
+    transcription.finalization_timed_out = False
+    provider = MagicMock()
+    provider.measure_ttft = AsyncMock(return_value=transcription)
+    writer = _make_stub_writer(_make_run())
+
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        writer=writer,
+    ):
+        with patch(
+            "coval_bench.runner.normalized.dual_write", new_callable=AsyncMock
+        ) as dual_write:
+            await _run_stt_item(
+                entry=_stt_entry("deepgram", "flux-general-en"),
+                item=_make_dataset_item(audio_file),
+                run_id=1,
+                sem=asyncio.Semaphore(1),
+                settings=configured,
+                writer=writer,
+                dataset_id="stt-v3",
+                dataset_sha256="a" * 64,
+                artifact_client=object(),
+            )
+
+    assert dual_write.await_args is not None
+    timing = dual_write.await_args.kwargs["timing_events"]
+    assert timing["finalization_latency_seconds"] == 0.12
+    assert timing["finalization_trigger"] == "manual"
+    assert timing["final_audio_window_end_seconds"] == 1.8
+    assert timing["finalization_warning_code"] is None
+    assert timing["finalization_timed_out"] is False
 
 
 @pytest.mark.asyncio

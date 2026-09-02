@@ -16,7 +16,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import SecretStr
 
-from coval_bench.providers.stt import deepgram as deepgram_mod
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events  # noqa: E402
 
@@ -124,8 +123,9 @@ def test_build_websocket_url_flux() -> None:
     assert "interim_results" not in url
     assert "no_delay" not in url
     assert "channels" not in url
-    # endpointing is a v1-only param and Flux can't be forced anyway.
     assert "endpointing" not in url
+    assert "eot_threshold=1.0" in url
+    assert "eot_timeout_ms=60000" in url
     # filler_words is a v1-only param; Flux 400s on it.
     assert "filler_words" not in url
 
@@ -160,39 +160,22 @@ async def test_nova_sends_finalize_before_close(fake_api_key: SecretStr) -> None
     assert result.audio_to_final_seconds is not None
 
 
-@pytest.mark.asyncio
-async def test_flux_does_not_send_finalize(fake_api_key: SecretStr) -> None:
-    """flux: no Finalize; with no EndOfTurn, silence streams to the cap, then close."""
-    sent: list[Any] = []
-    ws = FakeWebSocket([], on_send=sent.append)
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
-    audio = b"\x01" * 640
-
-    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
-        await provider.measure_ttft(
-            audio_data=audio,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.01,
-        )
-
-    text = [m for m in sent if isinstance(m, str)]
-    assert not any("Finalize" in m for m in text)
-    assert '"CloseStream"' in text[-1]
-    assert any(isinstance(m, bytes) and set(m) == {0} for m in sent)
-
-
-class _TurnEventWS:
-    """Fake WS that emits an EndOfTurn keyed to how many audio bytes have arrived."""
-
-    def __init__(self, audio_len: int, eot_after: int) -> None:
+class _ForceEndTurnWS:
+    def __init__(
+        self,
+        audio_len: int,
+        *,
+        final_transcript: str = "hello world",
+        trigger: str = "manual",
+        warning_code: str | None = None,
+        emit_final: bool = True,
+    ) -> None:
         self.sent: list[Any] = []
         self._audio_len = audio_len
-        self._eot_after = eot_after
+        self._final_transcript = final_transcript
+        self._trigger = trigger
+        self._warning_code = warning_code
+        self._emit_final = emit_final
         self._bytes_seen = 0
         self._queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -204,13 +187,24 @@ class _TurnEventWS:
             if before < self._audio_len <= self._bytes_seen:
                 turn = {"type": "TurnInfo", "event": "Update", "turn_index": 0}
                 self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
-            if before < self._eot_after <= self._bytes_seen:
-                turn = {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 0}
-                self._queue.put_nowait(json.dumps({**turn, "transcript": "hello world"}))
+        elif isinstance(msg, str) and "ForceEndTurn" in msg:
+            if self._warning_code is not None:
+                self._queue.put_nowait(json.dumps({"type": "Warning", "code": self._warning_code}))
+                return
+            if not self._emit_final:
+                return
+            turn = {
+                "type": "TurnInfo",
+                "event": "EndOfTurn",
+                "turn_index": 0,
+                "trigger": self._trigger,
+                "audio_window_end": self._audio_len / 32000,
+            }
+            self._queue.put_nowait(json.dumps({**turn, "transcript": self._final_transcript}))
         elif isinstance(msg, str) and "CloseStream" in msg:
             self._queue.put_nowait(None)
 
-    def __aiter__(self) -> _TurnEventWS:
+    def __aiter__(self) -> _ForceEndTurnWS:
         return self
 
     async def __anext__(self) -> str:
@@ -221,13 +215,9 @@ class _TurnEventWS:
 
 
 @pytest.mark.asyncio
-async def test_flux_stops_silence_on_end_of_turn(
-    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """flux: trailing silence stops at EndOfTurn instead of running out the cap."""
-    monkeypatch.setattr("coval_bench.providers.stt.deepgram._FLUX_EOT_SILENCE_S", 5.0)
+async def test_flux_force_end_turn_before_close(fake_api_key: SecretStr) -> None:
     audio = b"\x01" * 640
-    ws = _TurnEventWS(audio_len=len(audio), eot_after=len(audio) + 1)
+    ws = _ForceEndTurnWS(audio_len=len(audio))
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -245,18 +235,22 @@ async def test_flux_stops_silence_on_end_of_turn(
     assert result.error is None
     assert result.audio_to_final_seconds is not None
     assert result.complete_transcript == "hello world"
-    silence_bytes = sum(len(m) for m in ws.sent if isinstance(m, bytes)) - len(audio)
-    assert 0 < silence_bytes < 16000
-    assert isinstance(ws.sent[-1], str) and "CloseStream" in ws.sent[-1]
+    assert result.finalization_latency_seconds is not None
+    assert result.finalization_trigger == "manual"
+    assert result.final_audio_window_end_seconds == pytest.approx(len(audio) / 32000)
+    assert result.finalization_warning_code is None
+    assert result.finalization_timed_out is False
+    assert sum(len(m) for m in ws.sent if isinstance(m, bytes)) == len(audio)
+    text = [m for m in ws.sent if isinstance(m, str)]
+    assert not any("Finalize" in m for m in text)
+    assert "ForceEndTurn" in text[-2]
+    assert "CloseStream" in text[-1]
 
 
 @pytest.mark.asyncio
-async def test_flux_mid_clip_end_of_turn_does_not_cut_silence_short(
-    fake_api_key: SecretStr,
-) -> None:
-    """flux: an EndOfTurn during the audio must not skip the trailing silence."""
+async def test_flux_requires_manual_end_of_turn(fake_api_key: SecretStr) -> None:
     audio = b"\x01" * 640
-    ws = _TurnEventWS(audio_len=len(audio), eot_after=1)
+    ws = _ForceEndTurnWS(audio_len=len(audio), trigger="model")
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
@@ -271,10 +265,86 @@ async def test_flux_mid_clip_end_of_turn_does_not_cut_silence_short(
             realtime_resolution=0.01,
         )
 
-    silence_bytes = sum(len(m) for m in ws.sent if isinstance(m, bytes)) - len(audio)
-    assert silence_bytes == int(32000 * deepgram_mod._FLUX_EOT_SILENCE_S)
+    assert result.error == "Flux EndOfTurn was not manually triggered (trigger='model')"
     assert result.audio_to_final_seconds is not None
-    assert isinstance(ws.sent[-1], str) and "CloseStream" in ws.sent[-1]
+    assert result.complete_transcript is None
+    assert result.finalization_trigger == "model"
+
+
+@pytest.mark.asyncio
+async def test_flux_warning_does_not_promote_partial(fake_api_key: SecretStr) -> None:
+    audio = b"\x01" * 640
+    ws = _ForceEndTurnWS(audio_len=len(audio), warning_code="FORCE_END_TURN_NO_ACTIVE_TURN")
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    assert result.error is None
+    assert result.ttft_seconds is not None
+    assert result.partial_transcripts == ["hello world"]
+    assert result.complete_transcript is None
+    assert result.audio_to_final_seconds is None
+    assert result.finalization_warning_code == "FORCE_END_TURN_NO_ACTIVE_TURN"
+    assert result.finalization_timed_out is False
+
+
+@pytest.mark.asyncio
+async def test_flux_timeout_does_not_promote_partial(fake_api_key: SecretStr) -> None:
+    audio = b"\x01" * 640
+    ws = _ForceEndTurnWS(audio_len=len(audio), emit_final=False)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    assert result.error is None
+    assert result.ttft_seconds is not None
+    assert result.complete_transcript is None
+    assert result.audio_to_final_seconds is None
+    assert result.finalization_timed_out is True
+
+
+@pytest.mark.asyncio
+async def test_flux_empty_manual_final_uses_latest_update(fake_api_key: SecretStr) -> None:
+    audio = b"\x01" * 640
+    ws = _ForceEndTurnWS(audio_len=len(audio), final_transcript="")
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
+
+    with patch("coval_bench.providers.stt.deepgram.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    assert result.error is None
+    assert result.complete_transcript == "hello world"
+    assert result.audio_to_final_seconds is not None
+    assert result.finalization_trigger == "manual"
 
 
 def test_build_websocket_url_flux_rejects_non_mono() -> None:
@@ -294,6 +364,8 @@ def test_build_websocket_url_flux_multi() -> None:
     assert "interim_results" not in url
     assert "no_delay" not in url
     assert "channels" not in url
+    assert "eot_threshold=1.0" in url
+    assert "eot_timeout_ms=60000" in url
 
 
 # ---------------------------------------------------------------------------
@@ -569,9 +641,21 @@ async def test_deepgram_flux_concatenates_multiple_turns(
     events = [
         {"type": "Connected", "session_id": "test-flux-multi"},
         {"type": "TurnInfo", "event": "StartOfTurn", "turn_index": 1, "transcript": "how"},
-        {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 1, "transcript": "how are you"},
+        {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 1,
+            "trigger": "model",
+            "transcript": "how are you",
+        },
         {"type": "TurnInfo", "event": "StartOfTurn", "turn_index": 0, "transcript": "hello"},
-        {"type": "TurnInfo", "event": "EndOfTurn", "turn_index": 0, "transcript": "hello world"},
+        {
+            "type": "TurnInfo",
+            "event": "EndOfTurn",
+            "turn_index": 0,
+            "trigger": "manual",
+            "transcript": "hello world",
+        },
     ]
     provider = DeepgramProvider(api_key=fake_api_key, model="flux-general-en")
 
@@ -589,6 +673,8 @@ async def test_deepgram_flux_concatenates_multiple_turns(
 
     # Ordered by turn_index regardless of arrival order; both turns present.
     assert result.complete_transcript == "hello world how are you"
+    assert result.error is None
+    assert result.finalization_trigger == "manual"
 
 
 @pytest.mark.asyncio

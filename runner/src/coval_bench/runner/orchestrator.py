@@ -119,6 +119,8 @@ def _metric_outcome(
     item_error: str | None,
     metric_label: str,
     result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+    *,
+    missing_reason: str | None = None,
 ) -> tuple[Any, str | None]:
     """Decide ``(status, error)`` for a single result row.
 
@@ -134,7 +136,7 @@ def _metric_outcome(
     if item_error:
         return result_status.FAILED, _truncate(item_error)
     if metric_value is None:
-        return result_status.FAILED, f"no {metric_label} produced"
+        return result_status.FAILED, missing_reason or f"no {metric_label} produced"
     return result_status.SUCCESS, None
 
 
@@ -156,6 +158,31 @@ def _stt_silent_failure(result: Any) -> str | None:  # noqa: ANN401 — Transcri
     if result.ttft_seconds is not None or result.audio_to_final_seconds is not None:
         return None
     return _STT_SILENT_FAILURE
+
+
+_FINALIZATION_DEFAULTS: dict[str, Any] = {
+    "finalization_latency_seconds": None,
+    "finalization_trigger": None,
+    "final_audio_window_end_seconds": None,
+    "finalization_warning_code": None,
+    "finalization_timed_out": False,
+}
+
+
+def _finalization_events(result: Any) -> dict[str, Any]:  # noqa: ANN401 — TranscriptionResult
+    if result is None:
+        return dict(_FINALIZATION_DEFAULTS)
+    return {name: getattr(result, name) for name in _FINALIZATION_DEFAULTS}
+
+
+def _final_missing_reason(result: Any) -> str | None:  # noqa: ANN401 — TranscriptionResult
+    if result is None or result.audio_to_final_seconds is not None:
+        return None
+    if result.finalization_warning_code:
+        return f"finalization ignored: {result.finalization_warning_code}"
+    if result.finalization_timed_out:
+        return "finalization timed out"
+    return None
 
 
 def _log_item_failures(
@@ -446,6 +473,7 @@ async def _run_stt_item(
         complete_transcript = (
             transcription_result.complete_transcript if transcription_result else None
         )
+        final_missing_reason = _final_missing_reason(transcription_result)
 
         # 1. TTFT — time-to-first-partial from first audio.
         ttft_status, ttft_error = _metric_outcome(
@@ -478,7 +506,11 @@ async def _run_stt_item(
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(
-            audio_to_final, item_error, Metric.AUDIO_TO_FINAL, ResultStatus
+            audio_to_final,
+            item_error,
+            Metric.AUDIO_TO_FINAL,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         results.append(
             Result(
@@ -521,7 +553,11 @@ async def _run_stt_item(
                     exc_info=exc,
                 )
         ttfs_status, ttfs_error = _metric_outcome(
-            ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
+            ttfs_value,
+            item_error or ttfs_calc_error,
+            Metric.TTFS,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         ttfs_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFS]
         if not ttfs_excluded:
@@ -564,7 +600,11 @@ async def _run_stt_item(
                 )
 
         rtf_status, rtf_error = _metric_outcome(
-            audio_to_final, item_error, Metric.RTF, ResultStatus
+            audio_to_final,
+            item_error,
+            Metric.RTF,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         results.append(
             Result(
@@ -689,6 +729,7 @@ async def _run_stt_item(
                         "audio_to_final_seconds": audio_to_final,
                         "speech_end_offset_ms": speech_end_offset_ms,
                         "effective_duration_sec": duration_sec,
+                        **_finalization_events(transcription_result),
                     },
                 )
             except Exception as exc:

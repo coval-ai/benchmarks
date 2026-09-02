@@ -33,9 +33,6 @@ logger = structlog.get_logger(__name__)
 # timeout — the outer per-item timeout still bounds the run.
 _FINAL_WAIT_S = 5.0
 
-# Cap on trailing silence fed to Flux while waiting for EndOfTurn.
-_FLUX_EOT_SILENCE_S = 5.0
-
 
 class DeepgramProvider(STTProvider):
     """Deepgram streaming STT provider."""
@@ -78,6 +75,8 @@ class DeepgramProvider(STTProvider):
                 f"?model={self._model}"
                 f"&sample_rate={sample_rate}"
                 f"&encoding=linear16"
+                f"&eot_threshold=1.0"
+                f"&eot_timeout_ms=60000"
             )
         url = (
             f"wss://api.deepgram.com/v1/listen"
@@ -174,13 +173,13 @@ class DeepgramProvider(STTProvider):
                 result.audio_start_time = start
                 await ws.send(chunk)
             if self._model.startswith("flux-"):
-                # Clear so a mid-clip EndOfTurn can't cut the silence short.
                 final_event.clear()
-                silence = bytes(int(byte_rate * _FLUX_EOT_SILENCE_S))
-                async for chunk, _ in paced_chunks(silence, chunk_size, byte_rate):
-                    if final_event.is_set():
-                        break
-                    await ws.send(chunk)
+                result.finalization_start_time = time.monotonic()
+                await ws.send(json.dumps({"type": "ForceEndTurn"}))
+                try:
+                    await asyncio.wait_for(final_event.wait(), timeout=_FINAL_WAIT_S)
+                except TimeoutError:
+                    result.finalization_timed_out = True
             else:
                 # nova finalizes on our signal (endpointing disabled): send Finalize, then
                 # wait for the forced final before closing so the close can't race it.
@@ -231,9 +230,17 @@ class DeepgramProvider(STTProvider):
                 if msg_type in ("UtteranceEnd", "Metadata", "Connected"):
                     continue
 
+                if msg_type == "Warning":
+                    code = str(msg.get("code", ""))
+                    if code == "FORCE_END_TURN_NO_ACTIVE_TURN":
+                        result.finalization_warning_code = code
+                        final_event.set()
+                    continue
+
                 # Flux transcript is cumulative within a turn and resets per
                 # turn, so key by turn_index and concatenate turns.
                 if msg_type == "TurnInfo":
+                    is_end_of_turn = msg.get("event") == "EndOfTurn"
                     transcript = str(msg.get("transcript", "")).strip()
                     if not transcript:
                         words: list[dict[str, Any]] = msg.get("words", [])
@@ -246,18 +253,25 @@ class DeepgramProvider(STTProvider):
                             if text:
                                 parts.append(text)
                         transcript = " ".join(parts)
-                    if not transcript:
-                        continue
-                    if result.ttft_seconds is None and result.audio_start_time is not None:
-                        result.ttft_seconds = now - result.audio_start_time
-                        result.first_token_content = (
-                            transcript[:30] + "..." if len(transcript) > 30 else transcript
-                        )
-                    result.partial_transcripts.append(transcript)
-                    flux_turns[int(msg.get("turn_index", 0))] = transcript
-                    # EndOfTurn is the confirmed turn-final; Start/Update are partials.
-                    if msg.get("event") == "EndOfTurn":
+                    if transcript:
+                        if result.ttft_seconds is None and result.audio_start_time is not None:
+                            result.ttft_seconds = now - result.audio_start_time
+                            result.first_token_content = (
+                                transcript[:30] + "..." if len(transcript) > 30 else transcript
+                            )
+                        result.partial_transcripts.append(transcript)
+                        flux_turns[int(msg.get("turn_index", 0))] = transcript
+                    if is_end_of_turn:
                         last_final_time = now
+                        trigger = str(msg.get("trigger", "")) or None
+                        result.finalization_trigger = trigger
+                        audio_window_end = msg.get("audio_window_end")
+                        if isinstance(audio_window_end, (int, float)):
+                            result.final_audio_window_end_seconds = float(audio_window_end)
+                        if result.finalization_start_time is not None:
+                            result.finalization_latency_seconds = max(
+                                0.0, now - result.finalization_start_time
+                            )
                         final_event.set()
                     continue
 
@@ -296,8 +310,18 @@ class DeepgramProvider(STTProvider):
         if last_final_time is not None and result.audio_start_time is not None:
             result.audio_to_final_seconds = last_final_time - result.audio_start_time
 
+        is_flux = self._model.startswith("flux-")
+        final_trigger = result.finalization_trigger
+        if (
+            is_flux
+            and last_final_time is not None
+            and final_trigger != "manual"
+            and result.error is None
+        ):
+            result.error = f"Flux EndOfTurn was not manually triggered (trigger={final_trigger!r})"
+
         # Build complete transcript
-        if self._model in ("flux-general-en", "flux-general-multi"):
+        if is_flux and final_trigger == "manual":
             joined = " ".join(flux_turns[i] for i in sorted(flux_turns)).strip()
             result.complete_transcript = joined or None
         elif final_segments or pending_partial:
