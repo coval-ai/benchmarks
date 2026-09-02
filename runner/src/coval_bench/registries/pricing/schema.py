@@ -66,8 +66,58 @@ _UNITS_BY_BENCHMARK: dict[Benchmark, frozenset[PricingUnit]] = {
 }
 
 
+def units_for(benchmark: Benchmark) -> frozenset[PricingUnit]:
+    """The units that bill *benchmark*'s input; empty for a benchmark we do not price."""
+    return _UNITS_BY_BENCHMARK.get(benchmark, frozenset())
+
+
+def per_1m_chars(unit: PricingUnit, price_usd: Decimal) -> Decimal | None:
+    """A native rate normalized to USD per 1M characters.
+
+    Pure arithmetic per unit — ``per_1m_chars`` is served as-is,
+    ``per_1k_chars`` scales by 1000, ``per_char`` by 1,000,000.
+    ``per_second_audio_out`` returns None: seconds of audio have no
+    character equivalence without assuming a speaking rate, and we never
+    serve estimated figures.
+    """
+    if unit is PricingUnit.PER_1M_CHARS:
+        return price_usd
+    if unit is PricingUnit.PER_1K_CHARS:
+        return price_usd * 1000
+    if unit is PricingUnit.PER_CHAR:
+        return price_usd * 1_000_000
+    return None
+
+
+def per_1k_minutes(unit: PricingUnit, price_usd: Decimal) -> Decimal | None:
+    """A native rate normalized to USD per 1,000 minutes of input audio.
+
+    Defined only for the duration units that bill audio *in*.
+    ``per_second_audio_out`` measures synthesized output against a
+    different denominator, and character units have no duration
+    equivalence without assuming a speaking rate — both return None
+    rather than an estimate.
+
+    Per-minute and per-second rates scale exactly; the hourly conversion
+    divides and so rounds to ``_DIVIDED_SCALE``.
+    """
+    if unit is PricingUnit.PER_MINUTE:
+        return price_usd * 1000
+    if unit is PricingUnit.PER_HOUR:
+        return (price_usd * 1000 / 60).quantize(_DIVIDED_SCALE, rounding=ROUND_HALF_UP)
+    if unit is PricingUnit.PER_SECOND_AUDIO_IN:
+        return price_usd * 60_000
+    return None
+
+
 class PricingEntry(BaseModel, frozen=True, extra="forbid"):
-    """One model's published rate, keyed like the model registry."""
+    """One model's published rate, keyed like the model registry.
+
+    The shape of a ratesheet entry. Since the rates moved into Postgres these
+    files are the seed and the open, reviewable mirror of the table, and this
+    class is what validates both them and every rate recorded through the
+    admin API — one set of rules, whichever door a rate comes in by.
+    """
 
     benchmark: Benchmark
     provider: str
@@ -99,39 +149,10 @@ class PricingEntry(BaseModel, frozen=True, extra="forbid"):
 
     @property
     def price_per_1m_chars(self) -> Decimal | None:
-        """The native rate normalized to USD per 1M characters.
-
-        Pure arithmetic per unit — ``per_1m_chars`` is served as-is,
-        ``per_1k_chars`` scales by 1000, ``per_char`` by 1,000,000.
-        ``per_second_audio_out`` returns None: seconds of audio have no
-        character equivalence without assuming a speaking rate, and we never
-        serve estimated figures.
-        """
-        if self.unit is PricingUnit.PER_1M_CHARS:
-            return self.price_usd
-        if self.unit is PricingUnit.PER_1K_CHARS:
-            return self.price_usd * 1000
-        if self.unit is PricingUnit.PER_CHAR:
-            return self.price_usd * 1_000_000
-        return None
+        """The native rate normalized to USD per 1M characters; see :func:`per_1m_chars`."""
+        return per_1m_chars(self.unit, self.price_usd)
 
     @property
     def price_per_1k_minutes(self) -> Decimal | None:
-        """The native rate normalized to USD per 1,000 minutes of input audio.
-
-        Defined only for the duration units that bill audio *in*.
-        ``per_second_audio_out`` measures synthesized output against a
-        different denominator, and character units have no duration
-        equivalence without assuming a speaking rate — both return None
-        rather than an estimate.
-
-        Per-minute and per-second rates scale exactly; the hourly conversion
-        divides and so rounds to ``_DIVIDED_SCALE``.
-        """
-        if self.unit is PricingUnit.PER_MINUTE:
-            return self.price_usd * 1000
-        if self.unit is PricingUnit.PER_HOUR:
-            return (self.price_usd * 1000 / 60).quantize(_DIVIDED_SCALE, rounding=ROUND_HALF_UP)
-        if self.unit is PricingUnit.PER_SECOND_AUDIO_IN:
-            return self.price_usd * 60_000
-        return None
+        """The native rate normalized to USD per 1,000 minutes; see :func:`per_1k_minutes`."""
+        return per_1k_minutes(self.unit, self.price_usd)

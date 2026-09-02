@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +54,7 @@ from coval_bench.registries import (
     RegisteredModel,
     tag_value_label,
 )
+from coval_bench.registries.pricing import PRICING, PricingEntry
 from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
@@ -301,6 +302,31 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
                 ON benchmarks_v2.model_history (model_id, changed_at DESC)
         """)
+        # Pricing log (mirrors migration 20260902_0025).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
+                id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                benchmark           text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                provider            text NOT NULL CHECK (provider <> ''),
+                model               text NOT NULL CHECK (model <> ''),
+                unit                text CHECK (unit IS NULL OR unit <> ''),
+                price_usd           numeric CHECK (price_usd IS NULL OR price_usd > 0),
+                effective_from      date NOT NULL,
+                source_url          text CHECK (source_url IS NULL OR source_url <> ''),
+                notes               text CHECK (notes IS NULL OR notes <> ''),
+                recorded_by_user_id text NOT NULL CHECK (recorded_by_user_id <> ''),
+                recorded_by_email   text
+                    CHECK (recorded_by_email IS NULL OR recorded_by_email <> ''),
+                recorded_at         timestamptz NOT NULL DEFAULT now(),
+                CHECK ((unit IS NULL) = (price_usd IS NULL)),
+                CHECK (price_usd IS NULL OR source_url IS NOT NULL)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS pricing_rates_key_effective
+                ON benchmarks_v2.pricing_rates
+                (benchmark, provider, model, effective_from DESC, recorded_at DESC)
+        """)
 
 
 def _seed_registry(**connect_kwargs: Any) -> None:
@@ -317,6 +343,7 @@ def _seed_registry(**connect_kwargs: Any) -> None:
                 (str(tag), category.value, tag_value_label(category, str(tag))),
             )
         _insert_models(conn, MODEL_REGISTRY)
+        _insert_rates(conn, PRICING.values())
         conn.commit()
 
 
@@ -353,6 +380,29 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 "INSERT INTO benchmarks_v2.model_tags (model_id, tag) VALUES (%s, %s)",
                 (row[0], str(tag)),
             )
+
+
+def _insert_rates(conn: psycopg.Connection[Any], entries: Iterable[PricingEntry]) -> None:
+    """Record ratesheet entries into the pricing log, as the seed migration does."""
+    for entry in entries:
+        conn.execute(
+            """
+            INSERT INTO benchmarks_v2.pricing_rates
+                (benchmark, provider, model, unit, price_usd, effective_from, source_url, notes,
+                 recorded_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+            """,
+            (
+                str(entry.benchmark),
+                entry.provider,
+                entry.model,
+                str(entry.unit),
+                entry.price_usd,
+                entry.effective_from,
+                str(entry.source_url),
+                entry.notes,
+            ),
+        )
 
 
 def add_models(postgresql: Any, *models: RegisteredModel) -> None:
