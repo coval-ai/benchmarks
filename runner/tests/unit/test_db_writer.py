@@ -436,19 +436,33 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
     assert abs(float(row["p50"]) - 0.3) < 0.001
 
 
-def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
-    """finish_run → refresh_stats_matviews populates all three per-window views."""
+def test_refresh_stats_matviews_once_per_window(pg_conn: psycopg.Connection[Any]) -> None:
+    """The slot's last finisher refreshes; a running sibling or a held lock skips."""
     _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    slot = datetime(2026, 9, 2, 14, 30, tzinfo=UTC)
+
+    def _view_rows() -> int:
+        with pg_conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM benchmarks_v2.results_24h WHERE provider = 'openai'")
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
 
     async def _run() -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
-            assert run.id is not None
+            first = await writer.start_run(
+                dataset_id="stt-v1", dataset_sha256="deadbeef", scheduled_at=slot
+            )
+            second = await writer.start_run(
+                dataset_id="stt-v1", dataset_sha256="deadbeef", scheduled_at=slot
+            )
+            assert first.id is not None and second.id is not None
             results = [
                 Result(
-                    run_id=run.id,
+                    run_id=first.id,
                     provider="openai",
                     model="whisper-1",
                     benchmark=Benchmark.STT,
@@ -460,14 +474,23 @@ def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
                 for i in range(1, 6)
             ]
             await writer.record_results(results)
-            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
-            await writer.refresh_stats_matviews()
+            await writer.finish_run(first.id, status=RunStatus.SUCCEEDED)
+            assert await writer.refresh_stats_matviews(first.id) is False
+            assert _view_rows() == 0
+
+            await writer.finish_run(second.id, status=RunStatus.SUCCEEDED)
+            with pg_conn.transaction():
+                pg_conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('stats_matviews', 0))"
+                )
+                assert await writer.refresh_stats_matviews(second.id) is False
+            assert _view_rows() == 0
+            assert await writer.refresh_stats_matviews(second.id) is True
         finally:
             await pool.close()
 
     asyncio.run(_run())
 
-    pg_conn.autocommit = True
     for view in ("results_24h", "results_7d", "results_30d"):
         with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(

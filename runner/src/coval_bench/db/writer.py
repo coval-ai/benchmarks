@@ -961,16 +961,35 @@ class RunWriter:
             await conn.commit()
         return row is not None
 
-    async def refresh_stats_matviews(self) -> None:
-        """Concurrently refresh the per-window stats materialized views.
-
-        ``CONCURRENTLY`` relies on each view's unique group-key index and does
-        not block API reads. Raises on error like the rest of ``RunWriter``.
-        """
+    async def refresh_stats_matviews(self, run_id: int | None = None) -> bool:
+        """Only the slot's last finisher refreshes; False means skipped, not failed."""
         async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                if run_id is not None:
+                    await cur.execute(
+                        """SELECT EXISTS (
+                               SELECT 1 FROM benchmarks_v2.runs sibling
+                               JOIN benchmarks_v2.runs own ON own.id = %s
+                               WHERE sibling.scheduled_at = own.scheduled_at
+                                 AND sibling.id <> own.id
+                                 AND sibling.status = 'running') AS siblings_running""",
+                        (run_id,),
+                    )
+                    row = await cur.fetchone()
+                    if row is not None and row["siblings_running"]:
+                        await conn.rollback()
+                        return False
+                await cur.execute(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended('stats_matviews', 0))"
+                    " AS acquired"
+                )
+                row = await cur.fetchone()
+                if row is None or not row["acquired"]:
+                    await conn.rollback()
+                    return False
                 for view in STATS_MATVIEWS:
                     await cur.execute(  # noqa: S608 — view names are constants
                         f"REFRESH MATERIALIZED VIEW CONCURRENTLY benchmarks_v2.{view}"
                     )
             await conn.commit()
+        return True
