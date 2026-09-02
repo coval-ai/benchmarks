@@ -115,6 +115,20 @@ def _vapi(client: httpx.Client, agent_id: str) -> PlatformConfig:
     )
 
 
+def _telnyx(client: httpx.Client, agent_id: str) -> PlatformConfig:
+    response = client.get(f"/ai/assistants/{agent_id}")
+    response.raise_for_status()
+    payload = cast("dict[str, Any]", response.json())
+    data = payload.get("data")
+    raw = data if isinstance(data, dict) else payload
+    return PlatformConfig(
+        raw=raw,
+        system_prompt=str(raw.get("instructions") or ""),
+        first_message=str(raw.get("greeting") or "").strip(),
+        tools=list(raw.get("tools") or []),
+    )
+
+
 FETCHERS: dict[str, Fetcher] = {
     "vapi": Fetcher(
         name="vapi",
@@ -122,6 +136,13 @@ FETCHERS: dict[str, Fetcher] = {
         key_env="VAPI_API_KEY",
         fetch=_vapi,
         id_help="Vapi assistant id (uuid)",
+    ),
+    "telnyx": Fetcher(
+        name="telnyx",
+        api_base="https://api.telnyx.com/v2",
+        key_env="TELNYX_API_KEY",
+        fetch=_telnyx,
+        id_help="Telnyx assistant id (assistant-<uuid>)",
     ),
 }
 

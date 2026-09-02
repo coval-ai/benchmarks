@@ -17,6 +17,7 @@ logger = structlog.get_logger("coval_bench.mocktools")
 __all__ = [
     "CODECS",
     "MAX_TOOL_CALLS",
+    "PRESET_PREFIX",
     "Codec",
     "Correlation",
     "ToolCall",
@@ -26,6 +27,9 @@ __all__ = [
 SIMULATION_HEADER = "x-coval-simulation-id"
 CALLER_HEADER = "x-coval-caller-number"
 TELNYX_CALL_HEADER = "x-telnyx-call-control-id"
+PRESET_PREFIX = "_coval_"
+PRESET_SIMULATION = f"{PRESET_PREFIX}simulation_id"
+PRESET_CALLER = f"{PRESET_PREFIX}caller_number"
 MAX_TOOL_CALLS = 32
 
 Body = dict[str, Any] | None
@@ -85,10 +89,28 @@ GENERIC = Codec(
 )
 
 
-def _telnyx_correlate(_body: Body, headers: Mapping[str, str]) -> Correlation:
+def _telnyx_decode(body: Body, _headers: Mapping[str, str], tool: str | None) -> list[ToolCall]:
+    args = {k: v for k, v in _as_args(body).items() if not k.startswith(PRESET_PREFIX)}
+    return [ToolCall(tool=tool or "", args=args)]
+
+
+def _rendered(value: object) -> str | None:
+    if not isinstance(value, str) or not value or "{{" in value:
+        return None
+    return value
+
+
+def _telnyx_correlate(body: Body, headers: Mapping[str, str]) -> Correlation:
     found = _coval_headers(headers)
     if found.source != "none":
         return found
+    preset = _as_args(body)
+    simulation_id = _rendered(preset.get(PRESET_SIMULATION))
+    caller_number = _rendered(preset.get(PRESET_CALLER))
+    if simulation_id:
+        return Correlation(simulation_id, caller_number, source="telnyx_preset_body")
+    if caller_number:
+        return Correlation(None, caller_number, source="telnyx_preset_caller")
     if headers.get(TELNYX_CALL_HEADER):
         return Correlation(source="telnyx_call_control_id")
     return Correlation()
@@ -97,7 +119,7 @@ def _telnyx_correlate(_body: Body, headers: Mapping[str, str]) -> Correlation:
 TELNYX = Codec(
     name="telnyx",
     tool_in_path=True,
-    decode=_generic_decode,
+    decode=_telnyx_decode,
     correlate=_telnyx_correlate,
     encode=_generic_encode,
 )
