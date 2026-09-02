@@ -14,13 +14,20 @@ from coval_bench.contracts import read_contract_file
 from coval_bench.platform_assets import (
     AGENTS,
     TOOL_TIMEOUT_SECONDS,
+    CovalClient,
+    Plan,
     SyncError,
     VapiClient,
     apply,
+    coval_agent_body,
     desired,
+    drift,
+    launch_body,
     patch_body,
     plan,
     platform_for,
+    probe_vapi,
+    register,
     render_vapi_tools,
     spec_for,
 )
@@ -51,6 +58,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAPI_DENTAL_ASSISTANT_ID", "asst_1")
     monkeypatch.setenv("VAPI_API_KEY", "vapi-key")
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
+    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:appointment-dental@sip.vapi.ai")
 
 
 def _client(handler: Any) -> VapiClient:  # noqa: ANN401
@@ -240,3 +248,163 @@ def test_apply_surfaces_vendor_errors(env: None) -> None:
         pytest.raises(SyncError, match="PATCH /assistant/asst_1 -> 400"),
     ):
         apply(client, DENTAL, desired(DENTAL, BASE))
+
+
+# --- dry run ---------------------------------------------------------------
+
+
+def test_apply_dry_run_plans_but_never_patches(env: None) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        return httpx.Response(200, json=LIVE)
+
+    with _client(handler) as client:
+        result = apply(client, DENTAL, desired(DENTAL, BASE), dry_run=True)
+    assert list(result.update) == ["model.tools"]
+    assert result.prepared == []
+    assert seen == ["GET"]
+
+
+def test_platform_without_prepare_reports_nothing_prepared(env: None) -> None:
+    assert platform_for(DENTAL).prepare is None
+    with _client(lambda r: httpx.Response(200, json=LIVE)) as client:
+        assert apply(client, DENTAL, desired(DENTAL, BASE)).prepared == []
+
+
+def test_plan_summary_names_all_three_buckets() -> None:
+    result = Plan(update={"a": (1, 2)}, unchanged=["b"], prepared=["secret:x"])
+    assert result.summary() == "prepare=['secret:x'] update=['a'] unchanged=['b']"
+
+
+# --- probe -----------------------------------------------------------------
+
+
+def test_vapi_probe_sends_the_sdk_envelope_at_the_tool_url() -> None:
+    (tool, *_) = render_vapi_tools(CONTRACT, BASE, SECRET)
+    url, headers, body = probe_vapi(tool, {"phone": "6025550182"}, SECRET, "sim-1")
+    assert url == "https://mock.example.com/mock/vapi"
+    assert headers == {"X-Mock-Tools-Key": SECRET, "X-Coval-Simulation-Id": "sim-1"}
+    (call,) = body["message"]["toolCallList"]
+    assert call["id"] == "sim-1-1"
+    assert call["function"] == {"name": "lookup_patient", "arguments": '{"phone": "6025550182"}'}
+
+
+# --- coval side ------------------------------------------------------------
+
+
+def test_coval_agent_body_dials_the_target_with_the_pinned_codec(env: None) -> None:
+    body = coval_agent_body(DENTAL)
+    assert body["model_type"] == "MODEL_TYPE_VOICE"
+    assert body["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+    assert body["metadata"] == {"audio_codec": "PCMU"}
+    assert body["customer_agent_id"] == "vapi-dental"
+    assert body["attributes"]["platform"] == "vapi"
+    assert body["tags"] == ["orchestration", "dental", "vapi"]
+    assert body["prompt"].startswith("BrightSmile Dental")
+
+
+def test_dial_target_is_required_and_named_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VAPI_DENTAL_DIAL_TARGET", raising=False)
+    with pytest.raises(RuntimeError, match="VAPI_DENTAL_DIAL_TARGET is unset"):
+        coval_agent_body(DENTAL)
+
+
+def _coval_client(state: dict[str, Any]) -> CovalClient:
+    def handler(request: httpx.Request) -> httpx.Response:
+        state.setdefault("calls", []).append((request.method, request.url.path))
+        if request.url.path == "/v1/agents" and request.method == "GET":
+            return httpx.Response(200, json={"agents": state["agents"], "next_page_token": ""})
+        if request.url.path == "/v1/agents":
+            created = {**json.loads(request.content), "id": "A" * 22}
+            state["agents"].append(created)
+            return httpx.Response(200, json={"agent": created})
+        if request.url.path.startswith("/v1/agents/"):
+            state["patched"] = json.loads(request.content)
+            return httpx.Response(200, json={"agent": state["agents"][0]})
+        if request.url.path == "/v1/runs":
+            state["launched"] = json.loads(request.content)
+            return httpx.Response(200, json={"run": {"run_id": "R" * 22, "status": "PENDING"}})
+        return httpx.Response(404, text=request.url.path)
+
+    return CovalClient(
+        "coval-key", "https://api.coval.dev/v1", transport=httpx.MockTransport(handler)
+    )
+
+
+def test_register_creates_the_coval_agent_when_absent(env: None) -> None:
+    state: dict[str, Any] = {"agents": []}
+    with _coval_client(state) as client:
+        agent_id, result = register(client, DENTAL)
+    assert agent_id == "A" * 22
+    assert set(result.update) == {"phone_number", "prompt", "metadata", "attributes"}
+    assert state["agents"][0]["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+
+
+def test_register_patches_only_the_drifted_fields(env: None) -> None:
+    live = {**coval_agent_body(DENTAL), "id": "A", "phone_number": "sip:old@sip.vapi.ai"}
+    state: dict[str, Any] = {"agents": [live]}
+    with _coval_client(state) as client:
+        agent_id, result = register(client, DENTAL)
+    assert agent_id == "A"
+    assert list(result.update) == ["phone_number"]
+    assert state["patched"] == {"phone_number": "sip:appointment-dental@sip.vapi.ai"}
+
+
+def test_register_matches_on_customer_agent_id_not_display_name(env: None) -> None:
+    other = {**coval_agent_body(DENTAL), "id": "B", "customer_agent_id": "someone-else"}
+    state: dict[str, Any] = {"agents": [other]}
+    with _coval_client(state) as client:
+        agent_id, _ = register(client, DENTAL)
+    assert agent_id == "A" * 22
+    assert len(state["agents"]) == 2
+
+
+def test_register_dry_run_writes_nothing(env: None) -> None:
+    state: dict[str, Any] = {"agents": []}
+    with _coval_client(state) as client:
+        agent_id, result = register(client, DENTAL, dry_run=True)
+    assert agent_id == ""
+    assert len(result.update) == 4
+    assert all(method == "GET" for method, _ in state["calls"])
+
+
+def test_launch_body_is_reproducible_and_tagged_with_the_arm(env: None) -> None:
+    body = launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, ("M" * 22,), 3, 42)
+    assert body["agent_id"] == "A" * 22
+    assert body["options"] == {
+        "iteration_count": 1,
+        "concurrency": 1,
+        "sub_sample_size": 3,
+        "sub_sample_seed": 42,
+    }
+    assert body["metric_ids"] == ["M" * 22]
+    assert body["metadata"]["customer_metadata"]["arm"] == "vapi-dental"
+    assert body["metadata"]["display_name"].startswith("vapi-dental e2e ")
+
+
+def test_launch_run_unwraps_the_run(env: None) -> None:
+    state: dict[str, Any] = {"agents": []}
+    with _coval_client(state) as client:
+        run = client.launch_run(launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 1))
+    assert run == {"run_id": "R" * 22, "status": "PENDING"}
+    assert state["launched"]["options"]["sub_sample_size"] == 1
+
+
+def test_drift_lists_what_apply_would_still_change_without_writing(env: None) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        return httpx.Response(200, json=LIVE)
+
+    with _client(handler) as client:
+        assert drift(client, DENTAL, BASE) == ["model.tools"]
+    assert seen == ["GET"]
+
+
+def test_drift_is_empty_once_the_platform_matches(env: None) -> None:
+    synced = {**LIVE, "model": {**LIVE["model"], "tools": desired(DENTAL, BASE)["model.tools"]}}
+    with _client(lambda r: httpx.Response(200, json=synced)) as client:
+        assert drift(client, DENTAL, BASE) == []
