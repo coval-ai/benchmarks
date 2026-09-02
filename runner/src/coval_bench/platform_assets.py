@@ -236,6 +236,8 @@ TELNYX_PINS: dict[str, Pin] = {
     "transcription.language": lambda _stack: "en",
     "voice_settings.voice": lambda stack: f"ElevenLabs.{stack.tts.model}.{stack.tts.voice_id}",
     "voice_settings.api_key_ref": lambda _stack: TELNYX_TTS_REF,
+    "voice_settings.expressive_mode": lambda _stack: False,
+    "tool_ids": lambda _stack: [],
     "telephony_settings.recording_settings.enabled": (
         lambda stack: stack.platform_behaviour.vendor_post_call_analysis
     ),

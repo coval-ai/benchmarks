@@ -414,13 +414,13 @@ TELNYX_LIVE: dict[str, Any] = {
     "model": "openai/gpt-4.1",
     "llm_api_key_ref": "",
     "transcription": {"model": "deepgram/nova-3-medical", "language": "en", "settings": {}},
-    "voice_settings": {"voice": "Telnyx.Ultra.abc", "api_key_ref": None},
+    "voice_settings": {"voice": "Telnyx.Ultra.abc", "api_key_ref": None, "expressive_mode": True},
     "telephony_settings": {
         "default_texml_app_id": "texml-1",
         "recording_settings": {"enabled": True, "channels": "dual"},
     },
     "interruption_settings": {"start_speaking_plan": {"wait_seconds": 0.1}},
-    "tools": [],
+    "tools": [{"type": "hangup", "shared": True, "tool_id": "tool-1"}],
 }
 
 
@@ -477,6 +477,8 @@ CASES = [
                 "transcription.model",
                 "voice_settings.voice",
                 "voice_settings.api_key_ref",
+                "voice_settings.expressive_mode",
+                "tool_ids",
                 "telephony_settings.recording_settings.enabled",
                 "interruption_settings.start_speaking_plan.wait_seconds",
             }
@@ -487,6 +489,8 @@ CASES = [
             "transcription.model": "deepgram/nova-3",
             "voice_settings.voice": "ElevenLabs.eleven_flash_v2.EXAVITQu4vr4xnSDxMaL",
             "voice_settings.api_key_ref": "coval-bench-elevenlabs",
+            "voice_settings.expressive_mode": False,
+            "tool_ids": [],
             "telephony_settings.recording_settings.enabled": False,
             "interruption_settings.start_speaking_plan.wait_seconds": 0.8,
         },
