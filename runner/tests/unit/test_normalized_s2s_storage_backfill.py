@@ -383,6 +383,90 @@ def test_apply_reconciles_payload_lineage_rollups_and_is_idempotent(
         assert (phase, "completed") in phases
 
 
+def test_public_parity_is_bounded_to_complete_run_pages(
+    s2s_db: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_ids: list[int] = []
+    low = 0
+    high = 0
+    for index in range(3):
+        run_id, first, last = _seed_conversation(
+            s2s_db,
+            sample_id=f"coval-run-{index}/simulation",
+            metrics=(("V2V", 210.0 + index, "success"),),
+        )
+        run_ids.append(run_id)
+        low = first if low == 0 else min(low, first)
+        high = max(high, last)
+    initial = backfill(
+        s2s_db,
+        min_result_id=low,
+        max_result_id=high,
+        batch_size=1,
+        apply=True,
+        reporter=ProgressReporter("apply", low, high, 1, stream=io.StringIO()),
+    )
+    assert initial["backfill_complete"] is True
+
+    original_verify = migration._verify_public_parity_page
+    verified_pages: list[list[int]] = []
+
+    def record_page(
+        cur: psycopg.Cursor[Any],
+        page_run_ids: list[int],
+        page_low: int,
+        page_high: int,
+        report: dict[str, Any],
+    ) -> None:
+        verified_pages.append(list(page_run_ids))
+        original_verify(cur, page_run_ids, page_low, page_high, report)
+
+    monkeypatch.setattr(migration, "_verify_public_parity_page", record_page)
+    _insert_live_owned(s2s_db, run_ids[-1], sample_id="normalized-only/sample")
+    report = backfill(
+        s2s_db,
+        min_result_id=low,
+        max_result_id=high,
+        batch_size=1,
+        apply=True,
+        reporter=ProgressReporter("apply", low, high, 1, stream=io.StringIO()),
+    )
+
+    assert verified_pages == [[run_id] for run_id in run_ids]
+    assert report["public_parity_mismatch_count"] == 1
+    assert report["public_parity_mismatches"][0]["legacy_count"] == 0
+    assert report["public_parity_mismatches"][0]["normalized_count"] == 1
+    assert report["backfill_complete"] is False
+
+
+def test_public_parity_sets_transaction_local_timeout_before_page_query() -> None:
+    class RecordingCursor:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+
+        def execute(self, query: str, params: object = None) -> None:
+            self.calls.append((query, params))
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return []
+
+    cursor = RecordingCursor()
+    report = migration._report(11, 29, 1)
+    migration._verify_public_parity_page(cursor, [17], 11, 29, report)  # type: ignore[arg-type]
+
+    assert cursor.calls == [
+        (
+            "SELECT set_config('statement_timeout', %s, true)",
+            (migration._PUBLIC_PARITY_STATEMENT_TIMEOUT,),
+        ),
+        (
+            migration._PUBLIC_PARITY_PAGE_SQL,
+            {"run_ids": [17], "low": 11, "high": 29},
+        ),
+    ]
+    assert migration._PUBLIC_PARITY_STATEMENT_TIMEOUT == "30s"
+
+
 def test_entirely_failed_conversation_persists_canonical_errors(
     s2s_db: psycopg.Connection[Any],
 ) -> None:
@@ -473,11 +557,90 @@ def test_rollup_tamper_is_detected_exactly_by_read_only_dry_run(
     assert report["rollup_mismatch_count"] == 4
 
 
+def test_s2s_refresh_preserves_and_ignores_same_bucket_non_s2s_rollups(
+    s2s_db: psycopg.Connection[Any],
+) -> None:
+    _, low, high = _seed_conversation(s2s_db, metrics=(("V2V", 210.0, "success"),))
+    with s2s_db.cursor() as cur:
+        cur.execute(
+            """INSERT INTO benchmarks_v2.metric_values_by_bucket
+                (provider,model,benchmark,dataset_id,metric_type,metric_version,
+                 evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
+                 max_value,value_sum,sample_count)
+                VALUES
+                ('stt-provider','stt-model','STT','stt-dataset','WER','v7','custom',
+                 'primary','percent',%s,11,12,13,14,15,123,7),
+                ('tts-provider','tts-model','TTS','__all__','MOS','v9','custom',
+                 'primary','score',%s,21,22,23,24,25,456,8)""",
+            (_NOW, _NOW),
+        )
+        cur.execute(
+            """SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+                       evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
+                       max_value,value_sum,sample_count
+                FROM benchmarks_v2.metric_values_by_bucket
+                WHERE benchmark <> 'S2S' ORDER BY benchmark"""
+        )
+        before = cur.fetchall()
+    s2s_db.commit()
+
+    applied = backfill(
+        s2s_db,
+        min_result_id=low,
+        max_result_id=high,
+        apply=True,
+        reporter=ProgressReporter("apply", low, high, 100, stream=io.StringIO()),
+    )
+    assert applied["backfill_complete"] is True
+    assert applied["rollup_mismatch_count"] == 0
+    with s2s_db.cursor() as cur:
+        cur.execute(
+            """SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+                       evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
+                       max_value,value_sum,sample_count
+                FROM benchmarks_v2.metric_values_by_bucket
+                WHERE benchmark <> 'S2S' ORDER BY benchmark"""
+        )
+        assert cur.fetchall() == before
+        cur.execute(
+            "UPDATE benchmarks_v2.metric_values_by_bucket "
+            "SET value_sum=value_sum+1 WHERE benchmark='STT'"
+        )
+    s2s_db.commit()
+
+    non_s2s_tamper = backfill(
+        s2s_db,
+        min_result_id=low,
+        max_result_id=high,
+        apply=False,
+        reporter=ProgressReporter("dry_run", low, high, 100, stream=io.StringIO()),
+    )
+    assert non_s2s_tamper["backfill_complete"] is True
+    assert non_s2s_tamper["rollup_mismatch_count"] == 0
+
+    with s2s_db.cursor() as cur:
+        cur.execute(
+            "UPDATE benchmarks_v2.metric_values_by_bucket "
+            "SET value_sum=value_sum+0.000001 WHERE benchmark='S2S'"
+        )
+    s2s_db.commit()
+    s2s_tamper = backfill(
+        s2s_db,
+        min_result_id=low,
+        max_result_id=high,
+        apply=False,
+        reporter=ProgressReporter("dry_run", low, high, 100, stream=io.StringIO()),
+    )
+    assert s2s_tamper["backfill_complete"] is False
+    assert s2s_tamper["rollup_mismatch_count"] == 4
+
+
 def _insert_live_owned(
     conn: psycopg.Connection[Any],
     run_id: int,
     *,
     dataset_id: str = "persona-v1",
+    sample_id: str = "coval-run/simulation",
 ) -> uuid.UUID:
     observation_id = uuid.uuid4()
     evaluation_id = uuid.uuid4()
@@ -487,9 +650,16 @@ def _insert_live_owned(
             """INSERT INTO benchmarks_v2.benchmark_observations
                (id,run_id,dataset_id,dataset_sha256,sample_id,provider,model,voice,
                 benchmark,source_kind,captured_at,status)
-               VALUES (%s,%s,%s,%s,'coval-run/simulation','provider','model','voice',
+               VALUES (%s,%s,%s,%s,%s,'provider','model','voice',
                        'S2S','conversation_audio',%s,'succeeded')""",
-            (observation_id, run_id, dataset_id, normalized_sha, _NOW + timedelta(seconds=30)),
+            (
+                observation_id,
+                run_id,
+                dataset_id,
+                normalized_sha,
+                sample_id,
+                _NOW + timedelta(seconds=30),
+            ),
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
@@ -662,7 +832,7 @@ def test_cancellation_emits_checkpoint_and_releases_global_lock(
     stream = io.StringIO()
     monkeypatch.setattr(
         migration,
-        "_verify_public_parity",
+        "_verify_public_parity_page",
         lambda *_: (_ for _ in ()).throw(migration._Cancelled()),
     )
     with pytest.raises(migration._Cancelled):

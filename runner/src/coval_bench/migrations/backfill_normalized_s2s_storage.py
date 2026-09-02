@@ -39,6 +39,7 @@ _FALLBACK_EVALUATION_ERROR = "legacy metric produced no value"
 _MISMATCH_DETAIL_LIMIT = 100
 _PROGRESS_INTERVAL_SECONDS = 30.0
 _PROGRESS_MAX_UNITS = 10
+_PUBLIC_PARITY_STATEMENT_TIMEOUT = "30s"
 _METRICS = {
     "V2V": "milliseconds",
     "InstructionFollowing": "percent",
@@ -747,7 +748,7 @@ FROM benchmarks_v2.metric_values v
 JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
 JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
 JOIN benchmarks_v2.runs r ON r.id=o.run_id
-WHERE o.status='succeeded' AND e.status='succeeded'
+WHERE o.benchmark='S2S' AND o.status='succeeded' AND e.status='succeeded'
   AND r.status IN ('succeeded','partial') AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
   (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,
@@ -760,7 +761,8 @@ _STORED_ROLLUP_SQL = """
 SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
-FROM benchmarks_v2.metric_values_by_bucket WHERE bucket_at=%(bucket)s
+FROM benchmarks_v2.metric_values_by_bucket
+WHERE bucket_at=%(bucket)s AND benchmark='S2S'
 """
 
 
@@ -771,7 +773,9 @@ def _refresh(cur: psycopg.Cursor[Any], bucket: datetime) -> None:
         params,
     )
     cur.execute(
-        "DELETE FROM benchmarks_v2.metric_values_by_bucket WHERE bucket_at=%(bucket)s", params
+        "DELETE FROM benchmarks_v2.metric_values_by_bucket "
+        "WHERE bucket_at=%(bucket)s AND benchmark='S2S'",
+        params,
     )
     cur.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
@@ -853,27 +857,15 @@ def _verify_population(
     _record_counter_diff(report, "observation_population_mismatches", expected, actual)
 
 
-_PUBLIC_PARITY_SQL = """
-WITH cohort AS (
-  SELECT n.id
-  FROM benchmarks_v2.runs n
-  WHERE n.status IN ('succeeded','partial','failed')
-    AND EXISTS (
-      SELECT 1 FROM benchmarks_v2.results r
-      WHERE r.run_id=n.id AND r.id BETWEEN %(low)s AND %(high)s AND r.benchmark='S2S'
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM benchmarks_v2.results r
-      WHERE r.run_id=n.id AND (r.id < %(low)s OR r.id > %(high)s)
-    )
-), legacy AS (
+_PUBLIC_PARITY_PAGE_SQL = """
+WITH legacy AS (
   SELECT jsonb_build_array(r.run_id,r.audio_filename,r.provider,r.model,r.voice,n.dataset_id,
                            r.metric_type,r.metric_units,r.metric_value) AS identity,
          count(*)::int AS row_count
   FROM benchmarks_v2.results r
   JOIN benchmarks_v2.runs n ON n.id=r.run_id
-  JOIN cohort c ON c.id=r.run_id
-  WHERE r.id BETWEEN %(low)s AND %(high)s AND r.benchmark='S2S'
+  WHERE r.run_id=ANY(%(run_ids)s) AND r.id BETWEEN %(low)s AND %(high)s
+    AND r.benchmark='S2S'
     AND r.status='success' AND r.metric_value IS NOT NULL
     AND n.status IN ('succeeded','partial')
   GROUP BY r.run_id,r.audio_filename,r.provider,r.model,r.voice,n.dataset_id,
@@ -883,11 +875,11 @@ WITH cohort AS (
                            e.metric_type,v.unit,v.value) AS identity,
          count(*)::int AS row_count
   FROM benchmarks_v2.benchmark_observations o
-  JOIN cohort c ON c.id=o.run_id
   JOIN benchmarks_v2.runs n ON n.id=o.run_id
   JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id
   JOIN benchmarks_v2.metric_values v ON v.metric_evaluation_id=e.id
-  WHERE o.benchmark='S2S' AND o.status='succeeded' AND e.status='succeeded'
+  WHERE o.run_id=ANY(%(run_ids)s) AND o.benchmark='S2S'
+    AND o.status='succeeded' AND e.status='succeeded'
     AND e.metric_version='v1' AND e.evaluation_variant='default'
     AND v.value_key='primary' AND v.value_role='primary'
     AND n.status IN ('succeeded','partial')
@@ -901,27 +893,35 @@ ORDER BY 1
 """
 
 
-def _verify_public_parity(
-    conn: psycopg.Connection, low: int, high: int, report: dict[str, Any]
+def _verify_public_parity_page(
+    cur: psycopg.Cursor[Any],
+    run_ids: list[int],
+    low: int,
+    high: int,
+    report: dict[str, Any],
 ) -> None:
-    with conn.transaction(), conn.cursor() as cur:
-        cur.execute("SET TRANSACTION READ ONLY")
-        cur.execute(_PUBLIC_PARITY_SQL, {"low": low, "high": high})
-        while rows := cur.fetchmany(100):
-            for row in rows:
-                identity = row[0]
-                legacy_count = int(row[1])
-                normalized_count = int(row[2])
-                _append_mismatch(
-                    report,
-                    "public_parity_mismatches",
-                    {
-                        "identity": identity,
-                        "legacy_count": legacy_count,
-                        "normalized_count": normalized_count,
-                    },
-                    count=abs(legacy_count - normalized_count),
-                )
+    cur.execute(
+        "SELECT set_config('statement_timeout', %s, true)",
+        (_PUBLIC_PARITY_STATEMENT_TIMEOUT,),
+    )
+    cur.execute(
+        _PUBLIC_PARITY_PAGE_SQL,
+        {"run_ids": run_ids, "low": low, "high": high},
+    )
+    for row in cur.fetchall():
+        identity = row[0]
+        legacy_count = int(row[1])
+        normalized_count = int(row[2])
+        _append_mismatch(
+            report,
+            "public_parity_mismatches",
+            {
+                "identity": identity,
+                "legacy_count": legacy_count,
+                "normalized_count": normalized_count,
+            },
+            count=abs(legacy_count - normalized_count),
+        )
 
 
 def _finalize_report(report: dict[str, Any], *, apply: bool) -> None:
@@ -1081,9 +1081,39 @@ def backfill(
         progress.phase_completed(phase, report)
 
         phase = "public_parity"
-        progress.phase_started(phase, report)
-        _verify_public_parity(conn, min_result_id, max_result_id, report)
-        progress.completed_unit(report, phase=phase)
+        progress.phase_started(phase, report, total_runs=progress.total_runs)
+        after = 0
+        while True:
+            parity_skips: Counter[str] = Counter()
+            run_ids, rows, complete = _read_complete_page(
+                conn,
+                min_result_id,
+                max_result_id,
+                after,
+                batch_size,
+                parity_skips,
+            )
+            if not run_ids:
+                break
+            after = run_ids[-1]
+            complete_run_ids = sorted({row.run_id for row in complete})
+            if complete_run_ids:
+                with conn.transaction(), conn.cursor() as cur:
+                    cur.execute("SET TRANSACTION READ ONLY")
+                    _verify_public_parity_page(
+                        cur,
+                        complete_run_ids,
+                        min_result_id,
+                        max_result_id,
+                        report,
+                    )
+            conversations = len(
+                {
+                    (row.run_id, row.sample_id, row.provider, row.model, row.voice)
+                    for row in complete
+                }
+            )
+            progress.completed_page(run_ids, rows, conversations, report, phase=phase)
         progress.phase_completed(phase, report)
 
         phase = "rollup_verification"
