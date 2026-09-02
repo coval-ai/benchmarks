@@ -12,14 +12,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
+import sys
+import time
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 from importlib.resources import files
-from typing import Any
+from types import FrameType
+from typing import Any, TextIO
 
 import click
 import psycopg
@@ -41,6 +46,154 @@ _EVAL_NAMESPACE = uuid.UUID("e7f9ce4b-8f66-572c-bf9e-4f67b044422e")
 _ARTIFACT_NAMESPACE = uuid.UUID("64478df1-0d13-5996-a3ca-96c421f772c9")
 _LOCK = "normalized_storage_backfill"
 _MISMATCH_DETAIL_LIMIT = 100
+_PROGRESS_INTERVAL_SECONDS = 30.0
+_PROGRESS_MAX_UNITS = 10
+
+
+class _BackfillCancelled(Exception):
+    """Raised by the CLI SIGTERM handler after the current DB work unwinds."""
+
+
+@dataclass
+class ProgressReporter:
+    """Write aggregate-only, machine-readable migration progress to stderr."""
+
+    mode: str
+    min_result_id: int
+    max_result_id: int
+    batch_size: int
+    stream: TextIO = field(default_factory=lambda: sys.stderr)
+    monotonic: Callable[[], float] = time.monotonic
+    interval_seconds: float = _PROGRESS_INTERVAL_SECONDS
+    max_units: int = _PROGRESS_MAX_UNITS
+    started_at: float = 0.0
+    last_emitted_at: float = 0.0
+    units_since_emit: int = 0
+    pages: int = 0
+    runs: int = 0
+    results: int = 0
+    last_completed_run_id: int | None = None
+    last_completed_result_id: int | None = None
+    total_runs: int | None = None
+    phase_started_at: float = 0.0
+    phase_pages: int = 0
+    phase_runs: int = 0
+    phase_results: int = 0
+    phase_units_completed: int = 0
+    phase_last_completed_run_id: int | None = None
+    phase_last_completed_result_id: int | None = None
+    phase_total_runs: int | None = None
+
+    def __post_init__(self) -> None:
+        self.started_at = self.monotonic()
+        self.last_emitted_at = self.started_at
+        self.phase_started_at = self.started_at
+
+    def _payload(self, *, phase: str, status: str, report: dict[str, Any]) -> dict[str, Any]:
+        elapsed = max(0.0, self.monotonic() - self.started_at)
+        phase_elapsed = max(0.0, self.monotonic() - self.phase_started_at)
+        phase_run_throughput = self.phase_runs / phase_elapsed if phase_elapsed else 0.0
+        phase_result_throughput = self.phase_results / phase_elapsed if phase_elapsed else 0.0
+        payload: dict[str, Any] = {
+            "event": "normalized_storage_backfill_progress",
+            "status": status,
+            "phase": phase,
+            "mode": self.mode,
+            "min_result_id": self.min_result_id,
+            "max_result_id": self.max_result_id,
+            "batch_size": self.batch_size,
+            "pages": self.pages,
+            "runs": self.runs,
+            "results": self.results,
+            "last_completed_run_id": self.last_completed_run_id,
+            "last_completed_result_id": self.last_completed_result_id,
+            "elapsed_seconds": round(elapsed, 3),
+            "phase_elapsed_seconds": round(phase_elapsed, 3),
+            "throughput_runs_per_second": round(phase_run_throughput, 6),
+            "throughput_results_per_second": round(phase_result_throughput, 6),
+            "phase_pages": self.phase_pages,
+            "phase_runs": self.phase_runs,
+            "phase_results": self.phase_results,
+            "phase_units_completed": self.phase_units_completed,
+            "phase_last_completed_run_id": self.phase_last_completed_run_id,
+            "phase_last_completed_result_id": self.phase_last_completed_result_id,
+            "skipped": sum(report["skipped_by_reason"].values())
+            + sum(report["verification_skipped_by_reason"].values()),
+            "conflicts": report["parity_mismatch_count"] + report["rollup_mismatch_count"],
+        }
+        if self.phase_total_runs is not None:
+            payload["total_runs"] = self.phase_total_runs
+            payload["eta_seconds"] = (
+                round(max(0, self.phase_total_runs - self.phase_runs) / phase_run_throughput, 3)
+                if phase_run_throughput
+                else None
+            )
+        return payload
+
+    def emit(self, *, phase: str, status: str, report: dict[str, Any]) -> None:
+        self.stream.write(
+            json.dumps(self._payload(phase=phase, status=status, report=report), sort_keys=True)
+            + "\n"
+        )
+        self.stream.flush()
+        self.last_emitted_at = self.monotonic()
+        self.units_since_emit = 0
+
+    def phase_started(
+        self, phase: str, report: dict[str, Any], *, total_runs: int | None = None
+    ) -> None:
+        self.phase_started_at = self.monotonic()
+        self.phase_pages = 0
+        self.phase_runs = 0
+        self.phase_results = 0
+        self.phase_units_completed = 0
+        self.phase_last_completed_run_id = None
+        self.phase_last_completed_result_id = None
+        self.phase_total_runs = total_runs
+        self.emit(phase=phase, status="started", report=report)
+
+    def phase_completed(self, phase: str, report: dict[str, Any]) -> None:
+        self.emit(phase=phase, status="completed", report=report)
+
+    def completed_page(
+        self, run_ids: list[int], rows: list[LegacyRow], report: dict[str, Any], *, phase: str
+    ) -> None:
+        self.pages += 1
+        self.runs += len(run_ids)
+        self.results += len(rows)
+        self.phase_pages += 1
+        self.phase_runs += len(run_ids)
+        self.phase_results += len(rows)
+        self.last_completed_run_id = run_ids[-1]
+        self.last_completed_result_id = max(row.id for row in rows) if rows else None
+        self.phase_last_completed_run_id = self.last_completed_run_id
+        self.phase_last_completed_result_id = self.last_completed_result_id
+        self.completed_unit(report, phase=phase)
+
+    def completed_unit(self, report: dict[str, Any], *, phase: str) -> None:
+        self.units_since_emit += 1
+        self.phase_units_completed += 1
+        if (
+            self.units_since_emit >= self.max_units
+            or self.monotonic() - self.last_emitted_at >= self.interval_seconds
+        ):
+            self.emit(phase=phase, status="progress", report=report)
+
+
+@contextmanager
+def _temporary_sigterm_cancellation() -> Iterator[None]:
+    """Turn Cloud Run SIGTERM into an exception so cleanup finally blocks run."""
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def cancel(_: int, __: FrameType | None) -> None:
+        raise _BackfillCancelled()
+
+    signal.signal(signal.SIGTERM, cancel)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 @dataclass(frozen=True)
@@ -193,6 +346,12 @@ ORDER BY r.run_id
 LIMIT %s
 """
 
+_QUALIFYING_RUN_COUNT_SQL = """
+SELECT COUNT(DISTINCT r.run_id)
+FROM benchmarks_v2.results r
+WHERE r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS')
+"""
+
 _RUN_ROWS_SQL = """
 SELECT r.id,r.run_id,n.dataset_id,n.dataset_sha256,n.scheduled_at,r.provider,r.model,r.voice,
  r.benchmark,r.metric_type,r.metric_value,r.metric_units,r.audio_filename,r.transcript,r.status,
@@ -214,6 +373,16 @@ def _run_page(
             return [], []
         cur.execute(_RUN_ROWS_SQL, (run_ids, low, high))
         return run_ids, [LegacyRow(*row) for row in cur.fetchall()]
+
+
+def _qualifying_run_count(conn: psycopg.Connection, low: int, high: int) -> int:
+    """Count the same frozen run population used by keyset paging without loading IDs."""
+    with conn.cursor() as cur:
+        cur.execute(_QUALIFYING_RUN_COUNT_SQL, (low, high))
+        row = cur.fetchone()
+    if row is None:  # pragma: no cover - aggregate SELECT always returns one row.
+        raise RuntimeError("qualifying run count query returned no row")
+    return int(row[0])
 
 
 def _complete_window_rows(
@@ -952,7 +1121,10 @@ WHERE bucket_at=%(bucket)s
 
 
 def _rollup_mismatches(
-    conn: psycopg.Connection, buckets: Iterable[datetime], report: dict[str, Any]
+    conn: psycopg.Connection,
+    buckets: Iterable[datetime],
+    report: dict[str, Any],
+    on_bucket_completed: Callable[[], None] | None = None,
 ) -> None:
     """Compare materialized rollups with a fresh aggregate over immutable values."""
     with conn.cursor() as cur:
@@ -973,6 +1145,8 @@ def _rollup_mismatches(
                         "reason": "stored_bucket_payload_mismatch",
                     },
                 )
+            if on_bucket_completed is not None:
+                on_bucket_completed()
 
 
 _BUCKET_PAGE_SQL = """
@@ -1073,6 +1247,7 @@ def backfill(
     batch_size: int,
     apply: bool,
     artifact_bucket: str | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> dict[str, Any]:
     if min_result_id <= 0 or max_result_id < min_result_id or batch_size <= 0:
         raise ValueError("invalid id range or batch size")
@@ -1082,39 +1257,67 @@ def backfill(
         "max_result_id": max_result_id,
         "batch_size": batch_size,
     }
-    if apply and not artifact_bucket:
-        raise click.ClickException("BENCHMARK_ARTIFACT_BUCKET is required for --apply")
-    # Fail GCS setup before the first committed page, even if this prefix happens
-    # not to contain an artifact-bearing observation.
-    client = storage.Client() if apply else None
-    if client is not None and artifact_bucket is not None:
-        _preflight_artifact_bucket(client, artifact_bucket)
-    conn.commit()
-    if not apply:
-        for rows, complete in _complete_pages(
-            conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
-        ):
-            report["source_rows"] += len(rows)
-            plans = _page_plans(complete, report["skipped_by_reason"])
-            report["source_groups"] += len(plans)
-            for plan in plans:
-                if plan.first.scheduled_at is None:
-                    report["skipped_by_reason"]["scheduled_at_missing"] += 1
-                else:
-                    _insert_plan(conn, plan, False, artifact_bucket, None, report)
-        _rollup_mismatches(
-            conn,
-            _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
-            report,
-        )
-        _set_ready(report, dry_run=True)
-        return report
-    with conn.cursor() as cur:
-        cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
-    # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
-    # transaction now so each following ``conn.transaction`` is top-level.
-    conn.commit()
+    reporter = reporter or ProgressReporter(
+        mode="apply" if apply else "dry_run",
+        min_result_id=min_result_id,
+        max_result_id=max_result_id,
+        batch_size=batch_size,
+    )
+    phase = "operation"
+    lock_acquired = False
+    reporter.phase_started(phase, report)
     try:
+        if apply and not artifact_bucket:
+            raise click.ClickException("BENCHMARK_ARTIFACT_BUCKET is required for --apply")
+        # Fail GCS setup before the first committed page, even if this prefix happens
+        # not to contain an artifact-bearing observation.
+        client = storage.Client() if apply else None
+        if client is not None and artifact_bucket is not None:
+            phase = "artifact_preflight"
+            reporter.phase_started(phase, report)
+            _preflight_artifact_bucket(client, artifact_bucket)
+            reporter.phase_completed(phase, report)
+        phase = "qualifying_run_count"
+        reporter.phase_started(phase, report)
+        reporter.total_runs = _qualifying_run_count(conn, min_result_id, max_result_id)
+        reporter.phase_completed(phase, report)
+        conn.commit()
+        phase = "source_reconciliation"
+        reporter.phase_started(phase, report, total_runs=reporter.total_runs)
+        if not apply:
+            for rows, complete in _complete_pages(
+                conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
+            ):
+                report["source_rows"] += len(rows)
+                plans = _page_plans(complete, report["skipped_by_reason"])
+                report["source_groups"] += len(plans)
+                for plan in plans:
+                    if plan.first.scheduled_at is None:
+                        report["skipped_by_reason"]["scheduled_at_missing"] += 1
+                    else:
+                        _insert_plan(conn, plan, False, artifact_bucket, None, report)
+                reporter.completed_page(
+                    sorted({row.run_id for row in rows}), rows, report, phase=phase
+                )
+            reporter.phase_completed(phase, report)
+            phase = "rollup_verification"
+            reporter.phase_started(phase, report)
+            _rollup_mismatches(
+                conn,
+                _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
+                report,
+                lambda: reporter.completed_unit(report, phase=phase),
+            )
+            reporter.phase_completed(phase, report)
+            _set_ready(report, dry_run=True)
+            reporter.phase_completed("operation", report)
+            return report
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
+        lock_acquired = True
+        # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
+        # transaction now so each following ``conn.transaction`` is top-level.
+        conn.commit()
         for rows, complete in _complete_pages(
             conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
         ):
@@ -1141,9 +1344,13 @@ def backfill(
                         with conn.cursor() as cur:
                             _refresh_bucket(cur, bucket_at)
                         report["buckets"] += 1
+            reporter.completed_page(sorted({row.run_id for row in rows}), rows, report, phase=phase)
+        reporter.phase_completed(phase, report)
         # Re-plan from a fresh bounded pass; never retain first-pass plans.
+        phase = "post_write_verification"
+        reporter.phase_started(phase, report, total_runs=reporter.total_runs)
         verification_skipped: Counter[str] = report["verification_skipped_by_reason"]
-        for _, complete in _complete_pages(
+        for rows, complete in _complete_pages(
             conn, min_result_id, max_result_id, batch_size, verification_skipped
         ):
             for plan in _page_plans(complete, verification_skipped):
@@ -1171,18 +1378,31 @@ def backfill(
                             "parity_mismatches",
                             {"natural_key": list(plan.natural), "reason": reason},
                         )
+            reporter.completed_page(sorted({row.run_id for row in rows}), rows, report, phase=phase)
+        reporter.phase_completed(phase, report)
+        phase = "rollup_verification"
+        reporter.phase_started(phase, report)
         _rollup_mismatches(
             conn,
             _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
             report,
+            lambda: reporter.completed_unit(report, phase=phase),
         )
+        reporter.phase_completed(phase, report)
         _set_ready(report, dry_run=False)
+        reporter.phase_completed("operation", report)
         return report
+    except BaseException:
+        status = "cancelled" if isinstance(sys.exception(), _BackfillCancelled) else "failed"
+        reporter.emit(phase=phase, status=status, report=report)
+        reporter.emit(phase="operation", status=status, report=report)
+        raise
     finally:
-        conn.rollback()
-        with conn.cursor() as cur:
-            cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (_LOCK,))
-        conn.commit()
+        if lock_acquired:
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (_LOCK,))
+            conn.commit()
 
 
 @click.command(name="backfill-normalized-storage")
@@ -1201,7 +1421,7 @@ def backfill_normalized_storage_cli(
         raise click.ClickException(
             "DATABASE_URL is required for this production migration; set a non-local production URL"
         )
-    with psycopg.connect(url) as conn:
+    with _temporary_sigterm_cancellation(), psycopg.connect(url) as conn:
         if max_result_id is None:
             with conn.cursor() as cur:
                 cur.execute("SELECT COALESCE(max(id),0) FROM benchmarks_v2.results")

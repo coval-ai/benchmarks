@@ -59,6 +59,37 @@ Normalized observation dual writes are additive, private, and disabled by defaul
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
 enable the STT/TTS rollout; legacy result writes remain the source of truth.
 
+### Normalized-storage backfill operator runbook
+
+Run the production backfill as a dry run first. This command adds no `--apply`
+flag, so it makes no normalized-storage writes; the Cloud Run timeout override
+applies only to this execution.
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=24h \
+  --wait \
+  --args='migrate,backfill-normalized-storage,--min-result-id=1,--batch-size=100'
+```
+
+The dry run freezes and reports its maximum result ID. Record that maximum for
+any separately authorized `--apply` run, which must pass it explicitly. Progress
+events are JSON on stderr; the final JSON report remains stdout's final line.
+
+`--batch-size` is a run-ID read page and also bounds apply-plan transaction
+batches. Larger pages reduce round trips, but increase memory, transaction
+duration, rollback and retry work, artifact exposure, and the spacing between
+safe checkpoints. A local PostgreSQL 16 dry-run comparison over 5,000 synthetic
+STT runs with one result each measured 1.15--1.26 s / 95.2 MB peak RSS at 25,
+1.03--1.06 s / 95.6 MB at 100, and 0.92--0.98 s / 97.6--97.8 MB at 400 after a
+warm-up run. The small synthetic gain does not model production row fanout,
+artifact handling, transaction duration, or rollback exposure, so the default
+remains 100. Compare candidate sizes in production only with sequential dry
+runs over the same frozen window, using each phase's elapsed time and throughput
+together with Cloud Run peak memory.
+
 ### Normalized read-index benchmark
 
 With Docker Postgres running, compare the baseline and the two candidate indexes

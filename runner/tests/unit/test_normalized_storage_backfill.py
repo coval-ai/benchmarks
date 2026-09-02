@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import json
+import signal
 from collections import Counter
 from contextlib import nullcontext
 from dataclasses import astuple, replace
@@ -252,6 +255,271 @@ def test_cli_rejects_the_local_placeholder_before_connecting(
     assert "DATABASE_URL is required" in result.output
 
 
+class _Clock:
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def __call__(self) -> float:
+        return self.value
+
+
+def _progress_events(stream: io.StringIO) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in stream.getvalue().splitlines()]
+
+
+def test_progress_reporter_emits_periodically_with_checkpoint_throughput_and_eta() -> None:
+    clock = _Clock()
+    stream = io.StringIO()
+    report = migration._report()
+    reporter = migration.ProgressReporter(
+        "dry_run", 1, 99, 100, stream=stream, monotonic=clock, max_units=10
+    )
+    reporter.total_runs = 4
+    reporter.phase_started("source_reconciliation", report, total_runs=4)
+    clock.value = 31
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
+    reporter.completed_page([7], [row], report, phase="source_reconciliation")
+
+    event = _progress_events(stream)[-1]
+    assert event["status"] == "progress"
+    assert event["last_completed_run_id"] == 7
+    assert event["last_completed_result_id"] == 9
+    assert event["throughput_runs_per_second"] == pytest.approx(1 / 31, rel=1e-5)
+    assert event["throughput_results_per_second"] == pytest.approx(1 / 31, rel=1e-5)
+    assert event["eta_seconds"] == pytest.approx(93)
+    assert event["phase_elapsed_seconds"] == 31
+    assert event["mode"] == "dry_run"
+
+
+def test_progress_reporter_uses_bounded_unit_fallback_before_time_interval() -> None:
+    clock = _Clock()
+    stream = io.StringIO()
+    report = migration._report()
+    reporter = migration.ProgressReporter(
+        "dry_run", 1, 99, 100, stream=stream, monotonic=clock, max_units=2
+    )
+    reporter.phase_started("source_reconciliation", report)
+    row = replace(_row("WER", 1.0), benchmark="STT")
+    reporter.completed_page([1], [row], report, phase="source_reconciliation")
+    reporter.completed_page(
+        [2], [replace(row, id=2, run_id=2)], report, phase="source_reconciliation"
+    )
+
+    assert _progress_events(stream)[-1]["status"] == "progress"
+
+
+def test_progress_reporter_tracks_verification_pages_and_rollup_units() -> None:
+    clock = _Clock()
+    stream = io.StringIO()
+    report = migration._report()
+    reporter = migration.ProgressReporter("apply", 1, 99, 100, stream=stream, monotonic=clock)
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
+
+    reporter.phase_started("post_write_verification", report, total_runs=4)
+    clock.value = 10
+    reporter.completed_page([7], [row], report, phase="post_write_verification")
+    reporter.phase_completed("post_write_verification", report)
+    verification = _progress_events(stream)[-1]
+    assert verification["phase_pages"] == 1
+    assert verification["phase_runs"] == 1
+    assert verification["phase_results"] == 1
+    assert verification["eta_seconds"] == pytest.approx(30)
+
+    reporter.phase_started("rollup_verification", report)
+    reporter.completed_unit(report, phase="rollup_verification")
+    reporter.phase_completed("rollup_verification", report)
+    rollup = _progress_events(stream)[-1]
+    assert rollup["phase_units_completed"] == 1
+    assert "eta_seconds" not in rollup
+
+
+def test_dry_run_progress_is_stderr_only_and_forces_phase_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT", transcript="private")
+    stream = io.StringIO()
+    reporter = migration.ProgressReporter("dry_run", 1, 9, 1, stream=stream, monotonic=_Clock())
+    writes: list[bool] = []
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [],
+    )
+
+    class Conn:
+        def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
+    monkeypatch.setattr(migration, "_complete_pages", lambda *_: iter([([row], [row])]))
+    monkeypatch.setattr(migration, "_page_plans", lambda *_: [plan])
+    monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
+    monkeypatch.setattr(migration, "_rollup_mismatches", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        migration, "_insert_plan", lambda _conn, _plan, apply, *_args: writes.append(apply)
+    )
+
+    report = migration.backfill(
+        Conn(),  # type: ignore[arg-type]
+        min_result_id=1,
+        max_result_id=9,
+        batch_size=1,
+        apply=False,
+        reporter=reporter,
+    )
+
+    events = _progress_events(stream)
+    assert writes == [False]
+    assert report["source_rows"] == 1
+    assert events[-1]["phase"] == "operation"
+    assert events[-1]["status"] == "completed"
+    assert "private" not in stream.getvalue()
+
+
+def test_cli_keeps_progress_on_stderr_and_machine_report_as_final_stdout_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Settings:
+        database_url = "postgresql://example"
+
+    class Conn:
+        def __enter__(self) -> Conn:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def commit(self) -> None:
+            return None
+
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
+    monkeypatch.setattr(migration, "get_settings", lambda: Settings())
+    monkeypatch.setattr(psycopg, "connect", lambda _: Conn())
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
+    monkeypatch.setattr(migration, "_complete_pages", lambda *_: iter([([row], [row])]))
+    monkeypatch.setattr(migration, "_page_plans", lambda *_: [])
+    monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
+    monkeypatch.setattr(migration, "_rollup_mismatches", lambda *_args, **_kwargs: None)
+
+    result = CliRunner().invoke(backfill_normalized_storage_cli, ["--max-result-id", "9"])
+
+    assert result.exit_code == 0
+    assert "normalized_storage_backfill_progress" not in result.stdout
+    assert "normalized_storage_backfill_progress" in result.stderr
+    assert json.loads(result.stdout.splitlines()[-1])["window"]["max_result_id"] == 9
+
+
+def test_sigterm_cancellation_handler_is_restored(monkeypatch: pytest.MonkeyPatch) -> None:
+    previous = object()
+    handlers: list[Any] = []
+    monkeypatch.setattr(signal, "getsignal", lambda _: previous)
+    monkeypatch.setattr(signal, "signal", lambda _, handler: handlers.append(handler))
+
+    with migration._temporary_sigterm_cancellation(), pytest.raises(migration._BackfillCancelled):
+        handlers[-1](signal.SIGTERM, None)
+
+    assert handlers[-1] is previous
+
+
+def test_progress_failure_keeps_last_completed_checkpoint_without_detail_leakage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
+    stream = io.StringIO()
+    reporter = migration.ProgressReporter("dry_run", 1, 9, 1, stream=stream, monotonic=_Clock())
+
+    def pages(*_: Any) -> Any:
+        yield [row], [row]
+        raise RuntimeError("private transcript and exception detail")
+
+    class Conn:
+        def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
+    monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_page_plans", lambda *_: [])
+    with pytest.raises(RuntimeError, match="private transcript"):
+        migration.backfill(
+            Conn(),  # type: ignore[arg-type]
+            min_result_id=1,
+            max_result_id=9,
+            batch_size=1,
+            apply=False,
+            reporter=reporter,
+        )
+
+    events = _progress_events(stream)
+    assert events[-1]["status"] == "failed"
+    assert events[-1]["last_completed_run_id"] == 7
+    assert events[-1]["last_completed_result_id"] == 9
+    assert "private" not in stream.getvalue()
+
+
+def test_apply_cancellation_emits_checkpoint_then_unlocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
+    stream = io.StringIO()
+    reporter = migration.ProgressReporter("apply", 1, 9, 1, stream=stream, monotonic=_Clock())
+    events: list[str] = []
+
+    def pages(*_: Any) -> Any:
+        yield [row], []
+        raise migration._BackfillCancelled()
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, statement: str, *_: Any) -> None:
+            events.append("unlock" if "pg_advisory_unlock" in statement else "lock")
+
+    class Conn:
+        def commit(self) -> None:
+            events.append("commit")
+
+        def rollback(self) -> None:
+            events.append("rollback")
+
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+        def transaction(self) -> Any:
+            return nullcontext()
+
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
+    monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_page_plans", lambda *_: [])
+    monkeypatch.setattr(gcs_storage, "Client", lambda: object())
+    monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
+    with pytest.raises(migration._BackfillCancelled):
+        migration.backfill(
+            Conn(),  # type: ignore[arg-type]
+            min_result_id=1,
+            max_result_id=9,
+            batch_size=1,
+            apply=True,
+            artifact_bucket="bucket",
+            reporter=reporter,
+        )
+
+    progress = _progress_events(stream)
+    assert progress[-1]["status"] == "cancelled"
+    assert progress[-1]["last_completed_run_id"] == 7
+    assert events[-3:] == ["rollback", "unlock", "commit"]
+
+
 def test_run_pages_keyset_by_run_id_not_interleaved_result_ids() -> None:
     first = replace(_row("WER", 1.0), id=1, run_id=10, benchmark="STT")
     second = replace(_row("WER", 2.0), id=2, run_id=20, benchmark="STT")
@@ -389,6 +657,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
             return nullcontext()
 
     monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
     monkeypatch.setattr(migration, "_page_plans", lambda *_: [plan])
     monkeypatch.setattr(gcs_storage, "Client", lambda: object())
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
@@ -478,6 +747,7 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
             return nullcontext()
 
     monkeypatch.setattr(migration, "_complete_pages", pages)
+    monkeypatch.setattr(migration, "_qualifying_run_count", lambda *_: 1)
     monkeypatch.setattr(migration, "_page_plans", plans)
     monkeypatch.setattr(gcs_storage, "Client", lambda: object())
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
