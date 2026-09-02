@@ -31,6 +31,7 @@ TOOL_TIMEOUT_SECONDS = 20
 SIMULATION_HEADER_TEMPLATE = "{{coval-simulation-id}}"
 TOOLS_PATH = "model.tools"
 TELNYX_SIP_SUFFIX = ".sip.telnyx.com"
+TELNYX_SIP_RECEIVE = "from_anyone"
 COVAL_API_BASE = "https://api.coval.dev/v1"
 COVAL_MODEL_TYPE = "MODEL_TYPE_VOICE"
 COVAL_PROMPT_FILE = "_source/coval-prompt.txt"
@@ -288,7 +289,7 @@ class TelnyxClient(_JsonClient):
             {
                 "inbound": {
                     "sip_subdomain": subdomain,
-                    "sip_subdomain_receive_settings": "from_anyone",
+                    "sip_subdomain_receive_settings": TELNYX_SIP_RECEIVE,
                 }
             },
         )
@@ -311,9 +312,10 @@ def prepare_telnyx(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) 
     app_id = str(_get_path(live, "telephony_settings.default_texml_app_id") or "")
     if not app_id:
         raise SyncError("the assistant has no telephony_settings.default_texml_app_id")
-    current = _get_path(client.get_texml_app(app_id), "inbound.sip_subdomain")
-    if current != wanted:
-        pending.append(f"sip_subdomain:{app_id}={wanted}")
+    inbound = _get_path(client.get_texml_app(app_id), "inbound") or {}
+    current = (inbound.get("sip_subdomain"), inbound.get("sip_subdomain_receive_settings"))
+    if current != (wanted, TELNYX_SIP_RECEIVE):
+        pending.append(f"sip_subdomain:{app_id}={wanted}:{TELNYX_SIP_RECEIVE}")
         if not dry_run:
             client.set_sip_subdomain(app_id, wanted)
     return pending

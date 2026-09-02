@@ -529,14 +529,23 @@ def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
             state["secrets"].append(json.loads(request.content)["identifier"])
             return httpx.Response(201, json={"data": {"id": "s", "identifier": "x"}})
         if request.url.path == "/v2/texml_applications/texml-1" and request.method == "GET":
-            return httpx.Response(200, json={"data": {"inbound": {"sip_subdomain": state["sub"]}}})
+            inbound = {
+                "sip_subdomain": state["sub"],
+                "sip_subdomain_receive_settings": state["recv"],
+            }
+            return httpx.Response(200, json={"data": {"inbound": inbound}})
         if request.url.path == "/v2/texml_applications/texml-1":
-            state["sub"] = json.loads(request.content)["inbound"]["sip_subdomain"]
+            inbound = json.loads(request.content)["inbound"]
+            state["sub"], state["recv"] = (
+                inbound["sip_subdomain"],
+                inbound["sip_subdomain_receive_settings"],
+            )
             return httpx.Response(200, json={"data": {}})
         return httpx.Response(404, text=request.url.path)
 
     state.setdefault("secrets", list(TELNYX_SECRETS))
     state.setdefault("sub", "coval-bench-dental")
+    state.setdefault("recv", "from_anyone")
     return CLIENTS[spec.platform]("key", platform.api_base, transport=httpx.MockTransport(handler))
 
 
@@ -665,7 +674,7 @@ def test_telnyx_prepare_lists_missing_secrets_and_subdomain_then_creates_only_th
         assert pending == [
             "integration_secret:coval-bench-elevenlabs",
             "integration_secret:coval-bench-mock",
-            "sip_subdomain:texml-1=coval-bench-dental",
+            "sip_subdomain:texml-1=coval-bench-dental:from_anyone",
         ]
         assert state["secrets"] == ["coval", "coval-bench-openai"] and state["sub"] is None
         assert prepare_telnyx(client, spec, False) == pending
@@ -691,3 +700,15 @@ def test_telnyx_client_updates_with_post_as_the_reference_documents() -> None:
     ) as c:
         c.update_agent("assistant-1", {})
     assert seen == ["POST"]
+
+
+def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env: Case) -> None:
+    spec = spec_for("telnyx-dental")
+    state: dict[str, Any] = {"sub": "coval-bench-dental", "recv": "only_my_connections"}
+    with _platform_client(telnyx_env, state) as client:
+        assert prepare_telnyx(client, spec, True) == [
+            "sip_subdomain:texml-1=coval-bench-dental:from_anyone"
+        ]
+        prepare_telnyx(client, spec, False)
+        assert prepare_telnyx(client, spec, False) == []
+    assert state["recv"] == "from_anyone"
