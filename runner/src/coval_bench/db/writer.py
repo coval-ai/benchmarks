@@ -909,10 +909,12 @@ class RunWriter:
                 await cur.execute(sql, (status, error, run_id))
             await conn.commit()
 
-    async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
+    async def coval_run_ingested(
+        self, *, provider: str, coval_run_id: str, benchmark: str = "S2S"
+    ) -> bool:
         """True if a succeeded or partial run already holds rows for this Coval run.
 
-        S2S rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
+        Coval rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
         fetch job skip a re-pulled run so a retry or stale re-pull doesn't
         double-write the day's bucket. Rows from failed runs don't count: they
         never reach the bucket, so a retry must stay free to re-ingest the run.
@@ -922,20 +924,25 @@ class RunWriter:
             FROM benchmarks_v2.results r
             JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
             WHERE r.provider = %s
-              AND r.benchmark = 'S2S'
+              AND r.benchmark = %s
               AND split_part(r.audio_filename, '/', 1) = %s
               AND rn.status IN ('succeeded', 'partial')
             LIMIT 1
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, coval_run_id))
+                await cur.execute(sql, (provider, benchmark, coval_run_id))
                 row = await cur.fetchone()
             await conn.commit()
         return row is not None
 
     async def coval_metric_ingested(
-        self, *, provider: str, coval_run_id: str, metric_type: str
+        self,
+        *,
+        provider: str,
+        coval_run_id: str,
+        metric_type: str,
+        benchmark: str = "S2S",
     ) -> bool:
         """True if a succeeded/partial run already holds this Coval run's ``metric_type`` rows.
 
@@ -948,7 +955,7 @@ class RunWriter:
             FROM benchmarks_v2.results r
             JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
             WHERE r.provider = %s
-              AND r.benchmark = 'S2S'
+              AND r.benchmark = %s
               AND r.metric_type = %s
               AND split_part(r.audio_filename, '/', 1) = %s
               AND rn.status IN ('succeeded', 'partial')
@@ -956,7 +963,7 @@ class RunWriter:
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, metric_type, coval_run_id))
+                await cur.execute(sql, (provider, benchmark, metric_type, coval_run_id))
                 row = await cur.fetchone()
             await conn.commit()
         return row is not None

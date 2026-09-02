@@ -31,6 +31,7 @@ from pytest_postgresql.factories import postgresql
 from coval_bench.db.conn import get_pool
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.db.writer import RunWriter
+from coval_bench.registries import Metric
 
 # ---------------------------------------------------------------------------
 # pytest-postgresql fixtures — server shared via conftest ``pg_proc``
@@ -113,6 +114,20 @@ def _make_result(
         metric_value=0.05 + idx * 0.01,
         metric_units="ratio",
         status=status,
+    )
+
+
+def _coval_result(run_id: int, *, benchmark: Benchmark, coval_run_id: str) -> Result:
+    return Result(
+        run_id=run_id,
+        provider="test-provider",
+        model="test-model",
+        benchmark=benchmark,
+        metric_type=Metric.INSTRUCTION_FOLLOWING,
+        metric_value=100.0,
+        metric_units="percent",
+        audio_filename=f"{coval_run_id}/simulation-1",
+        status=ResultStatus.SUCCESS,
     )
 
 
@@ -970,3 +985,41 @@ def test_record_results_rejects_unknown_metric_type(pg_conn: psycopg.Connection[
         row = cur.fetchone()
     assert row is not None
     assert row[0] == 0
+
+
+def test_coval_ingestion_checks_are_scoped_by_benchmark(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    _apply_migrations(pg_conn)
+
+    async def _run() -> tuple[bool, bool, bool, bool]:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            llm_run = await writer.start_run(dataset_id="llm-dental-v1", dataset_sha256="llm")
+            assert llm_run.id is not None
+            await writer.record_results(
+                [_coval_result(llm_run.id, benchmark=Benchmark.LLM, coval_run_id="RLLM")]
+            )
+            await writer.finish_run(llm_run.id, status=RunStatus.SUCCEEDED)
+            return (
+                await writer.coval_run_ingested(provider="test-provider", coval_run_id="RLLM"),
+                await writer.coval_run_ingested(
+                    provider="test-provider", coval_run_id="RLLM", benchmark="LLM"
+                ),
+                await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RLLM",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RLLM",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                    benchmark="LLM",
+                ),
+            )
+        finally:
+            await pool.close()
+
+    assert asyncio.run(_run()) == (False, True, False, True)
