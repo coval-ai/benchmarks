@@ -6,7 +6,7 @@
     "unit": "per_1k_chars",
     "price_usd": "0.01",
     "effective_from": "2026-08-31",
-    "source_url": "https://murf.ai/api/pricing",
-    "notes": "Pay-as-you-go plan card: '$0.01/1000 characters for Falcon'. The page renders client-side; the figure ships in its own pricing config and API."
+    "source_url": "https://murf.ai/pricing",
+    "notes": "API tab of the pricing page, the realtime Text to Speech row ('Optimized for conversational AI and real-time voice agents with time-to-first-audio under 130ms', i.e. Falcon): $0.01 / 1000 characters. The $0.03 row beside it is the studio synthesis model, not this one. The page renders client-side; the old murf.ai/api/pricing route 404s since early Sep 2026."
   }
 ]

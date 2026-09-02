@@ -7,6 +7,6 @@
     "price_usd": "13",
     "effective_from": "2026-09-01",
     "source_url": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
-    "notes": "Qwen3-TTS-Flash-Realtime table, International deployment (the dashscope-intl endpoint we benchmark): $0.13 per 10,000 input text characters, output audio free. The Chinese-mainland table lists $0.143353 per 10,000."
+    "notes": "Qwen3-TTS-Flash-Realtime table, Singapore region ('International' deployment scope — the dashscope-intl endpoint we benchmark): $0.13 per 10,000 input text characters, output audio free. The Chinese-mainland (Beijing) table lists $0.143353 per 10,000."
   }
 ]
