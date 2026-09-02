@@ -587,6 +587,43 @@ def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> No
         assert cur.fetchall() == [(True, False, False, "migration:20260901_0025")]
 
 
+def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[Any]) -> None:
+    """The NOT VALID swaps end validated, and the re-added CHECKs still reject bad values."""
+    _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT conname, convalidated FROM pg_constraint "
+            "WHERE conname IN ('results_benchmark_check', 'results_by_bucket_benchmark_check', "
+            " 'benchmark_observations_benchmark_check', 'metric_values_by_bucket_benchmark_check', "
+            " 'models_modality_check', 'model_history_modality_check') "
+            "ORDER BY conname"
+        )
+        rows = cur.fetchall()
+    assert len(rows) == 6
+    assert all(validated for _, validated in rows), rows
+
+    pg_conn.autocommit = False
+    with (
+        pytest.raises(psycopg.errors.CheckViolation),
+        pg_conn.cursor() as cur,
+    ):
+        cur.execute(
+            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
+            "VALUES ('sha', 'ds', 'hash', 'succeeded') RETURNING id"
+        )
+        run_row = cur.fetchone()
+        assert run_row is not None
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results "
+            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
+            "VALUES (%s, 'acme', 'x', 'XYZ', 'TTFT', 1.0, 'seconds', 'success')",
+            (run_row[0],),
+        )
+    pg_conn.rollback()
+
+
 def test_pool_singleton(pg_conn: psycopg.Connection[Any]) -> None:
     """get_pool(settings) returns the same instance on repeated calls."""
     from unittest.mock import MagicMock
