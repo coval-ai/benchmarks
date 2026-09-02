@@ -193,6 +193,48 @@ async def test_s2s_leaderboard_uses_the_clean_primary_dataset(
     ]
 
 
+async def test_ttft_llm_uses_the_dental_primary_dataset(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The LLM board reads the text dental dataset; rows under other datasets stay out."""
+    dental_run = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+    other_run = await _insert_run(postgresql, dataset_id="llm-scratch-v1")
+    await _insert_result(
+        postgresql,
+        dental_run,
+        provider="phonely",
+        model="phonely-agent",
+        metric_type="TTFT",
+        metric_value=0.42,
+        metric_units="seconds",
+        benchmark="LLM",
+    )
+    await _insert_result(
+        postgresql,
+        other_run,
+        provider="acme",
+        model="chat-1",
+        metric_type="TTFT",
+        metric_value=0.10,
+        metric_units="seconds",
+        benchmark="LLM",
+    )
+    await _refresh_mv(postgresql)
+
+    response = await client.get("/v1/leaderboard", params={"metric": "TTFT", "benchmark": "LLM"})
+
+    assert response.status_code == 200
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
+        ("phonely", "phonely-agent")
+    ]
+
+
+async def test_v2v_llm_incompatible(client: AsyncClient) -> None:
+    """A text agent has no voice-to-voice latency."""
+    response = await client.get("/v1/leaderboard", params={"metric": "V2V", "benchmark": "LLM"})
+    assert response.status_code == 400
+
+
 async def test_thin_entry_flagged_and_sunk_below_ranked(
     client: AsyncClient, postgresql: Any
 ) -> None:

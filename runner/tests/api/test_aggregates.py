@@ -196,6 +196,35 @@ async def test_model_stats_math(client: AsyncClient, postgresql: Any) -> None:
     assert s["sample_count"] == 4
 
 
+async def test_llm_instruction_following_is_served_by_aggregates(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The LLM board's pass rate is read here, not from the leaderboard."""
+    run_id = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+    for value in (100.0, 0.0, 100.0, 100.0):
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="phonely",
+            model="phonely-agent",
+            metric_type="InstructionFollowing",
+            metric_value=value,
+            metric_units="percent",
+            benchmark="LLM",
+        )
+    await _refresh_mv(postgresql)
+
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
+    )
+    assert response.status_code == 200
+    stats = response.json()["model_stats"]
+    assert [(s["provider"], s["metric_type"], s["sample_count"]) for s in stats] == [
+        ("phonely", "InstructionFollowing", 4)
+    ]
+    assert stats[0]["avg_value"] == pytest.approx(75.0)
+
+
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
     """STDDEV_SAMP is NULL for n=1 — must be coalesced to 0 like the client did."""
     run_id = await _insert_run(postgresql)

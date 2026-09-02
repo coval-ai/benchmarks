@@ -548,6 +548,45 @@ def test_check_constraints(pg_conn: psycopg.Connection[Any]) -> None:
     pg_conn.rollback()
 
 
+def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> None:
+    """Every widened CHECK admits 'LLM', and the migration seeded the Phonely entry."""
+    _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
+            "VALUES ('sha', 'llm-dental-v1', 'hash', 'succeeded') RETURNING id"
+        )
+        run_row = cur.fetchone()
+        assert run_row is not None
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results "
+            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
+            "VALUES (%s, 'phonely', 'phonely-agent', 'LLM', 'TTFT', 0.42, 'seconds', 'success')",
+            (run_row[0],),
+        )
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results_by_bucket "
+            "(provider, model, benchmark, dataset_id, metric_type, bucket_at, "
+            " min_value, p25, p50, p75, max_value, value_sum, sample_count) "
+            "VALUES ('phonely', 'phonely-agent', 'LLM', 'llm-dental-v1', 'TTFT', now(), "
+            " 0.4, 0.4, 0.42, 0.45, 0.45, 0.85, 2)"
+        )
+        cur.execute(
+            "INSERT INTO benchmarks_v2.models "
+            "(modality, provider, model, voice, voices, creator, source, licensing, "
+            " on_prem, region, arena_enabled, collected, published, updated_by_user_id) "
+            "VALUES ('LLM', 'acme', 'chat-1', NULL, '[]'::jsonb, NULL, 'official-api', "
+            " 'proprietary', FALSE, 'us', FALSE, TRUE, FALSE, 'test')"
+        )
+        cur.execute(
+            "SELECT collected, published, arena_enabled, updated_by_user_id "
+            "FROM benchmarks_v2.models WHERE modality = 'LLM' AND provider = 'phonely'"
+        )
+        assert cur.fetchall() == [(True, False, False, "migration:20260901_0025")]
+
+
 def test_pool_singleton(pg_conn: psycopg.Connection[Any]) -> None:
     """get_pool(settings) returns the same instance on repeated calls."""
     from unittest.mock import MagicMock

@@ -94,7 +94,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="seconds",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=2,
-        benchmarks=frozenset({Benchmark.STT}),
+        benchmarks=frozenset({Benchmark.STT, Benchmark.LLM}),
     ),
     Metric.TTFS: MetricSpec(
         display_name="Time to Final from Speech",
@@ -155,7 +155,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="percent",
         direction=MetricDirection.HIGHER_IS_BETTER,
         decimals=1,
-        benchmarks=frozenset({Benchmark.S2S}),
+        benchmarks=frozenset({Benchmark.S2S, Benchmark.LLM}),
     ),
     Metric.INTERRUPTION_RATE: MetricSpec(
         display_name="Interruption Rate",

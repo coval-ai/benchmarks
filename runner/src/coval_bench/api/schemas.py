@@ -49,7 +49,7 @@ class ResultOut(BaseModel):
     provider: str
     model: str
     voice: str | None
-    benchmark: Literal["STT", "TTS", "S2S"]
+    benchmark: BenchmarkLiteral
     dataset_id: str
     metric_type: str
     metric_value: float | None
@@ -118,7 +118,8 @@ class ProvidersResponse(BaseModel):
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
     s2s: list[ProviderInfo]
-    # Facet vocabulary in display order, shared across STT, TTS, and S2S.
+    llm: list[ProviderInfo]
+    # Facet vocabulary in display order, shared across every benchmark.
     tag_categories: list[TagCategoryOut]
 
 

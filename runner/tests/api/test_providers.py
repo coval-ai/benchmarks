@@ -27,10 +27,8 @@ async def test_providers_shape(client: AsyncClient) -> None:
     """Response matches ProvidersResponse schema."""
     response = await client.get("/v1/providers")
     data = response.json()
-    assert "stt" in data
-    assert "tts" in data
-    assert isinstance(data["stt"], list)
-    assert isinstance(data["tts"], list)
+    for board in ("stt", "tts", "s2s", "llm"):
+        assert isinstance(data[board], list)
 
 
 async def test_each_provider_has_models(client: AsyncClient) -> None:
@@ -166,7 +164,7 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
     public = (await client.get("/v1/providers")).json()
     assert not any(
         m["early_access"]
-        for board in ("stt", "tts", "s2s")
+        for board in ("stt", "tts", "s2s", "llm")
         for entry in public[board]
         for m in entry["models"]
     )
@@ -175,7 +173,7 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
     internal_data = internal.json()
     flagged = {
         (entry["provider"], m["model"])
-        for board in ("stt", "tts", "s2s")
+        for board in ("stt", "tts", "s2s", "llm")
         for entry in internal_data[board]
         for m in entry["models"]
         if m["early_access"]
@@ -284,7 +282,7 @@ def _sorted_tags(payload: dict[str, Any]) -> dict[str, Any]:
     alphabetized, the literals carry the order they were typed in, and the site
     tests tag membership per facet rather than reading the sequence.
     """
-    for modality in ("stt", "tts", "s2s"):
+    for modality in ("stt", "tts", "s2s", "llm"):
         for provider in payload[modality]:
             for model in provider["models"]:
                 model["tags"] = sorted(model["tags"], key=lambda t: (t["category"], t["value"]))
@@ -308,7 +306,7 @@ async def test_publication_alone_decides_public_visibility(client: AsyncClient) 
     public = (await client.get("/v1/providers")).json()
     listed = {
         (entry["provider"], m["model"])
-        for modality in ("stt", "tts", "s2s")
+        for modality in ("stt", "tts", "s2s", "llm")
         for entry in public[modality]
         for m in entry["models"]
     }
@@ -317,7 +315,7 @@ async def test_publication_alone_decides_public_visibility(client: AsyncClient) 
     # Uncollected but published: listed, and marked so a client can grey it out.
     greyed = {
         (entry["provider"], m["model"])
-        for modality in ("stt", "tts", "s2s")
+        for modality in ("stt", "tts", "s2s", "llm")
         for entry in public[modality]
         for m in entry["models"]
         if m["disabled"]

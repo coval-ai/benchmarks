@@ -1,13 +1,13 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""``fetch_models`` reproduces the code registry from the seeded tables.
+"""``fetch_models`` returns a superset of the code registry from the seeded tables.
 
-The comparison is the gate on switching every consumer over: if the database
-answers differ from the literals in any field, the switch would change
-behaviour. Both sides are sorted by natural key — post-seed models take ids at
-the end, so id order diverges from literal order. Deleted with the registry it
-compares against.
+Every literal must come back from the database equal in every field, or the
+switch to database-backed consumers would change behaviour. The database may
+also hold rows the code registry never had (models seeded only by migration
+now that the database is authoritative); those are pinned so a drifting
+literal still fails here. Deleted with the registry it compares against.
 """
 
 from __future__ import annotations
@@ -53,9 +53,11 @@ def _key(model: RegisteredModel) -> tuple[str, str, str]:
     return (model.benchmark.value, model.provider, model.model)
 
 
-def test_the_database_reproduces_the_registry(fetch_pg: psycopg.Connection[Any]) -> None:
-    models = _fetched(fetch_pg)
-    assert len(models) == len(MODEL_REGISTRY)
-    literals = sorted(MODEL_REGISTRY, key=_key)
-    for fetched, literal in zip(sorted(models, key=_key), literals, strict=True):
-        assert _comparable(fetched) == _comparable(literal), f"{literal.provider}/{literal.model}"
+MIGRATION_ONLY_MODELS = {("LLM", "phonely", "phonely-agent")}
+
+
+def test_the_database_is_a_superset_of_the_registry(fetch_pg: psycopg.Connection[Any]) -> None:
+    fetched = {_key(m): _comparable(m) for m in _fetched(fetch_pg)}
+    for literal in MODEL_REGISTRY:
+        assert fetched[_key(literal)] == _comparable(literal), f"{literal.provider}/{literal.model}"
+    assert fetched.keys() - {_key(m) for m in MODEL_REGISTRY} == MIGRATION_ONLY_MODELS

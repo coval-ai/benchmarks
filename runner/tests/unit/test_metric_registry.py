@@ -51,8 +51,11 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.WER].benchmarks == {Benchmark.STT, Benchmark.TTS}
     for metric in (Metric.TTFA, Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE):
         assert METRIC_SPECS[metric].benchmarks == {Benchmark.TTS}
-    for metric in (Metric.TTFT, Metric.TTFS, Metric.RTF, Metric.AUDIO_TO_FINAL):
+    for metric in (Metric.TTFS, Metric.RTF, Metric.AUDIO_TO_FINAL):
         assert METRIC_SPECS[metric].benchmarks == {Benchmark.STT}
+    assert METRIC_SPECS[Metric.TTFT].benchmarks == {Benchmark.STT, Benchmark.LLM}
+    assert METRIC_SPECS[Metric.V2V].benchmarks == {Benchmark.S2S}
+    assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].benchmarks == {Benchmark.S2S, Benchmark.LLM}
 
 
 def test_metric_directions() -> None:
