@@ -1455,12 +1455,15 @@ async def run_benchmarks(
             # Refresh after finish_run: the view query only counts runs already
             # marked succeeded/partial. A failed refresh must not fail the run.
             try:
-                await writer.refresh_stats_matviews()
+                refreshed = await writer.refresh_stats_matviews(run_id)
             except Exception as refresh_exc:
                 logger.error(
                     "stats_matviews_refresh_failed",
                     exc_info=refresh_exc,
                 )
+            else:
+                if not refreshed:
+                    logger.info("stats_matviews_refresh_skipped")
 
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
                 await _refresh_series_bucket(writer, run_id, settings)
