@@ -14,7 +14,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from coval_bench.assets import SecretRef
-from coval_bench.contracts import contract_sha256, read_contract_file
+from coval_bench.contracts import public_contract_sha256, read_contract_file
 from coval_bench.variants.platforms import redact
 
 TOOL_TIMEOUT_SECONDS = 20
@@ -283,4 +283,4 @@ def assets_apply(agent_key: str, mock_base_url: str, api_base: str | None, yes: 
             raise click.ClickException("aborted")
         result = apply(client, spec, wanted)
     click.echo(f"patched {sorted(result.update)}")
-    click.echo(f"contract sha256 ({spec.suite}): {contract_sha256(spec.suite)}")
+    click.echo(f"public contract sha256 ({spec.suite}): {public_contract_sha256(spec.suite)}")
