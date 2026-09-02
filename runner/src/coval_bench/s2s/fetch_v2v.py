@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Fetch S2S (voice-to-voice) latency from the Coval API and write per-clip rows.
+"""Fetch benchmark metrics from the Coval API and write per-conversation rows.
 
 Ingests each provider's recent completed runs not yet in the DB, slotted by
 run create_time, and flags providers with no fresh data. Agent ids, the
@@ -53,7 +53,7 @@ WINDOW_PAGE_SIZE = 10
 
 @dataclass(frozen=True)
 class AgentSpec:
-    """One S2S provider: the Settings attr holding its Coval agent id + display strings."""
+    """One provider: the Settings attr holding its Coval agent id + display strings."""
 
     agent_id_attr: str
     provider: str
@@ -65,6 +65,7 @@ class AgentSpec:
     family: str = FAMILY_MULTITURN
     # Whether this agent's recordings may reach the public samples card.
     publish_samples: bool = True
+    benchmark: Benchmark = Benchmark.S2S
 
 
 @dataclass(frozen=True)
@@ -406,7 +407,7 @@ def _s2s_rows(
                 run_id=run_pk,
                 provider=spec.provider,
                 model=spec.model,
-                benchmark=Benchmark.S2S,
+                benchmark=spec.benchmark,
                 metric_type=metric,
                 metric_units=METRIC_SPECS[metric].units,
                 metric_value=metric_value,
@@ -451,7 +452,7 @@ def _failed_conversation_rows(
             run_id=run_pk,
             provider=spec.provider,
             model=spec.model,
-            benchmark=Benchmark.S2S,
+            benchmark=spec.benchmark,
             metric_type=Metric.V2V,
             metric_units=METRIC_SPECS[Metric.V2V].units,
             metric_value=None,
@@ -473,12 +474,16 @@ def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[
 
 def _ingestable(condition: DatasetMetrics, metric_ids: Mapping[Metric, str]) -> frozenset[Metric]:
     """The condition's metrics that are configured and have a row builder."""
-    return frozenset(m for m in condition.fetched if m in metric_ids and m in _VALUE_MAPPERS)
+    fetched = frozenset(
+        metric for metric in condition.fetched if metric in metric_ids and metric in _VALUE_MAPPERS
+    )
+    return fetched | condition.local
 
 
 async def _pending_metrics(
     writer: RunWriter,
     *,
+    benchmark: Benchmark,
     provider: str,
     coval_run_id: str,
     condition: DatasetMetrics,
@@ -488,7 +493,10 @@ async def _pending_metrics(
     pending: set[Metric] = set()
     for metric in _ingestable(condition, metric_ids):
         if not await writer.coval_metric_ingested(
-            provider=provider, coval_run_id=coval_run_id, metric_type=metric
+            benchmark=benchmark,
+            provider=provider,
+            coval_run_id=coval_run_id,
+            metric_type=metric,
         ):
             pending.add(metric)
     return frozenset(pending)
@@ -663,7 +671,7 @@ async def _ingest_run(
         if all_rows:
             captured_at = datetime.now(UTC)
             await writer.record_results(all_rows, created_at=captured_at)
-            if normalized_dual_write_enabled:
+            if normalized_dual_write_enabled and spec.benchmark is Benchmark.S2S:
                 from coval_bench.runner.normalized import dual_write
 
                 grouped: dict[str, list[Result]] = {}
@@ -870,6 +878,10 @@ async def _fetch_one_provider(
                 continue
             dataset_id, dataset_sha256 = identity
             condition = condition_for(dataset_id)
+            if condition.benchmark is not spec.benchmark:
+                raise RuntimeError(
+                    f"dataset {dataset_id!r} belongs to {condition.benchmark}, not {spec.benchmark}"
+                )
             if condition.required not in metric_ids:
                 logger.warning(
                     "required_metric_unconfigured",
@@ -881,6 +893,7 @@ async def _fetch_one_provider(
             ingestable = _ingestable(condition, metric_ids)
             pending = await _pending_metrics(
                 writer,
+                benchmark=spec.benchmark,
                 provider=spec.provider,
                 coval_run_id=coval_run.run_id,
                 condition=condition,
@@ -962,11 +975,12 @@ async def _fetch_one_provider(
 async def fetch_and_write_v2v(
     settings: Settings | None = None,
     *,
+    benchmark: Benchmark = Benchmark.S2S,
     only_run_ids: frozenset[str] | None = None,
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
 ) -> dict[str, RunStatus]:
-    """Ingest every provider's recent runs; return per-provider status.
+    """Ingest the selected benchmark's providers; return per-provider status.
 
     Each ingested Coval run gets its own run row slotted by its create_time,
     and ``coval_run_ingested`` makes re-scans no-ops, so ticks are idempotent
@@ -974,9 +988,10 @@ async def fetch_and_write_v2v(
     run more often than the sims.
     """
     settings = settings or get_settings()
+    specs = tuple(spec for spec in AGENTS if spec.benchmark is benchmark)
 
     metric_id = settings.coval_s2s_latency_metric_id
-    if not metric_id:
+    if benchmark is Benchmark.S2S and not metric_id:
         raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
     # without the filter would pool other sims on the same agents into the S2S
@@ -992,7 +1007,7 @@ async def fetch_and_write_v2v(
         )
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
-    if bool(instruction_metric_id) != bool(test_set_id):
+    if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
         )
@@ -1007,7 +1022,7 @@ async def fetch_and_write_v2v(
     # A family's test set is required once one of its agents is configured;
     # unset would otherwise skip the agent with a warning that reads the same
     # as never having configured it.
-    for spec in AGENTS:
+    for spec in specs:
         if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr):
             continue
         if not (getattr(settings, spec.test_set_id_attr) or "").strip():
@@ -1020,19 +1035,21 @@ async def fetch_and_write_v2v(
     if raw_noisy is not None and not raw_noisy.strip():
         raise RuntimeError("coval_s2s_noisy_persona_id must not be blank")
     noisy_persona_id = raw_noisy or None
-    if noisy_persona_id and not test_set_id:
+    if benchmark is Benchmark.S2S and noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
     # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
     # either order.
     persona_conditions = _persona_conditions(settings.coval_s2s_condition_personas)
-    if persona_conditions and not test_set_id:
+    if benchmark is Benchmark.S2S and persona_conditions and not test_set_id:
         raise RuntimeError("coval_s2s_condition_personas requires coval_s2s_test_set_id")
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
     # Only configured metrics are ever asked for, so an unset id simply means that
     # metric is not ingested yet.
-    metric_ids: dict[Metric, str] = {Metric.V2V: metric_id}
+    metric_ids: dict[Metric, str] = {}
+    if metric_id:
+        metric_ids[Metric.V2V] = metric_id
     if instruction_metric_id:
         metric_ids[Metric.INSTRUCTION_FOLLOWING] = instruction_metric_id
     if raw_interruption:
@@ -1047,7 +1064,7 @@ async def fetch_and_write_v2v(
         total_ingested = 0
         matched_run_ids: set[str] = set()
         sampled_runs: list[SampleRun] = []
-        for spec in AGENTS:
+        for spec in specs:
             agent_id = getattr(settings, spec.agent_id_attr)
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
@@ -1161,6 +1178,7 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
         statuses = asyncio.run(
             fetch_and_write_v2v(
                 settings,
+                benchmark=Benchmark.S2S,
                 only_run_ids=only_run_ids,
                 window_seconds=window_hours * 3600 if only_run_ids else None,
                 page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,

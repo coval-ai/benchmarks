@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -20,14 +21,16 @@ from structlog.testing import capture_logs
 from coval_bench.config import Settings
 from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial
-from coval_bench.registries import Metric
+from coval_bench.registries import Benchmark, Metric
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
     FAMILY_HAPPYPATH,
+    FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
+    DatasetMetrics,
     condition_for,
 )
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
@@ -37,6 +40,15 @@ LATENCY_IDS = {Metric.V2V: "MID"}
 ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
 SPEC = AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime")
+LLM_SPEC = AgentSpec(
+    agent_id_attr="coval_s2s_openai_agent_id",
+    provider="phonely",
+    model="phonely-agent",
+    test_set_id_attr="coval_s2s_dental_test_set_id",
+    family=FAMILY_LLM_DENTAL,
+    publish_samples=False,
+    benchmark=Benchmark.LLM,
+)
 
 
 def _iso(age: timedelta) -> str:
@@ -584,6 +596,36 @@ async def test_fetch_one_provider_noop_when_fresh() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_metrics_include_local_metrics_and_scope_dedupe_to_benchmark() -> None:
+    writer = _stub_writer()
+    condition = DatasetMetrics(
+        benchmark=Benchmark.LLM,
+        required=Metric.INSTRUCTION_FOLLOWING,
+        local=frozenset({Metric.TTFT}),
+    )
+
+    pending = await fetch_v2v._pending_metrics(
+        writer,
+        benchmark=Benchmark.LLM,
+        provider="phonely",
+        coval_run_id="R1",
+        condition=condition,
+        metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+    )
+
+    assert pending == frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.TTFT})
+    assert {call.kwargs["benchmark"] for call in writer.coval_metric_ingested.await_args_list} == {
+        Benchmark.LLM
+    }
+    assert {
+        call.kwargs["metric_type"] for call in writer.coval_metric_ingested.await_args_list
+    } == {
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.TTFT,
+    }
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_stale_fails() -> None:
     # Newest usable run is older than period + grace (4.5h) -> stale.
     writer = _stub_writer()
@@ -616,7 +658,10 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
 async def test_optional_metric_alone_does_not_prove_freshness() -> None:
     writer = _stub_writer()
 
-    async def ingested(*, provider: str, coval_run_id: str, metric_type: Metric) -> bool:
+    async def ingested(
+        *, benchmark: Benchmark, provider: str, coval_run_id: str, metric_type: Metric
+    ) -> bool:
+        assert benchmark is Benchmark.S2S
         return metric_type is Metric.INSTRUCTION_FOLLOWING
 
     writer.coval_metric_ingested = AsyncMock(side_effect=ingested)
@@ -718,6 +763,64 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        coval_s2s_instruction_metric_id="IID",
+        coval_s2s_openai_agent_id="llm-agent",
+        coval_s2s_dental_test_set_id="TSD",
+    )
+    client = _fake_client({}, {})
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (SPEC, LLM_SPEC))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _settings: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings, benchmark=Benchmark.LLM)
+
+    assert statuses == {"phonely:phonely-agent": RunStatus.SUCCEEDED}
+    fetch_one.assert_awaited_once()
+    assert fetch_one.await_args is not None
+    assert fetch_one.await_args.kwargs["spec"] is LLM_SPEC
+    assert fetch_one.await_args.kwargs["metric_ids"] == {Metric.INSTRUCTION_FOLLOWING: "IID"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> None:
+    writer = _stub_writer()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+
+    with capture_logs() as logs:
+        async with _fake_client(list_json, {}) as client:
+            status, ingested = await fetch_v2v._fetch_one_provider(
+                client,
+                writer,
+                spec=replace(LLM_SPEC, family=FAMILY_MULTITURN),
+                agent_id="a1",
+                metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+                test_set_id="TS1",
+                period_seconds=10_800,
+                stale_grace_seconds=5_400,
+            )
+
+    assert (status, ingested) == (RunStatus.FAILED, 0)
+    assert any(
+        log["event"] == "provider_fetch_failed" and "belongs to S2S, not LLM" in log["error"]
+        for log in logs
+    )
+    writer.coval_metric_ingested.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1774,6 +1877,41 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
     assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
     assert calls["R1/s1"]["captured_at"] == writer.record_results.await_args.kwargs["created_at"]
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_does_not_dual_write_llm_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    dual_write = AsyncMock()
+    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", dual_write)
+    condition = DatasetMetrics(
+        benchmark=Benchmark.LLM,
+        required=Metric.INSTRUCTION_FOLLOWING,
+    )
+
+    async with _fake_client(
+        {}, _run_json([{"simulation_output_id": "s1", "value": "YES"}], metric_id="IID")
+    ) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=LLM_SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+            condition=condition,
+            dataset_id="llm-dental-v1",
+            period_seconds=10_800,
+            normalized_dual_write_enabled=True,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.record_results.assert_awaited_once()
+    rows = writer.record_results.await_args.args[0]
+    assert len(rows) == 1
+    assert rows[0].benchmark is Benchmark.LLM
+    dual_write.assert_not_awaited()
 
 
 @pytest.mark.asyncio
