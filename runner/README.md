@@ -69,14 +69,26 @@ applies only to this execution.
 gcloud run jobs execute benchmarks-runner \
   --project=coval-benchmarks-prod \
   --region=us-east1 \
-  --task-timeout=24h \
+  --task-timeout=48h \
   --wait \
   --args='migrate,backfill-normalized-storage,--min-result-id=1,--batch-size=100'
 ```
 
-The dry run freezes and reports its maximum result ID. Record that maximum for
-any separately authorized `--apply` run, which must pass it explicitly. Progress
-events are JSON on stderr; the final JSON report remains stdout's final line.
+The dry run resolves one database UTC timestamp, freezes the preceding inclusive
+start/exclusive end 168-hour window, and reports its exact UTC start, end, and
+maximum result ID. The 48-hour timeout leaves a safe margin beyond the observed
+17h31m48s dry run. Record all three values for any separately authorized apply:
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=48h \
+  --wait \
+  --args='migrate,backfill-normalized-storage,--min-result-id=1,--window-start=2026-08-20T00:00:00Z,--window-end=2026-08-27T00:00:00Z,--max-result-id=N,--batch-size=100,--apply'
+```
+
+Progress events are JSON on stderr; the final JSON report remains stdout's final line.
 
 `--batch-size` is a run-ID read page and also bounds apply-plan transaction
 batches. Larger pages reduce round trips, but increase memory, transaction

@@ -13,7 +13,7 @@ from contextlib import nullcontext
 from dataclasses import astuple, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import click
@@ -35,11 +35,17 @@ from coval_bench.migrations.backfill_normalized_storage import (
     backfill,
     backfill_normalized_storage_cli,
 )
+from coval_bench.observation_artifacts import (
+    prepare_provider_transcript,
+    prepare_timing_events,
+)
 
 backfill_pg = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
 _NOW = datetime(2026, 8, 27, 10, 0, tzinfo=UTC)
 _SHA = "a" * 64
+_WINDOW_START = _NOW - timedelta(hours=167)
+_WINDOW_END = _NOW + timedelta(hours=1)
 
 
 def _dsn(conn: psycopg.Connection[Any]) -> str:
@@ -74,7 +80,12 @@ def _insert_run(conn: psycopg.Connection[Any]) -> int:
 
 
 def _insert_wer(
-    conn: psycopg.Connection[Any], run_id: int, filename: str, *, transcript: str = "words"
+    conn: psycopg.Connection[Any],
+    run_id: int,
+    filename: str,
+    *,
+    transcript: str = "words",
+    created_at: datetime = _NOW,
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
@@ -84,7 +95,7 @@ def _insert_wer(
                 wer_deletions_pct,wer_substitutions_pct)
                VALUES (%s,'provider','model','STT','WER',6,'percent',%s,%s,'success',
                        NULL,%s,1,2,3) RETURNING id""",
-            (run_id, filename, transcript, _NOW),
+            (run_id, filename, transcript, created_at),
         )
         row = cur.fetchone()
         assert row is not None
@@ -234,10 +245,466 @@ def test_ambiguous_tts_provider_failure_origin_is_skipped(
     assert skipped["observation_failure_origin_unrecoverable"] == 1
 
 
-def test_cli_apply_requires_explicit_frozen_maximum() -> None:
+def test_cli_apply_requires_explicit_frozen_window_and_maximum() -> None:
     result = CliRunner().invoke(backfill_normalized_storage_cli, ["--apply"])
     assert result.exit_code == 2
-    assert "--apply requires an explicit --max-result-id" in result.output
+    assert (
+        "--apply requires explicit --window-start, --window-end, and --max-result-id"
+        in result.output
+    )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["--window-start", "--window-end", "--max-result-id"],
+)
+def test_cli_apply_rejects_each_missing_frozen_argument_before_connecting(missing: str) -> None:
+    arguments = {
+        "--window-start": "2026-08-20T00:00:00Z",
+        "--window-end": "2026-08-27T00:00:00Z",
+        "--max-result-id": "9",
+    }
+    command = ["--apply"] + [
+        item for pair in arguments.items() if pair[0] != missing for item in pair
+    ]
+    result = CliRunner().invoke(backfill_normalized_storage_cli, command)
+    assert result.exit_code == 2
+    assert "--apply requires explicit" in result.output
+
+
+def test_frozen_window_is_utc_and_exactly_seven_days() -> None:
+    start = datetime(2026, 8, 20, tzinfo=UTC)
+    window = migration.FrozenWindow(1, 9, start, start + timedelta(hours=168))
+    assert window.start == start
+    assert window.end == start + timedelta(days=7)
+    with pytest.raises(ValueError, match="exactly 168 hours"):
+        migration.FrozenWindow(1, 9, start, start + timedelta(days=7, seconds=1))
+
+
+def test_parity_mismatch_report_aggregates_safe_reasons() -> None:
+    report = migration._report()
+    migration._append_mismatch(
+        report,
+        "parity_mismatches",
+        {"reason": "live_owned_payload_mismatch", "natural_key": ["private"]},
+    )
+    assert report["parity_mismatch_count"] == 1
+    assert report["parity_mismatch_reasons"] == {"live_owned_payload_mismatch": 1}
+    assert report["parity_mismatches"] == [{"reason": "live_owned_payload_mismatch"}]
+
+
+def test_apply_core_requires_explicit_window_before_client_or_connection_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gcs_storage, "Client", lambda: pytest.fail("must not create GCS client"))
+
+    class Conn:
+        def cursor(self) -> Any:
+            pytest.fail("must not touch the connection")
+
+    with pytest.raises(ValueError, match="apply requires explicit window"):
+        migration.backfill(
+            Conn(),  # type: ignore[arg-type]
+            min_result_id=1,
+            max_result_id=1,
+            batch_size=1,
+            apply=True,
+            artifact_bucket="bucket",
+        )
+
+
+def test_stt_tts_rollup_sql_never_deletes_or_verifies_s2s_rows() -> None:
+    assert "benchmark IN ('STT','TTS')" in migration._ROLLUP_PAYLOAD_SQL
+    assert "benchmark IN ('STT','TTS')" in migration._STORED_ROLLUP_SQL
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.statements: list[str] = []
+
+        def execute(self, statement: str, _: Any) -> None:
+            self.statements.append(statement)
+
+    cursor = Cursor()
+    migration._refresh_bucket(cursor, _NOW)  # type: ignore[arg-type]
+    assert "benchmark IN ('STT','TTS')" in cursor.statements[1]
+
+
+def test_backfill_owned_row_keeps_strict_lifecycle_timestamp_comparison() -> None:
+    row = replace(_row("WER", 6.0), benchmark="STT")
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [("provider_transcript", row.transcript or "")],
+    )
+    parent = (
+        row.run_id,
+        plan.dataset_id,
+        plan.dataset_sha256,
+        plan.sample_id,
+        row.provider,
+        row.model,
+        row.voice,
+        plan.benchmark,
+        plan.source_kind,
+        row.http_version,
+        row.headers_ms,
+        row.created_at,
+        plan.status,
+        plan.error,
+        plan.failure_origin,
+    )
+    later = row.created_at + timedelta(seconds=1)
+    stored_values = [
+        (
+            metric,
+            "v1",
+            "default",
+            "inline",
+            "succeeded",
+            later,
+            later,
+            None,
+            key,
+            unit,
+            value,
+            role,
+        )
+        for metric, key, value, unit, role in migration._values(plan.rows)
+    ]
+
+    class Cursor:
+        def execute(self, *_: Any) -> None:
+            return None
+
+        def fetchone(self) -> tuple[Any, ...]:
+            return parent
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            return stored_values
+
+    assert not migration._stored_plan_matches(Cursor(), plan, plan.id)  # type: ignore[arg-type]
+
+
+def test_live_tts_artifacts_inputs_and_lifecycle_are_exact_where_recoverable() -> None:
+    row = _row("TTFA", 12.0)
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "TTS",
+        "generated_audio",
+        "succeeded",
+        None,
+        None,
+        [("timing_events", '{"ttfa_ms":12.0}')],
+    )
+    observation_id, timing_id, audio_id = uuid4(), uuid4(), uuid4()
+    _, timing_payload, _, _, _ = prepare_timing_events({"ttfa_ms": 12.0})
+    timing_digest = hashlib.sha256(timing_payload).hexdigest()
+    audio_digest = "b" * 64
+
+    def matches(
+        *,
+        timing: tuple[str, int],
+        started: datetime = _NOW + timedelta(seconds=1),
+        audio_duration: float = 1.0,
+    ) -> bool:
+        parent = (
+            row.run_id,
+            plan.dataset_id,
+            plan.dataset_sha256,
+            plan.sample_id,
+            row.provider,
+            row.model,
+            row.voice,
+            "TTS",
+            "generated_audio",
+            None,
+            None,
+            None,
+            _NOW,
+            "succeeded",
+            None,
+            None,
+        )
+        artifacts = [
+            (
+                timing_id,
+                "timing_events",
+                "TimingEvents",
+                "v1",
+                f"gs://private/observation-artifacts/v1/timing_events/{timing[0][:2]}/{timing[0]}.json",
+                timing[0],
+                timing[1],
+                None,
+            ),
+            (
+                audio_id,
+                "generated_audio",
+                "GeneratedAudio",
+                "v1",
+                f"gs://private/observation-artifacts/v1/generated_audio/bb/{audio_digest}.wav",
+                audio_digest,
+                10,
+                audio_duration,
+            ),
+        ]
+
+        class Cursor:
+            fetchone_calls = 0
+            fetchall_calls = 0
+
+            def execute(self, *_: Any) -> None:
+                return None
+
+            def fetchone(self) -> tuple[Any, ...]:
+                self.fetchone_calls += 1
+                return parent if self.fetchone_calls == 1 else (False,)
+
+            def fetchall(self) -> list[tuple[Any, ...]]:
+                self.fetchall_calls += 1
+                return cast(
+                    list[tuple[Any, ...]],
+                    {
+                        1: [
+                            (
+                                uuid4(),
+                                "TTFA",
+                                "v1",
+                                "default",
+                                "inline",
+                                None,
+                                "succeeded",
+                                started,
+                                started + timedelta(seconds=1),
+                                None,
+                            )
+                        ],
+                        2: [("TTFA", "primary", "milliseconds", 12.0, "primary")],
+                        3: artifacts,
+                        4: [("TTFA", "timing", 0, timing_id), ("TTFA", "raw", 0, audio_id)],
+                    }[self.fetchall_calls],
+                )
+
+        return migration._live_stored_plan_matches(Cursor(), plan, observation_id)  # type: ignore[arg-type]
+
+    assert matches(timing=(timing_digest, len(timing_payload)))
+    assert not matches(timing=("c" * 64, 9))
+    assert not matches(
+        timing=(timing_digest, len(timing_payload)), started=_NOW - timedelta(seconds=1)
+    )
+    assert not matches(timing=(timing_digest, len(timing_payload)), audio_duration=0)
+
+
+def test_live_tts_null_ttfa_keeps_unreferenced_timing_artifact_for_wer() -> None:
+    anchor = _row("TTFA", None)
+    wer = _row("WER", 6.0)
+    plan = migration.Planned(
+        [anchor, wer],
+        "sample",
+        anchor.dataset_id,
+        anchor.dataset_sha256,
+        "TTS",
+        "generated_audio",
+        "succeeded",
+        None,
+        None,
+        [],
+    )
+    observation_id, timing_id, audio_id = uuid4(), uuid4(), uuid4()
+    # The legacy transport-contaminated row is null; the private artifact kept
+    # the unrecoverable original provider timing.
+    _, timing_payload, _, _, _ = prepare_timing_events({"ttfa_ms": 47.25})
+    timing_digest = hashlib.sha256(timing_payload).hexdigest()
+    audio_digest = "b" * 64
+    parent = (
+        anchor.run_id,
+        plan.dataset_id,
+        plan.dataset_sha256,
+        plan.sample_id,
+        anchor.provider,
+        anchor.model,
+        anchor.voice,
+        "TTS",
+        "generated_audio",
+        None,
+        None,
+        None,
+        _NOW,
+        "succeeded",
+        None,
+        None,
+    )
+
+    class Cursor:
+        fetchone_calls = 0
+        fetchall_calls = 0
+
+        def execute(self, *_: Any) -> None:
+            return None
+
+        def fetchone(self) -> tuple[Any, ...]:
+            self.fetchone_calls += 1
+            return parent if self.fetchone_calls == 1 else (False,)
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            self.fetchall_calls += 1
+            return cast(
+                list[tuple[Any, ...]],
+                {
+                    1: [
+                        (
+                            uuid4(),
+                            "WER",
+                            "v1",
+                            "default",
+                            "inline",
+                            None,
+                            "succeeded",
+                            _NOW,
+                            _NOW,
+                            None,
+                        )
+                    ],
+                    2: [
+                        ("WER", key, unit, value, role)
+                        for _, key, value, unit, role in migration._values(plan.rows)
+                    ],
+                    3: [
+                        (
+                            timing_id,
+                            "timing_events",
+                            "TimingEvents",
+                            "v1",
+                            f"gs://private/observation-artifacts/v1/timing_events/{timing_digest[:2]}/{timing_digest}.json",
+                            timing_digest,
+                            len(timing_payload),
+                            None,
+                        ),
+                        (
+                            audio_id,
+                            "generated_audio",
+                            "GeneratedAudio",
+                            "v1",
+                            f"gs://private/observation-artifacts/v1/generated_audio/bb/{audio_digest}.wav",
+                            audio_digest,
+                            10,
+                            1.0,
+                        ),
+                    ],
+                    4: [("WER", "raw", 0, audio_id)],
+                }[self.fetchall_calls],
+            )
+
+    assert migration._live_stored_plan_matches(Cursor(), plan, observation_id)  # type: ignore[arg-type]
+
+
+def test_live_stt_wer_allows_required_unreferenced_timing_artifact() -> None:
+    row = replace(_row("WER", 6.0), benchmark="STT")
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [("provider_transcript", row.transcript or "")],
+    )
+    observation_id, transcript_id, timing_id = uuid4(), uuid4(), uuid4()
+    _, transcript_payload, _, _, _ = prepare_provider_transcript(row.transcript or "")
+    transcript_digest = hashlib.sha256(transcript_payload).hexdigest()
+    timing_digest = "c" * 64
+    parent = (
+        row.run_id,
+        plan.dataset_id,
+        plan.dataset_sha256,
+        plan.sample_id,
+        row.provider,
+        row.model,
+        row.voice,
+        "STT",
+        "dataset_audio",
+        None,
+        None,
+        None,
+        _NOW,
+        "succeeded",
+        None,
+        None,
+    )
+
+    class Cursor:
+        fetchone_calls = 0
+        fetchall_calls = 0
+
+        def execute(self, *_: Any) -> None:
+            return None
+
+        def fetchone(self) -> tuple[Any, ...]:
+            self.fetchone_calls += 1
+            return parent if self.fetchone_calls == 1 else (False,)
+
+        def fetchall(self) -> list[tuple[Any, ...]]:
+            self.fetchall_calls += 1
+            return cast(
+                list[tuple[Any, ...]],
+                {
+                    1: [
+                        (
+                            uuid4(),
+                            "WER",
+                            "v1",
+                            "default",
+                            "inline",
+                            None,
+                            "succeeded",
+                            _NOW,
+                            _NOW,
+                            None,
+                        )
+                    ],
+                    2: [
+                        ("WER", key, unit, value, role)
+                        for _, key, value, unit, role in migration._values(plan.rows)
+                    ],
+                    3: [
+                        (
+                            transcript_id,
+                            "provider_transcript",
+                            "ProviderTranscript",
+                            "v1",
+                            f"gs://private/observation-artifacts/v1/provider_transcript/{transcript_digest[:2]}/{transcript_digest}.json",
+                            transcript_digest,
+                            len(transcript_payload),
+                            None,
+                        ),
+                        (
+                            timing_id,
+                            "timing_events",
+                            "TimingEvents",
+                            "v1",
+                            f"gs://private/observation-artifacts/v1/timing_events/{timing_digest[:2]}/{timing_digest}.json",
+                            timing_digest,
+                            1,
+                            None,
+                        ),
+                    ],
+                    4: [("WER", "raw", 0, transcript_id)],
+                }[self.fetchall_calls],
+            )
+
+    assert migration._live_stored_plan_matches(Cursor(), plan, observation_id)  # type: ignore[arg-type]
 
 
 def test_cli_rejects_the_local_placeholder_before_connecting(
@@ -408,12 +875,93 @@ def test_cli_keeps_progress_on_stderr_and_machine_report_as_final_stdout_line(
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
     monkeypatch.setattr(migration, "_rollup_mismatches", lambda *_args, **_kwargs: None)
 
-    result = CliRunner().invoke(backfill_normalized_storage_cli, ["--max-result-id", "9"])
+    result = CliRunner().invoke(
+        backfill_normalized_storage_cli,
+        [
+            "--max-result-id",
+            "9",
+            "--window-start",
+            "2026-08-20T00:00:00Z",
+            "--window-end",
+            "2026-08-27T00:00:00Z",
+        ],
+    )
 
     assert result.exit_code == 0
     assert "normalized_storage_backfill_progress" not in result.stdout
     assert "normalized_storage_backfill_progress" in result.stderr
-    assert json.loads(result.stdout.splitlines()[-1])["window"]["max_result_id"] == 9
+    window = json.loads(result.stdout.splitlines()[-1])["window"]
+    assert window == {
+        "batch_size": 100,
+        "end": "2026-08-27T00:00:00+00:00",
+        "max_result_id": 9,
+        "min_result_id": 1,
+        "start": "2026-08-20T00:00:00+00:00",
+    }
+
+
+def test_cli_dry_run_freezes_database_clock_and_maximum_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    captured: dict[str, Any] = {}
+
+    class Settings:
+        database_url = "postgresql://example"
+
+    class Cursor:
+        calls = 0
+
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, statement: str) -> None:
+            assert "statement_timestamp" in statement
+            self.calls += 1
+
+        def fetchone(self) -> tuple[datetime, int]:
+            return database_now, 77
+
+    class Conn:
+        cursor_value = Cursor()
+
+        def __enter__(self) -> Conn:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def cursor(self) -> Cursor:
+            return self.cursor_value
+
+    def fake_backfill(_: Any, **kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "window": {
+                "start": kwargs["window_start"].isoformat(),
+                "end": kwargs["window_end"].isoformat(),
+                "max_result_id": kwargs["max_result_id"],
+            }
+        }
+
+    monkeypatch.setattr(migration, "get_settings", lambda: Settings())
+    monkeypatch.setattr(psycopg, "connect", lambda _: Conn())
+    monkeypatch.setattr(migration, "backfill", fake_backfill)
+    result = CliRunner().invoke(backfill_normalized_storage_cli, [])
+
+    assert result.exit_code == 0
+    assert Conn.cursor_value.calls == 1
+    assert captured["window_start"] == database_now - timedelta(hours=168)
+    assert captured["window_end"] == database_now
+    assert captured["max_result_id"] == 77
+    assert json.loads(result.stdout.splitlines()[-1])["window"] == {
+        "start": "2026-08-20T12:00:00+00:00",
+        "end": "2026-08-27T12:00:00+00:00",
+        "max_result_id": 77,
+    }
 
 
 def test_sigterm_cancellation_handler_is_restored(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -451,6 +999,8 @@ def test_progress_failure_keeps_last_completed_checkpoint_without_detail_leakage
             Conn(),  # type: ignore[arg-type]
             min_result_id=1,
             max_result_id=9,
+            window_start=_WINDOW_START,
+            window_end=_WINDOW_END,
             batch_size=1,
             apply=False,
             reporter=reporter,
@@ -508,6 +1058,8 @@ def test_apply_cancellation_emits_checkpoint_then_unlocks(
             Conn(),  # type: ignore[arg-type]
             min_result_id=1,
             max_result_id=9,
+            window_start=_WINDOW_START,
+            window_end=_WINDOW_END,
             batch_size=1,
             apply=True,
             artifact_bucket="bucket",
@@ -538,8 +1090,8 @@ def test_run_pages_keyset_by_run_id_not_interleaved_result_ids() -> None:
         def execute(self, sql: str, params: tuple[Any, ...]) -> None:
             self.calls.append((sql, params))
             if sql == migration._PAGE_RUN_IDS_SQL:
-                after = int(params[2])
-                self.result = [(run_id,) for run_id in (10, 20) if run_id > after][: int(params[3])]
+                after = int(params[4])
+                self.result = [(run_id,) for run_id in (10, 20) if run_id > after][: int(params[5])]
             else:
                 self.result = [astuple(first) if params[0] == [10] else astuple(second)]
 
@@ -554,14 +1106,43 @@ def test_run_pages_keyset_by_run_id_not_interleaved_result_ids() -> None:
             return self.value
 
     conn = Conn()
-    ids, rows = migration._run_page(conn, 1, 99, 0, 1)  # type: ignore[arg-type]
-    next_ids, next_rows = migration._run_page(conn, 1, 99, ids[-1], 1)  # type: ignore[arg-type]
+    window = migration.FrozenWindow(1, 99, _NOW - timedelta(hours=168), _NOW)
+    ids, rows = migration._run_page(conn, window, 0, 1)  # type: ignore[arg-type]
+    next_ids, next_rows = migration._run_page(conn, window, ids[-1], 1)  # type: ignore[arg-type]
     assert (ids, [row.run_id for row in rows]) == ([10], [10])
     assert (next_ids, [row.run_id for row in next_rows]) == ([20], [20])
-    assert [call[1][2] for call in conn.value.calls if call[0] == migration._PAGE_RUN_IDS_SQL] == [
+    assert [call[1][4] for call in conn.value.calls if call[0] == migration._PAGE_RUN_IDS_SQL] == [
         0,
         10,
     ]
+
+
+def test_run_page_uses_start_inclusive_end_exclusive_and_frozen_max_id(
+    backfill_pg: psycopg.Connection[Any],
+) -> None:
+    _migrate(backfill_pg)
+    start = datetime(2026, 8, 20, tzinfo=UTC)
+    start_id = _insert_wer(backfill_pg, _insert_run(backfill_pg), "start.wav", created_at=start)
+    _insert_wer(
+        backfill_pg, _insert_run(backfill_pg), "end.wav", created_at=start + timedelta(hours=168)
+    )
+    max_id = _insert_wer(
+        backfill_pg, _insert_run(backfill_pg), "max.wav", created_at=start + timedelta(hours=1)
+    )
+    _insert_wer(
+        backfill_pg,
+        _insert_run(backfill_pg),
+        "after-max.wav",
+        created_at=start + timedelta(hours=1),
+    )
+
+    _, rows = migration._run_page(
+        backfill_pg,
+        migration.FrozenWindow(start_id, max_id, start, start + timedelta(hours=168)),
+        0,
+        100,
+    )
+    assert {row.id for row in rows} == {start_id, max_id}
 
 
 def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None:
@@ -580,7 +1161,7 @@ def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None
 
         def execute(self, _: str, params: tuple[Any, ...]) -> None:
             self.calls.append(params)
-            cursor = params[4]
+            cursor = params[8]
             self.result = (
                 [(_NOW, 10)] if cursor is None else [(later, 20)] if cursor == _NOW else []
             )
@@ -599,11 +1180,12 @@ def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None
             return self.value
 
     conn = Conn()
-    assert list(migration._scheduled_buckets(conn, 1, 99, 1)) == [_NOW, later]  # type: ignore[arg-type]
+    window = migration.FrozenWindow(1, 99, _NOW - timedelta(hours=168), _NOW)
+    assert list(migration._scheduled_buckets(conn, window, 1)) == [_NOW, later]  # type: ignore[arg-type]
     assert conn.value.calls == [
-        (1, 99, 1, 99, None, None, 0, 1),
-        (1, 99, 1, 99, _NOW, _NOW, 10, 1),
-        (1, 99, 1, 99, later, later, 20, 1),
+        (1, 99, window.start, window.end, 1, 99, window.start, window.end, None, None, 0, 1),
+        (1, 99, window.start, window.end, 1, 99, window.start, window.end, _NOW, _NOW, 10, 1),
+        (1, 99, window.start, window.end, 1, 99, window.start, window.end, later, later, 20, 1),
     ]
 
 
@@ -673,6 +1255,8 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
         Conn(),  # type: ignore[arg-type]
         min_result_id=1,
         max_result_id=1,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=True,
         artifact_bucket="bucket",
@@ -706,8 +1290,7 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
 
     def pages(
         _conn: Any,
-        _low: int,
-        _high: int,
+        _window: migration.FrozenWindow,
         _batch_size: int,
         skipped: Counter[str],
     ) -> Any:
@@ -759,6 +1342,8 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
         Conn(),  # type: ignore[arg-type]
         min_result_id=1,
         max_result_id=1,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=True,
         artifact_bucket="bucket",
@@ -806,6 +1391,8 @@ def test_apply_bucket_preflight_fails_before_lock_page_or_write(
             Conn(),  # type: ignore[arg-type]
             min_result_id=1,
             max_result_id=1,
+            window_start=_WINDOW_START,
+            window_end=_WINDOW_END,
             batch_size=1,
             apply=True,
             artifact_bucket="bucket",
@@ -884,6 +1471,8 @@ def test_apply_reconciles_artifacts_inputs_values_and_rollups(
         backfill_pg,
         min_result_id=result_id,
         max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=False,
     )
@@ -898,6 +1487,8 @@ def test_apply_reconciles_artifacts_inputs_values_and_rollups(
         backfill_pg,
         min_result_id=result_id,
         max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=True,
         artifact_bucket="backfill-artifacts",
@@ -919,6 +1510,8 @@ def test_apply_reconciles_artifacts_inputs_values_and_rollups(
         backfill_pg,
         min_result_id=result_id,
         max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=True,
         artifact_bucket="backfill-artifacts",
@@ -950,6 +1543,8 @@ def test_live_owned_incomplete_child_payload_blocks_readiness(
         backfill_pg,
         min_result_id=result_id,
         max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=False,
     )
@@ -984,6 +1579,8 @@ def test_batch_one_commits_when_batch_two_fails_then_rerun_resumes(
             backfill_pg,
             min_result_id=first,
             max_result_id=second,
+            window_start=_WINDOW_START,
+            window_end=_WINDOW_END,
             batch_size=1,
             apply=True,
             artifact_bucket="backfill-artifacts",
@@ -998,6 +1595,8 @@ def test_batch_one_commits_when_batch_two_fails_then_rerun_resumes(
         backfill_pg,
         min_result_id=first,
         max_result_id=second,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
         batch_size=1,
         apply=True,
         artifact_bucket="backfill-artifacts",
