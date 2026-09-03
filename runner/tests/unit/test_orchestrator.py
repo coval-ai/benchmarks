@@ -37,9 +37,11 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import httpx
 import openai
+import psycopg
 import pytest
 import structlog
 from posthog import Posthog
+from psycopg_pool import PoolTimeout
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
@@ -49,6 +51,7 @@ from coval_bench.registries import MODEL_REGISTRY, RegisteredModel, Source
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
+    _persist_legacy_results,
     _run_stt_item,
     _run_tts_item,
     _stt_silent_failure,
@@ -693,6 +696,32 @@ async def test_retry_exhausted() -> None:
     assert call_count == 3
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["stt", "tts"])
+async def test_persist_legacy_results_retries_pool_timeout(prefix: str) -> None:
+    writer = MagicMock()
+    writer.record_results = AsyncMock(side_effect=[PoolTimeout("busy"), None])
+    captured = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [MagicMock()]
+    await _persist_legacy_results(writer, rows, captured, asyncio.Semaphore(3), prefix)
+    assert writer.record_results.await_count == 2
+    assert all(
+        call.kwargs["created_at"] == captured for call in writer.record_results.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix", ["stt", "tts"])
+async def test_persist_legacy_results_does_not_retry_operational_error(prefix: str) -> None:
+    writer = MagicMock()
+    error = psycopg.OperationalError("disconnect")
+    writer.record_results = AsyncMock(side_effect=error)
+    captured = datetime(2026, 1, 1, tzinfo=UTC)
+    with pytest.raises(psycopg.OperationalError):
+        await _persist_legacy_results(writer, [MagicMock()], captured, asyncio.Semaphore(3), prefix)
+    assert writer.record_results.await_count == 1
+
+
 # ---------------------------------------------------------------------------
 # 6. test_concurrency_cap
 # ---------------------------------------------------------------------------
@@ -705,6 +734,9 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
     current_concurrent = 0
     max_normalized_concurrent = 0
     current_normalized_concurrent = 0
+    persistence_current = 0
+    persistence_max = 0
+    semaphore_ids: set[int] = set()
     lock = asyncio.Lock()
 
     async def tracked_measure_ttft(*args: Any, **kwargs: Any) -> TranscriptionResult:
@@ -718,16 +750,26 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
             current_concurrent -= 1
         return _good_transcription()
 
-    async def tracked_dual_write(**_kwargs: Any) -> None:
-        nonlocal max_normalized_concurrent, current_normalized_concurrent
-        async with lock:
-            current_normalized_concurrent += 1
-            max_normalized_concurrent = max(
-                max_normalized_concurrent, current_normalized_concurrent
-            )
-        await asyncio.sleep(0)
-        async with lock:
-            current_normalized_concurrent -= 1
+    async def tracked_dual_write(**kwargs: Any) -> None:
+        nonlocal \
+            max_normalized_concurrent, \
+            current_normalized_concurrent, \
+            persistence_current, \
+            persistence_max
+        db_sem = kwargs["db_semaphore"]
+        semaphore_ids.add(id(db_sem))
+        async with db_sem:
+            async with lock:
+                current_normalized_concurrent += 1
+                persistence_current += 1
+                max_normalized_concurrent = max(
+                    max_normalized_concurrent, current_normalized_concurrent
+                )
+                persistence_max = max(persistence_max, persistence_current)
+            await asyncio.sleep(0)
+            async with lock:
+                current_normalized_concurrent -= 1
+                persistence_current -= 1
 
     provider_inst = MagicMock()
     provider_inst.measure_ttft = tracked_measure_ttft
@@ -739,6 +781,19 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
 
     run = _make_run()
     writer = _make_stub_writer(run)
+    original_record = writer.record_results
+
+    async def tracked_record(results: Any, **kwargs: Any) -> None:
+        nonlocal persistence_current, persistence_max
+        async with lock:
+            persistence_current += 1
+            persistence_max = max(persistence_max, persistence_current)
+        await asyncio.sleep(0)
+        async with lock:
+            persistence_current -= 1
+        await original_record(results, **kwargs)
+
+    writer.record_results = AsyncMock(side_effect=tracked_record)
     enabled = settings.model_copy(
         update={
             "benchmark_artifact_bucket": "private-artifacts",
@@ -772,6 +827,8 @@ async def test_concurrency_cap(audio_file: Path, settings: Settings) -> None:
     assert max_normalized_concurrent <= 8, (
         f"max normalized concurrent was {max_normalized_concurrent}"
     )
+    assert persistence_max == 3
+    assert len(semaphore_ids) == 1
     assert dual_write.await_count == provider_cls.call_count
     assert dual_write.await_count > 8
     assert summary.total_results >= 50 * 3

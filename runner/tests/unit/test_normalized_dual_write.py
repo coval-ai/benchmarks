@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import wave
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -10,7 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
+from psycopg_pool import PoolTimeout
 
 from coval_bench.db.models import (
     Benchmark,
@@ -414,3 +417,159 @@ async def test_s2s_uses_conversation_source_and_coval_executor() -> None:
     assert [(value.value_key, value.value) for value in writer.completed[evaluation_id]] == [
         ("primary", 500.0)
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_error", ["", "   "])
+async def test_blank_provider_error_is_normalized(provider_error: str) -> None:
+    writer = _Writer()
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="private",
+        run_id=1,
+        dataset_id="stt-v1",
+        dataset_sha256="a" * 64,
+        sample_id="sample",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.STT,
+        results=[_result(Benchmark.STT, Metric.TTFT, 1, "seconds")],
+        provider_error=provider_error,
+        timing_events={"ttft_seconds": 1},
+    )
+    observation = writer.observations[0]
+    assert observation.error is None
+    assert observation.status is ObservationStatus.SUCCEEDED
+    assert observation.failure_origin is None
+
+
+@pytest.mark.asyncio
+async def test_nonblank_provider_error_is_preserved() -> None:
+    writer = _Writer()
+    error = "  provider failed  "
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="private",
+        run_id=1,
+        dataset_id="stt-v1",
+        dataset_sha256="a" * 64,
+        sample_id="sample",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.STT,
+        results=[
+            _result(
+                Benchmark.STT, Metric.TTFT, None, "seconds", status=ResultStatus.FAILED, error=error
+            )
+        ],
+        provider_error=error,
+        timing_events={"ttft_seconds": None},
+    )
+    assert writer.observations[0].error == error
+    assert writer.observations[0].status is ObservationStatus.FAILED
+
+
+class _RetryWriter(_Writer):
+    def __init__(self, exc: BaseException | None = None) -> None:
+        super().__init__()
+        self.calls = 0
+        self.exc = exc
+
+    async def insert_observation(self, observation: Observation) -> Observation:
+        self.calls += 1
+        if self.calls == 1 and self.exc is not None:
+            raise self.exc
+        return await super().insert_observation(observation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [PoolTimeout("busy"), psycopg.OperationalError("gone")])
+async def test_normalized_db_retry_does_not_repeat_upload(exc: BaseException) -> None:
+    writer = _RetryWriter(exc)
+    uploads = 0
+    original = normalized.upload_provider_transcript
+
+    def upload(*args: object) -> ObservationArtifact:
+        nonlocal uploads
+        uploads += 1
+        return _artifact(ObservationArtifactType.PROVIDER_TRANSCRIPT)
+
+    normalized.upload_provider_transcript = upload
+    try:
+        await normalized.dual_write(
+            writer=writer,
+            storage_client=object(),
+            bucket="b",
+            run_id=1,
+            dataset_id="d",
+            dataset_sha256="a" * 64,
+            sample_id="s",
+            entry=SimpleNamespace(provider="p", model="m"),
+            benchmark=Benchmark.STT,
+            results=[],
+            provider_error=None,
+            transcript="x",
+            db_semaphore=asyncio.Semaphore(3),
+            db_retry_attempts=3,
+        )
+    finally:
+        normalized.upload_provider_transcript = original
+    assert writer.calls == 2 and uploads == 1
+
+
+@pytest.mark.asyncio
+async def test_normalized_runtime_error_and_cancellation_are_not_retried() -> None:
+    for exc in (RuntimeError("bad"), asyncio.CancelledError()):
+        writer = _RetryWriter(exc)
+        with pytest.raises(type(exc)):
+            await normalized.dual_write(
+                writer=writer,
+                storage_client=object(),
+                bucket="b",
+                run_id=1,
+                dataset_id="d",
+                dataset_sha256="a" * 64,
+                sample_id="s",
+                entry=SimpleNamespace(provider="p", model="m"),
+                benchmark=Benchmark.STT,
+                results=[],
+                provider_error=None,
+                db_semaphore=asyncio.Semaphore(3),
+                db_retry_attempts=3,
+            )
+        assert writer.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_normalized_db_semaphore_caps_at_three() -> None:
+    active = 0
+    maximum = 0
+
+    class Writer(_Writer):
+        async def insert_observation(self, observation: Observation) -> Observation:
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0)
+            result = await super().insert_observation(observation)
+            active -= 1
+            return result
+
+    sem = asyncio.Semaphore(3)
+    writer = Writer()
+    kwargs = dict(
+        writer=writer,
+        storage_client=object(),
+        bucket="b",
+        run_id=1,
+        dataset_id="d",
+        dataset_sha256="a" * 64,
+        entry=SimpleNamespace(provider="p", model="m"),
+        benchmark=Benchmark.STT,
+        results=[],
+        provider_error=None,
+        db_semaphore=sem,
+        db_retry_attempts=1,
+    )
+    await asyncio.gather(*(normalized.dual_write(sample_id=str(i), **kwargs) for i in range(8)))
+    assert maximum == 3

@@ -38,6 +38,8 @@ async def with_retry[T](
     base_delay_s: float = 0.5,
     max_delay_s: float = 8.0,
     retry_on: tuple[type[BaseException], ...] = _DEFAULT_RETRY_ON,
+    retry_event: str = "provider_call_retry",
+    exhaustion_event: str = "retry_exhausted",
 ) -> T:
     """Call *fn* up to *max_attempts* times with exponential backoff + full jitter.
 
@@ -50,6 +52,8 @@ async def with_retry[T](
         base_delay_s: Base delay in seconds before the first retry.
         max_delay_s: Maximum delay cap in seconds.
         retry_on: Exception types that trigger a retry. All others propagate immediately.
+        retry_event: Structured event name emitted for retry attempts.
+        exhaustion_event: Structured event name emitted when retries are exhausted.
 
     Returns:
         The return value of the first successful *fn* call.
@@ -65,7 +69,7 @@ async def with_retry[T](
             last_exc = exc
             if attempt + 1 >= max_attempts:
                 logger.error(
-                    "retry_exhausted",
+                    exhaustion_event,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                     exc_info=exc,
@@ -75,7 +79,7 @@ async def with_retry[T](
             # Full jitter — non-cryptographic, used only for backoff scheduling
             delay = random.uniform(0, cap)  # noqa: S311
             logger.warning(
-                "provider_call_retry",
+                retry_event,
                 attempt=attempt + 1,
                 max_attempts=max_attempts,
                 delay_s=round(delay, 3),
