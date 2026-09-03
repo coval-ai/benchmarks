@@ -11,6 +11,7 @@ populated during the FastAPI lifespan (see ``app.py``).
 from __future__ import annotations
 
 import asyncio
+import hmac
 from collections import defaultdict
 from typing import Any, cast
 
@@ -19,11 +20,13 @@ from cachetools import TTLCache
 from fastapi import Depends, Header, HTTPException
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
+from pydantic import SecretStr
 from starlette.requests import Request
 
 from coval_bench.api import clerk
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import fetch_models
+from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
@@ -44,6 +47,33 @@ def get_settings(request: Request) -> Settings:
     """Return the Settings instance from app state."""
     settings: Settings = request.app.state.settings
     return settings
+
+
+def bearer_token(authorization: str | None) -> str | None:
+    """The token behind a Bearer authorization header, or ``None``."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+def secret_matches(provided: str | None, expected: SecretStr | None) -> bool:
+    """Constant-time match; an unset or empty secret never matches anything."""
+    if provided is None or expected is None:
+        return False
+    value = expected.get_secret_value()
+    return bool(value) and hmac.compare_digest(provided.encode(), value.encode())
+
+
+def get_phonely_client(request: Request) -> PhonelyClient:
+    """Return the lifespan-owned Phonely client, or fail closed."""
+    client: PhonelyClient | None = getattr(request.app.state, "phonely_client", None)
+    if client is None:
+        raise HTTPException(503, "Phonely proxy is not configured")
+    return client
 
 
 def require_coval_admin(

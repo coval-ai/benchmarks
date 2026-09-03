@@ -58,6 +58,7 @@ from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 ARENA_LABELER_KEY = "test-labeler-key"
 MOCK_TOOLS_KEY = "test-mock-tools-key"  # noqa: S105 — a fixture value, not a credential
+LLM_PROXY_KEY = "test-llm-proxy-key"  # noqa: S105 — a fixture value, not a credential
 
 # The one early-access proof is a Clerk session token, so the app fixture wires a
 # whole stub instance: an issuer, an authorized party, a signing key the stubbed
@@ -173,6 +174,22 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 latency_ms     double precision NOT NULL
                                CHECK (latency_ms >= 0 AND latency_ms NOT IN (
                                    'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
+                created_at     timestamptz NOT NULL DEFAULT now()
+            )
+        """)
+        # Per-turn LLM proxy timing (mirrors migration 20260902_0026).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.llm_turns (
+                id             bigserial PRIMARY KEY,
+                simulation_id  text NOT NULL CHECK (simulation_id <> ''),
+                turn_index     integer NOT NULL CHECK (turn_index >= 0),
+                provider       text NOT NULL CHECK (provider <> ''),
+                model          text NOT NULL CHECK (model <> ''),
+                ttft_ms        double precision NOT NULL CHECK (
+                    ttft_ms >= 0 AND ttft_ms NOT IN (
+                        'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
+                total_ms       double precision NOT NULL CHECK (total_ms >= ttft_ms),
+                output_tokens  integer CHECK (output_tokens IS NULL OR output_tokens >= 0),
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
@@ -416,6 +433,10 @@ async def app(
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("MOCK_TOOLS_SECRET", MOCK_TOOLS_KEY)
+    monkeypatch.setenv("LLM_PROXY_SECRET", LLM_PROXY_KEY)
+    monkeypatch.setenv("PHONELY_API_KEY", "test-phonely-key")
+    monkeypatch.setenv("PHONELY_AGENT_ID", "test-phonely-agent")
+    monkeypatch.setenv("PHONELY_BASE_URL", "http://phonely.invalid")
     monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
