@@ -23,7 +23,6 @@ from coval_bench.registries.metrics import (
     validate_metric_values,
 )
 from coval_bench.registries.models import (
-    MODEL_REGISTRY,
     Gender,
     Licensing,
     RegisteredModel,
@@ -50,7 +49,6 @@ __all__ = [
     "METRIC_VALUE_CONTRACTS",
     "SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS",
     "SERIES_EXCLUDED_METRICS",
-    "MODEL_REGISTRY",
     "Metric",
     "MetricDirection",
     "MetricSpec",

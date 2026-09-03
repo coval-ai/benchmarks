@@ -13,8 +13,8 @@ from httpx import ASGITransport, AsyncClient
 
 from coval_bench.api.internal import embargoed_pairs
 from coval_bench.api.routers.providers import _describe
-from coval_bench.registries.models import MODEL_REGISTRY
 from tests.api.conftest import COVAL_ORG, bearer
+from tests.roster import TEST_ROSTER
 
 
 async def test_providers_200(client: AsyncClient) -> None:
@@ -178,9 +178,9 @@ async def test_early_access_flag_marks_only_embargoed_rows(client: AsyncClient) 
         for m in entry["models"]
         if m["early_access"]
     }
-    # Registry-derived, not embargoed_pairs(MODEL_REGISTRY): retired board keys stay embargoed
+    # Registry-derived, not embargoed_pairs(TEST_ROSTER): retired board keys stay embargoed
     # for stored artefacts but are not registry entries, so they never appear here.
-    assert flagged == {(m.provider, m.model) for m in MODEL_REGISTRY if not m.published}
+    assert flagged == {(m.provider, m.model) for m in TEST_ROSTER if not m.published}
 
     baseten = next(e for e in internal_data["tts"] if e["provider"] == "baseten")
     qwen = next(m for m in baseten["models"] if m["model"] == "qwen3-tts-1.7b")
@@ -296,7 +296,7 @@ async def test_the_catalogue_matches_the_registry(client: AsyncClient) -> None:
     models, same order, same flags and facets.
     """
     live = (await client.get("/v1/providers")).json()
-    expected = _describe(MODEL_REGISTRY, embargoed_pairs(MODEL_REGISTRY)).model_dump(mode="json")
+    expected = _describe(TEST_ROSTER, embargoed_pairs(TEST_ROSTER)).model_dump(mode="json")
 
     assert _sorted_tags(live) == _sorted_tags(expected)
 
@@ -310,7 +310,7 @@ async def test_publication_alone_decides_public_visibility(client: AsyncClient) 
         for entry in public[modality]
         for m in entry["models"]
     }
-    assert listed == {(m.provider, m.model) for m in MODEL_REGISTRY if m.published}
+    assert listed == {(m.provider, m.model) for m in TEST_ROSTER if m.published}
 
     # Uncollected but published: listed, and marked so a client can grey it out.
     greyed = {
@@ -320,6 +320,4 @@ async def test_publication_alone_decides_public_visibility(client: AsyncClient) 
         for m in entry["models"]
         if m["disabled"]
     }
-    assert greyed == {
-        (m.provider, m.model) for m in MODEL_REGISTRY if m.published and not m.collected
-    }
+    assert greyed == {(m.provider, m.model) for m in TEST_ROSTER if m.published and not m.collected}

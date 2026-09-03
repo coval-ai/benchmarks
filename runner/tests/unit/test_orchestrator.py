@@ -48,7 +48,7 @@ from structlog.testing import capture_logs
 from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
-from coval_bench.registries import MODEL_REGISTRY, RegisteredModel, Source
+from coval_bench.registries import RegisteredModel, Source
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
@@ -60,6 +60,7 @@ from coval_bench.runner.orchestrator import (
     run_benchmarks,
 )
 from coval_bench.runner.retry import with_retry
+from tests.roster import TEST_ROSTER
 
 # ---------------------------------------------------------------------------
 # Shared test settings
@@ -111,7 +112,7 @@ def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) ->
 
 def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
     """First registered model for *provider* in *benchmark*; explicit error if missing."""
-    for m in MODEL_REGISTRY:
+    for m in TEST_ROSTER:
         if m.benchmark is benchmark and m.provider == provider:
             return m
     raise AssertionError(f"no registered {benchmark} model for provider {provider!r}")
@@ -121,7 +122,7 @@ def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
     """Pause every registered model for *benchmark*, as an override base."""
     return [
         m.model_copy(update={"collected": False, "published": True})
-        for m in MODEL_REGISTRY
+        for m in TEST_ROSTER
         if m.benchmark is benchmark
     ]
 
