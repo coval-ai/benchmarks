@@ -208,7 +208,6 @@ def _summarize(
     lines.append("")
     lines.append("Provider/model validation against benchmarks_v2.models:")
 
-    # Count combos per provider_lower/model
     all_combos: set[tuple[str, str]] = set()
     unmatched_counts: Counter[tuple[str, str]] = Counter()
     for row in rows:
