@@ -49,12 +49,12 @@ from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
 from coval_bench.registries import (
-    MODEL_REGISTRY,
     TAG_CATEGORIES,
     RegisteredModel,
     tag_value_label,
 )
 from coval_bench.registries.provider_keys import PROVIDER_ENV
+from tests.roster import TEST_ROSTER
 
 ARENA_LABELER_KEY = "test-labeler-key"
 MOCK_TOOLS_KEY = "test-mock-tools-key"  # noqa: S105 — a fixture value, not a credential
@@ -363,7 +363,7 @@ def _seed_registry(**connect_kwargs: Any) -> None:
                 " ON CONFLICT DO NOTHING",
                 (str(tag), category.value, tag_value_label(category, str(tag))),
             )
-        _insert_models(conn, MODEL_REGISTRY)
+        _insert_models(conn, TEST_ROSTER)
         conn.commit()
 
 
@@ -452,10 +452,10 @@ async def app(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     # Arena pairing drops providers whose key is not configured, so a service with no
-    # keys has no roster and every battle is a 503. Prod mounts all of them — CI's
-    # check_arena_keys.py enforces it — so the fixture models that. OPENAI_API_KEY stays
-    # unset on purpose above, which simply leaves openai out of the roster.
-    for model in active_tts_models(MODEL_REGISTRY):
+    # keys has no roster and every battle is a 503. Prod mounts all of them, so the
+    # fixture models that. OPENAI_API_KEY stays unset on purpose above, which simply
+    # leaves openai out of the roster.
+    for model in active_tts_models(TEST_ROSTER):
         env_var = PROVIDER_ENV.get(model.provider)
         if env_var is not None and env_var != "OPENAI_API_KEY":
             monkeypatch.setenv(env_var, "test-provider-key")

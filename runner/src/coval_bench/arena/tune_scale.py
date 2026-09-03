@@ -41,7 +41,6 @@ from coval_bench.arena.rating import (
     compute_ratings,
 )
 from coval_bench.db.models import PairingRating
-from coval_bench.registries import MODEL_REGISTRY
 from coval_bench.registries.models import Gender, RegisteredModel
 
 _EPS = 1e-12
@@ -163,6 +162,7 @@ def _simulate_once(
 
 
 def tune_scale(
+    models: Sequence[RegisteredModel],
     *,
     scales: Sequence[float] = DEFAULT_SCALES,
     n_battles: int = 2000,
@@ -195,7 +195,7 @@ def tune_scale(
     # the union. Both genders currently field the same models, so either stands
     # in for the regime; simulating the union would model a larger pool than any
     # real battle draws from.
-    roster = roster_for(MODEL_REGISTRY, Gender.FEMALE)
+    roster = roster_for(models, Gender.FEMALE)
     if len(roster) < 2:
         raise ValueError("need at least two active TTS models to simulate")
 

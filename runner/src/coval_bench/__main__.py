@@ -516,6 +516,10 @@ def arena_tune_scale(
     from pathlib import Path
 
     from coval_bench.arena.tune_scale import render_loss_curve, tune_scale
+    from coval_bench.config import get_settings
+    from coval_bench.db.conn import lifespan_pool
+    from coval_bench.db.registry_store import fetch_models
+    from coval_bench.registries import RegisteredModel
 
     try:
         scale_values = [float(s) for s in scales.split(",") if s.strip()]
@@ -523,7 +527,13 @@ def arena_tune_scale(
         raise click.BadParameter(f"--scales must be comma-separated numbers: {exc}") from exc
     if not scale_values:
         raise click.BadParameter("--scales must contain at least one value")
+
+    async def _roster() -> list[RegisteredModel]:
+        async with lifespan_pool(get_settings()) as pool:
+            return await fetch_models(pool)
+
     results = tune_scale(
+        asyncio.run(_roster()),
         scales=scale_values,
         n_battles=battles,
         refit_every=refit_every,

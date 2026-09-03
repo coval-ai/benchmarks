@@ -17,7 +17,6 @@ import psycopg
 import psycopg.rows
 
 from coval_bench.config import get_settings
-from coval_bench.registries import MODEL_REGISTRY
 
 LEGACY_RUNNER_SHA: Final[str] = "historical-import"
 LEGACY_DATASET_ID: Final[str] = "legacy:cv+local"
@@ -46,9 +45,11 @@ class LegacyRow:
     status: str  # "success" | "tts_failed"
 
 
-def _build_matrix_lookup() -> set[tuple[str, str]]:
-    """Return the canonical {(provider_lower, model)} set from the model registry."""
-    return {(m.provider.lower(), m.model) for m in MODEL_REGISTRY}
+def _build_matrix_lookup(target_url: str) -> set[tuple[str, str]]:
+    """Return the {(provider_lower, model)} set registered in the target database."""
+    with psycopg.connect(target_url) as conn:
+        rows = conn.execute("SELECT provider, model FROM benchmarks_v2.models").fetchall()
+    return {(str(provider).lower(), str(model)) for provider, model in rows}
 
 
 def _read_legacy(conn: psycopg.Connection[dict[str, object]]) -> list[LegacyRow]:
@@ -105,9 +106,9 @@ def _read_legacy(conn: psycopg.Connection[dict[str, object]]) -> list[LegacyRow]
 
 def _validate(
     rows: Iterable[LegacyRow],
+    matrix: set[tuple[str, str]],
 ) -> tuple[set[tuple[str, str]], Counter[str]]:
     """Return (unmatched_pairs, status_counts). Pure — no I/O."""
-    matrix = _build_matrix_lookup()
     status_counts: Counter[str] = Counter()
     unmatched_counts: Counter[tuple[str, str]] = Counter()
 
@@ -146,9 +147,9 @@ def _summarize(
     rows: list[LegacyRow],
     unmatched: set[tuple[str, str]],
     status_counts: Counter[str],
+    matrix: set[tuple[str, str]],
 ) -> str:
     """Return the dry-run report text. Pure — no I/O."""
-    matrix = _build_matrix_lookup()
 
     lines: list[str] = ["== legacy-import dry-run =="]
 
@@ -205,7 +206,7 @@ def _summarize(
         )
 
     lines.append("")
-    lines.append("Provider/model validation against MODEL_REGISTRY:")
+    lines.append("Provider/model validation against benchmarks_v2.models:")
 
     # Count combos per provider_lower/model
     all_combos: set[tuple[str, str]] = set()
@@ -344,8 +345,9 @@ def import_legacy_cli(dry_run: bool) -> None:
     with psycopg.connect(legacy_url, row_factory=psycopg.rows.dict_row) as conn:
         rows = _read_legacy(conn)
 
-    unmatched, status_counts = _validate(rows)
-    click.echo(_summarize(rows, unmatched, status_counts))
+    matrix = _build_matrix_lookup(target_url)
+    unmatched, status_counts = _validate(rows, matrix)
+    click.echo(_summarize(rows, unmatched, status_counts, matrix))
 
     if dry_run:
         return

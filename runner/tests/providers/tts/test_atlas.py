@@ -20,6 +20,7 @@ import pytest
 
 from coval_bench.config import Settings
 from coval_bench.providers.tts.atlas import SAMPLE_RATE, VALID_VOICES, AtlasTTSProvider
+from tests.roster import TEST_ROSTER
 
 from .conftest import FakeWebSocket, make_pcm_bytes
 
@@ -318,10 +319,9 @@ def test_registry_entry_is_early_access_off_arena_and_shared_inference() -> None
     possibly non-independent row off the public board and out of the blind
     voice-quality A/B.
     """
-    from coval_bench.registries import MODEL_REGISTRY
     from coval_bench.registries.models import Source
 
-    rows = [m for m in MODEL_REGISTRY if m.provider == "atlas"]
+    rows = [m for m in TEST_ROSTER if m.provider == "atlas"]
     assert len(rows) == 1
     assert rows[0].model == _MODEL
     assert rows[0].voice == _VOICE

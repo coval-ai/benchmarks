@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for the model registry."""
+"""Unit tests for the model and tag types and the provider name map."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import tomllib
 from pathlib import Path
 
 from coval_bench.registries import (
-    MODEL_REGISTRY,
     TAG_CATEGORIES,
     Benchmark,
     Licensing,
@@ -18,15 +17,11 @@ from coval_bench.registries import (
     Source,
 )
 from coval_bench.registries.provider_keys import provider_names
+from tests.roster import TEST_ROSTER
 
 
 def test_every_tag_has_a_category() -> None:
     assert TAG_CATEGORIES.keys() == set(ModelTag)
-
-
-def test_registry_keys_unique() -> None:
-    keys = [(m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY]
-    assert len(keys) == len(set(keys))
 
 
 def test_registered_model_defaults() -> None:
@@ -39,19 +34,6 @@ def test_registered_model_defaults() -> None:
     assert m.source is Source.OFFICIAL_API
     assert m.licensing is Licensing.PROPRIETARY
     assert m.on_prem is False
-
-
-def test_collected_tts_models_have_voices() -> None:
-    # The runner can't synthesize without a voice; only uncollected entries may omit one.
-    for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.TTS and m.collected:
-            assert m.voice is not None, f"{m.provider}/{m.model} is collected but has no voice"
-
-
-def test_stt_models_have_no_voice() -> None:
-    for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.STT:
-            assert m.voice is None
 
 
 def test_provider_names_cover_the_class_registries() -> None:
@@ -70,7 +52,7 @@ def test_scheduled_models_use_implemented_providers() -> None:
 
     Uncollected models are exempt: their rows outlive their provider's code.
     """
-    for model in MODEL_REGISTRY:
+    for model in TEST_ROSTER:
         if not model.collected:
             continue
         if model.benchmark is Benchmark.STT:

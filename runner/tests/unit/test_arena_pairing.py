@@ -19,10 +19,10 @@ from coval_bench.arena.pairing import (
 )
 from coval_bench.config import Settings
 from coval_bench.db.models import PairingRating
-from coval_bench.registries import MODEL_REGISTRY
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import Gender, RegisteredModel, Voice
 from coval_bench.registries.provider_keys import PROVIDER_ENV
+from tests.roster import TEST_ROSTER
 
 
 def _model(name: str) -> RegisteredModel:
@@ -161,19 +161,19 @@ def test_select_pair_rejects_non_positive_scale() -> None:
 
 
 def test_active_tts_models_are_tts_and_active() -> None:
-    roster = active_tts_models(MODEL_REGISTRY)
+    roster = active_tts_models(TEST_ROSTER)
     assert len(roster) >= 2
     assert all(m.benchmark is Benchmark.TTS and m.collected and m.published for m in roster)
 
 
 def test_active_tts_models_excludes_arena_disabled() -> None:
-    assert all(m.arena_enabled for m in active_tts_models(MODEL_REGISTRY))
+    assert all(m.arena_enabled for m in active_tts_models(TEST_ROSTER))
 
 
 def test_provider_env_covers_arena_providers() -> None:
     # Only providers the arena can actually synthesize with (ACTIVE + arena_enabled),
-    # matching active_tts_models(MODEL_REGISTRY) and the parity script — not every non-retired one.
-    providers = {m.provider for m in active_tts_models(MODEL_REGISTRY)}
+    # matching active_tts_models(TEST_ROSTER) and the parity script — not every non-retired one.
+    providers = {m.provider for m in active_tts_models(TEST_ROSTER)}
     missing = providers - PROVIDER_ENV.keys()
     assert not missing, f"arena providers with no PROVIDER_ENV entry: {sorted(missing)}"
 
@@ -192,7 +192,7 @@ def test_every_arena_model_can_field_both_genders() -> None:
     """
     incomplete = [
         f"{m.provider}/{m.model}"
-        for m in active_tts_models(MODEL_REGISTRY)
+        for m in active_tts_models(TEST_ROSTER)
         if {v.gender for v in m.voices} != {Gender.FEMALE, Gender.MALE} and m.provider != "palabra"
     ]
     assert incomplete == [], f"arena models missing a gendered voice: {incomplete}"
@@ -200,10 +200,10 @@ def test_every_arena_model_can_field_both_genders() -> None:
 
 def test_roster_for_keeps_only_models_with_that_gender() -> None:
     for gender in (Gender.FEMALE, Gender.MALE):
-        roster = roster_for(MODEL_REGISTRY, gender)
+        roster = roster_for(TEST_ROSTER, gender)
         assert len(roster) >= 2
         assert all(any(v.gender is gender for v in m.voices) for m in roster)
-    assert {m.provider for m in roster_for(MODEL_REGISTRY, Gender.FEMALE)}.isdisjoint({"palabra"})
+    assert {m.provider for m in roster_for(TEST_ROSTER, Gender.FEMALE)}.isdisjoint({"palabra"})
 
 
 def test_voice_for_returns_the_matching_half() -> None:
