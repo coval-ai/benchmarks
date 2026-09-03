@@ -11,7 +11,6 @@ from collections import Counter
 
 import pytest
 
-from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.rating import _ELO_SCALE
 from coval_bench.arena.tune_scale import (
     ScaleResult,
@@ -21,13 +20,32 @@ from coval_bench.arena.tune_scale import (
     _true_strengths,
     tune_scale,
 )
-from tests.roster import TEST_ROSTER
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import Gender, RegisteredModel, Voice
+
+
+def _tts(name: str) -> RegisteredModel:
+    return RegisteredModel(
+        benchmark=Benchmark.TTS,
+        provider=name,
+        model=name,
+        voice=f"{name}-f",
+        voices=(
+            Voice(id=f"{name}-f", gender=Gender.FEMALE),
+            Voice(id=f"{name}-m", gender=Gender.MALE),
+        ),
+        collected=True,
+        published=True,
+    )
+
+
+_ROSTER = [_tts("a"), _tts("b"), _tts("c"), _tts("d")]
 
 
 def _fast(seed: int) -> list[ScaleResult]:
     """tune_scale with fast knobs: quick but still exercises refit + pairing."""
     return tune_scale(
-        TEST_ROSTER,
+        _ROSTER,
         scales=(100.0, 200.0),
         n_battles=120,
         refit_every=40,
@@ -77,8 +95,7 @@ def test_davidson_is_symmetric_under_swap() -> None:
 
 
 def test_true_strengths_span_the_requested_elo_spread() -> None:
-    roster = active_tts_models(TEST_ROSTER)
-    theta = _true_strengths(roster, elo_spread=800.0, rng=random.Random(0))
+    theta = _true_strengths(_ROSTER, elo_spread=800.0, rng=random.Random(0))
     elo_range = (max(theta.values()) - min(theta.values())) * _ELO_SCALE
     assert math.isclose(elo_range, 800.0, rel_tol=1e-9)
 
@@ -108,7 +125,7 @@ def test_short_run_with_no_refit_is_still_finite() -> None:
     # n_battles < refit_every -> the fit never runs, so every battle is scored
     # against the neutral prior. Loss must stay finite (not collapse to inf).
     results = tune_scale(
-        TEST_ROSTER,
+        _ROSTER,
         scales=(150.0,),
         n_battles=20,
         refit_every=100,
@@ -132,4 +149,4 @@ def test_short_run_with_no_refit_is_still_finite() -> None:
 )
 def test_tune_scale_rejects_invalid_params(kwargs: dict[str, object]) -> None:
     with pytest.raises(ValueError):
-        tune_scale(TEST_ROSTER, **kwargs)  # type: ignore[arg-type]
+        tune_scale(_ROSTER, **kwargs)  # type: ignore[arg-type]

@@ -30,7 +30,6 @@ from coval_bench.api.routers.aggregates import (
     _NORMALIZED_TIMELINE_SQL,
 )
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
-from tests.roster import TEST_ROSTER
 
 
 async def _insert_normalized_metric(
@@ -636,7 +635,7 @@ async def test_concurrent_misses_coalesce(
     app.dependency_overrides[deps.get_pool] = CountingPool
     # The roster shares get_pool; serve it from memory so only the aggregates
     # query is counted here.
-    app.dependency_overrides[deps.get_models] = lambda: list(TEST_ROSTER)
+    app.dependency_overrides[deps.get_models] = lambda: []
     try:
         responses = await asyncio.gather(
             *(client.get("/v1/results/aggregates", params={"benchmark": "STT"}) for _ in range(5))
@@ -667,7 +666,7 @@ async def test_failed_fill_shared_not_retried(client: AsyncClient, app: FastAPI)
             yield  # noqa: B901 — unreachable; makes this an async generator
 
     app.dependency_overrides[deps.get_pool] = FailingPool
-    app.dependency_overrides[deps.get_models] = lambda: list(TEST_ROSTER)
+    app.dependency_overrides[deps.get_models] = lambda: []
     try:
         with pytest.raises(RuntimeError, match="db down"):
             await client.get("/v1/results/aggregates", params={"benchmark": "STT"})

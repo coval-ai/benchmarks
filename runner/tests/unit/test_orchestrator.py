@@ -56,7 +56,6 @@ from coval_bench.runner.orchestrator import (
     run_benchmarks,
 )
 from coval_bench.runner.retry import with_retry
-from tests.roster import TEST_ROSTER
 
 # ---------------------------------------------------------------------------
 # Shared test settings
@@ -106,21 +105,26 @@ def _tts_entry(provider: str, model: str, voice: str, *, active: bool = True) ->
     )
 
 
-def _registry_entry(benchmark: Benchmark, provider: str) -> RegisteredModel:
-    """First registered model for *provider* in *benchmark*; explicit error if missing."""
-    for m in TEST_ROSTER:
-        if m.benchmark is benchmark and m.provider == provider:
-            return m
-    raise AssertionError(f"no registered {benchmark} model for provider {provider!r}")
-
-
 def _paused_registry(benchmark: Benchmark) -> list[RegisteredModel]:
-    """Pause every registered model for *benchmark*, as an override base."""
+    """Two paused models for *benchmark*, the base the matrix overrides build on.
+
+    Paused entries must never be scheduled, whatever else the matrix holds.
+    """
+    paused = {"collected": False, "published": True}
+    if benchmark is Benchmark.STT:
+        return [
+            _stt_entry("paused-stt", "one").model_copy(update=paused),
+            _stt_entry("paused-stt", "two").model_copy(update=paused),
+        ]
     return [
-        m.model_copy(update={"collected": False, "published": True})
-        for m in TEST_ROSTER
-        if m.benchmark is benchmark
+        _tts_entry("paused-tts", "one", "v").model_copy(update=paused),
+        _tts_entry("paused-tts", "two", "v").model_copy(update=paused),
     ]
+
+
+# hume has no loadable provider class in the default install, so its entry
+# exercises the SDK-missing and empty-result paths.
+_HUME_ENTRY = _tts_entry("hume", "octave-2", "v").model_copy(update={"collected": False})
 
 
 def _make_run(run_id: int = 1) -> Run:
@@ -2111,7 +2115,7 @@ async def test_stt_ttfs_early_final_clamps_to_zero(audio_file: Path, settings: S
 @pytest.mark.asyncio
 async def test_tts_empty_ttfa_marked_failed(audio_file: Path, settings: Settings) -> None:
     """TTS synth returns (no raise) with no ttfa/audio → TTFA FAILED, no WER row, run FAILED."""
-    hume_entry = _registry_entry(Benchmark.TTS, "hume")
+    hume_entry = _HUME_ENTRY
     empty_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -2165,7 +2169,7 @@ async def test_tts_provider_error_wins_over_contamination(
     Transport contamination only downgrades a would-be SUCCESS; a real provider error keeps
     its own (more specific) message and suppresses WER.
     """
-    hume_entry = _registry_entry(Benchmark.TTS, "hume")
+    hume_entry = _HUME_ENTRY
     errored_tts = TTSResult(
         provider="hume",
         model=hume_entry.model,
@@ -2265,7 +2269,7 @@ async def test_tts_whisper_failure_emits_no_wer_row(settings: Settings) -> None:
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = _registry_entry(Benchmark.TTS, "hume")
+        hume_entry = _HUME_ENTRY
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
@@ -2324,7 +2328,7 @@ async def test_tts_wer_compute_failure_marked_failed(settings: Settings) -> None
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = _registry_entry(Benchmark.TTS, "hume")
+        hume_entry = _HUME_ENTRY
         good_tts = TTSResult(
             provider="hume",
             model=hume_entry.model,
@@ -2572,7 +2576,7 @@ async def test_tts_transport_gate_nulls_without_failing(settings: Settings) -> N
         audio_path = Path(tmpdir) / "synth.wav"
         audio_path.write_bytes(b"\x00" * 512)
 
-        hume_entry = _registry_entry(Benchmark.TTS, "hume")
+        hume_entry = _HUME_ENTRY
         tts_result = TTSResult(
             provider="hume",
             model=hume_entry.model,

@@ -20,9 +20,13 @@ from coval_bench.migrations.import_legacy import (
     _validate,
     map_status,
 )
-from tests.roster import TEST_ROSTER
 
-_MATRIX = {(m.provider.lower(), m.model) for m in TEST_ROSTER}
+_MATRIX = {
+    ("deepgram", "nova-2"),
+    ("deepgram", "nova-3"),
+    ("deepgram", "aura-2-thalia-en"),
+    ("assemblyai", "universal-streaming"),
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
