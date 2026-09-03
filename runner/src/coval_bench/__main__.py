@@ -27,7 +27,7 @@ from coval_bench.migrations.backfill_normalized_storage import backfill_normaliz
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.platform_assets import platform_assets
-from coval_bench.s2s.fetch_v2v import fetch_s2s
+from coval_bench.s2s.fetch_v2v import fetch_llm, fetch_s2s
 from coval_bench.variants.pull import pull_contract
 
 # Backstop so a stalled connection can't hang a smoke probe forever. Loose enough
@@ -113,8 +113,10 @@ migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-s
 migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 
-# S2S is fetch-only, so a standalone command rather than a `run --kind` value.
+# The Coval-fetched benchmarks are fetch-only, so each is a standalone command
+# backing its own Cloud Run job rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
+cli.add_command(fetch_llm, name="fetch-llm")
 cli.add_command(pull_contract, name="pull-contract")
 cli.add_command(platform_assets, name="platform-assets")
 

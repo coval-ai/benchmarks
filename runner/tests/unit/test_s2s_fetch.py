@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import click
 import httpx
 import pytest
 from click.testing import CliRunner
@@ -24,6 +25,7 @@ from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
+    DATASET_ID_LLM_DENTAL,
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
     FAMILY_HAPPYPATH,
@@ -117,6 +119,7 @@ def _stub_writer() -> MagicMock:
     )
     writer.coval_run_ingested = AsyncMock(return_value=False)
     writer.coval_metric_ingested = AsyncMock(return_value=False)
+    writer.conversation_ttft = AsyncMock(return_value={})
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_bucket = AsyncMock()
@@ -301,12 +304,14 @@ def test_expected_sample_models_excludes_non_publishing_agents() -> None:
         coval_s2s_openai_agent_id="a1",
         coval_s2s_gray_agent_id="a2",
         coval_s2s_red_agent_id="a3",
+        coval_llm_phonely_agent_id="a4",
     )
     expected = fetch_v2v._expected_sample_models(settings)
 
     assert ("openai", "gpt-realtime") in expected
     assert ("colors", "gray") not in expected
     assert ("colors", "red") not in expected
+    assert ("phonely", "phonely-agent") not in expected
 
 
 def test_bucket_start_floors_to_grid() -> None:
@@ -795,6 +800,147 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["spec"] is LLM_SPEC
     assert fetch_one.await_args.kwargs["metric_ids"] == {Metric.INSTRUCTION_FOLLOWING: "IID"}
+
+
+def test_phonely_spec_is_the_llm_dental_text_agent() -> None:
+    spec = next(spec for spec in fetch_v2v.AGENTS if spec.provider == "phonely")
+    assert spec == AgentSpec(
+        agent_id_attr="coval_llm_phonely_agent_id",
+        provider="phonely",
+        model="phonely-agent",
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_LLM_DENTAL,
+        publish_samples=False,
+        benchmark=Benchmark.LLM,
+    )
+    assert condition_for(DATASET_ID_LLM_DENTAL) == DatasetMetrics(
+        benchmark=Benchmark.LLM,
+        required=Metric.INSTRUCTION_FOLLOWING,
+        local=frozenset({Metric.TTFT}),
+    )
+
+
+async def _fetch_llm(
+    writer: MagicMock,
+    values: list[dict[str, Any]],
+    *,
+    persona_conditions: dict[str, Condition] | None = None,
+) -> tuple[RunStatus, int]:
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "P1"}
+    )
+    async with _fake_client(list_json, _run_json(values, metric_id="IID")) as client:
+        return await fetch_v2v._fetch_one_provider(
+            client,
+            writer,
+            spec=LLM_SPEC,
+            agent_id="a1",
+            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+            test_set_id="TSD",
+            persona_conditions=persona_conditions,
+            period_seconds=10_800,
+            stale_grace_seconds=5_400,
+        )
+
+
+@pytest.mark.asyncio
+async def test_text_agent_uses_instruction_as_the_clean_dental_anchor() -> None:
+    writer = _stub_writer()
+    writer.conversation_ttft = AsyncMock(return_value={"s1": 0.4126})
+    values = [
+        {"simulation_output_id": "s1", "value": "YES"},
+        {"simulation_output_id": "s2", "value": "NO"},
+    ]
+
+    with capture_logs() as logs:
+        status, ingested = await _fetch_llm(writer, values)
+
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_DENTAL
+    writer.conversation_ttft.assert_awaited_once_with(["s1", "s2"])
+    rows = writer.record_results.await_args.args[0]
+    assert {(r.metric_type, r.audio_filename, r.metric_value, r.metric_units) for r in rows} == {
+        (Metric.INSTRUCTION_FOLLOWING, "R1/s1", 100.0, "percent"),
+        (Metric.INSTRUCTION_FOLLOWING, "R1/s2", 0.0, "percent"),
+        (Metric.TTFT, "R1/s1", 0.413, "seconds"),
+    }
+    assert all(r.benchmark is Benchmark.LLM for r in rows)
+    gaps = [log for log in logs if log["event"] == "local_metric_coverage_gap"]
+    assert [(log["metric"], log["conversations"]) for log in gaps] == [("TTFT", 1)]
+
+
+def test_local_metrics_are_ingestable_only_with_a_source() -> None:
+    condition = DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING, local=frozenset({Metric.TTFT, Metric.V2V})
+    )
+    assert fetch_v2v._ingestable(condition, {Metric.INSTRUCTION_FOLLOWING: "IID"}) == {
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.TTFT,
+    }
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_defaults_to_writing_local_metrics() -> None:
+    writer = _stub_writer()
+    writer.conversation_ttft = AsyncMock(return_value={"s1": 0.25})
+    values = [{"simulation_output_id": "s1", "value": "YES"}]
+    async with _fake_client({}, _run_json(values, metric_id="IID")) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=LLM_SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
+            condition=condition_for(DATASET_ID_LLM_DENTAL),
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    assert {r.metric_type for r in rows} == {Metric.INSTRUCTION_FOLLOWING, Metric.TTFT}
+
+
+@pytest.mark.asyncio
+async def test_ttft_backfills_onto_an_ingested_run_once_turns_exist() -> None:
+    writer = _stub_writer()
+    writer.coval_metric_ingested = AsyncMock(
+        side_effect=lambda **kw: kw["metric_type"] is Metric.INSTRUCTION_FOLLOWING
+    )
+    values = [{"simulation_output_id": "s1", "value": "YES"}]
+
+    status, ingested = await _fetch_llm(writer, values)
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 0)
+    writer.start_run.assert_not_awaited()
+
+    writer.conversation_ttft = AsyncMock(return_value={"s1": 0.2})
+    status, ingested = await _fetch_llm(writer, values)
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    rows = writer.record_results.await_args.args[0]
+    assert [(r.metric_type, r.metric_value) for r in rows] == [(Metric.TTFT, 0.2)]
+
+
+@pytest.mark.asyncio
+async def test_non_clean_text_personas_are_not_ingested() -> None:
+    writer = _stub_writer()
+    values = [{"simulation_output_id": "s1", "value": "YES"}]
+
+    status, ingested = await _fetch_llm(writer, values, persona_conditions={"P1": Condition.NOISY})
+
+    assert (status, ingested) == (RunStatus.FAILED, 0)
+    writer.coval_metric_ingested.assert_not_awaited()
+    writer.start_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_llm_requires_the_instruction_metric_and_dental_set() -> None:
+    with pytest.raises(RuntimeError, match="coval_s2s_instruction_metric_id is not set"):
+        await fetch_v2v.fetch_and_write_v2v(
+            Settings(coval_llm_phonely_agent_id="a1"), benchmark=Benchmark.LLM
+        )
+    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id is required"):
+        await fetch_v2v.fetch_and_write_v2v(
+            Settings(coval_llm_phonely_agent_id="a1", coval_s2s_instruction_metric_id="IID"),
+            benchmark=Benchmark.LLM,
+        )
 
 
 @pytest.mark.asyncio
@@ -1792,9 +1938,14 @@ def test_log_run_failed_emits_run_failed_event() -> None:
 
 
 def _run_fetch_cli(
-    monkeypatch: pytest.MonkeyPatch, statuses: dict[str, RunStatus]
+    monkeypatch: pytest.MonkeyPatch,
+    statuses: dict[str, RunStatus],
+    command: click.Command = fetch_v2v.fetch_s2s,
+    calls: list[dict[str, Any]] | None = None,
 ) -> tuple[int, list[str]]:
-    async def fake_fetch(_settings: Settings, **_kwargs: object) -> dict[str, RunStatus]:
+    async def fake_fetch(_settings: Settings, **kwargs: object) -> dict[str, RunStatus]:
+        if calls is not None:
+            calls.append(dict(kwargs))
         return statuses
 
     settings = Settings.model_construct(log_level="INFO")
@@ -1802,8 +1953,17 @@ def _run_fetch_cli(
     monkeypatch.setattr(fetch_v2v, "get_settings", lambda: settings)
     monkeypatch.setattr("coval_bench.logging.configure_logging", lambda level: None)
     with capture_logs() as logs:
-        result = CliRunner().invoke(fetch_v2v.fetch_s2s, [])
+        result = CliRunner().invoke(command, [])
     return result.exit_code, [str(entry.get("event")) for entry in logs]
+
+
+def test_fetch_llm_cli_selects_the_llm_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    code, events = _run_fetch_cli(
+        monkeypatch, {"phonely:phonely-agent": RunStatus.SUCCEEDED}, fetch_v2v.fetch_llm, calls
+    )
+    assert (code, events) == (0, [])
+    assert calls[0]["benchmark"] is Benchmark.LLM
 
 
 def test_cli_mixed_alerts_partial_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:

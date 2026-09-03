@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import importlib.resources
 import random
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -27,12 +27,15 @@ from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
+from coval_bench.llm.phonely import MODEL as PHONELY_MODEL
+from coval_bench.llm.phonely import PROVIDER as PHONELY_PROVIDER
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
     FAMILY_DENTAL,
+    FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -126,6 +129,17 @@ AGENTS: tuple[AgentSpec, ...] = (
         test_set_id_attr="coval_s2s_dental_test_set_id",
         family=FAMILY_DENTAL,
         publish_samples=False,
+    ),
+    # The same dental set driven over text through the LLM proxy; TTFT comes from
+    # the proxy's own turn log rather than from Coval.
+    AgentSpec(
+        agent_id_attr="coval_llm_phonely_agent_id",
+        provider=PHONELY_PROVIDER,
+        model=PHONELY_MODEL,
+        test_set_id_attr="coval_s2s_dental_test_set_id",
+        family=FAMILY_LLM_DENTAL,
+        publish_samples=False,
+        benchmark=Benchmark.LLM,
     ),
 )
 
@@ -464,6 +478,41 @@ def _failed_conversation_rows(
     ]
 
 
+# Metrics a condition declares ``local`` are measured on our side and looked up
+# by the anchor's conversation ids instead of fetched from Coval. A local metric
+# is ingestable once it appears here, mirroring _VALUE_MAPPERS.
+_LOCAL_SOURCES: dict[
+    Metric, Callable[[RunWriter, Sequence[str]], Awaitable[Mapping[str, float]]]
+] = {
+    Metric.TTFT: lambda writer, sim_ids: writer.conversation_ttft(sim_ids),
+}
+
+
+def _local_rows(
+    values: Mapping[str, float],
+    *,
+    metric: Metric,
+    run_pk: int,
+    coval_run_id: str,
+    spec: AgentSpec,
+) -> list[Result]:
+    """One SUCCESS row per conversation measured locally, keyed like the anchor rows."""
+    return [
+        Result(
+            run_id=run_pk,
+            provider=spec.provider,
+            model=spec.model,
+            benchmark=spec.benchmark,
+            metric_type=metric,
+            metric_units=METRIC_SPECS[metric].units,
+            metric_value=round(value, 3),
+            audio_filename=f"{coval_run_id}/{sim_id}",
+            status=ResultStatus.SUCCESS,
+        )
+        for sim_id, value in values.items()
+    ]
+
+
 def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[str, Any]] | None:
     """The metric's per-conversation values, or None when it is not on the run."""
     payload = metrics.get(metric_id) if metric_id else None
@@ -477,7 +526,7 @@ def _ingestable(condition: DatasetMetrics, metric_ids: Mapping[Metric, str]) -> 
     fetched = frozenset(
         metric for metric in condition.fetched if metric in metric_ids and metric in _VALUE_MAPPERS
     )
-    return fetched | condition.local
+    return fetched | (condition.local & frozenset(_LOCAL_SOURCES))
 
 
 async def _pending_metrics(
@@ -526,7 +575,8 @@ async def _ingest_run(
     a single short call. A conversation with no anchor value becomes a FAILED
     row instead. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
     """
-    pending = condition.fetched if pending is None else pending
+    if pending is None:
+        pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
     run_pk: int | None = None
     try:
         resp = await client.get(f"/runs/{coval_run.run_id}")
@@ -628,7 +678,27 @@ async def _ingest_run(
                     )
                     del writable[metric]
 
-        if not writable:
+        # Local metrics are looked up for the anchor's conversations. A metric with
+        # no values at all stays pending for a later scan; once any conversation
+        # has a value the run counts as ingested, and the ones still missing are a
+        # permanent coverage gap, as an UNKNOWN verdict is for instruction.
+        local: dict[Metric, Mapping[str, float]] = {}
+        sim_ids = [sid for v in anchor_values if (sid := v.get("simulation_output_id"))]
+        for metric in sorted(condition.local & pending):
+            measured = await _LOCAL_SOURCES[metric](writer, sim_ids)
+            if not measured:
+                continue
+            if len(measured) < len(sim_ids):
+                logger.warning(
+                    "local_metric_coverage_gap",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric=metric.value,
+                    conversations=len(sim_ids) - len(measured),
+                )
+            local[metric] = measured
+
+        if not writable and not local:
             # Backfill with nothing to add; leave it retryable, write no run row.
             return None
 
@@ -651,6 +721,10 @@ async def _ingest_run(
             )
             for metric, values in writable.items()
         }
+        for metric, local_values in local.items():
+            by_metric[metric] = _local_rows(
+                local_values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
+            )
         if condition.required is Metric.V2V and Metric.V2V in writable:
             output_ids = [
                 s
@@ -723,6 +797,7 @@ async def _ingest_run(
             slot=str(scheduled_at),
             clips=len(rows),
             instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
+            ttft=len(by_metric.get(Metric.TTFT, [])),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
         if Metric.V2V in writable:
@@ -1007,6 +1082,8 @@ async def fetch_and_write_v2v(
         )
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
+    if benchmark is Benchmark.LLM and not instruction_metric_id:
+        raise RuntimeError("coval_s2s_instruction_metric_id is not set")
     if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
@@ -1140,36 +1217,40 @@ async def fetch_and_write_v2v(
         return statuses
 
 
-@click.command(name="fetch-s2s")
-@click.option(
-    "--coval-run-id",
-    "coval_run_ids",
-    multiple=True,
-    help="Ingest only these Coval runs, scanning beyond the scheduled window. Repeatable.",
-)
-@click.option(
-    "--window-hours",
-    type=click.IntRange(min=1),
-    default=720,
-    show_default=True,
-    help="How far back --coval-run-id searches. Ignored without it.",
-)
-@click.option(
-    "--page-size",
-    type=click.IntRange(min=1),
-    default=100,
-    show_default=True,
-    help="Runs listed per agent while searching for --coval-run-id. Ignored without it.",
-)
-def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
-    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job).
+def _fetch_options[Command: Callable[..., None]](command: Command) -> Command:
+    options = (
+        click.option(
+            "--coval-run-id",
+            "coval_run_ids",
+            multiple=True,
+            help="Ingest only these Coval runs, scanning beyond the scheduled window. Repeatable.",
+        ),
+        click.option(
+            "--window-hours",
+            type=click.IntRange(min=1),
+            default=720,
+            show_default=True,
+            help="How far back --coval-run-id searches. Ignored without it.",
+        ),
+        click.option(
+            "--page-size",
+            type=click.IntRange(min=1),
+            default=100,
+            show_default=True,
+            help="Runs listed per agent while searching for --coval-run-id. Ignored without it.",
+        ),
+    )
+    for option in reversed(options):
+        command = option(command)
+    return command
 
-    With --coval-run-id it becomes a targeted backfill instead: only the named runs
-    are ingested, no samples are published, and staleness is not judged, so an
-    operator can recover runs the scheduled window has already passed over.
-    """
+
+def _run_fetch(
+    benchmark: Benchmark, coval_run_ids: tuple[str, ...], window_hours: int, page_size: int
+) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
+    label = f"{benchmark.value.lower()} fetch"
     settings = get_settings()
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
@@ -1178,7 +1259,7 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
         statuses = asyncio.run(
             fetch_and_write_v2v(
                 settings,
-                benchmark=Benchmark.S2S,
+                benchmark=benchmark,
                 only_run_ids=only_run_ids,
                 window_seconds=window_hours * 3600 if only_run_ids else None,
                 page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,
@@ -1193,12 +1274,35 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
     failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
         if statuses:
-            log_run_failed(f"s2s fetch failed for all providers: {', '.join(failed)}")
+            log_run_failed(f"{label} failed for all providers: {', '.join(failed)}")
         else:
-            log_run_failed("s2s fetch ran no providers (none configured)")
-        raise click.ClickException("s2s fetch failed for all providers")
+            log_run_failed(f"{label} ran no providers (none configured)")
+        raise click.ClickException(f"{label} failed for all providers")
     if failed:
-        log_run_partial(f"s2s fetch has no fresh data from: {', '.join(failed)}")
+        log_run_partial(f"{label} has no fresh data from: {', '.join(failed)}")
+
+
+@click.command(name="fetch-s2s")
+@_fetch_options
+def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
+    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job).
+
+    With --coval-run-id it becomes a targeted backfill instead: only the named runs
+    are ingested, no samples are published, and staleness is not judged, so an
+    operator can recover runs the scheduled window has already passed over.
+    """
+    _run_fetch(Benchmark.S2S, coval_run_ids, window_hours, page_size)
+
+
+@click.command(name="fetch-llm")
+@_fetch_options
+def fetch_llm(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
+    """Fetch LLM instruction scores from Coval and join the proxy's per-turn TTFT.
+
+    Same scan and backfill options as fetch-s2s; only agents on the LLM benchmark
+    are ingested, so the two jobs never see each other's runs.
+    """
+    _run_fetch(Benchmark.LLM, coval_run_ids, window_hours, page_size)
 
 
 if __name__ == "__main__":
