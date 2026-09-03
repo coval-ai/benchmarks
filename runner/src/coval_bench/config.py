@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         extra="ignore",
         case_sensitive=False,
     )
@@ -168,6 +169,14 @@ class Settings(BaseSettings):
     # built from a git checkout and `_private/` is never in one. Empty means
     # local-only, which is every developer machine.
     mock_fixtures_bucket: str = ""
+    # --- Phonely LLM proxy ---
+    # The client is only built when both the key and the agent id are set; the
+    # /llm/phonely routes answer 503 otherwise. Empty values count as unset.
+    phonely_api_key: SecretStr | None = None
+    phonely_base_url: str = "https://db.phonely.ai"
+    phonely_agent_id: str | None = None
+    # Bearer secret Coval presents to the proxy; unset fails closed with 503.
+    llm_proxy_secret: SecretStr | None = None
     coval_api_base: str = "https://api.coval.dev/v1"
     # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None

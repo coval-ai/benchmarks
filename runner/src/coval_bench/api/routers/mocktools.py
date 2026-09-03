@@ -19,7 +19,6 @@ mid-conversation would be graded as the agent breaking.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import time
 from typing import Any
 
@@ -29,7 +28,7 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from coval_bench.api.deps import get_pool, get_settings
+from coval_bench.api.deps import get_pool, get_settings, secret_matches
 from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
@@ -55,9 +54,7 @@ def require_mock_secret(
     expected = settings.mock_tools_secret
     if expected is None:
         raise HTTPException(503, "mock tools are not configured")
-    if x_mock_tools_key is None or not hmac.compare_digest(
-        x_mock_tools_key.encode("utf-8"), expected.get_secret_value().encode("utf-8")
-    ):
+    if not secret_matches(x_mock_tools_key, expected):
         raise HTTPException(401, f"a valid {SECRET_HEADER} is required")
 
 

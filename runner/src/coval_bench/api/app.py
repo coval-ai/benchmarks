@@ -48,6 +48,7 @@ from coval_bench.api.routers import (
     arena,
     health,
     leaderboard,
+    llm_phonely,
     mocktools,
     providers,
     results,
@@ -59,6 +60,7 @@ from coval_bench.api.routers import (
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.fixture_sources import install_fixture_providers
+from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
 
@@ -116,6 +118,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("posthog_init_failed", exc_info=True)
                 posthog_client = None
         app.state.posthog = posthog_client
+        phonely_client: PhonelyClient | None = None
+        phonely_key = resolved.phonely_api_key
+        if phonely_key and phonely_key.get_secret_value() and resolved.phonely_agent_id:
+            phonely_client = PhonelyClient(
+                phonely_key.get_secret_value(),
+                resolved.phonely_agent_id,
+                resolved.phonely_base_url,
+            )
+        else:
+            logger.info("phonely_proxy_disabled")
+        app.state.phonely_client = phonely_client
         # Built here rather than on first request: loading and cross-checking the
         # fixtures inside a live call would put that cost on the agent's turn.
         # Absent fixtures are normal in CI and a fresh checkout, so the route
@@ -135,6 +148,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.settings = resolved
                 yield
         finally:
+            if phonely_client is not None:
+                await phonely_client.aclose()
             if posthog_client is not None:
                 try:
                     posthog_client.shutdown()  # type: ignore[no-untyped-call]
@@ -163,10 +178,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
 
-    # /mock is excluded alongside /clips: compressing a tool answer would add a
-    # variable cost to a response the suite deliberately holds to a fixed latency.
+    # /mock and /llm are excluded alongside /clips: compression would add jitter to
+    # a response whose latency is either held fixed (/mock) or measured (/llm).
     app.add_middleware(
-        SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips", "/mock")
+        SelectiveGZipMiddleware,
+        minimum_size=1024,
+        exclude_prefixes=("/clips", "/mock", "/llm"),
     )
 
     app.state.response_cache = new_response_cache()
@@ -197,9 +214,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(arena.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
     # Not under /v1 and not rate limited: an appliance the agents call, not
-    # public read API. slowapi carries no default limit, so /mock is exempt by
-    # construction — a 429 mid-conversation would be graded as the agent failing.
+    # public read API. slowapi carries no default limit, so /mock and /llm are exempt
+    # by construction — a 429 mid-conversation would be graded as the agent failing.
     app.include_router(mocktools.router)
+    app.include_router(llm_phonely.router)
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).

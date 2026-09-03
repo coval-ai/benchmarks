@@ -150,6 +150,7 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
     assert "runs" in tables
     assert "results" in tables
     assert "results_by_bucket" in tables
+    assert "llm_turns" in tables
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT matviewname FROM pg_matviews WHERE schemaname = 'benchmarks_v2'")
