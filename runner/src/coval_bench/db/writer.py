@@ -71,6 +71,38 @@ class RunWriter:
     ) -> None:
         self._pool = pool
 
+    def pool_diagnostics(self) -> dict[str, int]:
+        """Return a stable, read-only snapshot of pool health counters."""
+        keys = (
+            "pool_min",
+            "pool_max",
+            "pool_size",
+            "pool_available",
+            "requests_waiting",
+            "requests_num",
+            "requests_queued",
+            "requests_wait_ms",
+            "requests_errors",
+            "usage_ms",
+            "connections_num",
+            "connections_ms",
+            "connections_errors",
+            "connections_lost",
+            "returns_bad",
+            "pool_timeout_ms",
+        )
+        diagnostics = {key: 0 for key in keys}
+        stats = self._pool.get_stats()
+        for key in keys:
+            if key in stats:
+                diagnostics[key] = int(stats[key])
+        diagnostics["pool_min"] = int(self._pool.min_size)
+        diagnostics["pool_max"] = int(self._pool.max_size)
+        diagnostics["pool_size"] = int(stats.get("pool_size", 0))
+        diagnostics["pool_available"] = int(stats.get("pool_available", 0))
+        diagnostics["pool_timeout_ms"] = int(float(self._pool.timeout) * 1000)
+        return diagnostics
+
     async def start_run(
         self,
         *,

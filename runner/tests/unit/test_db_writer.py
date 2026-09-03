@@ -101,6 +101,54 @@ async def _make_pool(
     return pool
 
 
+def test_pool_diagnostics_uses_public_pool_apis(pg_conn: psycopg.Connection[Any]) -> None:
+    expected = {
+        "pool_min",
+        "pool_max",
+        "pool_size",
+        "pool_available",
+        "requests_waiting",
+        "requests_num",
+        "requests_queued",
+        "requests_wait_ms",
+        "requests_errors",
+        "usage_ms",
+        "connections_num",
+        "connections_ms",
+        "connections_errors",
+        "connections_lost",
+        "returns_bad",
+        "pool_timeout_ms",
+    }
+
+    async def check() -> tuple[dict[str, int], dict[str, int]]:
+        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
+            conninfo=_async_dsn(pg_conn),
+            min_size=1,
+            max_size=4,
+            timeout=12.5,
+            open=False,
+            kwargs={"autocommit": False},
+        )
+        await pool.open(wait=True)
+        try:
+            writer = RunWriter(pool)
+            before = writer.pool_diagnostics()
+            async with pool.connection():
+                checked_out = writer.pool_diagnostics()
+            return before, checked_out
+        finally:
+            await pool.close()
+
+    diagnostics, checked_out = asyncio.run(check())
+    assert set(diagnostics) == expected
+    assert diagnostics["pool_min"] == 1
+    assert diagnostics["pool_max"] == 4
+    assert diagnostics["pool_timeout_ms"] == 12_500
+    assert diagnostics["pool_size"] >= diagnostics["pool_available"] >= 0
+    assert diagnostics["pool_available"] == checked_out["pool_available"] + 1
+
+
 def _make_result(
     run_id: int, *, idx: int = 0, status: ResultStatus = ResultStatus.SUCCESS
 ) -> Result:

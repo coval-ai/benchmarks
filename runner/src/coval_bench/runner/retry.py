@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import Awaitable, Callable, Mapping
 
 import structlog
 
@@ -40,6 +41,7 @@ async def with_retry[T](
     retry_on: tuple[type[BaseException], ...] = _DEFAULT_RETRY_ON,
     retry_event: str = "provider_call_retry",
     exhaustion_event: str = "retry_exhausted",
+    retry_state: Callable[[], Mapping[str, object]] | None = None,
 ) -> T:
     """Call *fn* up to *max_attempts* times with exponential backoff + full jitter.
 
@@ -54,6 +56,8 @@ async def with_retry[T](
         retry_on: Exception types that trigger a retry. All others propagate immediately.
         retry_event: Structured event name emitted for retry attempts.
         exhaustion_event: Structured event name emitted when retries are exhausted.
+        retry_state: Optional synchronous callback returning diagnostic state captured around
+            each attempt. Callback failures are ignored.
 
     Returns:
         The return value of the first successful *fn* call.
@@ -63,16 +67,34 @@ async def with_retry[T](
     """
     last_exc: BaseException | None = None
     for attempt in range(max_attempts):
+        state_before: Mapping[str, object] = {}
+        if retry_state is not None:
+            try:
+                state_before = retry_state()
+            except Exception:  # Diagnostics must never affect operation behavior.
+                state_before = {}
+        started = time.monotonic()
         try:
             return await fn()
         except retry_on as exc:
             last_exc = exc
+            attempt_elapsed_ms = round((time.monotonic() - started) * 1000)
+            state_after: Mapping[str, object] = {}
+            if retry_state is not None:
+                try:
+                    state_after = retry_state()
+                except Exception:
+                    state_after = {}
             if attempt + 1 >= max_attempts:
                 logger.error(
                     exhaustion_event,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                     exc_info=exc,
+                    exception_type=type(exc).__name__,
+                    attempt_elapsed_ms=attempt_elapsed_ms,
+                    state_before=state_before,
+                    state_after=state_after,
                 )
                 break
             cap = min(base_delay_s * (2**attempt), max_delay_s)
@@ -84,6 +106,10 @@ async def with_retry[T](
                 max_attempts=max_attempts,
                 delay_s=round(delay, 3),
                 exc_info=exc,
+                exception_type=type(exc).__name__,
+                attempt_elapsed_ms=attempt_elapsed_ms,
+                state_before=state_before,
+                state_after=state_after,
             )
             await asyncio.sleep(delay)
 

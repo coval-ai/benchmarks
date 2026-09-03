@@ -75,7 +75,6 @@ logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
 _DEDICATED_CONCURRENCY_CAP = 1
-_PERSISTENCE_DB_CONCURRENCY = 3
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 # Stable contract — matched by the reason classifier and the alerting log metric.
@@ -364,15 +363,10 @@ async def _persist_legacy_results(
     writer: Any,
     results: list[Any],
     captured_at: datetime,
-    semaphore: asyncio.Semaphore | None,
     event_prefix: str,
 ) -> None:
     async def attempt() -> None:
-        if semaphore is None:
-            await writer.record_results(results, created_at=captured_at)
-        else:
-            async with semaphore:
-                await writer.record_results(results, created_at=captured_at)
+        await writer.record_results(results, created_at=captured_at)
 
     await with_retry(
         attempt,
@@ -380,6 +374,7 @@ async def _persist_legacy_results(
         retry_on=(PoolTimeout,),
         retry_event=f"{event_prefix}_persistence_retry",
         exhaustion_event=f"{event_prefix}_persistence_exhausted",
+        retry_state=writer.pool_diagnostics,
     )
 
 
@@ -399,7 +394,6 @@ async def _run_stt_item(
     dataset_id: str | None = None,
     dataset_sha256: str = "",
     artifact_client: Any | None = None,
-    persistence_db_sem: asyncio.Semaphore | None = None,
 ) -> list[Any]:
     """Run a single STT provider × dataset item, returning a list of Result rows.
 
@@ -722,7 +716,7 @@ async def _run_stt_item(
     captured_at = datetime.now(UTC)
     if writer is not None and results:
         try:
-            await _persist_legacy_results(writer, results, captured_at, persistence_db_sem, "stt")
+            await _persist_legacy_results(writer, results, captured_at, "stt")
         except Exception as exc:
             logger.warning(
                 "stt_result_persist_failed",
@@ -757,7 +751,6 @@ async def _run_stt_item(
                         "effective_duration_sec": duration_sec,
                         **_finalization_events(transcription_result),
                     },
-                    db_semaphore=persistence_db_sem,
                     db_retry_attempts=3,
                 )
             except Exception as exc:
@@ -807,7 +800,6 @@ async def _run_tts_item(
     dataset_id: str = "tts-v1",
     dataset_sha256: str = "",
     artifact_client: Any | None = None,
-    persistence_db_sem: asyncio.Semaphore | None = None,
 ) -> list[Any]:
     """Run a single TTS provider × dataset item, returning a list of Result rows.
 
@@ -1013,9 +1005,7 @@ async def _run_tts_item(
             captured_at = datetime.now(UTC)
             if writer is not None and results:
                 try:
-                    await _persist_legacy_results(
-                        writer, results, captured_at, persistence_db_sem, "tts"
-                    )
+                    await _persist_legacy_results(writer, results, captured_at, "tts")
                 except Exception as exc:
                     logger.warning(
                         "tts_result_persist_failed",
@@ -1044,7 +1034,6 @@ async def _run_tts_item(
                         timing_events={"ttfa_ms": ttfa_ms},
                         audio_path=audio_path,
                         voice=voice,
-                        db_semaphore=persistence_db_sem,
                         db_retry_attempts=3,
                     )
                 except Exception as exc:
@@ -1286,7 +1275,6 @@ async def run_benchmarks(
             )
             stt_artifact_client = None
         sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
-        persistence_db_sem = asyncio.Semaphore(_PERSISTENCE_DB_CONCURRENCY)
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
         # We catch it, cancel the in-flight gather, and finalize the run row as
@@ -1368,7 +1356,6 @@ async def run_benchmarks(
                         dataset_id=settings.dataset_id,
                         dataset_sha256=dataset_sha256,
                         artifact_client=stt_artifact_client,
-                        persistence_db_sem=persistence_db_sem,
                     )
                     for entry, item in stt_pairs
                 ]
@@ -1437,7 +1424,6 @@ async def run_benchmarks(
                         dataset_id="tts-v1",
                         dataset_sha256=tts_manifest_sha256,
                         artifact_client=tts_artifact_client,
-                        persistence_db_sem=persistence_db_sem,
                     )
                     for entry, item, voice in tts_pairs
                 ]

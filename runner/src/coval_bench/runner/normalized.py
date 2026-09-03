@@ -134,7 +134,6 @@ async def dual_write(
     audio_path: Any = None,
     voice: str | None = None,
     executor: MetricExecutor = MetricExecutor.INLINE,
-    db_semaphore: asyncio.Semaphore | None = None,
     db_retry_attempts: int = 1,
 ) -> None:
     """Persist one observation and its grouped normalized evaluations."""
@@ -238,23 +237,17 @@ async def dual_write(
                     values=_values(metric, rows, evaluation.id, primary),
                 )
 
-    async def attempt_db() -> None:
-        if db_semaphore is None:
-            await persist_db()
-        else:
-            async with db_semaphore:
-                await persist_db()
-
-    if db_retry_attempts <= 1 and db_semaphore is None:
+    if db_retry_attempts <= 1:
         await persist_db()
         return
     from coval_bench.runner.retry import with_retry
 
     retry_on = (PoolTimeout, psycopg.OperationalError)
     await with_retry(
-        attempt_db,
+        persist_db,
         max_attempts=db_retry_attempts,
         retry_on=retry_on,
         retry_event="normalized_persistence_retry",
         exhaustion_event="normalized_persistence_exhausted",
+        retry_state=writer.pool_diagnostics,
     )
