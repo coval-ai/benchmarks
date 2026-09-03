@@ -484,36 +484,34 @@ class _RetryWriter(_Writer):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("exc", [PoolTimeout("busy"), psycopg.OperationalError("gone")])
-async def test_normalized_db_retry_does_not_repeat_upload(exc: BaseException) -> None:
+async def test_normalized_db_retry_does_not_repeat_upload(
+    exc: BaseException, monkeypatch: pytest.MonkeyPatch
+) -> None:
     writer = _RetryWriter(exc)
     uploads = 0
-    original = normalized.upload_provider_transcript
 
-    def upload(*args: object) -> ObservationArtifact:
+    def upload(*_args: object) -> ObservationArtifact:
         nonlocal uploads
         uploads += 1
         return _artifact(ObservationArtifactType.PROVIDER_TRANSCRIPT)
 
-    normalized.upload_provider_transcript = upload
-    try:
-        await normalized.dual_write(
-            writer=writer,
-            storage_client=object(),
-            bucket="b",
-            run_id=1,
-            dataset_id="d",
-            dataset_sha256="a" * 64,
-            sample_id="s",
-            entry=SimpleNamespace(provider="p", model="m"),
-            benchmark=Benchmark.STT,
-            results=[],
-            provider_error=None,
-            transcript="x",
-            db_semaphore=asyncio.Semaphore(3),
-            db_retry_attempts=3,
-        )
-    finally:
-        normalized.upload_provider_transcript = original
+    monkeypatch.setattr(normalized, "upload_provider_transcript", upload)
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="b",
+        run_id=1,
+        dataset_id="d",
+        dataset_sha256="a" * 64,
+        sample_id="s",
+        entry=SimpleNamespace(provider="p", model="m"),
+        benchmark=Benchmark.STT,
+        results=[],
+        provider_error=None,
+        transcript="x",
+        db_semaphore=asyncio.Semaphore(3),
+        db_retry_attempts=3,
+    )
     assert writer.calls == 2 and uploads == 1
 
 
@@ -557,19 +555,23 @@ async def test_normalized_db_semaphore_caps_at_three() -> None:
 
     sem = asyncio.Semaphore(3)
     writer = Writer()
-    kwargs = dict(
-        writer=writer,
-        storage_client=object(),
-        bucket="b",
-        run_id=1,
-        dataset_id="d",
-        dataset_sha256="a" * 64,
-        entry=SimpleNamespace(provider="p", model="m"),
-        benchmark=Benchmark.STT,
-        results=[],
-        provider_error=None,
-        db_semaphore=sem,
-        db_retry_attempts=1,
-    )
-    await asyncio.gather(*(normalized.dual_write(sample_id=str(i), **kwargs) for i in range(8)))
+
+    async def write(index: int) -> None:
+        await normalized.dual_write(
+            writer=writer,
+            storage_client=object(),
+            bucket="b",
+            run_id=1,
+            dataset_id="d",
+            dataset_sha256="a" * 64,
+            sample_id=str(index),
+            entry=SimpleNamespace(provider="p", model="m"),
+            benchmark=Benchmark.STT,
+            results=[],
+            provider_error=None,
+            db_semaphore=sem,
+            db_retry_attempts=1,
+        )
+
+    await asyncio.gather(*(write(index) for index in range(8)))
     assert maximum == 3
