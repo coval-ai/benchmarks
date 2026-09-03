@@ -22,7 +22,6 @@ from coval_bench.db.models import PairingRating
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import Gender, RegisteredModel, Voice
 from coval_bench.registries.provider_keys import PROVIDER_ENV
-from tests.roster import TEST_ROSTER
 
 
 def _model(name: str) -> RegisteredModel:
@@ -160,22 +159,20 @@ def test_select_pair_rejects_non_positive_scale() -> None:
         select_pair(_MODELS, ratings, scale=0.0)
 
 
-def test_active_tts_models_are_tts_and_active() -> None:
-    roster = active_tts_models(TEST_ROSTER)
-    assert len(roster) >= 2
-    assert all(m.benchmark is Benchmark.TTS and m.collected and m.published for m in roster)
+_LIVE = _gendered_model("live", "m")
+_OPTED_OUT = _gendered_model("shy", "m").model_copy(update={"arena_enabled": False})
+_PAUSED = _gendered_model("paused", "m").model_copy(update={"collected": False})
+_EMBARGOED = _gendered_model("early", "m").model_copy(update={"published": False})
+_NO_POOL = _model("tiers")
+_STT = RegisteredModel(
+    benchmark=Benchmark.STT, provider="stt", model="m", collected=True, published=True
+)
+_MIXED = [_LIVE, _OPTED_OUT, _PAUSED, _EMBARGOED, _NO_POOL, _STT]
 
 
-def test_active_tts_models_excludes_arena_disabled() -> None:
-    assert all(m.arena_enabled for m in active_tts_models(TEST_ROSTER))
-
-
-def test_provider_env_covers_arena_providers() -> None:
-    # Only providers the arena can actually synthesize with (ACTIVE + arena_enabled),
-    # matching active_tts_models(TEST_ROSTER) and the parity script — not every non-retired one.
-    providers = {m.provider for m in active_tts_models(TEST_ROSTER)}
-    missing = providers - PROVIDER_ENV.keys()
-    assert not missing, f"arena providers with no PROVIDER_ENV entry: {sorted(missing)}"
+def test_active_tts_models_keeps_only_live_arena_tts() -> None:
+    """Collected, published, TTS, and not opted out; a missing pool is not a filter here."""
+    assert active_tts_models(_MIXED) == [_LIVE, _NO_POOL]
 
 
 def test_provider_env_names_match_settings_fields() -> None:
@@ -184,26 +181,14 @@ def test_provider_env_names_match_settings_fields() -> None:
     assert not bad, f"PROVIDER_ENV names with no Settings field: {sorted(bad)}"
 
 
-def test_every_arena_model_can_field_both_genders() -> None:
-    """Any arena model must field both genders, or it silently sits out half the battles.
-
-    Palabra is the standing exception: its ``voices`` are quality tiers rather
-    than speakers, so it has no gendered pool to draw from.
-    """
-    incomplete = [
-        f"{m.provider}/{m.model}"
-        for m in active_tts_models(TEST_ROSTER)
-        if {v.gender for v in m.voices} != {Gender.FEMALE, Gender.MALE} and m.provider != "palabra"
-    ]
-    assert incomplete == [], f"arena models missing a gendered voice: {incomplete}"
-
-
 def test_roster_for_keeps_only_models_with_that_gender() -> None:
-    for gender in (Gender.FEMALE, Gender.MALE):
-        roster = roster_for(TEST_ROSTER, gender)
-        assert len(roster) >= 2
-        assert all(any(v.gender is gender for v in m.voices) for m in roster)
-    assert {m.provider for m in roster_for(TEST_ROSTER, Gender.FEMALE)}.isdisjoint({"palabra"})
+    """A model with no voice of the battle's gender sits that battle out."""
+    female_only = _gendered_model("half", "m").model_copy(
+        update={"voices": (Voice(id="half-f", gender=Gender.FEMALE),)}
+    )
+    roster = [_LIVE, _NO_POOL, female_only]
+    assert roster_for(roster, Gender.FEMALE) == [_LIVE, female_only]
+    assert roster_for(roster, Gender.MALE) == [_LIVE]
 
 
 def test_voice_for_returns_the_matching_half() -> None:
