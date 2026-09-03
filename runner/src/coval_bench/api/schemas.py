@@ -11,7 +11,8 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -121,6 +122,54 @@ class ProvidersResponse(BaseModel):
     llm: list[ProviderInfo]
     # Facet vocabulary in display order, shared across every benchmark.
     tag_categories: list[TagCategoryOut]
+
+
+class PricingRateSpanOut(BaseModel):
+    """One stretch of a model's price history: a rate and the days it covered.
+
+    ``price_usd`` is the provider's native figure in ``unit``, served as the
+    exact decimal it was recorded as (a JSON string — floats would strip
+    trailing zeros and misquote the printed price, e.g. $0.20 → $0.2). The two
+    normalized fields scale it exactly, except hourly rates, whose ÷60 rounds
+    half-up to a millionth; both are ``None`` where no conversion exists
+    without assuming a speaking rate. ``unit``, ``price_usd`` and
+    ``source_url`` are all ``None`` over a span in which the model had no
+    known public rate. ``effective_to`` is exclusive, and ``None`` unless the
+    span was closed by a rate already in force — a change scheduled for a
+    future day is not public until then, its date included.
+    """
+
+    unit: str | None = None
+    price_usd: Decimal | None = None
+    price_per_1m_chars: float | None = None
+    price_per_1k_minutes: float | None = None
+    effective_from: date
+    effective_to: date | None = None
+    source_url: str | None = None
+
+
+class PricingRateOut(PricingRateSpanOut):
+    """One model's rate in force on the requested day, with what came before.
+
+    ``history`` lists the earlier spans oldest first, so a client can read the
+    price on any past day without a second request; ``recorded_at`` is when
+    the current figure was entered. Rates scheduled for a future day are not
+    served.
+    """
+
+    benchmark: BenchmarkLiteral
+    provider: str
+    model: str
+    notes: str | None = None
+    recorded_at: datetime
+    history: list[PricingRateSpanOut] = []
+
+
+class PricingRegistryResponse(BaseModel):
+    """Response schema for GET /v1/pricing: the rates in force on ``as_of``."""
+
+    as_of: date
+    rates: list[PricingRateOut]
 
 
 class ResultsResponse(BaseModel):
@@ -483,3 +532,68 @@ class AdminModelUpdateResponse(BaseModel):
 
     model: AdminModelOut
     warnings: list[str] = []
+
+
+class AdminRateRecordingOut(BaseModel):
+    """One row of the pricing log, as the admin sees it: who said what, when.
+
+    ``superseded`` marks a recording a later one replaced for the same
+    effective date — a corrected entry, kept for the audit trail but no longer
+    describing any day.
+    """
+
+    id: int
+    unit: str | None = None
+    price_usd: Decimal | None = None
+    price_per_1m_chars: float | None = None
+    price_per_1k_minutes: float | None = None
+    effective_from: date
+    source_url: str | None = None
+    notes: str | None = None
+    recorded_by_user_id: str
+    recorded_by_email: str | None = None
+    recorded_at: datetime
+    superseded: bool
+
+
+class AdminModelPricingOut(BaseModel):
+    """One model's pricing log, resolved for the admin page.
+
+    ``current`` is the recording in force today (None before the first
+    effective date), ``scheduled`` the ones whose day has not yet come, and
+    ``recordings`` every row ever written for the model, newest first.
+    """
+
+    benchmark: Benchmark
+    provider: str
+    model: str
+    current: AdminRateRecordingOut | None = None
+    scheduled: list[AdminRateRecordingOut] = []
+    recordings: list[AdminRateRecordingOut] = []
+
+
+class AdminPricingResponse(BaseModel):
+    """Response schema for GET /v1/admin/pricing."""
+
+    as_of: date
+    models: list[AdminModelPricingOut]
+
+
+class AdminRateCreate(BaseModel):
+    """POST body for /v1/admin/pricing: one new recording.
+
+    Send ``unit`` and ``price_usd`` together for a published rate, or leave
+    both out to record that the model has no known public rate from
+    ``effective_from``. ``price_usd`` is a decimal string so the quoted figure
+    survives exactly; ``effective_from`` defaults to today (UTC) and may be a
+    future day to schedule an announced change.
+    """
+
+    benchmark: Benchmark
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    unit: str | None = None
+    price_usd: str | None = None
+    effective_from: date | None = None
+    source_url: str | None = None
+    notes: str | None = None

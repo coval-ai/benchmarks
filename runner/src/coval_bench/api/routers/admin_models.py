@@ -34,6 +34,7 @@ from coval_bench.api.schemas import (
     AdminModelsResponse,
     AdminModelUpdateResponse,
 )
+from coval_bench.db.pricing_store import PricingStore
 from coval_bench.db.registry_store import (
     DuplicateKey,
     ModelChange,
@@ -226,6 +227,22 @@ async def update_admin_model(
     before, after = result
     response.headers["ETag"] = _etag(after)
     history = await store.history(model_id)
-    return AdminModelUpdateResponse(
-        model=_model_out(after, history), warnings=_rename_warnings(before, after)
-    )
+    warnings = _rename_warnings(before, after)
+    warnings.extend(await _pricing_rename_warnings(before, after, pool))
+    return AdminModelUpdateResponse(model=_model_out(after, history), warnings=warnings)
+
+
+async def _pricing_rename_warnings(
+    before: ModelRecord, after: ModelRecord, pool: AsyncConnectionPool[Any]
+) -> list[str]:
+    """The pricing log keys on the natural name, so a rename leaves its rates behind."""
+    old = (before.provider, before.model)
+    if old == (after.provider, after.model):
+        return []
+    count = await PricingStore(pool).count_for((before.modality, before.provider, before.model))
+    if count == 0:
+        return []
+    return [
+        f"{count} pricing recording(s) are filed under {old[0]}/{old[1]}; "
+        f"{after.provider}/{after.model} has no price until one is recorded under its new name"
+    ]
