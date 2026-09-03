@@ -177,6 +177,8 @@ class Settings(BaseSettings):
     phonely_agent_id: str | None = None
     # Bearer secret Coval presents to the proxy; unset fails closed with 503.
     llm_proxy_secret: SecretStr | None = None
+    # Public base URL of the API service, for sync-coval on a laptop; never deployed.
+    llm_proxy_public_url: str | None = None
     coval_api_base: str = "https://api.coval.dev/v1"
     # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None
