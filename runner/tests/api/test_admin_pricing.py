@@ -91,6 +91,8 @@ async def test_recording_a_rate_takes_effect_and_names_the_admin(client: AsyncCl
     public = await client.get("/v1/pricing")
     served = next(r for r in public.json()["rates"] if r["model"] == "nova-3")
     assert served["price_usd"] == "0.0050"
+    # The panel prints the admin figure; the public page prints the served one.
+    assert served["price_per_1k_minutes"] == model["current"]["price_per_1k_minutes"] == 5.0
     assert served["history"][0]["price_usd"] == str(
         PRICING[(Benchmark.STT, "deepgram", "nova-3")].price_usd
     )
