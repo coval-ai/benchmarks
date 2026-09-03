@@ -25,7 +25,7 @@ from coval_bench.api.deps import (
 )
 from coval_bench.config import Settings
 from coval_bench.db.llm_turns import insert_turn
-from coval_bench.llm.phonely import PhonelyClient, PhonelyError, TurnResult
+from coval_bench.llm.phonely import MODEL, PROVIDER, PhonelyClient, PhonelyError, TurnResult
 
 logger = structlog.get_logger("coval_bench.api.llm_phonely")
 
@@ -78,8 +78,8 @@ async def _record_turn(
             pool,
             simulation_id=simulation_id,
             turn_index=turn_index,
-            provider="phonely",
-            model="phonely-agent",
+            provider=PROVIDER,
+            model=MODEL,
             ttft_ms=result.ttft_ms,
             total_ms=result.total_ms,
             output_tokens=result.output_tokens,

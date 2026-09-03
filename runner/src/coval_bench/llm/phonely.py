@@ -12,6 +12,10 @@ from typing import Any
 
 import httpx
 
+# The (provider, model) identity seeded into benchmarks_v2.models by migration 0025.
+PROVIDER = "phonely"
+MODEL = "phonely-agent"
+
 _SESSION_TIMEOUT = httpx.Timeout(30.0)
 # Turns are seconds apart; a 5s keepalive would put a TLS handshake inside most TTFTs.
 _LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=8, keepalive_expiry=300.0)

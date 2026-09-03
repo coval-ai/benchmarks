@@ -186,6 +186,8 @@ class Settings(BaseSettings):
     coval_s2s_xai_think_fast_2_agent_id: str | None = None
     coval_s2s_gray_agent_id: str | None = None
     coval_s2s_red_agent_id: str | None = None
+    # Coval agent id for the Phonely text agent (opaque, not secret); unset skips it.
+    coval_llm_phonely_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
@@ -211,8 +213,9 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
-    # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
-    # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
+    # Fetch grid, in seconds, shared by the s2s-fetch and llm-fetch jobs; each job
+    # sets S2S_FETCH_PERIOD_SECONDS to match its own trigger cron in benchmark-infra.
+    # The 3h default is far below a daily trigger, so an unset job reads stale.
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)
     # Staleness threshold = fetch period + this grace.
     s2s_stale_grace_seconds: int = Field(default=0, ge=0)

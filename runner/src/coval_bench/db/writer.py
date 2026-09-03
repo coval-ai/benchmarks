@@ -27,6 +27,7 @@ import psycopg.rows
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from coval_bench.db.llm_turns import fetch_conversation_ttft
 from coval_bench.db.models import (
     MetricArtifact,
     MetricEvaluation,
@@ -908,6 +909,10 @@ class RunWriter:
             async with conn.cursor() as cur:
                 await cur.execute(sql, (status, error, run_id))
             await conn.commit()
+
+    async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
+        """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
+        return await fetch_conversation_ttft(self._pool, simulation_ids)
 
     async def coval_run_ingested(
         self, *, provider: str, coval_run_id: str, benchmark: str = "S2S"
