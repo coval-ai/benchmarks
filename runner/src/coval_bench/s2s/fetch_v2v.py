@@ -781,6 +781,7 @@ async def _ingest_run(
                             provider_error=provider_error,
                             captured_at=captured_at,
                             executor=MetricExecutor.COVAL_API,
+                            db_retry_attempts=3,
                         )
                     except Exception:
                         logger.warning(
