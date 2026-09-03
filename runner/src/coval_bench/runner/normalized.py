@@ -10,6 +10,9 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
+import psycopg
+from psycopg_pool import PoolTimeout
+
 from coval_bench.db.models import (
     MetricEvaluation,
     MetricEvaluationInput,
@@ -131,8 +134,12 @@ async def dual_write(
     audio_path: Any = None,
     voice: str | None = None,
     executor: MetricExecutor = MetricExecutor.INLINE,
+    db_retry_attempts: int = 1,
 ) -> None:
     """Persist one observation and its grouped normalized evaluations."""
+    if provider_error is not None and not provider_error.strip():
+        provider_error = None
+    captured_at = captured_at or datetime.now(UTC)
     audio_snapshot = snapshot_generated_audio(audio_path) if audio_path is not None else None
     artifacts = []
     if transcript is not None:
@@ -147,11 +154,7 @@ async def dual_write(
         audio_payload, audio_duration_ms = audio_snapshot
         artifacts.append(
             await asyncio.to_thread(
-                upload_generated_audio,
-                storage_client,
-                bucket,
-                audio_payload,
-                audio_duration_ms,
+                upload_generated_audio, storage_client, bucket, audio_payload, audio_duration_ms
             )
         )
     source_kind = {
@@ -159,73 +162,92 @@ async def dual_write(
         "TTS": ObservationSourceKind.GENERATED_AUDIO,
         "S2S": ObservationSourceKind.CONVERSATION_AUDIO,
     }[benchmark.value.upper()]
-    observation = await writer.insert_observation(
-        Observation(
-            run_id=run_id,
-            dataset_id=dataset_id,
-            dataset_sha256=dataset_sha256,
-            sample_id=sample_id,
-            provider=entry.provider,
-            model=entry.model,
-            voice=voice,
-            benchmark=benchmark,
-            source_kind=source_kind,
-            captured_at=captured_at,
-            status=ObservationStatus.FAILED if provider_error else ObservationStatus.SUCCEEDED,
-            error=provider_error,
-            failure_origin=ObservationFailureOrigin.PROVIDER if provider_error else None,
-            artifacts=artifacts,
-        )
-    )
-    artifact_ids = {artifact.artifact_type: artifact.id for artifact in observation.artifacts}
-    grouped: dict[str, list[Any]] = {}
-    for row in results:
-        metric = (
-            str(Metric.TTFA)
-            if row.metric_type in (Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE)
-            else str(row.metric_type)
-        )
-        grouped.setdefault(metric, []).append(row)
-    for metric, rows in grouped.items():
-        primary = next(
-            (row for row in rows if row.metric_value is not None and str(row.status) == "success"),
-            None,
-        )
-        # A null-valued success is an intentional exclusion from aggregation (for example,
-        # transport-contaminated TTFA), not a failed metric evaluation.
-        if primary is None and any(str(row.status) == "success" for row in rows):
-            continue
-        evaluation = await writer.insert_metric_evaluation(
-            MetricEvaluation(
-                observation_id=observation.id,
-                metric_type=metric,
-                metric_version="v1",
-                executor=executor,
-                status=ProcessingStatus.QUEUED,
-            ),
-            inputs=_inputs(metric, artifact_ids, benchmark),
-        )
-        if (
-            evaluation.status is ProcessingStatus.SUCCEEDED
-            or evaluation.status is ProcessingStatus.FAILED
-        ):
-            continue
-        if evaluation.status is ProcessingStatus.QUEUED:
-            evaluation = await writer.start_metric_evaluation(
-                evaluation.id, started_at=datetime.now(UTC)
+
+    async def persist_db() -> None:
+        observation = await writer.insert_observation(
+            Observation(
+                run_id=run_id,
+                dataset_id=dataset_id,
+                dataset_sha256=dataset_sha256,
+                sample_id=sample_id,
+                provider=entry.provider,
+                model=entry.model,
+                voice=voice,
+                benchmark=benchmark,
+                source_kind=source_kind,
+                captured_at=captured_at,
+                status=ObservationStatus.FAILED if provider_error else ObservationStatus.SUCCEEDED,
+                error=provider_error,
+                failure_origin=ObservationFailureOrigin.PROVIDER if provider_error else None,
+                artifacts=artifacts,
             )
-        finished_at = datetime.now(UTC)
-        if primary is None:
-            await writer.fail_metric_evaluation(
-                evaluation.id,
-                finished_at=finished_at,
-                error=next(
-                    (row.error for row in rows if row.error), "legacy metric produced no value"
+        )
+        artifact_ids = {artifact.artifact_type: artifact.id for artifact in observation.artifacts}
+        grouped: dict[str, list[Any]] = {}
+        for row in results:
+            metric = (
+                str(Metric.TTFA)
+                if row.metric_type in (Metric.TTFA_ROUNDTRIP, Metric.TTFA_LEADING_SILENCE)
+                else str(row.metric_type)
+            )
+            grouped.setdefault(metric, []).append(row)
+        for metric, rows in grouped.items():
+            primary = next(
+                (
+                    row
+                    for row in rows
+                    if row.metric_value is not None and str(row.status) == "success"
                 ),
+                None,
             )
-        else:
-            await writer.complete_metric_evaluation(
-                evaluation.id,
-                finished_at=finished_at,
-                values=_values(metric, rows, evaluation.id, primary),
+            if primary is None and any(str(row.status) == "success" for row in rows):
+                continue
+            evaluation = await writer.insert_metric_evaluation(
+                MetricEvaluation(
+                    observation_id=observation.id,
+                    metric_type=metric,
+                    metric_version="v1",
+                    executor=executor,
+                    status=ProcessingStatus.QUEUED,
+                ),
+                inputs=_inputs(metric, artifact_ids, benchmark),
             )
+            if (
+                evaluation.status is ProcessingStatus.SUCCEEDED
+                or evaluation.status is ProcessingStatus.FAILED
+            ):
+                continue
+            if evaluation.status is ProcessingStatus.QUEUED:
+                evaluation = await writer.start_metric_evaluation(
+                    evaluation.id, started_at=datetime.now(UTC)
+                )
+            finished_at = datetime.now(UTC)
+            if primary is None:
+                await writer.fail_metric_evaluation(
+                    evaluation.id,
+                    finished_at=finished_at,
+                    error=next(
+                        (row.error for row in rows if row.error), "legacy metric produced no value"
+                    ),
+                )
+            else:
+                await writer.complete_metric_evaluation(
+                    evaluation.id,
+                    finished_at=finished_at,
+                    values=_values(metric, rows, evaluation.id, primary),
+                )
+
+    if db_retry_attempts <= 1:
+        await persist_db()
+        return
+    from coval_bench.runner.retry import with_retry
+
+    retry_on = (PoolTimeout, psycopg.OperationalError)
+    await with_retry(
+        persist_db,
+        max_attempts=db_retry_attempts,
+        retry_on=retry_on,
+        retry_event="normalized_persistence_retry",
+        exhaustion_event="normalized_persistence_exhausted",
+        retry_state=writer.pool_diagnostics,
+    )

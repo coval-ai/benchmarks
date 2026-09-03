@@ -2037,6 +2037,9 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
     assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
     assert calls["R1/s1"]["captured_at"] == writer.record_results.await_args.kwargs["created_at"]
+    for kwargs in calls.values():
+        assert "db_retry_attempts" not in kwargs
+        assert not any("semaphore" in key for key in kwargs)
 
 
 @pytest.mark.asyncio

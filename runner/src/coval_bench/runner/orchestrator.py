@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from posthog import Posthog
+from psycopg_pool import PoolTimeout
 from pydantic import BaseModel
 
 from coval_bench.db.registry_store import fetch_models
@@ -356,6 +357,25 @@ def _get_metrics() -> tuple[Any, Any]:
     """Return (compute_wer, compute_rtf) at call time."""
     mod = importlib.import_module("coval_bench.metrics")
     return mod.compute_wer, mod.compute_rtf
+
+
+async def _persist_legacy_results(
+    writer: Any,
+    results: list[Any],
+    captured_at: datetime,
+    event_prefix: str,
+) -> None:
+    async def attempt() -> None:
+        await writer.record_results(results, created_at=captured_at)
+
+    await with_retry(
+        attempt,
+        max_attempts=3,
+        retry_on=(PoolTimeout,),
+        retry_event=f"{event_prefix}_persistence_retry",
+        exhaustion_event=f"{event_prefix}_persistence_exhausted",
+        retry_state=writer.pool_diagnostics,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -696,7 +716,7 @@ async def _run_stt_item(
     captured_at = datetime.now(UTC)
     if writer is not None and results:
         try:
-            await writer.record_results(results, created_at=captured_at)
+            await _persist_legacy_results(writer, results, captured_at, "stt")
         except Exception as exc:
             logger.warning(
                 "stt_result_persist_failed",
@@ -731,6 +751,7 @@ async def _run_stt_item(
                         "effective_duration_sec": duration_sec,
                         **_finalization_events(transcription_result),
                     },
+                    db_retry_attempts=3,
                 )
             except Exception as exc:
                 logger.warning(
@@ -984,7 +1005,7 @@ async def _run_tts_item(
             captured_at = datetime.now(UTC)
             if writer is not None and results:
                 try:
-                    await writer.record_results(results, created_at=captured_at)
+                    await _persist_legacy_results(writer, results, captured_at, "tts")
                 except Exception as exc:
                     logger.warning(
                         "tts_result_persist_failed",
@@ -1013,6 +1034,7 @@ async def _run_tts_item(
                         timing_events={"ttfa_ms": ttfa_ms},
                         audio_path=audio_path,
                         voice=voice,
+                        db_retry_attempts=3,
                     )
                 except Exception as exc:
                     logger.warning(

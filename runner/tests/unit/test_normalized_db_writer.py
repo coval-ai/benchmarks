@@ -17,7 +17,7 @@ import psycopg.rows
 import pytest
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.models import (
@@ -39,6 +39,7 @@ from coval_bench.db.models import (
 )
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric, MetricValueRole, validate_metric_values
+from coval_bench.runner import normalized
 
 pg_conn = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
@@ -177,6 +178,124 @@ def _raw_artifact(*, sha: str = _SHA) -> ObservationArtifact:
         content_sha256=sha,
         size_bytes=1,
     )
+
+
+def _dual_result(run_id: int) -> Any:
+    from coval_bench.db.models import Result, ResultStatus
+
+    return Result(
+        run_id=run_id,
+        provider="provider",
+        model="model",
+        benchmark=Benchmark.STT,
+        metric_type=Metric.WER,
+        metric_value=10.0,
+        metric_units="percent",
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=7.0,
+        status=ResultStatus.SUCCESS,
+    )
+
+
+async def _run_dual_write_retry_case(
+    conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    pool = await _pool(conn)
+    try:
+        writer = RunWriter(pool)
+        run = await writer.start_run(dataset_id="stt-v1", dataset_sha256=_SHA)
+        run_id = _required(run.id)
+        original_observation = writer.insert_observation
+        original_evaluation = writer.insert_metric_evaluation
+        original_complete = writer.complete_metric_evaluation
+        calls = 0
+
+        async def observation(value: Observation) -> Observation:
+            nonlocal calls
+            if mode == "observation" and calls == 0:
+                calls += 1
+                raise PoolTimeout("busy")
+            return await original_observation(value)
+
+        async def evaluation(value: MetricEvaluation, *, inputs: Any = ()) -> MetricEvaluation:
+            nonlocal calls
+            result = await original_evaluation(value, inputs=inputs)
+            if mode == "evaluation" and calls == 0:
+                calls += 1
+                raise psycopg.OperationalError("ambiguous commit")
+            return result
+
+        async def complete(
+            value: Any, *, finished_at: datetime, values: Any, artifacts: Any = ()
+        ) -> None:
+            nonlocal calls
+            await original_complete(
+                value, finished_at=finished_at, values=values, artifacts=artifacts
+            )
+            if mode == "complete" and calls == 0:
+                calls += 1
+                raise psycopg.OperationalError("ambiguous commit")
+
+        monkeypatch.setattr(writer, "insert_observation", observation)
+        monkeypatch.setattr(writer, "insert_metric_evaluation", evaluation)
+        monkeypatch.setattr(writer, "complete_metric_evaluation", complete)
+        monkeypatch.setattr(normalized, "upload_provider_transcript", lambda *_: _raw_artifact())
+        await normalized.dual_write(
+            writer=writer,
+            storage_client=object(),
+            bucket="private",
+            run_id=run_id,
+            dataset_id="stt-v1",
+            dataset_sha256=_SHA,
+            sample_id=f"sample-{mode}",
+            entry=type("Entry", (), {"provider": "provider", "model": "model"})(),
+            benchmark=Benchmark.STT,
+            results=[_dual_result(run_id)],
+            provider_error=None,
+            captured_at=_NOW,
+            transcript="hello",
+            db_retry_attempts=3,
+        )
+    finally:
+        await pool.close()
+
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM benchmarks_v2.benchmark_observations WHERE sample_id = %s",
+            (f"sample-{mode}",),
+        )
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1
+        cur.execute("SELECT count(*) FROM benchmarks_v2.observation_artifacts")
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1
+        cur.execute("SELECT count(*) FROM benchmarks_v2.metric_evaluations")
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1
+        cur.execute("SELECT count(*) FROM benchmarks_v2.metric_evaluation_inputs")
+        row = cur.fetchone()
+        assert row is not None and row[0] == 1
+        cur.execute(
+            "SELECT count(*), count(*) FILTER (WHERE value_role = 'primary') "
+            "FROM benchmarks_v2.metric_values"
+        )
+        row = cur.fetchone()
+        assert row == (4, 1)
+        cur.execute("SELECT status FROM benchmarks_v2.metric_evaluations")
+        row = cur.fetchone()
+        assert row is not None and row[0] == "succeeded"
+
+
+@pytest.mark.parametrize("mode", ["observation", "evaluation", "complete"])
+def test_dual_write_retries_ambiguous_database_operations(
+    pg_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    _migrate(pg_conn)
+    import asyncio
+
+    asyncio.run(_run_dual_write_retry_case(pg_conn, monkeypatch, mode))
 
 
 def _wer_values(evaluation_id: Any) -> list[MetricValue]:
