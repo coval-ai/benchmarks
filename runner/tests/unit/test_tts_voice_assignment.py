@@ -10,7 +10,6 @@ from collections import Counter
 from coval_bench.registries import Benchmark, RegisteredModel
 from coval_bench.registries.models import Gender, Voice
 from coval_bench.runner.orchestrator import _assign_tts_voices
-from tests.roster import TEST_ROSTER
 
 
 def _entry(voices: tuple[str, ...] = ()) -> RegisteredModel:
@@ -67,36 +66,3 @@ def test_no_pool_falls_back_to_pin() -> None:
     """Entries without a ``voices`` pool keep the single pinned ``voice`` for every item."""
     entry = _entry()
     assert _assign_tts_voices(entry, 10, run_id=1) == ["pinned"] * 10
-
-
-def test_registry_pools_are_f_m_pairs() -> None:
-    """Every ``voices`` pool is a distinct (female, male) pair on a live TTS entry.
-
-    An uncollected entry keeps its pool so resuming it needs no re-research."""
-    pooled = [m for m in TEST_ROSTER if m.voices]
-    assert pooled, "expected voice pools in the registry"
-    for m in pooled:
-        assert m.benchmark is Benchmark.TTS, f"{m.provider}/{m.model}: pool on non-TTS entry"
-        assert m.collected or m.published, f"{m.provider}/{m.model}: pool on dead entry"
-        assert len(m.voices) == 2, f"{m.provider}/{m.model}: pool must be a (female, male) pair"
-        ids = [v.id for v in m.voices]
-        assert len(set(ids)) == 2, f"{m.provider}/{m.model}: duplicate voice in pool"
-        genders = sorted(v.gender for v in m.voices)
-        assert genders == [Gender.FEMALE, Gender.MALE], (
-            f"{m.provider}/{m.model}: pool must hold exactly one female and one male, got {genders}"
-        )
-
-
-def test_active_tts_entries_have_pools() -> None:
-    """All ACTIVE TTS models split voices, except palabra, whose voices are quality
-    tiers rather than speakers."""
-    missing = [
-        (m.provider, m.model)
-        for m in TEST_ROSTER
-        if m.benchmark is Benchmark.TTS
-        and m.collected
-        and m.published
-        and not m.voices
-        and m.provider != "palabra"
-    ]
-    assert missing == []

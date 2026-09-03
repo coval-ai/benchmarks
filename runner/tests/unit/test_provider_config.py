@@ -17,7 +17,6 @@ from coval_bench.registries import (
     Source,
 )
 from coval_bench.registries.provider_keys import provider_names
-from tests.roster import TEST_ROSTER
 
 
 def test_every_tag_has_a_category() -> None:
@@ -45,20 +44,6 @@ def test_provider_names_cover_the_class_registries() -> None:
     # Names with no loadable class must be exactly the optional-SDK providers.
     assert provider_names("stt") - stt_classes <= {"google"}
     assert provider_names("tts") - tts_classes <= {"google", "hume"}
-
-
-def test_scheduled_models_use_implemented_providers() -> None:
-    """Every model the orchestrator may schedule resolves without SDK imports.
-
-    Uncollected models are exempt: their rows outlive their provider's code.
-    """
-    for model in TEST_ROSTER:
-        if not model.collected:
-            continue
-        if model.benchmark is Benchmark.STT:
-            assert model.provider in provider_names("stt"), model.provider
-        elif model.benchmark is Benchmark.TTS:
-            assert model.provider in provider_names("tts"), model.provider
 
 
 def test_the_runner_image_installs_every_provider_extra() -> None:

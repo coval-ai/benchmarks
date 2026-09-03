@@ -19,7 +19,8 @@ from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.providers.base import TTSResult
-from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
+from coval_bench.registries import Benchmark, RegisteredModel
+from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url, add_models
 from tests.roster import TEST_ROSTER
 
 _LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
@@ -408,9 +409,20 @@ async def test_leaderboard_returns_latest_board_sorted(
 async def test_leaderboard_hides_retired_models(client: AsyncClient, postgresql: Any) -> None:
     """A board computed before a model was retired must not keep showing it."""
     await _apply_arena_schema(_make_db_url(postgresql))
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.TTS,
+            provider="cartesia",
+            model="sonic-old",
+            voice="v",
+            collected=False,
+            published=True,
+        ),
+    )
     computed = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
     await _insert_snapshot(
-        postgresql, computed_at=computed, provider="cartesia", model="sonic-3", rating_elo=1520
+        postgresql, computed_at=computed, provider="cartesia", model="sonic-old", rating_elo=1520
     )
     await _insert_snapshot(
         postgresql, computed_at=computed, provider="cartesia", model="sonic-3.5", rating_elo=1480

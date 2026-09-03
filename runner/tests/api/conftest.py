@@ -46,7 +46,6 @@ from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
-from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
 from coval_bench.registries import (
     TAG_CATEGORIES,
@@ -452,13 +451,11 @@ async def app(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     # Arena pairing drops providers whose key is not configured, so a service with no
-    # keys has no roster and every battle is a 503. Prod mounts all of them, so the
-    # fixture models that. OPENAI_API_KEY stays unset on purpose above, which simply
+    # keys has no roster and every battle is a 503. Prod mounts every provider key, so
+    # the fixture does too. OPENAI_API_KEY stays unset on purpose above, which simply
     # leaves openai out of the roster.
-    for model in active_tts_models(TEST_ROSTER):
-        env_var = PROVIDER_ENV.get(model.provider)
-        if env_var is not None and env_var != "OPENAI_API_KEY":
-            monkeypatch.setenv(env_var, "test-provider-key")
+    for env_var in set(PROVIDER_ENV.values()) - {"OPENAI_API_KEY"}:
+        monkeypatch.setenv(env_var, "test-provider-key")
 
     settings = Settings()
 
