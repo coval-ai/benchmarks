@@ -530,8 +530,13 @@ class CovalClient(_JsonClient):
                 return
 
     def find_agent(self, customer_agent_id: str) -> dict[str, Any] | None:
-        for agent in self._pages("/agents", "agents"):
-            if agent.get("customer_agent_id") == customer_agent_id:
+        payload = self._request(
+            "GET",
+            "/agents",
+            params={"filter": f'customer_agent_id="{customer_agent_id}"', "page_size": 1},
+        )
+        for agent in payload.get("agents") or []:
+            if isinstance(agent, dict) and agent.get("customer_agent_id") == customer_agent_id:
                 return agent
         return None
 

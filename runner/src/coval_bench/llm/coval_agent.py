@@ -122,15 +122,6 @@ class CovalTextClient(CovalClient):
     def __enter__(self) -> Self:
         return self
 
-    def find_agent(self, customer_agent_id: str) -> dict[str, Any] | None:
-        by_name = None
-        for agent in self._pages("/agents", "agents"):
-            if agent.get("customer_agent_id") == customer_agent_id:
-                return agent
-            if by_name is None and agent.get("display_name") == DISPLAY_NAME:
-                by_name = agent
-        return by_name
-
     def test_set_agent_ids(self, test_set_id: str) -> set[str]:
         return {
             str(agent["id"])

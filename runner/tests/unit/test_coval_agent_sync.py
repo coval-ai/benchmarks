@@ -41,6 +41,7 @@ def _state(**overrides: Any) -> dict[str, Any]:
         "run_templates": [],
         "scheduled_runs": [],
         "writes": [],
+        "filters": [],
     }
     state.update(overrides)
     return state
@@ -50,6 +51,11 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/v1")
         body: dict[str, Any] = json.loads(request.content) if request.content else {}
+        if request.method == "GET" and path == "/agents":
+            state["filters"].append(dict(request.url.params))
+            wanted = request.url.params["filter"].split('"')[1]
+            agents = [a for a in state["agents"] if a.get("customer_agent_id") == wanted]
+            return httpx.Response(200, json={"agents": agents})
         if request.method == "GET":
             state_key, response_key = {
                 "/agents": ("agents", "agents"),
@@ -163,19 +169,16 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
     assert state["writes"] == [("/agents/A", {"metadata": DEFINITION.agent_body()["metadata"]})]
 
 
-def test_sync_is_a_no_op_once_converged_and_matches_by_display_name_fallback() -> None:
-    live = {**DEFINITION.agent_body(), "id": "A", "customer_agent_id": ""}
-    state = _state(
-        agents=[live],
-        test_set_agents=[{"id": "A"}],
-        run_templates=[{"id": "T", "display_name": RUN_NAME}],
-        scheduled_runs=[{"id": "S", "run_template_id": "T"}],
-    )
+def test_sync_looks_up_by_customer_id_filter_and_never_adopts_a_name_only_match() -> None:
+    name_only = {**DEFINITION.agent_body(), "id": "B", "customer_agent_id": ""}
+    state = _state(agents=[name_only])
     with _client(state) as client:
         result = sync(client, DEFINITION)
-    assert result.agent_id == "A"
-    assert result.actions[0] == "agent: unchanged"
-    assert state["writes"] == []
+    assert state["filters"] == [
+        {"filter": f'customer_agent_id="{CUSTOMER_AGENT_ID}"', "page_size": "1"}
+    ]
+    assert result.agent_id == "A" * 22
+    assert state["writes"][0][0] == "/agents"
 
 
 def test_sync_dry_run_reports_and_writes_nothing() -> None:
