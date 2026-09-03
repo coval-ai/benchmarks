@@ -265,7 +265,9 @@ def _coval_client(state: dict[str, Any]) -> CovalClient:
     def handler(request: httpx.Request) -> httpx.Response:
         state.setdefault("calls", []).append((request.method, request.url.path))
         if request.url.path == "/v1/agents" and request.method == "GET":
-            return httpx.Response(200, json={"agents": state["agents"], "next_page_token": ""})
+            wanted = request.url.params["filter"].split('"')[1]
+            agents = [a for a in state["agents"] if a.get("customer_agent_id") == wanted]
+            return httpx.Response(200, json={"agents": agents, "next_page_token": ""})
         if request.url.path == "/v1/agents":
             created = {**json.loads(request.content), "id": "A" * 22}
             state["agents"].append(created)
