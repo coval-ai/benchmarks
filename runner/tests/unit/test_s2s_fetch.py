@@ -2038,7 +2038,7 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
     assert calls["R1/s1"]["captured_at"] == writer.record_results.await_args.kwargs["created_at"]
     for kwargs in calls.values():
-        assert "db_retry_attempts" not in kwargs
+        assert kwargs["db_retry_attempts"] == 3
         assert not any("semaphore" in key for key in kwargs)
 
 
