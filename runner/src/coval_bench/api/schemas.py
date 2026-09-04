@@ -11,7 +11,8 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -121,6 +122,42 @@ class ProvidersResponse(BaseModel):
     llm: list[ProviderInfo]
     # Facet vocabulary in display order, shared across every benchmark.
     tag_categories: list[TagCategoryOut]
+
+
+class PricingRateSpanOut(BaseModel):
+    """One stretch of a model's price history.
+
+    ``price_usd`` is the provider's native figure in ``unit`` as the exact decimal
+    string it was recorded as; the normalized fields are None where no conversion
+    exists without assuming a speaking rate, and all three are None over a span
+    with no known public rate. ``effective_to`` is exclusive, None while open.
+    """
+
+    unit: str | None = None
+    price_usd: Decimal | None = None
+    price_per_1m_chars: float | None = None
+    price_per_1k_minutes: float | None = None
+    effective_from: date
+    effective_to: date | None = None
+    source_url: str | None = None
+
+
+class PricingRateOut(PricingRateSpanOut):
+    """One model's rate in force on the requested day, with the earlier spans oldest first."""
+
+    benchmark: Benchmark
+    provider: str
+    model: str
+    notes: str | None = None
+    recorded_at: datetime
+    history: list[PricingRateSpanOut] = []
+
+
+class PricingRegistryResponse(BaseModel):
+    """Response schema for GET /v1/pricing: the rates in force on ``as_of``."""
+
+    as_of: date
+    rates: list[PricingRateOut]
 
 
 class ResultsResponse(BaseModel):
@@ -483,3 +520,46 @@ class AdminModelUpdateResponse(BaseModel):
 
     model: AdminModelOut
     warnings: list[str] = []
+
+
+class AdminRateRecordingOut(PricingRateSpanOut):
+    """One row of the pricing log as the admin sees it; ``superseded`` marks a corrected entry."""
+
+    id: int
+    notes: str | None = None
+    recorded_by_user_id: str
+    recorded_by_email: str | None = None
+    recorded_at: datetime
+    superseded: bool
+
+
+class AdminModelPricingOut(BaseModel):
+    """One model's pricing log: in force today, scheduled, and every recording newest first."""
+
+    benchmark: Benchmark
+    provider: str
+    model: str
+    current: AdminRateRecordingOut | None = None
+    scheduled: list[AdminRateRecordingOut] = []
+    recordings: list[AdminRateRecordingOut] = []
+
+
+class AdminPricingResponse(BaseModel):
+    """Response schema for GET /v1/admin/pricing."""
+
+    as_of: date
+    models: list[AdminModelPricingOut]
+
+
+class AdminRateCreate(BaseModel):
+    """POST body for /v1/admin/pricing: ``unit`` + ``price_usd`` (decimal string) for a
+    published rate, neither for a delisting; ``effective_from`` defaults to today (UTC)."""
+
+    benchmark: Benchmark
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    unit: str | None = None
+    price_usd: str | None = None
+    effective_from: date | None = None
+    source_url: str | None = None
+    notes: str | None = None
