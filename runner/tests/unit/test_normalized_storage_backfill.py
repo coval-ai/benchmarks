@@ -1948,21 +1948,25 @@ def test_live_timing_only_failed_tts_is_read_only_and_idempotent(
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status,
-                started_at,finished_at,error)
-               VALUES (%s,%s,'TTFA','v1','default','inline','failed',%s,%s,'provider failed')""",
-            (
-                evaluation_id,
-                observation_id,
-                _NOW + timedelta(seconds=1),
-                _NOW + timedelta(seconds=2),
-            ),
+               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,'TTFA','v1','default','inline','queued')""",
+            (evaluation_id, observation_id),
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluation_inputs
                (metric_evaluation_id,observation_artifact_id,input_role,input_order)
                VALUES (%s,%s,'timing',0)""",
             (evaluation_id, timing_id),
+        )
+        cur.execute(
+            """UPDATE benchmarks_v2.metric_evaluations
+               SET status='running',started_at=%s WHERE id=%s""",
+            (_NOW + timedelta(seconds=1), evaluation_id),
+        )
+        cur.execute(
+            """UPDATE benchmarks_v2.metric_evaluations
+               SET status='failed',finished_at=%s,error='provider failed' WHERE id=%s""",
+            (_NOW + timedelta(seconds=2), evaluation_id),
         )
     backfill_pg.commit()
 
