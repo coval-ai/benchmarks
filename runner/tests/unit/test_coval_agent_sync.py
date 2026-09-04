@@ -143,9 +143,12 @@ def test_sync_creates_everything_when_absent() -> None:
         "/scheduled-runs",
     ]
     template = state["writes"][2][1]
-    assert template["agent_id"] == "A" * 22
+    assert template["agent_ids"] == ["A" * 22]
     assert template["persona_ids"] == list(coval_agent.CLEAN_DENTAL_PERSONAS)
+    assert template["test_set_ids"] == ["TSDENTAL"]
     assert template["metric_ids"] == ["M" * 22]
+    assert template["iteration_count"] == 1
+    assert "options" not in template
     assert state["writes"][3][1]["schedule_expression"] == "cron(0 13 * * ? *)"
 
 
