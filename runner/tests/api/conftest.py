@@ -347,6 +347,26 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
                 ON benchmarks_v2.model_history (model_id, changed_at DESC)
         """)
+        # Pricing log (mirrors migration 20260903_0027).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
+                id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                benchmark           text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                provider            text NOT NULL CHECK (provider <> ''),
+                model               text NOT NULL CHECK (model <> ''),
+                unit                text CHECK (unit IS NULL OR unit <> ''),
+                price_usd           numeric CHECK (price_usd IS NULL OR price_usd > 0),
+                effective_from      date NOT NULL,
+                source_url          text CHECK (source_url IS NULL OR source_url <> ''),
+                notes               text CHECK (notes IS NULL OR notes <> ''),
+                recorded_by_user_id text NOT NULL CHECK (recorded_by_user_id <> ''),
+                recorded_by_email   text
+                    CHECK (recorded_by_email IS NULL OR recorded_by_email <> ''),
+                recorded_at         timestamptz NOT NULL DEFAULT now(),
+                CHECK ((unit IS NULL) = (price_usd IS NULL)),
+                CHECK (price_usd IS NULL OR source_url IS NOT NULL)
+            )
+        """)
 
 
 def _seed_registry(**connect_kwargs: Any) -> None:
@@ -363,6 +383,7 @@ def _seed_registry(**connect_kwargs: Any) -> None:
                 (str(tag), category.value, tag_value_label(category, str(tag))),
             )
         _insert_models(conn, TEST_ROSTER)
+        _insert_rates(conn, SEED_RATES)
         conn.commit()
 
 
@@ -399,6 +420,43 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 "INSERT INTO benchmarks_v2.model_tags (model_id, tag) VALUES (%s, %s)",
                 (row[0], str(tag)),
             )
+
+
+# One published rate per priced benchmark, on the test roster, keyed like the
+# migration's seed rows: (benchmark, provider, model, unit, price, from, source, notes).
+SEED_RATES: tuple[tuple[str, ...], ...] = (
+    (
+        "STT",
+        "seed",
+        "stt",
+        "per_minute",
+        "0.0048",
+        "2026-08-24",
+        "https://seed.example/pricing",
+        "Pay as you go.",
+    ),
+    (
+        "TTS",
+        "seed",
+        "tts-a",
+        "per_1k_chars",
+        "0.030",
+        "2026-08-10",
+        "https://seed.example/pricing",
+        "Pay as you go.",
+    ),
+)
+
+
+def _insert_rates(conn: psycopg.Connection[Any], rows: Sequence[Sequence[str]]) -> None:
+    """Record rates into the pricing log, as the seed migration does."""
+    for row in rows:
+        conn.execute(
+            "INSERT INTO benchmarks_v2.pricing_rates (benchmark, provider, model, unit, price_usd,"
+            " effective_from, source_url, notes, recorded_by_user_id)"
+            " VALUES (%s, %s, %s, %s, %s::numeric, %s::date, %s, %s, 'tests')",
+            tuple(row),
+        )
 
 
 def add_models(postgresql: Any, *models: RegisteredModel) -> None:

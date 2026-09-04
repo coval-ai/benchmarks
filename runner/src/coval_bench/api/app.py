@@ -44,12 +44,14 @@ from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
     admin_models,
+    admin_pricing,
     aggregates,
     arena,
     health,
     leaderboard,
     llm_phonely,
     mocktools,
+    pricing,
     providers,
     results,
     robots,
@@ -210,9 +212,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
     app.include_router(tags.router, prefix="/v1")
+    app.include_router(pricing.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
+    app.include_router(admin_pricing.router, prefix="/v1")
     # Not under /v1 and not rate limited: an appliance the agents call, not
     # public read API. slowapi carries no default limit, so /mock and /llm are exempt
     # by construction — a 429 mid-conversation would be graded as the agent failing.
