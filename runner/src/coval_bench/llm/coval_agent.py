@@ -102,11 +102,11 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     def run_template_body(self, agent_id: str) -> dict[str, Any]:
         return {
             "display_name": RUN_NAME,
-            "agent_id": agent_id,
+            "agent_ids": [agent_id],
             "persona_ids": list(CLEAN_DENTAL_PERSONAS),
-            "test_set_id": self.test_set_id,
+            "test_set_ids": [self.test_set_id],
             "metric_ids": [self.instruction_metric_id],
-            "options": {"iteration_count": 1},
+            "iteration_count": 1,
         }
 
 
