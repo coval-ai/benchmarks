@@ -64,14 +64,19 @@ def _migrate(conn: psycopg.Connection[Any]) -> None:
     alembic_command.upgrade(config, "head")
 
 
-def _insert_run(conn: psycopg.Connection[Any]) -> int:
+def _insert_run(
+    conn: psycopg.Connection[Any],
+    *,
+    dataset_id: str = "historical-stt",
+    dataset_sha256: str = _SHA,
+) -> int:
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO benchmarks_v2.runs
                (started_at,finished_at,runner_sha,dataset_id,dataset_sha256,status,scheduled_at)
-               VALUES (%s,%s,'runner-sha','historical-stt',%s,'succeeded',%s)
+               VALUES (%s,%s,'runner-sha',%s,%s,'succeeded',%s)
                RETURNING id""",
-            (_NOW, _NOW, _SHA, _NOW),
+            (_NOW, _NOW, dataset_id, dataset_sha256, _NOW),
         )
         row = cur.fetchone()
         assert row is not None
@@ -212,14 +217,83 @@ def test_ttfa_components_require_a_successful_valued_anchor(anchor_status: str) 
     assert skipped["metric_payload_invalid"] == 1
 
 
-def test_tts_anchor_without_filename_is_explicitly_skipped(
+def test_tts_failed_anchor_without_filename_requires_live_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
     skipped: Counter[str] = Counter()
-    plans = _tts_plans([_row("TTFA", 12.0, filename=None)], skipped)
-    assert plans == []
-    assert skipped["tts_anchor_filename_missing"] == 1
+    plans = _tts_plans([_row("TTFA", 12.0, filename=None, status="failed")], skipped)
+    assert len(plans) == 1
+    assert plans[0].live_owner_required
+    assert plans[0].source_kind == "generated_audio"
+    assert plans[0].artifacts == [("timing_events", '{"ttfa_ms":12.0}')]
+    assert skipped == {}
+
+
+def test_tts_failed_prompt_is_independent_of_other_prompt_in_same_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
+    first = _row("TTFA", 12.0, filename=None, status="failed", transcript="first")
+    second = replace(_row("TTFA", 13.0, transcript="second"), id=2)
+    plans = _tts_plans([first, second], Counter())
+    assert len(plans) == 2
+    assert plans[0].live_owner_required
+    assert not plans[1].live_owner_required
+
+
+@pytest.mark.parametrize(
+    ("value", "unit"),
+    [
+        (None, "milliseconds"),
+        (float("nan"), "milliseconds"),
+        (float("inf"), "milliseconds"),
+        (-1.0, "milliseconds"),
+        (12.0, "seconds"),
+    ],
+)
+def test_tts_filename_less_allowlist_rejects_malformed_timing(
+    monkeypatch: pytest.MonkeyPatch, value: float | None, unit: str
+) -> None:
+    monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
+    row = replace(_row("TTFA", value, filename=None, status="failed"), unit=unit)
+    skipped: Counter[str] = Counter()
+    assert _tts_plans([row], skipped) == []
+    assert skipped == {"tts_anchor_filename_missing": 1, "tts_source_rows_unclaimed": 1}
+
+
+def test_tts_success_without_filename_remains_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
+    skipped: Counter[str] = Counter()
+    assert _tts_plans([_row("TTFA", 12.0, filename=None)], skipped) == []
+    assert skipped == {"tts_anchor_filename_missing": 1, "tts_source_rows_unclaimed": 1}
+
+
+def test_tts_failed_empty_filename_is_not_the_current_null_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
+    skipped: Counter[str] = Counter()
+    row = _row("TTFA", 12.0, filename="", status="failed")
+    assert _tts_plans([row], skipped) == []
+    assert skipped == {"tts_anchor_filename_missing": 1, "tts_source_rows_unclaimed": 1}
+
+
+def test_tts_failed_error_is_preserved_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(migration, "_tts_sample", lambda *_: "sample")
+    row = replace(
+        _row("TTFA", 12.0, filename=None, status="failed"),
+        error=" provider failed ",
+    )
+    plan = _tts_plans([row], Counter())[0]
+    assert plan.error == " provider failed "
+    cursor = _LiveCursor(plan)
+    assert _validate_live(cursor, plan).matches
+    assert cursor.evaluations[0][9] == " provider failed "
 
 
 def test_canonical_missing_ttfa_is_metric_failure_not_fabricated_provider_failure(
@@ -281,16 +355,17 @@ def test_frozen_window_is_utc_and_exactly_seven_days() -> None:
         migration.FrozenWindow(1, 9, start, start + timedelta(days=7, seconds=1))
 
 
-def test_parity_mismatch_report_aggregates_safe_reasons() -> None:
+@pytest.mark.parametrize("reason", sorted(migration._LIVE_CONFLICT_CATEGORIES))
+def test_parity_mismatch_report_aggregates_safe_reasons(reason: str) -> None:
     report = migration._report()
     migration._append_mismatch(
         report,
         "parity_mismatches",
-        {"reason": "live_owned_payload_mismatch", "natural_key": ["private"]},
+        {"reason": reason, "natural_key": ["private"]},
     )
     assert report["parity_mismatch_count"] == 1
-    assert report["parity_mismatch_reasons"] == {"live_owned_payload_mismatch": 1}
-    assert report["parity_mismatches"] == [{"reason": "live_owned_payload_mismatch"}]
+    assert report["parity_mismatch_reasons"] == {reason: 1}
+    assert report["parity_mismatches"] == [{"reason": reason}]
 
 
 def test_apply_core_requires_explicit_window_before_client_or_connection_setup(
@@ -390,6 +465,307 @@ def test_backfill_owned_row_keeps_strict_lifecycle_timestamp_comparison() -> Non
             return stored_values
 
     assert not migration._stored_plan_matches(Cursor(), plan, plan.id)  # type: ignore[arg-type]
+
+
+class _LiveCursor:
+    def __init__(self, plan: migration.Planned) -> None:
+        row = plan.first
+        self.observation_id = uuid4()
+        self.evaluation_id = uuid4()
+        self.timing_id = uuid4()
+        self.audio_id = uuid4()
+        self.parent: tuple[Any, ...] = (
+            row.run_id,
+            plan.dataset_id,
+            plan.dataset_sha256,
+            plan.sample_id,
+            row.provider,
+            row.model,
+            row.voice,
+            plan.benchmark,
+            plan.source_kind,
+            None,
+            None,
+            None,
+            row.created_at,
+            plan.status,
+            plan.error,
+            plan.failure_origin,
+        )
+        expected_metrics = migration._expected_metric_payloads(plan)
+        self.evaluations: list[tuple[Any, ...]] = [
+            (
+                self.evaluation_id,
+                metric,
+                "v1",
+                "default",
+                "inline",
+                None,
+                status,
+                row.created_at,
+                row.created_at,
+                error,
+            )
+            for metric, (status, error, _) in expected_metrics.items()
+        ]
+        self.values: list[tuple[Any, ...]] = [
+            (metric, key, unit, value, role)
+            for metric, (_, _, values) in expected_metrics.items()
+            for _, key, value, unit, role in values
+        ]
+        _, timing_payload, _, _, _ = prepare_timing_events({"ttfa_ms": row.value})
+        timing_digest = hashlib.sha256(timing_payload).hexdigest()
+        self.artifacts: list[tuple[Any, ...]] = [
+            (
+                self.timing_id,
+                "timing_events",
+                "TimingEvents",
+                "v1",
+                f"gs://private/observation-artifacts/v1/timing_events/{timing_digest[:2]}/{timing_digest}.json",
+                timing_digest,
+                len(timing_payload),
+                None,
+            )
+        ]
+        if not plan.live_owner_required:
+            audio_digest = "b" * 64
+            self.artifacts.append(
+                (
+                    self.audio_id,
+                    "generated_audio",
+                    "GeneratedAudio",
+                    "v1",
+                    f"gs://private/observation-artifacts/v1/generated_audio/bb/{audio_digest}.wav",
+                    audio_digest,
+                    10,
+                    1.0,
+                )
+            )
+        self.inputs: list[tuple[Any, ...]] = [
+            ("TTFA", "timing", 0, self.timing_id),
+            *([] if plan.live_owner_required else [("TTFA", "raw", 0, self.audio_id)]),
+        ]
+        self.unexpected = False
+        self._result: Any = None
+
+    def execute(self, statement: str, *_: Any) -> None:
+        if "FROM benchmarks_v2.benchmark_observations WHERE id" in statement:
+            self._result = self.parent
+        elif "FROM benchmarks_v2.metric_evaluations WHERE observation_id" in statement:
+            self._result = self.evaluations
+        elif "FROM benchmarks_v2.metric_values v JOIN" in statement:
+            self._result = self.values
+        elif "FROM benchmarks_v2.observation_artifacts WHERE observation_id" in statement:
+            self._result = self.artifacts
+        elif "FROM benchmarks_v2.metric_evaluation_inputs i JOIN" in statement:
+            self._result = self.inputs
+        elif "SELECT EXISTS" in statement:
+            self._result = (self.unexpected,)
+        else:  # pragma: no cover - catches validator query drift.
+            raise AssertionError(statement)
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return cast(tuple[Any, ...] | None, self._result)
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return cast(list[tuple[Any, ...]], self._result)
+
+
+def _validate_live(cursor: _LiveCursor, plan: migration.Planned) -> migration.LiveValidationResult:
+    return migration._live_validation_result(
+        cast(psycopg.Cursor[tuple[Any, ...]], cursor), plan, cursor.observation_id
+    )
+
+
+def _live_tts_plan(*, failed: bool = False, transport: bool = False) -> migration.Planned:
+    row = _row(
+        "TTFA",
+        12.0,
+        status="failed" if failed else "success",
+        filename=None if failed else "a.wav",
+    )
+    if transport:
+        row = replace(row, http_version="HTTP/2", headers_ms=4.0)
+    return migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "TTS",
+        "generated_audio",
+        "failed" if failed else "succeeded",
+        row.error if failed else None,
+        "provider" if failed else None,
+        [("timing_events", '{"ttfa_ms":12.0}')],
+        failed,
+    )
+
+
+def test_live_timing_only_failed_tts_matches_exact_current_shape() -> None:
+    plan = _live_tts_plan(failed=True)
+    cursor = _LiveCursor(plan)
+    result = _validate_live(cursor, plan)
+    assert result.matches
+    assert result.category is None
+    assert cursor.values == []
+    assert [artifact[1] for artifact in cursor.artifacts] == ["timing_events"]
+    assert cursor.inputs == [("TTFA", "timing", 0, cursor.timing_id)]
+
+
+def test_live_validation_reports_exact_aggregate_safe_categories() -> None:
+    plan = _live_tts_plan()
+
+    parent = _LiveCursor(plan)
+    parent.parent = (*parent.parent[:4], "foreign", *parent.parent[5:])
+    assert _validate_live(parent, plan).category == "parent"
+
+    lifecycle = _LiveCursor(plan)
+    lifecycle.parent = (*lifecycle.parent[:13], "failed", "mutated", "provider")
+    assert _validate_live(lifecycle, plan).category == "lifecycle"
+
+    evaluation = _LiveCursor(plan)
+    evaluation.evaluations[0] = (
+        *evaluation.evaluations[0][:2],
+        "v2",
+        *evaluation.evaluations[0][3:],
+    )
+    assert _validate_live(evaluation, plan).category == "evaluation"
+
+    value = _LiveCursor(plan)
+    value.values[0] = (*value.values[0][:3], 99.0, value.values[0][4])
+    assert _validate_live(value, plan).category == "value"
+
+    artifact = _LiveCursor(plan)
+    artifact.artifacts[0] = (*artifact.artifacts[0][:5], "c" * 64, *artifact.artifacts[0][6:])
+    assert _validate_live(artifact, plan).category == "artifact"
+
+    input_mismatch = _LiveCursor(plan)
+    input_mismatch.inputs[0] = ("TTFA", "raw", 0, input_mismatch.timing_id)
+    assert _validate_live(input_mismatch, plan).category == "input"
+
+    foreign_input = _LiveCursor(plan)
+    foreign_input.inputs[0] = ("TTFA", "timing", 0, uuid4())
+    assert _validate_live(foreign_input, plan).category == "input"
+
+    duplicate_evaluation = _LiveCursor(plan)
+    duplicate_evaluation.evaluations.append(duplicate_evaluation.evaluations[0])
+    assert _validate_live(duplicate_evaluation, plan).category == "unexpected_child"
+
+    duplicate_artifact = _LiveCursor(plan)
+    duplicate_artifact.artifacts.append(duplicate_artifact.artifacts[0])
+    assert _validate_live(duplicate_artifact, plan).category == "unexpected_child"
+
+    extra_child_table = _LiveCursor(plan)
+    extra_child_table.unexpected = True
+    assert _validate_live(extra_child_table, plan).category == "unexpected_child"
+
+
+def test_live_validation_keeps_successful_tts_generated_audio_strict() -> None:
+    plan = _live_tts_plan()
+    missing = _LiveCursor(plan)
+    missing.artifacts = missing.artifacts[:1]
+    assert _validate_live(missing, plan).category == "artifact"
+
+    malformed = _LiveCursor(plan)
+    malformed.artifacts[1] = (*malformed.artifacts[1][:-1], 0.0)
+    assert _validate_live(malformed, plan).category == "artifact"
+
+
+def test_live_validation_timestamps_are_semantic_and_provenance_is_actual() -> None:
+    plan = _live_tts_plan(transport=True)
+    exact = _LiveCursor(plan)
+    first = _validate_live(exact, plan)
+    second = _validate_live(_LiveCursor(plan), plan)
+    assert first == second
+    assert first.matches
+    assert first.tolerated_provenance == (
+        "artifact_content_not_reconstructable",
+        "legacy_transport_metadata",
+    )
+
+    semantic = _LiveCursor(plan)
+    later = plan.first.created_at + timedelta(seconds=1)
+    semantic.evaluations[0] = (
+        *semantic.evaluations[0][:7],
+        later,
+        later + timedelta(seconds=1),
+        semantic.evaluations[0][9],
+    )
+    result = _validate_live(semantic, plan)
+    assert result.matches
+    assert "live_evaluation_timestamps" in result.tolerated_provenance
+
+    invalid = _LiveCursor(plan)
+    invalid.evaluations[0] = (
+        *invalid.evaluations[0][:7],
+        plan.first.created_at - timedelta(seconds=1),
+        plan.first.created_at,
+        invalid.evaluations[0][9],
+    )
+    assert _validate_live(invalid, plan).category == "evaluation"
+
+
+def test_live_validation_rejects_stored_transport_mutation() -> None:
+    plan = _live_tts_plan()
+    cursor = _LiveCursor(plan)
+    cursor.parent = (*cursor.parent[:9], "HTTP/2", *cursor.parent[10:])
+    assert _validate_live(cursor, plan).category == "parent"
+
+
+def test_timing_only_failed_tts_without_live_owner_never_inserts() -> None:
+    plan = _live_tts_plan(failed=True)
+    statements: list[str] = []
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, statement: str, *_: Any) -> None:
+            statements.append(statement)
+
+        def fetchone(self) -> None:
+            return None
+
+    class Conn:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    report = migration._report()
+    migration._insert_plan(Conn(), plan, True, "unused", object(), report)  # type: ignore[arg-type]
+    assert not any("INSERT" in statement for statement in statements)
+    assert report["eligible"] == 0
+    assert report["parity_mismatch_reasons"] == {"parent": 1}
+
+
+def test_timing_only_failed_tts_deterministic_owner_is_not_live_proof() -> None:
+    plan = _live_tts_plan(failed=True)
+    statements: list[str] = []
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *_: Any) -> None:
+            return None
+
+        def execute(self, statement: str, *_: Any) -> None:
+            statements.append(statement)
+
+        def fetchone(self) -> tuple[Any, ...]:
+            return (plan.id,)
+
+    class Conn:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    report = migration._report()
+    migration._insert_plan(Conn(), plan, False, None, None, report)  # type: ignore[arg-type]
+    assert len(statements) == 1
+    assert report["reconciled"] == 0
+    assert report["parity_mismatch_reasons"] == {"parent": 1}
 
 
 def test_live_tts_artifacts_inputs_and_lifecycle_are_exact_where_recoverable() -> None:
@@ -1521,6 +1897,120 @@ def test_apply_reconciles_artifacts_inputs_values_and_rollups(
     assert rerun["cutover_ready"]
 
 
+def test_live_timing_only_failed_tts_is_read_only_and_idempotent(
+    backfill_pg: psycopg.Connection[Any],
+) -> None:
+    _migrate(backfill_pg)
+    manifest = migration._packaged_manifest("tts-v1")
+    assert manifest is not None
+    prompt, samples = next(iter(manifest.tts_samples.items()))
+    assert len(samples) == 1
+    run_id = _insert_run(
+        backfill_pg,
+        dataset_id="tts-v1",
+        dataset_sha256=manifest.sha256,
+    )
+    observation_id, evaluation_id, timing_id = uuid4(), uuid4(), uuid4()
+    _, timing_payload, _, _, _ = prepare_timing_events({"ttfa_ms": 12.0})
+    timing_digest = hashlib.sha256(timing_payload).hexdigest()
+    with backfill_pg.cursor() as cur:
+        cur.execute(
+            """INSERT INTO benchmarks_v2.results
+               (run_id,provider,model,voice,benchmark,metric_type,metric_value,metric_units,
+                audio_filename,transcript,status,error,created_at)
+               VALUES (%s,'provider','model','voice','TTS','TTFA',12,'milliseconds',
+                       NULL,%s,'failed','provider failed',%s) RETURNING id""",
+            (run_id, prompt, _NOW),
+        )
+        result = cur.fetchone()
+        assert result is not None
+        result_id = int(result[0])
+        cur.execute(
+            """INSERT INTO benchmarks_v2.benchmark_observations
+               (id,run_id,dataset_id,dataset_sha256,sample_id,provider,model,voice,benchmark,
+                source_kind,captured_at,status,error,failure_origin)
+               VALUES (%s,%s,'tts-v1',%s,%s,'provider','model','voice','TTS',
+                       'generated_audio',%s,'failed','provider failed','provider')""",
+            (observation_id, run_id, manifest.sha256, samples[0], _NOW),
+        )
+        cur.execute(
+            """INSERT INTO benchmarks_v2.observation_artifacts
+               (id,observation_id,artifact_type,schema_name,schema_version,gcs_uri,
+                content_sha256,size_bytes,duration_ms)
+               VALUES (%s,%s,'timing_events','TimingEvents','v1',%s,%s,%s,NULL)""",
+            (
+                timing_id,
+                observation_id,
+                f"gs://private/observation-artifacts/v1/timing_events/{timing_digest[:2]}/{timing_digest}.json",
+                timing_digest,
+                len(timing_payload),
+            ),
+        )
+        cur.execute(
+            """INSERT INTO benchmarks_v2.metric_evaluations
+               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,'TTFA','v1','default','inline','queued')""",
+            (evaluation_id, observation_id),
+        )
+        cur.execute(
+            """INSERT INTO benchmarks_v2.metric_evaluation_inputs
+               (metric_evaluation_id,observation_artifact_id,input_role,input_order)
+               VALUES (%s,%s,'timing',0)""",
+            (evaluation_id, timing_id),
+        )
+        cur.execute(
+            """UPDATE benchmarks_v2.metric_evaluations
+               SET status='running',started_at=%s WHERE id=%s""",
+            (_NOW + timedelta(seconds=1), evaluation_id),
+        )
+        cur.execute(
+            """UPDATE benchmarks_v2.metric_evaluations
+               SET status='failed',finished_at=%s,error='provider failed' WHERE id=%s""",
+            (_NOW + timedelta(seconds=2), evaluation_id),
+        )
+    backfill_pg.commit()
+
+    first = backfill(
+        backfill_pg,
+        min_result_id=result_id,
+        max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
+        batch_size=1,
+        apply=False,
+    )
+    second = backfill(
+        backfill_pg,
+        min_result_id=result_id,
+        max_result_id=result_id,
+        window_start=_WINDOW_START,
+        window_end=_WINDOW_END,
+        batch_size=1,
+        apply=False,
+    )
+    assert first == second
+    assert first["live_owned"] == 1
+    assert first["reconciled"] == 1
+    assert first["eligible"] == 0
+    assert first["parity_mismatch_count"] == 0
+    assert first["cutover_ready"]
+    assert first["window"] == {
+        "min_result_id": result_id,
+        "max_result_id": result_id,
+        "start": _WINDOW_START.isoformat(),
+        "end": _WINDOW_END.isoformat(),
+        "batch_size": 1,
+    }
+    with backfill_pg.cursor() as cur:
+        cur.execute("SELECT count(*) FROM benchmarks_v2.benchmark_observations")
+        assert cur.fetchone() == (1,)
+        cur.execute("SELECT count(*) FROM benchmarks_v2.observation_artifacts")
+        assert cur.fetchone() == (1,)
+        cur.execute("SELECT count(*) FROM benchmarks_v2.metric_values")
+        assert cur.fetchone() == (0,)
+    backfill_pg.rollback()
+
+
 def test_live_owned_incomplete_child_payload_blocks_readiness(
     backfill_pg: psycopg.Connection[Any],
 ) -> None:
@@ -1550,7 +2040,7 @@ def test_live_owned_incomplete_child_payload_blocks_readiness(
     )
     assert report["live_owned"] == 1
     assert not report["cutover_ready"]
-    assert report["parity_mismatches"][0]["reason"] == "live_owned_payload_mismatch"
+    assert report["parity_mismatches"][0]["reason"] == "evaluation"
 
 
 def test_batch_one_commits_when_batch_two_fails_then_rerun_resumes(
