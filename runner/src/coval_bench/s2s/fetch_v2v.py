@@ -1247,12 +1247,17 @@ def _fetch_options[Command: Callable[..., None]](command: Command) -> Command:
 
 
 def _run_fetch(
-    benchmark: Benchmark, coval_run_ids: tuple[str, ...], window_hours: int, page_size: int
+    benchmark: Benchmark,
+    coval_run_ids: tuple[str, ...],
+    window_hours: int,
+    page_size: int,
+    *,
+    settings: Settings | None = None,
 ) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
     label = f"{benchmark.value.lower()} fetch"
-    settings = get_settings()
+    settings = settings or get_settings()
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:

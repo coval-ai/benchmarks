@@ -20,7 +20,7 @@ import click
 
 from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
-from coval_bench.llm.coval_agent import sync_coval
+from coval_bench.llm.coval_agent import sync_llm
 from coval_bench.migrations.backfill_normalized_s2s_storage import (
     backfill_normalized_s2s_storage_cli,
 )
@@ -118,7 +118,7 @@ migrate.add_command(import_legacy_cli, name="import-legacy")
 # backing its own Cloud Run job rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
 cli.add_command(fetch_llm, name="fetch-llm")
-cli.add_command(sync_coval, name="sync-coval")
+cli.add_command(sync_llm, name="sync-llm")
 cli.add_command(pull_contract, name="pull-contract")
 cli.add_command(platform_assets, name="platform-assets")
 

@@ -1,12 +1,13 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The sync-coval command and the Phonely text agent it defines."""
+"""The sync-llm command and the Phonely text agent it defines."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -21,7 +22,7 @@ from coval_bench.llm.coval_agent import (
     CovalTextAgentDefinition,
     CovalTextClient,
     sync,
-    sync_coval,
+    sync_llm,
 )
 from coval_bench.platform_assets import SyncError
 
@@ -221,12 +222,51 @@ def test_cli_prints_the_agent_id_and_never_the_secret(monkeypatch: pytest.Monkey
     )
     monkeypatch.setattr(coval_agent, "CovalTextClient", lambda *_args: _client(state))
 
-    dry = CliRunner().invoke(sync_coval, ["--dry-run"])
+    dry = CliRunner().invoke(sync_llm, ["--dry-run"])
     assert dry.exit_code == 0, dry.output
     assert "COVAL_LLM_PHONELY_AGENT_ID=<created on apply>" in dry.output
     assert state["writes"] == []
 
-    applied = CliRunner().invoke(sync_coval, [])
+    applied = CliRunner().invoke(sync_llm, [])
     assert applied.exit_code == 0, applied.output
     assert f"COVAL_LLM_PHONELY_AGENT_ID={'A' * 22}" in applied.output
+    assert "llm_sync_fetch_deferred" in applied.output
     assert SECRET not in dry.output + applied.output
+
+
+def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent_id = "A" * 22
+    template_id = "T" * 22
+    state = _state(
+        agents=[{**DEFINITION.agent_body(), "id": agent_id}],
+        test_set_agents=[{"id": agent_id}],
+        run_templates=[{"id": template_id, "display_name": RUN_NAME}],
+        scheduled_runs=[{"id": "S" * 22, "run_template_id": template_id}],
+    )
+    settings = Settings(
+        llm_proxy_public_url="https://api.example.com",
+        llm_proxy_secret=SecretStr(SECRET),
+        coval_s2s_dental_test_set_id="TSDENTAL",
+        coval_s2s_instruction_metric_id="M" * 22,
+    )
+    fetch = MagicMock()
+    monkeypatch.setenv("COVAL_API_KEY", "coval-key")
+    monkeypatch.setattr(coval_agent, "get_settings", lambda: settings)
+    monkeypatch.setattr(coval_agent, "CovalTextClient", lambda *_args: _client(state))
+    monkeypatch.setattr("coval_bench.s2s.fetch_v2v._run_fetch", fetch)
+
+    applied = CliRunner().invoke(sync_llm, [])
+
+    assert applied.exit_code == 0, applied.output
+    fetch.assert_called_once()
+    assert fetch.call_args.kwargs["settings"].coval_llm_phonely_agent_id == agent_id
+
+
+def test_cli_logs_automation_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(coval_agent, "get_settings", Settings)
+
+    failed = CliRunner().invoke(sync_llm, [])
+
+    assert failed.exit_code == 1
+    assert '"event": "RUN_FAILED"' in failed.output
+    assert "sync-llm needs" in failed.output
