@@ -260,6 +260,7 @@ class Planned:
     error: str | None
     failure_origin: str | None
     artifacts: list[tuple[str, str]]  # (kind, body), no storage side effect
+    live_owner_required: bool = False
 
     @property
     def first(self) -> LegacyRow:
@@ -362,6 +363,7 @@ def _report() -> dict[str, Any]:
         "rollup_mismatches_truncated": False,
         "cutover_ready": False,
         "parity_mismatch_reasons": Counter(),
+        "provenance_differences": Counter(),
     }
 
 
@@ -554,9 +556,6 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         if not a.transcript:
             skipped["tts_anchor_prompt_missing"] += 1
             continue
-        if not a.filename:
-            skipped["tts_anchor_filename_missing"] += 1
-            continue
         if not _valid_sha(a.dataset_sha256):
             skipped["invalid_dataset_sha"] += 1
             continue
@@ -578,6 +577,23 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 or r.id == a.id
             )
         ]
+        # A provider failure can retain TTFA timing without producing audio.
+        # Accept only the one-row, prompt-owned shape emitted by today's writer;
+        # other prompts for this model/run remain separate observations.
+        failed_tts = (
+            a.filename is None
+            and attached == [a]
+            and a.status == "failed"
+            and bool(a.error and a.error.strip())
+            and a.value is not None
+            and a.value == a.value
+            and a.value not in (float("inf"), float("-inf"))
+            and a.value >= 0
+            and a.unit == "milliseconds"
+        )
+        if not a.filename and not failed_tts:
+            skipped["tts_anchor_filename_missing"] += 1
+            continue
         # A duplicate TTFA prompt means there is no safe identity for attachment.
         if (
             sum(
@@ -613,10 +629,14 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         if failed and len(errors) != 1:
             skipped["failed_observation_error_unrecoverable"] += 1
             continue
-        if failed and not (
-            len(attached) == 1
-            and attached[0].metric == str(Metric.TTFA)
-            and errors == {f"no {Metric.TTFA} produced"}
+        if (
+            failed
+            and not failed_tts
+            and not (
+                len(attached) == 1
+                and attached[0].metric == str(Metric.TTFA)
+                and errors == {f"no {Metric.TTFA} produced"}
+            )
         ):
             skipped["observation_failure_origin_unrecoverable"] += 1
             continue
@@ -644,10 +664,11 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 a.dataset_sha256,
                 "TTS",
                 "generated_audio",
-                "failed" if error else "succeeded",
-                error,
-                "provider" if error else None,
+                "failed" if failed_tts else ("failed" if error else "succeeded"),
+                a.error if failed_tts else error,
+                "provider" if failed_tts else ("provider" if error else None),
                 artifacts,
+                failed_tts,
             )
         )
     claimed_ids = {row.id for plan in plans for row in plan.rows}
@@ -1025,11 +1046,40 @@ def _live_artifact_matches(
     return True
 
 
-def _live_stored_plan_matches(
+_LIVE_CONFLICT_CATEGORIES = frozenset(
+    {
+        "parent",
+        "lifecycle",
+        "evaluation",
+        "value",
+        "artifact",
+        "input",
+        "unexpected_child",
+    }
+)
+
+
+@dataclass(frozen=True)
+class LiveValidationResult:
+    """Aggregate-safe outcome for reconciling a live-owned observation."""
+
+    matches: bool
+    category: str | None = None
+    tolerated_provenance: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.matches and self.category is not None:
+            raise ValueError("a matching live row cannot have a conflict category")
+        if not self.matches and self.category not in _LIVE_CONFLICT_CATEGORIES:
+            raise ValueError("live mismatch requires an aggregate-safe category")
+
+
+def _live_validation_result(
     cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
-) -> bool:
-    """Accept only the current STT/TTS dual-write contract for a live-owned key."""
+) -> LiveValidationResult:
+    """Validate one live-owned row in website-critical dependency order."""
     row = plan.first
+    provenance: set[str] = set()
     cur.execute(
         """SELECT run_id,dataset_id,dataset_sha256,sample_id,provider,model,voice,benchmark,
                   source_kind,transport_protocol,submit_to_headers_ms,provider_extras,captured_at,status,error,failure_origin
@@ -1055,27 +1105,38 @@ def _live_stored_plan_matches(
         plan.error,
         plan.failure_origin,
     )
-    if actual != expected:
-        return False
+    if actual is None or tuple(actual[:13]) != expected[:13]:
+        return LiveValidationResult(False, "parent")
+    if tuple(actual[13:]) != expected[13:]:
+        return LiveValidationResult(False, "lifecycle")
+    if row.http_version is not None or row.headers_ms is not None:
+        provenance.add("legacy_transport_metadata")
+
     expected_metrics = _expected_metric_payloads(plan)
     expected_tts_timing: tuple[str, int] | None = None
     if plan.benchmark == "TTS":
         anchor = next((candidate for candidate in plan.rows if candidate.metric == "TTFA"), None)
         if anchor is None:
-            return False
+            return LiveValidationResult(False, "evaluation")
         if anchor.value is not None:
             _, payload, _, _, _ = prepare_timing_events({"ttfa_ms": anchor.value})
             expected_tts_timing = (hashlib.sha256(payload).hexdigest(), len(payload))
-        # Transport contamination nulls legacy TTFA while the private artifact
-        # retains the unrecoverable original measurement.
+
     cur.execute(
         """SELECT id,metric_type,metric_version,evaluation_variant,executor,external_request_id,status,started_at,finished_at,error
            FROM benchmarks_v2.metric_evaluations WHERE observation_id=%s""",
         (observation_id,),
     )
     evaluations = cur.fetchall()
+    metrics = [item[1] for item in evaluations]
+    if (
+        len(evaluations) > len(expected_metrics)
+        or len(metrics) != len(set(metrics))
+        or any(metric not in expected_metrics for metric in metrics)
+    ):
+        return LiveValidationResult(False, "unexpected_child")
     if len(evaluations) != len(expected_metrics):
-        return False
+        return LiveValidationResult(False, "evaluation")
     evaluation_ids: dict[str, uuid.UUID] = {}
     for (
         eid,
@@ -1089,10 +1150,7 @@ def _live_stored_plan_matches(
         finished,
         error,
     ) in evaluations:
-        expected_metric = expected_metrics.get(metric)
-        if metric in evaluation_ids or expected_metric is None:
-            return False
-        expected_status, expected_error, _ = expected_metric
+        expected_status, expected_error, _ = expected_metrics[metric]
         if (version, variant, executor, external_request_id, status, error) != (
             "v1",
             "default",
@@ -1101,14 +1159,15 @@ def _live_stored_plan_matches(
             expected_status,
             expected_error,
         ):
-            return False
+            return LiveValidationResult(False, "evaluation")
         if started is None or started < row.created_at or finished is None or finished < started:
-            return False
-        if status == "succeeded" and error is not None:
-            return False
-        if status == "failed" and not error:
-            return False
+            return LiveValidationResult(False, "evaluation")
+        if (status == "succeeded" and error is not None) or (status == "failed" and not error):
+            return LiveValidationResult(False, "evaluation")
+        if started != row.created_at or finished != row.created_at:
+            provenance.add("live_evaluation_timestamps")
         evaluation_ids[metric] = eid
+
     cur.execute(
         """SELECT e.metric_type,v.value_key,v.unit,v.value,v.value_role
            FROM benchmarks_v2.metric_values v JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
@@ -1122,7 +1181,8 @@ def _live_stored_plan_matches(
         for _, key, value, unit, role in values
     )
     if actual_values != expected_values:
-        return False
+        return LiveValidationResult(False, "value")
+
     cur.execute(
         """SELECT id,artifact_type,schema_name,schema_version,gcs_uri,content_sha256,size_bytes,duration_ms
            FROM benchmarks_v2.observation_artifacts WHERE observation_id=%s""",
@@ -1134,38 +1194,46 @@ def _live_stored_plan_matches(
         if plan.benchmark == "STT"
         else {"timing_events", "generated_audio"}
     )
+    expected_artifact_types = (
+        {"timing_events", "generated_audio"}
+        if plan.benchmark == "TTS"
+        else {"timing_events"} | ({"provider_transcript"} if row.transcript is not None else set())
+    )
+    if plan.live_owner_required:
+        allowed = expected_artifact_types = {"timing_events"}
+    artifact_types = [item[1] for item in artifacts]
+    if len(artifact_types) != len(set(artifact_types)) or any(
+        artifact_type not in allowed for artifact_type in artifact_types
+    ):
+        return LiveValidationResult(False, "unexpected_child")
     by_type: dict[str, uuid.UUID] = {}
     for aid, artifact_type, schema_name, schema_version, uri, digest, size, duration in artifacts:
-        if (
-            artifact_type in by_type
-            or artifact_type not in allowed
-            or not _live_artifact_matches(
-                artifact_type,
-                schema_name,
-                schema_version,
-                uri,
-                digest,
-                size,
-                duration,
-                transcript=row.transcript if artifact_type == "provider_transcript" else None,
-            )
+        if not _live_artifact_matches(
+            artifact_type,
+            schema_name,
+            schema_version,
+            uri,
+            digest,
+            size,
+            duration,
+            transcript=row.transcript if artifact_type == "provider_transcript" else None,
         ):
-            return False
+            return LiveValidationResult(False, "artifact")
         if (
             artifact_type == "timing_events"
             and plan.benchmark == "TTS"
             and expected_tts_timing is not None
             and (digest, size) != expected_tts_timing
         ):
-            return False
+            return LiveValidationResult(False, "artifact")
+        if artifact_type == "generated_audio" or (
+            artifact_type == "timing_events" and plan.benchmark == "STT"
+        ):
+            provenance.add("artifact_content_not_reconstructable")
         by_type[artifact_type] = aid
-    expected_emitted_artifact_types = (
-        {"timing_events", "generated_audio"}
-        if plan.benchmark == "TTS"
-        else {"timing_events"} | ({"provider_transcript"} if row.transcript is not None else set())
-    )
-    if set(by_type) != expected_emitted_artifact_types:
-        return False
+    if set(by_type) != expected_artifact_types:
+        return LiveValidationResult(False, "artifact")
+
     expected_inputs: list[tuple[str, str, int, uuid.UUID]] = []
     for metric in expected_metrics:
         wanted = (
@@ -1179,10 +1247,12 @@ def _live_stored_plan_matches(
             if metric == "TTFA"
             else [("timing_events", "timing")]
         )
+        if plan.live_owner_required:
+            wanted = [("timing_events", "timing")]
         for artifact_type, role in wanted:
             aid = by_type.get(artifact_type)
             if aid is None:
-                return False
+                return LiveValidationResult(False, "artifact")
             expected_inputs.append((metric, role, 0, aid))
     cur.execute(
         """SELECT e.metric_type,i.input_role,i.input_order,i.observation_artifact_id
@@ -1190,10 +1260,10 @@ def _live_stored_plan_matches(
            WHERE e.observation_id=%s""",
         (observation_id,),
     )
-    if sorted((tuple(item) for item in cur.fetchall()), key=repr) != sorted(
-        expected_inputs, key=repr
-    ):
-        return False
+    actual_inputs = sorted((tuple(item) for item in cur.fetchall()), key=repr)
+    if actual_inputs != sorted(expected_inputs, key=repr):
+        return LiveValidationResult(False, "input")
+
     cur.execute(
         """SELECT EXISTS (
              SELECT 1 FROM benchmarks_v2.preprocessing_artifacts WHERE observation_id=%s
@@ -1204,8 +1274,17 @@ def _live_stored_plan_matches(
            )""",
         (observation_id, observation_id),
     )
-    exists_row = cur.fetchone()
-    return exists_row is not None and not bool(exists_row[0])
+    unexpected = cur.fetchone()
+    if unexpected is None or bool(unexpected[0]):
+        return LiveValidationResult(False, "unexpected_child")
+    return LiveValidationResult(True, tolerated_provenance=tuple(sorted(provenance)))
+
+
+def _live_stored_plan_matches(
+    cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
+) -> bool:
+    """Return whether a live row matches the current dual-write contract."""
+    return _live_validation_result(cur, plan, observation_id).matches
 
 
 def _stored_plan_matches(
@@ -1238,15 +1317,22 @@ def _insert_plan(
             plan.natural,
         )
         found = cur.fetchone()
+        if found and plan.live_owner_required and found[0] == plan.id:
+            if report_mismatch:
+                _append_mismatch(report, "parity_mismatches", {"reason": "parent"})
+            return
         if found and found[0] != plan.id:
             report["live_owned"] += 1
-            if _stored_plan_matches(cur, plan, found[0]):
+            validation = _live_validation_result(cur, plan, found[0])
+            if validation.matches:
                 report["reconciled"] += 1
+                for difference in validation.tolerated_provenance:
+                    report["provenance_differences"][difference] += 1
             elif report_mismatch:
                 _append_mismatch(
                     report,
                     "parity_mismatches",
-                    {"reason": "live_owned_payload_mismatch"},
+                    {"reason": validation.category or "parent"},
                 )
             return
         if found:
@@ -1258,6 +1344,12 @@ def _insert_plan(
                     "parity_mismatches",
                     {"reason": "backfill_payload_mismatch"},
                 )
+            return
+        if plan.live_owner_required:
+            if report_mismatch:
+                _append_mismatch(report, "parity_mismatches", {"reason": "parent"})
+            # This legacy shape is only a proof of an already dual-written
+            # observation; it must never be synthesized by backfill.
             return
         report["eligible"] += 1
         if not apply:
@@ -1559,6 +1651,7 @@ def _set_ready(report: dict[str, Any], *, dry_run: bool) -> None:
     report["skipped_by_reason"] = dict(report["skipped_by_reason"])
     report["verification_skipped_by_reason"] = dict(report["verification_skipped_by_reason"])
     report["parity_mismatch_reasons"] = dict(report["parity_mismatch_reasons"])
+    report["provenance_differences"] = dict(report["provenance_differences"])
     report["cutover_ready"] = (
         (not dry_run or not report["eligible"])
         and report["parity_mismatch_count"] == 0
@@ -1708,13 +1801,21 @@ def backfill(
                         plan.natural,
                     )
                     found = cur.fetchone()
-                    reason = (
-                        "post_write_observation_missing"
-                        if found is None
-                        else "post_write_payload_mismatch"
-                        if not _stored_plan_matches(cur, plan, found[0])
-                        else None
-                    )
+                    reason: str | None = None
+                    if found is None:
+                        reason = (
+                            "parent"
+                            if plan.live_owner_required
+                            else "post_write_observation_missing"
+                        )
+                    elif plan.live_owner_required and found[0] == plan.id:
+                        reason = "parent"
+                    elif found[0] != plan.id:
+                        live_validation = _live_validation_result(cur, plan, found[0])
+                        if not live_validation.matches:
+                            reason = live_validation.category
+                    elif not _strict_stored_plan_matches(cur, plan, found[0]):
+                        reason = "post_write_payload_mismatch"
                     if reason is not None:
                         _append_mismatch(
                             report,
