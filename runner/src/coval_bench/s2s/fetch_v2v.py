@@ -1300,16 +1300,5 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
     _run_fetch(Benchmark.S2S, coval_run_ids, window_hours, page_size)
 
 
-@click.command(name="fetch-llm")
-@_fetch_options
-def fetch_llm(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
-    """Fetch LLM instruction scores from Coval and join the proxy's per-turn TTFT.
-
-    Same scan and backfill options as fetch-s2s; only agents on the LLM benchmark
-    are ingested, so the two jobs never see each other's runs.
-    """
-    _run_fetch(Benchmark.LLM, coval_run_ids, window_hours, page_size)
-
-
 if __name__ == "__main__":
     fetch_s2s()

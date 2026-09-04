@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import click
 import httpx
 import pytest
 from click.testing import CliRunner
@@ -1940,12 +1939,8 @@ def test_log_run_failed_emits_run_failed_event() -> None:
 def _run_fetch_cli(
     monkeypatch: pytest.MonkeyPatch,
     statuses: dict[str, RunStatus],
-    command: click.Command = fetch_v2v.fetch_s2s,
-    calls: list[dict[str, Any]] | None = None,
 ) -> tuple[int, list[str]]:
     async def fake_fetch(_settings: Settings, **kwargs: object) -> dict[str, RunStatus]:
-        if calls is not None:
-            calls.append(dict(kwargs))
         return statuses
 
     settings = Settings.model_construct(log_level="INFO")
@@ -1953,17 +1948,8 @@ def _run_fetch_cli(
     monkeypatch.setattr(fetch_v2v, "get_settings", lambda: settings)
     monkeypatch.setattr("coval_bench.logging.configure_logging", lambda level: None)
     with capture_logs() as logs:
-        result = CliRunner().invoke(command, [])
+        result = CliRunner().invoke(fetch_v2v.fetch_s2s, [])
     return result.exit_code, [str(entry.get("event")) for entry in logs]
-
-
-def test_fetch_llm_cli_selects_the_llm_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, Any]] = []
-    code, events = _run_fetch_cli(
-        monkeypatch, {"phonely:phonely-agent": RunStatus.SUCCEEDED}, fetch_v2v.fetch_llm, calls
-    )
-    assert (code, events) == (0, [])
-    assert calls[0]["benchmark"] is Benchmark.LLM
 
 
 def test_cli_mixed_alerts_partial_exit_zero(monkeypatch: pytest.MonkeyPatch) -> None:
