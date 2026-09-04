@@ -1247,12 +1247,17 @@ def _fetch_options[Command: Callable[..., None]](command: Command) -> Command:
 
 
 def _run_fetch(
-    benchmark: Benchmark, coval_run_ids: tuple[str, ...], window_hours: int, page_size: int
+    benchmark: Benchmark,
+    coval_run_ids: tuple[str, ...],
+    window_hours: int,
+    page_size: int,
+    *,
+    settings: Settings | None = None,
 ) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
     label = f"{benchmark.value.lower()} fetch"
-    settings = get_settings()
+    settings = settings or get_settings()
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:
@@ -1293,17 +1298,6 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
     operator can recover runs the scheduled window has already passed over.
     """
     _run_fetch(Benchmark.S2S, coval_run_ids, window_hours, page_size)
-
-
-@click.command(name="fetch-llm")
-@_fetch_options
-def fetch_llm(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
-    """Fetch LLM instruction scores from Coval and join the proxy's per-turn TTFT.
-
-    Same scan and backfill options as fetch-s2s; only agents on the LLM benchmark
-    are ingested, so the two jobs never see each other's runs.
-    """
-    _run_fetch(Benchmark.LLM, coval_run_ids, window_hours, page_size)
 
 
 if __name__ == "__main__":

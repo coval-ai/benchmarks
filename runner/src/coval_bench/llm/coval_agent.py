@@ -11,9 +11,11 @@ from typing import Any, Self
 
 import click
 import httpx
+import structlog
 from pydantic import BaseModel, SecretStr
 
 from coval_bench.config import Settings, get_settings
+from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
 from coval_bench.variants.platforms import redact
 
@@ -56,7 +58,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
             if not value
         ]
         if missing or proxy_url is None or proxy_secret is None or not dental or not metric:
-            raise SyncError(f"sync-coval needs {', '.join(missing)} set")
+            raise SyncError(f"sync-llm needs {', '.join(missing)} set")
         return cls(
             proxy_url=proxy_url.rstrip("/"),
             proxy_secret=proxy_secret,
@@ -218,7 +220,7 @@ def sync(
     return result
 
 
-@click.command(name="sync-coval")
+@click.command(name="sync-llm")
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Report what would change; write nothing."
 )
@@ -226,17 +228,38 @@ def sync(
 @click.option(
     "--coval-api-base", envvar="COVAL_API_BASE", default=COVAL_API_BASE, show_default=True
 )
-def sync_coval(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> None:
-    """Create or reconcile the Coval agent, test-set link, run template, and daily schedule
-    for the Phonely text agent. Laptop tool; prints the agent id the fetch job needs."""
+def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> None:
+    """Reconcile the Coval text benchmark, then ingest its completed runs.
+
+    The first apply creates the scheduled benchmark and defers ingestion until a
+    run can exist. Later applies sync both Coval's desired state and our database.
+    """
+    settings = get_settings()
+    if not dry_run:
+        configure_logging(level=settings.log_level)
+    run_logger = structlog.get_logger("coval_bench.llm.coval_agent")
     try:
-        definition = CovalTextAgentDefinition.from_settings(get_settings(), test_set_id=test_set_id)
+        definition = CovalTextAgentDefinition.from_settings(settings, test_set_id=test_set_id)
         if dry_run:
             click.echo(json.dumps(definition.redacted_body(), indent=2, sort_keys=True))
         with CovalTextClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
             result = sync(client, definition, dry_run=dry_run)
     except (SyncError, RuntimeError, httpx.HTTPError) as exc:
+        if not dry_run:
+            run_logger.error("RUN_FAILED", error=str(exc), exc_info=exc)
         raise click.ClickException(str(exc)) from exc
     for action in result.actions:
         click.echo(action)
     click.echo(f"COVAL_LLM_PHONELY_AGENT_ID={result.agent_id or '<created on apply>'}")
+    if not dry_run:
+        if "scheduled run: create" in result.actions:
+            run_logger.info("llm_sync_fetch_deferred", reason="scheduled_run_created")
+        else:
+            from coval_bench.registries.benchmarks import Benchmark
+            from coval_bench.s2s.fetch_v2v import _run_fetch
+
+            fetch_settings = settings.model_copy(
+                update={"coval_llm_phonely_agent_id": result.agent_id}
+            )
+            _run_fetch(Benchmark.LLM, (), 720, 100, settings=fetch_settings)
+        run_logger.info("llm_sync_completed", agent_id=result.agent_id, actions=result.actions)
