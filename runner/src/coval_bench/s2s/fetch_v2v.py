@@ -27,8 +27,7 @@ from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.writer import RunWriter
-from coval_bench.llm.phonely import MODEL as PHONELY_MODEL
-from coval_bench.llm.phonely import PROVIDER as PHONELY_PROVIDER
+from coval_bench.llm.benchmark import LLM_MODELS
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.s2s.conditions import (
@@ -132,14 +131,17 @@ AGENTS: tuple[AgentSpec, ...] = (
     ),
     # The same dental set driven over text through the LLM proxy; TTFT comes from
     # the proxy's own turn log rather than from Coval.
-    AgentSpec(
-        agent_id_attr="coval_llm_phonely_agent_id",
-        provider=PHONELY_PROVIDER,
-        model=PHONELY_MODEL,
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_LLM_DENTAL,
-        publish_samples=False,
-        benchmark=Benchmark.LLM,
+    *(
+        AgentSpec(
+            agent_id_attr=f"coval_llm_{provider}_agent_id",
+            provider=provider,
+            model=model,
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_LLM_DENTAL,
+            publish_samples=False,
+            benchmark=Benchmark.LLM,
+        )
+        for provider, model in LLM_MODELS.items()
     ),
 )
 

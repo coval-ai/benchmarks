@@ -20,11 +20,8 @@ from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
 from coval_bench.variants.platforms import redact
 
-CUSTOMER_AGENT_ID = "benchmarks-phonely-text"
-DISPLAY_NAME = "Benchmarks: Phonely text agent"
 # The public API rejects MODEL_TYPE_TEXT; CHAT is the HTTP text simulator.
 MODEL_TYPE = "MODEL_TYPE_CHAT"
-RUN_NAME = "benchmarks-phonely-text-daily"
 SCHEDULE_EXPRESSION = "cron(0 13 * * ? *)"
 SCHEDULE_TIMEZONE = "UTC"
 INPUT_TEMPLATE = (
@@ -36,13 +33,28 @@ MANAGED = ("display_name", "metadata", "test_set_ids")
 
 
 class CovalTextAgentDefinition(BaseModel, frozen=True):
+    provider: str
     proxy_url: str
     proxy_secret: SecretStr
     test_set_id: str
     instruction_metric_id: str
 
+    @property
+    def customer_agent_id(self) -> str:
+        return f"benchmarks-{self.provider}-text"
+
+    @property
+    def display_name(self) -> str:
+        return f"Benchmarks: {self.provider.capitalize()} text agent"
+
+    @property
+    def run_name(self) -> str:
+        return f"benchmarks-{self.provider}-text-daily"
+
     @classmethod
-    def from_settings(cls, settings: Settings, *, test_set_id: str | None = None) -> Self:
+    def from_settings(
+        cls, provider: str, settings: Settings, *, test_set_id: str | None = None
+    ) -> Self:
         proxy_url = settings.llm_proxy_public_url
         proxy_secret = settings.llm_proxy_secret
         dental = test_set_id or settings.coval_s2s_dental_test_set_id
@@ -60,6 +72,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         if missing or proxy_url is None or proxy_secret is None or not dental or not metric:
             raise SyncError(f"sync-llm needs {', '.join(missing)} set")
         return cls(
+            provider=provider,
             proxy_url=proxy_url.rstrip("/"),
             proxy_secret=proxy_secret,
             test_set_id=dental,
@@ -68,12 +81,12 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
 
     def agent_body(self) -> dict[str, Any]:
         return {
-            "display_name": DISPLAY_NAME,
-            "customer_agent_id": CUSTOMER_AGENT_ID,
+            "display_name": self.display_name,
+            "customer_agent_id": self.customer_agent_id,
             "model_type": MODEL_TYPE,
             "metadata": {
-                "chat_endpoint": f"{self.proxy_url}/llm/phonely/chat",
-                "initialization_endpoint": f"{self.proxy_url}/llm/phonely/session",
+                "chat_endpoint": f"{self.proxy_url}/llm/{self.provider}/chat",
+                "initialization_endpoint": f"{self.proxy_url}/llm/{self.provider}/session",
                 "initialization_payload": "{}",
                 "authorization_header": f"Bearer {self.proxy_secret.get_secret_value()}",
                 "input_template": INPUT_TEMPLATE,
@@ -101,13 +114,13 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
 
     def run_template_body(self, agent_id: str) -> dict[str, Any]:
         return benchmark.run_template_body(
-            RUN_NAME, agent_id, self.test_set_id, self.instruction_metric_id
+            self.run_name, agent_id, self.test_set_id, self.instruction_metric_id
         )
 
 
-def scheduled_run_body(run_template_id: str) -> dict[str, Any]:
+def scheduled_run_body(run_name: str, run_template_id: str) -> dict[str, Any]:
     return {
-        "display_name": RUN_NAME,
+        "display_name": run_name,
         "run_template_id": run_template_id,
         "schedule_expression": SCHEDULE_EXPRESSION,
         "schedule_timezone": SCHEDULE_TIMEZONE,
@@ -169,7 +182,7 @@ def sync(
     """Find-or-create the agent, its test-set link, run template, and schedule."""
     result = SyncResult()
     wanted = definition.agent_body()
-    live = client.find_agent(CUSTOMER_AGENT_ID)
+    live = client.find_agent(definition.customer_agent_id)
     if live is None:
         result.actions.append("agent: create")
         if dry_run:
@@ -200,7 +213,7 @@ def sync(
         if not dry_run:
             client.add_test_set_agents(definition.test_set_id, [result.agent_id])
 
-    template = client.find_run_template(RUN_NAME)
+    template = client.find_run_template(definition.run_name)
     if template is None:
         result.actions.append("run template: create")
         if dry_run:
@@ -224,7 +237,7 @@ def sync(
     if client.find_scheduled_run(template_id) is None:
         result.actions.append("scheduled run: create")
         if not dry_run:
-            client.create_scheduled_run(scheduled_run_body(template_id))
+            client.create_scheduled_run(scheduled_run_body(definition.run_name, template_id))
     else:
         result.actions.append("scheduled run: exists")
     return result
@@ -249,27 +262,47 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
         configure_logging(level=settings.log_level)
     run_logger = structlog.get_logger("coval_bench.llm.coval_agent")
     try:
-        definition = CovalTextAgentDefinition.from_settings(settings, test_set_id=test_set_id)
+        definitions = [
+            CovalTextAgentDefinition.from_settings(provider, settings, test_set_id=test_set_id)
+            for provider in benchmark.LLM_MODELS
+        ]
         if dry_run:
-            click.echo(json.dumps(definition.redacted_body(), indent=2, sort_keys=True))
+            for definition in definitions:
+                click.echo(json.dumps(definition.redacted_body(), indent=2, sort_keys=True))
         with CovalTextClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
-            result = sync(client, definition, dry_run=dry_run)
+            results = {
+                definition.provider: sync(client, definition, dry_run=dry_run)
+                for definition in definitions
+            }
     except (SyncError, RuntimeError, httpx.HTTPError) as exc:
         if not dry_run:
             run_logger.error("RUN_FAILED", error=str(exc), exc_info=exc)
         raise click.ClickException(str(exc)) from exc
-    for action in result.actions:
-        click.echo(action)
-    click.echo(f"COVAL_LLM_PHONELY_AGENT_ID={result.agent_id or '<created on apply>'}")
-    if not dry_run:
+    for provider, result in results.items():
+        for action in result.actions:
+            click.echo(f"{provider} {action}")
+        click.echo(
+            f"COVAL_LLM_{provider.upper()}_AGENT_ID={result.agent_id or '<created on apply>'}"
+        )
+    if dry_run:
+        return
+    fetchable: dict[str, str] = {}
+    for provider, result in results.items():
         if "scheduled run: create" in result.actions:
-            run_logger.info("llm_sync_fetch_deferred", reason="scheduled_run_created")
-        else:
-            from coval_bench.registries.benchmarks import Benchmark
-            from coval_bench.s2s.fetch_v2v import _run_fetch
-
-            fetch_settings = settings.model_copy(
-                update={"coval_llm_phonely_agent_id": result.agent_id}
+            run_logger.info(
+                "llm_sync_fetch_deferred", provider=provider, reason="scheduled_run_created"
             )
-            _run_fetch(Benchmark.LLM, (), 720, 100, settings=fetch_settings)
-        run_logger.info("llm_sync_completed", agent_id=result.agent_id, actions=result.actions)
+        else:
+            fetchable[f"coval_llm_{provider}_agent_id"] = result.agent_id
+    if fetchable:
+        from coval_bench.registries.benchmarks import Benchmark
+        from coval_bench.s2s.fetch_v2v import _run_fetch
+
+        _run_fetch(Benchmark.LLM, (), 720, 100, settings=settings.model_copy(update=fetchable))
+    for provider, result in results.items():
+        run_logger.info(
+            "llm_sync_completed",
+            provider=provider,
+            agent_id=result.agent_id,
+            actions=result.actions,
+        )

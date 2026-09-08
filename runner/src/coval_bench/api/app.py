@@ -49,7 +49,7 @@ from coval_bench.api.routers import (
     arena,
     health,
     leaderboard,
-    llm_phonely,
+    llm_proxy,
     mocktools,
     pricing,
     providers,
@@ -63,6 +63,7 @@ from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.llm.phonely import PhonelyClient
+from coval_bench.llm.turn import TurnClient
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
 
@@ -120,17 +121,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("posthog_init_failed", exc_info=True)
                 posthog_client = None
         app.state.posthog = posthog_client
-        phonely_client: PhonelyClient | None = None
+        llm_clients: dict[str, TurnClient] = {}
         phonely_key = resolved.phonely_api_key
         if phonely_key and phonely_key.get_secret_value() and resolved.phonely_agent_id:
-            phonely_client = PhonelyClient(
+            llm_clients["phonely"] = PhonelyClient(
                 phonely_key.get_secret_value(),
                 resolved.phonely_agent_id,
                 resolved.phonely_base_url,
             )
         else:
-            logger.info("phonely_proxy_disabled")
-        app.state.phonely_client = phonely_client
+            logger.info("llm_proxy_disabled", provider="phonely")
+        app.state.llm_clients = llm_clients
         # Built here rather than on first request: loading and cross-checking the
         # fixtures inside a live call would put that cost on the agent's turn.
         # Absent fixtures are normal in CI and a fresh checkout, so the route
@@ -150,8 +151,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 app.state.settings = resolved
                 yield
         finally:
-            if phonely_client is not None:
-                await phonely_client.aclose()
+            for llm_client in llm_clients.values():
+                await llm_client.aclose()
             if posthog_client is not None:
                 try:
                     posthog_client.shutdown()  # type: ignore[no-untyped-call]
@@ -221,7 +222,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # public read API. slowapi carries no default limit, so /mock and /llm are exempt
     # by construction — a 429 mid-conversation would be graded as the agent failing.
     app.include_router(mocktools.router)
-    app.include_router(llm_phonely.router)
+    app.include_router(llm_proxy.router)
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).
