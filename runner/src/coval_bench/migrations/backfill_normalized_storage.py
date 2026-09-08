@@ -515,21 +515,18 @@ def _stt_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         statuses = {x.status for x in group}
         failed = statuses == {"failed"}
         errors = {x.error.strip() for x in group if x.error and x.error.strip()}
-        if failed and len(errors) != 1:
+        if failed and not errors:
             skipped["failed_observation_error_unrecoverable"] += 1
             continue
         if not _metrics_are_valid(group, skipped):
             continue
-        # Legacy rows have no failure-origin column.  A provider error was
-        # copied onto every STT metric, so multiple distinct failed metrics
-        # carrying one identical error are the only defensible proof.  A
-        # single failed metric is ambiguous and remains a failed evaluation
-        # under a succeeded observation.
         failed_metrics = {x.metric for x in group if x.status == "failed"}
         if failed and len(failed_metrics) < 2:
             skipped["observation_failure_origin_unrecoverable"] += 1
             continue
-        error = next(iter(errors)) if failed else None
+        # Shared errors indicate provider failure; distinct errors are metric failures.
+        provider_failed = failed and len(failed_metrics) >= 2 and len(errors) == 1
+        error = next(iter(errors)) if provider_failed else None
         plans.append(
             Planned(
                 group,
@@ -538,9 +535,9 @@ def _stt_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 r.dataset_sha256,
                 "STT",
                 "dataset_audio",
-                "failed" if error else "succeeded",
+                "failed" if provider_failed else "succeeded",
                 error,
-                "provider" if error else None,
+                "provider" if provider_failed else None,
                 artifacts,
             )
         )
@@ -585,10 +582,14 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
             and attached == [a]
             and a.status == "failed"
             and bool(a.error and a.error.strip())
-            and a.value is not None
-            and a.value == a.value
-            and a.value not in (float("inf"), float("-inf"))
-            and a.value >= 0
+            and (
+                a.value is None
+                or (
+                    a.value == a.value
+                    and a.value not in (float("inf"), float("-inf"))
+                    and a.value >= 0
+                )
+            )
             and a.unit == "milliseconds"
         )
         if not a.filename and not failed_tts:
@@ -647,14 +648,14 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         # but do not fabricate observation failure provenance.
         error = None
         artifacts = (
-            []
-            if a.value is None
-            else [
+            [
                 (
                     "timing_events",
                     json.dumps({"ttfa_ms": a.value}, sort_keys=True, separators=(",", ":")),
                 )
             ]
+            if a.value is not None or failed_tts
+            else []
         )
         plans.append(
             Planned(
@@ -1118,7 +1119,7 @@ def _live_validation_result(
         anchor = next((candidate for candidate in plan.rows if candidate.metric == "TTFA"), None)
         if anchor is None:
             return LiveValidationResult(False, "evaluation")
-        if anchor.value is not None:
+        if anchor.value is not None or plan.live_owner_required:
             _, payload, _, _, _ = prepare_timing_events({"ttfa_ms": anchor.value})
             expected_tts_timing = (hashlib.sha256(payload).hexdigest(), len(payload))
 
