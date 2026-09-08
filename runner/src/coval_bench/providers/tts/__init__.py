@@ -27,6 +27,7 @@ from coval_bench.providers.tts.fishaudio import FishAudioTTSProvider
 from coval_bench.providers.tts.fluxions import FluxionsTTSProvider
 from coval_bench.providers.tts.gradium import GradiumTTSProvider
 from coval_bench.providers.tts.groq import GroqTTSProvider
+from coval_bench.providers.tts.guava import GuavaTTSProvider
 from coval_bench.providers.tts.hakim import HakimTTSProvider
 from coval_bench.providers.tts.inworld import InworldTTSProvider
 from coval_bench.providers.tts.lmnt import LmntTTSProvider
@@ -66,6 +67,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "smallest": SmallestTTSProvider,
     "xai": XaiTTSProvider,
     "groq": GroqTTSProvider,
+    "guava": GuavaTTSProvider,
     "soniox": SonioxTTSProvider,
     "baseten": BasetenTTSProvider,
     "azure": AzureTTSProvider,
@@ -99,6 +101,7 @@ __all__ = [
     "FishAudioTTSProvider",
     "FluxionsTTSProvider",
     "GradiumTTSProvider",
+    "GuavaTTSProvider",
     "HakimTTSProvider",
     "LmntTTSProvider",
     "MinimaxTTSProvider",

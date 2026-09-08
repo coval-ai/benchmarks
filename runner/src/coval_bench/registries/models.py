@@ -372,6 +372,23 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         collected=True,
         published=False,
     ),
+    # Guava STT (daytona-stt). Dark entry right now.
+    # Flip collected=True once the endpoint URL +
+    # token are mounted on the dedicated runner job.
+    RegisteredModel(
+        benchmark=_STT,
+        provider="guava",
+        model="daytona-stt",
+        creator="guava",
+        tags=(_VAD,),
+        source=Source.DEDICATED_INFERENCE,
+        licensing=_OPEN,
+        on_prem=True,
+        region="us",
+        collected=False,
+        published=False,
+        arena_enabled=False,
+    ),
     # Azure AI Speech real-time (raw WebSocket, conversation mode).
     RegisteredModel(
         benchmark=_STT,
@@ -1044,6 +1061,22 @@ MODEL_REGISTRY: list[RegisteredModel] = [
         region="us",
         collected=True,
         published=False,
+    ),
+    # Guava TTS (daytona-tts). Dark entry right now.
+    # Flip collected=True once the endpoint URL + token are
+    # mounted on the dedicated runner job.
+    RegisteredModel(
+        benchmark=_TTS,
+        provider="guava",
+        model="daytona-tts",
+        voice="grace",
+        creator="guava",
+        source=Source.DEDICATED_INFERENCE,
+        licensing=_OPEN,
+        on_prem=True,
+        collected=False,
+        published=False,
+        arena_enabled=False,
     ),
     RegisteredModel(
         benchmark=_TTS,

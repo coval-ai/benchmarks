@@ -288,6 +288,8 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
         from coval_bench.providers.stt.baseten import endpoint_url
 
         kwargs["ws_url"] = endpoint_url(settings, model)
+    elif provider == "guava":
+        kwargs["base_url"] = settings.guava_base_url
     elif provider == "azure":
         kwargs["region"] = settings.azure_region
     try:
