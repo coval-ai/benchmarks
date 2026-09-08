@@ -5,19 +5,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from typing import Any, Self
 
 import click
 import httpx
+import psycopg
 import structlog
 from pydantic import BaseModel, SecretStr
 
 from coval_bench.config import Settings, get_settings
+from coval_bench.db.conn import lifespan_pool
+from coval_bench.db.registry_store import fetch_models
 from coval_bench.llm import benchmark
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
+from coval_bench.registries.models import RegisteredModel
 from coval_bench.variants.platforms import redact
 
 # The public API rejects MODEL_TYPE_TEXT; CHAT is the HTTP text simulator.
@@ -38,6 +43,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     proxy_secret: SecretStr
     test_set_id: str
     instruction_metric_id: str
+    collected: bool = True
 
     @property
     def customer_agent_id(self) -> str:
@@ -53,7 +59,12 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
 
     @classmethod
     def from_settings(
-        cls, provider: str, settings: Settings, *, test_set_id: str | None = None
+        cls,
+        provider: str,
+        settings: Settings,
+        *,
+        test_set_id: str | None = None,
+        collected: bool = True,
     ) -> Self:
         proxy_url = settings.llm_proxy_public_url
         proxy_secret = settings.llm_proxy_secret
@@ -77,6 +88,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
             proxy_secret=proxy_secret,
             test_set_id=dental,
             instruction_metric_id=metric,
+            collected=collected,
         )
 
     def agent_body(self) -> dict[str, Any]:
@@ -118,14 +130,22 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         )
 
 
-def scheduled_run_body(run_name: str, run_template_id: str) -> dict[str, Any]:
+def scheduled_run_body(run_name: str, run_template_id: str, *, enabled: bool) -> dict[str, Any]:
     return {
         "display_name": run_name,
         "run_template_id": run_template_id,
         "schedule_expression": SCHEDULE_EXPRESSION,
         "schedule_timezone": SCHEDULE_TIMEZONE,
-        "enabled": True,
+        "enabled": enabled,
     }
+
+
+def load_llm_models(settings: Settings) -> list[RegisteredModel]:
+    async def _load() -> list[RegisteredModel]:
+        async with lifespan_pool(settings) as pool:
+            return benchmark.llm_models(await fetch_models(pool))
+
+    return asyncio.run(_load())
 
 
 class CovalTextClient(CovalClient):
@@ -166,6 +186,11 @@ class CovalTextClient(CovalClient):
 
     def create_scheduled_run(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = self._request("POST", "/scheduled-runs", body)
+        scheduled = payload.get("scheduled_run")
+        return scheduled if isinstance(scheduled, dict) else payload
+
+    def update_scheduled_run(self, scheduled_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        payload = self._request("PATCH", f"/scheduled-runs/{scheduled_id}", body)
         scheduled = payload.get("scheduled_run")
         return scheduled if isinstance(scheduled, dict) else payload
 
@@ -234,12 +259,19 @@ def sync(
             result.actions.append("run template: unchanged")
     template_id = str(template["id"])
 
-    if client.find_scheduled_run(template_id) is None:
+    scheduled = client.find_scheduled_run(template_id)
+    if scheduled is None:
         result.actions.append("scheduled run: create")
         if not dry_run:
-            client.create_scheduled_run(scheduled_run_body(definition.run_name, template_id))
+            client.create_scheduled_run(
+                scheduled_run_body(definition.run_name, template_id, enabled=definition.collected)
+            )
+    elif bool(scheduled.get("enabled")) != definition.collected:
+        result.actions.append(f"scheduled run: {'enable' if definition.collected else 'disable'}")
+        if not dry_run:
+            client.update_scheduled_run(str(scheduled["id"]), {"enabled": definition.collected})
     else:
-        result.actions.append("scheduled run: exists")
+        result.actions.append("scheduled run: unchanged")
     return result
 
 
@@ -263,8 +295,10 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
     run_logger = structlog.get_logger("coval_bench.llm.coval_agent")
     try:
         definitions = [
-            CovalTextAgentDefinition.from_settings(provider, settings, test_set_id=test_set_id)
-            for provider in benchmark.LLM_MODELS
+            CovalTextAgentDefinition.from_settings(
+                model.provider, settings, test_set_id=test_set_id, collected=model.collected
+            )
+            for model in load_llm_models(settings)
         ]
         if dry_run:
             for definition in definitions:
@@ -274,7 +308,7 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
                 definition.provider: sync(client, definition, dry_run=dry_run)
                 for definition in definitions
             }
-    except (SyncError, RuntimeError, httpx.HTTPError) as exc:
+    except (SyncError, RuntimeError, httpx.HTTPError, psycopg.Error) as exc:
         if not dry_run:
             run_logger.error("RUN_FAILED", error=str(exc), exc_info=exc)
         raise click.ClickException(str(exc)) from exc
@@ -287,8 +321,11 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
     if dry_run:
         return
     fetchable: dict[str, str] = {}
-    for provider, result in results.items():
-        if "scheduled run: create" in result.actions:
+    for definition, result in zip(definitions, results.values(), strict=True):
+        provider = definition.provider
+        if not definition.collected:
+            run_logger.info("llm_sync_fetch_skipped", provider=provider, reason="not_collected")
+        elif "scheduled run: create" in result.actions:
             run_logger.info(
                 "llm_sync_fetch_deferred", provider=provider, reason="scheduled_run_created"
             )

@@ -11,7 +11,7 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
@@ -19,14 +19,14 @@ from starlette.responses import JSONResponse
 from coval_bench.api.deps import (
     bearer_token,
     get_pool,
+    get_proxied_model,
     get_settings,
-    get_turn_client,
     secret_matches,
 )
 from coval_bench.config import Settings
 from coval_bench.db.llm_turns import insert_turn
-from coval_bench.llm.benchmark import LLM_MODELS
-from coval_bench.llm.turn import TurnClient, TurnError, TurnResult
+from coval_bench.llm.benchmark import ProxiedModel
+from coval_bench.llm.turn import TurnError, TurnResult
 
 logger = structlog.get_logger("coval_bench.api.llm_proxy")
 
@@ -70,7 +70,7 @@ def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _record_turn(
     pool: AsyncConnectionPool[Any],
     *,
-    provider: str,
+    target: ProxiedModel,
     simulation_id: str,
     turn_index: int,
     result: TurnResult,
@@ -80,8 +80,8 @@ async def _record_turn(
             pool,
             simulation_id=simulation_id,
             turn_index=turn_index,
-            provider=provider,
-            model=LLM_MODELS[provider],
+            provider=target.provider,
+            model=target.model,
             ttft_ms=result.ttft_ms,
             total_ms=result.total_ms,
             output_tokens=result.output_tokens,
@@ -124,14 +124,13 @@ def _completion(call_id: str, result: TurnResult) -> dict[str, Any]:
 
 @router.post("/session", dependencies=[Depends(require_proxy_secret)])
 async def create_session(
-    provider: str = Path(),
-    client: TurnClient = Depends(get_turn_client),
+    target: ProxiedModel = Depends(get_proxied_model),
 ) -> dict[str, str | None]:
     try:
-        session = await client.create_session()
+        session = await target.client.create_session()
     except TurnError as exc:
-        logger.warning("llm_session_failed", provider=provider, error=str(exc))
-        raise HTTPException(502, f"{provider} session creation failed") from exc
+        logger.warning("llm_session_failed", provider=target.provider, error=str(exc))
+        raise HTTPException(502, f"{target.provider} session creation failed") from exc
     return {"sessionId": session.call_id, "expiresAt": session.expires_at}
 
 
@@ -139,17 +138,17 @@ async def create_session(
 async def chat(
     body: ChatRequest,
     background: BackgroundTasks,
-    provider: str = Path(),
-    client: TurnClient = Depends(get_turn_client),
+    target: ProxiedModel = Depends(get_proxied_model),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> JSONResponse:
     if body.stream:
         raise HTTPException(400, "streaming responses are not supported")
+    provider = target.provider
     messages = _messages(body.messages)
     turn_index = sum(message.get("role") == "assistant" for message in messages)
     try:
         async with asyncio.timeout(_TURN_TIMEOUT_S):
-            result = await client.stream_turn(body.model, messages)
+            result = await target.client.stream_turn(body.model, messages)
     except TimeoutError as exc:
         logger.warning("llm_turn_timed_out", provider=provider, turn_index=turn_index)
         raise HTTPException(504, f"{provider} completion timed out") from exc
@@ -161,7 +160,7 @@ async def chat(
         background.add_task(
             _record_turn,
             pool,
-            provider=provider,
+            target=target,
             simulation_id=body.simulation_id,
             turn_index=turn_index,
             result=result,

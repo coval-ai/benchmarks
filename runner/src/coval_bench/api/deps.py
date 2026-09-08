@@ -26,7 +26,7 @@ from starlette.requests import Request
 from coval_bench.api import clerk
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import fetch_models
-from coval_bench.llm.benchmark import LLM_MODELS
+from coval_bench.llm.benchmark import ProxiedModel, llm_models
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries import RegisteredModel
 
@@ -67,17 +67,6 @@ def secret_matches(provided: str | None, expected: SecretStr | None) -> bool:
         return False
     value = expected.get_secret_value()
     return bool(value) and hmac.compare_digest(provided.encode(), value.encode())
-
-
-def get_turn_client(provider: str, request: Request) -> TurnClient:
-    """Return the lifespan-owned client for this provider, or fail closed."""
-    if provider not in LLM_MODELS:
-        raise HTTPException(404, f"{provider} is not an LLM benchmark provider")
-    clients: dict[str, TurnClient] = getattr(request.app.state, "llm_clients", {})
-    client = clients.get(provider)
-    if client is None:
-        raise HTTPException(503, f"{provider} proxy is not configured")
-    return client
 
 
 def require_coval_admin(
@@ -141,6 +130,24 @@ async def get_models(
     except Exception as exc:
         logger.error("model_roster_unavailable", exc_info=True)
         raise HTTPException(503, "the model registry is unavailable") from exc
+
+
+async def get_proxied_model(
+    provider: str,
+    request: Request,
+    models: list[RegisteredModel] = Depends(get_models),
+) -> ProxiedModel:
+    """The collected LLM model behind a /llm/{provider} route, or fail closed."""
+    registered = next(
+        (m for m in llm_models(models) if m.provider == provider and m.collected), None
+    )
+    if registered is None:
+        raise HTTPException(404, f"{provider} is not a collected LLM benchmark model")
+    clients: dict[str, TurnClient] = getattr(request.app.state, "llm_clients", {})
+    client = clients.get(provider)
+    if client is None:
+        raise HTTPException(503, f"{provider} proxy is not configured")
+    return ProxiedModel(provider=provider, model=registered.model, client=client)
 
 
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:

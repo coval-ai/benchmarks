@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import importlib.resources
 import random
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -26,10 +26,11 @@ import structlog
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
+from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
-from coval_bench.llm.benchmark import LLM_MODELS
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
@@ -129,21 +130,27 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_DENTAL,
         publish_samples=False,
     ),
-    # The same dental set driven over text through the LLM proxy; TTFT comes from
-    # the proxy's own turn log rather than from Coval.
-    *(
+)
+
+
+def llm_specs(models: Iterable[RegisteredModel]) -> tuple[AgentSpec, ...]:
+    """Every collected LLM model, driven over the same dental set through the proxy.
+
+    TTFT comes from the proxy's own turn log rather than from Coval.
+    """
+    return tuple(
         AgentSpec(
-            agent_id_attr=f"coval_llm_{provider}_agent_id",
-            provider=provider,
-            model=model,
+            agent_id_attr=f"coval_llm_{model.provider}_agent_id",
+            provider=model.provider,
+            model=model.model,
             test_set_id_attr="coval_s2s_dental_test_set_id",
             family=FAMILY_LLM_DENTAL,
             publish_samples=False,
             benchmark=Benchmark.LLM,
         )
-        for provider, model in LLM_MODELS.items()
-    ),
-)
+        for model in models
+        if model.benchmark is Benchmark.LLM and model.collected
+    )
 
 
 def _client(settings: Settings) -> httpx.AsyncClient:
@@ -1050,6 +1057,21 @@ async def _fetch_one_provider(
         return RunStatus.FAILED, len(statuses)
 
 
+def _require_family_test_sets(settings: Settings, specs: Sequence[AgentSpec]) -> None:
+    """A family's test set is required once one of its agents is configured.
+
+    Unset would otherwise skip the agent with a warning that reads the same as
+    never having configured it.
+    """
+    for spec in specs:
+        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr, None):
+            continue
+        if not (getattr(settings, spec.test_set_id_attr) or "").strip():
+            raise RuntimeError(
+                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
+            )
+
+
 async def fetch_and_write_v2v(
     settings: Settings | None = None,
     *,
@@ -1099,16 +1121,9 @@ async def fetch_and_write_v2v(
     raw_dental = settings.coval_s2s_dental_test_set_id
     if raw_dental is not None and not raw_dental.strip():
         raise RuntimeError("coval_s2s_dental_test_set_id must not be blank")
-    # A family's test set is required once one of its agents is configured;
-    # unset would otherwise skip the agent with a warning that reads the same
-    # as never having configured it.
-    for spec in specs:
-        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr):
-            continue
-        if not (getattr(settings, spec.test_set_id_attr) or "").strip():
-            raise RuntimeError(
-                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
-            )
+    if benchmark is Benchmark.LLM and not raw_dental:
+        raise RuntimeError("coval_s2s_dental_test_set_id is required for the LLM benchmark")
+    _require_family_test_sets(settings, specs)
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.
     raw_noisy = settings.coval_s2s_noisy_persona_id
@@ -1139,13 +1154,16 @@ async def fetch_and_write_v2v(
         raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
+        if benchmark is Benchmark.LLM:
+            specs = llm_specs(await fetch_models(pool))
+            _require_family_test_sets(settings, specs)
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
         matched_run_ids: set[str] = set()
         sampled_runs: list[SampleRun] = []
         for spec in specs:
-            agent_id = getattr(settings, spec.agent_id_attr)
+            agent_id = getattr(settings, spec.agent_id_attr, None)
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
                 continue

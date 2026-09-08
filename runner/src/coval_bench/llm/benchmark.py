@@ -5,10 +5,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any
 
-LLM_MODELS = {"phonely": "phonely-agent"}
+from coval_bench.config import Settings
+from coval_bench.llm.phonely import PhonelyClient
+from coval_bench.llm.turn import TurnClient
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import RegisteredModel
+
+CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
+    "phonely": PhonelyClient.from_settings,
+}
 DEFAULT_PERSONA_ID = "PN3xgmsqeLDjsNNEA2e55e"
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")
@@ -17,6 +26,26 @@ _TEMPLATE_PATCH_KEYS = {
     "persona_ids": "persona_id",
     "test_set_ids": "test_set_id",
 }
+
+
+@dataclass(frozen=True)
+class ProxiedModel:
+    provider: str
+    model: str
+    client: TurnClient
+
+
+def llm_models(models: Iterable[RegisteredModel]) -> list[RegisteredModel]:
+    return [model for model in models if model.benchmark is Benchmark.LLM]
+
+
+def make_clients(settings: Settings) -> dict[str, TurnClient]:
+    clients: dict[str, TurnClient] = {}
+    for provider, factory in CLIENT_FACTORIES.items():
+        client = factory(settings)
+        if client is not None:
+            clients[provider] = client
+    return clients
 
 
 def run_template_body(
