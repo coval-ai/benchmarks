@@ -15,7 +15,7 @@ from click.testing import CliRunner
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
-from coval_bench.llm import coval_agent
+from coval_bench.llm import benchmark, coval_agent
 from coval_bench.llm.coval_agent import (
     CUSTOMER_AGENT_ID,
     RUN_NAME,
@@ -79,6 +79,8 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
             created = {**body, "id": "T" * 22}
             state["run_templates"].append(created)
             return httpx.Response(200, json={"run_template": created})
+        if path.startswith("/run-templates/"):
+            return httpx.Response(200, json={"run_template": {**state["run_templates"][0], **body}})
         if path == "/scheduled-runs":
             return httpx.Response(200, json={"scheduled_run": {**body, "id": "S" * 22}})
         return httpx.Response(
@@ -144,7 +146,7 @@ def test_sync_creates_everything_when_absent() -> None:
     ]
     template = state["writes"][2][1]
     assert template["agent_ids"] == ["A" * 22]
-    assert template["persona_ids"] == list(coval_agent.CLEAN_DENTAL_PERSONAS)
+    assert template["persona_ids"] == [benchmark.DEFAULT_PERSONA_ID]
     assert template["test_set_ids"] == ["TSDENTAL"]
     assert template["metric_ids"] == ["M" * 22]
     assert template["iteration_count"] == 1
@@ -158,7 +160,7 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
     state = _state(
         agents=[live],
         test_set_agents=[{"id": "A"}],
-        run_templates=[{"id": "T", "display_name": RUN_NAME}],
+        run_templates=[{**DEFINITION.run_template_body("A"), "id": "T"}],
         scheduled_runs=[{"id": "S", "run_template_id": "T"}],
     )
     with _client(state) as client:
@@ -167,10 +169,34 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
     assert result.actions == [
         "agent: patch ['metadata']",
         "test set: attached",
-        "run template: exists",
+        "run template: unchanged",
         "scheduled run: exists",
     ]
     assert state["writes"] == [("/agents/A", {"metadata": DEFINITION.agent_body()["metadata"]})]
+
+
+def test_sync_patches_only_the_drifted_template_fields() -> None:
+    live_template = {
+        **DEFINITION.run_template_body("A"),
+        "id": "T",
+        "persona_ids": [benchmark.DEFAULT_PERSONA_ID, "9ATy64zKXxSUaVWb5YnQtd"],
+        "concurrency": 1,
+    }
+    state = _state(
+        agents=[{**DEFINITION.agent_body(), "id": "A"}],
+        test_set_agents=[{"id": "A"}],
+        run_templates=[live_template],
+        scheduled_runs=[{"id": "S", "run_template_id": "T"}],
+    )
+    with _client(state) as client:
+        assert (
+            sync(client, DEFINITION, dry_run=True).actions[2]
+            == "run template: patch ['persona_ids']"
+        )
+        assert state["writes"] == []
+        sync(client, DEFINITION)
+
+    assert state["writes"] == [("/run-templates/T", {"persona_id": benchmark.DEFAULT_PERSONA_ID})]
 
 
 def test_sync_looks_up_by_customer_id_filter_and_never_adopts_a_name_only_match() -> None:

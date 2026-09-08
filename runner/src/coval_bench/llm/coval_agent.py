@@ -15,6 +15,7 @@ import structlog
 from pydantic import BaseModel, SecretStr
 
 from coval_bench.config import Settings, get_settings
+from coval_bench.llm import benchmark
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
 from coval_bench.variants.platforms import redact
@@ -24,7 +25,6 @@ DISPLAY_NAME = "Benchmarks: Phonely text agent"
 # The public API rejects MODEL_TYPE_TEXT; CHAT is the HTTP text simulator.
 MODEL_TYPE = "MODEL_TYPE_CHAT"
 RUN_NAME = "benchmarks-phonely-text-daily"
-CLEAN_DENTAL_PERSONAS = ("PN3xgmsqeLDjsNNEA2e55e", "9ATy64zKXxSUaVWb5YnQtd")
 SCHEDULE_EXPRESSION = "cron(0 13 * * ? *)"
 SCHEDULE_TIMEZONE = "UTC"
 INPUT_TEMPLATE = (
@@ -100,14 +100,9 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         return redacted
 
     def run_template_body(self, agent_id: str) -> dict[str, Any]:
-        return {
-            "display_name": RUN_NAME,
-            "agent_ids": [agent_id],
-            "persona_ids": list(CLEAN_DENTAL_PERSONAS),
-            "test_set_ids": [self.test_set_id],
-            "metric_ids": [self.instruction_metric_id],
-            "iteration_count": 1,
-        }
+        return benchmark.run_template_body(
+            RUN_NAME, agent_id, self.test_set_id, self.instruction_metric_id
+        )
 
 
 def scheduled_run_body(run_template_id: str) -> dict[str, Any]:
@@ -142,6 +137,11 @@ class CovalTextClient(CovalClient):
 
     def create_run_template(self, body: dict[str, Any]) -> dict[str, Any]:
         payload = self._request("POST", "/run-templates", body)
+        template = payload.get("run_template")
+        return template if isinstance(template, dict) else payload
+
+    def update_run_template(self, template_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        payload = self._request("PATCH", f"/run-templates/{template_id}", body)
         template = payload.get("run_template")
         return template if isinstance(template, dict) else payload
 
@@ -208,7 +208,17 @@ def sync(
             return result
         template = client.create_run_template(definition.run_template_body(result.agent_id))
     else:
-        result.actions.append("run template: exists")
+        wanted_template = definition.run_template_body(result.agent_id)
+        drift = plan(template, {path: wanted_template[path] for path in benchmark.TEMPLATE_MANAGED})
+        if drift.update:
+            result.actions.append(f"run template: patch {sorted(drift.update)}")
+            if not dry_run:
+                client.update_run_template(
+                    str(template["id"]),
+                    benchmark.template_patch_body(wanted_template, drift.update),
+                )
+        else:
+            result.actions.append("run template: unchanged")
     template_id = str(template["id"])
 
     if client.find_scheduled_run(template_id) is None:
