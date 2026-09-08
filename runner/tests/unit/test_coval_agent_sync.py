@@ -23,8 +23,17 @@ from coval_bench.llm.coval_agent import (
     sync_llm,
 )
 from coval_bench.platform_assets import SyncError
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import RegisteredModel
 
 SECRET = "proxy-secret-value"  # noqa: S105
+PHONELY = RegisteredModel(
+    benchmark=Benchmark.LLM,
+    provider="phonely",
+    model="phonely-agent",
+    collected=True,
+    published=False,
+)
 DEFINITION = CovalTextAgentDefinition(
     provider="phonely",
     proxy_url="https://api.example.com",
@@ -82,6 +91,10 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
             return httpx.Response(200, json={"run_template": {**state["run_templates"][0], **body}})
         if path == "/scheduled-runs":
             return httpx.Response(200, json={"scheduled_run": {**body, "id": "S" * 22}})
+        if path.startswith("/scheduled-runs/"):
+            return httpx.Response(
+                200, json={"scheduled_run": {**state["scheduled_runs"][0], **body}}
+            )
         return httpx.Response(
             400, json={"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": path}}
         )
@@ -154,6 +167,29 @@ def test_sync_creates_everything_when_absent() -> None:
     assert template["iteration_count"] == 1
     assert "options" not in template
     assert state["writes"][3][1]["schedule_expression"] == "cron(0 13 * * ? *)"
+    assert state["writes"][3][1]["enabled"] is True
+
+
+def test_sync_disables_the_schedule_of_an_uncollected_model() -> None:
+    paused = DEFINITION.model_copy(update={"collected": False})
+    state = _state(
+        agents=[{**DEFINITION.agent_body(), "id": "A"}],
+        test_set_agents=[{"id": "A"}],
+        run_templates=[{**DEFINITION.run_template_body("A"), "id": "T"}],
+        scheduled_runs=[{"id": "S", "run_template_id": "T", "enabled": True}],
+    )
+    with _client(state) as client:
+        assert sync(client, paused, dry_run=True).actions[3] == "scheduled run: disable"
+        assert state["writes"] == []
+        sync(client, paused)
+        state["scheduled_runs"][0]["enabled"] = False
+        assert sync(client, paused).actions[3] == "scheduled run: unchanged"
+        assert sync(client, DEFINITION).actions[3] == "scheduled run: enable"
+
+    assert state["writes"] == [
+        ("/scheduled-runs/S", {"enabled": False}),
+        ("/scheduled-runs/S", {"enabled": True}),
+    ]
 
 
 def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
@@ -163,7 +199,7 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
         agents=[live],
         test_set_agents=[{"id": "A"}],
         run_templates=[{**DEFINITION.run_template_body("A"), "id": "T"}],
-        scheduled_runs=[{"id": "S", "run_template_id": "T"}],
+        scheduled_runs=[{"id": "S", "run_template_id": "T", "enabled": True}],
     )
     with _client(state) as client:
         result = sync(client, DEFINITION)
@@ -172,7 +208,7 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
         "agent: patch ['metadata']",
         "test set: attached",
         "run template: unchanged",
-        "scheduled run: exists",
+        "scheduled run: unchanged",
     ]
     assert state["writes"] == [("/agents/A", {"metadata": DEFINITION.agent_body()["metadata"]})]
 
@@ -188,7 +224,7 @@ def test_sync_patches_only_the_drifted_template_fields() -> None:
         agents=[{**DEFINITION.agent_body(), "id": "A"}],
         test_set_agents=[{"id": "A"}],
         run_templates=[live_template],
-        scheduled_runs=[{"id": "S", "run_template_id": "T"}],
+        scheduled_runs=[{"id": "S", "run_template_id": "T", "enabled": True}],
     )
     with _client(state) as client:
         assert (
@@ -252,6 +288,7 @@ def test_cli_prints_the_agent_id_and_never_the_secret(monkeypatch: pytest.Monkey
         ),
     )
     monkeypatch.setattr(coval_agent, "CovalTextClient", lambda *_args: _client(state))
+    monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [PHONELY])
 
     dry = CliRunner().invoke(sync_llm, ["--dry-run"])
     assert dry.exit_code == 0, dry.output
@@ -272,7 +309,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
         agents=[{**DEFINITION.agent_body(), "id": agent_id}],
         test_set_agents=[{"id": agent_id}],
         run_templates=[{"id": template_id, "display_name": "benchmarks-phonely-text-daily"}],
-        scheduled_runs=[{"id": "S" * 22, "run_template_id": template_id}],
+        scheduled_runs=[{"id": "S" * 22, "run_template_id": template_id, "enabled": True}],
     )
     settings = Settings(
         llm_proxy_public_url="https://api.example.com",
@@ -284,6 +321,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("COVAL_API_KEY", "coval-key")
     monkeypatch.setattr(coval_agent, "get_settings", lambda: settings)
     monkeypatch.setattr(coval_agent, "CovalTextClient", lambda *_args: _client(state))
+    monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [PHONELY])
     monkeypatch.setattr("coval_bench.s2s.fetch_v2v._run_fetch", fetch)
 
     applied = CliRunner().invoke(sync_llm, [])
@@ -292,9 +330,19 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
     fetch.assert_called_once()
     assert fetch.call_args.kwargs["settings"].coval_llm_phonely_agent_id == agent_id
 
+    paused = PHONELY.model_copy(update={"collected": False})
+    monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [paused])
+    fetch.reset_mock()
+    applied = CliRunner().invoke(sync_llm, [])
+
+    assert applied.exit_code == 0, applied.output
+    assert "phonely scheduled run: disable" in applied.output
+    fetch.assert_not_called()
+
 
 def test_cli_logs_automation_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(coval_agent, "get_settings", Settings)
+    monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [PHONELY])
 
     failed = CliRunner().invoke(sync_llm, [])
 

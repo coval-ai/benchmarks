@@ -22,6 +22,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Benchmark, Metric
+from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
     DATASET_ID_LLM_DENTAL,
@@ -41,6 +42,13 @@ LATENCY_IDS = {Metric.V2V: "MID"}
 ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
 SPEC = AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime")
+PHONELY = RegisteredModel(
+    benchmark=Benchmark.LLM,
+    provider="phonely",
+    model="phonely-agent",
+    collected=True,
+    published=False,
+)
 LLM_SPEC = AgentSpec(
     agent_id_attr="coval_s2s_openai_agent_id",
     provider="phonely",
@@ -775,7 +783,8 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
 ) -> None:
     settings = Settings(
         coval_s2s_instruction_metric_id="IID",
-        coval_s2s_openai_agent_id="llm-agent",
+        coval_s2s_openai_agent_id="s2s-agent",
+        coval_llm_phonely_agent_id="llm-agent",
         coval_s2s_dental_test_set_id="TSD",
     )
     client = _fake_client({}, {})
@@ -786,7 +795,15 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
         yield MagicMock()
 
     fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (SPEC, LLM_SPEC))
+    paused = RegisteredModel(
+        benchmark=Benchmark.LLM,
+        provider="paused",
+        model="paused-agent",
+        collected=False,
+        published=False,
+    )
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (SPEC,))
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=[PHONELY, paused]))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _settings: client)
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
@@ -797,12 +814,12 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     assert statuses == {"phonely:phonely-agent": RunStatus.SUCCEEDED}
     fetch_one.assert_awaited_once()
     assert fetch_one.await_args is not None
-    assert fetch_one.await_args.kwargs["spec"] is LLM_SPEC
+    assert fetch_one.await_args.kwargs["spec"] == fetch_v2v.llm_specs([PHONELY])[0]
     assert fetch_one.await_args.kwargs["metric_ids"] == {Metric.INSTRUCTION_FOLLOWING: "IID"}
 
 
 def test_phonely_spec_is_the_llm_dental_text_agent() -> None:
-    spec = next(spec for spec in fetch_v2v.AGENTS if spec.provider == "phonely")
+    (spec,) = fetch_v2v.llm_specs([PHONELY, PHONELY.model_copy(update={"collected": False})])
     assert spec == AgentSpec(
         agent_id_attr="coval_llm_phonely_agent_id",
         provider="phonely",

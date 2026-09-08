@@ -21,7 +21,9 @@ from httpx import AsyncClient
 from pydantic import SecretStr
 
 from coval_bench.llm.phonely import PhonelyClient
-from tests.api.conftest import LLM_PROXY_KEY, _make_db_url
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import RegisteredModel
+from tests.api.conftest import LLM_PROXY_KEY, _make_db_url, add_models
 
 AUTH = {"Authorization": f"Bearer {LLM_PROXY_KEY}"}
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -46,6 +48,23 @@ def _sse(*deltas: dict[str, Any]) -> bytes:
         ]
     )
     return "\n\n".join(lines).encode()
+
+
+def _llm_model(provider: str, *, collected: bool) -> RegisteredModel:
+    return RegisteredModel(
+        benchmark=Benchmark.LLM,
+        provider=provider,
+        model=f"{provider}-agent",
+        collected=collected,
+        published=False,
+    )
+
+
+@pytest.fixture(autouse=True)
+def llm_roster(postgresql: Any) -> None:
+    add_models(
+        postgresql, _llm_model("phonely", collected=True), _llm_model("paused", collected=False)
+    )
 
 
 @pytest_asyncio.fixture
@@ -88,6 +107,7 @@ async def test_proxy_auth_configuration_and_route_location(
     ).status_code == 401
     assert (await client.post("/v1/llm/phonely/session", json={}, headers=AUTH)).status_code == 404
     assert (await client.post("/llm/unknown/session", json={}, headers=AUTH)).status_code == 404
+    assert (await client.post("/llm/paused/session", json={}, headers=AUTH)).status_code == 404
 
     app.state.llm_clients = {}
     assert (await client.post("/llm/phonely/session", json={}, headers=AUTH)).status_code == 503

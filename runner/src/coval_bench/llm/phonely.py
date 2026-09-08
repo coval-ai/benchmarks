@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from coval_bench.llm.turn import Session as PhonelySession
 from coval_bench.llm.turn import TurnError, TurnResult
+
+if TYPE_CHECKING:
+    from coval_bench.config import Settings
 
 _SESSION_TIMEOUT = httpx.Timeout(30.0)
 # Turns are seconds apart; a 5s keepalive would put a TLS handshake inside most TTFTs.
@@ -168,6 +171,13 @@ class PhonelyClient:
             timeout=httpx.Timeout(30.0, read=None),
             transport=transport or httpx.AsyncHTTPTransport(http2=True, limits=_LIMITS),
         )
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> PhonelyClient | None:
+        key = settings.phonely_api_key
+        if not (key and key.get_secret_value() and settings.phonely_agent_id):
+            return None
+        return cls(key.get_secret_value(), settings.phonely_agent_id, settings.phonely_base_url)
 
     def __repr__(self) -> str:
         return f"PhonelyClient(agent_id={self._agent_id!r})"
