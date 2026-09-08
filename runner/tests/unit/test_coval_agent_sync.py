@@ -17,8 +17,6 @@ from pydantic import SecretStr
 from coval_bench.config import Settings
 from coval_bench.llm import benchmark, coval_agent
 from coval_bench.llm.coval_agent import (
-    CUSTOMER_AGENT_ID,
-    RUN_NAME,
     CovalTextAgentDefinition,
     CovalTextClient,
     sync,
@@ -28,6 +26,7 @@ from coval_bench.platform_assets import SyncError
 
 SECRET = "proxy-secret-value"  # noqa: S105
 DEFINITION = CovalTextAgentDefinition(
+    provider="phonely",
     proxy_url="https://api.example.com",
     proxy_secret=SecretStr(SECRET),
     test_set_id="TSDENTAL",
@@ -92,7 +91,8 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
 
 def test_body_renders_the_proxy_contract_and_survives_covals_substitution() -> None:
     body = DEFINITION.agent_body()
-    assert body["customer_agent_id"] == CUSTOMER_AGENT_ID
+    assert body["customer_agent_id"] == "benchmarks-phonely-text"
+    assert body["display_name"] == "Benchmarks: Phonely text agent"
     assert body["model_type"] == "MODEL_TYPE_CHAT"
     assert body["metadata"]["chat_endpoint"] == "https://api.example.com/llm/phonely/chat"
     assert body["metadata"]["authorization_header"] == f"Bearer {SECRET}"
@@ -113,9 +113,11 @@ def test_body_renders_the_proxy_contract_and_survives_covals_substitution() -> N
 def test_from_settings_names_every_missing_setting() -> None:
     with pytest.raises(SyncError, match="llm_proxy_public_url, llm_proxy_secret"):
         CovalTextAgentDefinition.from_settings(
-            Settings(coval_s2s_dental_test_set_id="T", coval_s2s_instruction_metric_id="M")
+            "phonely",
+            Settings(coval_s2s_dental_test_set_id="T", coval_s2s_instruction_metric_id="M"),
         )
     definition = CovalTextAgentDefinition.from_settings(
+        "phonely",
         Settings(
             llm_proxy_public_url="https://api.example.com/",
             llm_proxy_secret=SecretStr(SECRET),
@@ -205,7 +207,7 @@ def test_sync_looks_up_by_customer_id_filter_and_never_adopts_a_name_only_match(
     with _client(state) as client:
         result = sync(client, DEFINITION)
     assert state["filters"] == [
-        {"filter": f'customer_agent_id="{CUSTOMER_AGENT_ID}"', "page_size": "1"}
+        {"filter": 'customer_agent_id="benchmarks-phonely-text"', "page_size": "1"}
     ]
     assert result.agent_id == "A" * 22
     assert state["writes"][0][0] == "/agents"
@@ -269,7 +271,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
     state = _state(
         agents=[{**DEFINITION.agent_body(), "id": agent_id}],
         test_set_agents=[{"id": agent_id}],
-        run_templates=[{"id": template_id, "display_name": RUN_NAME}],
+        run_templates=[{"id": template_id, "display_name": "benchmarks-phonely-text-daily"}],
         scheduled_runs=[{"id": "S" * 22, "run_template_id": template_id}],
     )
     settings = Settings(

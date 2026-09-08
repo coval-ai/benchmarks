@@ -7,21 +7,19 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-# The (provider, model) identity seeded into benchmarks_v2.models by migration 0025.
-PROVIDER = "phonely"
-MODEL = "phonely-agent"
+from coval_bench.llm.turn import Session as PhonelySession
+from coval_bench.llm.turn import TurnError, TurnResult
 
 _SESSION_TIMEOUT = httpx.Timeout(30.0)
 # Turns are seconds apart; a 5s keepalive would put a TLS handshake inside most TTFTs.
 _LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=8, keepalive_expiry=300.0)
 
 
-class PhonelyError(Exception):
+class PhonelyError(TurnError):
     """Base class for failures returned by the Phonely API."""
 
 
@@ -35,22 +33,6 @@ class PhonelySessionExpired(PhonelyError):
 
 class PhonelyUpstreamError(PhonelyError):
     """Phonely failed to produce a usable completion."""
-
-
-@dataclass(frozen=True)
-class PhonelySession:
-    call_id: str
-    expires_at: str | None
-
-
-@dataclass(frozen=True)
-class TurnResult:
-    content: str
-    tool_calls: tuple[dict[str, Any], ...]
-    finish_reason: str
-    ttft_ms: float
-    total_ms: float
-    output_tokens: int | None
 
 
 class TurnAccumulator:

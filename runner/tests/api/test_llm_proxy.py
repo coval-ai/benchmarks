@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The authenticated Phonely LLM proxy."""
+"""The authenticated LLM proxy, exercised through the Phonely provider."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ async def bind_phonely(app: FastAPI) -> AsyncIterator[Callable[[Handler], None]]
         "https://phonely.test",
         transport=httpx.MockTransport(lambda request: handlers[-1](request)),
     )
-    app.state.phonely_client = client
+    app.state.llm_clients = {"phonely": client}
     yield handlers.append
     await client.aclose()
 
@@ -78,8 +78,8 @@ async def _turn_rows(postgresql: Any) -> list[dict[str, Any]]:
 async def test_proxy_auth_configuration_and_route_location(
     client: AsyncClient, app: FastAPI
 ) -> None:
-    configured_client = app.state.phonely_client
-    assert isinstance(configured_client, PhonelyClient)
+    configured_clients = app.state.llm_clients
+    assert isinstance(configured_clients["phonely"], PhonelyClient)
     assert (await client.post("/llm/phonely/session", json={})).status_code == 401
     assert (
         await client.post(
@@ -87,13 +87,14 @@ async def test_proxy_auth_configuration_and_route_location(
         )
     ).status_code == 401
     assert (await client.post("/v1/llm/phonely/session", json={}, headers=AUTH)).status_code == 404
+    assert (await client.post("/llm/unknown/session", json={}, headers=AUTH)).status_code == 404
 
-    app.state.phonely_client = None
+    app.state.llm_clients = {}
     assert (await client.post("/llm/phonely/session", json={}, headers=AUTH)).status_code == 503
     lowercase = {"Authorization": f"bearer {LLM_PROXY_KEY}"}
     lowercase_response = await client.post("/llm/phonely/session", json={}, headers=lowercase)
     assert lowercase_response.status_code == 503
-    app.state.phonely_client = configured_client
+    app.state.llm_clients = configured_clients
     settings = app.state.settings
     app.state.settings = settings.model_copy(update={"llm_proxy_secret": SecretStr("")})
     empty = {"Authorization": "Bearer "}
@@ -239,7 +240,7 @@ async def test_a_stalled_turn_returns_504(
     bind_phonely: Callable[[Handler], None],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("coval_bench.api.routers.llm_phonely._TURN_TIMEOUT_S", 0.2)
+    monkeypatch.setattr("coval_bench.api.routers.llm_proxy._TURN_TIMEOUT_S", 0.2)
     bind_phonely(lambda _request: httpx.Response(200, stream=_StalledStream()))
     response = await client.post(
         "/llm/phonely/chat", headers=AUTH, json={"model": "call-1", "messages": []}
@@ -254,11 +255,11 @@ async def test_failed_timing_insert_does_not_fail_the_turn(
 ) -> None:
     bind_phonely(lambda _request: httpx.Response(200, content=_sse({"content": "Hi"})))
     monkeypatch.setattr(
-        "coval_bench.api.routers.llm_phonely.insert_turn",
+        "coval_bench.api.routers.llm_proxy.insert_turn",
         AsyncMock(side_effect=RuntimeError("database unavailable")),
     )
     logger = MagicMock()
-    monkeypatch.setattr("coval_bench.api.routers.llm_phonely.logger", logger)
+    monkeypatch.setattr("coval_bench.api.routers.llm_proxy.logger", logger)
 
     response = await client.post(
         "/llm/phonely/chat",

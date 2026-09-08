@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+LLM_MODELS = {"phonely": "phonely-agent"}
 DEFAULT_PERSONA_ID = "PN3xgmsqeLDjsNNEA2e55e"
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")

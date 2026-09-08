@@ -26,7 +26,8 @@ from starlette.requests import Request
 from coval_bench.api import clerk
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import fetch_models
-from coval_bench.llm.phonely import PhonelyClient
+from coval_bench.llm.benchmark import LLM_MODELS
+from coval_bench.llm.turn import TurnClient
 from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
@@ -68,11 +69,14 @@ def secret_matches(provided: str | None, expected: SecretStr | None) -> bool:
     return bool(value) and hmac.compare_digest(provided.encode(), value.encode())
 
 
-def get_phonely_client(request: Request) -> PhonelyClient:
-    """Return the lifespan-owned Phonely client, or fail closed."""
-    client: PhonelyClient | None = getattr(request.app.state, "phonely_client", None)
+def get_turn_client(provider: str, request: Request) -> TurnClient:
+    """Return the lifespan-owned client for this provider, or fail closed."""
+    if provider not in LLM_MODELS:
+        raise HTTPException(404, f"{provider} is not an LLM benchmark provider")
+    clients: dict[str, TurnClient] = getattr(request.app.state, "llm_clients", {})
+    client = clients.get(provider)
     if client is None:
-        raise HTTPException(503, "Phonely proxy is not configured")
+        raise HTTPException(503, f"{provider} proxy is not configured")
     return client
 
 

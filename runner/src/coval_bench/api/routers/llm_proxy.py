@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authenticated OpenAI-compatible proxy for Phonely text-agent turns."""
+"""Authenticated OpenAI-compatible proxy for LLM benchmark turns."""
 
 from __future__ import annotations
 
@@ -11,32 +11,33 @@ import uuid
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse
 
 from coval_bench.api.deps import (
     bearer_token,
-    get_phonely_client,
     get_pool,
     get_settings,
+    get_turn_client,
     secret_matches,
 )
 from coval_bench.config import Settings
 from coval_bench.db.llm_turns import insert_turn
-from coval_bench.llm.phonely import MODEL, PROVIDER, PhonelyClient, PhonelyError, TurnResult
+from coval_bench.llm.benchmark import LLM_MODELS
+from coval_bench.llm.turn import TurnClient, TurnError, TurnResult
 
-logger = structlog.get_logger("coval_bench.api.llm_phonely")
+logger = structlog.get_logger("coval_bench.api.llm_proxy")
 
-router = APIRouter(prefix="/llm/phonely", tags=["llm-phonely"])
+router = APIRouter(prefix="/llm/{provider}", tags=["llm-proxy"])
 
 _MESSAGE_KEYS = frozenset({"role", "content", "name", "tool_calls", "tool_call_id"})
 _TURN_TIMEOUT_S = 150.0
 
 
-# Only model (the Phonely callId) and messages reach Phonely; its agent owns tools and
-# sampling, so other OpenAI request fields are dropped.
+# Only model (the provider's session id) and messages reach the provider; its agent
+# owns tools and sampling, so other OpenAI request fields are dropped.
 class ChatRequest(BaseModel):
     model: str = Field(min_length=1)
     messages: list[dict[str, Any]]
@@ -69,6 +70,7 @@ def _messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _record_turn(
     pool: AsyncConnectionPool[Any],
     *,
+    provider: str,
     simulation_id: str,
     turn_index: int,
     result: TurnResult,
@@ -78,8 +80,8 @@ async def _record_turn(
             pool,
             simulation_id=simulation_id,
             turn_index=turn_index,
-            provider=PROVIDER,
-            model=MODEL,
+            provider=provider,
+            model=LLM_MODELS[provider],
             ttft_ms=result.ttft_ms,
             total_ms=result.total_ms,
             output_tokens=result.output_tokens,
@@ -122,13 +124,14 @@ def _completion(call_id: str, result: TurnResult) -> dict[str, Any]:
 
 @router.post("/session", dependencies=[Depends(require_proxy_secret)])
 async def create_session(
-    client: PhonelyClient = Depends(get_phonely_client),
+    provider: str = Path(),
+    client: TurnClient = Depends(get_turn_client),
 ) -> dict[str, str | None]:
     try:
         session = await client.create_session()
-    except PhonelyError as exc:
-        logger.warning("phonely_session_failed", error=str(exc))
-        raise HTTPException(502, "Phonely session creation failed") from exc
+    except TurnError as exc:
+        logger.warning("llm_session_failed", provider=provider, error=str(exc))
+        raise HTTPException(502, f"{provider} session creation failed") from exc
     return {"sessionId": session.call_id, "expiresAt": session.expires_at}
 
 
@@ -136,7 +139,8 @@ async def create_session(
 async def chat(
     body: ChatRequest,
     background: BackgroundTasks,
-    client: PhonelyClient = Depends(get_phonely_client),
+    provider: str = Path(),
+    client: TurnClient = Depends(get_turn_client),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> JSONResponse:
     if body.stream:
@@ -147,22 +151,23 @@ async def chat(
         async with asyncio.timeout(_TURN_TIMEOUT_S):
             result = await client.stream_turn(body.model, messages)
     except TimeoutError as exc:
-        logger.warning("phonely_turn_timed_out", turn_index=turn_index)
-        raise HTTPException(504, "Phonely completion timed out") from exc
-    except PhonelyError as exc:
-        logger.warning("phonely_turn_failed", turn_index=turn_index, error=str(exc))
-        raise HTTPException(502, "Phonely completion failed") from exc
+        logger.warning("llm_turn_timed_out", provider=provider, turn_index=turn_index)
+        raise HTTPException(504, f"{provider} completion timed out") from exc
+    except TurnError as exc:
+        logger.warning("llm_turn_failed", provider=provider, turn_index=turn_index, error=str(exc))
+        raise HTTPException(502, f"{provider} completion failed") from exc
 
     if body.simulation_id:
         background.add_task(
             _record_turn,
             pool,
+            provider=provider,
             simulation_id=body.simulation_id,
             turn_index=turn_index,
             result=result,
         )
     else:
-        logger.warning("llm_turn_unattributed", turn_index=turn_index)
+        logger.warning("llm_turn_unattributed", provider=provider, turn_index=turn_index)
     return JSONResponse(
         _completion(body.model, result),
         headers={
