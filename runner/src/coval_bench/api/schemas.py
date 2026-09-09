@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
-from coval_bench.registries import Benchmark, Licensing, Source, TagCategory, Voice
+from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
 
 
 class RunOut(BaseModel):
@@ -103,6 +103,9 @@ class ModelInfo(BaseModel):
     disabled: bool = False
     early_access: bool = False
     tags: list[ModelTagOut] = []
+    # The series color the registry records for the model, as lowercase
+    # ``#rrggbb``. None means the site picks one from its built-in palette.
+    color: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -478,6 +481,7 @@ class AdminModelOut(BaseModel):
     collected: bool
     published: bool
     tags: list[str] = []
+    color: str | None = None
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -507,10 +511,14 @@ class AdminModelCreate(BaseModel):
     collected: bool = True
     published: bool = False
     tags: list[str] = []
+    color: HexColor = None
 
 
 class AdminModelPatch(BaseModel):
-    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged."""
+    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
+
+    ``color`` null returns the model to the site's built-in palette.
+    """
 
     provider: str | None = Field(default=None, min_length=1)
     model: str | None = Field(default=None, min_length=1)
@@ -525,6 +533,7 @@ class AdminModelPatch(BaseModel):
     collected: bool | None = None
     published: bool | None = None
     tags: list[str] | None = None
+    color: HexColor = None
 
 
 class AdminModelUpdateResponse(BaseModel):

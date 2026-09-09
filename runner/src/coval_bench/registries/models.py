@@ -10,10 +10,11 @@ the orchestrator runs every ``collected`` entry and the API serves only the
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel
 
 from coval_bench.registries.benchmarks import Benchmark
 
@@ -43,6 +44,25 @@ class Gender(StrEnum):
 
     FEMALE = "female"
     MALE = "male"
+
+
+# What the site can draw: six hex digits, any case on the way in, lowercase at rest.
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def normalize_hex_color(value: str | None) -> str | None:
+    """A ``#rrggbb`` color lowercased, ``None`` passed through; anything else is a ValueError."""
+    if value is None:
+        return None
+    candidate = value.strip()
+    if not _HEX_COLOR.match(candidate):
+        raise ValueError("a color is six hex digits behind a #, like #1db098")
+    return candidate.lower()
+
+
+# A model's series color as every writer accepts it: null, or #rrggbb in any case,
+# stored lowercase. One type so no body that carries a color can skip the rule.
+HexColor = Annotated[str | None, AfterValidator(normalize_hex_color)]
 
 
 class Voice(BaseModel, frozen=True, extra="forbid"):
@@ -90,3 +110,6 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # the org its grant names, never to everyone.
     published: bool
     arena_enabled: bool = True  # in the arena roster? independent of `collected`
+    # The series color the site draws the model in, as lowercase ``#rrggbb``.
+    # None means the site picks one from its built-in palette.
+    color: HexColor = None

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from coval_bench.registries import Benchmark, Licensing, RegisteredModel, Source
-from tests.api.conftest import COVAL_ORG, add_models, bearer
+from tests.api.conftest import COVAL_ORG, _make_db_url, add_models, bearer
 
 
 def _model(
@@ -89,7 +90,21 @@ async def test_providers_shape(client: AsyncClient) -> None:
     for board in ("stt", "tts", "s2s", "llm"):
         assert isinstance(data[board], list)
     first_model = data["tts"][0]["models"][0]
-    assert set(first_model) == {"model", "disabled", "early_access", "tags"}
+    assert set(first_model) == {"model", "disabled", "early_access", "tags", "color"}
+
+
+async def test_a_recorded_color_rides_along_with_the_model(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The site draws what the registry says; a model without a color says nothing."""
+    add_models(
+        postgresql,
+        _model(Benchmark.STT, "acme", "painted", color="#1db098"),
+        _model(Benchmark.STT, "acme", "plain"),
+    )
+    public = await _public(client)
+    assert _entry(public, "acme", "painted")["color"] == "#1db098"
+    assert _entry(public, "acme", "plain")["color"] is None
 
 
 async def test_publication_alone_decides_public_visibility(
@@ -282,3 +297,18 @@ async def test_providers_without_a_database_is_503(
         app.state.pool = original_pool
 
     assert response.status_code == 503
+
+
+async def test_the_catalogue_survives_a_database_without_the_color_column(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """The API deploys ahead of migration 0029; until it runs, every color reads as unset."""
+    add_models(postgresql, _model(Benchmark.STT, "acme", "m", color="#1db098"))
+    conn = psycopg.connect(_make_db_url(postgresql))
+    try:
+        conn.execute("ALTER TABLE benchmarks_v2.models DROP COLUMN color")
+        conn.commit()
+    finally:
+        conn.close()
+    public = await _public(client)
+    assert _entry(public, "acme", "m")["color"] is None

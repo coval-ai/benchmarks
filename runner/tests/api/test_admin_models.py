@@ -410,6 +410,47 @@ async def test_patch_null_rules(client: AsyncClient) -> None:
     assert allowed.status_code == 200
 
 
+async def test_a_color_is_stored_lowercase_and_reaches_the_catalogue(
+    client: AsyncClient,
+) -> None:
+    """However it is typed, the row and the public roster say #rrggbb in lowercase."""
+    created = (await _post_model(client, published=True, color="#1DB098")).json()
+    assert created["color"] == "#1db098"
+    assert created["history"][0]["new"]["color"] == "#1db098"
+
+    public = (await client.get("/v1/providers")).json()
+    (entry,) = [m for e in public["stt"] for m in e["models"] if e["provider"] == "acme"]
+    assert entry["color"] == "#1db098"
+
+
+async def test_patch_sets_and_clears_the_color_with_history(client: AsyncClient) -> None:
+    created = (await _post_model(client)).json()
+    assert created["color"] is None
+
+    painted = await _patch(client, created["id"], created["updated_at"], {"color": "#FF8800"})
+    assert painted.status_code == 200
+    model = painted.json()["model"]
+    assert model["color"] == "#ff8800"
+    newest = model["history"][0]
+    assert (newest["old"]["color"], newest["new"]["color"]) == (None, "#ff8800")
+
+    # Null is a value here: the model goes back to the site's palette.
+    cleared = await _patch(client, created["id"], model["updated_at"], {"color": None})
+    assert cleared.status_code == 200
+    model = cleared.json()["model"]
+    assert model["color"] is None
+    assert model["history"][0]["old"]["color"] == "#ff8800"
+    assert len(model["history"]) == 3  # create, paint, clear
+
+
+@pytest.mark.parametrize("color", ["1db098", "#1db09", "#1db0988", "#gggggg", "", "teal"])
+async def test_a_color_is_six_hex_digits_or_nothing(client: AsyncClient, color: str) -> None:
+    assert (await _post_model(client, color=color)).status_code == 422
+    created = (await _post_model(client)).json()
+    response = await _patch(client, created["id"], created["updated_at"], {"color": color})
+    assert response.status_code == 422
+
+
 async def test_patch_unknown_model_is_404(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"] + 1, created["updated_at"], {})
