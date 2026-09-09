@@ -252,6 +252,13 @@ async def test_llm_instruction_following_is_served_by_aggregates(
     ]
     assert stats[0]["avg_value"] == pytest.approx(75.0)
 
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
+    )
+    assert response.json()["model_stats"] == stats
+
 
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
     """STDDEV_SAMP is NULL for n=1 — must be coalesced to 0 like the client did."""
@@ -536,6 +543,11 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     assert (point["pooled_value"], point["error_sum"], point["reference_word_sum"]) == (5.0, 2, 40)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
+    compact = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
+    )
+    [point] = compact.json()["series"]
+    assert (point["error_sum"], point["reference_word_sum"]) == (2, 40)
 
     timeline = await client.get(
         "/v1/results/timeline", params={"benchmark": "STT", "dataset": "stt-v2"}

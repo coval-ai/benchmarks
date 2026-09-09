@@ -221,12 +221,16 @@ async def test_ttft_llm_uses_the_dental_primary_dataset(
     )
     await _refresh_mv(postgresql)
 
-    response = await client.get("/v1/leaderboard", params={"metric": "TTFT", "benchmark": "LLM"})
-
+    params = {"metric": "TTFT", "benchmark": "LLM"}
+    expected = [("phonely", "phonely-agent")]
+    response = await client.get("/v1/leaderboard", params=params)
     assert response.status_code == 200
-    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
-        ("phonely", "phonely-agent")
-    ]
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    response = await client.get("/v1/leaderboard", params=params)
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
 
 
 async def test_v2v_llm_incompatible(client: AsyncClient) -> None:

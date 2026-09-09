@@ -43,6 +43,7 @@ from coval_bench.api.common import (
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
+    reads_normalized,
 )
 from coval_bench.api.deps import (
     capture_api_event,
@@ -122,7 +123,8 @@ _COMPACT_SERIES_TAIL = (
     " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
     " FROM binned"
     ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
-    " max_value, value_sum, sample_count, value, pooled_value FROM selected"
+    " max_value, value_sum, sample_count, value, error_sum, reference_word_sum, pooled_value"
+    " FROM selected"
     " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
     " ORDER BY scheduled_at, provider, model, metric_type"
 )
@@ -133,7 +135,7 @@ _COMPACT_SERIES_SQL = (
     " min_value, p25, p50, p75, max_value, value_sum, sample_count,"
     " CASE WHEN metric_type = 'WER'"
     " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value,"
-    " NULL::float8 AS pooled_value"
+    " NULL::float8 AS error_sum, NULL::float8 AS reference_word_sum, NULL::float8 AS pooled_value"
     " FROM benchmarks_v2.results_by_bucket"
     " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
     " AND bucket_at >= NOW() - %(interval)s::interval" + _COMPACT_SERIES_TAIL
@@ -377,7 +379,7 @@ async def get_results_aggregates(
     dataset_key = dataset or DATASET_ALL
 
     async def fill() -> AggregatesResponse:
-        normalized = settings.normalized_dashboard_reads_enabled
+        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
             _NORMALIZED_STATS_SQL
             if normalized
@@ -495,7 +497,7 @@ async def get_results_timeline(
     async def fill() -> TimelineResponse:
         sql = (
             (_NORMALIZED_COMPACT_SERIES_SQL if window == "30d" else _NORMALIZED_TIMELINE_SQL)
-            if settings.normalized_dashboard_reads_enabled
+            if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
             else (_COMPACT_SERIES_SQL if window == "30d" else _TIMELINE_SQL)
         )
         params = {
@@ -573,7 +575,7 @@ async def get_results_aggregates_by_dataset(
     """
 
     async def fill() -> AggregatesByDatasetResponse:
-        normalized = settings.normalized_dashboard_reads_enabled
+        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
             _NORMALIZED_STATS_BY_DATASET_SQL
             if normalized
