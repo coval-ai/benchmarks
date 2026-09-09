@@ -87,12 +87,12 @@ def test_the_migration_seeds_valid_rates_on_registered_models(
     _run(pricing_pg, scenario)
 
 
-def _downgrade_one(conn: psycopg.Connection[Any]) -> None:
+def _downgrade_past_pricing(conn: psycopg.Connection[Any]) -> None:
     cfg = AlembicConfig(str(_INI_PATH))
     cfg.set_main_option(
         "sqlalchemy.url", async_dsn(conn).replace("postgresql://", "postgresql+psycopg://")
     )
-    alembic_command.downgrade(cfg, "-1")
+    alembic_command.downgrade(cfg, "20260902_0026")
 
 
 def test_downgrade_drops_only_a_log_that_holds_nothing_beyond_the_seed(
@@ -103,11 +103,11 @@ def test_downgrade_drops_only_a_log_that_holds_nothing_beyond_the_seed(
 
     _run(pricing_pg, scenario)
     with pytest.raises(RuntimeError, match="refusing to drop"):
-        _downgrade_one(pricing_pg)
+        _downgrade_past_pricing(pricing_pg)
     with pricing_pg.cursor() as cur:
         cur.execute("DELETE FROM benchmarks_v2.pricing_rates WHERE price_usd = 0.0061")
         pricing_pg.commit()
-    _downgrade_one(pricing_pg)
+    _downgrade_past_pricing(pricing_pg)
     with pricing_pg.cursor() as cur:
         cur.execute("SELECT to_regclass('benchmarks_v2.pricing_rates')")
         assert cur.fetchone() == (None,)

@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for the model and tag types and the provider name map."""
+"""Unit tests for the model types and the provider name map."""
 
 from __future__ import annotations
 
@@ -9,18 +9,12 @@ import tomllib
 from pathlib import Path
 
 from coval_bench.registries import (
-    TAG_CATEGORIES,
     Benchmark,
     Licensing,
-    ModelTag,
     RegisteredModel,
     Source,
 )
 from coval_bench.registries.provider_keys import provider_names
-
-
-def test_every_tag_has_a_category() -> None:
-    assert TAG_CATEGORIES.keys() == set(ModelTag)
 
 
 def test_registered_model_defaults() -> None:

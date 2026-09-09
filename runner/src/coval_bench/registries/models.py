@@ -16,7 +16,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.tags import ModelTag
 
 
 class Source(StrEnum):
@@ -76,7 +75,7 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # see :class:`Voice` for why nothing pairs on it yet.
     voices: tuple[Voice, ...] = ()
     creator: str | None = None  # who makes the model; None means same as provider
-    tags: tuple[ModelTag, ...] = ()
+    tags: tuple[str, ...] = ()
     source: Source = Source.OFFICIAL_API
     licensing: Licensing = Licensing.PROPRIETARY
     on_prem: bool = False  # provider offers on-prem/customer-infra deployment
