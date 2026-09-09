@@ -105,7 +105,8 @@ _TIMELINE_SQL = (
 # Select a bounded, representative 30-day timeline in PostgreSQL.  Each exact
 # provider/model/metric group is split into 119 ordinal bins; retaining the min
 # and max plotted value in every bin plus the endpoints caps the result at 240
-# points per group while preserving endpoints and plotted extrema.  All tie
+# points per group (480 when pooled WER extrema are kept too) while preserving
+# endpoints and plotted extrema.  All tie
 # breaks include bucket_at so identical requests have identical ordering.
 _COMPACT_SERIES_TAIL = (
     "), ranked AS ("
@@ -119,11 +120,16 @@ _COMPACT_SERIES_TAIL = (
     " SELECT *, row_number() OVER (PARTITION BY provider, model, metric_type, bin"
     " ORDER BY value ASC, scheduled_at ASC) AS min_rank,"
     " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
+    " ORDER BY value DESC, scheduled_at ASC) AS max_rank,"
+    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
+    " ORDER BY pooled_value ASC NULLS LAST, scheduled_at ASC) AS pooled_min_rank,"
+    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
+    " ORDER BY pooled_value DESC NULLS LAST, scheduled_at ASC) AS pooled_max_rank"
     " FROM binned"
     ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
     " max_value, value_sum, sample_count, value, pooled_value FROM selected"
     " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
+    " OR (pooled_value IS NOT NULL AND (pooled_min_rank = 1 OR pooled_max_rank = 1))"
     " ORDER BY scheduled_at, provider, model, metric_type"
 )
 

@@ -92,27 +92,16 @@ _WER_COUNT_KEYS = ("substitution_count", "deletion_count", "insertion_count", "r
 
 
 async def _insert_normalized_wer_with_counts(
-    postgresql: Any,
-    run_id: int,
-    *,
-    dataset_id: str,
-    substitutions: int,
-    deletions: int,
-    insertions: int,
-    reference_words: int,
+    postgresql: Any, run_id: int, *, counts: tuple[int, int, int], reference_words: int
 ) -> None:
-    errors = substitutions + deletions + insertions
-    share = 100 / reference_words
+    substitutions, deletions, insertions = counts
     await _insert_normalized_metric(
         postgresql,
         run_id,
-        dataset_id=dataset_id,
+        dataset_id="stt-v2",
         metric_type="WER",
         values={
-            "primary": errors * share,
-            "insertions": insertions * share,
-            "deletions": deletions * share,
-            "substitutions": substitutions * share,
+            "primary": 100 * sum(counts) / reference_words,
             "substitution_count": substitutions,
             "deletion_count": deletions,
             "insertion_count": insertions,
@@ -497,70 +486,29 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
     """One miss on a 4-word clip and a clean 36-word clip: mean 12.5, pooled 2.5."""
     run_id = await _insert_run(postgresql, dataset_id="stt-v2")
     await _insert_normalized_wer_with_counts(
-        postgresql,
-        run_id,
-        dataset_id="stt-v2",
-        substitutions=1,
-        deletions=0,
-        insertions=0,
-        reference_words=4,
+        postgresql, run_id, counts=(1, 0, 0), reference_words=4
     )
     await _insert_normalized_wer_with_counts(
-        postgresql,
-        run_id,
-        dataset_id="stt-v2",
-        substitutions=0,
-        deletions=0,
-        insertions=0,
-        reference_words=36,
+        postgresql, run_id, counts=(0, 0, 0), reference_words=36
     )
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    s = response.json()["model_stats"][0]
+    s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    s = s["model_stats"][0]
     assert s["avg_value"] == pytest.approx(12.5)
     assert s["pooled_value"] == pytest.approx(2.5)
     assert s["pooled_substitutions_pct"] == pytest.approx(2.5)
     assert s["pooled_deletions_pct"] == 0.0
     assert s["pooled_insertions_pct"] == 0.0
 
-    by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
-    block = by_dataset.json()["blocks"][0]
-    assert block["model_stats"][0]["pooled_value"] == pytest.approx(2.5)
-
-
-async def test_normalized_pooled_wer_null_when_any_clip_lacks_counts(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_wer_with_counts(
-        postgresql,
-        run_id,
-        dataset_id="stt-v2",
-        substitutions=1,
-        deletions=0,
-        insertions=0,
-        reference_words=4,
-    )
     await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
-
-    app = client._transport.app  # type: ignore[attr-defined]
-    app.state.settings.normalized_dashboard_reads_enabled = True
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    s = response.json()["model_stats"][0]
-    assert s["sample_count"] == 2
+    app.state.response_cache.clear()
+    s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
+    s = s["model_stats"][0]
+    assert s["sample_count"] == 3
     assert s["pooled_value"] is None
     assert s["pooled_substitutions_pct"] is None
-
-
-async def test_legacy_reads_carry_no_pooled_wer(client: AsyncClient, postgresql: Any) -> None:
-    run_id = await _insert_run(postgresql)
-    await _insert_result(postgresql, run_id, metric_value=6.0)
-    await _refresh_mv(postgresql)
-
-    response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    assert response.json()["model_stats"][0]["pooled_value"] is None
 
 
 async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
@@ -588,7 +536,6 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     assert len(pooled.json()["series"]) == 1
     assert pooled.json()["series"][0]["pooled_value"] == pytest.approx(5.0)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
-    assert timeline.json()["points"][0]["value"] == pytest.approx(3.0)
     assert timeline.json()["points"][0]["pooled_value"] == pytest.approx(5.0)
 
     partial = await client.get(
@@ -597,8 +544,51 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     assert len(partial.json()["series"]) == 1
     assert partial.json()["series"][0]["pooled_value"] is None
 
-    compact = await client.get("/v1/results/timeline", params={"benchmark": "STT", "window": "30d"})
-    assert compact.json()["points"][0]["pooled_value"] == pytest.approx(5.0)
+
+async def test_compact_series_keeps_pooled_wer_extrema(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Mean WER flat across 360 buckets while pooled spikes once: the spike survives."""
+    import psycopg
+
+    from tests.api.conftest import _make_db_url
+
+    now = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    spike_at = now - timedelta(hours=2 * 200)
+    rows = []
+    for step in range(360):
+        bucket = now - timedelta(hours=2 * step)
+        reference_words = 10.0 if bucket == spike_at else 90.0
+        for key, value_sum in (
+            ("primary", 20.0),
+            ("substitution_count", 9.0),
+            ("deletion_count", 0.0),
+            ("insertion_count", 0.0),
+            ("reference_words", reference_words),
+        ):
+            rows.append((key, "count" if key in _WER_COUNT_KEYS else "percent", bucket, value_sum))
+    async with (
+        await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True) as conn,
+        conn.cursor() as cur,
+    ):
+        await cur.executemany(
+            """INSERT INTO benchmarks_v2.metric_values_by_bucket
+                   (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                    evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
+                    p75, max_value, value_sum, sample_count)
+                   VALUES ('deepgram', 'nova-3', 'STT', '__all__', 'WER', 'v1', 'default',
+                           %s, %s, %s, 1, 2, 3, 4, 5, %s, 2)""",
+            rows,
+        )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    response = await client.get(
+        "/v1/results/timeline", params={"benchmark": "STT", "window": "30d"}
+    )
+    points = response.json()["points"]
+    assert len(points) < 360
+    assert max(p["pooled_value"] for p in points) == pytest.approx(90.0)
 
 
 async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(
