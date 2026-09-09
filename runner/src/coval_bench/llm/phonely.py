@@ -1,16 +1,16 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Phonely Programmatic Calls client and streamed-turn accumulator."""
+"""Phonely Programmatic Calls client."""
 
 from __future__ import annotations
 
-import json
 import time
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from coval_bench.llm.openai_compat import LIMITS, TurnAccumulator
 from coval_bench.llm.turn import Session as PhonelySession
 from coval_bench.llm.turn import TurnError, TurnResult
 
@@ -18,8 +18,6 @@ if TYPE_CHECKING:
     from coval_bench.config import Settings
 
 _SESSION_TIMEOUT = httpx.Timeout(30.0)
-# Turns are seconds apart; a 5s keepalive would put a TLS handshake inside most TTFTs.
-_LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=8, keepalive_expiry=300.0)
 
 
 class PhonelyError(TurnError):
@@ -38,122 +36,6 @@ class PhonelyUpstreamError(PhonelyError):
     """Phonely failed to produce a usable completion."""
 
 
-class TurnAccumulator:
-    """Reassemble OpenAI SSE chunks while measuring the first meaningful delta."""
-
-    def __init__(self, started_at: float) -> None:
-        self._started_at = started_at
-        self._first_token_at: float | None = None
-        self._content: list[str] = []
-        self._tool_calls: dict[int, dict[str, Any]] = {}
-        self._finish_reason: str | None = None
-        self._complete = False
-        self._output_tokens: int | None = None
-
-    def _stamp_first_token(self, now: float) -> None:
-        if self._first_token_at is None:
-            self._first_token_at = now
-
-    def feed(self, line: str, now: float) -> None:
-        """Consume one SSE line; irrelevant or malformed lines are ignored."""
-        line = line.strip()
-        if not line.startswith("data:"):
-            return
-        payload = line.removeprefix("data:").strip()
-        if not payload:
-            return
-        if payload == "[DONE]":
-            self._complete = True
-            return
-        try:
-            event = json.loads(payload)
-        except json.JSONDecodeError:
-            return
-        if not isinstance(event, dict):
-            return
-        error = event.get("error")
-        if error is not None:
-            message = error.get("message", error) if isinstance(error, dict) else error
-            raise PhonelyUpstreamError(f"Phonely stream error: {message}")
-
-        usage = event.get("usage")
-        if isinstance(usage, dict):
-            output_tokens = usage.get("completion_tokens")
-            if isinstance(output_tokens, int) and not isinstance(output_tokens, bool):
-                self._output_tokens = output_tokens
-
-        choices = event.get("choices")
-        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-            return
-        choice = choices[0]
-        delta = choice.get("delta")
-        if isinstance(delta, dict):
-            content = delta.get("content")
-            if isinstance(content, str) and content:
-                self._stamp_first_token(now)
-                self._content.append(content)
-            raw_tool_calls = delta.get("tool_calls")
-            if isinstance(raw_tool_calls, list) and raw_tool_calls:
-                self._stamp_first_token(now)
-                self._feed_tool_calls(raw_tool_calls)
-        finish_reason = choice.get("finish_reason")
-        if isinstance(finish_reason, str) and finish_reason:
-            self._finish_reason = finish_reason
-            self._complete = True
-
-    def _feed_tool_calls(self, chunks: list[Any]) -> None:
-        for chunk in chunks:
-            if not isinstance(chunk, dict):
-                continue
-            index = chunk.get("index", 0)
-            if not isinstance(index, int) or isinstance(index, bool):
-                index = 0
-            slot = self._tool_calls.setdefault(
-                index, {"id": "", "type": "function", "name": "", "arguments": ""}
-            )
-            call_id = chunk.get("id")
-            if isinstance(call_id, str) and call_id:
-                slot["id"] = call_id
-            call_type = chunk.get("type")
-            if isinstance(call_type, str) and call_type:
-                slot["type"] = call_type
-            function = chunk.get("function")
-            if not isinstance(function, dict):
-                continue
-            name = function.get("name")
-            if isinstance(name, str):
-                slot["name"] += name
-            arguments = function.get("arguments")
-            if isinstance(arguments, str):
-                slot["arguments"] += arguments
-
-    def result(self, now: float) -> TurnResult:
-        """Return the completed turn, rejecting an empty or truncated stream."""
-        if self._first_token_at is None:
-            raise PhonelyUpstreamError("Phonely returned an empty completion")
-        if not self._complete:
-            raise PhonelyUpstreamError("Phonely stream ended before the completion finished")
-        tool_calls = tuple(
-            {
-                "id": slot["id"],
-                "type": slot["type"],
-                "function": {"name": slot["name"], "arguments": slot["arguments"]},
-            }
-            for _, slot in sorted(self._tool_calls.items())
-        )
-        finish_reason = self._finish_reason or "stop"
-        if tool_calls and finish_reason == "stop":
-            finish_reason = "tool_calls"
-        return TurnResult(
-            content="".join(self._content),
-            tool_calls=tool_calls,
-            finish_reason=finish_reason,
-            ttft_ms=(self._first_token_at - self._started_at) * 1000,
-            total_ms=(now - self._started_at) * 1000,
-            output_tokens=self._output_tokens,
-        )
-
-
 class PhonelyClient:
     """Async client for Phonely's session and streaming chat endpoints."""
 
@@ -169,7 +51,7 @@ class PhonelyClient:
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=httpx.Timeout(30.0, read=None),
-            transport=transport or httpx.AsyncHTTPTransport(http2=True, limits=_LIMITS),
+            transport=transport or httpx.AsyncHTTPTransport(http2=True, limits=LIMITS),
         )
 
     @classmethod
