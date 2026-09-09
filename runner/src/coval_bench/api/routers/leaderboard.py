@@ -13,7 +13,8 @@ Metric/benchmark compatibility:
 
 Every window queries its materialized view (``benchmarks_v2.results_24h``/
 ``results_7d``/``results_30d``), refreshed by the runner at the end of each
-benchmark run — read-only here.
+benchmark run — read-only here. With normalized reads enabled it ranks on the
+aggregates' headline value.
 """
 
 from __future__ import annotations
@@ -28,16 +29,18 @@ from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
 from coval_bench.api.common import (
+    WINDOW_INTERVALS,
     WINDOW_VIEWS,
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
 )
-from coval_bench.api.deps import capture_api_event, get_pool, get_posthog
+from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
+from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_SQL
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
-from coval_bench.config import DATASET_ALL
+from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.registries import is_metric_excluded
 from coval_bench.s2s.conditions import DATASET_ID_DENTAL, DATASET_ID_LLM_DENTAL
 
@@ -88,6 +91,7 @@ async def get_leaderboard(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
+    settings: Settings = Depends(get_settings),
 ) -> LeaderboardResponse:
     """Return leaderboard entries sorted ascending by average metric value.
 
@@ -113,13 +117,26 @@ async def get_leaderboard(
         "metric": metric,
         "benchmark": benchmark,
         "dataset": _PRIMARY_DATASET_BY_BENCHMARK.get(benchmark, DATASET_ALL),
+        "interval": WINDOW_INTERVALS[window],
     }
-    sql = _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+    normalized = settings.normalized_dashboard_reads_enabled
+    sql = (
+        _NORMALIZED_STATS_SQL if normalized else _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+    )
 
     async with pool.connection() as conn:
         conn.row_factory = psycopg.rows.dict_row
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
+    if normalized:
+        entry_rows = sorted(
+            (
+                {**r, "avg": r["avg_value"], "n": r["sample_count"]}
+                for r in entry_rows
+                if r["metric_type"] == metric
+            ),
+            key=lambda r: r["avg"],
+        )
 
     entries = [
         LeaderboardEntry.model_validate(r)
