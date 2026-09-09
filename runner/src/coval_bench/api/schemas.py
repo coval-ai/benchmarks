@@ -175,7 +175,9 @@ class ModelStatEntry(BaseModel):
     provider: str
     model: str
     metric_type: str
+    # WER: corpus-level (pooled) when every clip carries counts, else the per-clip mean.
     avg_value: float
+    mean_value: float | None = None
     stddev_value: float
     p25: float
     p50: float
@@ -206,7 +208,8 @@ class ModelStatEntry(BaseModel):
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50; WER renders value_sum / sample_count.
+    Latency timelines render p50. WER renders error_sum / reference_word_sum when
+    present, else value_sum / sample_count; both pairs sum across buckets.
     """
 
     provider: str
@@ -220,6 +223,8 @@ class SeriesPoint(BaseModel):
     max_value: float
     value_sum: float
     sample_count: int
+    error_sum: float | None = None
+    reference_word_sum: float | None = None
     pooled_value: float | None = None
 
 

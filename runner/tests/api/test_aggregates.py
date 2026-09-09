@@ -252,6 +252,13 @@ async def test_llm_instruction_following_is_served_by_aggregates(
     ]
     assert stats[0]["avg_value"] == pytest.approx(75.0)
 
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
+    )
+    assert response.json()["model_stats"] == stats
+
 
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
     """STDDEV_SAMP is NULL for n=1 — must be coalesced to 0 like the client did."""
@@ -496,19 +503,18 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
     app.state.settings.normalized_dashboard_reads_enabled = True
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
     s = s["model_stats"][0]
-    assert s["avg_value"] == pytest.approx(12.5)
-    assert s["pooled_value"] == pytest.approx(2.5)
-    assert s["pooled_substitutions_pct"] == pytest.approx(2.5)
-    assert s["pooled_deletions_pct"] == 0.0
-    assert s["pooled_insertions_pct"] == 0.0
+    keys = ("mean_value", "avg_value", "pooled_value", "wer_substitutions_pct")
+    assert [s[k] for k in keys] == pytest.approx([12.5, 2.5, 2.5, 2.5])
+    assert (s["pooled_deletions_pct"], s["pooled_insertions_pct"]) == (0, 0)
+    board = await client.get("/v1/leaderboard", params={"metric": "WER", "benchmark": "STT"})
+    assert board.json()["entries"][0]["avg"] == pytest.approx(2.5)
 
     await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
     app.state.response_cache.clear()
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
     s = s["model_stats"][0]
-    assert s["sample_count"] == 3
     assert s["pooled_value"] is None
-    assert s["pooled_substitutions_pct"] is None
+    assert s["avg_value"] == pytest.approx(s["mean_value"]) == pytest.approx(31 / 3)
 
 
 async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
@@ -533,16 +539,20 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     app.state.settings.normalized_dashboard_reads_enabled = True
 
     pooled = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
-    assert len(pooled.json()["series"]) == 1
-    assert pooled.json()["series"][0]["pooled_value"] == pytest.approx(5.0)
+    [point] = pooled.json()["series"]
+    assert (point["pooled_value"], point["error_sum"], point["reference_word_sum"]) == (5.0, 2, 40)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
-    assert timeline.json()["points"][0]["pooled_value"] == pytest.approx(5.0)
-
-    partial = await client.get(
-        "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v2"}
+    assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
+    compact = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
     )
-    assert len(partial.json()["series"]) == 1
-    assert partial.json()["series"][0]["pooled_value"] is None
+    [point] = compact.json()["series"]
+    assert (point["error_sum"], point["reference_word_sum"]) == (2, 40)
+
+    timeline = await client.get(
+        "/v1/results/timeline", params={"benchmark": "STT", "dataset": "stt-v2"}
+    )
+    assert timeline.json()["points"][0]["value"] == pytest.approx(3.0)
 
 
 async def test_compact_series_keeps_pooled_wer_extrema(
@@ -588,7 +598,7 @@ async def test_compact_series_keeps_pooled_wer_extrema(
     )
     points = response.json()["points"]
     assert len(points) < 360
-    assert max(p["pooled_value"] for p in points) == pytest.approx(90.0)
+    assert max(p["value"] for p in points) == pytest.approx(90.0)
 
 
 async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(

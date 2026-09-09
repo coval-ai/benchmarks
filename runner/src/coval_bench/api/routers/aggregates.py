@@ -43,6 +43,7 @@ from coval_bench.api.common import (
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
+    reads_normalized,
 )
 from coval_bench.api.deps import (
     capture_api_event,
@@ -105,8 +106,7 @@ _TIMELINE_SQL = (
 # Select a bounded, representative 30-day timeline in PostgreSQL.  Each exact
 # provider/model/metric group is split into 119 ordinal bins; retaining the min
 # and max plotted value in every bin plus the endpoints caps the result at 240
-# points per group (480 when pooled WER extrema are kept too) while preserving
-# endpoints and plotted extrema.  All tie
+# points per group while preserving endpoints and plotted extrema.  All tie
 # breaks include bucket_at so identical requests have identical ordering.
 _COMPACT_SERIES_TAIL = (
     "), ranked AS ("
@@ -120,16 +120,12 @@ _COMPACT_SERIES_TAIL = (
     " SELECT *, row_number() OVER (PARTITION BY provider, model, metric_type, bin"
     " ORDER BY value ASC, scheduled_at ASC) AS min_rank,"
     " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value DESC, scheduled_at ASC) AS max_rank,"
-    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY pooled_value ASC NULLS LAST, scheduled_at ASC) AS pooled_min_rank,"
-    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY pooled_value DESC NULLS LAST, scheduled_at ASC) AS pooled_max_rank"
+    " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
     " FROM binned"
     ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
-    " max_value, value_sum, sample_count, value, pooled_value FROM selected"
+    " max_value, value_sum, sample_count, value, error_sum, reference_word_sum, pooled_value"
+    " FROM selected"
     " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
-    " OR (pooled_value IS NOT NULL AND (pooled_min_rank = 1 OR pooled_max_rank = 1))"
     " ORDER BY scheduled_at, provider, model, metric_type"
 )
 
@@ -139,7 +135,7 @@ _COMPACT_SERIES_SQL = (
     " min_value, p25, p50, p75, max_value, value_sum, sample_count,"
     " CASE WHEN metric_type = 'WER'"
     " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value,"
-    " NULL::float8 AS pooled_value"
+    " NULL::float8 AS error_sum, NULL::float8 AS reference_word_sum, NULL::float8 AS pooled_value"
     " FROM benchmarks_v2.results_by_bucket"
     " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
     " AND bucket_at >= NOW() - %(interval)s::interval" + _COMPACT_SERIES_TAIL
@@ -170,7 +166,20 @@ _WER_COUNTS_COMPLETE = (
     "COUNT(reference_words) = COUNT(*) AND COUNT(substitution_count) = COUNT(*)"
     " AND COUNT(deletion_count) = COUNT(*) AND COUNT(insertion_count) = COUNT(*)"
 )
-_POOLED = "100 * SUM({key}) / NULLIF(SUM(reference_words), 0)"
+
+
+def _pooled(counts: str) -> str:
+    return (
+        f"CASE WHEN {_WER_COUNTS_COMPLETE}"
+        f" THEN (100 * SUM({counts}) / NULLIF(SUM(reference_words), 0))::float8 END"
+    )
+
+
+def _mean_split(column: str) -> str:
+    return f"CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG({column})::float8 END"
+
+
+_POOLED_TOTAL = _pooled("substitution_count + deletion_count + insertion_count")
 
 # TTFA components have public metric names of their own, hence the UNION ALL.
 _NORMALIZED_STATS_SQL = f"""
@@ -209,7 +218,8 @@ WITH evaluations AS (
         NULL, NULL, NULL, NULL, NULL, NULL, NULL
  FROM evaluations WHERE metric_type = 'TTFA' AND leading_silence IS NOT NULL
 )
-SELECT provider, model, metric_type, AVG(value)::float8 AS avg_value,
+SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value,
+ COALESCE({_POOLED_TOTAL}, AVG(value))::float8 AS avg_value,
  COALESCE(STDDEV_SAMP(value), 0)::float8 AS stddev_value,
  PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value)::float8 AS p25,
  PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value)::float8 AS p50,
@@ -218,19 +228,14 @@ SELECT provider, model, metric_type, AVG(value)::float8 AS avg_value,
  PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY value)::float8 AS p95,
  PERCENTILE_CONT(.99) WITHIN GROUP (ORDER BY value)::float8 AS p99,
  MIN(value)::float8 AS min_value, MAX(value)::float8 AS max_value, COUNT(*)::int AS sample_count,
- CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG(wer_insertions_pct)::float8 END AS wer_insertions_pct,
- CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG(wer_deletions_pct)::float8 END AS wer_deletions_pct,
- CASE WHEN {_WER_SPLIT_COMPLETE}
-      THEN AVG(wer_substitutions_pct)::float8 END AS wer_substitutions_pct,
- CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN ({_POOLED.format(key="substitution_count + deletion_count + insertion_count")})::float8
-      END AS pooled_value,
- CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN ({_POOLED.format(key="insertion_count")})::float8 END AS pooled_insertions_pct,
- CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN ({_POOLED.format(key="deletion_count")})::float8 END AS pooled_deletions_pct,
- CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN ({_POOLED.format(key="substitution_count")})::float8 END AS pooled_substitutions_pct
+ COALESCE({_pooled("insertion_count")}, {_mean_split("wer_insertions_pct")}) AS wer_insertions_pct,
+ COALESCE({_pooled("deletion_count")}, {_mean_split("wer_deletions_pct")}) AS wer_deletions_pct,
+ COALESCE({_pooled("substitution_count")}, {_mean_split("wer_substitutions_pct")})
+   AS wer_substitutions_pct,
+ {_POOLED_TOTAL} AS pooled_value,
+ {_pooled("insertion_count")} AS pooled_insertions_pct,
+ {_pooled("deletion_count")} AS pooled_deletions_pct,
+ {_pooled("substitution_count")} AS pooled_substitutions_pct
 FROM public_values
  WHERE (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)
 GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type
@@ -258,13 +263,20 @@ _NORMALIZED_STATS_BY_DATASET_SQL = (
         "ORDER BY dataset_id, provider, model, metric_type",
     )
     .replace(
-        "SELECT provider, model, metric_type, AVG(value)",
-        "SELECT dataset_id, provider, model, metric_type, AVG(value)",
+        "SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value",
+        "SELECT dataset_id, provider, model, metric_type, AVG(value)::float8 AS mean_value",
     )
 )
 
 # Pooled WER needs all four count rows covering the same clips as the primary row.
-_NORMALIZED_BUCKETS_SQL = """
+_BUCKET_COUNTS_COMPLETE = "COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)"
+_BUCKET_ERROR_SUM = (
+    "SUM(value_sum) FILTER (WHERE value_key IN"
+    " ('substitution_count', 'deletion_count', 'insertion_count'))"
+)
+_BUCKET_REFERENCE_SUM = "SUM(value_sum) FILTER (WHERE value_key = 'reference_words')"
+
+_NORMALIZED_BUCKETS_SQL = f"""
 SELECT provider, model, metric_type, bucket_at AS scheduled_at,
  MAX(min_value) FILTER (WHERE value_key = 'primary') AS min_value,
  MAX(p25) FILTER (WHERE value_key = 'primary') AS p25,
@@ -273,11 +285,10 @@ SELECT provider, model, metric_type, bucket_at AS scheduled_at,
  MAX(max_value) FILTER (WHERE value_key = 'primary') AS max_value,
  MAX(value_sum) FILTER (WHERE value_key = 'primary') AS value_sum,
  MAX(sample_count) FILTER (WHERE value_key = 'primary') AS sample_count,
- CASE WHEN COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)
-      THEN 100 * SUM(value_sum) FILTER (WHERE value_key IN
-             ('substitution_count', 'deletion_count', 'insertion_count'))
-           / NULLIF(SUM(value_sum) FILTER (WHERE value_key = 'reference_words'), 0)
-      END AS pooled_value
+ CASE WHEN {_BUCKET_COUNTS_COMPLETE} THEN {_BUCKET_ERROR_SUM} END AS error_sum,
+ CASE WHEN {_BUCKET_COUNTS_COMPLETE} THEN {_BUCKET_REFERENCE_SUM} END AS reference_word_sum,
+ CASE WHEN {_BUCKET_COUNTS_COMPLETE}
+      THEN 100 * {_BUCKET_ERROR_SUM} / NULLIF({_BUCKET_REFERENCE_SUM}, 0) END AS pooled_value
 FROM benchmarks_v2.metric_values_by_bucket
 WHERE metric_version = 'v1' AND evaluation_variant = 'default'
  AND value_key IN ('primary', 'substitution_count', 'deletion_count',
@@ -286,10 +297,11 @@ WHERE metric_version = 'v1' AND evaluation_variant = 'default'
  AND bucket_at >= NOW() - %(interval)s::interval
 GROUP BY provider, model, metric_type, bucket_at
 HAVING COUNT(*) FILTER (WHERE value_key = 'primary') = 1
-"""
+"""  # noqa: S608
 
 _BUCKET_VALUE = (
-    " CASE WHEN metric_type = 'WER' THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value"
+    " CASE WHEN metric_type = 'WER'"
+    " THEN COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) ELSE p50 END AS value"
 )
 
 _NORMALIZED_SERIES_SQL = (
@@ -367,7 +379,7 @@ async def get_results_aggregates(
     dataset_key = dataset or DATASET_ALL
 
     async def fill() -> AggregatesResponse:
-        normalized = settings.normalized_dashboard_reads_enabled
+        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
             _NORMALIZED_STATS_SQL
             if normalized
@@ -485,7 +497,7 @@ async def get_results_timeline(
     async def fill() -> TimelineResponse:
         sql = (
             (_NORMALIZED_COMPACT_SERIES_SQL if window == "30d" else _NORMALIZED_TIMELINE_SQL)
-            if settings.normalized_dashboard_reads_enabled
+            if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
             else (_COMPACT_SERIES_SQL if window == "30d" else _TIMELINE_SQL)
         )
         params = {
@@ -563,7 +575,7 @@ async def get_results_aggregates_by_dataset(
     """
 
     async def fill() -> AggregatesByDatasetResponse:
-        normalized = settings.normalized_dashboard_reads_enabled
+        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
             _NORMALIZED_STATS_BY_DATASET_SQL
             if normalized
