@@ -50,7 +50,7 @@ from coval_bench.registries.provider_keys import provider_names
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 
 # PATCH fields where null is a value, not an omission.
-_NULLABLE_FIELDS = frozenset({"voice", "creator", "region"})
+_NULLABLE_FIELDS = frozenset({"voice", "creator", "region", "color"})
 
 
 def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut:

@@ -24,10 +24,12 @@ from coval_bench.registries.metrics import (
 )
 from coval_bench.registries.models import (
     Gender,
+    HexColor,
     Licensing,
     RegisteredModel,
     Source,
     Voice,
+    normalize_hex_color,
 )
 from coval_bench.registries.preprocessing import (
     SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS,
@@ -51,6 +53,7 @@ __all__ = [
     "MetricDirection",
     "MetricSpec",
     "Gender",
+    "HexColor",
     "MetricValueContract",
     "MetricValueDefinition",
     "MetricValueRole",
@@ -58,6 +61,7 @@ __all__ = [
     "RegisteredModel",
     "Source",
     "Voice",
+    "normalize_hex_color",
     "CATEGORY_LABELS",
     "PROVIDER_VALUED_CATEGORIES",
     "TagCategory",

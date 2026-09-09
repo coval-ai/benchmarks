@@ -26,6 +26,7 @@ from pydantic import BaseModel, field_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import (
+    HexColor,
     Licensing,
     RegisteredModel,
     Source,
@@ -52,6 +53,7 @@ EDITABLE_FIELDS = frozenset(
         "collected",
         "published",
         "tags",
+        "color",
     }
 )
 
@@ -93,6 +95,7 @@ class NewModel(BaseModel):
     collected: bool = True
     published: bool = False
     tags: tuple[str, ...] = ()
+    color: HexColor = None
 
     @field_validator("tags")
     @classmethod
@@ -129,7 +132,7 @@ class ModelChange(BaseModel):
 _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
-           m.collected, m.published, m.updated_by_user_id, m.updated_by_email,
+           m.collected, m.published, m.color, m.updated_by_user_id, m.updated_by_email,
            m.updated_at, COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
     LEFT JOIN (
@@ -142,9 +145,9 @@ _SELECT_MODELS = """
 _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
-         on_prem, region, arena_enabled, collected, published,
+         on_prem, region, arena_enabled, collected, published, color,
          updated_by_user_id, updated_by_email)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
 """
 
@@ -152,7 +155,7 @@ _UPDATE_MODEL = """
     UPDATE benchmarks_v2.models
     SET provider = %s, model = %s, voice = %s, voices = %s, creator = %s,
         source = %s, licensing = %s, on_prem = %s, region = %s,
-        arena_enabled = %s, collected = %s, published = %s,
+        arena_enabled = %s, collected = %s, published = %s, color = %s,
         updated_by_user_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
@@ -167,6 +170,13 @@ _INSERT_HISTORY = """
          changed_by_user_id, changed_by_org_id, changed_by_email)
     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 """
+
+
+# The same read for a database that migration 0029 has not reached yet. The API
+# deploys ahead of its migrations, and this is the read behind /v1/providers and
+# the orchestrator's roster — the whole site goes dark if it fails for the window
+# between the two. Every color reads as unset until the column exists.
+_SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS.replace("m.color,", "NULL AS color,")
 
 
 def _record(row: Mapping[str, Any]) -> ModelRecord:
@@ -204,15 +214,30 @@ class RegistryStore:
 
     async def list_models(self) -> list[ModelRecord]:
         async with self._pool.connection() as conn:
-            rows = await (await conn.execute(f"{_SELECT_MODELS} ORDER BY m.id")).fetchall()
+            rows = await self._select_models(conn, "ORDER BY m.id", ())
         return [_record(row) for row in rows]
 
     async def get_model(self, model_id: int) -> ModelRecord | None:
         async with self._pool.connection() as conn:
-            row = await (
-                await conn.execute(f"{_SELECT_MODELS} WHERE m.id = %s", (model_id,))
-            ).fetchone()
-        return None if row is None else _record(row)
+            rows = await self._select_models(conn, "WHERE m.id = %s", (model_id,))
+        return _record(rows[0]) if rows else None
+
+    @staticmethod
+    async def _select_models(
+        conn: psycopg.AsyncConnection[psycopg.rows.DictRow],
+        clause: str,
+        params: tuple[Any, ...],
+    ) -> list[psycopg.rows.DictRow]:
+        """Read model rows, falling back to the pre-0029 shape while the column is missing."""
+        try:
+            return await (await conn.execute(f"{_SELECT_MODELS} {clause}", params)).fetchall()
+        except psycopg.errors.UndefinedColumn:
+            # The failed statement aborted the connection's implicit transaction;
+            # clear it so the retry is not refused with InFailedSqlTransaction.
+            await conn.rollback()
+            return await (
+                await conn.execute(f"{_SELECT_MODELS_BEFORE_COLOR} {clause}", params)
+            ).fetchall()
 
     async def insert_model(
         self,
@@ -242,6 +267,7 @@ class RegistryStore:
                             new.arena_enabled,
                             new.collected,
                             new.published,
+                            new.color,
                             user_id,
                             email,
                         ),
@@ -329,6 +355,7 @@ class RegistryStore:
                             merged.arena_enabled,
                             merged.collected,
                             merged.published,
+                            merged.color,
                             user_id,
                             email,
                             model_id,
@@ -434,6 +461,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         collected=record.collected,
         published=record.published,
         arena_enabled=record.arena_enabled,
+        color=record.color,
     )
 
 
