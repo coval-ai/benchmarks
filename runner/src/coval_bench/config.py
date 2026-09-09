@@ -300,6 +300,11 @@ class Settings(BaseSettings):
             )
         return value
 
+    # Google accounts admitted to the admin routes; empty admits none.
+    admin_google_emails: list[str] = []
+    # The default is the fixed aud on gcloud user identity tokens.
+    admin_google_audiences: list[str] = ["32555940559.apps.googleusercontent.com"]
+
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None
     arena_audio_dir: Path = Path("arena-audio")

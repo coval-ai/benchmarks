@@ -1,13 +1,12 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The admin auth dependency: 401 without a proven token, 403 outside the coval org."""
+"""The admin auth dependency: 401 without a proven token, 403 when it is not staff."""
 
 from __future__ import annotations
 
 import json
 import time
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,19 +16,19 @@ from coval_bench.api import clerk
 from coval_bench.api.deps import require_coval_admin
 from coval_bench.config import Settings
 from tests.api.conftest import (
-    _CLERK_PUBLIC_PEM,
     CLERK_ISSUER,
     CLERK_PARTY,
     COVAL_ORG,
+    GOOGLE_ADMIN_EMAIL,
     mint_clerk_token,
+    mint_google_token,
+    stub_jwks,
 )
 
 
 @pytest.fixture(autouse=True)
 def _stub_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
-    signing_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
-    client = SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key)
-    monkeypatch.setattr(clerk, "_jwks", lambda issuer: client)
+    stub_jwks(monkeypatch)
 
 
 def _settings(monkeypatch: pytest.MonkeyPatch, coval_org: str | None = COVAL_ORG) -> Settings:
@@ -42,6 +41,7 @@ def _settings(monkeypatch: pytest.MonkeyPatch, coval_org: str | None = COVAL_ORG
         monkeypatch.delenv("CLERK_COVAL_ORG", raising=False)
     else:
         monkeypatch.setenv("CLERK_COVAL_ORG", coval_org)
+    monkeypatch.setenv("ADMIN_GOOGLE_EMAILS", json.dumps([GOOGLE_ADMIN_EMAIL]))
     return Settings()
 
 
@@ -51,6 +51,10 @@ def _admin(settings: Settings, authorization: str | None) -> clerk.CovalAdmin:
 
 def _bearer(**claims: Any) -> str:
     return f"Bearer {mint_clerk_token(**claims)}"
+
+
+def _google(**claims: Any) -> str:
+    return f"Bearer {mint_google_token(**claims)}"
 
 
 @pytest.mark.parametrize("authorization", [None, "", "Token abc", "Bearer ", "Bearer not-a-jwt"])
@@ -119,3 +123,35 @@ def test_a_missing_blank_or_malformed_email_is_none(
     settings = _settings(monkeypatch)
     admin = _admin(settings, _bearer(sub="user_1", org_id=COVAL_ORG, **claims))
     assert admin.email is None
+
+
+def test_allowlisted_google_token_yields_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch)
+    admin = _admin(settings, _google(email=GOOGLE_ADMIN_EMAIL.upper()))
+    assert admin == clerk.CovalAdmin(user_id="google-sub-1", email=GOOGLE_ADMIN_EMAIL)
+
+
+def test_unlisted_google_account_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        _admin(settings, _google(email="someone-else@test.example.com"))
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"aud": "another-client.apps.googleusercontent.com"},
+        {"iat": int(time.time()) - 7200, "exp": int(time.time()) - 3600},
+        {"email_verified": False},
+    ],
+)
+def test_unproven_google_tokens_are_401(
+    monkeypatch: pytest.MonkeyPatch, claims: dict[str, Any]
+) -> None:
+    settings = _settings(monkeypatch)
+    with pytest.raises(HTTPException) as exc:
+        _admin(settings, _google(**claims))
+    assert exc.value.status_code == 401
+    assert exc.value.headers is not None
+    assert exc.value.headers["WWW-Authenticate"] == "Bearer"

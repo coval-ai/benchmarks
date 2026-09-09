@@ -23,7 +23,7 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import SecretStr
 from starlette.requests import Request
 
-from coval_bench.api import clerk
+from coval_bench.api import clerk, google_auth
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import RegistryStore, TagRecord, fetch_models
 from coval_bench.llm.benchmark import ProxiedModel, llm_models
@@ -73,21 +73,16 @@ def require_coval_admin(
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> clerk.CovalAdmin:
-    """The verified coval caller: 401 without a proven token, 403 outside the coval org."""
+    """The verified coval caller: 401 without a proven token, 403 when it is not staff."""
+    token = bearer_token(authorization)
+    if token is not None and google_auth.looks_like_google(token):
+        return _google_admin(token, settings)
     claims = clerk.bearer_claims(authorization, settings)
     if claims is None:
-        raise HTTPException(
-            401,
-            "a valid Clerk session token is required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unproven("a valid Clerk session or Google identity token is required")
     user_id = claims.get("sub")
     if not isinstance(user_id, str) or not user_id:
-        raise HTTPException(
-            401,
-            "the session token names no subject",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unproven("the session token names no subject")
     org_id = claims.get("org_id")
     if (
         not isinstance(org_id, str)
@@ -100,6 +95,20 @@ def require_coval_admin(
         user_id=user_id,
         email=email if isinstance(email, str) and email else None,
     )
+
+
+def _google_admin(token: str, settings: Settings) -> clerk.CovalAdmin:
+    identity = google_auth.verify(token, settings)
+    if identity is None:
+        raise _unproven("the Google identity token could not be verified")
+    allowed = {email.lower() for email in settings.admin_google_emails}
+    if identity.email not in allowed:
+        raise HTTPException(403, "this Google account is not an admin")
+    return clerk.CovalAdmin(user_id=identity.sub, email=identity.email)
+
+
+def _unproven(detail: str) -> HTTPException:
+    return HTTPException(401, detail, headers={"WWW-Authenticate": "Bearer"})
 
 
 def get_posthog(request: Request) -> Posthog | None:
