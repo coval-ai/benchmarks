@@ -199,8 +199,15 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
         MetricValueDefinition(key="insertions", unit="percent", minimum=0.0),
         MetricValueDefinition(key="deletions", unit="percent", minimum=0.0),
         MetricValueDefinition(key="substitutions", unit="percent", minimum=0.0),
+        MetricValueDefinition(key="substitution_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="deletion_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="insertion_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="reference_words", unit="count", minimum=0.0, required=False),
     ),
     component_sum_tolerance=0.0001,
+    optional_all_or_none=(
+        frozenset({"substitution_count", "deletion_count", "insertion_count", "reference_words"}),
+    ),
 )
 METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
     metric=Metric.TTFA,
@@ -273,7 +280,14 @@ def validate_metric_values(
             missing = ", ".join(sorted(optional_group - present))
             raise ValueError(f"optional metric value group is incomplete; missing: {missing}")
     if contract.component_sum_tolerance is not None:
-        components = [value for key, value in by_key.items() if key != "primary"]
+        primary_unit = next(
+            d.unit for d in contract.values if d.value_role is MetricValueRole.PRIMARY
+        )
+        components = [
+            value
+            for key, value in by_key.items()
+            if key != "primary" and definitions[key].unit == primary_unit
+        ]
         if (
             components
             and abs(sum(components) - by_key["primary"]) > contract.component_sum_tolerance

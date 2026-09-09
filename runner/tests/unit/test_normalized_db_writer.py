@@ -1381,6 +1381,32 @@ def test_metric_value_contracts_cover_wer_and_optional_ttfa_components() -> None
         ),
     )
     validate_metric_values(
+        Metric.WER,
+        "v1",
+        (
+            ("primary", "percent", 3, MetricValueRole.PRIMARY),
+            ("insertions", "percent", 1, MetricValueRole.COMPONENT),
+            ("deletions", "percent", 1, MetricValueRole.COMPONENT),
+            ("substitutions", "percent", 1, MetricValueRole.COMPONENT),
+            ("substitution_count", "count", 1, MetricValueRole.COMPONENT),
+            ("deletion_count", "count", 1, MetricValueRole.COMPONENT),
+            ("insertion_count", "count", 1, MetricValueRole.COMPONENT),
+            ("reference_words", "count", 100, MetricValueRole.COMPONENT),
+        ),
+    )
+    with pytest.raises(ValueError, match="optional metric value group"):
+        validate_metric_values(
+            Metric.WER,
+            "v1",
+            (
+                ("primary", "percent", 3, MetricValueRole.PRIMARY),
+                ("insertions", "percent", 1, MetricValueRole.COMPONENT),
+                ("deletions", "percent", 1, MetricValueRole.COMPONENT),
+                ("substitutions", "percent", 1, MetricValueRole.COMPONENT),
+                ("reference_words", "count", 100, MetricValueRole.COMPONENT),
+            ),
+        )
+    validate_metric_values(
         Metric.TTFA, "v1", (("primary", "milliseconds", 12, MetricValueRole.PRIMARY),)
     )
     validate_metric_values(

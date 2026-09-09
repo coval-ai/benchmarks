@@ -203,6 +203,10 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
             wer_insertions_pct=2,
             wer_deletions_pct=3,
             wer_substitutions_pct=5,
+            wer_substitutions=5,
+            wer_deletions=3,
+            wer_insertions=2,
+            wer_reference_words=100,
         ),
     ]
 
@@ -236,6 +240,10 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
         "insertions",
         "deletions",
         "substitutions",
+        "substitution_count",
+        "deletion_count",
+        "insertion_count",
+        "reference_words",
     ]
     assert writer.inputs[wer_id] == [
         MetricEvaluationInput(

@@ -668,6 +668,7 @@ async def _run_stt_item(
                         status=ResultStatus.SUCCESS,
                         error=None,
                         **wer_result.error_percentages,
+                        **wer_result.error_counts,
                     )
                 )
                 logger.debug(
@@ -968,6 +969,7 @@ async def _run_tts_item(
                                 status=ResultStatus.SUCCESS,
                                 error=None,
                                 **wer_result.error_percentages,
+                                **wer_result.error_counts,
                             )
                         )
                         logger.debug(
