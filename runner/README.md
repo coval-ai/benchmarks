@@ -59,6 +59,24 @@ Normalized observation dual writes are additive, private, and disabled by defaul
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
 enable the STT/TTS rollout; legacy result writes remain the source of truth.
 
+### API auth
+
+Public data endpoints need no auth. Two things do.
+
+**Admin routes** (`/v1/admin/models`, `/v1/admin/pricing`, and the PATCH on a model) accept either proof:
+
+- A Clerk session token with the coval org active. This is what the web admin page sends.
+- A Google identity token for an email in `ADMIN_GOOGLE_EMAILS`. In prod that list is `local.dev_members` in benchmark-infra `envs/prod/humans.tf`, so every dev there can drive the admin API from a shell:
+
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "$API_URL"/v1/admin/models
+```
+
+The token lasts an hour and needs only a normal `gcloud auth login`. Model history records the caller's subject and email either way. A 401 means the token could not be verified; a 403 means it verified but the account is not staff.
+
+**Early-access models** are stripped from every data endpoint unless the request carries a Clerk session token. The coval org sees everything, a partner org sees what `CLERK_ORG_PROVIDERS` or `CLERK_ORG_EXCLUSIVE` names for it, and anything else gets the public view. The response says which case applied in `X-EA-Token-Status`.
+
 ### Normalized-storage backfill operator runbook
 
 Run the production backfill as a dry run first. This command adds no `--apply`
