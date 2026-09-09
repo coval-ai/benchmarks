@@ -193,6 +193,7 @@ class Settings(BaseSettings):
     # Coval agent id for the Phonely text agent (opaque, not secret); unset skips it.
     coval_llm_phonely_agent_id: str | None = None
     coval_llm_openai_agent_id: str | None = None
+    coval_llm_google_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
