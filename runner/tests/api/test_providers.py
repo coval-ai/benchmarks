@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from coval_bench.registries import Benchmark, Licensing, ModelTag, RegisteredModel, Source
+from coval_bench.registries import Benchmark, Licensing, RegisteredModel, Source
 from tests.api.conftest import COVAL_ORG, add_models, bearer
 
 
@@ -196,7 +196,7 @@ async def test_feature_tags_and_on_prem_surface_as_facets(
             Benchmark.STT,
             "acme",
             "m",
-            tags=(ModelTag.DIARIZATION, ModelTag.TRANSLATION),
+            tags=("diarization", "translation"),
             on_prem=True,
         ),
     )

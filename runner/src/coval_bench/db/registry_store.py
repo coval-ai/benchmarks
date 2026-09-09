@@ -20,7 +20,6 @@ from typing import Any, Literal
 import psycopg
 import psycopg.errors
 import psycopg.rows
-import structlog
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, field_validator
@@ -32,11 +31,8 @@ from coval_bench.registries.models import (
     Source,
     Voice,
 )
-from coval_bench.registries.tags import ModelTag
 
 RegistryPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]
-
-logger = structlog.get_logger("coval_bench.db.registry_store")
 
 
 # Columns a PATCH may change. The modality is immutable: it selects the
@@ -422,23 +418,7 @@ class RegistryStore:
 
 
 def _registered(record: ModelRecord) -> RegisteredModel:
-    """One row as the frozen object every consumer already expects.
-
-    A tag the code vocabulary does not know is dropped rather than raised on: a
-    tag added through the admin API must not take the catalogue down, it just
-    does not surface until the vocabulary knows it.
-    """
-    tags: list[ModelTag] = []
-    for value in record.tags:
-        try:
-            tags.append(ModelTag(value))
-        except ValueError:
-            logger.warning(
-                "registry_unknown_tag",
-                provider=record.provider,
-                model=record.model,
-                tag=value,
-            )
+    """One row as the frozen object every consumer already expects."""
     return RegisteredModel(
         benchmark=record.modality,
         provider=record.provider,
@@ -446,7 +426,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         voice=record.voice,
         voices=record.voices,
         creator=record.creator,
-        tags=tuple(tags),
+        tags=record.tags,
         source=record.source,
         licensing=record.licensing,
         on_prem=record.on_prem,

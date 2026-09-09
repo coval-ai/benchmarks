@@ -25,7 +25,7 @@ router = APIRouter(tags=["tags"])
 async def list_tags(
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
 ) -> TagsResponse:
-    """The MODE and FEATURES tag vocabulary, ordered by value."""
+    """The FEATURES tag vocabulary, ordered by value."""
     records = await RegistryStore(pool).list_tags()
     return TagsResponse(tags=[TagOut.model_validate(record.model_dump()) for record in records])
 
