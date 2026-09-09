@@ -68,4 +68,5 @@ PROVIDER_ENV: dict[str, str] = {
     "fluxions": "FLUXIONS_API_KEY",
     "deepdub": "DEEPDUB_API_KEY",
     "atlas": "ATLAS_API_KEY",
+    "nari": "NARI_API_KEY",
 }
