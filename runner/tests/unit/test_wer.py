@@ -197,6 +197,41 @@ def test_error_percentages_sum_to_wer(
 
 
 # ---------------------------------------------------------------------------
+# alignment counts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("case_id", "ref", "hyp", "expected_wer", "note"), _GOLDEN)
+def test_counts_reproduce_wer(
+    case_id: int, ref: str, hyp: str, expected_wer: float, note: str
+) -> None:
+    result = compute_wer(ref, hyp)
+    errors = result.substitutions + result.deletions + result.insertions
+    assert result.reference_words == len(result.normalized_reference.split())
+    if result.reference_words:
+        assert errors / result.reference_words == pytest.approx(result.wer)
+    else:
+        assert result.wer == float(errors)
+
+
+def test_counts_by_type() -> None:
+    result = compute_wer("a b c d", "a x c d e")
+    assert (result.substitutions, result.deletions, result.insertions) == (1, 0, 1)
+    assert result.error_counts == {
+        "wer_substitutions": 1,
+        "wer_deletions": 0,
+        "wer_insertions": 1,
+        "wer_reference_words": 4,
+    }
+
+
+def test_counts_empty_reference() -> None:
+    result = compute_wer("", "hello there")
+    assert result.reference_words == 0
+    assert result.insertions == 2
+
+
+# ---------------------------------------------------------------------------
 # WordError model
 # ---------------------------------------------------------------------------
 

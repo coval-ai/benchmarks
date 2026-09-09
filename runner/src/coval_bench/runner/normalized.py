@@ -86,6 +86,19 @@ def _values(
             for key, value in components
             if value is not None
         )
+        counts = (
+            ("substitution_count", primary.wer_substitutions),
+            ("deletion_count", primary.wer_deletions),
+            ("insertion_count", primary.wer_insertions),
+            ("reference_words", primary.wer_reference_words),
+        )
+        if all(count is not None for _, count in counts):
+            values.extend(
+                MetricValue(
+                    metric_evaluation_id=evaluation_id, value_key=key, unit="count", value=count
+                )
+                for key, count in counts
+            )
     if metric == Metric.TTFA:
         component_rows = {str(row.metric_type): row for row in rows}
         roundtrip = component_rows.get(str(Metric.TTFA_ROUNDTRIP))
