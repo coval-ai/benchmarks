@@ -107,15 +107,7 @@ _TIMELINE_SQL = (
 # and max plotted value in every bin plus the endpoints caps the result at 240
 # points per group while preserving endpoints and plotted extrema.  All tie
 # breaks include bucket_at so identical requests have identical ordering.
-_COMPACT_SERIES_SQL = (
-    "WITH base AS ("
-    " SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
-    " min_value, p25, p50, p75, max_value, value_sum, sample_count,"
-    " CASE WHEN metric_type = 'WER'"
-    " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value"
-    " FROM benchmarks_v2.results_by_bucket"
-    " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
-    " AND bucket_at >= NOW() - %(interval)s::interval"
+_COMPACT_SERIES_TAIL = (
     "), ranked AS ("
     " SELECT *, row_number() OVER grp AS ordinal,"
     " count(*) OVER (PARTITION BY provider, model, metric_type) AS group_count"
@@ -130,9 +122,21 @@ _COMPACT_SERIES_SQL = (
     " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
     " FROM binned"
     ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
-    " max_value, value_sum, sample_count, value FROM selected"
+    " max_value, value_sum, sample_count, value, pooled_value FROM selected"
     " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
     " ORDER BY scheduled_at, provider, model, metric_type"
+)
+
+_COMPACT_SERIES_SQL = (
+    "WITH base AS ("  # noqa: S608
+    " SELECT provider, model, metric_type, bucket_at AS scheduled_at,"
+    " min_value, p25, p50, p75, max_value, value_sum, sample_count,"
+    " CASE WHEN metric_type = 'WER'"
+    " THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value,"
+    " NULL::float8 AS pooled_value"
+    " FROM benchmarks_v2.results_by_bucket"
+    " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
+    " AND bucket_at >= NOW() - %(interval)s::interval" + _COMPACT_SERIES_TAIL
 )
 
 _DATASETS_SQL_TEMPLATE = (
@@ -152,50 +156,52 @@ _STATS_BY_DATASET_SQL_TEMPLATE = (
     " ORDER BY dataset_id, provider, model, metric_type"
 )
 
-_WER_COUNTS_COMPLETE = (
-    "metric_type = 'WER' AND COUNT(reference_words) = COUNT(*)"
-    " AND COUNT(substitution_count) = COUNT(*) AND COUNT(deletion_count) = COUNT(*)"
-    " AND COUNT(insertion_count) = COUNT(*)"
+_WER_SPLIT_COMPLETE = (
+    "COUNT(wer_insertions_pct) = COUNT(*) AND COUNT(wer_deletions_pct) = COUNT(*)"
+    " AND COUNT(wer_substitutions_pct) = COUNT(*)"
 )
+_WER_COUNTS_COMPLETE = (
+    "COUNT(reference_words) = COUNT(*) AND COUNT(substitution_count) = COUNT(*)"
+    " AND COUNT(deletion_count) = COUNT(*) AND COUNT(insertion_count) = COUNT(*)"
+)
+_POOLED = "100 * SUM({key}) / NULLIF(SUM(reference_words), 0)"
 
-# The normalized store keeps a metric's primary value and its components in one
-# evaluation.  Only TTFA components had public legacy rows; WER components are
-# breakdown columns on the WER primary row, never public metric rows.
+# TTFA components have public metric names of their own, hence the UNION ALL.
 _NORMALIZED_STATS_SQL = f"""
-WITH public_values AS (
- SELECT o.provider, o.model, o.benchmark, o.dataset_id,
-        CASE WHEN e.metric_type = 'TTFA' AND v.value_key = 'roundtrip' THEN 'TTFARoundtrip'
-             WHEN e.metric_type = 'TTFA' AND v.value_key = 'leading_silence'
-                  THEN 'TTFALeadingSilence'
-             WHEN v.value_role = 'primary' THEN e.metric_type END AS metric_type,
-        v.value, wi.value AS wer_insertions_pct, wd.value AS wer_deletions_pct,
-        ws.value AS wer_substitutions_pct,
-        cs.value AS substitution_count, cd.value AS deletion_count,
-        ci.value AS insertion_count, cr.value AS reference_words
- FROM benchmarks_v2.metric_values v
- JOIN benchmarks_v2.metric_evaluations e ON e.id = v.metric_evaluation_id
+WITH evaluations AS (
+ SELECT o.provider, o.model, o.dataset_id, e.metric_type,
+        MAX(v.value) FILTER (WHERE v.value_key = 'primary') AS value,
+        MAX(v.value) FILTER (WHERE v.value_key = 'roundtrip') AS roundtrip,
+        MAX(v.value) FILTER (WHERE v.value_key = 'leading_silence') AS leading_silence,
+        MAX(v.value) FILTER (WHERE v.value_key = 'insertions') AS wer_insertions_pct,
+        MAX(v.value) FILTER (WHERE v.value_key = 'deletions') AS wer_deletions_pct,
+        MAX(v.value) FILTER (WHERE v.value_key = 'substitutions') AS wer_substitutions_pct,
+        MAX(v.value) FILTER (WHERE v.value_key = 'substitution_count') AS substitution_count,
+        MAX(v.value) FILTER (WHERE v.value_key = 'deletion_count') AS deletion_count,
+        MAX(v.value) FILTER (WHERE v.value_key = 'insertion_count') AS insertion_count,
+        MAX(v.value) FILTER (WHERE v.value_key = 'reference_words') AS reference_words
+ FROM benchmarks_v2.metric_evaluations e
  JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
  JOIN benchmarks_v2.runs r ON r.id = o.run_id
- LEFT JOIN benchmarks_v2.metric_values wi
-   ON wi.metric_evaluation_id = e.id AND wi.value_key = 'insertions'
- LEFT JOIN benchmarks_v2.metric_values wd
-   ON wd.metric_evaluation_id = e.id AND wd.value_key = 'deletions'
- LEFT JOIN benchmarks_v2.metric_values ws
-   ON ws.metric_evaluation_id = e.id AND ws.value_key = 'substitutions'
- LEFT JOIN benchmarks_v2.metric_values cs
-   ON cs.metric_evaluation_id = e.id AND cs.value_key = 'substitution_count'
- LEFT JOIN benchmarks_v2.metric_values cd
-   ON cd.metric_evaluation_id = e.id AND cd.value_key = 'deletion_count'
- LEFT JOIN benchmarks_v2.metric_values ci
-   ON ci.metric_evaluation_id = e.id AND ci.value_key = 'insertion_count'
- LEFT JOIN benchmarks_v2.metric_values cr
-   ON cr.metric_evaluation_id = e.id AND cr.value_key = 'reference_words'
+ JOIN benchmarks_v2.metric_values v ON v.metric_evaluation_id = e.id
  WHERE o.status = 'succeeded' AND e.status = 'succeeded'
    AND r.status IN ('succeeded', 'partial') AND e.metric_version = 'v1'
    AND e.evaluation_variant = 'default' AND o.benchmark = %(benchmark)s
    AND o.captured_at >= NOW() - %(interval)s::interval
-   AND (v.value_role = 'primary' OR (e.metric_type = 'TTFA'
-        AND v.value_key IN ('roundtrip', 'leading_silence')))
+ GROUP BY e.id, o.provider, o.model, o.dataset_id, e.metric_type
+), public_values AS (
+ SELECT provider, model, dataset_id, metric_type, value,
+        wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
+        substitution_count, deletion_count, insertion_count, reference_words
+ FROM evaluations WHERE value IS NOT NULL
+ UNION ALL
+ SELECT provider, model, dataset_id, 'TTFARoundtrip', roundtrip,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL
+ FROM evaluations WHERE metric_type = 'TTFA' AND roundtrip IS NOT NULL
+ UNION ALL
+ SELECT provider, model, dataset_id, 'TTFALeadingSilence', leading_silence,
+        NULL, NULL, NULL, NULL, NULL, NULL, NULL
+ FROM evaluations WHERE metric_type = 'TTFA' AND leading_silence IS NOT NULL
 )
 SELECT provider, model, metric_type, AVG(value)::float8 AS avg_value,
  COALESCE(STDDEV_SAMP(value), 0)::float8 AS stddev_value,
@@ -206,29 +212,21 @@ SELECT provider, model, metric_type, AVG(value)::float8 AS avg_value,
  PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY value)::float8 AS p95,
  PERCENTILE_CONT(.99) WITHIN GROUP (ORDER BY value)::float8 AS p99,
  MIN(value)::float8 AS min_value, MAX(value)::float8 AS max_value, COUNT(*)::int AS sample_count,
- CASE WHEN metric_type = 'WER' AND COUNT(wer_insertions_pct) = COUNT(*)
-      AND COUNT(wer_deletions_pct) = COUNT(*) AND COUNT(wer_substitutions_pct) = COUNT(*)
-      THEN AVG(wer_insertions_pct)::float8 END AS wer_insertions_pct,
- CASE WHEN metric_type = 'WER' AND COUNT(wer_insertions_pct) = COUNT(*)
-      AND COUNT(wer_deletions_pct) = COUNT(*) AND COUNT(wer_substitutions_pct) = COUNT(*)
-      THEN AVG(wer_deletions_pct)::float8 END AS wer_deletions_pct,
- CASE WHEN metric_type = 'WER' AND COUNT(wer_insertions_pct) = COUNT(*)
-      AND COUNT(wer_deletions_pct) = COUNT(*) AND COUNT(wer_substitutions_pct) = COUNT(*)
+ CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG(wer_insertions_pct)::float8 END AS wer_insertions_pct,
+ CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG(wer_deletions_pct)::float8 END AS wer_deletions_pct,
+ CASE WHEN {_WER_SPLIT_COMPLETE}
       THEN AVG(wer_substitutions_pct)::float8 END AS wer_substitutions_pct,
  CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN (100 * (SUM(substitution_count) + SUM(deletion_count) + SUM(insertion_count))
-            / NULLIF(SUM(reference_words), 0))::float8 END AS pooled_value,
+      THEN ({_POOLED.format(key="substitution_count + deletion_count + insertion_count")})::float8
+      END AS pooled_value,
  CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN (100 * SUM(insertion_count) / NULLIF(SUM(reference_words), 0))::float8
-      END AS pooled_insertions_pct,
+      THEN ({_POOLED.format(key="insertion_count")})::float8 END AS pooled_insertions_pct,
  CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN (100 * SUM(deletion_count) / NULLIF(SUM(reference_words), 0))::float8
-      END AS pooled_deletions_pct,
+      THEN ({_POOLED.format(key="deletion_count")})::float8 END AS pooled_deletions_pct,
  CASE WHEN {_WER_COUNTS_COMPLETE}
-      THEN (100 * SUM(substitution_count) / NULLIF(SUM(reference_words), 0))::float8
-      END AS pooled_substitutions_pct
-FROM public_values WHERE metric_type IS NOT NULL
- AND (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)
+      THEN ({_POOLED.format(key="substitution_count")})::float8 END AS pooled_substitutions_pct
+FROM public_values
+ WHERE (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)
 GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type
 """  # noqa: S608
 
@@ -245,7 +243,9 @@ ORDER BY o.dataset_id
 """
 
 _NORMALIZED_STATS_BY_DATASET_SQL = (
-    _NORMALIZED_STATS_SQL.replace(" AND (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)", "")
+    _NORMALIZED_STATS_SQL.replace(
+        " WHERE (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)", ""
+    )
     .replace(
         "GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type",
         "GROUP BY dataset_id, provider, model, metric_type "
@@ -257,77 +257,56 @@ _NORMALIZED_STATS_BY_DATASET_SQL = (
     )
 )
 
-_NORMALIZED_POOLED_BUCKET_JOIN = (
-    " LEFT JOIN LATERAL ("
-    " SELECT CASE WHEN COUNT(*) = 4"
-    " AND MIN(c.sample_count) = b.sample_count AND MAX(c.sample_count) = b.sample_count"
-    " THEN 100 * SUM(c.value_sum) FILTER (WHERE c.value_key <> 'reference_words')"
-    " / NULLIF(SUM(c.value_sum) FILTER (WHERE c.value_key = 'reference_words'), 0)"
-    " END AS pooled_value"
-    " FROM benchmarks_v2.metric_values_by_bucket c"
-    " WHERE c.provider = b.provider AND c.model = b.model AND c.benchmark = b.benchmark"
-    " AND c.dataset_id = b.dataset_id AND c.metric_type = b.metric_type"
-    " AND c.metric_version = b.metric_version AND c.evaluation_variant = b.evaluation_variant"
-    " AND c.bucket_at = b.bucket_at AND c.value_key IN"
-    " ('substitution_count', 'deletion_count', 'insertion_count', 'reference_words')"
-    ") pooled ON TRUE"
-)
+# Pooled WER needs all four count rows covering the same clips as the primary row.
+_NORMALIZED_BUCKETS_SQL = """
+SELECT provider, model, metric_type, bucket_at AS scheduled_at,
+ MAX(min_value) FILTER (WHERE value_key = 'primary') AS min_value,
+ MAX(p25) FILTER (WHERE value_key = 'primary') AS p25,
+ MAX(p50) FILTER (WHERE value_key = 'primary') AS p50,
+ MAX(p75) FILTER (WHERE value_key = 'primary') AS p75,
+ MAX(max_value) FILTER (WHERE value_key = 'primary') AS max_value,
+ MAX(value_sum) FILTER (WHERE value_key = 'primary') AS value_sum,
+ MAX(sample_count) FILTER (WHERE value_key = 'primary') AS sample_count,
+ CASE WHEN COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)
+      THEN 100 * SUM(value_sum) FILTER (WHERE value_key IN
+             ('substitution_count', 'deletion_count', 'insertion_count'))
+           / NULLIF(SUM(value_sum) FILTER (WHERE value_key = 'reference_words'), 0)
+      END AS pooled_value
+FROM benchmarks_v2.metric_values_by_bucket
+WHERE metric_version = 'v1' AND evaluation_variant = 'default'
+ AND value_key IN ('primary', 'substitution_count', 'deletion_count',
+                   'insertion_count', 'reference_words')
+ AND benchmark = %(benchmark)s AND dataset_id = %(dataset)s
+ AND bucket_at >= NOW() - %(interval)s::interval
+GROUP BY provider, model, metric_type, bucket_at
+HAVING COUNT(*) FILTER (WHERE value_key = 'primary') = 1
+"""
 
-_NORMALIZED_BUCKET_WHERE = (
-    " WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'"
-    " AND b.value_key = 'primary' AND b.benchmark = %(benchmark)s"
-    " AND b.dataset_id = %(dataset)s"
-    " AND b.bucket_at >= NOW() - %(interval)s::interval"
+_BUCKET_VALUE = (
+    " CASE WHEN metric_type = 'WER' THEN value_sum / NULLIF(sample_count, 0) ELSE p50 END AS value"
 )
 
 _NORMALIZED_SERIES_SQL = (
-    "SELECT b.provider, b.model, b.metric_type, b.bucket_at AS scheduled_at,"  # noqa: S608
-    " b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,"
-    " pooled.pooled_value"
-    " FROM benchmarks_v2.metric_values_by_bucket b"
-    + _NORMALIZED_POOLED_BUCKET_JOIN
-    + _NORMALIZED_BUCKET_WHERE
-    + " ORDER BY b.bucket_at, b.provider, b.model, b.metric_type"
+    "SELECT * FROM (" + _NORMALIZED_BUCKETS_SQL + ") b"  # noqa: S608
+    " ORDER BY scheduled_at, provider, model, metric_type"
 )
 
 _NORMALIZED_TIMELINE_SQL = (
-    "SELECT b.provider, b.model, b.metric_type, b.bucket_at AS scheduled_at,"  # noqa: S608
-    " CASE WHEN b.metric_type = 'WER'"
-    " THEN b.value_sum / NULLIF(b.sample_count, 0) ELSE b.p50 END AS value,"
-    " pooled.pooled_value"
-    " FROM benchmarks_v2.metric_values_by_bucket b"
-    + _NORMALIZED_POOLED_BUCKET_JOIN
-    + _NORMALIZED_BUCKET_WHERE
-    + " ORDER BY b.bucket_at, b.provider, b.model, b.metric_type"
+    "SELECT provider, model, metric_type, scheduled_at, pooled_value,"  # noqa: S608
+    + _BUCKET_VALUE
+    + " FROM ("
+    + _NORMALIZED_BUCKETS_SQL
+    + ") b"
+    " ORDER BY scheduled_at, provider, model, metric_type"
 )
 
 _NORMALIZED_COMPACT_SERIES_SQL = (
-    "WITH base AS ("  # noqa: S608
-    " SELECT b.provider, b.model, b.metric_type, b.bucket_at AS scheduled_at,"
-    " b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,"
-    " CASE WHEN b.metric_type = 'WER'"
-    " THEN b.value_sum / NULLIF(b.sample_count, 0) ELSE b.p50 END AS value,"
-    " pooled.pooled_value"
-    " FROM benchmarks_v2.metric_values_by_bucket b"
-    + _NORMALIZED_POOLED_BUCKET_JOIN
-    + _NORMALIZED_BUCKET_WHERE
-    + "), ranked AS ("
-    " SELECT *, row_number() OVER grp AS ordinal,"
-    " count(*) OVER (PARTITION BY provider, model, metric_type) AS group_count"
-    " FROM base WINDOW grp AS (PARTITION BY provider, model, metric_type ORDER BY scheduled_at)"
-    "), binned AS ("
-    " SELECT *, floor((ordinal - 1) * 119.0 / group_count)::int AS bin"
-    " FROM ranked"
-    "), selected AS ("
-    " SELECT *, row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value ASC, scheduled_at ASC) AS min_rank,"
-    " row_number() OVER (PARTITION BY provider, model, metric_type, bin"
-    " ORDER BY value DESC, scheduled_at ASC) AS max_rank"
-    " FROM binned"
-    ") SELECT provider, model, metric_type, scheduled_at, min_value, p25, p50, p75,"
-    " max_value, value_sum, sample_count, value, pooled_value FROM selected"
-    " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
-    " ORDER BY scheduled_at, provider, model, metric_type"
+    "WITH base AS (SELECT *,"  # noqa: S608
+    + _BUCKET_VALUE
+    + " FROM ("
+    + _NORMALIZED_BUCKETS_SQL
+    + ") b"
+    + _COMPACT_SERIES_TAIL
 )
 
 
