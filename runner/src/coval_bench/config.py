@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     schedule_period_seconds: int = Field(default=1800, gt=0)
 
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
+    airy_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
     atlas_api_key: SecretStr | None = None

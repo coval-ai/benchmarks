@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 from coval_bench.providers.base import TTSProvider
+from coval_bench.providers.tts.airy import AiryTTSProvider
 from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.atlas import AtlasTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
@@ -55,6 +56,7 @@ except ImportError:
     GOOGLE_TTS_AVAILABLE = False
 
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
+    "airy": AiryTTSProvider,
     "openai": OpenAITTSProvider,
     "atlas": AtlasTTSProvider,
     "cartesia": CartesiaTTSProvider,
@@ -88,6 +90,7 @@ if GoogleTTSProvider is not None and GOOGLE_TTS_AVAILABLE:
     TTS_PROVIDERS["google"] = GoogleTTSProvider
 
 __all__ = [
+    "AiryTTSProvider",
     "TTS_PROVIDERS",
     "HUME_AVAILABLE",
     "GOOGLE_TTS_AVAILABLE",
