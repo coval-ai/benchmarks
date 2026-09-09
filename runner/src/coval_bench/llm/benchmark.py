@@ -10,13 +10,35 @@ from dataclasses import dataclass
 from typing import Any
 
 from coval_bench.config import Settings
+from coval_bench.llm.dental import load_dental_agent
+from coval_bench.llm.openai_compat import OpenAICompatClient
 from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+# Must match the model column of the collected LLM row for this provider.
+OPENAI_MODEL = "gpt-4.1"
+
+
+def openai_client(settings: Settings) -> TurnClient | None:
+    key = settings.openai_api_key
+    if not (key and key.get_secret_value()):
+        return None
+    agent = load_dental_agent()
+    return OpenAICompatClient(
+        key.get_secret_value(),
+        OPENAI_BASE_URL,
+        OPENAI_MODEL,
+        agent.system_prompt,
+        list(agent.tools),
+    )
+
+
 CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
     "phonely": PhonelyClient.from_settings,
+    "openai": openai_client,
 }
 DEFAULT_PERSONA_ID = "PN3xgmsqeLDjsNNEA2e55e"
 ITERATION_COUNT = 1
