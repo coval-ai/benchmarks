@@ -98,6 +98,44 @@ def bearer(**claims: Any) -> dict[str, str]:
     return {"Authorization": f"Bearer {mint_clerk_token(**claims)}"}
 
 
+GOOGLE_ADMIN_EMAIL = "admin@test.example.com"
+GOOGLE_AUDIENCE = "32555940559.apps.googleusercontent.com"
+
+_GOOGLE_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_GOOGLE_PUBLIC_PEM = _GOOGLE_SIGNING_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+)
+
+
+def mint_google_token(**claims: Any) -> str:
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "iss": "https://accounts.google.com",
+        "aud": GOOGLE_AUDIENCE,
+        "sub": "google-sub-1",
+        "email": GOOGLE_ADMIN_EMAIL,
+        "email_verified": True,
+        "iat": now,
+        "exp": now + 3600,
+    }
+    payload.update(claims)
+    return jwt.encode(payload, _GOOGLE_SIGNING_KEY, algorithm="RS256")
+
+
+def stub_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
+    clerk_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
+    monkeypatch.setattr(
+        "coval_bench.api.clerk._jwks",
+        lambda issuer: SimpleNamespace(get_signing_key_from_jwt=lambda token: clerk_key),
+    )
+    google_key = SimpleNamespace(key=_GOOGLE_PUBLIC_PEM)
+    monkeypatch.setattr(
+        "coval_bench.api.google_auth._jwks",
+        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda token: google_key),
+    )
+
+
 def _make_db_url(postgresql: Any) -> str:
     """Build a postgresql:// URL from the pytest-postgresql fixture."""
     info = postgresql.info
@@ -498,12 +536,7 @@ async def app(
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
     monkeypatch.setenv("CLERK_COVAL_ORG", COVAL_ORG)
-    # Resolve token signatures against the fixture key instead of the network.
-    signing_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
-    monkeypatch.setattr(
-        "coval_bench.api.clerk._jwks",
-        lambda issuer: SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key),
-    )
+    stub_jwks(monkeypatch)
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
