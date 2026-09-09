@@ -52,7 +52,6 @@ class WERResult(BaseModel):
 
     @property
     def error_counts(self) -> dict[str, int]:
-        """Raw alignment counts; pooled WER is sum(errors) / sum(reference_words)."""
         return {
             "wer_substitutions": self.substitutions,
             "wer_deletions": self.deletions,

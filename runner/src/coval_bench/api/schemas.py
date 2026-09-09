@@ -196,6 +196,11 @@ class ModelStatEntry(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
+    # WER only; null unless every clip in the group carries counts.
+    pooled_value: float | None = None
+    pooled_insertions_pct: float | None = None
+    pooled_deletions_pct: float | None = None
+    pooled_substitutions_pct: float | None = None
 
 
 class SeriesPoint(BaseModel):
@@ -215,6 +220,7 @@ class SeriesPoint(BaseModel):
     max_value: float
     value_sum: float
     sample_count: int
+    pooled_value: float | None = None
 
 
 class AggregatesResponse(BaseModel):
@@ -242,6 +248,7 @@ class TimelinePoint(BaseModel):
     metric_type: str
     scheduled_at: datetime
     value: float
+    pooled_value: float | None = None
 
 
 class TimelineResponse(BaseModel):

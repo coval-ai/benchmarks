@@ -361,8 +361,6 @@ class Result(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
-    # WER only: alignment counts behind the split. Not a legacy column; they ride
-    # the row to the normalized store so pooled WER can be aggregated.
     wer_substitutions: int | None = None
     wer_deletions: int | None = None
     wer_insertions: int | None = None
