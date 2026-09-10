@@ -558,7 +558,11 @@ def test_load_manifest_reads_packaged_tts_v2_manifest() -> None:
     kinds = {item.kind for item in items}
     assert kinds == {"vertical", "phonetic", "legacy"}
     assert all(item.spoken_reference for item in items if item.kind != "legacy")
-    v1 = {item.testcase_id: item.transcript for item in _load_manifest("tts-v1").items}
+    v1 = {
+        item.testcase_id: item.transcript
+        for item in _load_manifest("tts-v1").items
+        if isinstance(item, TTSManifestItem)
+    }
     assert {i.testcase_id: i.transcript for i in items if i.kind == "legacy"} == v1
 
 
