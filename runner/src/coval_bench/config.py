@@ -224,9 +224,13 @@ class Settings(BaseSettings):
     # one coval_api_key defaults to, so every request for them must carry this
     # header. Opaque id, not secret.
     coval_s2s_industry_workspace_id: str | None = None
-    # Shared across all three industries: reads test_case.expected_behaviors, so
-    # one metric id scores every industry's test set. Opaque id, not secret.
-    coval_s2s_industry_instruction_metric_id: str | None = None
+    # One per industry rather than shared, so this can point at either the
+    # domain-specific judge (fast to validate, already scored on existing
+    # runs) or a shared expected-behavior metric (set all three to the same
+    # id) without a code change either way. Opaque id, not secret.
+    coval_s2s_health_instruction_metric_id: str | None = None
+    coval_s2s_home_service_instruction_metric_id: str | None = None
+    coval_s2s_cust_service_instruction_metric_id: str | None = None
     coval_s2s_health_test_set_id: str | None = None
     coval_s2s_health_openai_agent_id: str | None = None
     coval_s2s_health_grok_agent_id: str | None = None

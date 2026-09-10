@@ -977,7 +977,7 @@ async def test_industry_only_deployment_does_not_require_the_latency_metric(
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="W1",
-        coval_s2s_industry_instruction_metric_id="IID",
+        coval_s2s_health_instruction_metric_id="IID",
     )
 
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
@@ -1013,12 +1013,13 @@ async def test_fetch_and_write_v2v_still_requires_the_latency_metric_for_legacy_
 async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A whitespace-only shared industry setting must not read as configured.
+    """A whitespace-only industry setting must not read as configured.
 
-    Both ids are shared across every industry spec, so a blank value (rather
-    than unset) would otherwise silently send an empty workspace header or
-    mark every industry spec as measuring instruction adherence when none is
-    actually wired up, instead of the clear "*_unset" warning + skip.
+    The workspace id is shared across every industry spec, so a blank value
+    (rather than unset) would otherwise silently send an empty workspace
+    header; the instruction metric id is now per-industry, but the same
+    blank-vs-unset risk applies to it individually, instead of the clear
+    "*_unset" warning + skip.
     """
     industry_spec = next(
         spec
@@ -1029,7 +1030,7 @@ async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="   ",
-        coval_s2s_industry_instruction_metric_id="   ",
+        coval_s2s_health_instruction_metric_id="   ",
     )
 
     fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))

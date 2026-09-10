@@ -151,7 +151,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_health_grok_agent_id",
@@ -161,7 +161,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_health_violet_agent_id",
@@ -171,7 +171,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_openai_agent_id",
@@ -181,7 +181,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_grok_agent_id",
@@ -191,7 +191,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_violet_agent_id",
@@ -201,7 +201,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_openai_agent_id",
@@ -211,7 +211,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_grok_agent_id",
@@ -221,7 +221,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_violet_agent_id",
@@ -231,7 +231,7 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
     ),
 )
 
