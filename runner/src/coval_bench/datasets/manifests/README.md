@@ -346,6 +346,54 @@ print(json.dumps(manifest, indent=2, ensure_ascii=False))
 
 License: `Apache-2.0`.
 
+### `tts-v2.json`
+
+**What we benchmark.** The TTS v2 authoring bank: 240 original agent-to-customer
+passages (five verticals × easy/medium/hard × four scenario families × four
+spoken-word length buckets, L1 10–20 words up to L4 200–300), 60 phonetic
+control sentences with declared ARPAbet coverage, and the 30 `tts-v1` prompts
+imported unchanged. Every new item carries a `spoken_reference`, the transcript
+written the way it sounds (`$24.50` → `twenty four dollars and fifty cents`,
+`LT-507` → `l t five oh seven`), which is the WER reference; legacy items have
+none and fall back to `transcript`. Item metadata (`kind`, `vertical`,
+`difficulty`, `family`, `length_bucket`, `tags`, `phonetic`) rides along for
+per-slice reporting.
+
+**How it is built.** The bank is authored privately as segments (literal text
+plus `{"written", "spoken"}` pairs); its own compiler joins them and emits a
+`corpus.json`. The shipped manifest is that file re-shaped to our schema, from
+the 2026-09-08 draft:
+
+```sh
+python3 -c "
+import json, sys
+records = json.load(open('corpus.json'))['records']
+items = []
+for r in records:
+    item = {'testcase_id': r['id'], 'transcript': r['text'], 'kind': r['kind']}
+    if r['spoken_reference'] is not None:
+        item['spoken_reference'] = r['spoken_reference']
+    if r['kind'] == 'vertical':
+        item.update({k: r[k] for k in ('vertical', 'difficulty', 'family', 'length_bucket', 'tags')})
+    elif r['kind'] == 'phonetic':
+        item['phonetic'] = {k: r[k] for k in ('block', 'mode', 'focus', 'phones', 'evidence')}
+    items.append(item)
+manifest = {
+    'id': 'tts-v2',
+    'version': '2.0.0',
+    'license': 'Apache-2.0',
+    'source': 'Coval TTS v2 authoring bank plus tts-v1',
+    'items': items,
+}
+print(json.dumps(manifest, indent=2, ensure_ascii=False))
+" > runner/src/coval_bench/datasets/manifests/tts-v2.json
+```
+
+`tts-v1.json` is never edited: its byte hash is what ties historical runs to
+their items.
+
+License: `Apache-2.0`.
+
 ### `s2s-v1.json`
 
 **What we benchmark.** Speech-to-speech (S2S) providers are scored on a frozen

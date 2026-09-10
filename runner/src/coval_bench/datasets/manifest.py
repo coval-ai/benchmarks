@@ -13,6 +13,8 @@ Schema matches ARCHITECTURE.md § "GCS dataset bucket — manifest.json schema".
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -39,13 +41,38 @@ class STTManifestItem(BaseModel):
         return value
 
 
+class PhoneticControl(BaseModel):
+    """Speech-sound coverage metadata for a tts-v2 phonetic control sentence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    block: int = Field(ge=1)
+    mode: str
+    focus: str
+    phones: list[str]
+    evidence: list[str]
+
+
 class TTSManifestItem(BaseModel):
-    """A single TTS prompt entry in the manifest."""
+    """A single TTS prompt entry in the manifest.
+
+    ``spoken_reference`` is the transcript written the way it sounds and is the
+    WER reference when present; tts-v1 items have none and fall back to
+    ``transcript``.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     testcase_id: str = Field(min_length=1)
     transcript: str
+    spoken_reference: str | None = None
+    kind: Literal["vertical", "phonetic", "legacy"] | None = None
+    vertical: str | None = None
+    difficulty: Literal["easy", "medium", "hard"] | None = None
+    family: str | None = None
+    length_bucket: Literal["L1", "L2", "L3", "L4"] | None = None
+    tags: list[str] = Field(default_factory=list)
+    phonetic: PhoneticControl | None = None
 
 
 class Manifest(BaseModel):

@@ -548,6 +548,20 @@ def test_load_manifest_reads_packaged_tts_manifest() -> None:
     assert len(manifest.items) == 30  # 30 curated TTS prompts
 
 
+def test_load_manifest_reads_packaged_tts_v2_manifest() -> None:
+    """tts-v2 carries the v1 prompts unchanged plus the annotated v2 bank."""
+    from coval_bench.datasets.loader import _load_manifest
+
+    manifest = _load_manifest("tts-v2")
+    items = [item for item in manifest.items if isinstance(item, TTSManifestItem)]
+    assert len(items) == 330
+    kinds = {item.kind for item in items}
+    assert kinds == {"vertical", "phonetic", "legacy"}
+    assert all(item.spoken_reference for item in items if item.kind != "legacy")
+    v1 = {item.testcase_id: item.transcript for item in _load_manifest("tts-v1").items}
+    assert {i.testcase_id: i.transcript for i in items if i.kind == "legacy"} == v1
+
+
 def test_load_manifest_reads_packaged_stt_manifest() -> None:
     """_load_manifest round-trips the packaged stt-v1.json manifest."""
     from coval_bench.datasets.loader import _load_manifest

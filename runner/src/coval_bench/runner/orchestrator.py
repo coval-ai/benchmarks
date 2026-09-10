@@ -953,7 +953,8 @@ async def _run_tts_item(
                 # genuine failure worth surfacing as a FAILED row rather than silently dropping.
                 if whisper_transcript is not None:
                     try:
-                        wer_result = compute_wer(transcript, whisper_transcript)
+                        reference = item.spoken_reference or transcript
+                        wer_result = compute_wer(reference, whisper_transcript)
                         results.append(
                             Result(
                                 run_id=run_id,

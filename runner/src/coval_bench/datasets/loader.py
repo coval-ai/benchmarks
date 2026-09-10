@@ -136,11 +136,8 @@ class Dataset(BaseModel):
     items: list[DatasetItem]
 
 
-class TTSDatasetItem(BaseModel):
+class TTSDatasetItem(TTSManifestItem):
     """A single TTS benchmark item (text-only, no audio to fetch)."""
-
-    testcase_id: str = Field(min_length=1)
-    transcript: str
 
 
 class TTSDataset(BaseModel):
@@ -407,12 +404,7 @@ def load_tts_dataset(
             raise TypeError(
                 f"Dataset '{dataset_id}' contains non-TTS items; use load_stt_dataset instead."
             )
-        tts_items.append(
-            TTSDatasetItem(
-                testcase_id=raw_item.testcase_id,
-                transcript=raw_item.transcript,
-            )
-        )
+        tts_items.append(TTSDatasetItem.model_validate(raw_item.model_dump()))
 
     return TTSDataset(id=manifest.id, version=manifest.version, items=tts_items)
 
