@@ -490,8 +490,16 @@ def _population_mismatch(
 def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     """YES -> 100.0, NO -> 0.0, UNKNOWN -> no row, so the mean is YES / (YES + NO).
 
-    Raises InvalidInstructionVerdict on any value outside the contract.
+    A numeric raw value is a composite judge's own already-computed fraction of
+    criteria met (e.g. Expected Behavior Adherence's 0-1 "percentage_of_criteria_met"),
+    not a YES/NO verdict, and is scaled to a percentage directly. Coval's binary
+    judges and composite judges report through the same metric id shape, so this
+    mapper must accept either.
+
+    Raises InvalidInstructionVerdict on a string outside YES/NO/UNKNOWN.
     """
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return round(float(raw) * 100, 2), ResultStatus.SUCCESS
     verdict = _instruction_verdict(raw)
     if verdict is None:
         return None

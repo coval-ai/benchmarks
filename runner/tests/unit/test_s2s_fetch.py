@@ -1319,6 +1319,29 @@ def test_instruction_verdict_raises_on_unexpected() -> None:
         fetch_v2v._instruction_verdict(None)
 
 
+def test_instruction_value_scales_a_composite_judge_fraction() -> None:
+    # A composite judge (e.g. Expected Behavior Adherence) reports its own
+    # 0-1 "percentage of criteria met" through the same metric id a binary
+    # judge's YES/NO/UNKNOWN comes through, so the mapper must accept both.
+    assert fetch_v2v._instruction_value(0.4) == (40.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(0.75) == (75.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(1.0) == (100.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(0) == (0.0, ResultStatus.SUCCESS)
+
+
+def test_instruction_rows_maps_a_composite_judge_fraction() -> None:
+    values: list[dict[str, Any]] = [
+        {"simulation_output_id": "s1", "value": 0.4},
+        {"simulation_output_id": "s2", "value": 0.75},
+        {"simulation_output_id": "s3", "value": 1.0},
+    ]
+    rows = fetch_v2v._s2s_rows(
+        values, metric=Metric.INSTRUCTION_FOLLOWING, run_pk=1, coval_run_id="R1", spec=SPEC
+    )
+    assert [r.metric_value for r in rows] == [40.0, 75.0, 100.0]
+    assert [r.status for r in rows] == [ResultStatus.SUCCESS] * 3
+
+
 def test_population_mismatch() -> None:
     anchor = [{"simulation_output_id": "s1"}, {"simulation_output_id": "s2"}]
     assert fetch_v2v._population_mismatch(anchor, anchor) is None
