@@ -7,7 +7,7 @@ Wire protocol: HTTP POST, <guava_base_url>/audio/speech, streaming response.
 Auth: Authorization: Bearer <key>.
 Request (JSON): {"input": text, "voice": ..., "sampling_rate": 16000,
   "response_format": "wav", "stream": true}
-Response: streaming WAV containing 16 kHz mono PCM; timing starts at PCM arrival.
+Response: raw 16 kHz mono PCM (audio/L16), or WAV; timing starts at PCM arrival.
 """
 
 from __future__ import annotations
@@ -135,16 +135,22 @@ class GuavaTTSProvider(TTSProvider):
                         arrivals.append((received_bytes, time.monotonic()))
                         audio_chunks.append(chunk)
             if audio_chunks:
-                source = io.BytesIO(b"".join(audio_chunks))
-                with wave.open(source, "rb") as wav:
-                    if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (
-                        1,
-                        2,
-                        SAMPLE_RATE,
-                    ):
-                        raise ValueError("Guava requires mono 16-bit 16 kHz WAV output")
-                    pcm_offset = source.tell()
-                    audio_data = wav.readframes(wav.getnframes())
+                payload_audio = b"".join(audio_chunks)
+                pcm_offset = 0
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
+                if payload_audio[:4] == b"RIFF" or content_type != "audio/l16":
+                    source = io.BytesIO(payload_audio)
+                    with wave.open(source, "rb") as wav:
+                        if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (
+                            1,
+                            2,
+                            SAMPLE_RATE,
+                        ):
+                            raise ValueError("Guava requires mono 16-bit 16 kHz WAV output")
+                        pcm_offset = source.tell()
+                        audio_data = wav.readframes(wav.getnframes())
+                else:
+                    audio_data = payload_audio
                 if audio_data:
                     first_chunk_at = next(at for end, at in arrivals if end > pcm_offset)
         except Exception as exc:

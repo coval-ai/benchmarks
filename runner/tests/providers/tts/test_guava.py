@@ -235,3 +235,19 @@ async def test_guava_rejects_invalid_wav(data: bytes) -> None:
     assert result.error is not None
     assert result.ttfa_ms is None
     assert result.audio_path is None
+
+
+@pytest.mark.asyncio
+async def test_guava_live_raw_pcm_response_format() -> None:
+    pcm = make_pcm_bytes(480)
+    _install_mock(
+        lambda _: httpx.Response(
+            200, content=pcm, headers={"Content-Type": "audio/L16;rate=16000;channels=1"}
+        )
+    )
+    result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
+    assert result.error is None
+    assert result.audio_path is not None
+    with wave.open(str(result.audio_path), "rb") as wav:
+        assert wav.readframes(wav.getnframes()) == pcm
+    result.audio_path.unlink()
