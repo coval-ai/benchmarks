@@ -16,8 +16,8 @@ import psycopg.errors
 import sqlalchemy.exc
 from alembic import op
 
-revision = "20260910_0031"
-down_revision = "20260910_0030"
+revision = "20260910_0032"
+down_revision = "20260910_0031"
 branch_labels = None
 depends_on = None
 
