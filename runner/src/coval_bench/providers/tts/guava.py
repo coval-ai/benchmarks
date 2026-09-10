@@ -7,12 +7,14 @@ Wire protocol: HTTP POST, <guava_base_url>/audio/speech, streaming response.
 Auth: Authorization: Bearer <key>.
 Request (JSON): {"input": text, "voice": ..., "sampling_rate": 16000,
   "response_format": "wav", "stream": true}
-Response: chunked 16 kHz mono PCM bytes; TTFA = submit -> first chunk.
+Response: streaming WAV containing 16 kHz mono PCM; timing starts at PCM arrival.
 """
 
 from __future__ import annotations
 
+import io
 import time
+import wave
 
 import structlog
 
@@ -95,6 +97,9 @@ class GuavaTTSProvider(TTSProvider):
         }
 
         audio_chunks: list[bytes] = []
+        arrivals: list[tuple[int, float]] = []
+        received_bytes = 0
+        audio_data = b""
         http_version: str | None = None
         setup_ms: float | None = None
         reused: bool | None = None
@@ -126,9 +131,22 @@ class GuavaTTSProvider(TTSProvider):
                     )
                 async for chunk in response.aiter_bytes():
                     if chunk:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
+                        received_bytes += len(chunk)
+                        arrivals.append((received_bytes, time.monotonic()))
                         audio_chunks.append(chunk)
+            if audio_chunks:
+                source = io.BytesIO(b"".join(audio_chunks))
+                with wave.open(source, "rb") as wav:
+                    if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (
+                        1,
+                        2,
+                        SAMPLE_RATE,
+                    ):
+                        raise ValueError("Guava requires mono 16-bit 16 kHz WAV output")
+                    pcm_offset = source.tell()
+                    audio_data = wav.readframes(wav.getnframes())
+                if audio_data:
+                    first_chunk_at = next(at for end, at in arrivals if end > pcm_offset)
         except Exception as exc:
             logger.warning("guava_error", provider="guava", model=self._model, exc_info=exc)
             return finalize_tts_result(
@@ -145,7 +163,6 @@ class GuavaTTSProvider(TTSProvider):
                 connection_reused=reused,
             )
 
-        audio_data = b"".join(audio_chunks)
         if not audio_data:
             logger.warning("guava_no_audio", model=self._model)
 

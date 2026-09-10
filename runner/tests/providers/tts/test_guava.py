@@ -5,9 +5,12 @@
 
 from __future__ import annotations
 
+import io
 import json
-from collections.abc import Generator
+import wave
+from collections.abc import AsyncIterator, Generator
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -21,6 +24,16 @@ from .conftest import make_pcm_bytes
 
 _BASE_URL = "https://guava.example.internal"
 _VOICE = "grace"
+
+
+def _wav(pcm: bytes, sample_rate: int = 16000) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(pcm)
+    return buffer.getvalue()
 
 
 def _settings(**overrides: object) -> Settings:
@@ -59,7 +72,7 @@ async def test_guava_happy_path() -> None:
         captured["url"] = str(request.url)
         captured["authorization"] = request.headers.get("authorization")
         captured["body"] = json.loads(request.read())
-        return httpx.Response(200, content=pcm)
+        return httpx.Response(200, content=_wav(pcm))
 
     _install_mock(handler)
 
@@ -69,7 +82,8 @@ async def test_guava_happy_path() -> None:
     assert result.error is None, result.error
     assert result.ttfa_ms is not None and 0 < result.ttfa_ms < 10_000
     assert result.audio_path is not None and result.audio_path.exists()
-    assert result.audio_path.read_bytes()[:4] == b"RIFF"
+    with wave.open(str(result.audio_path), "rb") as wav:
+        assert wav.readframes(wav.getnframes()) == pcm
     assert result.provider == "guava"
     assert result.model == "daytona-tts"
 
@@ -139,7 +153,7 @@ async def test_guava_warmup_synthesizes_and_cleans_up() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(f"{request.method} {request.url.path}")
-        return httpx.Response(200, content=make_pcm_bytes(240))
+        return httpx.Response(200, content=_wav(make_pcm_bytes(240)))
 
     _install_mock(handler)
     await GuavaTTSProvider.warmup(_settings())
@@ -153,7 +167,7 @@ async def test_guava_warmup_noop_without_config() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(str(request.url))
-        return httpx.Response(200, content=make_pcm_bytes(240))
+        return httpx.Response(200, content=_wav(make_pcm_bytes(240)))
 
     _install_mock(handler)
     # No URL / key configured → warmup must return without touching the network.
@@ -181,3 +195,43 @@ def test_guava_missing_base_url() -> None:
 def test_guava_missing_api_key() -> None:
     with pytest.raises(ValueError, match="guava_api_key"):
         GuavaTTSProvider(_settings(guava_api_key=None), model="daytona-tts", voice=_VOICE)
+
+
+@pytest.mark.asyncio
+async def test_guava_silent_wav_is_not_a_success() -> None:
+    _install_mock(lambda _: httpx.Response(200, content=_wav(bytes(32000))))
+    result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
+    assert result.error == "provider audio remained below the audibility threshold"
+    assert result.ttfa_ms is None
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_guava_header_arrival_does_not_start_audio_clock() -> None:
+    data = _wav(make_pcm_bytes(480))
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield data[:20]
+            yield data[20:44]
+            yield data[44:]
+
+    _install_mock(lambda _: httpx.Response(200, stream=Stream()))
+    with patch("coval_bench.providers.tts.guava.time") as clock:
+        clock.monotonic.side_effect = [100.0, 100.1, 100.2, 103.0]
+        result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
+    assert result.error is None
+    assert result.ttfa_ms == pytest.approx(3000.0)
+    assert result.audio_path is not None
+    result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [b"not a WAV", _wav(bytes(320), sample_rate=8000)])
+async def test_guava_rejects_invalid_wav(data: bytes) -> None:
+    _install_mock(lambda _: httpx.Response(200, content=data))
+    result = await GuavaTTSProvider(_settings(), "daytona-tts", _VOICE).synthesize("hi")
+    assert result.error is not None
+    assert result.ttfa_ms is None
+    assert result.audio_path is None

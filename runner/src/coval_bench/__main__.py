@@ -290,6 +290,7 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
         kwargs["ws_url"] = endpoint_url(settings, model)
     elif provider == "guava":
         kwargs["base_url"] = settings.guava_base_url
+        kwargs["domain"] = settings.guava_stt_domain
     elif provider == "azure":
         kwargs["region"] = settings.azure_region
     try:

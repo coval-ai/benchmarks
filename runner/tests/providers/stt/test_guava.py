@@ -9,13 +9,17 @@ All tests use FakeWebSocket — no live network calls.
 from __future__ import annotations
 
 import json
+import wave
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from click.testing import CliRunner
 from pydantic import SecretStr
 
 from coval_bench.metrics.wer import compute_wer
+from coval_bench.providers.base import TranscriptionResult
 from coval_bench.providers.stt.guava import GuavaSTTProvider, ws_url_from_base
 from tests.providers.stt.conftest import FakeWebSocket
 
@@ -70,30 +74,7 @@ async def test_guava_success(fake_api_key: SecretStr) -> None:
 
 
 @pytest.mark.asyncio
-async def test_guava_default_uses_partial_over_final(fake_api_key: SecretStr) -> None:
-    """By default the partial is reported when it diverges from the final."""
-    events: list[Any] = [
-        {"type": "asr_partial", "transcript": "hello there", "ts_ms": 300},
-        {"type": "asr_final", "transcript": "hello their", "ts_ms": 900},
-    ]
-    provider = make_provider(fake_api_key)
-
-    with patch(
-        "coval_bench.providers.stt.guava.ws_client.connect",
-        return_value=_fake_connect(events),
-    ):
-        result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000, 0.1)
-
-    assert result.error is None
-    assert result.complete_transcript == "hello there"
-
-
-@pytest.mark.asyncio
-async def test_guava_anchor_on_final_opt_out(
-    fake_api_key: SecretStr, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """GUAVA_STT_ANCHOR_ON_FINAL reports the committed final instead."""
-    monkeypatch.setattr("coval_bench.providers.stt.guava._ANCHOR_ON_FINAL", True)
+async def test_guava_uses_final_over_partial(fake_api_key: SecretStr) -> None:
     events: list[Any] = [
         {"type": "asr_partial", "transcript": "hello there", "ts_ms": 300},
         {"type": "asr_final", "transcript": "hello their", "ts_ms": 900},
@@ -108,6 +89,35 @@ async def test_guava_anchor_on_final_opt_out(
 
     assert result.error is None
     assert result.complete_transcript == "hello their"
+
+
+@pytest.mark.asyncio
+async def test_guava_final_timing_is_not_replaced_by_partial() -> None:
+    result = TranscriptionResult(provider="guava", audio_start_time=100.0)
+    ws = FakeWebSocket(
+        [
+            {"type": "asr_partial", "transcript": "early guess"},
+            {"type": "asr_final", "transcript": "committed result"},
+        ]
+    )
+    with patch("coval_bench.providers.stt.guava.time.monotonic", side_effect=[101.0, 103.0]):
+        await make_provider()._receive(ws, result)
+    assert result.ttft_seconds == 1.0
+    assert result.audio_to_final_seconds == 3.0
+    assert result.complete_transcript == "committed result"
+
+
+@pytest.mark.asyncio
+async def test_guava_partial_only_close_is_failure() -> None:
+    with patch(
+        "coval_bench.providers.stt.guava.ws_client.connect",
+        return_value=_fake_connect([{"type": "asr_partial", "transcript": "uncommitted"}]),
+    ):
+        result = await make_provider().measure_ttft(_SMALL_PCM, 1, 2, 16000)
+    assert result.error is not None
+    assert "before a final transcription" in result.error
+    assert result.complete_transcript is None
+    assert result.audio_to_final_seconds is None
 
 
 @pytest.mark.asyncio
@@ -270,3 +280,33 @@ async def test_guava_connection_error(fake_api_key: SecretStr) -> None:
     assert result.error is not None
     assert "connection refused" in result.error
     assert result.complete_transcript is None
+
+
+def test_guava_smoke_passes_configured_domain(tmp_path: Path) -> None:
+    from coval_bench.__main__ import cli
+    from coval_bench.config import Settings
+
+    audio = tmp_path / "input.wav"
+    with wave.open(str(audio), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(_SMALL_PCM)
+    settings = Settings(
+        _env_file=None,
+        guava_api_key=SecretStr("test-key"),
+        guava_base_url=_BASE_URL,
+        guava_stt_domain=_DOMAIN,
+    )
+    measured = AsyncMock(
+        return_value=TranscriptionResult(provider="guava", complete_transcript="ok")
+    )
+    with (
+        patch("coval_bench.config.get_settings", return_value=settings),
+        patch.object(GuavaSTTProvider, "measure_ttft", measured),
+    ):
+        result = CliRunner().invoke(
+            cli, ["stt-smoke", "--provider", "guava", "--model", "daytona-stt", "--wav", str(audio)]
+        )
+    assert result.exit_code == 0, result.output
+    measured.assert_awaited_once()

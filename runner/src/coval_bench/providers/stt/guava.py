@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from typing import Any
 
@@ -36,13 +35,6 @@ _SAMPLE_RATE = 16000
 
 _MAX_WS_SIZE = 16 * 1024 * 1024
 _NO_FINAL_ERROR = "Guava stream ended before a final transcription was received"
-
-# Set GUAVA_STT_ANCHOR_ON_FINAL=1 to report the committed final transcript.
-_ANCHOR_ON_FINAL = os.environ.get("GUAVA_STT_ANCHOR_ON_FINAL", "").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-)
 
 
 def ws_url_from_base(base_url: str) -> str:
@@ -181,8 +173,6 @@ class GuavaSTTProvider(STTProvider):
     async def _receive(self, ws: Any, result: TranscriptionResult) -> None:
         # Finals accumulate in arrival order.
         final_parts: list[str] = []
-        last_partial_text: str | None = None
-        last_partial_time: float | None = None
 
         try:
             async for raw in ws:
@@ -212,20 +202,13 @@ class GuavaSTTProvider(STTProvider):
                         result.audio_to_final_seconds = now - result.audio_start_time
                 elif text:
                     result.partial_transcripts.append(text)
-                    last_partial_text = text
-                    if result.audio_start_time is not None:
-                        last_partial_time = now - result.audio_start_time
 
         except Exception as exc:
             logger.warning("guava_receive_error", provider="guava", model=self._model, exc_info=exc)
             if result.error is None and result.audio_to_final_seconds is None:
                 result.error = str(exc)
 
-        if not _ANCHOR_ON_FINAL and last_partial_text is not None:
-            result.complete_transcript = last_partial_text or None
-            if last_partial_time is not None:
-                result.audio_to_final_seconds = last_partial_time
-        elif final_parts:
+        if final_parts:
             result.complete_transcript = " ".join(final_parts).strip() or None
 
         if result.complete_transcript:
