@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import signal
 import sys
@@ -1075,6 +1076,78 @@ class LiveValidationResult:
             raise ValueError("live mismatch requires an aggregate-safe category")
 
 
+def _live_values_match(
+    expected_values: list[tuple[str, str, float, str, str]],
+    actual_values: list[tuple[Any, ...]],
+) -> tuple[bool, bool]:
+    """Compare recoverable values, allowing only live WER count supplements.
+
+    Legacy rows do not retain the four WER counts.  A dual-written normalized
+    row may therefore have a complete count quartet in addition to the exact
+    percentage values recoverable from legacy storage.  The second return
+    value marks that aggregate-safe provenance limitation.
+    """
+    expected = sorted(
+        (metric, key, unit, value, role) for metric, key, value, unit, role in expected_values
+    )
+    actual = sorted((tuple(item) for item in actual_values), key=repr)
+    if actual == expected:
+        return True, False
+
+    if not any(metric == "WER" for metric, *_ in expected):
+        return False, False
+    expected_counter = Counter(expected)
+    actual_counter = Counter(actual)
+    if any(actual_counter[value] < needed for value, needed in expected_counter.items()):
+        return False, False
+    extras: list[tuple[Any, ...]] = []
+    for value, count in actual_counter.items():
+        extras.extend([value] * (count - expected_counter[value]))
+    count_keys = {
+        "substitution_count",
+        "deletion_count",
+        "insertion_count",
+        "reference_words",
+    }
+    if (
+        len(extras) != 4
+        or {item[0] for item in extras} != {"WER"}
+        or {item[1] for item in extras} != count_keys
+    ):
+        return False, False
+    if any(item[2] != "count" or item[4] != "component" for item in extras):
+        return False, False
+
+    wer_values = [item for item in actual if item[0] == "WER"]
+    try:
+        validate_metric_values(
+            "WER",
+            "v1",
+            tuple(
+                (key, unit, float(value), MetricValueRole(role))
+                for _, key, unit, value, role in wer_values
+            ),
+        )
+        by_key = {key: float(value) for _, key, _, value, _ in wer_values}
+        count_values = [by_key[key] for key in count_keys]
+        if any(not math.isfinite(value) or not value.is_integer() for value in count_values):
+            return False, False
+        expected_wer = by_key["primary"]
+        reference = by_key["reference_words"]
+        reconciled = (
+            100.0
+            * sum(
+                by_key[key] for key in ("substitution_count", "deletion_count", "insertion_count")
+            )
+            / max(reference, 1.0)
+        )
+        if abs(reconciled - expected_wer) > 0.0001:
+            return False, False
+    except (TypeError, ValueError, KeyError):
+        return False, False
+    return True, True
+
+
 def _live_validation_result(
     cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
 ) -> LiveValidationResult:
@@ -1176,13 +1249,16 @@ def _live_validation_result(
         (observation_id,),
     )
     actual_values = sorted((tuple(item) for item in cur.fetchall()), key=repr)
-    expected_values = sorted(
-        (metric, key, unit, value, role)
+    expected_values = [
+        (metric, key, value, unit, role)
         for metric, (_, _, values) in expected_metrics.items()
         for _, key, value, unit, role in values
-    )
-    if actual_values != expected_values:
+    ]
+    values_match, counts_not_reconstructable = _live_values_match(expected_values, actual_values)
+    if not values_match:
         return LiveValidationResult(False, "value")
+    if counts_not_reconstructable:
+        provenance.add("wer_counts_not_reconstructable")
 
     cur.execute(
         """SELECT id,artifact_type,schema_name,schema_version,gcs_uri,content_sha256,size_bytes,duration_ms
