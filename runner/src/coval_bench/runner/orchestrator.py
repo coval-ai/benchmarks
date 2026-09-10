@@ -429,6 +429,9 @@ async def _run_stt_item(
             kwargs["project_id"] = settings.google_project_id
         elif entry.provider == "baseten":
             kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
+        elif entry.provider == "guava":
+            kwargs["base_url"] = settings.guava_base_url
+            kwargs["domain"] = settings.guava_stt_domain
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
         elif entry.provider == "zoom":

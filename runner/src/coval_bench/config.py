@@ -143,6 +143,13 @@ class Settings(BaseSettings):
 
     alibaba_tts_url: str | None = None
 
+    # Guava TTS (daytona-tts). The endpoint runs on customer
+    # infra, so its base URL + routing key live in config (``.env`` locally, Secret Manager in
+    # prod) rather than hardcoded in the provider module.
+    guava_base_url: str | None = None
+    guava_api_key: SecretStr | None = None
+    guava_stt_domain: str | None = None
+
     # Path to a Google service-account JSON file mounted as a Secret-as-volume.
     google_application_credentials: Path | None = None
 
