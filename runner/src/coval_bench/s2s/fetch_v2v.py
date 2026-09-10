@@ -35,6 +35,9 @@ from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
     FAMILY_DENTAL,
+    FAMILY_INSTR_CUST_SERVICE,
+    FAMILY_INSTR_HEALTH,
+    FAMILY_INSTR_HOME_SERVICE,
     FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
@@ -69,6 +72,13 @@ class AgentSpec:
     # Whether this agent's recordings may reach the public samples card.
     publish_samples: bool = True
     benchmark: Benchmark = Benchmark.S2S
+    # Settings attr holding the Coval workspace id this agent lives in. None
+    # means the workspace coval_api_key defaults to (the existing behavior).
+    workspace_id_attr: str | None = None
+    # Settings attr holding this agent's own instruction-adherence metric id,
+    # overriding the global coval_s2s_instruction_metric_id. None uses the
+    # global one.
+    instruction_metric_id_attr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +139,99 @@ AGENTS: tuple[AgentSpec, ...] = (
         test_set_id_attr="coval_s2s_dental_test_set_id",
         family=FAMILY_DENTAL,
         publish_samples=False,
+    ),
+    # Instruction adherence by industry: a separate Coval workspace, one family
+    # per industry so they're never pooled together on the dashboard. No V2V is
+    # measured here, so these never reach the public samples card.
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
     ),
 )
 
@@ -280,6 +383,7 @@ async def recent_completed_runs(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     requested_run_ids: frozenset[str] | None = None,
+    workspace_id: str | None = None,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
@@ -287,7 +391,8 @@ async def recent_completed_runs(
     (tags are not filterable). ``test_set_id`` narrows to one test set so other
     sims on the same agents (e.g. the single-turn set) are not ingested. Runs
     without a parseable create_time are kept: better to ingest with a fetch-time
-    slot than to drop data.
+    slot than to drop data. ``workspace_id`` is required for an agent that does
+    not live in the workspace the client's API key defaults to.
     """
     window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
@@ -297,6 +402,7 @@ async def recent_completed_runs(
     runs: list[CovalRun] = []
     page_token: str | None = None
     found_ids: set[str] = set()
+    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     while True:
         params: dict[str, str | int] = {
             "filter": filt,
@@ -305,7 +411,7 @@ async def recent_completed_runs(
         }
         if page_token:
             params["page_token"] = page_token
-        resp = await client.get("/runs", params=params)
+        resp = await client.get("/runs", params=params, headers=headers)
         resp.raise_for_status()
         payload = cast("dict[str, Any]", resp.json())
         raw = cast("list[dict[str, Any]]", payload.get("runs", []))
@@ -573,6 +679,7 @@ async def _ingest_run(
     dataset_sha256: str = "",
     period_seconds: int,
     normalized_dual_write_enabled: bool = False,
+    workspace_id: str | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
@@ -587,8 +694,9 @@ async def _ingest_run(
     if pending is None:
         pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
     run_pk: int | None = None
+    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     try:
-        resp = await client.get(f"/runs/{coval_run.run_id}")
+        resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
         resp.raise_for_status()
         run = cast("dict[str, Any]", resp.json()["run"])
         metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
@@ -894,6 +1002,7 @@ async def _fetch_one_provider(
     page_size: int = WINDOW_PAGE_SIZE,
     matched_run_ids: set[str] | None = None,
     normalized_dual_write_enabled: bool = False,
+    workspace_id: str | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -946,6 +1055,7 @@ async def _fetch_one_provider(
             window_seconds=window_seconds,
             page_size=page_size,
             requested_run_ids=only_run_ids,
+            workspace_id=workspace_id,
         )
         data_seen = False
         newest_data_at: datetime | None = None
@@ -1008,6 +1118,7 @@ async def _fetch_one_provider(
                 dataset_sha256=dataset_sha256,
                 period_seconds=period_seconds,
                 normalized_dual_write_enabled=normalized_dual_write_enabled,
+                workspace_id=workspace_id,
             )
             if status is None:
                 continue
@@ -1092,7 +1203,14 @@ async def fetch_and_write_v2v(
 
     metric_id = settings.coval_s2s_latency_metric_id
     if benchmark is Benchmark.S2S and not metric_id:
-        raise RuntimeError("coval_s2s_latency_metric_id is not set")
+        # Industry specs fetch instruction adherence only (see conditions.py);
+        # only a spec still relying on the shared V2V metric makes it required.
+        v2v_spec_configured = any(
+            not spec.instruction_metric_id_attr and getattr(settings, spec.agent_id_attr, None)
+            for spec in specs
+        )
+        if v2v_spec_configured:
+            raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
     # without the filter would pool other sims on the same agents into the S2S
     # rows. Reject a blank (misconfigured) value and require the pair; both
@@ -1176,12 +1294,39 @@ async def fetch_and_write_v2v(
             if spec.test_set_id_attr and not spec_test_set:
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
                 continue
-            statuses[f"{spec.provider}:{spec.model}"], ingested = await _fetch_one_provider(
+            spec_workspace_id = (
+                (getattr(settings, spec.workspace_id_attr) or "").strip() or None
+                if spec.workspace_id_attr
+                else None
+            )
+            if spec.workspace_id_attr and not spec_workspace_id:
+                logger.warning(
+                    "workspace_id_unset", provider=spec.provider, attr=spec.workspace_id_attr
+                )
+                continue
+            spec_metric_ids = metric_ids
+            if spec.instruction_metric_id_attr:
+                spec_instruction_metric_id = (
+                    getattr(settings, spec.instruction_metric_id_attr) or ""
+                ).strip()
+                if not spec_instruction_metric_id:
+                    logger.warning(
+                        "instruction_metric_id_unset",
+                        provider=spec.provider,
+                        attr=spec.instruction_metric_id_attr,
+                    )
+                    continue
+                spec_metric_ids = {
+                    **metric_ids,
+                    Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
+                }
+            status_key = f"{spec.family}:{spec.provider}:{spec.model}"
+            statuses[status_key], ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=spec,
                 agent_id=agent_id,
-                metric_ids=metric_ids,
+                metric_ids=spec_metric_ids,
                 test_set_id=spec_test_set,
                 noisy_persona_id=noisy_persona_id,
                 persona_conditions=persona_conditions,
@@ -1193,6 +1338,7 @@ async def fetch_and_write_v2v(
                 page_size=page_size,
                 matched_run_ids=matched_run_ids,
                 normalized_dual_write_enabled=settings.normalized_dual_write_enabled,
+                workspace_id=spec_workspace_id,
             )
             total_ingested += ingested
 
