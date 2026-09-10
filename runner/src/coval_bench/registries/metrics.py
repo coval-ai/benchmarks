@@ -32,6 +32,7 @@ class Metric(StrEnum):
     V2V = "V2V"
     INSTRUCTION_FOLLOWING = "InstructionFollowing"
     INTERRUPTION_RATE = "InterruptionRate"
+    EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
 
 
 class MetricDirection(StrEnum):
@@ -162,6 +163,15 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="per_minute",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=2,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.EXPECTED_BEHAVIOR_ADHERENCE: MetricSpec(
+        display_name="Expected Behavior Adherence",
+        # Coval reports criteria_met_count / criteria_total_count as a 0-1
+        # fraction; stored as a percentage like InstructionFollowing.
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
 }

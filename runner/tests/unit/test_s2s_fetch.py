@@ -1054,6 +1054,83 @@ async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec
 
 
 @pytest.mark.asyncio
+async def test_expected_behavior_metric_id_merged_into_spec_metric_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Set alongside the domain judge, EBA is fetched too, not instead of it."""
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.AGENTS
+        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
+    )
+    settings = Settings(
+        coval_s2s_health_openai_agent_id="a1",
+        coval_s2s_health_test_set_id="TS1",
+        coval_s2s_industry_workspace_id="WS1",
+        coval_s2s_health_instruction_metric_id="JUDGE1",
+        coval_s2s_industry_expected_behavior_metric_id="EBA1",
+    )
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    await fetch_v2v.fetch_and_write_v2v(settings)
+
+    fetch_one.assert_awaited_once()
+    metric_ids = fetch_one.call_args.kwargs["metric_ids"]
+    assert metric_ids[Metric.INSTRUCTION_FOLLOWING] == "JUDGE1"
+    assert metric_ids[Metric.EXPECTED_BEHAVIOR_ADHERENCE] == "EBA1"
+
+
+@pytest.mark.asyncio
+async def test_blank_expected_behavior_metric_id_warns_but_does_not_skip_the_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unlike the domain judge, EBA is optional: its absence logs, not skips."""
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.AGENTS
+        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
+    )
+    settings = Settings(
+        coval_s2s_health_openai_agent_id="a1",
+        coval_s2s_health_test_set_id="TS1",
+        coval_s2s_industry_workspace_id="WS1",
+        coval_s2s_health_instruction_metric_id="JUDGE1",
+    )
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    with capture_logs() as logs:
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+    fetch_one.assert_awaited_once()
+    metric_ids = fetch_one.call_args.kwargs["metric_ids"]
+    assert metric_ids[Metric.INSTRUCTION_FOLLOWING] == "JUDGE1"
+    assert Metric.EXPECTED_BEHAVIOR_ADHERENCE not in metric_ids
+    assert any(log["event"] == "expected_behavior_metric_id_unset" for log in logs)
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> None:
     writer = _stub_writer()
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
@@ -1318,6 +1395,36 @@ def test_instruction_verdict_raises_on_unexpected() -> None:
         fetch_v2v._instruction_verdict("MAYBE")
     with pytest.raises(fetch_v2v.InvalidInstructionVerdict):
         fetch_v2v._instruction_verdict(None)
+
+
+def test_expected_behavior_value_scales_fraction_to_percent() -> None:
+    assert fetch_v2v._expected_behavior_value(1.0) == (100.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._expected_behavior_value(0.75) == (75.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._expected_behavior_value(0.0) == (0.0, ResultStatus.SUCCESS)
+
+
+def test_expected_behavior_value_rejects_non_numeric() -> None:
+    assert fetch_v2v._expected_behavior_value(None) == (None, ResultStatus.FAILED)
+    assert fetch_v2v._expected_behavior_value("unknown") == (None, ResultStatus.FAILED)
+
+
+def test_expected_behavior_rows_maps_fractions() -> None:
+    values: list[dict[str, Any]] = [
+        {"simulation_output_id": "s1", "value": 1.0},
+        {"simulation_output_id": "s2", "value": 0.5},
+    ]
+    rows = fetch_v2v._s2s_rows(
+        values,
+        metric=Metric.EXPECTED_BEHAVIOR_ADHERENCE,
+        run_pk=1,
+        coval_run_id="R1",
+        spec=SPEC,
+    )
+    assert [r.metric_value for r in rows] == [100.0, 50.0]
+    assert all(
+        r.metric_type == Metric.EXPECTED_BEHAVIOR_ADHERENCE and r.metric_units == "percent"
+        for r in rows
+    )
 
 
 def test_population_mismatch() -> None:
