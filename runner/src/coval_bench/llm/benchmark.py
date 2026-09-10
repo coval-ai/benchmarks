@@ -36,9 +36,29 @@ def openai_client(settings: Settings) -> TurnClient | None:
     )
 
 
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEMINI_MODEL = "gemini-2.5-flash"
+
+
+def gemini_client(settings: Settings) -> TurnClient | None:
+    key = settings.gemini_api_key
+    if not (key and key.get_secret_value()):
+        return None
+    agent = load_dental_agent()
+    return OpenAICompatClient(
+        key.get_secret_value(),
+        GEMINI_BASE_URL,
+        GEMINI_MODEL,
+        agent.system_prompt,
+        list(agent.tools),
+        extra_body={"reasoning_effort": "none"},
+    )
+
+
 CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
     "phonely": PhonelyClient.from_settings,
     "openai": openai_client,
+    "google": gemini_client,
 }
 DEFAULT_PERSONA_ID = "PN3xgmsqeLDjsNNEA2e55e"
 ITERATION_COUNT = 1

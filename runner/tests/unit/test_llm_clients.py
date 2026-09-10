@@ -12,7 +12,7 @@ from coval_bench.llm.openai_compat import OpenAICompatClient
 
 @pytest.mark.parametrize(
     ("provider", "key_env", "model"),
-    [("openai", "OPENAI_API_KEY", "gpt-4.1")],
+    [("openai", "OPENAI_API_KEY", "gpt-4.1"), ("google", "GEMINI_API_KEY", "gemini-2.5-flash")],
 )
 def test_compat_clients_need_their_key(
     provider: str, key_env: str, model: str, monkeypatch: pytest.MonkeyPatch
