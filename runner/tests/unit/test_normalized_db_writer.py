@@ -1323,6 +1323,21 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
         await writer.complete_metric_evaluation(
             evaluation_id, values=values, artifacts=[artifact], finished_at=finished
         )
+        async with pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT has_primary_role, value, wer_insertions_pct,
+                          wer_deletions_pct, wer_substitutions_pct
+                   FROM benchmarks_v2.dashboard_metric_values
+                   WHERE evaluation_id = %s""",
+                (evaluation_id,),
+            )
+            assert await cur.fetchone() == {
+                "has_primary_role": True,
+                "value": 10.0,
+                "wer_insertions_pct": 1.0,
+                "wer_deletions_pct": 2.0,
+                "wer_substitutions_pct": 7.0,
+            }
         await writer.complete_metric_evaluation(
             evaluation_id, values=values, artifacts=[artifact], finished_at=finished
         )
@@ -1365,6 +1380,126 @@ async def test_metric_completion_replay_and_rollback(pg_conn: psycopg.Connection
                 (invalid_id,),
             )
             assert _required(await cur.fetchone())["count"] == 0
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.dashboard_metric_values "
+                "WHERE evaluation_id = %s",
+                (invalid_id,),
+            )
+            assert _required(await cur.fetchone())["count"] == 0
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_first", [True, False])
+async def test_metric_payload_reassignment_rejects_terminal_parents(
+    pg_conn: psycopg.Connection[Any], terminal_first: bool
+) -> None:
+    """Moving a payload to or from a terminal evaluation is rejected atomically."""
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer, sample=f"reparent-{terminal_first}")
+        first = await _evaluation(writer, observation, metric=Metric.WER)
+        second = await _evaluation(writer, observation, metric=Metric.TTFA)
+        first_id, second_id = _required(first.id), _required(second.id)
+        terminal_id, running_id = (first_id, second_id) if terminal_first else (second_id, first_id)
+        if terminal_first:
+            await writer.complete_metric_evaluation(
+                terminal_id, values=_wer_values(terminal_id), finished_at=_NOW
+            )
+            payload_id, destination_id = terminal_id, running_id
+        else:
+            payload_id, destination_id = running_id, terminal_id
+            await writer.complete_metric_evaluation(
+                destination_id,
+                values=[
+                    MetricValue(
+                        metric_evaluation_id=destination_id,
+                        value_key="primary",
+                        unit="milliseconds",
+                        value=1,
+                        value_role=MetricValueRole.PRIMARY,
+                    )
+                ],
+                finished_at=_NOW,
+            )
+        async with pool.connection() as conn, conn.cursor() as cur:
+            if not terminal_first:
+                # Keep the running parent's temporary output in this transaction.
+                # It cannot commit until the parent succeeds.
+                await cur.execute(
+                    "INSERT INTO benchmarks_v2.metric_values "
+                    "(metric_evaluation_id, value_key, unit, value, value_role) "
+                    "VALUES (%s, 'primary', 'percent', 10, 'primary')",
+                    (payload_id,),
+                )
+            with pytest.raises(psycopg.errors.RaiseException, match="payloads are immutable"):
+                await cur.execute(
+                    "UPDATE benchmarks_v2.metric_values SET metric_evaluation_id = %s "
+                    "WHERE metric_evaluation_id = %s AND value_key = 'primary'",
+                    (destination_id, payload_id),
+                )
+            await conn.rollback()
+            await cur.execute(
+                "SELECT count(*) AS count FROM benchmarks_v2.dashboard_metric_values "
+                "WHERE evaluation_id IN (%s, %s)",
+                (terminal_id, running_id),
+            )
+            assert _required(await cur.fetchone())["count"] == 1
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_metric_payload_insert_waits_for_completion_then_rejects(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """A payload writer serializes behind completion and then sees terminal state."""
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        _, observation = await _observation(writer, sample="payload-lock")
+        evaluation = await _evaluation(writer, observation)
+        evaluation_id = _required(evaluation.id)
+        async with pool.connection() as conn_a, conn_a.cursor() as cur_a:
+            await cur_a.execute(
+                "SELECT id FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE",
+                (evaluation_id,),
+            )
+            async with pool.connection() as conn_b, conn_b.cursor() as cur_b:
+                await cur_b.execute("SET LOCAL lock_timeout = '100ms'")
+                with pytest.raises(psycopg.errors.LockNotAvailable):
+                    await cur_b.execute(
+                        "INSERT INTO benchmarks_v2.metric_values "
+                        "(metric_evaluation_id, value_key, unit, value, value_role) "
+                        "VALUES (%s, 'primary', 'percent', 10, 'primary')",
+                        (evaluation_id,),
+                    )
+                await conn_b.rollback()
+            await cur_a.execute(
+                "INSERT INTO benchmarks_v2.metric_values "
+                "(metric_evaluation_id, value_key, unit, value, value_role) "
+                "VALUES (%s, 'primary', 'percent', 10, 'primary')",
+                (evaluation_id,),
+            )
+            await cur_a.execute(
+                "UPDATE benchmarks_v2.metric_evaluations SET status = 'succeeded', "
+                "finished_at = %s WHERE id = %s",
+                (_NOW + timedelta(seconds=1), evaluation_id),
+            )
+            await conn_a.commit()
+        async with pool.connection() as conn, conn.cursor() as cur:
+            with pytest.raises(psycopg.errors.RaiseException, match="payloads are immutable"):
+                await cur.execute(
+                    "INSERT INTO benchmarks_v2.metric_values "
+                    "(metric_evaluation_id, value_key, unit, value, value_role) "
+                    "VALUES (%s, 'insertions', 'percent', 1, 'component')",
+                    (evaluation_id,),
+                )
+            await conn.rollback()
     finally:
         await pool.close()
 

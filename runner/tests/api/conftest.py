@@ -25,10 +25,11 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import jwt
 import psycopg
@@ -245,6 +246,10 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 value_key text NOT NULL, unit text NOT NULL, value double precision NOT NULL,
                 value_role text NOT NULL, PRIMARY KEY (metric_evaluation_id, value_key)
             );
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_artifacts (
+                id uuid PRIMARY KEY,
+                metric_evaluation_id uuid NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id)
+            );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_values_by_bucket (
                 provider text NOT NULL, model text NOT NULL, benchmark text NOT NULL,
                 dataset_id text NOT NULL, metric_type text NOT NULL, metric_version text NOT NULL,
@@ -256,6 +261,19 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 sample_count integer NOT NULL
             )
         """)
+        # Exercise the actual projection migration over the small API schema.
+        # Full lifecycle constraints and migration rollback use the DB writer tests.
+        projection = import_module(
+            "coval_bench.db.migrations.versions.20260910_0031_dashboard_metric_values"
+        )
+        with patch.object(projection, "op", SimpleNamespace(execute=conn.execute)):
+            projection.upgrade()
+        for table in ("metric_values", "metric_artifacts"):
+            conn.execute(
+                f"CREATE TRIGGER {table}_guard_terminal BEFORE INSERT OR UPDATE OR DELETE "
+                f"ON benchmarks_v2.{table} FOR EACH ROW "
+                "EXECUTE FUNCTION benchmarks_v2.guard_terminal_metric_payload()"
+            )  # noqa: S608 — table names are fixed fixture constants.
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
@@ -583,6 +601,8 @@ async def app(
     monkeypatch.setattr("coval_bench.api.app.lifespan_pool", fresh_lifespan_pool)
 
     test_app = create_app(settings)
+    # The module-level limiter otherwise shares one quota across unrelated tests.
+    test_app.state.limiter.reset()
     async with LifespanManager(test_app):
         yield test_app
 

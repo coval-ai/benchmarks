@@ -39,6 +39,7 @@ async def _insert_normalized_metric(
     dataset_id: str,
     metric_type: str,
     values: dict[str, float],
+    primary_key: str = "primary",
     benchmark: str = "STT",
     observation_status: str = "succeeded",
     evaluation_status: str = "succeeded",
@@ -70,7 +71,7 @@ async def _insert_normalized_metric(
                 metric_type,
                 metric_version,
                 evaluation_variant,
-                evaluation_status,
+                "running",
             ),
         )
         for key, component in values.items():
@@ -83,9 +84,13 @@ async def _insert_normalized_metric(
                     key,
                     "count" if key in _WER_COUNT_KEYS else "percent",
                     component,
-                    "primary" if key == "primary" else "component",
+                    "primary" if key == primary_key else "component",
                 ),
             )
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status = %s WHERE id = %s",
+            (evaluation_status, evaluation_id),
+        )
 
 
 _WER_COUNT_KEYS = ("substitution_count", "deletion_count", "insertion_count", "reference_words")
@@ -485,6 +490,284 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
     assert stats["TTFA"]["avg_value"] == pytest.approx(120.0)
     assert stats["TTFARoundtrip"]["avg_value"] == pytest.approx(75.0)
     assert stats["TTFALeadingSilence"]["avg_value"] == pytest.approx(45.0)
+
+
+async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """TTFA components remain public when the primary role has another key."""
+    run_id = await _insert_run(postgresql, dataset_id="tts-components-v1")
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="tts-components-v1",
+        benchmark="TTS",
+        metric_type="TTFA",
+        values={"ttfa_ms": 120.0, "roundtrip": 75.0, "leading_silence": 45.0},
+        primary_key="ttfa_ms",
+    )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    params = {"benchmark": "TTS", "include_series": "false"}
+
+    pooled = (await client.get("/v1/results/aggregates", params=params)).json()
+    pooled_stats = {row["metric_type"]: row for row in pooled["model_stats"]}
+    assert set(pooled_stats) == {"TTFARoundtrip", "TTFALeadingSilence"}
+    assert pooled["datasets"] == ["tts-components-v1"]
+
+    scoped = (
+        await client.get(
+            "/v1/results/aggregates",
+            params={**params, "dataset": "tts-components-v1"},
+        )
+    ).json()
+    assert {row["metric_type"] for row in scoped["model_stats"]} == {
+        "TTFARoundtrip",
+        "TTFALeadingSilence",
+    }
+
+    by_dataset = (
+        await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "TTS"})
+    ).json()["blocks"]
+    assert [block["dataset"] for block in by_dataset] == ["tts-components-v1"]
+    assert {row["metric_type"] for row in by_dataset[0]["model_stats"]} == {
+        "TTFARoundtrip",
+        "TTFALeadingSilence",
+    }
+
+
+async def test_normalized_stats_pool_scope_and_group_exact_distribution(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Pooled and per dataset normalized stats preserve exact sample math."""
+    run_v1 = await _insert_run(postgresql, dataset_id="stt-v1")
+    run_v3 = await _insert_run(postgresql, dataset_id="stt-v3")
+    for run_id, dataset_id, values in (
+        (run_v1, "stt-v1", (1.0, 2.0)),
+        (run_v3, "stt-v3", (3.0, 4.0)),
+    ):
+        for value in values:
+            await _insert_normalized_metric(
+                postgresql,
+                run_id,
+                dataset_id=dataset_id,
+                metric_type="WER",
+                values={"primary": value},
+            )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    params = {"benchmark": "STT", "include_series": "false"}
+
+    pooled = (await client.get("/v1/results/aggregates", params=params)).json()["model_stats"][0]
+    assert pooled["sample_count"] == 4
+    assert pooled["mean_value"] == pytest.approx(2.5)
+    assert pooled["avg_value"] == pytest.approx(2.5)
+    assert pooled["stddev_value"] == pytest.approx(1.2909944, rel=1e-6)
+    assert pooled["p25"] == pytest.approx(1.75)
+    assert pooled["p50"] == pytest.approx(2.5)
+    assert pooled["p75"] == pytest.approx(3.25)
+    assert pooled["p90"] == pytest.approx(3.7)
+    assert pooled["p95"] == pytest.approx(3.85)
+    assert pooled["p99"] == pytest.approx(3.97)
+    assert pooled["min_value"] == pytest.approx(1.0)
+    assert pooled["max_value"] == pytest.approx(4.0)
+
+    scoped = (
+        await client.get(
+            "/v1/results/aggregates",
+            params={**params, "dataset": "stt-v3"},
+        )
+    ).json()["model_stats"][0]
+    assert scoped["sample_count"] == 2
+    assert scoped["mean_value"] == pytest.approx(3.5)
+
+    by_dataset = (
+        await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
+    ).json()["blocks"]
+    assert [block["dataset"] for block in by_dataset] == ["stt-v1", "stt-v3"]
+    assert [block["model_stats"][0]["mean_value"] for block in by_dataset] == pytest.approx(
+        [1.5, 3.5]
+    )
+
+
+async def test_projection_reads_current_metadata_eligibility_and_window(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Persisted values never freeze live observation/run attributes or time bounds."""
+    import psycopg
+
+    from tests.api.conftest import _make_db_url
+
+    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
+    await _insert_normalized_metric(
+        postgresql, run_id, dataset_id="stt-v2", metric_type="WER", values={"primary": 10.0}
+    )
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+
+    async def read(window: str = "24h") -> dict[str, Any]:
+        app.state.response_cache.clear()
+        response = await client.get(
+            "/v1/results/aggregates",
+            params={"benchmark": "STT", "include_series": "false", "window": window},
+        )
+        assert response.status_code == 200
+        body: dict[str, Any] = response.json()
+        return body
+
+    assert (await read())["model_stats"][0]["avg_value"] == pytest.approx(10)
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        await conn.execute(
+            "UPDATE benchmarks_v2.benchmark_observations "
+            "SET dataset_id = 'stt-renamed', provider = 'Prövïder', model = 'Mödèl' "
+            "WHERE run_id = %s",
+            (run_id,),
+        )
+        body = await read()
+        assert body["datasets"] == ["stt-renamed"]
+        assert body["model_stats"][0]["provider"] == "Prövïder"
+        assert body["model_stats"][0]["model"] == "Mödèl"
+        await conn.execute(
+            "UPDATE benchmarks_v2.runs SET status = 'running' WHERE id = %s", (run_id,)
+        )
+        body = await read()
+        assert body["model_stats"] == []
+        assert body["datasets"] == []
+        await conn.execute(
+            "UPDATE benchmarks_v2.runs SET status = 'partial' WHERE id = %s", (run_id,)
+        )
+        assert (await read())["model_stats"][0]["avg_value"] == pytest.approx(10)
+        await conn.execute(
+            "UPDATE benchmarks_v2.benchmark_observations "
+            "SET captured_at = now() - interval '2 days' WHERE run_id = %s",
+            (run_id,),
+        )
+        assert (await read())["model_stats"] == []
+        assert (await read("7d"))["model_stats"][0]["avg_value"] == pytest.approx(10)
+        await conn.execute(
+            "UPDATE benchmarks_v2.benchmark_observations SET status = 'failed' WHERE run_id = %s",
+            (run_id,),
+        )
+        body = await read("7d")
+        assert body["model_stats"] == []
+        assert body["datasets"] == []
+
+
+async def test_normalized_wer_zero_reference_falls_back_to_mean(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Complete count rows with no reference words cannot produce a ratio."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="stt-v2",
+        metric_type="WER",
+        values={
+            "primary": 0.0,
+            "substitution_count": 0.0,
+            "deletion_count": 0.0,
+            "insertion_count": 0.0,
+            "reference_words": 0.0,
+        },
+    )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    stat = (
+        await client.get(
+            "/v1/results/aggregates",
+            params={"benchmark": "STT", "include_series": "false"},
+        )
+    ).json()["model_stats"][0]
+    assert stat["sample_count"] == 1
+    assert stat["avg_value"] == pytest.approx(0.0)
+    assert stat["pooled_value"] is None
+
+
+async def test_normalized_wer_count_and_split_cohorts_fall_back_independently(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Incomplete count or split cohorts cannot manufacture pooled breakdowns."""
+    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="stt-v2",
+        metric_type="WER",
+        values={
+            "primary": 10.0,
+            "insertions": 1.0,
+            "deletions": 2.0,
+            "substitutions": 7.0,
+            "substitution_count": 1.0,
+            "deletion_count": 1.0,
+            "insertion_count": 0.0,
+            "reference_words": 10.0,
+        },
+    )
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="stt-v2",
+        metric_type="WER",
+        values={"primary": 20.0},
+    )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    stat = (
+        await client.get(
+            "/v1/results/aggregates",
+            params={"benchmark": "STT", "include_series": "false"},
+        )
+    ).json()["model_stats"][0]
+    assert stat["sample_count"] == 2
+    assert stat["mean_value"] == pytest.approx(15.0)
+    assert stat["avg_value"] == pytest.approx(15.0)
+    assert stat["pooled_value"] is None
+    assert stat["wer_insertions_pct"] is None
+
+
+async def test_normalized_ttfa_derived_name_collision_keeps_public_count(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """A native metric sharing a TTFA component name joins the same final group."""
+    run_id = await _insert_run(postgresql, dataset_id="tts-v1")
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="tts-v1",
+        benchmark="TTS",
+        metric_type="TTFA",
+        values={"primary": 120.0, "roundtrip": 75.0, "leading_silence": 45.0},
+    )
+    await _insert_normalized_metric(
+        postgresql,
+        run_id,
+        dataset_id="tts-v1",
+        benchmark="TTS",
+        metric_type="TTFARoundtrip",
+        values={"primary": 90.0},
+    )
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    stats = {
+        row["metric_type"]: row
+        for row in (
+            await client.get(
+                "/v1/results/aggregates",
+                params={"benchmark": "TTS", "include_series": "false"},
+            )
+        ).json()["model_stats"]
+    }
+    assert stats["TTFARoundtrip"]["sample_count"] == 2
+    assert stats["TTFARoundtrip"]["mean_value"] == pytest.approx(82.5)
 
 
 async def test_normalized_pooled_wer_is_a_ratio_of_sums(
