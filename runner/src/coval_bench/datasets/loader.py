@@ -136,11 +136,8 @@ class Dataset(BaseModel):
     items: list[DatasetItem]
 
 
-class TTSDatasetItem(BaseModel):
+class TTSDatasetItem(TTSManifestItem):
     """A single TTS benchmark item (text-only, no audio to fetch)."""
-
-    testcase_id: str = Field(min_length=1)
-    transcript: str
 
 
 class TTSDataset(BaseModel):
@@ -256,6 +253,34 @@ def _fetch_blob(
     blob.download_to_filename(str(dest))
 
 
+def _fetch_verified(
+    *,
+    client: storage.Client,
+    bucket: str,
+    object_path: str,
+    sha256: str,
+    local_path: Path,
+) -> Path:
+    """Return *local_path* holding *object_path*, downloading from GCS if needed.
+
+    If the cached file already has the correct SHA256, the download is skipped.
+    On SHA256 mismatch after download, raises :class:`DatasetIntegrityError`.
+    """
+    if local_path.exists():
+        if _sha256_file(local_path) == sha256:
+            logger.debug("cache_hit", path=object_path)
+            return local_path
+        logger.warning("cached_file_hash_mismatch", path=str(local_path))
+
+    logger.info("fetching_dataset_object", bucket=bucket, object=object_path)
+    _fetch_blob(client, bucket, object_path, local_path)
+
+    actual = _sha256_file(local_path)
+    if actual != sha256:
+        raise DatasetIntegrityError(object_path, sha256, actual)
+    return local_path
+
+
 def _fetch_and_verify(
     *,
     client: storage.Client,
@@ -264,31 +289,42 @@ def _fetch_and_verify(
     item: STTManifestItem,
     cache_dir: Path,
 ) -> Path:
-    """Return local path for *item*, downloading from GCS if needed.
+    """Return local path for *item*, downloading from GCS if needed."""
+    return _fetch_verified(
+        client=client,
+        bucket=bucket,
+        object_path=f"{dataset_id}/{item.path}",
+        sha256=item.sha256,
+        local_path=cache_dir / dataset_id / item.path,
+    )
 
-    If the cached file already has the correct SHA256, the download is skipped.
-    On SHA256 mismatch after download, raises :class:`DatasetIntegrityError`.
-    """
-    local_path = cache_dir / dataset_id / item.path
 
-    # Cache hit check
-    if local_path.exists():
-        if _sha256_file(local_path) == item.sha256:
-            logger.debug("cache_hit", path=str(item.path))
-            return local_path
-        logger.warning("cached_file_hash_mismatch", path=str(local_path))
-
-    # Download
-    gcs_object = f"{dataset_id}/{item.path}"
-    logger.info("fetching_dataset_object", bucket=bucket, object=gcs_object)
-    _fetch_blob(client, bucket, gcs_object, local_path)
-
-    # Post-download integrity check
-    actual = _sha256_file(local_path)
-    if actual != item.sha256:
-        raise DatasetIntegrityError(item.path, item.sha256, actual)
-
-    return local_path
+def _resolve_manifest(
+    dataset_id: str,
+    *,
+    cache_dir: Path | None,
+    storage_client: storage.Client | None,
+) -> Manifest:
+    """Load the packaged manifest, following a private ``remote`` pointer if present."""
+    packaged = _load_manifest(dataset_id)
+    if packaged.remote is None:
+        return packaged
+    # A private bucket needs real credentials; the anonymous public-bucket client cannot read it.
+    client = storage_client if storage_client is not None else storage.Client()
+    resolved_cache = cache_dir if cache_dir is not None else _default_cache_dir()
+    local_path = _fetch_verified(
+        client=client,
+        bucket=packaged.remote.bucket,
+        object_path=packaged.remote.path,
+        sha256=packaged.remote.sha256,
+        local_path=resolved_cache / dataset_id / "manifest.json",
+    )
+    manifest = Manifest.model_validate_json(local_path.read_text(encoding="utf-8"))
+    if manifest.id != dataset_id or manifest.remote is not None:
+        raise ManifestAlignmentError(
+            f"remote manifest for '{dataset_id}' is not a full manifest with that id"
+        )
+    return manifest
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +363,7 @@ def load_stt_dataset(
     Dataset
         Fully-verified dataset with local file paths.
     """
-    manifest = _load_manifest(dataset_id)
+    manifest = _resolve_manifest(dataset_id, cache_dir=cache_dir, storage_client=storage_client)
     if dataset_id in WILDASR_ENV_FAMILY:
         _assert_family_alignment(dataset_id, manifest)
     resolved_cache = cache_dir if cache_dir is not None else _default_cache_dir()
@@ -371,24 +407,24 @@ def load_stt_dataset(
 def load_tts_dataset(
     dataset_id: str,
     *,
-    settings: Settings,  # noqa: ARG001 – kept for uniform call signature
-    cache_dir: Path | None = None,  # noqa: ARG001 – no files to cache for TTS
-    storage_client: storage.Client | None = None,  # noqa: ARG001 – no GCS needed
+    settings: Settings,
+    cache_dir: Path | None = None,
+    storage_client: storage.Client | None = None,
     sample_size: int | None = None,
     rng: random.Random | None = None,
 ) -> TTSDataset:
-    """Load a TTS dataset (text prompts only; no GCS fetch required).
+    """Load a TTS dataset (text prompts only; GCS is touched only for a private manifest).
 
     Parameters
     ----------
     dataset_id:
         Manifest identifier, e.g. ``"tts-v1"``.
     settings:
-        Accepted for call-signature symmetry; not used for TTS.
+        Runner settings; used to build a GCS client for private manifests.
     cache_dir:
-        Accepted for call-signature symmetry; not used for TTS.
+        Override the local cache directory for a fetched private manifest.
     storage_client:
-        Accepted for call-signature symmetry; not used for TTS.
+        Injectable GCS client (for tests; production passes ``None``).
     sample_size:
         Draw this many prompts at random; ``None`` uses all.
     rng:
@@ -399,7 +435,7 @@ def load_tts_dataset(
     TTSDataset
         Dataset with text-only items.
     """
-    manifest = _load_manifest(dataset_id)
+    manifest = _resolve_manifest(dataset_id, cache_dir=cache_dir, storage_client=storage_client)
 
     tts_items: list[TTSDatasetItem] = []
     for raw_item in _sample_items(list(manifest.items), sample_size, rng):
@@ -407,12 +443,7 @@ def load_tts_dataset(
             raise TypeError(
                 f"Dataset '{dataset_id}' contains non-TTS items; use load_stt_dataset instead."
             )
-        tts_items.append(
-            TTSDatasetItem(
-                testcase_id=raw_item.testcase_id,
-                transcript=raw_item.transcript,
-            )
-        )
+        tts_items.append(TTSDatasetItem.model_validate(raw_item.model_dump()))
 
     return TTSDataset(id=manifest.id, version=manifest.version, items=tts_items)
 
@@ -431,7 +462,7 @@ def load_dataset(
     Prefer the explicit ``load_stt_dataset`` / ``load_tts_dataset`` functions
     when the caller knows the dataset type ahead of time.
     """
-    manifest = _load_manifest(dataset_id)
+    manifest = _resolve_manifest(dataset_id, cache_dir=cache_dir, storage_client=storage_client)
     if manifest.items and isinstance(manifest.items[0], STTManifestItem):
         return load_stt_dataset(
             dataset_id,

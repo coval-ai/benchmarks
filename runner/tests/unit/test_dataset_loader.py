@@ -548,6 +548,64 @@ def test_load_manifest_reads_packaged_tts_manifest() -> None:
     assert len(manifest.items) == 30  # 30 curated TTS prompts
 
 
+def test_packaged_tts_v2_is_a_private_pointer() -> None:
+    """The prompts never live in the wheel."""
+    manifest = _load_manifest("tts-v2")
+    assert manifest.items == [] and manifest.remote is not None
+
+
+def _remote(tmp_path: Path, body: str) -> tuple[Manifest, MagicMock]:
+    """A pointer to *body* served by a fake bucket, pinned to the body's real hash."""
+    remote_dir = tmp_path / "remote"
+    remote_dir.mkdir()
+    (remote_dir / "manifest.json").write_text(body)
+    pointer = Manifest(
+        id="tts-v2",
+        version="2.0.0",
+        license="proprietary",
+        source="test",
+        remote={
+            "bucket": "private",
+            "path": "tts-v2/manifest.json",
+            "sha256": hashlib.sha256(body.encode()).hexdigest(),
+        },
+    )
+    return pointer, _make_fake_storage_client(remote_dir)
+
+
+def test_remote_tts_manifest_is_fetched_and_verified(
+    test_settings: Settings, tmp_path: Path
+) -> None:
+    full = Manifest(
+        id="tts-v2",
+        version="2.0.0",
+        license="proprietary",
+        source="test",
+        items=[TTSManifestItem(testcase_id="x", transcript="LT-507", spoken_reference="l t")],
+    )
+    pointer, client = _remote(tmp_path, full.model_dump_json())
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=pointer):
+        result = load_tts_dataset(
+            "tts-v2", settings=test_settings, cache_dir=tmp_path, storage_client=client
+        )
+
+    assert [i.spoken_reference for i in result.items] == ["l t"]
+
+
+def test_remote_manifest_hash_mismatch_raises(test_settings: Settings, tmp_path: Path) -> None:
+    pointer, client = _remote(tmp_path, "{}")
+    (tmp_path / "remote" / "manifest.json").write_text("tampered")
+
+    with (
+        patch("coval_bench.datasets.loader._load_manifest", return_value=pointer),
+        pytest.raises(DatasetIntegrityError),
+    ):
+        load_tts_dataset(
+            "tts-v2", settings=test_settings, cache_dir=tmp_path, storage_client=client
+        )
+
+
 def test_load_manifest_reads_packaged_stt_manifest() -> None:
     """_load_manifest round-trips the packaged stt-v1.json manifest."""
     from coval_bench.datasets.loader import _load_manifest

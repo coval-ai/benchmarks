@@ -429,9 +429,6 @@ async def _run_stt_item(
             kwargs["project_id"] = settings.google_project_id
         elif entry.provider == "baseten":
             kwargs["ws_url"] = _get_baseten_stt_url()(settings, entry.model)
-        elif entry.provider == "guava":
-            kwargs["base_url"] = settings.guava_base_url
-            kwargs["domain"] = settings.guava_stt_domain
         elif entry.provider == "azure":
             kwargs["region"] = settings.azure_region
         elif entry.provider == "zoom":
@@ -956,7 +953,8 @@ async def _run_tts_item(
                 # genuine failure worth surfacing as a FAILED row rather than silently dropping.
                 if whisper_transcript is not None:
                     try:
-                        wer_result = compute_wer(transcript, whisper_transcript)
+                        reference = item.spoken_reference or transcript
+                        wer_result = compute_wer(reference, whisper_transcript)
                         results.append(
                             Result(
                                 run_id=run_id,

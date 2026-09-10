@@ -159,6 +159,7 @@ def _make_tts_item(transcript: str = "hello world") -> Any:
     item = MagicMock()
     item.testcase_id = "tts-0001"
     item.transcript = transcript
+    item.spoken_reference = None
     return item
 
 
@@ -3649,3 +3650,43 @@ async def test_transcribe_does_not_retry_other_errors(tmp_path: Path) -> None:
     ):
         await _transcribe_with_whisper(audio, _TEST_SETTINGS)
     assert client.audio.transcriptions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tts_wer_scores_against_spoken_reference(
+    audio_file: Path, settings: Settings
+) -> None:
+    """When an item carries a spoken reference, WER is measured against it, not the prompt."""
+    provider = MagicMock()
+    provider.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="voice",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    item = _make_tts_item("Your reference is LT-507.")
+    item.spoken_reference = "your reference is l t five oh seven"
+
+    async with _orchestrator_env(
+        audio_path=audio_file, tts_providers={"elevenlabs": MagicMock(return_value=provider)}
+    ):
+        with patch(
+            "coval_bench.runner.orchestrator._transcribe_with_whisper",
+            new_callable=AsyncMock,
+            return_value="your reference is l t five oh seven",
+        ):
+            results = await _run_tts_item(
+                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
+                item=item,
+                run_id=1,
+                sem=asyncio.Semaphore(1),
+                settings=settings,
+            )
+
+    wer_rows = [r for r in results if r.metric_type == "WER"]
+    assert len(wer_rows) == 1
+    assert wer_rows[0].metric_value == 0.0

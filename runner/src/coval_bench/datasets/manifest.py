@@ -13,6 +13,8 @@ Schema matches ARCHITECTURE.md § "GCS dataset bucket — manifest.json schema".
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -39,13 +41,48 @@ class STTManifestItem(BaseModel):
         return value
 
 
+class PhoneticControl(BaseModel):
+    """Speech-sound coverage metadata for a tts-v2 phonetic control sentence."""
+
+    model_config = ConfigDict(frozen=True)
+
+    block: int = Field(ge=1)
+    mode: str
+    focus: str
+    phones: list[str]
+    evidence: list[str]
+
+
 class TTSManifestItem(BaseModel):
-    """A single TTS prompt entry in the manifest."""
+    """A single TTS prompt entry in the manifest.
+
+    ``spoken_reference`` is the transcript written the way it sounds and is the
+    WER reference when present; tts-v1 items have none and fall back to
+    ``transcript``.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     testcase_id: str = Field(min_length=1)
     transcript: str
+    spoken_reference: str | None = None
+    kind: Literal["vertical", "phonetic", "legacy"] | None = None
+    vertical: str | None = None
+    difficulty: Literal["easy", "medium", "hard"] | None = None
+    family: str | None = None
+    length_bucket: Literal["L1", "L2", "L3", "L4"] | None = None
+    tags: list[str] = Field(default_factory=list)
+    phonetic: PhoneticControl | None = None
+
+
+class RemoteManifest(BaseModel):
+    """Where a private manifest lives; the packaged file is only this pointer."""
+
+    model_config = ConfigDict(frozen=True)
+
+    bucket: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class Manifest(BaseModel):
@@ -54,6 +91,9 @@ class Manifest(BaseModel):
     The ``items`` field is either a homogeneous list of
     :class:`STTManifestItem` or :class:`TTSManifestItem`.
     Mixed lists are rejected by the ``items_consistent`` validator.
+
+    A private dataset ships no items in the wheel; its packaged file carries
+    ``remote`` instead and the loader fetches the full manifest at run time.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -62,11 +102,14 @@ class Manifest(BaseModel):
     version: str = Field(pattern=r"^\d+\.\d+\.\d+$")
     license: str  # "CC-BY-4.0" for STT, internal for TTS
     source: str  # e.g. "LibriSpeech test-clean"
-    items: list[STTManifestItem | TTSManifestItem]
+    items: list[STTManifestItem | TTSManifestItem] = Field(default_factory=list)
+    remote: RemoteManifest | None = None
 
     @model_validator(mode="after")
     def items_consistent(self) -> Manifest:
         """Ensure items are homogeneous and have distinct effective identities."""
+        if self.items and self.remote is not None:
+            raise ValueError(f"Manifest '{self.id}' cannot carry both items and a remote pointer")
         if not self.items:
             return self
         first_type = type(self.items[0])

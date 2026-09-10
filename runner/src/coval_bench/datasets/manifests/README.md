@@ -346,6 +346,39 @@ print(json.dumps(manifest, indent=2, ensure_ascii=False))
 
 License: `Apache-2.0`.
 
+### `tts-v2.json` (private; pointer only)
+
+**What we benchmark.** The TTS v2 authoring bank: 240 original agent-to-customer
+passages (five verticals × easy/medium/hard × four scenario families × four
+spoken-word length buckets, L1 10–20 words up to L4 200–300), 60 phonetic
+control sentences with declared ARPAbet coverage, and the 30 `tts-v1` prompts
+imported unchanged. Every new item carries a `spoken_reference`, the transcript
+written the way it sounds (`$12` → `twelve dollars`,
+`ID-42` → `i d forty two`), which is the WER reference; legacy items have
+none and fall back to `transcript`. Item metadata (`kind`, `vertical`,
+`difficulty`, `family`, `length_bucket`, `tags`, `phonetic`) rides along for
+per-slice reporting.
+
+**The prompts are not in this repo.** The bank is private and this repo is
+public, so the packaged `tts-v2.json` is a pointer: `remote.bucket`,
+`remote.path`, and the `sha256` of the full manifest. The loader fetches the
+manifest from that bucket at run time, verifies the hash, and caches it under
+`<cache>/tts-v2/manifest.json`. The bucket has public-access prevention
+enforced; the runner service account can read it, contributors without GCP
+credentials cannot, and no test depends on it.
+
+**Updating the bank.** Reshape the bank compiler's `corpus.json` to this
+manifest schema (items with `testcase_id`, `transcript`, `spoken_reference`,
+`kind`, and the per-kind metadata), then upload and re-pin:
+
+```sh
+gcloud storage cp manifest.json gs://coval-benchmarks-datasets-private/datasets/tts-v2/manifest.json
+shasum -a 256 manifest.json   # paste into remote.sha256 in tts-v2.json, bump version
+```
+
+Never commit the full manifest here. `tts-v1.json` is never edited either: its
+byte hash is what ties historical runs to their items.
+
 ### `s2s-v1.json`
 
 **What we benchmark.** Speech-to-speech (S2S) providers are scored on a frozen
