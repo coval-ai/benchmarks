@@ -32,6 +32,7 @@ import wave
 from collections.abc import AsyncIterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
@@ -3690,3 +3691,47 @@ async def test_tts_wer_scores_against_spoken_reference(
     wer_rows = [r for r in results if r.metric_type == "WER"]
     assert len(wer_rows) == 1
     assert wer_rows[0].metric_value == 0.0
+
+
+@pytest.mark.asyncio
+async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings: Settings) -> None:
+    """The orchestrator wires Guava's endpoint settings into the provider constructor."""
+    seen: dict[str, Any] = {}
+
+    class _Capture:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            raise RuntimeError("stop here")
+
+    entry = RegisteredModel(
+        benchmark=Benchmark.STT,
+        provider="guava",
+        model="daytona-stt",
+        source=Source.OFFICIAL_API,
+        collected=True,
+        published=False,
+    )
+    item = SimpleNamespace(
+        path=audio_file,
+        transcript="hello",
+        duration_sec=0.032,
+        speech_end_offset_ms=None,
+        sample_id=None,
+    )
+    cfg = settings.model_copy(
+        update={
+            "guava_api_key": SecretStr("k"),
+            "guava_base_url": "https://guava.test",
+            "guava_stt_domain": "healthcare",
+        }
+    )
+
+    with patch(
+        "coval_bench.runner.orchestrator._get_stt_providers", return_value={"guava": _Capture}
+    ):
+        await _run_stt_item(
+            entry=entry, item=item, run_id=0, sem=asyncio.Semaphore(1), settings=cfg, writer=None
+        )
+
+    assert seen["base_url"] == "https://guava.test"
+    assert seen["domain"] == "healthcare"
