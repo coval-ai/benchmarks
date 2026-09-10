@@ -174,6 +174,7 @@ async def dual_write(
         "STT": ObservationSourceKind.DATASET_AUDIO,
         "TTS": ObservationSourceKind.GENERATED_AUDIO,
         "S2S": ObservationSourceKind.CONVERSATION_AUDIO,
+        "LLM": ObservationSourceKind.CONVERSATION_TEXT,
     }[benchmark.value.upper()]
 
     async def persist_db() -> None:

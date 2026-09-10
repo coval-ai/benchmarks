@@ -77,6 +77,7 @@ class ObservationSourceKind(StrEnum):
     DATASET_AUDIO = "dataset_audio"
     GENERATED_AUDIO = "generated_audio"
     CONVERSATION_AUDIO = "conversation_audio"
+    CONVERSATION_TEXT = "conversation_text"
 
 
 class ObservationFailureOrigin(StrEnum):

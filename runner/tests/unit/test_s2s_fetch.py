@@ -2252,7 +2252,7 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
 
 
 @pytest.mark.asyncio
-async def test_ingest_run_does_not_dual_write_llm_rows(
+async def test_ingest_run_dual_writes_llm_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writer = _stub_writer()
@@ -2283,7 +2283,9 @@ async def test_ingest_run_does_not_dual_write_llm_rows(
     rows = writer.record_results.await_args.args[0]
     assert len(rows) == 1
     assert rows[0].benchmark is Benchmark.LLM
-    dual_write.assert_not_awaited()
+    dual_write.assert_awaited_once()
+    kwargs = dual_write.await_args_list[0].kwargs
+    assert (kwargs["benchmark"], kwargs["sample_id"]) == (Benchmark.LLM, "R1/s1")
 
 
 @pytest.mark.asyncio

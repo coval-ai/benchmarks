@@ -403,7 +403,16 @@ async def test_null_success_metric_is_excluded_instead_of_failed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_s2s_uses_conversation_source_and_coval_executor() -> None:
+@pytest.mark.parametrize(
+    ("benchmark", "metric", "unit", "source_kind"),
+    [
+        (Benchmark.S2S, Metric.V2V, "milliseconds", ObservationSourceKind.CONVERSATION_AUDIO),
+        (Benchmark.LLM, Metric.TTFT, "seconds", ObservationSourceKind.CONVERSATION_TEXT),
+    ],
+)
+async def test_conversation_benchmarks_use_their_source_kind_and_coval_executor(
+    benchmark: Benchmark, metric: Metric, unit: str, source_kind: ObservationSourceKind
+) -> None:
     writer = _Writer()
 
     await normalized.dual_write(
@@ -411,23 +420,23 @@ async def test_s2s_uses_conversation_source_and_coval_executor() -> None:
         storage_client=None,
         bucket="",
         run_id=1,
-        dataset_id="s2s-multiturn-v1",
+        dataset_id="dental-v1",
         dataset_sha256="e" * 64,
         sample_id="R1/s1",
         entry=SimpleNamespace(provider="provider", model="model"),
-        benchmark=Benchmark.S2S,
-        results=[_result(Benchmark.S2S, Metric.V2V, 500, "milliseconds")],
+        benchmark=benchmark,
+        results=[_result(benchmark, metric, 0.5, unit)],
         provider_error=None,
         executor=MetricExecutor.COVAL_API,
     )
 
     observation = writer.observations[0]
-    assert observation.source_kind is ObservationSourceKind.CONVERSATION_AUDIO
-    evaluation_id, evaluation = _evaluation_by_metric(writer, Metric.V2V)
+    assert observation.source_kind is source_kind
+    evaluation_id, evaluation = _evaluation_by_metric(writer, metric)
     assert evaluation.executor is MetricExecutor.COVAL_API
     assert writer.inputs[evaluation_id] == []
     assert [(value.value_key, value.value) for value in writer.completed[evaluation_id]] == [
-        ("primary", 500.0)
+        ("primary", 0.5)
     ]
 
 
