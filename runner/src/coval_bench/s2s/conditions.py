@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Which metrics each S2S caller condition carries.
+"""Which metrics each Coval caller condition carries.
 
 A condition is one dataset id. ``required`` must be on the run or the run is a
 fault; ``optional`` is written when present; anything named in neither is never
@@ -17,7 +17,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel
 
-from coval_bench.registries import Metric
+from coval_bench.registries import Benchmark, Metric
 
 __all__ = [
     "DATASET_ID",
@@ -27,11 +27,19 @@ __all__ = [
     "DATASET_ID_HAPPYPATH",
     "DATASET_ID_HAPPYPATH_ACCENTED",
     "DATASET_ID_HAPPYPATH_NOISY",
+    "DATASET_ID_INSTR_CUST_SERVICE",
+    "DATASET_ID_INSTR_HEALTH",
+    "DATASET_ID_INSTR_HOME_SERVICE",
+    "DATASET_ID_LLM_DENTAL",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
     "FAMILY_DENTAL",
     "FAMILY_HAPPYPATH",
+    "FAMILY_INSTR_CUST_SERVICE",
+    "FAMILY_INSTR_HEALTH",
+    "FAMILY_INSTR_HOME_SERVICE",
+    "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
     "Condition",
     "DatasetMetrics",
@@ -64,6 +72,12 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # happy-path on purpose: pooling two populations under one dataset id would break
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
+FAMILY_LLM_DENTAL = "llm-dental"
+# One family per industry so their instruction-adherence numbers are never
+# pooled together — each is its own board on the dashboard.
+FAMILY_INSTR_HEALTH = "instruction-adherence-health"
+FAMILY_INSTR_HOME_SERVICE = "instruction-adherence-home-service"
+FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -80,8 +94,16 @@ DATASET_ID_DENTAL = "s2s-dental-v1"
 DATASET_ID_DENTAL_NOISY = "s2s-dental-noisy-v1"
 DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
 
+# The same Coval dental test set driven over text: a separate population, never
+# pooled with the voice rows.
+DATASET_ID_LLM_DENTAL = "llm-dental-v1"
+
+DATASET_ID_INSTR_HEALTH = "instruction-adherence-health-v1"
+DATASET_ID_INSTR_HOME_SERVICE = "instruction-adherence-home-service-v1"
+DATASET_ID_INSTR_CUST_SERVICE = "instruction-adherence-cust-service-v1"
+
 # Unlisted pairs are a configuration error, not a silent skip.
-DATASET_IDS: dict[tuple[str, Condition], str] = {
+DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_MULTITURN, Condition.CLEAN): DATASET_ID_MULTITURN,
     (FAMILY_MULTITURN, Condition.NOISY): DATASET_ID_MULTITURN_NOISY,
     (FAMILY_HAPPYPATH, Condition.CLEAN): DATASET_ID_HAPPYPATH,
@@ -90,6 +112,12 @@ DATASET_IDS: dict[tuple[str, Condition], str] = {
     (FAMILY_DENTAL, Condition.CLEAN): DATASET_ID_DENTAL,
     (FAMILY_DENTAL, Condition.NOISY): DATASET_ID_DENTAL_NOISY,
     (FAMILY_DENTAL, Condition.ACCENTED): DATASET_ID_DENTAL_ACCENTED,
+    (FAMILY_LLM_DENTAL, Condition.CLEAN): DATASET_ID_LLM_DENTAL,
+    (FAMILY_LLM_DENTAL, Condition.NOISY): None,
+    (FAMILY_LLM_DENTAL, Condition.ACCENTED): None,
+    (FAMILY_INSTR_HEALTH, Condition.CLEAN): DATASET_ID_INSTR_HEALTH,
+    (FAMILY_INSTR_HOME_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_HOME_SERVICE,
+    (FAMILY_INSTR_CUST_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_CUST_SERVICE,
 }
 
 
@@ -110,8 +138,10 @@ class DatasetMetrics(BaseModel, frozen=True):
     every optional metric's conversation ids must match it to be written.
     """
 
+    benchmark: Benchmark = Benchmark.S2S
     required: Metric
     optional: frozenset[Metric] = frozenset()
+    local: frozenset[Metric] = frozenset()
 
     @property
     def fetched(self) -> frozenset[Metric]:
@@ -159,6 +189,27 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     DATASET_ID_DENTAL_ACCENTED: DatasetMetrics(
         required=Metric.INSTRUCTION_FOLLOWING,
         optional=frozenset({Metric.INTERRUPTION_RATE}),
+    ),
+    DATASET_ID_LLM_DENTAL: DatasetMetrics(
+        benchmark=Benchmark.LLM,
+        required=Metric.INSTRUCTION_FOLLOWING,
+        local=frozenset({Metric.TTFT}),
+    ),
+    # No V2V or interruption metric is configured for these test sets. Expected
+    # Behavior Adherence is optional, not required: it anchors on the judge
+    # score's conversation ids, so a run rescored for EBA after the fact is
+    # still ingested rather than faulted for arriving late.
+    DATASET_ID_INSTR_HEALTH: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
+    DATASET_ID_INSTR_HOME_SERVICE: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
+    DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
     ),
 }
 

@@ -44,11 +44,14 @@ from coval_bench.api.ratelimit import _rate_limit_handler, limiter
 from coval_bench.api.request_logging import RequestLoggingMiddleware
 from coval_bench.api.routers import (
     admin_models,
+    admin_pricing,
     aggregates,
     arena,
     health,
     leaderboard,
+    llm_proxy,
     mocktools,
+    pricing,
     providers,
     results,
     robots,
@@ -58,7 +61,9 @@ from coval_bench.api.routers import (
 )
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
+from coval_bench.db.registry_store import fetch_models
 from coval_bench.fixture_sources import install_fixture_providers
+from coval_bench.llm.benchmark import llm_models, make_clients
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
 
@@ -116,6 +121,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 logger.warning("posthog_init_failed", exc_info=True)
                 posthog_client = None
         app.state.posthog = posthog_client
+        llm_clients = make_clients(resolved)
+        logger.info("llm_clients_ready", providers=sorted(llm_clients))
+        app.state.llm_clients = llm_clients
         # Built here rather than on first request: loading and cross-checking the
         # fixtures inside a live call would put that cost on the agent's turn.
         # Absent fixtures are normal in CI and a fresh checkout, so the route
@@ -133,8 +141,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async with lifespan_pool(resolved) as pool:
                 app.state.pool = pool
                 app.state.settings = resolved
+                try:
+                    roster = await fetch_models(pool)
+                except Exception:
+                    logger.warning("llm_client_check_skipped", exc_info=True)
+                else:
+                    for model in llm_models(roster):
+                        if model.collected and model.provider not in llm_clients:
+                            logger.error("llm_client_missing", provider=model.provider)
                 yield
         finally:
+            for llm_client in llm_clients.values():
+                await llm_client.aclose()
             if posthog_client is not None:
                 try:
                     posthog_client.shutdown()  # type: ignore[no-untyped-call]
@@ -163,10 +181,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
 
-    # /mock is excluded alongside /clips: compressing a tool answer would add a
-    # variable cost to a response the suite deliberately holds to a fixed latency.
+    # /mock and /llm are excluded alongside /clips: compression would add jitter to
+    # a response whose latency is either held fixed (/mock) or measured (/llm).
     app.add_middleware(
-        SelectiveGZipMiddleware, minimum_size=1024, exclude_prefixes=("/clips", "/mock")
+        SelectiveGZipMiddleware,
+        minimum_size=1024,
+        exclude_prefixes=("/clips", "/mock", "/llm"),
     )
 
     app.state.response_cache = new_response_cache()
@@ -193,13 +213,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
     app.include_router(tags.router, prefix="/v1")
+    app.include_router(pricing.router, prefix="/v1")
     app.include_router(s2s_samples.router, prefix="/v1")
     app.include_router(arena.router, prefix="/v1")
     app.include_router(admin_models.router, prefix="/v1")
+    app.include_router(admin_pricing.router, prefix="/v1")
     # Not under /v1 and not rate limited: an appliance the agents call, not
-    # public read API. slowapi carries no default limit, so /mock is exempt by
-    # construction — a 429 mid-conversation would be graded as the agent failing.
+    # public read API. slowapi carries no default limit, so /mock and /llm are exempt
+    # by construction — a 429 mid-conversation would be graded as the agent failing.
     app.include_router(mocktools.router)
+    app.include_router(llm_proxy.router)
 
     # Serve locally-generated arena clips when no external audio host is set
     # (prod sets arena_gcs_bucket for GCS, or arena_audio_base_url for a CDN origin).

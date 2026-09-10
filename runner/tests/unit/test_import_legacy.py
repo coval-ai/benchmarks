@@ -21,6 +21,13 @@ from coval_bench.migrations.import_legacy import (
     map_status,
 )
 
+_MATRIX = {
+    ("deepgram", "nova-2"),
+    ("deepgram", "nova-3"),
+    ("deepgram", "aura-2-thalia-en"),
+    ("assemblyai", "universal-streaming"),
+}
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -68,7 +75,7 @@ def test_validate_all_known() -> None:
         _make_row(provider="deepgram", model="nova-3"),
         _make_row(provider="assemblyai", model="universal-streaming"),
     ]
-    unmatched, status_counts = _validate(rows)
+    unmatched, status_counts = _validate(rows, _MATRIX)
     assert unmatched == set()
     assert status_counts["success"] == 3
 
@@ -84,7 +91,7 @@ def test_validate_unmatched() -> None:
         _make_row(provider="unknown-provider", model="unknown-model"),
         _make_row(provider="unknown-provider", model="unknown-model"),
     ]
-    unmatched, _ = _validate(rows)
+    unmatched, _ = _validate(rows, _MATRIX)
     assert ("unknown-provider", "unknown-model") in unmatched
     assert len(unmatched) == 1
 
@@ -99,7 +106,7 @@ def test_validate_provider_casing() -> None:
     rows = [
         _make_row(provider="Deepgram", model="aura-2-thalia-en", benchmark="TTS"),
     ]
-    unmatched, _ = _validate(rows)
+    unmatched, _ = _validate(rows, _MATRIX)
     assert unmatched == set(), f"expected no unmatched, got {unmatched}"
 
 
@@ -138,7 +145,7 @@ def test_status_mapping_unknown_raises() -> None:
     # Validate that _validate accumulates it in status_counts so caller
     # can detect it.  The caller (import_legacy_cli) then exits non-zero.
     rows = [_make_row(status="weird")]
-    _, status_counts = _validate(rows)
+    _, status_counts = _validate(rows, _MATRIX)
     assert status_counts["weird"] == 1
     unexpected = set(status_counts) - {"success", "tts_failed"}
     assert "weird" in unexpected
@@ -241,7 +248,7 @@ def test_summarize_format_stable() -> None:
     unmatched: set[tuple[str, str]] = set()
     status_counts: Counter[str] = Counter({"success": 4, "tts_failed": 1})
 
-    output = _summarize(_FIXTURE_ROWS, unmatched, status_counts)
+    output = _summarize(_FIXTURE_ROWS, unmatched, status_counts, _MATRIX)
 
     # Header
     assert "== legacy-import dry-run ==" in output

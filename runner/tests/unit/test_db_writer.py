@@ -31,6 +31,7 @@ from pytest_postgresql.factories import postgresql
 from coval_bench.db.conn import get_pool
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.db.writer import RunWriter
+from coval_bench.registries import Metric
 
 # ---------------------------------------------------------------------------
 # pytest-postgresql fixtures — server shared via conftest ``pg_proc``
@@ -100,6 +101,54 @@ async def _make_pool(
     return pool
 
 
+def test_pool_diagnostics_uses_public_pool_apis(pg_conn: psycopg.Connection[Any]) -> None:
+    expected = {
+        "pool_min",
+        "pool_max",
+        "pool_size",
+        "pool_available",
+        "requests_waiting",
+        "requests_num",
+        "requests_queued",
+        "requests_wait_ms",
+        "requests_errors",
+        "usage_ms",
+        "connections_num",
+        "connections_ms",
+        "connections_errors",
+        "connections_lost",
+        "returns_bad",
+        "pool_timeout_ms",
+    }
+
+    async def check() -> tuple[dict[str, int], dict[str, int]]:
+        pool: AsyncConnectionPool[Any] = AsyncConnectionPool(
+            conninfo=_async_dsn(pg_conn),
+            min_size=1,
+            max_size=4,
+            timeout=12.5,
+            open=False,
+            kwargs={"autocommit": False},
+        )
+        await pool.open(wait=True)
+        try:
+            writer = RunWriter(pool)
+            before = writer.pool_diagnostics()
+            async with pool.connection():
+                checked_out = writer.pool_diagnostics()
+            return before, checked_out
+        finally:
+            await pool.close()
+
+    diagnostics, checked_out = asyncio.run(check())
+    assert set(diagnostics) == expected
+    assert diagnostics["pool_min"] == 1
+    assert diagnostics["pool_max"] == 4
+    assert diagnostics["pool_timeout_ms"] == 12_500
+    assert diagnostics["pool_size"] >= diagnostics["pool_available"] >= 0
+    assert diagnostics["pool_available"] == checked_out["pool_available"] + 1
+
+
 def _make_result(
     run_id: int, *, idx: int = 0, status: ResultStatus = ResultStatus.SUCCESS
 ) -> Result:
@@ -113,6 +162,20 @@ def _make_result(
         metric_value=0.05 + idx * 0.01,
         metric_units="ratio",
         status=status,
+    )
+
+
+def _coval_result(run_id: int, *, benchmark: Benchmark, coval_run_id: str) -> Result:
+    return Result(
+        run_id=run_id,
+        provider="test-provider",
+        model="test-model",
+        benchmark=benchmark,
+        metric_type=Metric.INSTRUCTION_FOLLOWING,
+        metric_value=100.0,
+        metric_units="percent",
+        audio_filename=f"{coval_run_id}/simulation-1",
+        status=ResultStatus.SUCCESS,
     )
 
 
@@ -135,6 +198,7 @@ def test_migration_up_down(pg_conn: psycopg.Connection[Any]) -> None:
     assert "runs" in tables
     assert "results" in tables
     assert "results_by_bucket" in tables
+    assert "llm_turns" in tables
 
     with pg_conn.cursor() as cur:
         cur.execute("SELECT matviewname FROM pg_matviews WHERE schemaname = 'benchmarks_v2'")
@@ -436,19 +500,33 @@ def test_results_24h_view(pg_conn: psycopg.Connection[Any]) -> None:
     assert abs(float(row["p50"]) - 0.3) < 0.001
 
 
-def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
-    """finish_run → refresh_stats_matviews populates all three per-window views."""
+def test_refresh_stats_matviews_once_per_window(pg_conn: psycopg.Connection[Any]) -> None:
+    """The slot's last finisher refreshes; a running sibling or a held lock skips."""
     _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    slot = datetime(2026, 9, 2, 14, 30, tzinfo=UTC)
+
+    def _view_rows() -> int:
+        with pg_conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM benchmarks_v2.results_24h WHERE provider = 'openai'")
+            row = cur.fetchone()
+        assert row is not None
+        return int(row[0])
 
     async def _run() -> None:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            run = await writer.start_run(dataset_id="stt-v1", dataset_sha256="deadbeef")
-            assert run.id is not None
+            first = await writer.start_run(
+                dataset_id="stt-v1", dataset_sha256="deadbeef", scheduled_at=slot
+            )
+            second = await writer.start_run(
+                dataset_id="stt-v1", dataset_sha256="deadbeef", scheduled_at=slot
+            )
+            assert first.id is not None and second.id is not None
             results = [
                 Result(
-                    run_id=run.id,
+                    run_id=first.id,
                     provider="openai",
                     model="whisper-1",
                     benchmark=Benchmark.STT,
@@ -460,14 +538,23 @@ def test_refresh_stats_matviews(pg_conn: psycopg.Connection[Any]) -> None:
                 for i in range(1, 6)
             ]
             await writer.record_results(results)
-            await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
-            await writer.refresh_stats_matviews()
+            await writer.finish_run(first.id, status=RunStatus.SUCCEEDED)
+            assert await writer.refresh_stats_matviews(first.id) is False
+            assert _view_rows() == 0
+
+            await writer.finish_run(second.id, status=RunStatus.SUCCEEDED)
+            with pg_conn.transaction():
+                pg_conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended('stats_matviews', 0))"
+                )
+                assert await writer.refresh_stats_matviews(second.id) is False
+            assert _view_rows() == 0
+            assert await writer.refresh_stats_matviews(second.id) is True
         finally:
             await pool.close()
 
     asyncio.run(_run())
 
-    pg_conn.autocommit = True
     for view in ("results_24h", "results_7d", "results_30d"):
         with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             cur.execute(
@@ -544,6 +631,82 @@ def test_check_constraints(pg_conn: psycopg.Connection[Any]) -> None:
                 (runner_sha, dataset_id, dataset_sha256, status)
             VALUES ('sha', 'ds', 'hash', 'invalid_status')
             """
+        )
+    pg_conn.rollback()
+
+
+def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> None:
+    """Every widened CHECK admits 'LLM', and the migration seeded the Phonely entry."""
+    _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
+            "VALUES ('sha', 'llm-dental-v1', 'hash', 'succeeded') RETURNING id"
+        )
+        run_row = cur.fetchone()
+        assert run_row is not None
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results "
+            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
+            "VALUES (%s, 'phonely', 'phonely-agent', 'LLM', 'TTFT', 0.42, 'seconds', 'success')",
+            (run_row[0],),
+        )
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results_by_bucket "
+            "(provider, model, benchmark, dataset_id, metric_type, bucket_at, "
+            " min_value, p25, p50, p75, max_value, value_sum, sample_count) "
+            "VALUES ('phonely', 'phonely-agent', 'LLM', 'llm-dental-v1', 'TTFT', now(), "
+            " 0.4, 0.4, 0.42, 0.45, 0.45, 0.85, 2)"
+        )
+        cur.execute(
+            "INSERT INTO benchmarks_v2.models "
+            "(modality, provider, model, voice, voices, creator, source, licensing, "
+            " on_prem, region, arena_enabled, collected, published, updated_by_user_id) "
+            "VALUES ('LLM', 'acme', 'chat-1', NULL, '[]'::jsonb, NULL, 'official-api', "
+            " 'proprietary', FALSE, 'us', FALSE, TRUE, FALSE, 'test')"
+        )
+        cur.execute(
+            "SELECT collected, published, arena_enabled, updated_by_user_id "
+            "FROM benchmarks_v2.models WHERE modality = 'LLM' AND provider = 'phonely'"
+        )
+        assert cur.fetchall() == [(True, False, False, "migration:20260901_0025")]
+
+
+def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[Any]) -> None:
+    """The NOT VALID swaps end validated, and the re-added CHECKs still reject bad values."""
+    _apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT conname, convalidated FROM pg_constraint "
+            "WHERE conname IN ('results_benchmark_check', 'results_by_bucket_benchmark_check', "
+            " 'benchmark_observations_benchmark_check', 'metric_values_by_bucket_benchmark_check', "
+            " 'models_modality_check', 'model_history_modality_check') "
+            "ORDER BY conname"
+        )
+        rows = cur.fetchall()
+    assert len(rows) == 6
+    assert all(validated for _, validated in rows), rows
+
+    pg_conn.autocommit = False
+    with (
+        pytest.raises(psycopg.errors.CheckViolation),
+        pg_conn.cursor() as cur,
+    ):
+        cur.execute(
+            "INSERT INTO benchmarks_v2.runs (runner_sha, dataset_id, dataset_sha256, status) "
+            "VALUES ('sha', 'ds', 'hash', 'succeeded') RETURNING id"
+        )
+        run_row = cur.fetchone()
+        assert run_row is not None
+        cur.execute(
+            "INSERT INTO benchmarks_v2.results "
+            "(run_id, provider, model, benchmark, metric_type, metric_value, metric_units, status) "
+            "VALUES (%s, 'acme', 'x', 'XYZ', 'TTFT', 1.0, 'seconds', 'success')",
+            (run_row[0],),
         )
     pg_conn.rollback()
 
@@ -871,3 +1034,41 @@ def test_record_results_rejects_unknown_metric_type(pg_conn: psycopg.Connection[
         row = cur.fetchone()
     assert row is not None
     assert row[0] == 0
+
+
+def test_coval_ingestion_checks_are_scoped_by_benchmark(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    _apply_migrations(pg_conn)
+
+    async def _run() -> tuple[bool, bool, bool, bool]:
+        pool = await _make_pool(pg_conn)
+        try:
+            writer = RunWriter(pool)
+            llm_run = await writer.start_run(dataset_id="llm-dental-v1", dataset_sha256="llm")
+            assert llm_run.id is not None
+            await writer.record_results(
+                [_coval_result(llm_run.id, benchmark=Benchmark.LLM, coval_run_id="RLLM")]
+            )
+            await writer.finish_run(llm_run.id, status=RunStatus.SUCCEEDED)
+            return (
+                await writer.coval_run_ingested(provider="test-provider", coval_run_id="RLLM"),
+                await writer.coval_run_ingested(
+                    provider="test-provider", coval_run_id="RLLM", benchmark="LLM"
+                ),
+                await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RLLM",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RLLM",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                    benchmark="LLM",
+                ),
+            )
+        finally:
+            await pool.close()
+
+    assert asyncio.run(_run()) == (False, True, False, True)

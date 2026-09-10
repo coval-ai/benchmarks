@@ -311,26 +311,6 @@ def test_missing_key_is_rejected() -> None:
         AtlasTTSProvider(settings, model=_MODEL, voice=_VOICE)
 
 
-def test_registry_entry_is_early_access_off_arena_and_shared_inference() -> None:
-    """Atlas proxies an undisclosed upstream, so it is not published as first-party.
-
-    Pinned as a test because these three fields are the only thing keeping a
-    possibly non-independent row off the public board and out of the blind
-    voice-quality A/B.
-    """
-    from coval_bench.registries import MODEL_REGISTRY
-    from coval_bench.registries.models import Source
-
-    rows = [m for m in MODEL_REGISTRY if m.provider == "atlas"]
-    assert len(rows) == 1
-    assert rows[0].model == _MODEL
-    assert rows[0].voice == _VOICE
-    assert rows[0].collected is True
-    assert rows[0].published is False
-    assert rows[0].source is Source.SHARED_INFERENCE
-    assert rows[0].arena_enabled is False
-
-
 def test_atlas_has_a_provider_env_entry() -> None:
     """Without this, publishing Atlas breaks the arena key parity check."""
     from coval_bench.registries.provider_keys import PROVIDER_ENV

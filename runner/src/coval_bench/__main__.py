@@ -20,9 +20,14 @@ import click
 
 from coval_bench import __version__
 from coval_bench.db.cli import db_check, db_migrate
+from coval_bench.llm.coval_agent import sync_llm
+from coval_bench.migrations.backfill_normalized_s2s_storage import (
+    backfill_normalized_s2s_storage_cli,
+)
 from coval_bench.migrations.backfill_normalized_storage import backfill_normalized_storage_cli
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
+from coval_bench.platform_assets import platform_assets
 from coval_bench.s2s.fetch_v2v import fetch_s2s
 from coval_bench.variants.pull import pull_contract
 
@@ -106,11 +111,14 @@ def migrate() -> None:
 
 migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
 migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
+migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 
-# S2S is fetch-only, so a standalone command rather than a `run --kind` value.
+# Coval-backed workflows use standalone commands rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
+cli.add_command(sync_llm, name="sync-llm")
 cli.add_command(pull_contract, name="pull-contract")
+cli.add_command(platform_assets, name="platform-assets")
 
 
 @cli.command(name="tts-smoke")
@@ -511,6 +519,10 @@ def arena_tune_scale(
     from pathlib import Path
 
     from coval_bench.arena.tune_scale import render_loss_curve, tune_scale
+    from coval_bench.config import get_settings
+    from coval_bench.db.conn import lifespan_pool
+    from coval_bench.db.registry_store import fetch_models
+    from coval_bench.registries import RegisteredModel
 
     try:
         scale_values = [float(s) for s in scales.split(",") if s.strip()]
@@ -518,7 +530,13 @@ def arena_tune_scale(
         raise click.BadParameter(f"--scales must be comma-separated numbers: {exc}") from exc
     if not scale_values:
         raise click.BadParameter("--scales must contain at least one value")
+
+    async def _roster() -> list[RegisteredModel]:
+        async with lifespan_pool(get_settings()) as pool:
+            return await fetch_models(pool)
+
     results = tune_scale(
+        asyncio.run(_roster()),
         scales=scale_values,
         n_battles=battles,
         refit_every=refit_every,

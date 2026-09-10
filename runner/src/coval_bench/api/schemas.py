@@ -11,14 +11,15 @@ added later if needed.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
-from coval_bench.registries import Benchmark, Licensing, Source, TagCategory, Voice
+from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
 
 
 class RunOut(BaseModel):
@@ -49,7 +50,7 @@ class ResultOut(BaseModel):
     provider: str
     model: str
     voice: str | None
-    benchmark: Literal["STT", "TTS", "S2S"]
+    benchmark: BenchmarkLiteral
     dataset_id: str
     metric_type: str
     metric_value: float | None
@@ -102,6 +103,9 @@ class ModelInfo(BaseModel):
     disabled: bool = False
     early_access: bool = False
     tags: list[ModelTagOut] = []
+    # The series color the registry records for the model, as lowercase
+    # ``#rrggbb``. None means the site picks one from its built-in palette.
+    color: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -118,8 +122,45 @@ class ProvidersResponse(BaseModel):
     stt: list[ProviderInfo]
     tts: list[ProviderInfo]
     s2s: list[ProviderInfo]
-    # Facet vocabulary in display order, shared across STT, TTS, and S2S.
+    llm: list[ProviderInfo]
+    # Facet vocabulary in display order, shared across every benchmark.
     tag_categories: list[TagCategoryOut]
+
+
+class PricingRateSpanOut(BaseModel):
+    """One stretch of a model's price history.
+
+    ``price_usd`` is the provider's native figure in ``unit`` as the exact decimal
+    string it was recorded as; the normalized fields are None where no conversion
+    exists without assuming a speaking rate, and all three are None over a span
+    with no known public rate. ``effective_to`` is exclusive, None while open.
+    """
+
+    unit: str | None = None
+    price_usd: Decimal | None = None
+    price_per_1m_chars: float | None = None
+    price_per_1k_minutes: float | None = None
+    effective_from: date
+    effective_to: date | None = None
+    source_url: str | None = None
+
+
+class PricingRateOut(PricingRateSpanOut):
+    """One model's rate in force on the requested day, with the earlier spans oldest first."""
+
+    benchmark: Benchmark
+    provider: str
+    model: str
+    notes: str | None = None
+    recorded_at: datetime
+    history: list[PricingRateSpanOut] = []
+
+
+class PricingRegistryResponse(BaseModel):
+    """Response schema for GET /v1/pricing: the rates in force on ``as_of``."""
+
+    as_of: date
+    rates: list[PricingRateOut]
 
 
 class ResultsResponse(BaseModel):
@@ -137,7 +178,9 @@ class ModelStatEntry(BaseModel):
     provider: str
     model: str
     metric_type: str
+    # WER: corpus-level (pooled) when every clip carries counts, else the per-clip mean.
     avg_value: float
+    mean_value: float | None = None
     stddev_value: float
     p25: float
     p50: float
@@ -158,12 +201,18 @@ class ModelStatEntry(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
+    # WER only; null unless every clip in the group carries counts.
+    pooled_value: float | None = None
+    pooled_insertions_pct: float | None = None
+    pooled_deletions_pct: float | None = None
+    pooled_substitutions_pct: float | None = None
 
 
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50; WER renders value_sum / sample_count.
+    Latency timelines render p50. WER renders error_sum / reference_word_sum when
+    present, else value_sum / sample_count; both pairs sum across buckets.
     """
 
     provider: str
@@ -177,6 +226,9 @@ class SeriesPoint(BaseModel):
     max_value: float
     value_sum: float
     sample_count: int
+    error_sum: float | None = None
+    reference_word_sum: float | None = None
+    pooled_value: float | None = None
 
 
 class AggregatesResponse(BaseModel):
@@ -204,6 +256,7 @@ class TimelinePoint(BaseModel):
     metric_type: str
     scheduled_at: datetime
     value: float
+    pooled_value: float | None = None
 
 
 class TimelineResponse(BaseModel):
@@ -428,6 +481,7 @@ class AdminModelOut(BaseModel):
     collected: bool
     published: bool
     tags: list[str] = []
+    color: str | None = None
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -457,10 +511,14 @@ class AdminModelCreate(BaseModel):
     collected: bool = True
     published: bool = False
     tags: list[str] = []
+    color: HexColor = None
 
 
 class AdminModelPatch(BaseModel):
-    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged."""
+    """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
+
+    ``color`` null returns the model to the site's built-in palette.
+    """
 
     provider: str | None = Field(default=None, min_length=1)
     model: str | None = Field(default=None, min_length=1)
@@ -475,6 +533,7 @@ class AdminModelPatch(BaseModel):
     collected: bool | None = None
     published: bool | None = None
     tags: list[str] | None = None
+    color: HexColor = None
 
 
 class AdminModelUpdateResponse(BaseModel):
@@ -482,3 +541,46 @@ class AdminModelUpdateResponse(BaseModel):
 
     model: AdminModelOut
     warnings: list[str] = []
+
+
+class AdminRateRecordingOut(PricingRateSpanOut):
+    """One row of the pricing log as the admin sees it; ``superseded`` marks a corrected entry."""
+
+    id: int
+    notes: str | None = None
+    recorded_by_user_id: str
+    recorded_by_email: str | None = None
+    recorded_at: datetime
+    superseded: bool
+
+
+class AdminModelPricingOut(BaseModel):
+    """One model's pricing log: in force today, scheduled, and every recording newest first."""
+
+    benchmark: Benchmark
+    provider: str
+    model: str
+    current: AdminRateRecordingOut | None = None
+    scheduled: list[AdminRateRecordingOut] = []
+    recordings: list[AdminRateRecordingOut] = []
+
+
+class AdminPricingResponse(BaseModel):
+    """Response schema for GET /v1/admin/pricing."""
+
+    as_of: date
+    models: list[AdminModelPricingOut]
+
+
+class AdminRateCreate(BaseModel):
+    """POST body for /v1/admin/pricing: ``unit`` + ``price_usd`` (decimal string) for a
+    published rate, neither for a delisting; ``effective_from`` defaults to today (UTC)."""
+
+    benchmark: Benchmark
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    unit: str | None = None
+    price_usd: str | None = None
+    effective_from: date | None = None
+    source_url: str | None = None
+    notes: str | None = None

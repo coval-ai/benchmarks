@@ -49,7 +49,7 @@ retired manifests (`stt-v2.json`) stay for historical reproducibility.
 **Aggregation across datasets.** Each dataset runs as its own run (one
 `DATASET_ID` per execution), and a result's dataset is derived from its parent
 run. The aggregation layer pools every result in the window regardless of
-dataset, so headline stats (e.g. average WER) blend all datasets that ran.
+dataset, so headline stats (e.g. pooled WER) blend all datasets that ran.
 `/v1/results` exposes each row's `dataset_id` and takes a `dataset` filter for
 per-dataset inspection. See ADR-023.
 
@@ -104,6 +104,27 @@ before and after the change are **not comparable**. Because result rows do not
 carry a normalization-version marker, historical rows cannot be reliably
 segmented by normalization pipeline version.
 
+### Aggregation
+
+The headline WER for a model is corpus-level: the sum of substitutions,
+deletions, and insertions across every clip in the window, divided by the sum
+of reference words. Each per-clip row carries those four counts, so the figure
+is exact rather than an average of ratios. The per-clip distribution (median,
+percentiles, spread) is still reported from the per-clip ratios.
+
+The two disagree by design. Reference clips run from 4 to 41 words, so a mean
+of per-clip ratios lets one miss on a 4-word clip weigh the same as a perfect
+41-word clip, and the empty-reference convention above turns a clip with no
+reference into a raw insertion count. Pooling weights every word equally and
+absorbs both.
+
+**Methodology change (2026-09).** WER was previously the mean of per-clip
+ratios. Counts are recorded from this point forward and were not backfilled,
+so a window reports the pooled figure only once every clip in it carries
+counts; until then it falls back to the mean and says so (`pooled_value` is
+null, `mean_value` is always present). Headline numbers before and after are
+**not comparable**. See [ADR-024](#adr-references).
+
 ## 4. Latency metrics (TTFA)
 
 The TTS latency metric is **TTFA (Time-To-First-Audio)**, reported in
@@ -150,8 +171,8 @@ but the rule is the same.
 
 | Cohort | What is excluded from t0 |
 |---|---|
-| WS streaming (Deepgram, AssemblyAI, ElevenLabs, Speechmatics, Gradium STT, Cartesia, Together AI, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
-| HTTP TTS (OpenAI `gpt-4o-mini-tts`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
+| WS streaming (Deepgram, AssemblyAI, ElevenLabs, Speechmatics, Gradium STT, Cartesia, Together AI, Nari STT, Deepgram aura-2, Rime, Gradium TTS, Hume) | TLS + WS upgrade + optional session-setup RTT (~50–200 ms). Handshake naturally completes inside `measure_ttft` / `synthesize` before t0. |
+| HTTP TTS (OpenAI `gpt-4o-mini-tts`, Nari `qwen3-tts-fast`) | TLS + TCP via a shared `httpx.AsyncClient` pre-warmed once per run (~80–200 ms). |
 
 HTTP-pool warming lives in `runner/src/coval_bench/providers/_http_session.py`.
 Providers opt in by overriding `Provider.warmup()` in `providers/base.py`; the
@@ -255,6 +276,10 @@ exact source reproduction for those rows is unsupported.
 - ADR-023 — Multi-dataset benchmarking: one run per dataset, dataset identity
   derived from the parent run (no dataset column on `results`); headline
   aggregates pool across datasets.
+- ADR-024 — Corpus-level WER as the headline: per-clip S/I/D and reference-word
+  counts persisted as WER components; aggregates report sum(errors) /
+  sum(reference words), falling back to the per-clip mean until a window is
+  fully counted; no backfill.
 
 ADR rationale is referenced inline in the relevant source files and READMEs
 where the decision context is load-bearing.

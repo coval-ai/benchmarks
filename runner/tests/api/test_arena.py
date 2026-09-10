@@ -19,8 +19,9 @@ from coval_bench.arena.moderation import ModerationResult
 from coval_bench.arena.pairing import active_tts_models
 from coval_bench.arena.prompts import EXAMPLE_PROMPTS
 from coval_bench.providers.base import TTSResult
-from coval_bench.registries import MODEL_REGISTRY
-from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url
+from coval_bench.registries import Benchmark, RegisteredModel
+from tests.api.conftest import ARENA_LABELER_KEY, _make_db_url, add_models
+from tests.roster import TEST_ROSTER
 
 _LABELER_HEADERS = {"X-Labeler-Key": ARENA_LABELER_KEY}
 
@@ -408,9 +409,20 @@ async def test_leaderboard_returns_latest_board_sorted(
 async def test_leaderboard_hides_retired_models(client: AsyncClient, postgresql: Any) -> None:
     """A board computed before a model was retired must not keep showing it."""
     await _apply_arena_schema(_make_db_url(postgresql))
+    add_models(
+        postgresql,
+        RegisteredModel(
+            benchmark=Benchmark.TTS,
+            provider="cartesia",
+            model="sonic-old",
+            voice="v",
+            collected=False,
+            published=True,
+        ),
+    )
     computed = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
     await _insert_snapshot(
-        postgresql, computed_at=computed, provider="cartesia", model="sonic-3", rating_elo=1520
+        postgresql, computed_at=computed, provider="cartesia", model="sonic-old", rating_elo=1520
     )
     await _insert_snapshot(
         postgresql, computed_at=computed, provider="cartesia", model="sonic-3.5", rating_elo=1480
@@ -710,7 +722,7 @@ def _fake_tts_providers(fail_models: set[str]) -> dict[str, type]:
                 error=None,
             )
 
-    return {m.provider: _FakeTTS for m in active_tts_models(MODEL_REGISTRY)}
+    return {m.provider: _FakeTTS for m in active_tts_models(TEST_ROSTER)}
 
 
 async def test_create_battle_returns_blind_battle(
@@ -764,7 +776,7 @@ async def test_create_battle_502_when_synthesis_fails(
 ) -> None:
     """If synthesis fails, no battle is persisted and the endpoint returns 502."""
     await _apply_arena_schema(_make_db_url(postgresql))
-    every_model = {m.model for m in active_tts_models(MODEL_REGISTRY)}
+    every_model = {m.model for m in active_tts_models(TEST_ROSTER)}
     monkeypatch.setattr(
         "coval_bench.arena.generate.TTS_PROVIDERS", _fake_tts_providers(every_model)
     )

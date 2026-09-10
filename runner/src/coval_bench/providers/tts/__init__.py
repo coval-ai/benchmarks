@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 from coval_bench.providers.base import TTSProvider
+from coval_bench.providers.tts.airy import AiryTTSProvider
 from coval_bench.providers.tts.alibaba import AlibabaTTSProvider
 from coval_bench.providers.tts.atlas import AtlasTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
@@ -33,6 +34,7 @@ from coval_bench.providers.tts.inworld import InworldTTSProvider
 from coval_bench.providers.tts.lmnt import LmntTTSProvider
 from coval_bench.providers.tts.minimax import MinimaxTTSProvider
 from coval_bench.providers.tts.murf import MurfTTSProvider
+from coval_bench.providers.tts.nari import NariTTSProvider
 from coval_bench.providers.tts.openai import OpenAITTSProvider
 from coval_bench.providers.tts.palabra import PalabraTTSProvider
 from coval_bench.providers.tts.rime import RimeTTSProvider
@@ -56,6 +58,7 @@ except ImportError:
     GOOGLE_TTS_AVAILABLE = False
 
 TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
+    "airy": AiryTTSProvider,
     "openai": OpenAITTSProvider,
     "atlas": AtlasTTSProvider,
     "cartesia": CartesiaTTSProvider,
@@ -81,6 +84,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "deepdub": DeepdubTTSProvider,
     "murf": MurfTTSProvider,
     "hakim": HakimTTSProvider,
+    "nari": NariTTSProvider,
 }
 
 if HumeTTSProvider is not None:
@@ -90,6 +94,7 @@ if GoogleTTSProvider is not None and GOOGLE_TTS_AVAILABLE:
     TTS_PROVIDERS["google"] = GoogleTTSProvider
 
 __all__ = [
+    "AiryTTSProvider",
     "TTS_PROVIDERS",
     "HUME_AVAILABLE",
     "GOOGLE_TTS_AVAILABLE",
@@ -106,6 +111,7 @@ __all__ = [
     "LmntTTSProvider",
     "MinimaxTTSProvider",
     "MurfTTSProvider",
+    "NariTTSProvider",
     "SmallestTTSProvider",
     "XaiTTSProvider",
     "GroqTTSProvider",

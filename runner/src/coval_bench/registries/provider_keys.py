@@ -43,6 +43,7 @@ def provider_names(kind: Literal["stt", "tts"]) -> frozenset[str]:
 
 
 PROVIDER_ENV: dict[str, str] = {
+    "airy": "AIRY_API_KEY",
     "openai": "OPENAI_API_KEY",
     "cartesia": "CARTESIA_API_KEY",
     "elevenlabs": "ELEVENLABS_API_KEY",
@@ -68,4 +69,5 @@ PROVIDER_ENV: dict[str, str] = {
     "fluxions": "FLUXIONS_API_KEY",
     "deepdub": "DEEPDUB_API_KEY",
     "atlas": "ATLAS_API_KEY",
+    "nari": "NARI_API_KEY",
 }

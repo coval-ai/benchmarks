@@ -11,6 +11,7 @@ populated during the FastAPI lifespan (see ``app.py``).
 from __future__ import annotations
 
 import asyncio
+import hmac
 from collections import defaultdict
 from typing import Any, cast
 
@@ -19,11 +20,14 @@ from cachetools import TTLCache
 from fastapi import Depends, Header, HTTPException
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
+from pydantic import SecretStr
 from starlette.requests import Request
 
-from coval_bench.api import clerk
+from coval_bench.api import clerk, google_auth
 from coval_bench.config import Settings
-from coval_bench.db.registry_store import fetch_models
+from coval_bench.db.registry_store import RegistryStore, TagRecord, fetch_models
+from coval_bench.llm.benchmark import ProxiedModel, llm_models
+from coval_bench.llm.turn import TurnClient
 from coval_bench.registries import RegisteredModel
 
 logger = structlog.get_logger("coval_bench.api")
@@ -46,25 +50,39 @@ def get_settings(request: Request) -> Settings:
     return settings
 
 
+def bearer_token(authorization: str | None) -> str | None:
+    """The token behind a Bearer authorization header, or ``None``."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+def secret_matches(provided: str | None, expected: SecretStr | None) -> bool:
+    """Constant-time match; an unset or empty secret never matches anything."""
+    if provided is None or expected is None:
+        return False
+    value = expected.get_secret_value()
+    return bool(value) and hmac.compare_digest(provided.encode(), value.encode())
+
+
 def require_coval_admin(
     authorization: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> clerk.CovalAdmin:
-    """The verified coval caller: 401 without a proven token, 403 outside the coval org."""
+    """The verified coval caller: 401 without a proven token, 403 when it is not staff."""
+    token = bearer_token(authorization)
+    if token is not None and google_auth.looks_like_google(token):
+        return _google_admin(token, settings)
     claims = clerk.bearer_claims(authorization, settings)
     if claims is None:
-        raise HTTPException(
-            401,
-            "a valid Clerk session token is required",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unproven("a valid Clerk session or Google identity token is required")
     user_id = claims.get("sub")
     if not isinstance(user_id, str) or not user_id:
-        raise HTTPException(
-            401,
-            "the session token names no subject",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise _unproven("the session token names no subject")
     org_id = claims.get("org_id")
     if (
         not isinstance(org_id, str)
@@ -77,6 +95,20 @@ def require_coval_admin(
         user_id=user_id,
         email=email if isinstance(email, str) and email else None,
     )
+
+
+def _google_admin(token: str, settings: Settings) -> clerk.CovalAdmin:
+    identity = google_auth.verify(token, settings)
+    if identity is None:
+        raise _unproven("the Google identity token could not be verified")
+    allowed = {email.lower() for email in settings.admin_google_emails}
+    if identity.email not in allowed:
+        raise HTTPException(403, "this Google account is not an admin")
+    return clerk.CovalAdmin(user_id=identity.sub, email=identity.email)
+
+
+def _unproven(detail: str) -> HTTPException:
+    return HTTPException(401, detail, headers={"WWW-Authenticate": "Bearer"})
 
 
 def get_posthog(request: Request) -> Posthog | None:
@@ -107,6 +139,35 @@ async def get_models(
     except Exception as exc:
         logger.error("model_roster_unavailable", exc_info=True)
         raise HTTPException(503, "the model registry is unavailable") from exc
+
+
+async def get_proxied_model(
+    provider: str,
+    request: Request,
+    models: list[RegisteredModel] = Depends(get_models),
+) -> ProxiedModel:
+    """The collected LLM model behind a /llm/{provider} route, or fail closed."""
+    registered = next(
+        (m for m in llm_models(models) if m.provider == provider and m.collected), None
+    )
+    if registered is None:
+        raise HTTPException(404, f"{provider} is not a collected LLM benchmark model")
+    clients: dict[str, TurnClient] = getattr(request.app.state, "llm_clients", {})
+    client = clients.get(provider)
+    if client is None:
+        raise HTTPException(503, f"{provider} proxy is not configured")
+    return ProxiedModel(provider=provider, model=registered.model, client=client)
+
+
+async def get_tag_vocabulary(
+    pool: AsyncConnectionPool[Any] = Depends(get_pool),
+) -> dict[str, TagRecord]:
+    """The FEATURES vocabulary by value, read fresh on every request like the roster."""
+    try:
+        return {record.value: record for record in await RegistryStore(pool).list_tags()}
+    except Exception as exc:
+        logger.error("tag_vocabulary_unavailable", exc_info=True)
+        raise HTTPException(503, "the tag vocabulary is unavailable") from exc
 
 
 def get_cache_locks(request: Request) -> defaultdict[Any, asyncio.Lock]:

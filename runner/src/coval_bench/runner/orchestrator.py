@@ -44,12 +44,14 @@ import random
 import signal
 import wave
 from collections import Counter, defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime  # noqa: UP017 — UTC alias requires 3.11+, target is 3.12
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from posthog import Posthog
+from psycopg_pool import PoolTimeout
 from pydantic import BaseModel
 
 from coval_bench.db.registry_store import fetch_models
@@ -118,6 +120,8 @@ def _metric_outcome(
     item_error: str | None,
     metric_label: str,
     result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+    *,
+    missing_reason: str | None = None,
 ) -> tuple[Any, str | None]:
     """Decide ``(status, error)`` for a single result row.
 
@@ -133,7 +137,7 @@ def _metric_outcome(
     if item_error:
         return result_status.FAILED, _truncate(item_error)
     if metric_value is None:
-        return result_status.FAILED, f"no {metric_label} produced"
+        return result_status.FAILED, missing_reason or f"no {metric_label} produced"
     return result_status.SUCCESS, None
 
 
@@ -155,6 +159,31 @@ def _stt_silent_failure(result: Any) -> str | None:  # noqa: ANN401 — Transcri
     if result.ttft_seconds is not None or result.audio_to_final_seconds is not None:
         return None
     return _STT_SILENT_FAILURE
+
+
+_FINALIZATION_DEFAULTS: dict[str, Any] = {
+    "finalization_latency_seconds": None,
+    "finalization_trigger": None,
+    "final_audio_window_end_seconds": None,
+    "finalization_warning_code": None,
+    "finalization_timed_out": False,
+}
+
+
+def _finalization_events(result: Any) -> dict[str, Any]:  # noqa: ANN401 — TranscriptionResult
+    if result is None:
+        return dict(_FINALIZATION_DEFAULTS)
+    return {name: getattr(result, name) for name in _FINALIZATION_DEFAULTS}
+
+
+def _final_missing_reason(result: Any) -> str | None:  # noqa: ANN401 — TranscriptionResult
+    if result is None or result.audio_to_final_seconds is not None:
+        return None
+    if result.finalization_warning_code:
+        return f"finalization ignored: {result.finalization_warning_code}"
+    if result.finalization_timed_out:
+        return "finalization timed out"
+    return None
 
 
 def _log_item_failures(
@@ -330,6 +359,25 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
+async def _persist_legacy_results(
+    writer: Any,
+    results: list[Any],
+    captured_at: datetime,
+    event_prefix: str,
+) -> None:
+    async def attempt() -> None:
+        await writer.record_results(results, created_at=captured_at)
+
+    await with_retry(
+        attempt,
+        max_attempts=3,
+        retry_on=(PoolTimeout,),
+        retry_event=f"{event_prefix}_persistence_retry",
+        exhaustion_event=f"{event_prefix}_persistence_exhausted",
+        retry_state=writer.pool_diagnostics,
+    )
+
+
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -448,6 +496,7 @@ async def _run_stt_item(
         complete_transcript = (
             transcription_result.complete_transcript if transcription_result else None
         )
+        final_missing_reason = _final_missing_reason(transcription_result)
 
         # 1. TTFT — time-to-first-partial from first audio.
         ttft_status, ttft_error = _metric_outcome(
@@ -480,7 +529,11 @@ async def _run_stt_item(
 
         # 2. AudioToFinal
         atf_status, atf_error = _metric_outcome(
-            audio_to_final, item_error, Metric.AUDIO_TO_FINAL, ResultStatus
+            audio_to_final,
+            item_error,
+            Metric.AUDIO_TO_FINAL,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         results.append(
             Result(
@@ -523,7 +576,11 @@ async def _run_stt_item(
                     exc_info=exc,
                 )
         ttfs_status, ttfs_error = _metric_outcome(
-            ttfs_value, item_error or ttfs_calc_error, Metric.TTFS, ResultStatus
+            ttfs_value,
+            item_error or ttfs_calc_error,
+            Metric.TTFS,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         ttfs_excluded = (entry.provider, entry.model) in METRIC_EXCLUSIONS[Metric.TTFS]
         if not ttfs_excluded:
@@ -566,7 +623,11 @@ async def _run_stt_item(
                 )
 
         rtf_status, rtf_error = _metric_outcome(
-            audio_to_final, item_error, Metric.RTF, ResultStatus
+            audio_to_final,
+            item_error,
+            Metric.RTF,
+            ResultStatus,
+            missing_reason=final_missing_reason,
         )
         results.append(
             Result(
@@ -610,6 +671,7 @@ async def _run_stt_item(
                         status=ResultStatus.SUCCESS,
                         error=None,
                         **wer_result.error_percentages,
+                        **wer_result.error_counts,
                     )
                 )
                 logger.debug(
@@ -658,7 +720,7 @@ async def _run_stt_item(
     captured_at = datetime.now(UTC)
     if writer is not None and results:
         try:
-            await writer.record_results(results, created_at=captured_at)
+            await _persist_legacy_results(writer, results, captured_at, "stt")
         except Exception as exc:
             logger.warning(
                 "stt_result_persist_failed",
@@ -691,7 +753,9 @@ async def _run_stt_item(
                         "audio_to_final_seconds": audio_to_final,
                         "speech_end_offset_ms": speech_end_offset_ms,
                         "effective_duration_sec": duration_sec,
+                        **_finalization_events(transcription_result),
                     },
+                    db_retry_attempts=3,
                 )
             except Exception as exc:
                 logger.warning(
@@ -908,6 +972,7 @@ async def _run_tts_item(
                                 status=ResultStatus.SUCCESS,
                                 error=None,
                                 **wer_result.error_percentages,
+                                **wer_result.error_counts,
                             )
                         )
                         logger.debug(
@@ -945,7 +1010,7 @@ async def _run_tts_item(
             captured_at = datetime.now(UTC)
             if writer is not None and results:
                 try:
-                    await writer.record_results(results, created_at=captured_at)
+                    await _persist_legacy_results(writer, results, captured_at, "tts")
                 except Exception as exc:
                     logger.warning(
                         "tts_result_persist_failed",
@@ -974,6 +1039,7 @@ async def _run_tts_item(
                         timing_events={"ttfa_ms": ttfa_ms},
                         audio_path=audio_path,
                         voice=voice,
+                        db_retry_attempts=3,
                     )
                 except Exception as exc:
                     logger.warning(
@@ -1031,23 +1097,34 @@ _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
 
 
 async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
-    """Best-effort refresh of the run's series rollup bucket; never raises.
+    """Best-effort refresh of the run's legacy and normalized rollup bucket.
 
-    Transient failures are retried. A final failure leaves only this bucket
-    stale (a run sharing the slot recomputes it; the migration backfill is
-    the manual repair) — not worth failing the run.
+    Each rollup is retried independently so one stale table cannot suppress the
+    other. A run sharing the slot recomputes both tables; the migration backfill
+    is the manual repair after a final failure. Maintenance never fails the run.
     """
-    for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
-        try:
-            await writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds)
-        except Exception:
-            if attempt == _BUCKET_REFRESH_ATTEMPTS:
-                logger.warning("series_bucket_refresh_failed", exc_info=True)
-                return
-            logger.info("series_bucket_refresh_retry", attempt=attempt)
-            await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
-        else:
-            return
+    refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
+        (
+            "series_bucket",
+            lambda: writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds),
+        ),
+        (
+            "normalized_series_bucket",
+            lambda: writer.refresh_metric_values_bucket(run_id),
+        ),
+    )
+    for event_prefix, refresh in refreshes:
+        for attempt in range(1, _BUCKET_REFRESH_ATTEMPTS + 1):
+            try:
+                await refresh()
+            except Exception:
+                if attempt == _BUCKET_REFRESH_ATTEMPTS:
+                    logger.warning(f"{event_prefix}_refresh_failed", exc_info=True)
+                    break
+                logger.info(f"{event_prefix}_refresh_retry", attempt=attempt)
+                await asyncio.sleep(_BUCKET_REFRESH_RETRY_DELAY_S)
+            else:
+                break
 
 
 async def run_benchmarks(
@@ -1405,12 +1482,15 @@ async def run_benchmarks(
             # Refresh after finish_run: the view query only counts runs already
             # marked succeeded/partial. A failed refresh must not fail the run.
             try:
-                await writer.refresh_stats_matviews()
+                refreshed = await writer.refresh_stats_matviews(run_id)
             except Exception as refresh_exc:
                 logger.error(
                     "stats_matviews_refresh_failed",
                     exc_info=refresh_exc,
                 )
+            else:
+                if not refreshed:
+                    logger.info("stats_matviews_refresh_skipped")
 
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
                 await _refresh_series_bucket(writer, run_id, settings)

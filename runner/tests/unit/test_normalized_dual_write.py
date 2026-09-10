@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import wave
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -10,13 +11,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import psycopg
 import pytest
+from psycopg_pool import PoolTimeout
+from structlog.testing import capture_logs
 
 from coval_bench.db.models import (
     Benchmark,
     MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
+    MetricExecutor,
     MetricValue,
     Observation,
     ObservationArtifact,
@@ -40,6 +45,9 @@ class _Writer:
         self.inputs: dict[UUID, list[MetricEvaluationInput]] = {}
         self.completed: dict[UUID, list[MetricValue]] = {}
         self.failed: dict[UUID, str] = {}
+
+    def pool_diagnostics(self) -> dict[str, int]:
+        return {"pool_size": 0}
 
     async def insert_observation(self, observation: Observation) -> Observation:
         observation_id = uuid4()
@@ -195,6 +203,10 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
             wer_insertions_pct=2,
             wer_deletions_pct=3,
             wer_substitutions_pct=5,
+            wer_substitutions=5,
+            wer_deletions=3,
+            wer_insertions=2,
+            wer_reference_words=100,
         ),
     ]
 
@@ -228,6 +240,10 @@ async def test_stt_groups_wer_and_freezes_transcript_and_timing_lineage() -> Non
         "insertions",
         "deletions",
         "substitutions",
+        "substitution_count",
+        "deletion_count",
+        "insertion_count",
+        "reference_words",
     ]
     assert writer.inputs[wer_id] == [
         MetricEvaluationInput(
@@ -384,3 +400,178 @@ async def test_null_success_metric_is_excluded_instead_of_failed() -> None:
     assert not writer.evaluations
     assert not writer.completed
     assert not writer.failed
+
+
+@pytest.mark.asyncio
+async def test_s2s_uses_conversation_source_and_coval_executor() -> None:
+    writer = _Writer()
+
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=None,
+        bucket="",
+        run_id=1,
+        dataset_id="s2s-multiturn-v1",
+        dataset_sha256="e" * 64,
+        sample_id="R1/s1",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.S2S,
+        results=[_result(Benchmark.S2S, Metric.V2V, 500, "milliseconds")],
+        provider_error=None,
+        executor=MetricExecutor.COVAL_API,
+    )
+
+    observation = writer.observations[0]
+    assert observation.source_kind is ObservationSourceKind.CONVERSATION_AUDIO
+    evaluation_id, evaluation = _evaluation_by_metric(writer, Metric.V2V)
+    assert evaluation.executor is MetricExecutor.COVAL_API
+    assert writer.inputs[evaluation_id] == []
+    assert [(value.value_key, value.value) for value in writer.completed[evaluation_id]] == [
+        ("primary", 500.0)
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider_error", ["", "   "])
+async def test_blank_provider_error_is_normalized(provider_error: str) -> None:
+    writer = _Writer()
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="private",
+        run_id=1,
+        dataset_id="stt-v1",
+        dataset_sha256="a" * 64,
+        sample_id="sample",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.STT,
+        results=[_result(Benchmark.STT, Metric.TTFT, 1, "seconds")],
+        provider_error=provider_error,
+        timing_events={"ttft_seconds": 1},
+    )
+    observation = writer.observations[0]
+    assert observation.error is None
+    assert observation.status is ObservationStatus.SUCCEEDED
+    assert observation.failure_origin is None
+
+
+@pytest.mark.asyncio
+async def test_nonblank_provider_error_is_preserved() -> None:
+    writer = _Writer()
+    error = "  provider failed  "
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="private",
+        run_id=1,
+        dataset_id="stt-v1",
+        dataset_sha256="a" * 64,
+        sample_id="sample",
+        entry=SimpleNamespace(provider="provider", model="model"),
+        benchmark=Benchmark.STT,
+        results=[
+            _result(
+                Benchmark.STT, Metric.TTFT, None, "seconds", status=ResultStatus.FAILED, error=error
+            )
+        ],
+        provider_error=error,
+        timing_events={"ttft_seconds": None},
+    )
+    assert writer.observations[0].error == error
+    assert writer.observations[0].status is ObservationStatus.FAILED
+
+
+class _RetryWriter(_Writer):
+    def __init__(self, exc: BaseException | None = None) -> None:
+        super().__init__()
+        self.calls = 0
+        self.exc = exc
+
+    async def insert_observation(self, observation: Observation) -> Observation:
+        self.calls += 1
+        if self.calls == 1 and self.exc is not None:
+            raise self.exc
+        return await super().insert_observation(observation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [PoolTimeout("busy"), psycopg.OperationalError("gone")])
+async def test_normalized_db_retry_does_not_repeat_upload(
+    exc: BaseException, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = _RetryWriter(exc)
+    uploads = 0
+
+    def upload(*_args: object) -> ObservationArtifact:
+        nonlocal uploads
+        uploads += 1
+        return _artifact(ObservationArtifactType.PROVIDER_TRANSCRIPT)
+
+    monkeypatch.setattr(normalized, "upload_provider_transcript", upload)
+    await normalized.dual_write(
+        writer=writer,
+        storage_client=object(),
+        bucket="b",
+        run_id=1,
+        dataset_id="d",
+        dataset_sha256="a" * 64,
+        sample_id="s",
+        entry=SimpleNamespace(provider="p", model="m"),
+        benchmark=Benchmark.STT,
+        results=[],
+        provider_error=None,
+        transcript="x",
+        db_retry_attempts=3,
+    )
+    assert writer.calls == 2 and uploads == 1
+
+
+@pytest.mark.asyncio
+async def test_normalized_operational_error_retry_logs_pool_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _RetryWriter(psycopg.OperationalError("gone"))
+    monkeypatch.setattr("coval_bench.runner.retry.random.uniform", lambda *_: 0.0)
+    with capture_logs() as logs:
+        await normalized.dual_write(
+            writer=writer,
+            storage_client=object(),
+            bucket="b",
+            run_id=1,
+            dataset_id="d",
+            dataset_sha256="a" * 64,
+            sample_id="telemetry",
+            entry=SimpleNamespace(provider="p", model="m"),
+            benchmark=Benchmark.STT,
+            results=[],
+            provider_error=None,
+            db_retry_attempts=3,
+        )
+    retry = next(record for record in logs if record["event"] == "normalized_persistence_retry")
+    assert retry["exception_type"] == "OperationalError"
+    assert isinstance(retry["attempt_elapsed_ms"], int)
+    assert retry["attempt_elapsed_ms"] >= 0
+    assert retry["state_before"] == {"pool_size": 0}
+    assert retry["state_after"] == {"pool_size": 0}
+
+
+@pytest.mark.asyncio
+async def test_normalized_runtime_error_and_cancellation_are_not_retried() -> None:
+    for exc in (RuntimeError("bad"), asyncio.CancelledError()):
+        writer = _RetryWriter(exc)
+        with pytest.raises(type(exc)):
+            await normalized.dual_write(
+                writer=writer,
+                storage_client=object(),
+                bucket="b",
+                run_id=1,
+                dataset_id="d",
+                dataset_sha256="a" * 64,
+                sample_id="s",
+                entry=SimpleNamespace(provider="p", model="m"),
+                benchmark=Benchmark.STT,
+                results=[],
+                provider_error=None,
+                db_retry_attempts=3,
+            )
+        assert writer.calls == 1

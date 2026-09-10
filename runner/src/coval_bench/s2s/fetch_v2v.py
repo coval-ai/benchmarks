@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Fetch S2S (voice-to-voice) latency from the Coval API and write per-clip rows.
+"""Fetch benchmark metrics from the Coval API and write per-conversation rows.
 
 Ingests each provider's recent completed runs not yet in the DB, slotted by
 run create_time, and flags providers with no fresh data. Agent ids, the
@@ -14,7 +14,7 @@ import asyncio
 import hashlib
 import importlib.resources
 import random
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -25,14 +25,20 @@ import structlog
 
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
-from coval_bench.db.models import Result, ResultStatus, RunStatus
+from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
+from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
     FAMILY_DENTAL,
+    FAMILY_INSTR_CUST_SERVICE,
+    FAMILY_INSTR_HEALTH,
+    FAMILY_INSTR_HOME_SERVICE,
+    FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -53,7 +59,7 @@ WINDOW_PAGE_SIZE = 10
 
 @dataclass(frozen=True)
 class AgentSpec:
-    """One S2S provider: the Settings attr holding its Coval agent id + display strings."""
+    """One provider: the Settings attr holding its Coval agent id + display strings."""
 
     agent_id_attr: str
     provider: str
@@ -65,6 +71,19 @@ class AgentSpec:
     family: str = FAMILY_MULTITURN
     # Whether this agent's recordings may reach the public samples card.
     publish_samples: bool = True
+    benchmark: Benchmark = Benchmark.S2S
+    # Settings attr holding the Coval workspace id this agent lives in. None
+    # means the workspace coval_api_key defaults to (the existing behavior).
+    workspace_id_attr: str | None = None
+    # Settings attr holding this agent's own instruction-adherence metric id,
+    # overriding the global coval_s2s_instruction_metric_id. None uses the
+    # global one.
+    instruction_metric_id_attr: str | None = None
+    # Settings attr holding this agent's Expected Behavior Adherence metric id.
+    # Fetched and stored under its own metric type alongside (not instead of)
+    # instruction_metric_id_attr's judge score, so the two never collapse into
+    # one chart. None means this agent doesn't have that metric configured.
+    expected_behavior_metric_id_attr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,7 +145,129 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_DENTAL,
         publish_samples=False,
     ),
+    # Instruction adherence by industry: a separate Coval workspace, one family
+    # per industry so they're never pooled together on the dashboard. No V2V is
+    # measured here, so these never reach the public samples card.
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_health_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_health_test_set_id",
+        family=FAMILY_INSTR_HEALTH,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_home_service_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_home_service_test_set_id",
+        family=FAMILY_INSTR_HOME_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_openai_agent_id",
+        provider="openai",
+        model="gpt-realtime",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_grok_agent_id",
+        provider="xai",
+        model="grok-voice",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
+    AgentSpec(
+        agent_id_attr="coval_s2s_cust_service_violet_agent_id",
+        provider="openai",
+        model="violet",
+        test_set_id_attr="coval_s2s_cust_service_test_set_id",
+        family=FAMILY_INSTR_CUST_SERVICE,
+        publish_samples=False,
+        workspace_id_attr="coval_s2s_industry_workspace_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+    ),
 )
+
+
+def llm_specs(models: Iterable[RegisteredModel]) -> tuple[AgentSpec, ...]:
+    """Every collected LLM model, driven over the same dental set through the proxy.
+
+    TTFT comes from the proxy's own turn log rather than from Coval.
+    """
+    return tuple(
+        AgentSpec(
+            agent_id_attr=f"coval_llm_{model.provider}_agent_id",
+            provider=model.provider,
+            model=model.model,
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_LLM_DENTAL,
+            publish_samples=False,
+            benchmark=Benchmark.LLM,
+        )
+        for model in models
+        if model.benchmark is Benchmark.LLM and model.collected
+    )
 
 
 def _client(settings: Settings) -> httpx.AsyncClient:
@@ -151,6 +292,18 @@ def _dataset_sha256() -> str:
     except Exception:
         logger.warning("dataset_sha256_failed", dataset_id=DATASET_ID, exc_info=True)
         return "unknown"
+
+
+def _normalized_dataset_sha256(provenance: str) -> str:
+    """Return the normalized schema stable 64-hex dataset fingerprint.
+
+    Packaged datasets already carry a content SHA. Coval-hosted S2S datasets
+    carry immutable test-set/persona provenance in the legacy run column, so
+    fingerprint that identifier without changing the legacy representation.
+    """
+    if len(provenance) == 64 and all(character in "0123456789abcdef" for character in provenance):
+        return provenance
+    return hashlib.sha256(provenance.encode()).hexdigest()
 
 
 def _condition_for_persona(
@@ -244,6 +397,7 @@ async def recent_completed_runs(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     requested_run_ids: frozenset[str] | None = None,
+    workspace_id: str | None = None,
 ) -> list[CovalRun]:
     """Completed Coval runs for one agent within the ingest window, newest first.
 
@@ -251,7 +405,8 @@ async def recent_completed_runs(
     (tags are not filterable). ``test_set_id`` narrows to one test set so other
     sims on the same agents (e.g. the single-turn set) are not ingested. Runs
     without a parseable create_time are kept: better to ingest with a fetch-time
-    slot than to drop data.
+    slot than to drop data. ``workspace_id`` is required for an agent that does
+    not live in the workspace the client's API key defaults to.
     """
     window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
@@ -261,6 +416,7 @@ async def recent_completed_runs(
     runs: list[CovalRun] = []
     page_token: str | None = None
     found_ids: set[str] = set()
+    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     while True:
         params: dict[str, str | int] = {
             "filter": filt,
@@ -269,7 +425,7 @@ async def recent_completed_runs(
         }
         if page_token:
             params["page_token"] = page_token
-        resp = await client.get("/runs", params=params)
+        resp = await client.get("/runs", params=params, headers=headers)
         resp.raise_for_status()
         payload = cast("dict[str, Any]", resp.json())
         raw = cast("list[dict[str, Any]]", payload.get("runs", []))
@@ -356,6 +512,13 @@ def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
 
 
+def _expected_behavior_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Coval's criteria_met_count / criteria_total_count fraction, as a percent."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return round(float(raw) * 100.0, 1), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
 def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     """Interruptions per minute, stored as-is; a clip with no numeric value becomes a FAILED row."""
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
@@ -369,6 +532,7 @@ _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus
     Metric.V2V: _v2v_value,
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
     Metric.INTERRUPTION_RATE: _interruption_value,
+    Metric.EXPECTED_BEHAVIOR_ADHERENCE: _expected_behavior_value,
 }
 
 
@@ -394,7 +558,7 @@ def _s2s_rows(
                 run_id=run_pk,
                 provider=spec.provider,
                 model=spec.model,
-                benchmark=Benchmark.S2S,
+                benchmark=spec.benchmark,
                 metric_type=metric,
                 metric_units=METRIC_SPECS[metric].units,
                 metric_value=metric_value,
@@ -439,7 +603,7 @@ def _failed_conversation_rows(
             run_id=run_pk,
             provider=spec.provider,
             model=spec.model,
-            benchmark=Benchmark.S2S,
+            benchmark=spec.benchmark,
             metric_type=Metric.V2V,
             metric_units=METRIC_SPECS[Metric.V2V].units,
             metric_value=None,
@@ -448,6 +612,41 @@ def _failed_conversation_rows(
         )
         for sim_id in output_ids
         if sim_id not in covered
+    ]
+
+
+# Metrics a condition declares ``local`` are measured on our side and looked up
+# by the anchor's conversation ids instead of fetched from Coval. A local metric
+# is ingestable once it appears here, mirroring _VALUE_MAPPERS.
+_LOCAL_SOURCES: dict[
+    Metric, Callable[[RunWriter, Sequence[str]], Awaitable[Mapping[str, float]]]
+] = {
+    Metric.TTFT: lambda writer, sim_ids: writer.conversation_ttft(sim_ids),
+}
+
+
+def _local_rows(
+    values: Mapping[str, float],
+    *,
+    metric: Metric,
+    run_pk: int,
+    coval_run_id: str,
+    spec: AgentSpec,
+) -> list[Result]:
+    """One SUCCESS row per conversation measured locally, keyed like the anchor rows."""
+    return [
+        Result(
+            run_id=run_pk,
+            provider=spec.provider,
+            model=spec.model,
+            benchmark=spec.benchmark,
+            metric_type=metric,
+            metric_units=METRIC_SPECS[metric].units,
+            metric_value=round(value, 3),
+            audio_filename=f"{coval_run_id}/{sim_id}",
+            status=ResultStatus.SUCCESS,
+        )
+        for sim_id, value in values.items()
     ]
 
 
@@ -461,12 +660,16 @@ def _metric_values(metrics: dict[str, Any], metric_id: str | None) -> list[dict[
 
 def _ingestable(condition: DatasetMetrics, metric_ids: Mapping[Metric, str]) -> frozenset[Metric]:
     """The condition's metrics that are configured and have a row builder."""
-    return frozenset(m for m in condition.fetched if m in metric_ids and m in _VALUE_MAPPERS)
+    fetched = frozenset(
+        metric for metric in condition.fetched if metric in metric_ids and metric in _VALUE_MAPPERS
+    )
+    return fetched | (condition.local & frozenset(_LOCAL_SOURCES))
 
 
 async def _pending_metrics(
     writer: RunWriter,
     *,
+    benchmark: Benchmark,
     provider: str,
     coval_run_id: str,
     condition: DatasetMetrics,
@@ -476,7 +679,10 @@ async def _pending_metrics(
     pending: set[Metric] = set()
     for metric in _ingestable(condition, metric_ids):
         if not await writer.coval_metric_ingested(
-            provider=provider, coval_run_id=coval_run_id, metric_type=metric
+            benchmark=benchmark,
+            provider=provider,
+            coval_run_id=coval_run_id,
+            metric_type=metric,
         ):
             pending.add(metric)
     return frozenset(pending)
@@ -494,6 +700,8 @@ async def _ingest_run(
     dataset_id: str = DATASET_ID,
     dataset_sha256: str = "",
     period_seconds: int,
+    normalized_dual_write_enabled: bool = False,
+    workspace_id: str | None = None,
 ) -> RunStatus | None:
     """Ingest one Coval run into its own run row; None = skipped, nothing written.
 
@@ -505,10 +713,12 @@ async def _ingest_run(
     a single short call. A conversation with no anchor value becomes a FAILED
     row instead. SUCCEEDED = all clips numeric, PARTIAL = some failed, FAILED = all.
     """
-    pending = condition.fetched if pending is None else pending
+    if pending is None:
+        pending = condition.fetched | (condition.local & frozenset(_LOCAL_SOURCES))
     run_pk: int | None = None
+    headers = {"X-Coval-Workspace-Id": workspace_id} if workspace_id else None
     try:
-        resp = await client.get(f"/runs/{coval_run.run_id}")
+        resp = await client.get(f"/runs/{coval_run.run_id}", headers=headers)
         resp.raise_for_status()
         run = cast("dict[str, Any]", resp.json()["run"])
         metrics = cast("dict[str, Any]", (run.get("results") or {}).get("metrics") or {})
@@ -607,7 +817,27 @@ async def _ingest_run(
                     )
                     del writable[metric]
 
-        if not writable:
+        # Local metrics are looked up for the anchor's conversations. A metric with
+        # no values at all stays pending for a later scan; once any conversation
+        # has a value the run counts as ingested, and the ones still missing are a
+        # permanent coverage gap, as an UNKNOWN verdict is for instruction.
+        local: dict[Metric, Mapping[str, float]] = {}
+        sim_ids = [sid for v in anchor_values if (sid := v.get("simulation_output_id"))]
+        for metric in sorted(condition.local & pending):
+            measured = await _LOCAL_SOURCES[metric](writer, sim_ids)
+            if not measured:
+                continue
+            if len(measured) < len(sim_ids):
+                logger.warning(
+                    "local_metric_coverage_gap",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    metric=metric.value,
+                    conversations=len(sim_ids) - len(measured),
+                )
+            local[metric] = measured
+
+        if not writable and not local:
             # Backfill with nothing to add; leave it retryable, write no run row.
             return None
 
@@ -630,6 +860,10 @@ async def _ingest_run(
             )
             for metric, values in writable.items()
         }
+        for metric, local_values in local.items():
+            by_metric[metric] = _local_rows(
+                local_values, metric=metric, run_pk=run_pk, coval_run_id=coval_run.run_id, spec=spec
+            )
         if condition.required is Metric.V2V and Metric.V2V in writable:
             output_ids = [
                 s
@@ -648,7 +882,54 @@ async def _ingest_run(
         all_rows = [row for rows in by_metric.values() for row in rows]
         rows = by_metric.get(Metric.V2V, [])
         if all_rows:
-            await writer.record_results(all_rows)
+            captured_at = datetime.now(UTC)
+            await writer.record_results(all_rows, created_at=captured_at)
+            if normalized_dual_write_enabled and spec.benchmark is Benchmark.S2S:
+                from coval_bench.runner.normalized import dual_write
+
+                grouped: dict[str, list[Result]] = {}
+                for row in all_rows:
+                    if row.audio_filename is None:  # pragma: no cover -- S2S rows set it
+                        logger.warning(
+                            "normalized_s2s_sample_id_missing",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                        )
+                        continue
+                    grouped.setdefault(row.audio_filename, []).append(row)
+                normalized_sha256 = _normalized_dataset_sha256(dataset_sha256 or _dataset_sha256())
+                for sample_id, sample_rows in grouped.items():
+                    provider_error = None
+                    if not any(row.status is ResultStatus.SUCCESS for row in sample_rows):
+                        provider_error = next(
+                            (row.error for row in sample_rows if row.error),
+                            "Coval conversation produced no successful metric value",
+                        )
+                    try:
+                        await dual_write(
+                            writer=writer,
+                            storage_client=None,
+                            bucket="",
+                            run_id=run_pk,
+                            dataset_id=dataset_id,
+                            dataset_sha256=normalized_sha256,
+                            sample_id=sample_id,
+                            entry=spec,
+                            benchmark=Benchmark.S2S,
+                            results=sample_rows,
+                            provider_error=provider_error,
+                            captured_at=captured_at,
+                            executor=MetricExecutor.COVAL_API,
+                            db_retry_attempts=3,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "normalized_s2s_dual_write_failed",
+                            provider=spec.provider,
+                            coval_run_id=coval_run.run_id,
+                            sample_id=sample_id,
+                            exc_info=True,
+                        )
         logger.info(
             "fetched_clips",
             provider=spec.provider,
@@ -656,6 +937,7 @@ async def _ingest_run(
             slot=str(scheduled_at),
             clips=len(rows),
             instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
+            ttft=len(by_metric.get(Metric.TTFT, [])),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
         if Metric.V2V in writable:
@@ -676,6 +958,12 @@ async def _ingest_run(
                 await writer.refresh_bucket(run_pk, period_seconds=period_seconds)
             except Exception:
                 logger.warning("refresh_bucket_failed", provider=spec.provider, exc_info=True)
+            try:
+                await writer.refresh_metric_values_bucket(run_pk)
+            except Exception:
+                logger.warning(
+                    "normalized_bucket_refresh_failed", provider=spec.provider, exc_info=True
+                )
         return status
     except Exception as exc:
         if run_pk is not None:
@@ -735,6 +1023,8 @@ async def _fetch_one_provider(
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
     matched_run_ids: set[str] | None = None,
+    normalized_dual_write_enabled: bool = False,
+    workspace_id: str | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -787,6 +1077,7 @@ async def _fetch_one_provider(
             window_seconds=window_seconds,
             page_size=page_size,
             requested_run_ids=only_run_ids,
+            workspace_id=workspace_id,
         )
         data_seen = False
         newest_data_at: datetime | None = None
@@ -804,6 +1095,10 @@ async def _fetch_one_provider(
                 continue
             dataset_id, dataset_sha256 = identity
             condition = condition_for(dataset_id)
+            if condition.benchmark is not spec.benchmark:
+                raise RuntimeError(
+                    f"dataset {dataset_id!r} belongs to {condition.benchmark}, not {spec.benchmark}"
+                )
             if condition.required not in metric_ids:
                 logger.warning(
                     "required_metric_unconfigured",
@@ -815,6 +1110,7 @@ async def _fetch_one_provider(
             ingestable = _ingestable(condition, metric_ids)
             pending = await _pending_metrics(
                 writer,
+                benchmark=spec.benchmark,
                 provider=spec.provider,
                 coval_run_id=coval_run.run_id,
                 condition=condition,
@@ -843,6 +1139,8 @@ async def _fetch_one_provider(
                 dataset_id=dataset_id,
                 dataset_sha256=dataset_sha256,
                 period_seconds=period_seconds,
+                normalized_dual_write_enabled=normalized_dual_write_enabled,
+                workspace_id=workspace_id,
             )
             if status is None:
                 continue
@@ -892,14 +1190,30 @@ async def _fetch_one_provider(
         return RunStatus.FAILED, len(statuses)
 
 
+def _require_family_test_sets(settings: Settings, specs: Sequence[AgentSpec]) -> None:
+    """A family's test set is required once one of its agents is configured.
+
+    Unset would otherwise skip the agent with a warning that reads the same as
+    never having configured it.
+    """
+    for spec in specs:
+        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr, None):
+            continue
+        if not (getattr(settings, spec.test_set_id_attr) or "").strip():
+            raise RuntimeError(
+                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
+            )
+
+
 async def fetch_and_write_v2v(
     settings: Settings | None = None,
     *,
+    benchmark: Benchmark = Benchmark.S2S,
     only_run_ids: frozenset[str] | None = None,
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
 ) -> dict[str, RunStatus]:
-    """Ingest every provider's recent runs; return per-provider status.
+    """Ingest the selected benchmark's providers; return per-provider status.
 
     Each ingested Coval run gets its own run row slotted by its create_time,
     and ``coval_run_ingested`` makes re-scans no-ops, so ticks are idempotent
@@ -907,10 +1221,18 @@ async def fetch_and_write_v2v(
     run more often than the sims.
     """
     settings = settings or get_settings()
+    specs = tuple(spec for spec in AGENTS if spec.benchmark is benchmark)
 
     metric_id = settings.coval_s2s_latency_metric_id
-    if not metric_id:
-        raise RuntimeError("coval_s2s_latency_metric_id is not set")
+    if benchmark is Benchmark.S2S and not metric_id:
+        # Industry specs fetch instruction adherence only (see conditions.py);
+        # only a spec still relying on the shared V2V metric makes it required.
+        v2v_spec_configured = any(
+            not spec.instruction_metric_id_attr and getattr(settings, spec.agent_id_attr, None)
+            for spec in specs
+        )
+        if v2v_spec_configured:
+            raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
     # without the filter would pool other sims on the same agents into the S2S
     # rows. Reject a blank (misconfigured) value and require the pair; both
@@ -925,7 +1247,9 @@ async def fetch_and_write_v2v(
         )
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
-    if bool(instruction_metric_id) != bool(test_set_id):
+    if benchmark is Benchmark.LLM and not instruction_metric_id:
+        raise RuntimeError("coval_s2s_instruction_metric_id is not set")
+    if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
         )
@@ -937,35 +1261,30 @@ async def fetch_and_write_v2v(
     raw_dental = settings.coval_s2s_dental_test_set_id
     if raw_dental is not None and not raw_dental.strip():
         raise RuntimeError("coval_s2s_dental_test_set_id must not be blank")
-    # A family's test set is required once one of its agents is configured;
-    # unset would otherwise skip the agent with a warning that reads the same
-    # as never having configured it.
-    for spec in AGENTS:
-        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr):
-            continue
-        if not (getattr(settings, spec.test_set_id_attr) or "").strip():
-            raise RuntimeError(
-                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
-            )
+    if benchmark is Benchmark.LLM and not raw_dental:
+        raise RuntimeError("coval_s2s_dental_test_set_id is required for the LLM benchmark")
+    _require_family_test_sets(settings, specs)
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.
     raw_noisy = settings.coval_s2s_noisy_persona_id
     if raw_noisy is not None and not raw_noisy.strip():
         raise RuntimeError("coval_s2s_noisy_persona_id must not be blank")
     noisy_persona_id = raw_noisy or None
-    if noisy_persona_id and not test_set_id:
+    if benchmark is Benchmark.S2S and noisy_persona_id and not test_set_id:
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
     # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
     # either order.
     persona_conditions = _persona_conditions(settings.coval_s2s_condition_personas)
-    if persona_conditions and not test_set_id:
+    if benchmark is Benchmark.S2S and persona_conditions and not test_set_id:
         raise RuntimeError("coval_s2s_condition_personas requires coval_s2s_test_set_id")
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
     # Only configured metrics are ever asked for, so an unset id simply means that
     # metric is not ingested yet.
-    metric_ids: dict[Metric, str] = {Metric.V2V: metric_id}
+    metric_ids: dict[Metric, str] = {}
+    if metric_id:
+        metric_ids[Metric.V2V] = metric_id
     if instruction_metric_id:
         metric_ids[Metric.INSTRUCTION_FOLLOWING] = instruction_metric_id
     if raw_interruption:
@@ -975,13 +1294,16 @@ async def fetch_and_write_v2v(
         raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
+        if benchmark is Benchmark.LLM:
+            specs = llm_specs(await fetch_models(pool))
+            _require_family_test_sets(settings, specs)
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
         matched_run_ids: set[str] = set()
         sampled_runs: list[SampleRun] = []
-        for spec in AGENTS:
-            agent_id = getattr(settings, spec.agent_id_attr)
+        for spec in specs:
+            agent_id = getattr(settings, spec.agent_id_attr, None)
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
                 continue
@@ -994,12 +1316,54 @@ async def fetch_and_write_v2v(
             if spec.test_set_id_attr and not spec_test_set:
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
                 continue
-            statuses[f"{spec.provider}:{spec.model}"], ingested = await _fetch_one_provider(
+            spec_workspace_id = (
+                (getattr(settings, spec.workspace_id_attr) or "").strip() or None
+                if spec.workspace_id_attr
+                else None
+            )
+            if spec.workspace_id_attr and not spec_workspace_id:
+                logger.warning(
+                    "workspace_id_unset", provider=spec.provider, attr=spec.workspace_id_attr
+                )
+                continue
+            spec_metric_ids = metric_ids
+            if spec.instruction_metric_id_attr:
+                spec_instruction_metric_id = (
+                    getattr(settings, spec.instruction_metric_id_attr) or ""
+                ).strip()
+                if not spec_instruction_metric_id:
+                    logger.warning(
+                        "instruction_metric_id_unset",
+                        provider=spec.provider,
+                        attr=spec.instruction_metric_id_attr,
+                    )
+                    continue
+                spec_metric_ids = {
+                    **metric_ids,
+                    Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
+                }
+            if spec.expected_behavior_metric_id_attr:
+                spec_expected_behavior_metric_id = (
+                    getattr(settings, spec.expected_behavior_metric_id_attr) or ""
+                ).strip()
+                if spec_expected_behavior_metric_id:
+                    spec_metric_ids = {
+                        **spec_metric_ids,
+                        Metric.EXPECTED_BEHAVIOR_ADHERENCE: spec_expected_behavior_metric_id,
+                    }
+                else:
+                    logger.warning(
+                        "expected_behavior_metric_id_unset",
+                        provider=spec.provider,
+                        attr=spec.expected_behavior_metric_id_attr,
+                    )
+            status_key = f"{spec.family}:{spec.provider}:{spec.model}"
+            statuses[status_key], ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=spec,
                 agent_id=agent_id,
-                metric_ids=metric_ids,
+                metric_ids=spec_metric_ids,
                 test_set_id=spec_test_set,
                 noisy_persona_id=noisy_persona_id,
                 persona_conditions=persona_conditions,
@@ -1010,6 +1374,8 @@ async def fetch_and_write_v2v(
                 window_seconds=window_seconds,
                 page_size=page_size,
                 matched_run_ids=matched_run_ids,
+                normalized_dual_write_enabled=settings.normalized_dual_write_enabled,
+                workspace_id=spec_workspace_id,
             )
             total_ingested += ingested
 
@@ -1055,37 +1421,46 @@ async def fetch_and_write_v2v(
         return statuses
 
 
-@click.command(name="fetch-s2s")
-@click.option(
-    "--coval-run-id",
-    "coval_run_ids",
-    multiple=True,
-    help="Ingest only these Coval runs, scanning beyond the scheduled window. Repeatable.",
-)
-@click.option(
-    "--window-hours",
-    type=click.IntRange(min=1),
-    default=720,
-    show_default=True,
-    help="How far back --coval-run-id searches. Ignored without it.",
-)
-@click.option(
-    "--page-size",
-    type=click.IntRange(min=1),
-    default=100,
-    show_default=True,
-    help="Runs listed per agent while searching for --coval-run-id. Ignored without it.",
-)
-def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
-    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job).
+def _fetch_options[Command: Callable[..., None]](command: Command) -> Command:
+    options = (
+        click.option(
+            "--coval-run-id",
+            "coval_run_ids",
+            multiple=True,
+            help="Ingest only these Coval runs, scanning beyond the scheduled window. Repeatable.",
+        ),
+        click.option(
+            "--window-hours",
+            type=click.IntRange(min=1),
+            default=720,
+            show_default=True,
+            help="How far back --coval-run-id searches. Ignored without it.",
+        ),
+        click.option(
+            "--page-size",
+            type=click.IntRange(min=1),
+            default=100,
+            show_default=True,
+            help="Runs listed per agent while searching for --coval-run-id. Ignored without it.",
+        ),
+    )
+    for option in reversed(options):
+        command = option(command)
+    return command
 
-    With --coval-run-id it becomes a targeted backfill instead: only the named runs
-    are ingested, no samples are published, and staleness is not judged, so an
-    operator can recover runs the scheduled window has already passed over.
-    """
+
+def _run_fetch(
+    benchmark: Benchmark,
+    coval_run_ids: tuple[str, ...],
+    window_hours: int,
+    page_size: int,
+    *,
+    settings: Settings | None = None,
+) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
-    settings = get_settings()
+    label = f"{benchmark.value.lower()} fetch"
+    settings = settings or get_settings()
     configure_logging(level=settings.log_level)
     # A setup crash fails the whole job.
     try:
@@ -1093,6 +1468,7 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
         statuses = asyncio.run(
             fetch_and_write_v2v(
                 settings,
+                benchmark=benchmark,
                 only_run_ids=only_run_ids,
                 window_seconds=window_hours * 3600 if only_run_ids else None,
                 page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,
@@ -1107,12 +1483,24 @@ def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int)
     failed = [p for p, s in statuses.items() if s is RunStatus.FAILED]
     if not statuses or all(s is RunStatus.FAILED for s in statuses.values()):
         if statuses:
-            log_run_failed(f"s2s fetch failed for all providers: {', '.join(failed)}")
+            log_run_failed(f"{label} failed for all providers: {', '.join(failed)}")
         else:
-            log_run_failed("s2s fetch ran no providers (none configured)")
-        raise click.ClickException("s2s fetch failed for all providers")
+            log_run_failed(f"{label} ran no providers (none configured)")
+        raise click.ClickException(f"{label} failed for all providers")
     if failed:
-        log_run_partial(f"s2s fetch has no fresh data from: {', '.join(failed)}")
+        log_run_partial(f"{label} has no fresh data from: {', '.join(failed)}")
+
+
+@click.command(name="fetch-s2s")
+@_fetch_options
+def fetch_s2s(coval_run_ids: tuple[str, ...], window_hours: int, page_size: int) -> None:
+    """Fetch S2S latency from Coval and write per-clip rows (scheduled Cloud Run Job).
+
+    With --coval-run-id it becomes a targeted backfill instead: only the named runs
+    are ingested, no samples are published, and staleness is not judged, so an
+    operator can recover runs the scheduled window has already passed over.
+    """
+    _run_fetch(Benchmark.S2S, coval_run_ids, window_hours, page_size)
 
 
 if __name__ == "__main__":

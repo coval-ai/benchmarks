@@ -13,3 +13,4 @@ class Benchmark(StrEnum):
     STT = "STT"
     TTS = "TTS"
     S2S = "S2S"
+    LLM = "LLM"

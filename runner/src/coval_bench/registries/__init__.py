@@ -23,12 +23,13 @@ from coval_bench.registries.metrics import (
     validate_metric_values,
 )
 from coval_bench.registries.models import (
-    MODEL_REGISTRY,
     Gender,
+    HexColor,
     Licensing,
     RegisteredModel,
     Source,
     Voice,
+    normalize_hex_color,
 )
 from coval_bench.registries.preprocessing import (
     SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS,
@@ -37,8 +38,6 @@ from coval_bench.registries.preprocessing import (
 from coval_bench.registries.tags import (
     CATEGORY_LABELS,
     PROVIDER_VALUED_CATEGORIES,
-    TAG_CATEGORIES,
-    ModelTag,
     TagCategory,
     tag_value_label,
 )
@@ -50,11 +49,11 @@ __all__ = [
     "METRIC_VALUE_CONTRACTS",
     "SUPPORTED_PREPROCESSING_ARTIFACT_CONTRACTS",
     "SERIES_EXCLUDED_METRICS",
-    "MODEL_REGISTRY",
     "Metric",
     "MetricDirection",
     "MetricSpec",
     "Gender",
+    "HexColor",
     "MetricValueContract",
     "MetricValueDefinition",
     "MetricValueRole",
@@ -62,10 +61,9 @@ __all__ = [
     "RegisteredModel",
     "Source",
     "Voice",
+    "normalize_hex_color",
     "CATEGORY_LABELS",
     "PROVIDER_VALUED_CATEGORIES",
-    "TAG_CATEGORIES",
-    "ModelTag",
     "TagCategory",
     "is_metric_excluded",
     "validate_metric_contract",

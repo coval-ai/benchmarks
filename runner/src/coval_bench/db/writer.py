@@ -27,6 +27,7 @@ import psycopg.rows
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
+from coval_bench.db.llm_turns import fetch_conversation_ttft
 from coval_bench.db.models import (
     MetricArtifact,
     MetricEvaluation,
@@ -70,6 +71,38 @@ class RunWriter:
         pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]],
     ) -> None:
         self._pool = pool
+
+    def pool_diagnostics(self) -> dict[str, int]:
+        """Return a stable, read-only snapshot of pool health counters."""
+        keys = (
+            "pool_min",
+            "pool_max",
+            "pool_size",
+            "pool_available",
+            "requests_waiting",
+            "requests_num",
+            "requests_queued",
+            "requests_wait_ms",
+            "requests_errors",
+            "usage_ms",
+            "connections_num",
+            "connections_ms",
+            "connections_errors",
+            "connections_lost",
+            "returns_bad",
+            "pool_timeout_ms",
+        )
+        diagnostics = {key: 0 for key in keys}
+        stats = self._pool.get_stats()
+        for key in keys:
+            if key in stats:
+                diagnostics[key] = int(stats[key])
+        diagnostics["pool_min"] = int(self._pool.min_size)
+        diagnostics["pool_max"] = int(self._pool.max_size)
+        diagnostics["pool_size"] = int(stats.get("pool_size", 0))
+        diagnostics["pool_available"] = int(stats.get("pool_available", 0))
+        diagnostics["pool_timeout_ms"] = int(float(self._pool.timeout) * 1000)
+        return diagnostics
 
     async def start_run(
         self,
@@ -909,10 +942,16 @@ class RunWriter:
                 await cur.execute(sql, (status, error, run_id))
             await conn.commit()
 
-    async def coval_run_ingested(self, *, provider: str, coval_run_id: str) -> bool:
+    async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
+        """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
+        return await fetch_conversation_ttft(self._pool, simulation_ids)
+
+    async def coval_run_ingested(
+        self, *, provider: str, coval_run_id: str, benchmark: str = "S2S"
+    ) -> bool:
         """True if a succeeded or partial run already holds rows for this Coval run.
 
-        S2S rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
+        Coval rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
         fetch job skip a re-pulled run so a retry or stale re-pull doesn't
         double-write the day's bucket. Rows from failed runs don't count: they
         never reach the bucket, so a retry must stay free to re-ingest the run.
@@ -922,20 +961,25 @@ class RunWriter:
             FROM benchmarks_v2.results r
             JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
             WHERE r.provider = %s
-              AND r.benchmark = 'S2S'
+              AND r.benchmark = %s
               AND split_part(r.audio_filename, '/', 1) = %s
               AND rn.status IN ('succeeded', 'partial')
             LIMIT 1
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, coval_run_id))
+                await cur.execute(sql, (provider, benchmark, coval_run_id))
                 row = await cur.fetchone()
             await conn.commit()
         return row is not None
 
     async def coval_metric_ingested(
-        self, *, provider: str, coval_run_id: str, metric_type: str
+        self,
+        *,
+        provider: str,
+        coval_run_id: str,
+        metric_type: str,
+        benchmark: str = "S2S",
     ) -> bool:
         """True if a succeeded/partial run already holds this Coval run's ``metric_type`` rows.
 
@@ -948,7 +992,7 @@ class RunWriter:
             FROM benchmarks_v2.results r
             JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
             WHERE r.provider = %s
-              AND r.benchmark = 'S2S'
+              AND r.benchmark = %s
               AND r.metric_type = %s
               AND split_part(r.audio_filename, '/', 1) = %s
               AND rn.status IN ('succeeded', 'partial')
@@ -956,21 +1000,40 @@ class RunWriter:
         """
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, metric_type, coval_run_id))
+                await cur.execute(sql, (provider, benchmark, metric_type, coval_run_id))
                 row = await cur.fetchone()
             await conn.commit()
         return row is not None
 
-    async def refresh_stats_matviews(self) -> None:
-        """Concurrently refresh the per-window stats materialized views.
-
-        ``CONCURRENTLY`` relies on each view's unique group-key index and does
-        not block API reads. Raises on error like the rest of ``RunWriter``.
-        """
+    async def refresh_stats_matviews(self, run_id: int | None = None) -> bool:
+        """Only the slot's last finisher refreshes; False means skipped, not failed."""
         async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                if run_id is not None:
+                    await cur.execute(
+                        """SELECT EXISTS (
+                               SELECT 1 FROM benchmarks_v2.runs sibling
+                               JOIN benchmarks_v2.runs own ON own.id = %s
+                               WHERE sibling.scheduled_at = own.scheduled_at
+                                 AND sibling.id <> own.id
+                                 AND sibling.status = 'running') AS siblings_running""",
+                        (run_id,),
+                    )
+                    row = await cur.fetchone()
+                    if row is not None and row["siblings_running"]:
+                        await conn.rollback()
+                        return False
+                await cur.execute(
+                    "SELECT pg_try_advisory_xact_lock(hashtextextended('stats_matviews', 0))"
+                    " AS acquired"
+                )
+                row = await cur.fetchone()
+                if row is None or not row["acquired"]:
+                    await conn.rollback()
+                    return False
                 for view in STATS_MATVIEWS:
                     await cur.execute(  # noqa: S608 — view names are constants
                         f"REFRESH MATERIALIZED VIEW CONCURRENTLY benchmarks_v2.{view}"
                     )
             await conn.commit()
+        return True

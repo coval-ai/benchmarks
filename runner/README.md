@@ -59,6 +59,130 @@ Normalized observation dual writes are additive, private, and disabled by defaul
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
 enable the STT/TTS rollout; legacy result writes remain the source of truth.
 
+### API auth
+
+Public data endpoints need no auth. Two things do.
+
+**Admin routes** (`/v1/admin/models`, `/v1/admin/pricing`, and the PATCH on a model) accept either proof:
+
+- A Clerk session token with the coval org active. This is what the web admin page sends.
+- A Google identity token for an email in `ADMIN_GOOGLE_EMAILS`. In prod that list is `local.dev_members` in benchmark-infra `envs/prod/humans.tf`, so every dev there can drive the admin API from a shell:
+
+```bash
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  "$API_URL"/v1/admin/models
+```
+
+The token lasts an hour and needs only a normal `gcloud auth login`. Model history records the caller's subject and email either way. A 401 means the token could not be verified; a 403 means it verified but the account is not staff.
+
+**Early-access models** are stripped from every data endpoint unless the request carries a Clerk session token. The coval org sees everything, a partner org sees what `CLERK_ORG_PROVIDERS` or `CLERK_ORG_EXCLUSIVE` names for it, and anything else gets the public view. The response says which case applied in `X-EA-Token-Status`.
+
+### Normalized-storage backfill operator runbook
+
+Run the production backfill as a dry run first. This command adds no `--apply`
+flag, so it makes no normalized-storage writes; the Cloud Run timeout override
+applies only to this execution.
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=48h \
+  --wait \
+  --args='migrate,backfill-normalized-storage,--min-result-id=1,--batch-size=100'
+```
+
+The dry run resolves one database UTC timestamp, freezes the preceding inclusive
+start/exclusive end 168-hour window, and reports its exact UTC start, end, and
+maximum result ID. The 48-hour timeout leaves a safe margin beyond the observed
+17h31m48s dry run. Record all three values for any separately authorized apply:
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=48h \
+  --wait \
+  --args='migrate,backfill-normalized-storage,--min-result-id=1,--window-start=2026-08-20T00:00:00Z,--window-end=2026-08-27T00:00:00Z,--max-result-id=N,--batch-size=100,--apply'
+```
+
+Progress events are JSON on stderr; the final JSON report remains stdout's final line.
+
+`--batch-size` is a run-ID read page and also bounds apply-plan transaction
+batches. Larger pages reduce round trips, but increase memory, transaction
+duration, rollback and retry work, artifact exposure, and the spacing between
+safe checkpoints. A local PostgreSQL 16 dry-run comparison over 5,000 synthetic
+STT runs with one result each measured 1.15--1.26 s / 95.2 MB peak RSS at 25,
+1.03--1.06 s / 95.6 MB at 100, and 0.92--0.98 s / 97.6--97.8 MB at 400 after a
+warm-up run. The small synthetic gain does not model production row fanout,
+artifact handling, transaction duration, or rollback exposure, so the default
+remains 100. Compare candidate sizes in production only with sequential dry
+runs over the same frozen window, using each phase's elapsed time and throughput
+together with Cloud Run peak memory.
+
+### Normalized S2S-storage backfill operator runbook
+
+S2S has a separate, database-only backfill: it never instantiates GCS and it
+never writes artifacts, preprocessing artifacts, evaluation inputs, or metric
+artifacts. Start with this read-only dry run; it freezes and reports the S2S
+maximum result ID only. Progress JSON is written to stderr and the final report
+is stdout's final line.
+
+```bash
+gcloud run jobs execute benchmarks-runner \
+  --project=coval-benchmarks-prod \
+  --region=us-east1 \
+  --task-timeout=24h \
+  --wait \
+  --args='migrate,backfill-normalized-s2s-storage,--min-result-id=1,--batch-size=100'
+```
+
+An apply requires explicit approval and the frozen maximum from the dry run:
+add `--max-result-id=N,--apply`. Progress phases are `qualifying_run_count`,
+`source_reconciliation`, `post_write_verification`, `public_parity`, and
+`rollup_verification`, bracketed by the `operation` phase. Events include both
+completed and durably committed run/result checkpoints. On failure, restart the
+same frozen window: deterministic backfill IDs and exact natural-key
+reconciliation make committed pages idempotent.
+
+The default is 100 run IDs/page. A page bounds planning memory and one top-level
+write transaction; a failed page rolls back its observations, evaluations,
+values, and bucket refreshes together while earlier pages remain committed.
+Larger pages reduce query and checkpoint overhead but increase memory,
+transaction duration, rollback work, and the distance between durable
+checkpoints. Each affected scheduled bucket is refreshed under the existing
+per-bucket advisory transaction lock.
+
+The final verification is independent of source-pass counters. It freshly
+re-plans the frozen complete-run cohort, compares the complete normalized S2S
+observation population, compares public legacy values with normalized primary
+values exactly, and compares every stored rollup field (including `value_sum`)
+with a fresh aggregate. Bounded mismatch details accompany exact mismatch
+counts. `backfill_complete` means this frozen migration window reconciles; it
+does not claim global cutover readiness.
+
+The local helper creates, migrates, seeds, benchmarks, and removes a uniquely
+named disposable database. Its default seed uses 450 runs, 50 conversations per
+run, and one to three metrics per conversation; each batch size runs in a fresh
+child process so peak RSS is comparable. Query duration is cumulative
+client-observed SQL execution time. The administrative URL must be loopback and
+its role must be allowed to create and drop databases.
+
+```bash
+uv run python scripts/benchmark_normalized_s2s_backfill.py \
+  --admin-database-url postgresql://postgres:postgres@127.0.0.1:5432/postgres \
+  --batch-sizes 25,100,400 \
+  --warmups 1 \
+  --iterations 1 \
+  --format markdown
+```
+
+No production-size measurement is recorded here yet, so 100 remains the
+conservative default. Roll out the read-only dry run, obtain explicit approval
+for the frozen apply, then use the separate readiness/cutover process. Do not
+enable normalized dashboard reads, broaden the STT/TTS backfill, or combine
+this runbook with the asynchronous-runner follow-up.
+
 ### Normalized read-index benchmark
 
 With Docker Postgres running, compare the baseline and the two candidate indexes

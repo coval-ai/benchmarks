@@ -213,3 +213,24 @@ def test_the_published_hash_is_the_same_whichever_source_supplied_the_bytes(
     register_fixture_provider(lambda suite: seeded)
     assert contract_sha256("dental") == from_disk
     assert contract_sha256("dental") != public_contract_sha256("dental")
+
+
+def test_redact_catches_the_mock_tools_header_but_not_the_correlation_one() -> None:
+    from coval_bench.variants.platforms import redact
+
+    found: list[str] = []
+    out = redact(
+        {
+            "server": {
+                "headers": {"X-Mock-Tools-Key": "s3cr3t", "X-Coval-Simulation-Id": "{{x}}"},
+            },
+            "credentialIds": ["cred_1"],
+        },
+        found,
+    )
+    assert out["server"]["headers"] == {
+        "X-Mock-Tools-Key": "[REDACTED]",
+        "X-Coval-Simulation-Id": "{{x}}",
+    }
+    assert out["credentialIds"] == ["cred_1"]
+    assert found == ["server.headers.X-Mock-Tools-Key"]

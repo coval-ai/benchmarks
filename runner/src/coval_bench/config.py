@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         extra="ignore",
         case_sensitive=False,
     )
@@ -89,6 +90,7 @@ class Settings(BaseSettings):
     schedule_period_seconds: int = Field(default=1800, gt=0)
 
     # --- Provider API keys (all optional; loaded from Secret Manager at runtime) ---
+    airy_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
     atlas_api_key: SecretStr | None = None
@@ -121,6 +123,7 @@ class Settings(BaseSettings):
     murfai_api_key: SecretStr | None = None
     hakimai_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
+    nari_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
     deepdub_api_key: SecretStr | None = None
@@ -169,12 +172,22 @@ class Settings(BaseSettings):
     mock_tools_secret: SecretStr | None = None
     # The fixed latency every mock tool answer is held to, so tool time is a
     # constant across variants instead of a property of the seed that answered.
-    mock_tools_latency_ms: float = Field(default=50.0, ge=0)
+    mock_tools_latency_ms: float = Field(default=0.0, ge=0, le=10_000)
     mock_tools_suite: str = "dental"
     # Where the deployed service reads the seeded world, since the image is
     # built from a git checkout and `_private/` is never in one. Empty means
     # local-only, which is every developer machine.
     mock_fixtures_bucket: str = ""
+    # --- Phonely LLM proxy ---
+    # The client is only built when both the key and the agent id are set; the
+    # /llm/phonely routes answer 503 otherwise. Empty values count as unset.
+    phonely_api_key: SecretStr | None = None
+    phonely_base_url: str = "https://db.phonely.ai"
+    phonely_agent_id: str | None = None
+    # Bearer secret Coval presents to the proxy; unset fails closed with 503.
+    llm_proxy_secret: SecretStr | None = None
+    # Public base URL of the API service, for sync-llm; deployed only to that job.
+    llm_proxy_public_url: str | None = None
     coval_api_base: str = "https://api.coval.dev/v1"
     # The S2S latency metric id + per-provider Coval agent ids (opaque, not secret).
     coval_s2s_latency_metric_id: str | None = None
@@ -184,6 +197,10 @@ class Settings(BaseSettings):
     coval_s2s_xai_think_fast_2_agent_id: str | None = None
     coval_s2s_gray_agent_id: str | None = None
     coval_s2s_red_agent_id: str | None = None
+    # Coval agent id for the Phonely text agent (opaque, not secret); unset skips it.
+    coval_llm_phonely_agent_id: str | None = None
+    coval_llm_openai_agent_id: str | None = None
+    coval_llm_google_agent_id: str | None = None
     # The S2S instruction-adherence metric id (opaque, not secret). Optional: the
     # fetch pulls its per-conversation scores only when set, so latency still
     # ingests without it.
@@ -209,8 +226,40 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
-    # Fetch grid, in seconds; kept in sync with the s2s-fetch-trigger cron in
-    # benchmark-infra (override via S2S_FETCH_PERIOD_SECONDS). Default = 3h.
+    # --- Instruction-adherence-by-industry (separate Coval workspace) ---
+    # These agents, test sets and this metric live in a workspace other than the
+    # one coval_api_key defaults to, so every request for them must carry this
+    # header. Opaque id, not secret.
+    coval_s2s_industry_workspace_id: str | None = None
+    # One per industry rather than shared, so this can point at either the
+    # domain-specific judge (fast to validate, already scored on existing
+    # runs) or a shared expected-behavior metric (set all three to the same
+    # id) without a code change either way. Opaque id, not secret.
+    coval_s2s_health_instruction_metric_id: str | None = None
+    coval_s2s_home_service_instruction_metric_id: str | None = None
+    coval_s2s_cust_service_instruction_metric_id: str | None = None
+    coval_s2s_health_test_set_id: str | None = None
+    coval_s2s_health_openai_agent_id: str | None = None
+    coval_s2s_health_grok_agent_id: str | None = None
+    coval_s2s_health_violet_agent_id: str | None = None
+    coval_s2s_home_service_test_set_id: str | None = None
+    coval_s2s_home_service_openai_agent_id: str | None = None
+    coval_s2s_home_service_grok_agent_id: str | None = None
+    coval_s2s_home_service_violet_agent_id: str | None = None
+    coval_s2s_cust_service_test_set_id: str | None = None
+    coval_s2s_cust_service_openai_agent_id: str | None = None
+    coval_s2s_cust_service_grok_agent_id: str | None = None
+    coval_s2s_cust_service_violet_agent_id: str | None = None
+    # Shared across all three industries (it reads test_case.expected_behaviors
+    # generically, unlike the domain judges), so one field rather than three.
+    # A separate metric from coval_s2s_*_instruction_metric_id above, not a
+    # replacement for it: both are fetched and stored under their own metric
+    # types, so Instruction Adherence and Expected Behavior Adherence stay
+    # distinct charts. Opaque id, not secret.
+    coval_s2s_industry_expected_behavior_metric_id: str | None = None
+    # Fetch grid, in seconds, shared by the s2s-fetch and llm-fetch jobs; each job
+    # sets S2S_FETCH_PERIOD_SECONDS to match its own trigger cron in benchmark-infra.
+    # The 3h default is far below a daily trigger, so an unset job reads stale.
     s2s_fetch_period_seconds: int = Field(default=10_800, gt=0)
     # Staleness threshold = fetch period + this grace.
     s2s_stale_grace_seconds: int = Field(default=0, ge=0)
@@ -290,6 +339,11 @@ class Settings(BaseSettings):
                 'clerk_org_exclusive must be {"org_id": "provider" | ["provider/model", ...]}'
             )
         return value
+
+    # Google accounts admitted to the admin routes; empty admits none.
+    admin_google_emails: list[str] = []
+    # The default is the fixed aud on gcloud user identity tokens.
+    admin_google_audiences: list[str] = ["32555940559.apps.googleusercontent.com"]
 
     # --- Arena ---
     arena_labeler_key: SecretStr | None = None

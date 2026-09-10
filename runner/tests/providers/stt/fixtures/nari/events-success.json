@@ -1,0 +1,7 @@
+[
+  {"type": "session.configured", "event_id": "evt_1", "session": {"id": "sess_001", "model": "qwen3-asr-fast", "language": "en", "turn_detection": null, "limits": {"max_duration_seconds": 36.0, "idle_timeout_seconds": 60.0}}},
+  {"type": "transcript.partial", "event_id": "evt_2", "item_id": "item_001", "transcript": "hello", "revision": 1},
+  {"type": "transcript.partial", "event_id": "evt_3", "item_id": "item_001", "transcript": "hello world how", "revision": 2},
+  {"type": "input_audio_buffer.committed", "event_id": "evt_4", "item_id": "item_001", "previous_item_id": null, "client_event_id": null},
+  {"type": "transcript.completed", "event_id": "evt_5", "item_id": "item_001", "transcript": "hello world how are you", "language": "en", "commit_reason": "manual", "usage": {"input_audio_seconds": 3.0}}
+]

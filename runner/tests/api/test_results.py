@@ -45,6 +45,28 @@ async def test_filters_compose(client: AsyncClient, postgresql: Any) -> None:
     assert results[0]["metric_type"] == "WER"
 
 
+async def test_llm_rows_round_trip(client: AsyncClient, postgresql: Any) -> None:
+    run_id = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+    await _insert_result(
+        postgresql,
+        run_id,
+        provider="phonely",
+        model="phonely-agent",
+        metric_type="TTFT",
+        metric_value=0.42,
+        metric_units="seconds",
+        benchmark="LLM",
+    )
+    await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3", metric_type="WER")
+
+    response = await client.get("/v1/results", params={"benchmark": "LLM"})
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert [(r["benchmark"], r["provider"], r["metric_type"]) for r in results] == [
+        ("LLM", "phonely", "TTFT")
+    ]
+
+
 async def test_since_until_window(client: AsyncClient, postgresql: Any) -> None:
     """Time window narrows results correctly."""
     run_id = await _insert_run(postgresql)

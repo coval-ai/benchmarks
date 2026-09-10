@@ -32,6 +32,11 @@ class TranscriptionResult:
     ttft_seconds: float | None = None
     total_time: float | None = None
     audio_to_final_seconds: float | None = None
+    finalization_latency_seconds: float | None = None
+    finalization_trigger: str | None = None
+    final_audio_window_end_seconds: float | None = None
+    finalization_warning_code: str | None = None
+    finalization_timed_out: bool = False
 
     # Content
     first_token_content: str | None = None
@@ -47,6 +52,7 @@ class TranscriptionResult:
 
     # Internal timing
     audio_start_time: float | None = None
+    finalization_start_time: float | None = None
 
     # Deepgram-specific VAD data
     vad_first_detected: float | None = None

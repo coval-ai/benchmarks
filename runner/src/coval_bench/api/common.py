@@ -11,8 +11,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-BenchmarkLiteral = Literal["STT", "TTS", "S2S"]
+BenchmarkLiteral = Literal["STT", "TTS", "S2S", "LLM"]
 WindowLiteral = Literal["24h", "7d", "30d"]
+
+# LLM results have no normalized writer yet, so its reads stay on legacy storage.
+NORMALIZED_BENCHMARKS: frozenset[str] = frozenset({"STT", "TTS", "S2S"})
+
+
+def reads_normalized(enabled: bool, benchmark: str) -> bool:
+    return enabled and benchmark in NORMALIZED_BENCHMARKS
+
 
 # Fixed interval strings — looked up by Python, never user-interpolated into
 # SQL. Used by live queries (the aggregates series block).
@@ -46,6 +54,7 @@ MIN_SCORED_SAMPLES: dict[str, int] = {
     "STT": 5,
     "TTS": 5,
     "S2S": 5,
+    "LLM": 5,
 }
 
 

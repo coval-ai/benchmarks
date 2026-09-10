@@ -12,14 +12,19 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
+import sys
+import time
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from importlib.resources import files
-from typing import Any
+from types import FrameType
+from typing import Any, TextIO
 
 import click
 import psycopg
@@ -41,6 +46,180 @@ _EVAL_NAMESPACE = uuid.UUID("e7f9ce4b-8f66-572c-bf9e-4f67b044422e")
 _ARTIFACT_NAMESPACE = uuid.UUID("64478df1-0d13-5996-a3ca-96c421f772c9")
 _LOCK = "normalized_storage_backfill"
 _MISMATCH_DETAIL_LIMIT = 100
+_PROGRESS_INTERVAL_SECONDS = 30.0
+_PROGRESS_MAX_UNITS = 10
+
+
+class _BackfillCancelled(Exception):
+    """Raised by the CLI SIGTERM handler after the current DB work unwinds."""
+
+
+@dataclass(frozen=True)
+class FrozenWindow:
+    """The one, reproducible STT/TTS source cohort for an operator run."""
+
+    min_result_id: int
+    max_result_id: int
+    start: datetime
+    end: datetime
+
+    def __post_init__(self) -> None:
+        if self.min_result_id <= 0 or self.max_result_id < self.min_result_id:
+            raise ValueError("invalid frozen result-id bounds")
+        if self.start.tzinfo is None or self.end.tzinfo is None:
+            raise ValueError("window timestamps must be timezone-aware")
+        start = self.start.astimezone(UTC)
+        end = self.end.astimezone(UTC)
+        if end - start != timedelta(hours=168):
+            raise ValueError("window must be exactly 168 hours")
+        object.__setattr__(self, "start", start)
+        object.__setattr__(self, "end", end)
+
+
+@dataclass
+class ProgressReporter:
+    """Write aggregate-only, machine-readable migration progress to stderr."""
+
+    mode: str
+    min_result_id: int
+    max_result_id: int
+    batch_size: int
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    stream: TextIO = field(default_factory=lambda: sys.stderr)
+    monotonic: Callable[[], float] = time.monotonic
+    interval_seconds: float = _PROGRESS_INTERVAL_SECONDS
+    max_units: int = _PROGRESS_MAX_UNITS
+    started_at: float = 0.0
+    last_emitted_at: float = 0.0
+    units_since_emit: int = 0
+    pages: int = 0
+    runs: int = 0
+    results: int = 0
+    last_completed_run_id: int | None = None
+    last_completed_result_id: int | None = None
+    total_runs: int | None = None
+    phase_started_at: float = 0.0
+    phase_pages: int = 0
+    phase_runs: int = 0
+    phase_results: int = 0
+    phase_units_completed: int = 0
+    phase_last_completed_run_id: int | None = None
+    phase_last_completed_result_id: int | None = None
+    phase_total_runs: int | None = None
+
+    def __post_init__(self) -> None:
+        self.started_at = self.monotonic()
+        self.last_emitted_at = self.started_at
+        self.phase_started_at = self.started_at
+
+    def _payload(self, *, phase: str, status: str, report: dict[str, Any]) -> dict[str, Any]:
+        elapsed = max(0.0, self.monotonic() - self.started_at)
+        phase_elapsed = max(0.0, self.monotonic() - self.phase_started_at)
+        phase_run_throughput = self.phase_runs / phase_elapsed if phase_elapsed else 0.0
+        phase_result_throughput = self.phase_results / phase_elapsed if phase_elapsed else 0.0
+        payload: dict[str, Any] = {
+            "event": "normalized_storage_backfill_progress",
+            "status": status,
+            "phase": phase,
+            "mode": self.mode,
+            "min_result_id": self.min_result_id,
+            "max_result_id": self.max_result_id,
+            "window_start": self.window_start.isoformat() if self.window_start else None,
+            "window_end": self.window_end.isoformat() if self.window_end else None,
+            "batch_size": self.batch_size,
+            "pages": self.pages,
+            "runs": self.runs,
+            "results": self.results,
+            "last_completed_run_id": self.last_completed_run_id,
+            "last_completed_result_id": self.last_completed_result_id,
+            "elapsed_seconds": round(elapsed, 3),
+            "phase_elapsed_seconds": round(phase_elapsed, 3),
+            "throughput_runs_per_second": round(phase_run_throughput, 6),
+            "throughput_results_per_second": round(phase_result_throughput, 6),
+            "phase_pages": self.phase_pages,
+            "phase_runs": self.phase_runs,
+            "phase_results": self.phase_results,
+            "phase_units_completed": self.phase_units_completed,
+            "phase_last_completed_run_id": self.phase_last_completed_run_id,
+            "phase_last_completed_result_id": self.phase_last_completed_result_id,
+            "skipped": sum(report["skipped_by_reason"].values())
+            + sum(report["verification_skipped_by_reason"].values()),
+            "conflicts": report["parity_mismatch_count"] + report["rollup_mismatch_count"],
+        }
+        if self.phase_total_runs is not None:
+            payload["total_runs"] = self.phase_total_runs
+            payload["eta_seconds"] = (
+                round(max(0, self.phase_total_runs - self.phase_runs) / phase_run_throughput, 3)
+                if phase_run_throughput
+                else None
+            )
+        return payload
+
+    def emit(self, *, phase: str, status: str, report: dict[str, Any]) -> None:
+        self.stream.write(
+            json.dumps(self._payload(phase=phase, status=status, report=report), sort_keys=True)
+            + "\n"
+        )
+        self.stream.flush()
+        self.last_emitted_at = self.monotonic()
+        self.units_since_emit = 0
+
+    def phase_started(
+        self, phase: str, report: dict[str, Any], *, total_runs: int | None = None
+    ) -> None:
+        self.phase_started_at = self.monotonic()
+        self.phase_pages = 0
+        self.phase_runs = 0
+        self.phase_results = 0
+        self.phase_units_completed = 0
+        self.phase_last_completed_run_id = None
+        self.phase_last_completed_result_id = None
+        self.phase_total_runs = total_runs
+        self.emit(phase=phase, status="started", report=report)
+
+    def phase_completed(self, phase: str, report: dict[str, Any]) -> None:
+        self.emit(phase=phase, status="completed", report=report)
+
+    def completed_page(
+        self, run_ids: list[int], rows: list[LegacyRow], report: dict[str, Any], *, phase: str
+    ) -> None:
+        self.pages += 1
+        self.runs += len(run_ids)
+        self.results += len(rows)
+        self.phase_pages += 1
+        self.phase_runs += len(run_ids)
+        self.phase_results += len(rows)
+        self.last_completed_run_id = run_ids[-1]
+        self.last_completed_result_id = max(row.id for row in rows) if rows else None
+        self.phase_last_completed_run_id = self.last_completed_run_id
+        self.phase_last_completed_result_id = self.last_completed_result_id
+        self.completed_unit(report, phase=phase)
+
+    def completed_unit(self, report: dict[str, Any], *, phase: str) -> None:
+        self.units_since_emit += 1
+        self.phase_units_completed += 1
+        if (
+            self.units_since_emit >= self.max_units
+            or self.monotonic() - self.last_emitted_at >= self.interval_seconds
+        ):
+            self.emit(phase=phase, status="progress", report=report)
+
+
+@contextmanager
+def _temporary_sigterm_cancellation() -> Iterator[None]:
+    """Turn Cloud Run SIGTERM into an exception so cleanup finally blocks run."""
+
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def cancel(_: int, __: FrameType | None) -> None:
+        raise _BackfillCancelled()
+
+    signal.signal(signal.SIGTERM, cancel)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 @dataclass(frozen=True)
@@ -81,6 +260,7 @@ class Planned:
     error: str | None
     failure_origin: str | None
     artifacts: list[tuple[str, str]]  # (kind, body), no storage side effect
+    live_owner_required: bool = False
 
     @property
     def first(self) -> LegacyRow:
@@ -182,15 +362,25 @@ def _report() -> dict[str, Any]:
         "rollup_mismatch_count": 0,
         "rollup_mismatches_truncated": False,
         "cutover_ready": False,
+        "parity_mismatch_reasons": Counter(),
+        "provenance_differences": Counter(),
     }
 
 
 _PAGE_RUN_IDS_SQL = """
 SELECT DISTINCT r.run_id
 FROM benchmarks_v2.results r
-WHERE r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS') AND r.run_id > %s
+WHERE r.id BETWEEN %s AND %s AND r.created_at >= %s AND r.created_at < %s
+  AND r.benchmark IN ('STT','TTS') AND r.run_id > %s
 ORDER BY r.run_id
 LIMIT %s
+"""
+
+_QUALIFYING_RUN_COUNT_SQL = """
+SELECT COUNT(DISTINCT r.run_id)
+FROM benchmarks_v2.results r
+WHERE r.id BETWEEN %s AND %s AND r.created_at >= %s AND r.created_at < %s
+  AND r.benchmark IN ('STT','TTS')
 """
 
 _RUN_ROWS_SQL = """
@@ -198,26 +388,53 @@ SELECT r.id,r.run_id,n.dataset_id,n.dataset_sha256,n.scheduled_at,r.provider,r.m
  r.benchmark,r.metric_type,r.metric_value,r.metric_units,r.audio_filename,r.transcript,r.status,
  r.error,r.http_version,r.submit_to_headers_ms,r.created_at,r.wer_insertions_pct,r.wer_deletions_pct,r.wer_substitutions_pct
 FROM benchmarks_v2.results r JOIN benchmarks_v2.runs n ON n.id=r.run_id
-WHERE r.run_id=ANY(%s) AND r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS')
+WHERE r.run_id=ANY(%s) AND r.id BETWEEN %s AND %s
+  AND r.created_at >= %s AND r.created_at < %s AND r.benchmark IN ('STT','TTS')
 ORDER BY r.run_id,r.id
 """
 
 
 def _run_page(
-    conn: psycopg.Connection, low: int, high: int, after_run_id: int, batch_size: int
+    conn: psycopg.Connection, window: FrozenWindow, after_run_id: int, batch_size: int
 ) -> tuple[list[int], list[LegacyRow]]:
     """Read one bounded, run-keyset page from the frozen result-id window."""
     with conn.cursor() as cur:
-        cur.execute(_PAGE_RUN_IDS_SQL, (low, high, after_run_id, batch_size))
+        cur.execute(
+            _PAGE_RUN_IDS_SQL,
+            (
+                window.min_result_id,
+                window.max_result_id,
+                window.start,
+                window.end,
+                after_run_id,
+                batch_size,
+            ),
+        )
         run_ids = [int(row[0]) for row in cur.fetchall()]
         if not run_ids:
             return [], []
-        cur.execute(_RUN_ROWS_SQL, (run_ids, low, high))
+        cur.execute(
+            _RUN_ROWS_SQL,
+            (run_ids, window.min_result_id, window.max_result_id, window.start, window.end),
+        )
         return run_ids, [LegacyRow(*row) for row in cur.fetchall()]
 
 
+def _qualifying_run_count(conn: psycopg.Connection, window: FrozenWindow) -> int:
+    """Count the same frozen run population used by keyset paging without loading IDs."""
+    with conn.cursor() as cur:
+        cur.execute(
+            _QUALIFYING_RUN_COUNT_SQL,
+            (window.min_result_id, window.max_result_id, window.start, window.end),
+        )
+        row = cur.fetchone()
+    if row is None:  # pragma: no cover - aggregate SELECT always returns one row.
+        raise RuntimeError("qualifying run count query returned no row")
+    return int(row[0])
+
+
 def _complete_window_rows(
-    conn: psycopg.Connection, rows: list[LegacyRow], low: int, high: int, skipped: Counter[str]
+    conn: psycopg.Connection, rows: list[LegacyRow], window: FrozenWindow, skipped: Counter[str]
 ) -> list[LegacyRow]:
     """A result window is safe only if each selected run is wholly present and terminal."""
     run_ids = sorted({row.run_id for row in rows})
@@ -225,14 +442,18 @@ def _complete_window_rows(
         return rows
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT n.id, min(r.id), max(r.id), n.status FROM benchmarks_v2.runs n
-               JOIN benchmarks_v2.results r ON r.run_id=n.id WHERE n.id=ANY(%s)
+            """SELECT n.id,
+                      bool_or(r.benchmark IN ('STT','TTS') AND NOT (
+                        r.id BETWEEN %s AND %s AND r.created_at >= %s AND r.created_at < %s
+                      )), n.status
+               FROM benchmarks_v2.runs n JOIN benchmarks_v2.results r ON r.run_id=n.id
+               WHERE n.id=ANY(%s)
                GROUP BY n.id,n.status""",
-            (run_ids,),
+            (window.min_result_id, window.max_result_id, window.start, window.end, run_ids),
         )
         bad: set[int] = set()
-        for run_id, first_id, last_id, status in cur.fetchall():
-            if first_id < low or last_id > high:
+        for run_id, has_outside_stt_tts, status in cur.fetchall():
+            if has_outside_stt_tts:
                 skipped["split_window_run"] += 1
                 bad.add(run_id)
             elif status not in ("succeeded", "partial", "failed"):
@@ -257,6 +478,11 @@ def _append_mismatch(report: dict[str, Any], kind: str, detail: dict[str, Any]) 
     """Retain bounded diagnostics while reporting the exact mismatch total."""
     count_key = "parity_mismatch_count" if kind == "parity_mismatches" else "rollup_mismatch_count"
     report[count_key] += 1
+    if kind == "parity_mismatches":
+        report["parity_mismatch_reasons"][str(detail.get("reason", "unknown"))] += 1
+        # Parity spans private observations.  Keep its compatibility list useful
+        # without allowing a caller to leak identities or payloads into JSON.
+        detail = {"reason": str(detail.get("reason", "unknown"))}
     if len(report[kind]) < _MISMATCH_DETAIL_LIMIT:
         report[kind].append(detail)
     else:
@@ -289,21 +515,18 @@ def _stt_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         statuses = {x.status for x in group}
         failed = statuses == {"failed"}
         errors = {x.error.strip() for x in group if x.error and x.error.strip()}
-        if failed and len(errors) != 1:
+        if failed and not errors:
             skipped["failed_observation_error_unrecoverable"] += 1
             continue
         if not _metrics_are_valid(group, skipped):
             continue
-        # Legacy rows have no failure-origin column.  A provider error was
-        # copied onto every STT metric, so multiple distinct failed metrics
-        # carrying one identical error are the only defensible proof.  A
-        # single failed metric is ambiguous and remains a failed evaluation
-        # under a succeeded observation.
         failed_metrics = {x.metric for x in group if x.status == "failed"}
         if failed and len(failed_metrics) < 2:
             skipped["observation_failure_origin_unrecoverable"] += 1
             continue
-        error = next(iter(errors)) if failed else None
+        # Shared errors indicate provider failure; distinct errors are metric failures.
+        provider_failed = failed and len(failed_metrics) >= 2 and len(errors) == 1
+        error = next(iter(errors)) if provider_failed else None
         plans.append(
             Planned(
                 group,
@@ -312,9 +535,9 @@ def _stt_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 r.dataset_sha256,
                 "STT",
                 "dataset_audio",
-                "failed" if error else "succeeded",
+                "failed" if provider_failed else "succeeded",
                 error,
-                "provider" if error else None,
+                "provider" if provider_failed else None,
                 artifacts,
             )
         )
@@ -329,9 +552,6 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
     for a in anchors:
         if not a.transcript:
             skipped["tts_anchor_prompt_missing"] += 1
-            continue
-        if not a.filename:
-            skipped["tts_anchor_filename_missing"] += 1
             continue
         if not _valid_sha(a.dataset_sha256):
             skipped["invalid_dataset_sha"] += 1
@@ -354,6 +574,27 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 or r.id == a.id
             )
         ]
+        # A provider failure can retain TTFA timing without producing audio.
+        # Accept only the one-row, prompt-owned shape emitted by today's writer;
+        # other prompts for this model/run remain separate observations.
+        failed_tts = (
+            a.filename is None
+            and attached == [a]
+            and a.status == "failed"
+            and bool(a.error and a.error.strip())
+            and (
+                a.value is None
+                or (
+                    a.value == a.value
+                    and a.value not in (float("inf"), float("-inf"))
+                    and a.value >= 0
+                )
+            )
+            and a.unit == "milliseconds"
+        )
+        if not a.filename and not failed_tts:
+            skipped["tts_anchor_filename_missing"] += 1
+            continue
         # A duplicate TTFA prompt means there is no safe identity for attachment.
         if (
             sum(
@@ -389,10 +630,14 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         if failed and len(errors) != 1:
             skipped["failed_observation_error_unrecoverable"] += 1
             continue
-        if failed and not (
-            len(attached) == 1
-            and attached[0].metric == str(Metric.TTFA)
-            and errors == {f"no {Metric.TTFA} produced"}
+        if (
+            failed
+            and not failed_tts
+            and not (
+                len(attached) == 1
+                and attached[0].metric == str(Metric.TTFA)
+                and errors == {f"no {Metric.TTFA} produced"}
+            )
         ):
             skipped["observation_failure_origin_unrecoverable"] += 1
             continue
@@ -403,14 +648,14 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
         # but do not fabricate observation failure provenance.
         error = None
         artifacts = (
-            []
-            if a.value is None
-            else [
+            [
                 (
                     "timing_events",
                     json.dumps({"ttfa_ms": a.value}, sort_keys=True, separators=(",", ":")),
                 )
             ]
+            if a.value is not None or failed_tts
+            else []
         )
         plans.append(
             Planned(
@@ -420,10 +665,11 @@ def _tts_plans(rows: Iterable[LegacyRow], skipped: Counter[str]) -> list[Planned
                 a.dataset_sha256,
                 "TTS",
                 "generated_audio",
-                "failed" if error else "succeeded",
-                error,
-                "provider" if error else None,
+                "failed" if failed_tts else ("failed" if error else "succeeded"),
+                a.error if failed_tts else error,
+                "provider" if failed_tts else ("provider" if error else None),
                 artifacts,
+                failed_tts,
             )
         )
     claimed_ids = {row.id for plan in plans for row in plan.rows}
@@ -568,7 +814,7 @@ def _metrics_are_valid(rows: list[LegacyRow], skipped: Counter[str]) -> bool:
     return True
 
 
-def _stored_plan_matches(
+def _strict_stored_plan_matches(
     cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
 ) -> bool:
     """Compare the legacy-derived immutable payload, never merely its parent ID."""
@@ -731,6 +977,328 @@ def _stored_plan_matches(
     return [tuple(item) for item in cur.fetchall()] == sorted(expected_inputs, key=repr)
 
 
+def _expected_metric_payloads(
+    plan: Planned,
+) -> dict[str, tuple[str, str | None, list[tuple[str, str, float, str, str]]]]:
+    """Return the immutable metric identities and values reconstructed from legacy rows."""
+    values_by_metric: dict[str, list[tuple[str, str, float, str, str]]] = defaultdict(list)
+    for datum in _values(plan.rows):
+        values_by_metric[datum[0]].append(datum)
+    expected: dict[str, tuple[str, str | None, list[tuple[str, str, float, str, str]]]] = {
+        metric: ("succeeded", None, values) for metric, values in values_by_metric.items()
+    }
+    for metric, rows in _metric_groups(plan.rows).items():
+        if metric not in expected and rows and all(row.status == "failed" for row in rows):
+            expected[metric] = ("failed", next(row.error for row in rows if row.error), [])
+    return expected
+
+
+def _live_artifact_matches(
+    artifact_type: str,
+    schema_name: str,
+    schema_version: str,
+    gcs_uri: str,
+    digest: str,
+    size_bytes: int,
+    duration_ms: float | None,
+    *,
+    transcript: str | None,
+) -> bool:
+    """Validate dual-write descriptors without fetching private artifact payloads."""
+    if not _valid_sha(digest) or size_bytes <= 0 or schema_version != "v1":
+        return False
+    extension = {
+        "provider_transcript": "json",
+        "timing_events": "json",
+        "generated_audio": "wav",
+    }.get(artifact_type)
+    schema = {
+        "provider_transcript": "ProviderTranscript",
+        "timing_events": "TimingEvents",
+        "generated_audio": "GeneratedAudio",
+    }.get(artifact_type)
+    if extension is None or schema_name != schema:
+        return False
+    key = f"observation-artifacts/v1/{artifact_type}/{digest[:2]}/{digest}.{extension}"
+    parts = gcs_uri.split("/", 3)
+    if (
+        not gcs_uri.startswith("gs://")
+        or len(parts) != 4
+        or not parts[2]
+        or "?" in gcs_uri
+        or "#" in gcs_uri
+        or parts[3] != key
+    ):
+        return False
+    if artifact_type == "generated_audio":
+        return (
+            duration_ms is not None
+            and duration_ms > 0
+            and duration_ms != float("inf")
+            and duration_ms == duration_ms
+        )
+    if duration_ms is not None:
+        return False
+    if artifact_type == "provider_transcript":
+        if transcript is None:
+            return False
+        _, payload, _, _, _ = prepare_provider_transcript(transcript)
+        return digest == hashlib.sha256(payload).hexdigest() and size_bytes == len(payload)
+    return True
+
+
+_LIVE_CONFLICT_CATEGORIES = frozenset(
+    {
+        "parent",
+        "lifecycle",
+        "evaluation",
+        "value",
+        "artifact",
+        "input",
+        "unexpected_child",
+    }
+)
+
+
+@dataclass(frozen=True)
+class LiveValidationResult:
+    """Aggregate-safe outcome for reconciling a live-owned observation."""
+
+    matches: bool
+    category: str | None = None
+    tolerated_provenance: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.matches and self.category is not None:
+            raise ValueError("a matching live row cannot have a conflict category")
+        if not self.matches and self.category not in _LIVE_CONFLICT_CATEGORIES:
+            raise ValueError("live mismatch requires an aggregate-safe category")
+
+
+def _live_validation_result(
+    cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
+) -> LiveValidationResult:
+    """Validate one live-owned row in website-critical dependency order."""
+    row = plan.first
+    provenance: set[str] = set()
+    cur.execute(
+        """SELECT run_id,dataset_id,dataset_sha256,sample_id,provider,model,voice,benchmark,
+                  source_kind,transport_protocol,submit_to_headers_ms,provider_extras,captured_at,status,error,failure_origin
+           FROM benchmarks_v2.benchmark_observations WHERE id=%s""",
+        (observation_id,),
+    )
+    actual = cur.fetchone()
+    expected = (
+        row.run_id,
+        plan.dataset_id,
+        plan.dataset_sha256,
+        plan.sample_id,
+        row.provider,
+        row.model,
+        row.voice,
+        plan.benchmark,
+        plan.source_kind,
+        None,
+        None,
+        None,
+        row.created_at,
+        plan.status,
+        plan.error,
+        plan.failure_origin,
+    )
+    if actual is None or tuple(actual[:13]) != expected[:13]:
+        return LiveValidationResult(False, "parent")
+    if tuple(actual[13:]) != expected[13:]:
+        return LiveValidationResult(False, "lifecycle")
+    if row.http_version is not None or row.headers_ms is not None:
+        provenance.add("legacy_transport_metadata")
+
+    expected_metrics = _expected_metric_payloads(plan)
+    expected_tts_timing: tuple[str, int] | None = None
+    if plan.benchmark == "TTS":
+        anchor = next((candidate for candidate in plan.rows if candidate.metric == "TTFA"), None)
+        if anchor is None:
+            return LiveValidationResult(False, "evaluation")
+        if anchor.value is not None or plan.live_owner_required:
+            _, payload, _, _, _ = prepare_timing_events({"ttfa_ms": anchor.value})
+            expected_tts_timing = (hashlib.sha256(payload).hexdigest(), len(payload))
+
+    cur.execute(
+        """SELECT id,metric_type,metric_version,evaluation_variant,executor,external_request_id,status,started_at,finished_at,error
+           FROM benchmarks_v2.metric_evaluations WHERE observation_id=%s""",
+        (observation_id,),
+    )
+    evaluations = cur.fetchall()
+    metrics = [item[1] for item in evaluations]
+    if (
+        len(evaluations) > len(expected_metrics)
+        or len(metrics) != len(set(metrics))
+        or any(metric not in expected_metrics for metric in metrics)
+    ):
+        return LiveValidationResult(False, "unexpected_child")
+    if len(evaluations) != len(expected_metrics):
+        return LiveValidationResult(False, "evaluation")
+    evaluation_ids: dict[str, uuid.UUID] = {}
+    for (
+        eid,
+        metric,
+        version,
+        variant,
+        executor,
+        external_request_id,
+        status,
+        started,
+        finished,
+        error,
+    ) in evaluations:
+        expected_status, expected_error, _ = expected_metrics[metric]
+        if (version, variant, executor, external_request_id, status, error) != (
+            "v1",
+            "default",
+            "inline",
+            None,
+            expected_status,
+            expected_error,
+        ):
+            return LiveValidationResult(False, "evaluation")
+        if started is None or started < row.created_at or finished is None or finished < started:
+            return LiveValidationResult(False, "evaluation")
+        if (status == "succeeded" and error is not None) or (status == "failed" and not error):
+            return LiveValidationResult(False, "evaluation")
+        if started != row.created_at or finished != row.created_at:
+            provenance.add("live_evaluation_timestamps")
+        evaluation_ids[metric] = eid
+
+    cur.execute(
+        """SELECT e.metric_type,v.value_key,v.unit,v.value,v.value_role
+           FROM benchmarks_v2.metric_values v JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
+           WHERE e.observation_id=%s""",
+        (observation_id,),
+    )
+    actual_values = sorted((tuple(item) for item in cur.fetchall()), key=repr)
+    expected_values = sorted(
+        (metric, key, unit, value, role)
+        for metric, (_, _, values) in expected_metrics.items()
+        for _, key, value, unit, role in values
+    )
+    if actual_values != expected_values:
+        return LiveValidationResult(False, "value")
+
+    cur.execute(
+        """SELECT id,artifact_type,schema_name,schema_version,gcs_uri,content_sha256,size_bytes,duration_ms
+           FROM benchmarks_v2.observation_artifacts WHERE observation_id=%s""",
+        (observation_id,),
+    )
+    artifacts = cur.fetchall()
+    allowed = (
+        {"provider_transcript", "timing_events"}
+        if plan.benchmark == "STT"
+        else {"timing_events", "generated_audio"}
+    )
+    expected_artifact_types = (
+        {"timing_events", "generated_audio"}
+        if plan.benchmark == "TTS"
+        else {"timing_events"} | ({"provider_transcript"} if row.transcript is not None else set())
+    )
+    if plan.live_owner_required:
+        allowed = expected_artifact_types = {"timing_events"}
+    artifact_types = [item[1] for item in artifacts]
+    if len(artifact_types) != len(set(artifact_types)) or any(
+        artifact_type not in allowed for artifact_type in artifact_types
+    ):
+        return LiveValidationResult(False, "unexpected_child")
+    by_type: dict[str, uuid.UUID] = {}
+    for aid, artifact_type, schema_name, schema_version, uri, digest, size, duration in artifacts:
+        if not _live_artifact_matches(
+            artifact_type,
+            schema_name,
+            schema_version,
+            uri,
+            digest,
+            size,
+            duration,
+            transcript=row.transcript if artifact_type == "provider_transcript" else None,
+        ):
+            return LiveValidationResult(False, "artifact")
+        if (
+            artifact_type == "timing_events"
+            and plan.benchmark == "TTS"
+            and expected_tts_timing is not None
+            and (digest, size) != expected_tts_timing
+        ):
+            return LiveValidationResult(False, "artifact")
+        if artifact_type == "generated_audio" or (
+            artifact_type == "timing_events" and plan.benchmark == "STT"
+        ):
+            provenance.add("artifact_content_not_reconstructable")
+        by_type[artifact_type] = aid
+    if set(by_type) != expected_artifact_types:
+        return LiveValidationResult(False, "artifact")
+
+    expected_inputs: list[tuple[str, str, int, uuid.UUID]] = []
+    for metric in expected_metrics:
+        wanted = (
+            [("provider_transcript", "raw")]
+            if plan.benchmark == "STT" and metric == "WER"
+            else [("timing_events", "timing")]
+            if plan.benchmark == "STT"
+            else [("generated_audio", "raw")]
+            if metric == "WER"
+            else [("timing_events", "timing"), ("generated_audio", "raw")]
+            if metric == "TTFA"
+            else [("timing_events", "timing")]
+        )
+        if plan.live_owner_required:
+            wanted = [("timing_events", "timing")]
+        for artifact_type, role in wanted:
+            aid = by_type.get(artifact_type)
+            if aid is None:
+                return LiveValidationResult(False, "artifact")
+            expected_inputs.append((metric, role, 0, aid))
+    cur.execute(
+        """SELECT e.metric_type,i.input_role,i.input_order,i.observation_artifact_id
+           FROM benchmarks_v2.metric_evaluation_inputs i JOIN benchmarks_v2.metric_evaluations e ON e.id=i.metric_evaluation_id
+           WHERE e.observation_id=%s""",
+        (observation_id,),
+    )
+    actual_inputs = sorted((tuple(item) for item in cur.fetchall()), key=repr)
+    if actual_inputs != sorted(expected_inputs, key=repr):
+        return LiveValidationResult(False, "input")
+
+    cur.execute(
+        """SELECT EXISTS (
+             SELECT 1 FROM benchmarks_v2.preprocessing_artifacts WHERE observation_id=%s
+             UNION ALL
+             SELECT 1 FROM benchmarks_v2.metric_artifacts a
+             JOIN benchmarks_v2.metric_evaluations e ON e.id=a.metric_evaluation_id
+             WHERE e.observation_id=%s
+           )""",
+        (observation_id, observation_id),
+    )
+    unexpected = cur.fetchone()
+    if unexpected is None or bool(unexpected[0]):
+        return LiveValidationResult(False, "unexpected_child")
+    return LiveValidationResult(True, tolerated_provenance=tuple(sorted(provenance)))
+
+
+def _live_stored_plan_matches(
+    cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
+) -> bool:
+    """Return whether a live row matches the current dual-write contract."""
+    return _live_validation_result(cur, plan, observation_id).matches
+
+
+def _stored_plan_matches(
+    cur: psycopg.Cursor[tuple[Any, ...]], plan: Planned, observation_id: uuid.UUID
+) -> bool:
+    """Dispatch exact backfill validation or the narrow live dual-write allowlist."""
+    return (
+        _strict_stored_plan_matches(cur, plan, observation_id)
+        if observation_id == plan.id
+        else _live_stored_plan_matches(cur, plan, observation_id)
+    )
+
+
 def _insert_plan(
     conn: psycopg.Connection,
     plan: Planned,
@@ -750,15 +1318,22 @@ def _insert_plan(
             plan.natural,
         )
         found = cur.fetchone()
+        if found and plan.live_owner_required and found[0] == plan.id:
+            if report_mismatch:
+                _append_mismatch(report, "parity_mismatches", {"reason": "parent"})
+            return
         if found and found[0] != plan.id:
             report["live_owned"] += 1
-            if _stored_plan_matches(cur, plan, found[0]):
+            validation = _live_validation_result(cur, plan, found[0])
+            if validation.matches:
                 report["reconciled"] += 1
+                for difference in validation.tolerated_provenance:
+                    report["provenance_differences"][difference] += 1
             elif report_mismatch:
                 _append_mismatch(
                     report,
                     "parity_mismatches",
-                    {"natural_key": list(plan.natural), "reason": "live_owned_payload_mismatch"},
+                    {"reason": validation.category or "parent"},
                 )
             return
         if found:
@@ -768,8 +1343,14 @@ def _insert_plan(
                 _append_mismatch(
                     report,
                     "parity_mismatches",
-                    {"natural_key": list(plan.natural), "reason": "backfill_payload_mismatch"},
+                    {"reason": "backfill_payload_mismatch"},
                 )
+            return
+        if plan.live_owner_required:
+            if report_mismatch:
+                _append_mismatch(report, "parity_mismatches", {"reason": "parent"})
+            # This legacy shape is only a proof of an already dual-written
+            # observation; it must never be synthesized by backfill.
             return
         report["eligible"] += 1
         if not apply:
@@ -899,14 +1480,14 @@ def _insert_plan(
 
 
 def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -> None:
-    """Use the RunWriter delete/insert contract over every normalized row."""
+    """Refresh only STT/TTS rows; S2S owns its independent rollup population."""
     params = {"bucket": bucket_at}
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket', extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
         params,
     )
     cur.execute(
-        "DELETE FROM benchmarks_v2.metric_values_by_bucket WHERE bucket_at=%(bucket)s",
+        "DELETE FROM benchmarks_v2.metric_values_by_bucket WHERE bucket_at=%(bucket)s AND benchmark IN ('STT','TTS')",
         params,
     )
     cur.execute(
@@ -932,6 +1513,7 @@ JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
 JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
 JOIN benchmarks_v2.runs r ON r.id=o.run_id
 WHERE o.status='succeeded' AND e.status='succeeded'
+  AND o.benchmark IN ('STT','TTS')
   AND r.status IN ('succeeded','partial')
   AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
@@ -947,12 +1529,15 @@ SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
 FROM benchmarks_v2.metric_values_by_bucket
-WHERE bucket_at=%(bucket)s
+WHERE bucket_at=%(bucket)s AND benchmark IN ('STT','TTS')
 """
 
 
 def _rollup_mismatches(
-    conn: psycopg.Connection, buckets: Iterable[datetime], report: dict[str, Any]
+    conn: psycopg.Connection,
+    buckets: Iterable[datetime],
+    report: dict[str, Any],
+    on_bucket_completed: Callable[[], None] | None = None,
 ) -> None:
     """Compare materialized rollups with a fresh aggregate over immutable values."""
     with conn.cursor() as cur:
@@ -973,6 +1558,8 @@ def _rollup_mismatches(
                         "reason": "stored_bucket_payload_mismatch",
                     },
                 )
+            if on_bucket_completed is not None:
+                on_bucket_completed()
 
 
 _BUCKET_PAGE_SQL = """
@@ -982,10 +1569,14 @@ WITH buckets AS (
   WHERE n.status IN ('succeeded','partial','failed') AND n.scheduled_at IS NOT NULL
     AND EXISTS (
       SELECT 1 FROM benchmarks_v2.results r
-      WHERE r.run_id=n.id AND r.id BETWEEN %s AND %s AND r.benchmark IN ('STT','TTS')
+      WHERE r.run_id=n.id AND r.id BETWEEN %s AND %s AND r.created_at >= %s AND r.created_at < %s
+        AND r.benchmark IN ('STT','TTS')
     )
     AND NOT EXISTS (
-      SELECT 1 FROM benchmarks_v2.results r WHERE r.run_id=n.id AND (r.id < %s OR r.id > %s)
+      SELECT 1 FROM benchmarks_v2.results r
+      WHERE r.run_id=n.id AND r.benchmark IN ('STT','TTS') AND NOT (
+        r.id BETWEEN %s AND %s AND r.created_at >= %s AND r.created_at < %s
+      )
     )
   GROUP BY n.scheduled_at
 )
@@ -996,23 +1587,23 @@ ORDER BY scheduled_at,first_run_id LIMIT %s
 
 
 def _complete_pages(
-    conn: psycopg.Connection, low: int, high: int, batch_size: int, skipped: Counter[str]
+    conn: psycopg.Connection, window: FrozenWindow, batch_size: int, skipped: Counter[str]
 ) -> Iterable[tuple[list[LegacyRow], list[LegacyRow]]]:
     """Yield raw and complete bounded run pages, ending each read transaction."""
     after_run_id = 0
     while True:
-        run_ids, rows = _run_page(conn, low, high, after_run_id, batch_size)
+        run_ids, rows = _run_page(conn, window, after_run_id, batch_size)
         if not run_ids:
             conn.commit()
             return
         after_run_id = run_ids[-1]
-        complete = _complete_window_rows(conn, rows, low, high, skipped)
+        complete = _complete_window_rows(conn, rows, window, skipped)
         conn.commit()
         yield rows, complete
 
 
 def _scheduled_buckets(
-    conn: psycopg.Connection, low: int, high: int, batch_size: int
+    conn: psycopg.Connection, window: FrozenWindow, batch_size: int
 ) -> Iterable[datetime]:
     """Keyset distinct buckets by timestamp and a stable representative run id."""
     after: tuple[datetime, int] | None = None
@@ -1022,10 +1613,14 @@ def _scheduled_buckets(
             cur.execute(
                 _BUCKET_PAGE_SQL,
                 (
-                    low,
-                    high,
-                    low,
-                    high,
+                    window.min_result_id,
+                    window.max_result_id,
+                    window.start,
+                    window.end,
+                    window.min_result_id,
+                    window.max_result_id,
+                    window.start,
+                    window.end,
                     after[0] if after else None,
                     *(after or (None, 0)),
                     batch_size,
@@ -1056,6 +1651,8 @@ def _preflight_artifact_bucket(client: storage.Client, bucket_name: str) -> None
 def _set_ready(report: dict[str, Any], *, dry_run: bool) -> None:
     report["skipped_by_reason"] = dict(report["skipped_by_reason"])
     report["verification_skipped_by_reason"] = dict(report["verification_skipped_by_reason"])
+    report["parity_mismatch_reasons"] = dict(report["parity_mismatch_reasons"])
+    report["provenance_differences"] = dict(report["provenance_differences"])
     report["cutover_ready"] = (
         (not dry_run or not report["eligible"])
         and report["parity_mismatch_count"] == 0
@@ -1070,53 +1667,98 @@ def backfill(
     *,
     min_result_id: int,
     max_result_id: int,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
     batch_size: int,
     apply: bool,
     artifact_bucket: str | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> dict[str, Any]:
-    if min_result_id <= 0 or max_result_id < min_result_id or batch_size <= 0:
+    if batch_size <= 0:
         raise ValueError("invalid id range or batch size")
+    if (window_start is None) != (window_end is None):
+        raise ValueError("window start and end must be provided together")
+    if apply and window_start is None:
+        raise ValueError("apply requires explicit window start and end")
+    # The command resolves this from the database exactly once.  This fallback
+    # retains a frozen cohort for programmatic callers used in focused tests.
+    end = window_end or datetime.now(UTC)
+    window = FrozenWindow(
+        min_result_id, max_result_id, window_start or end - timedelta(hours=168), end
+    )
     report = _report()
     report["window"] = {
         "min_result_id": min_result_id,
         "max_result_id": max_result_id,
+        "start": window.start.isoformat(),
+        "end": window.end.isoformat(),
         "batch_size": batch_size,
     }
-    if apply and not artifact_bucket:
-        raise click.ClickException("BENCHMARK_ARTIFACT_BUCKET is required for --apply")
-    # Fail GCS setup before the first committed page, even if this prefix happens
-    # not to contain an artifact-bearing observation.
-    client = storage.Client() if apply else None
-    if client is not None and artifact_bucket is not None:
-        _preflight_artifact_bucket(client, artifact_bucket)
-    conn.commit()
-    if not apply:
-        for rows, complete in _complete_pages(
-            conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
-        ):
-            report["source_rows"] += len(rows)
-            plans = _page_plans(complete, report["skipped_by_reason"])
-            report["source_groups"] += len(plans)
-            for plan in plans:
-                if plan.first.scheduled_at is None:
-                    report["skipped_by_reason"]["scheduled_at_missing"] += 1
-                else:
-                    _insert_plan(conn, plan, False, artifact_bucket, None, report)
-        _rollup_mismatches(
-            conn,
-            _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
-            report,
-        )
-        _set_ready(report, dry_run=True)
-        return report
-    with conn.cursor() as cur:
-        cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
-    # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
-    # transaction now so each following ``conn.transaction`` is top-level.
-    conn.commit()
+    reporter = reporter or ProgressReporter(
+        mode="apply" if apply else "dry_run",
+        min_result_id=min_result_id,
+        max_result_id=max_result_id,
+        batch_size=batch_size,
+        window_start=window.start,
+        window_end=window.end,
+    )
+    phase = "operation"
+    lock_acquired = False
+    reporter.phase_started(phase, report)
     try:
+        if apply and not artifact_bucket:
+            raise click.ClickException("BENCHMARK_ARTIFACT_BUCKET is required for --apply")
+        # Fail GCS setup before the first committed page, even if this prefix happens
+        # not to contain an artifact-bearing observation.
+        client = storage.Client() if apply else None
+        if client is not None and artifact_bucket is not None:
+            phase = "artifact_preflight"
+            reporter.phase_started(phase, report)
+            _preflight_artifact_bucket(client, artifact_bucket)
+            reporter.phase_completed(phase, report)
+        phase = "qualifying_run_count"
+        reporter.phase_started(phase, report)
+        reporter.total_runs = _qualifying_run_count(conn, window)
+        reporter.phase_completed(phase, report)
+        conn.commit()
+        phase = "source_reconciliation"
+        reporter.phase_started(phase, report, total_runs=reporter.total_runs)
+        if not apply:
+            for rows, complete in _complete_pages(
+                conn, window, batch_size, report["skipped_by_reason"]
+            ):
+                report["source_rows"] += len(rows)
+                plans = _page_plans(complete, report["skipped_by_reason"])
+                report["source_groups"] += len(plans)
+                for plan in plans:
+                    if plan.first.scheduled_at is None:
+                        report["skipped_by_reason"]["scheduled_at_missing"] += 1
+                    else:
+                        _insert_plan(conn, plan, False, artifact_bucket, None, report)
+                reporter.completed_page(
+                    sorted({row.run_id for row in rows}), rows, report, phase=phase
+                )
+            reporter.phase_completed(phase, report)
+            phase = "rollup_verification"
+            reporter.phase_started(phase, report)
+            _rollup_mismatches(
+                conn,
+                _scheduled_buckets(conn, window, batch_size),
+                report,
+                lambda: reporter.completed_unit(report, phase=phase),
+            )
+            reporter.phase_completed(phase, report)
+            _set_ready(report, dry_run=True)
+            reporter.phase_completed("operation", report)
+            return report
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
+        lock_acquired = True
+        # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
+        # transaction now so each following ``conn.transaction`` is top-level.
+        conn.commit()
         for rows, complete in _complete_pages(
-            conn, min_result_id, max_result_id, batch_size, report["skipped_by_reason"]
+            conn, window, batch_size, report["skipped_by_reason"]
         ):
             report["source_rows"] += len(rows)
             plans = _page_plans(complete, report["skipped_by_reason"])
@@ -1141,11 +1783,13 @@ def backfill(
                         with conn.cursor() as cur:
                             _refresh_bucket(cur, bucket_at)
                         report["buckets"] += 1
+            reporter.completed_page(sorted({row.run_id for row in rows}), rows, report, phase=phase)
+        reporter.phase_completed(phase, report)
         # Re-plan from a fresh bounded pass; never retain first-pass plans.
+        phase = "post_write_verification"
+        reporter.phase_started(phase, report, total_runs=reporter.total_runs)
         verification_skipped: Counter[str] = report["verification_skipped_by_reason"]
-        for _, complete in _complete_pages(
-            conn, min_result_id, max_result_id, batch_size, verification_skipped
-        ):
+        for rows, complete in _complete_pages(conn, window, batch_size, verification_skipped):
             for plan in _page_plans(complete, verification_skipped):
                 if plan.first.scheduled_at is None:
                     verification_skipped["scheduled_at_missing"] += 1
@@ -1158,63 +1802,122 @@ def backfill(
                         plan.natural,
                     )
                     found = cur.fetchone()
-                    reason = (
-                        "post_write_observation_missing"
-                        if found is None
-                        else "post_write_payload_mismatch"
-                        if not _stored_plan_matches(cur, plan, found[0])
-                        else None
-                    )
+                    reason: str | None = None
+                    if found is None:
+                        reason = (
+                            "parent"
+                            if plan.live_owner_required
+                            else "post_write_observation_missing"
+                        )
+                    elif plan.live_owner_required and found[0] == plan.id:
+                        reason = "parent"
+                    elif found[0] != plan.id:
+                        live_validation = _live_validation_result(cur, plan, found[0])
+                        if not live_validation.matches:
+                            reason = live_validation.category
+                    elif not _strict_stored_plan_matches(cur, plan, found[0]):
+                        reason = "post_write_payload_mismatch"
                     if reason is not None:
                         _append_mismatch(
                             report,
                             "parity_mismatches",
-                            {"natural_key": list(plan.natural), "reason": reason},
+                            {"reason": reason},
                         )
+            reporter.completed_page(sorted({row.run_id for row in rows}), rows, report, phase=phase)
+        reporter.phase_completed(phase, report)
+        phase = "rollup_verification"
+        reporter.phase_started(phase, report)
         _rollup_mismatches(
             conn,
-            _scheduled_buckets(conn, min_result_id, max_result_id, batch_size),
+            _scheduled_buckets(conn, window, batch_size),
             report,
+            lambda: reporter.completed_unit(report, phase=phase),
         )
+        reporter.phase_completed(phase, report)
         _set_ready(report, dry_run=False)
+        reporter.phase_completed("operation", report)
         return report
+    except BaseException:
+        status = "cancelled" if isinstance(sys.exception(), _BackfillCancelled) else "failed"
+        reporter.emit(phase=phase, status=status, report=report)
+        reporter.emit(phase="operation", status=status, report=report)
+        raise
     finally:
-        conn.rollback()
-        with conn.cursor() as cur:
-            cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (_LOCK,))
-        conn.commit()
+        if lock_acquired:
+            conn.rollback()
+            with conn.cursor() as cur:
+                cur.execute("SELECT pg_advisory_unlock(hashtextextended(%s,0))", (_LOCK,))
+            conn.commit()
 
 
 @click.command(name="backfill-normalized-storage")
 @click.option("--min-result-id", type=click.IntRange(1), default=1, show_default=True)
 @click.option("--max-result-id", type=click.IntRange(1))
+@click.option("--window-start", type=str)
+@click.option("--window-end", type=str)
 @click.option("--batch-size", type=click.IntRange(1), default=100, show_default=True)
 @click.option("--apply", is_flag=True, help="Write immutable normalized rows.")
 def backfill_normalized_storage_cli(
-    min_result_id: int, max_result_id: int | None, batch_size: int, apply: bool
+    min_result_id: int,
+    max_result_id: int | None,
+    window_start: str | None,
+    window_end: str | None,
+    batch_size: int,
+    apply: bool,
 ) -> None:
     """Reconcile a frozen inclusive legacy-result window into normalized tables."""
-    if apply and max_result_id is None:
-        raise click.UsageError("--apply requires an explicit --max-result-id")
+    if apply and (max_result_id is None or window_start is None or window_end is None):
+        raise click.UsageError(
+            "--apply requires explicit --window-start, --window-end, and --max-result-id"
+        )
+    if (window_start is None) != (window_end is None):
+        raise click.UsageError("--window-start and --window-end must be provided together")
+
+    def parse_window(value: str, option: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise click.UsageError(f"{option} must be an ISO-8601 timestamp") from exc
+        if parsed.tzinfo is None:
+            raise click.UsageError(f"{option} must include a timezone")
+        return parsed.astimezone(UTC)
+
+    explicit_start = parse_window(window_start, "--window-start") if window_start else None
+    explicit_end = parse_window(window_end, "--window-end") if window_end else None
     url = str(get_settings().database_url)
     if url == "postgresql://unused:unused@127.0.0.1:5432/unused":
         raise click.ClickException(
             "DATABASE_URL is required for this production migration; set a non-local production URL"
         )
-    with psycopg.connect(url) as conn:
-        if max_result_id is None:
+    with _temporary_sigterm_cancellation(), psycopg.connect(url) as conn:
+        database_now: datetime | None = None
+        if max_result_id is None or explicit_end is None:
             with conn.cursor() as cur:
-                cur.execute("SELECT COALESCE(max(id),0) FROM benchmarks_v2.results")
+                cur.execute(
+                    "SELECT statement_timestamp(),COALESCE(max(id),0) FROM benchmarks_v2.results"
+                )
                 row = cur.fetchone()
                 if row is None:  # pragma: no cover - aggregate SELECT always returns one row.
-                    raise RuntimeError("max result id query returned no row")
-                max_result_id = row[0]
+                    raise RuntimeError("frozen window query returned no row")
+                database_now, resolved_max_result_id = row
+                if max_result_id is None:
+                    max_result_id = int(resolved_max_result_id)
+        end = explicit_end if explicit_end is not None else database_now
+        if end is None:  # pragma: no cover - query always returns statement_timestamp.
+            raise RuntimeError("database clock query returned no timestamp")
+        start = explicit_start if explicit_start is not None else end - timedelta(hours=168)
         if max_result_id < min_result_id:
             raise click.UsageError("--max-result-id must be >= --min-result-id")
+        try:
+            FrozenWindow(min_result_id, max_result_id, start, end)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
         report = backfill(
             conn,
             min_result_id=min_result_id,
             max_result_id=max_result_id,
+            window_start=start,
+            window_end=end,
             batch_size=batch_size,
             apply=apply,
             artifact_bucket=os.getenv("BENCHMARK_ARTIFACT_BUCKET"),

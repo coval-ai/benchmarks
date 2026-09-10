@@ -361,6 +361,10 @@ class Result(BaseModel):
     wer_insertions_pct: float | None = None
     wer_deletions_pct: float | None = None
     wer_substitutions_pct: float | None = None
+    wer_substitutions: int | None = None
+    wer_deletions: int | None = None
+    wer_insertions: int | None = None
+    wer_reference_words: int | None = None
     # The configuration arm that produced this row. `pinned` marks components Coval
     # chose for comparability; a vendor-submitted or otherwise-configured arm carries
     # its own id. Orchestration platforms are variants of S2S, not their own benchmark.

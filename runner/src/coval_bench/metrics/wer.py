@@ -44,7 +44,20 @@ class WERResult(BaseModel):
     incorrect_words: list[WordError]
     normalized_reference: str
     normalized_hypothesis: str
+    substitutions: int
+    deletions: int
+    insertions: int
+    reference_words: int
     norm_version: Literal["2"] = NORM_VERSION
+
+    @property
+    def error_counts(self) -> dict[str, int]:
+        return {
+            "wer_substitutions": self.substitutions,
+            "wer_deletions": self.deletions,
+            "wer_insertions": self.insertions,
+            "wer_reference_words": self.reference_words,
+        }
 
     @property
     def error_percentages(self) -> dict[str, float]:
@@ -175,6 +188,10 @@ def compute_wer(
             incorrect_words=[],
             normalized_reference=norm_ref,
             normalized_hypothesis=norm_hyp,
+            substitutions=0,
+            deletions=0,
+            insertions=0,
+            reference_words=0,
         )
 
     # Empty reference with non-empty hypothesis: jiwer would return inf.
@@ -190,10 +207,15 @@ def compute_wer(
             incorrect_words=errors,
             normalized_reference=norm_ref,
             normalized_hypothesis=norm_hyp,
+            substitutions=0,
+            deletions=0,
+            insertions=ins_count,
+            reference_words=0,
         )
 
     # Use jiwer for the WER ratio (fast, correctness-tested Levenshtein)
-    raw_wer: float = jiwer.wer(norm_ref, norm_hyp)
+    aligned = jiwer.process_words(norm_ref, norm_hyp)
+    raw_wer: float = aligned.wer
 
     incorrect = _build_word_errors(ref_words, hyp_words)
 
@@ -203,4 +225,8 @@ def compute_wer(
         incorrect_words=incorrect,
         normalized_reference=norm_ref,
         normalized_hypothesis=norm_hyp,
+        substitutions=aligned.substitutions,
+        deletions=aligned.deletions,
+        insertions=aligned.insertions,
+        reference_words=len(ref_words),
     )

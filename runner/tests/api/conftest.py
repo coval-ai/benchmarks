@@ -46,18 +46,14 @@ from pytest_postgresql import factories
 
 from coval_bench.api.app import create_app
 from coval_bench.arena.moderation import ModerationResult
-from coval_bench.arena.pairing import active_tts_models
 from coval_bench.config import Settings
-from coval_bench.registries import (
-    MODEL_REGISTRY,
-    TAG_CATEGORIES,
-    RegisteredModel,
-    tag_value_label,
-)
+from coval_bench.registries import RegisteredModel
 from coval_bench.registries.provider_keys import PROVIDER_ENV
+from tests.roster import TEST_ROSTER
 
 ARENA_LABELER_KEY = "test-labeler-key"
 MOCK_TOOLS_KEY = "test-mock-tools-key"  # noqa: S105 — a fixture value, not a credential
+LLM_PROXY_KEY = "test-llm-proxy-key"  # noqa: S105 — a fixture value, not a credential
 
 # The one early-access proof is a Clerk session token, so the app fixture wires a
 # whole stub instance: an issuer, an authorized party, a signing key the stubbed
@@ -96,6 +92,44 @@ def mint_clerk_token(**claims: Any) -> str:
 def bearer(**claims: Any) -> dict[str, str]:
     """Request headers proving whatever *claims* say (e.g. ``email=``, ``org_id=``)."""
     return {"Authorization": f"Bearer {mint_clerk_token(**claims)}"}
+
+
+GOOGLE_ADMIN_EMAIL = "admin@test.example.com"
+GOOGLE_AUDIENCE = "32555940559.apps.googleusercontent.com"
+
+_GOOGLE_SIGNING_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_GOOGLE_PUBLIC_PEM = _GOOGLE_SIGNING_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+)
+
+
+def mint_google_token(**claims: Any) -> str:
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "iss": "https://accounts.google.com",
+        "aud": GOOGLE_AUDIENCE,
+        "sub": "google-sub-1",
+        "email": GOOGLE_ADMIN_EMAIL,
+        "email_verified": True,
+        "iat": now,
+        "exp": now + 3600,
+    }
+    payload.update(claims)
+    return jwt.encode(payload, _GOOGLE_SIGNING_KEY, algorithm="RS256")
+
+
+def stub_jwks(monkeypatch: pytest.MonkeyPatch) -> None:
+    clerk_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
+    monkeypatch.setattr(
+        "coval_bench.api.clerk._jwks",
+        lambda issuer: SimpleNamespace(get_signing_key_from_jwt=lambda token: clerk_key),
+    )
+    google_key = SimpleNamespace(key=_GOOGLE_PUBLIC_PEM)
+    monkeypatch.setattr(
+        "coval_bench.api.google_auth._jwks",
+        lambda: SimpleNamespace(get_signing_key_from_jwt=lambda token: google_key),
+    )
 
 
 def _make_db_url(postgresql: Any) -> str:
@@ -146,7 +180,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 provider       text NOT NULL,
                 model          text NOT NULL,
                 voice          text,
-                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                benchmark      text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
                 metric_type    text NOT NULL,
                 metric_value   double precision,
                 metric_units   text,
@@ -173,6 +207,22 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 latency_ms     double precision NOT NULL
                                CHECK (latency_ms >= 0 AND latency_ms NOT IN (
                                    'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
+                created_at     timestamptz NOT NULL DEFAULT now()
+            )
+        """)
+        # Per-turn LLM proxy timing (mirrors migration 20260902_0026).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.llm_turns (
+                id             bigserial PRIMARY KEY,
+                simulation_id  text NOT NULL CHECK (simulation_id <> ''),
+                turn_index     integer NOT NULL CHECK (turn_index >= 0),
+                provider       text NOT NULL CHECK (provider <> ''),
+                model          text NOT NULL CHECK (model <> ''),
+                ttft_ms        double precision NOT NULL CHECK (
+                    ttft_ms >= 0 AND ttft_ms NOT IN (
+                        'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
+                total_ms       double precision NOT NULL CHECK (total_ms >= ttft_ms),
+                output_tokens  integer CHECK (output_tokens IS NULL OR output_tokens >= 0),
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
@@ -260,7 +310,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE TABLE IF NOT EXISTS benchmarks_v2.results_by_bucket (
                 provider      text NOT NULL,
                 model         text NOT NULL,
-                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                benchmark     text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S','LLM')),
                 dataset_id    text NOT NULL,
                 metric_type   text NOT NULL,
                 bucket_at     timestamptz NOT NULL,
@@ -278,7 +328,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.models (
                 id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-                modality      text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                modality      text NOT NULL CHECK (modality IN ('STT','TTS','S2S','LLM')),
                 provider      text NOT NULL CHECK (provider <> ''),
                 model         text NOT NULL CHECK (model <> ''),
                 voice         text CHECK (voice IS NULL OR voice <> ''),
@@ -291,6 +341,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 arena_enabled boolean NOT NULL DEFAULT true,
                 collected     boolean NOT NULL,
                 published     boolean NOT NULL,
+                color         text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$'),
                 updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
                 updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
                 updated_at    timestamptz NOT NULL DEFAULT now(),
@@ -300,7 +351,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.tags (
                 value    text PRIMARY KEY CHECK (value <> ''),
-                category text NOT NULL CHECK (category IN ('mode','features')),
+                category text NOT NULL CHECK (category = 'features'),
                 label    text NOT NULL CHECK (label <> '')
             )
         """)
@@ -315,7 +366,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE TABLE IF NOT EXISTS benchmarks_v2.model_history (
                 id        bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                 model_id  bigint NOT NULL,
-                modality  text NOT NULL CHECK (modality IN ('STT','TTS','S2S')),
+                modality  text NOT NULL CHECK (modality IN ('STT','TTS','S2S','LLM')),
                 provider  text NOT NULL CHECK (provider <> ''),
                 model     text NOT NULL CHECK (model <> ''),
                 old       jsonb CHECK (old IS NULL OR jsonb_typeof(old) = 'object'),
@@ -331,6 +382,38 @@ def _load_schema(**connect_kwargs: Any) -> None:
             CREATE INDEX IF NOT EXISTS model_history_model_id_changed_at
                 ON benchmarks_v2.model_history (model_id, changed_at DESC)
         """)
+        # Pricing log (mirrors migration 20260903_0027).
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS benchmarks_v2.pricing_rates (
+                id                  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                benchmark           text NOT NULL CHECK (benchmark IN ('STT','TTS','S2S')),
+                provider            text NOT NULL CHECK (provider <> ''),
+                model               text NOT NULL CHECK (model <> ''),
+                unit                text CHECK (unit IS NULL OR unit <> ''),
+                price_usd           numeric CHECK (price_usd IS NULL OR price_usd > 0),
+                effective_from      date NOT NULL,
+                source_url          text CHECK (source_url IS NULL OR source_url <> ''),
+                notes               text CHECK (notes IS NULL OR notes <> ''),
+                recorded_by_user_id text NOT NULL CHECK (recorded_by_user_id <> ''),
+                recorded_by_email   text
+                    CHECK (recorded_by_email IS NULL OR recorded_by_email <> ''),
+                recorded_at         timestamptz NOT NULL DEFAULT now(),
+                CHECK ((unit IS NULL) = (price_usd IS NULL)),
+                CHECK (price_usd IS NULL OR source_url IS NOT NULL)
+            )
+        """)
+
+
+TAG_VOCABULARY: tuple[tuple[str, str], ...] = (
+    ("multilingual", "Multilingual"),
+    ("vad", "VAD"),
+    ("diarization", "Diarization"),
+    ("translation", "Translation"),
+    ("code-switching", "Code switching"),
+    ("keyterm-biasing", "Keyterm biasing"),
+    ("voice-cloning", "Voice cloning"),
+    ("emotion-control", "Emotion control"),
+)
 
 
 def _seed_registry(**connect_kwargs: Any) -> None:
@@ -340,13 +423,14 @@ def _seed_registry(**connect_kwargs: Any) -> None:
     needs them populated. Loaded into the template database once.
     """
     with psycopg.connect(**connect_kwargs) as conn:
-        for tag, category in TAG_CATEGORIES.items():
+        for value, label in TAG_VOCABULARY:
             conn.execute(
                 "INSERT INTO benchmarks_v2.tags (value, category, label) VALUES (%s, %s, %s)"
                 " ON CONFLICT DO NOTHING",
-                (str(tag), category.value, tag_value_label(category, str(tag))),
+                (value, "features", label),
             )
-        _insert_models(conn, MODEL_REGISTRY)
+        _insert_models(conn, TEST_ROSTER)
+        _insert_rates(conn, SEED_RATES)
         conn.commit()
 
 
@@ -357,8 +441,9 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             """
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
-                 on_prem, region, arena_enabled, collected, published, updated_by_user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+                 on_prem, region, arena_enabled, collected, published, color,
+                 updated_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
             """,
             (
@@ -375,6 +460,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.arena_enabled,
                 model.collected,
                 model.published,
+                model.color,
             ),
         ).fetchone()
         assert row is not None
@@ -383,6 +469,43 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 "INSERT INTO benchmarks_v2.model_tags (model_id, tag) VALUES (%s, %s)",
                 (row[0], str(tag)),
             )
+
+
+# One published rate per priced benchmark, on the test roster, keyed like the
+# migration's seed rows: (benchmark, provider, model, unit, price, from, source, notes).
+SEED_RATES: tuple[tuple[str, ...], ...] = (
+    (
+        "STT",
+        "seed",
+        "stt",
+        "per_minute",
+        "0.0048",
+        "2026-08-24",
+        "https://seed.example/pricing",
+        "Pay as you go.",
+    ),
+    (
+        "TTS",
+        "seed",
+        "tts-a",
+        "per_1k_chars",
+        "0.030",
+        "2026-08-10",
+        "https://seed.example/pricing",
+        "Pay as you go.",
+    ),
+)
+
+
+def _insert_rates(conn: psycopg.Connection[Any], rows: Sequence[Sequence[str]]) -> None:
+    """Record rates into the pricing log, as the seed migration does."""
+    for row in rows:
+        conn.execute(
+            "INSERT INTO benchmarks_v2.pricing_rates (benchmark, provider, model, unit, price_usd,"
+            " effective_from, source_url, notes, recorded_by_user_id)"
+            " VALUES (%s, %s, %s, %s, %s::numeric, %s::date, %s, %s, 'tests')",
+            tuple(row),
+        )
 
 
 def add_models(postgresql: Any, *models: RegisteredModel) -> None:
@@ -416,28 +539,25 @@ async def app(
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("MOCK_TOOLS_SECRET", MOCK_TOOLS_KEY)
+    monkeypatch.setenv("LLM_PROXY_SECRET", LLM_PROXY_KEY)
+    monkeypatch.setenv("PHONELY_API_KEY", "test-phonely-key")
+    monkeypatch.setenv("PHONELY_AGENT_ID", "test-phonely-agent")
+    monkeypatch.setenv("PHONELY_BASE_URL", "http://phonely.invalid")
     monkeypatch.setenv("CLERK_ISSUER", CLERK_ISSUER)
     monkeypatch.setenv("CLERK_AUTHORIZED_PARTIES", json.dumps([CLERK_PARTY]))
     monkeypatch.setenv("CLERK_ORG_PROVIDERS", json.dumps(CLERK_ORG_PROVIDERS))
     monkeypatch.setenv("CLERK_COVAL_ORG", COVAL_ORG)
-    # Resolve token signatures against the fixture key instead of the network.
-    signing_key = SimpleNamespace(key=_CLERK_PUBLIC_PEM)
-    monkeypatch.setattr(
-        "coval_bench.api.clerk._jwks",
-        lambda issuer: SimpleNamespace(get_signing_key_from_jwt=lambda token: signing_key),
-    )
+    stub_jwks(monkeypatch)
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     # Arena pairing drops providers whose key is not configured, so a service with no
-    # keys has no roster and every battle is a 503. Prod mounts all of them — CI's
-    # check_arena_keys.py enforces it — so the fixture models that. OPENAI_API_KEY stays
-    # unset on purpose above, which simply leaves openai out of the roster.
-    for model in active_tts_models(MODEL_REGISTRY):
-        env_var = PROVIDER_ENV.get(model.provider)
-        if env_var is not None and env_var != "OPENAI_API_KEY":
-            monkeypatch.setenv(env_var, "test-provider-key")
+    # keys has no roster and every battle is a 503. Prod mounts every provider key, so
+    # the fixture does too. OPENAI_API_KEY stays unset on purpose above, which simply
+    # leaves openai out of the roster.
+    for env_var in set(PROVIDER_ENV.values()) - {"OPENAI_API_KEY"}:
+        monkeypatch.setenv(env_var, "test-provider-key")
 
     settings = Settings()
 

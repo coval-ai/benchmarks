@@ -14,7 +14,7 @@ Wire protocol (OpenAI-Realtime style):
 
 The Nemotron models run with ~1.1 s of encoder lookahead and commit drops it,
 truncating the tail. Trailing silence is paced in before the commit to flush
-the lookahead (Flux/Rev AI pattern); their TTFS is excluded in
+the lookahead (Rev AI pattern); their TTFS is excluded in
 ``registries/metrics.py`` since the final's timing then tracks the client's
 silence length, not the engine.
 

@@ -32,6 +32,7 @@ class Metric(StrEnum):
     V2V = "V2V"
     INSTRUCTION_FOLLOWING = "InstructionFollowing"
     INTERRUPTION_RATE = "InterruptionRate"
+    EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
 
 
 class MetricDirection(StrEnum):
@@ -94,7 +95,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="seconds",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=2,
-        benchmarks=frozenset({Benchmark.STT}),
+        benchmarks=frozenset({Benchmark.STT, Benchmark.LLM}),
     ),
     Metric.TTFS: MetricSpec(
         display_name="Time to Final from Speech",
@@ -155,13 +156,22 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         units="percent",
         direction=MetricDirection.HIGHER_IS_BETTER,
         decimals=1,
-        benchmarks=frozenset({Benchmark.S2S}),
+        benchmarks=frozenset({Benchmark.S2S, Benchmark.LLM}),
     ),
     Metric.INTERRUPTION_RATE: MetricSpec(
         display_name="Interruption Rate",
         units="per_minute",
         direction=MetricDirection.LOWER_IS_BETTER,
         decimals=2,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
+    Metric.EXPECTED_BEHAVIOR_ADHERENCE: MetricSpec(
+        display_name="Expected Behavior Adherence",
+        # Coval reports criteria_met_count / criteria_total_count as a 0-1
+        # fraction; stored as a percentage like InstructionFollowing.
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
 }
@@ -199,8 +209,15 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
         MetricValueDefinition(key="insertions", unit="percent", minimum=0.0),
         MetricValueDefinition(key="deletions", unit="percent", minimum=0.0),
         MetricValueDefinition(key="substitutions", unit="percent", minimum=0.0),
+        MetricValueDefinition(key="substitution_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="deletion_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="insertion_count", unit="count", minimum=0.0, required=False),
+        MetricValueDefinition(key="reference_words", unit="count", minimum=0.0, required=False),
     ),
     component_sum_tolerance=0.0001,
+    optional_all_or_none=(
+        frozenset({"substitution_count", "deletion_count", "insertion_count", "reference_words"}),
+    ),
 )
 METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
     metric=Metric.TTFA,
@@ -273,7 +290,14 @@ def validate_metric_values(
             missing = ", ".join(sorted(optional_group - present))
             raise ValueError(f"optional metric value group is incomplete; missing: {missing}")
     if contract.component_sum_tolerance is not None:
-        components = [value for key, value in by_key.items() if key != "primary"]
+        primary_unit = next(
+            d.unit for d in contract.values if d.value_role is MetricValueRole.PRIMARY
+        )
+        components = [
+            value
+            for key, value in by_key.items()
+            if key != "primary" and definitions[key].unit == primary_unit
+        ]
         if (
             components
             and abs(sum(components) - by_key["primary"]) > contract.component_sum_tolerance
@@ -315,8 +339,6 @@ METRIC_EXCLUSIONS: dict[Metric, frozenset[tuple[str, str]]] = {
     ),
     Metric.TTFS: frozenset(
         {
-            ("deepgram", "flux-general-en"),
-            ("deepgram", "flux-general-multi"),
             ("assemblyai", "universal-streaming"),
             ("assemblyai", "universal-streaming-multilingual"),
             # Rev AI has no force-finalize; the tail final only lands after Reverb's

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from coval_bench.registries import Metric
+from coval_bench.registries import Benchmark, Metric
 from coval_bench.s2s import conditions
 
 
@@ -28,9 +28,35 @@ def test_unmapped_dataset_keeps_the_pre_scoping_contract() -> None:
     assert legacy.required is Metric.V2V
 
 
-def test_every_fetched_metric_is_an_s2s_metric() -> None:
-    from coval_bench.registries import METRIC_SPECS, Benchmark
+def test_llm_dental_contract_uses_instruction_and_local_ttft() -> None:
+    llm = conditions.condition_for(conditions.DATASET_ID_LLM_DENTAL)
+    assert llm.benchmark is Benchmark.LLM
+    assert llm.required is Metric.INSTRUCTION_FOLLOWING
+    assert llm.optional == frozenset()
+    assert llm.local == frozenset({Metric.TTFT})
+    assert (
+        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.CLEAN)
+        == conditions.DATASET_ID_LLM_DENTAL
+    )
+    assert (
+        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.NOISY) is None
+    )
+    assert (
+        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.ACCENTED)
+        is None
+    )
+    existing = {
+        dataset_id: condition
+        for dataset_id, condition in conditions.CONDITIONS.items()
+        if dataset_id != conditions.DATASET_ID_LLM_DENTAL
+    }
+    assert all(condition.benchmark is Benchmark.S2S for condition in existing.values())
+    assert all(not condition.local for condition in existing.values())
+
+
+def test_every_condition_metric_supports_its_benchmark() -> None:
+    from coval_bench.registries import METRIC_SPECS
 
     for dataset_id, condition in conditions.CONDITIONS.items():
-        for metric in condition.fetched:
-            assert Benchmark.S2S in METRIC_SPECS[metric].benchmarks, (dataset_id, metric)
+        for metric in condition.fetched | condition.local:
+            assert condition.benchmark in METRIC_SPECS[metric].benchmarks, (dataset_id, metric)

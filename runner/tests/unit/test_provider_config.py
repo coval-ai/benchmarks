@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for the model registry."""
+"""Unit tests for the model types and the provider name map."""
 
 from __future__ import annotations
 
@@ -9,24 +9,12 @@ import tomllib
 from pathlib import Path
 
 from coval_bench.registries import (
-    MODEL_REGISTRY,
-    TAG_CATEGORIES,
     Benchmark,
     Licensing,
-    ModelTag,
     RegisteredModel,
     Source,
 )
 from coval_bench.registries.provider_keys import provider_names
-
-
-def test_every_tag_has_a_category() -> None:
-    assert TAG_CATEGORIES.keys() == set(ModelTag)
-
-
-def test_registry_keys_unique() -> None:
-    keys = [(m.benchmark, m.provider, m.model) for m in MODEL_REGISTRY]
-    assert len(keys) == len(set(keys))
 
 
 def test_registered_model_defaults() -> None:
@@ -41,19 +29,6 @@ def test_registered_model_defaults() -> None:
     assert m.on_prem is False
 
 
-def test_collected_tts_models_have_voices() -> None:
-    # The runner can't synthesize without a voice; only uncollected entries may omit one.
-    for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.TTS and m.collected:
-            assert m.voice is not None, f"{m.provider}/{m.model} is collected but has no voice"
-
-
-def test_stt_models_have_no_voice() -> None:
-    for m in MODEL_REGISTRY:
-        if m.benchmark is Benchmark.STT:
-            assert m.voice is None
-
-
 def test_provider_names_cover_the_class_registries() -> None:
     """Every loadable provider class is reachable by its module name."""
     stt_classes = set(importlib.import_module("coval_bench.providers.stt").STT_PROVIDERS)
@@ -63,20 +38,6 @@ def test_provider_names_cover_the_class_registries() -> None:
     # Names with no loadable class must be exactly the optional-SDK providers.
     assert provider_names("stt") - stt_classes <= {"google"}
     assert provider_names("tts") - tts_classes <= {"google", "hume"}
-
-
-def test_scheduled_models_use_implemented_providers() -> None:
-    """Every model the orchestrator may schedule resolves without SDK imports.
-
-    Uncollected models are exempt: their rows outlive their provider's code.
-    """
-    for model in MODEL_REGISTRY:
-        if not model.collected:
-            continue
-        if model.benchmark is Benchmark.STT:
-            assert model.provider in provider_names("stt"), model.provider
-        elif model.benchmark is Benchmark.TTS:
-            assert model.provider in provider_names("tts"), model.provider
 
 
 def test_the_runner_image_installs_every_provider_extra() -> None:

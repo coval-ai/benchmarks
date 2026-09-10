@@ -23,7 +23,6 @@ recorded.
 from __future__ import annotations
 
 import asyncio
-import hmac
 import secrets
 import uuid
 from collections.abc import Sequence
@@ -44,6 +43,7 @@ from coval_bench.api.deps import (
     get_pool,
     get_posthog,
     get_settings,
+    secret_matches,
 )
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
@@ -127,12 +127,7 @@ def _hidden_tts_models(models: Sequence[RegisteredModel]) -> frozenset[tuple[str
 
 def _is_authenticated_labeler(provided: str | None, settings: Settings) -> bool:
     """True only if a labeler key is configured and the presented key matches it."""
-    expected = settings.arena_labeler_key
-    if expected is None or provided is None:
-        return False
-    return hmac.compare_digest(
-        provided.encode("utf-8"), expected.get_secret_value().encode("utf-8")
-    )
+    return secret_matches(provided, settings.arena_labeler_key)
 
 
 def require_labeler(

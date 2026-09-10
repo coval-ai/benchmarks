@@ -309,3 +309,26 @@ def test_the_modality_is_not_editable(registry_pg: psycopg.Connection[Any]) -> N
             )
 
     _with_store(registry_pg, scenario)
+
+
+def test_color_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]) -> None:
+    async def scenario(store: RegistryStore) -> None:
+        created = await store.insert_model(_new_model(), **_EDITOR)
+        assert created.color is None
+        result = await store.update_model(
+            created.id, {"color": "#1db098"}, expected_updated_at=created.updated_at, **_EDITOR
+        )
+        assert result is not None
+        _, painted = result
+        assert painted.color == "#1db098"
+        assert (await store.get_model(created.id)) == painted
+        result = await store.update_model(
+            created.id, {"color": None}, expected_updated_at=painted.updated_at, **_EDITOR
+        )
+        assert result is not None
+        _, cleared = result
+        assert cleared.color is None
+        changes = await store.history(created.id)
+        assert [change.new["color"] for change in changes] == [None, "#1db098", None]
+
+    _with_store(registry_pg, scenario)
