@@ -558,17 +558,14 @@ def _remote(tmp_path: Path, body: str) -> tuple[Manifest, MagicMock]:
     """A pointer to *body* served by a fake bucket, pinned to the body's real hash."""
     remote_dir = tmp_path / "remote"
     remote_dir.mkdir()
-    (remote_dir / "manifest.json").write_text(body)
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    (remote_dir / f"{sha}.json").write_text(body)
     pointer = Manifest(
         id="tts-v2",
         version="2.0.0",
         license="proprietary",
         source="test",
-        remote={
-            "bucket": "private",
-            "path": "tts-v2/manifest.json",
-            "sha256": hashlib.sha256(body.encode()).hexdigest(),
-        },
+        remote={"bucket": "private", "path": f"tts-v2/{sha}.json", "sha256": sha},
     )
     return pointer, _make_fake_storage_client(remote_dir)
 
@@ -595,7 +592,8 @@ def test_remote_tts_manifest_is_fetched_and_verified(
 
 def test_remote_manifest_hash_mismatch_raises(test_settings: Settings, tmp_path: Path) -> None:
     pointer, client = _remote(tmp_path, "{}")
-    (tmp_path / "remote" / "manifest.json").write_text("tampered")
+    assert pointer.remote is not None
+    (tmp_path / "remote" / pointer.remote.path.rsplit("/", 1)[1]).write_text("tampered")
 
     with (
         patch("coval_bench.datasets.loader._load_manifest", return_value=pointer),

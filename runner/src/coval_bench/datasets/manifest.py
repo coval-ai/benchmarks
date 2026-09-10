@@ -84,6 +84,13 @@ class RemoteManifest(BaseModel):
     path: str = Field(min_length=1)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
+    @model_validator(mode="after")
+    def path_is_content_addressed(self) -> RemoteManifest:
+        """A bank update is a new object, so a pinned runner never sees overwritten bytes."""
+        if self.sha256 not in self.path:
+            raise ValueError(f"remote path {self.path!r} must contain its sha256")
+        return self
+
 
 class Manifest(BaseModel):
     """Top-level manifest object for a dataset version.

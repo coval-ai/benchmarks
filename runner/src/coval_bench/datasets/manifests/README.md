@@ -369,11 +369,14 @@ credentials cannot, and no test depends on it.
 
 **Updating the bank.** Reshape the bank compiler's `corpus.json` to this
 manifest schema (items with `testcase_id`, `transcript`, `spoken_reference`,
-`kind`, and the per-kind metadata), then upload and re-pin:
+`kind`, and the per-kind metadata). The object name is the file's sha256, so a
+new revision is a new object and every pinned runner keeps resolving the bytes
+it was released with:
 
 ```sh
-gcloud storage cp manifest.json gs://coval-benchmarks-datasets-private/datasets/tts-v2/manifest.json
-shasum -a 256 manifest.json   # paste into remote.sha256 in tts-v2.json, bump version
+SHA=$(shasum -a 256 manifest.json | cut -c1-64)
+gcloud storage cp manifest.json gs://coval-benchmarks-datasets-private/datasets/tts-v2/$SHA.json
+# then set remote.path and remote.sha256 in tts-v2.json to $SHA and bump version
 ```
 
 Never commit the full manifest here. `tts-v1.json` is never edited either: its
