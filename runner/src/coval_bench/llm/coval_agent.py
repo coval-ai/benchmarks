@@ -330,12 +330,12 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
                 "llm_sync_fetch_deferred", provider=provider, reason="scheduled_run_created"
             )
         else:
-            fetchable[f"coval_llm_{provider}_agent_id"] = result.agent_id
+            fetchable[provider] = result.agent_id
     if fetchable:
         from coval_bench.registries.benchmarks import Benchmark
         from coval_bench.s2s.fetch_v2v import _run_fetch
 
-        _run_fetch(Benchmark.LLM, (), 720, 100, settings=settings.model_copy(update=fetchable))
+        _run_fetch(Benchmark.LLM, (), 720, 100, settings=settings, llm_agent_ids=fetchable)
     for provider, result in results.items():
         run_logger.info(
             "llm_sync_completed",

@@ -59,11 +59,12 @@ WINDOW_PAGE_SIZE = 10
 
 @dataclass(frozen=True)
 class AgentSpec:
-    """One provider: the Settings attr holding its Coval agent id + display strings."""
+    """One provider: its Coval agent id + display strings."""
 
-    agent_id_attr: str
     provider: str
     model: str
+    # None means the agent is not configured and is skipped.
+    agent_id: str | None = None
     # Settings attr holding this agent's own Coval test set id; None uses the
     # shared ``coval_s2s_test_set_id``.
     test_set_id_attr: str | None = None
@@ -95,169 +96,173 @@ class CovalRun:
     persona_id: str = ""
 
 
-# Agent ids resolved from Settings; model strings are display labels. Every agent
-# now runs the dental test set: the shared multi-turn set stays queryable but is
-# no longer written to, so a spec left on it would go stale rather than idle.
-AGENTS: tuple[AgentSpec, ...] = (
-    AgentSpec(
-        agent_id_attr="coval_s2s_openai_agent_id",
-        provider="openai",
-        model="gpt-realtime",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_gemini_agent_id",
-        provider="google",
-        model="gemini-live",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_xai_agent_id",
-        provider="xai",
-        model="grok-voice-think-fast-1.0",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_xai_think_fast_2_agent_id",
-        provider="xai",
-        model="grok-voice-think-fast-2.0",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-    ),
-    # Pre-launch models under codenames: the provider and model strings are what
-    # land in the results table, so they carry no vendor identity of their own.
-    AgentSpec(
-        agent_id_attr="coval_s2s_gray_agent_id",
-        provider="colors",
-        model="gray",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-        publish_samples=False,
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_red_agent_id",
-        provider="colors",
-        model="red",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_DENTAL,
-        publish_samples=False,
-    ),
-    # Instruction adherence by industry: a separate Coval workspace, one family
-    # per industry so they're never pooled together on the dashboard. No V2V is
-    # measured here, so these never reach the public samples card.
-    AgentSpec(
-        agent_id_attr="coval_s2s_health_openai_agent_id",
-        provider="openai",
-        model="gpt-realtime",
-        test_set_id_attr="coval_s2s_health_test_set_id",
-        family=FAMILY_INSTR_HEALTH,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_health_grok_agent_id",
-        provider="xai",
-        model="grok-voice",
-        test_set_id_attr="coval_s2s_health_test_set_id",
-        family=FAMILY_INSTR_HEALTH,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_health_violet_agent_id",
-        provider="openai",
-        model="violet",
-        test_set_id_attr="coval_s2s_health_test_set_id",
-        family=FAMILY_INSTR_HEALTH,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_home_service_openai_agent_id",
-        provider="openai",
-        model="gpt-realtime",
-        test_set_id_attr="coval_s2s_home_service_test_set_id",
-        family=FAMILY_INSTR_HOME_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_home_service_grok_agent_id",
-        provider="xai",
-        model="grok-voice",
-        test_set_id_attr="coval_s2s_home_service_test_set_id",
-        family=FAMILY_INSTR_HOME_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_home_service_violet_agent_id",
-        provider="openai",
-        model="violet",
-        test_set_id_attr="coval_s2s_home_service_test_set_id",
-        family=FAMILY_INSTR_HOME_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_cust_service_openai_agent_id",
-        provider="openai",
-        model="gpt-realtime",
-        test_set_id_attr="coval_s2s_cust_service_test_set_id",
-        family=FAMILY_INSTR_CUST_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_cust_service_grok_agent_id",
-        provider="xai",
-        model="grok-voice",
-        test_set_id_attr="coval_s2s_cust_service_test_set_id",
-        family=FAMILY_INSTR_CUST_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-    AgentSpec(
-        agent_id_attr="coval_s2s_cust_service_violet_agent_id",
-        provider="openai",
-        model="violet",
-        test_set_id_attr="coval_s2s_cust_service_test_set_id",
-        family=FAMILY_INSTR_CUST_SERVICE,
-        publish_samples=False,
-        workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-    ),
-)
+# Model strings are display labels. Every agent runs the dental test set: the
+# shared multi-turn set stays queryable but is no longer written to, so a spec
+# left on it would go stale rather than idle.
+def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
+    return (
+        AgentSpec(
+            agent_id=settings.coval_s2s_openai_agent_id,
+            provider="openai",
+            model="gpt-realtime",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_gemini_agent_id,
+            provider="google",
+            model="gemini-live",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_xai_agent_id,
+            provider="xai",
+            model="grok-voice-think-fast-1.0",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_xai_think_fast_2_agent_id,
+            provider="xai",
+            model="grok-voice-think-fast-2.0",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+        ),
+        # Pre-launch models under codenames: the provider and model strings are what
+        # land in the results table, so they carry no vendor identity of their own.
+        AgentSpec(
+            agent_id=settings.coval_s2s_gray_agent_id,
+            provider="colors",
+            model="gray",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+            publish_samples=False,
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_red_agent_id,
+            provider="colors",
+            model="red",
+            test_set_id_attr="coval_s2s_dental_test_set_id",
+            family=FAMILY_DENTAL,
+            publish_samples=False,
+        ),
+        # Instruction adherence by industry: a separate Coval workspace, one family
+        # per industry so they're never pooled together on the dashboard. No V2V is
+        # measured here, so these never reach the public samples card.
+        AgentSpec(
+            agent_id=settings.coval_s2s_health_openai_agent_id,
+            provider="openai",
+            model="gpt-realtime",
+            test_set_id_attr="coval_s2s_health_test_set_id",
+            family=FAMILY_INSTR_HEALTH,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_health_grok_agent_id,
+            provider="xai",
+            model="grok-voice",
+            test_set_id_attr="coval_s2s_health_test_set_id",
+            family=FAMILY_INSTR_HEALTH,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_health_violet_agent_id,
+            provider="openai",
+            model="violet",
+            test_set_id_attr="coval_s2s_health_test_set_id",
+            family=FAMILY_INSTR_HEALTH,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_home_service_openai_agent_id,
+            provider="openai",
+            model="gpt-realtime",
+            test_set_id_attr="coval_s2s_home_service_test_set_id",
+            family=FAMILY_INSTR_HOME_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_home_service_grok_agent_id,
+            provider="xai",
+            model="grok-voice",
+            test_set_id_attr="coval_s2s_home_service_test_set_id",
+            family=FAMILY_INSTR_HOME_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_home_service_violet_agent_id,
+            provider="openai",
+            model="violet",
+            test_set_id_attr="coval_s2s_home_service_test_set_id",
+            family=FAMILY_INSTR_HOME_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_cust_service_openai_agent_id,
+            provider="openai",
+            model="gpt-realtime",
+            test_set_id_attr="coval_s2s_cust_service_test_set_id",
+            family=FAMILY_INSTR_CUST_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_cust_service_grok_agent_id,
+            provider="xai",
+            model="grok-voice",
+            test_set_id_attr="coval_s2s_cust_service_test_set_id",
+            family=FAMILY_INSTR_CUST_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_cust_service_violet_agent_id,
+            provider="openai",
+            model="violet",
+            test_set_id_attr="coval_s2s_cust_service_test_set_id",
+            family=FAMILY_INSTR_CUST_SERVICE,
+            publish_samples=False,
+            workspace_id_attr="coval_s2s_industry_workspace_id",
+            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+    )
 
 
-def llm_specs(models: Iterable[RegisteredModel]) -> tuple[AgentSpec, ...]:
+def llm_specs(
+    models: Iterable[RegisteredModel], agent_ids: Mapping[str, str] | None = None
+) -> tuple[AgentSpec, ...]:
     """Every collected LLM model, driven over the same dental set through the proxy.
 
     TTFT comes from the proxy's own turn log rather than from Coval.
     """
+    agent_ids = agent_ids or {}
     return tuple(
         AgentSpec(
-            agent_id_attr=f"coval_llm_{model.provider}_agent_id",
+            agent_id=agent_ids.get(model.provider),
             provider=model.provider,
             model=model.model,
             test_set_id_attr="coval_s2s_dental_test_set_id",
@@ -1001,8 +1006,8 @@ def _expected_sample_models(settings: Settings) -> set[tuple[str, str]]:
     """The pairs a sample must cover; a bucket short one publishes nothing."""
     return {
         (spec.provider, spec.model)
-        for spec in AGENTS
-        if getattr(settings, spec.agent_id_attr) and spec.publish_samples
+        for spec in s2s_specs(settings)
+        if spec.agent_id and spec.publish_samples
     }
 
 
@@ -1197,11 +1202,11 @@ def _require_family_test_sets(settings: Settings, specs: Sequence[AgentSpec]) ->
     never having configured it.
     """
     for spec in specs:
-        if not spec.test_set_id_attr or not getattr(settings, spec.agent_id_attr, None):
+        if not spec.test_set_id_attr or not spec.agent_id:
             continue
         if not (getattr(settings, spec.test_set_id_attr) or "").strip():
             raise RuntimeError(
-                f"{spec.test_set_id_attr} is required when {spec.agent_id_attr} is set"
+                f"{spec.test_set_id_attr} is required when the {spec.provider} agent is set"
             )
 
 
@@ -1212,6 +1217,7 @@ async def fetch_and_write_v2v(
     only_run_ids: frozenset[str] | None = None,
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
+    llm_agent_ids: Mapping[str, str] | None = None,
 ) -> dict[str, RunStatus]:
     """Ingest the selected benchmark's providers; return per-provider status.
 
@@ -1221,15 +1227,14 @@ async def fetch_and_write_v2v(
     run more often than the sims.
     """
     settings = settings or get_settings()
-    specs = tuple(spec for spec in AGENTS if spec.benchmark is benchmark)
+    specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()
 
     metric_id = settings.coval_s2s_latency_metric_id
     if benchmark is Benchmark.S2S and not metric_id:
         # Industry specs fetch instruction adherence only (see conditions.py);
         # only a spec still relying on the shared V2V metric makes it required.
         v2v_spec_configured = any(
-            not spec.instruction_metric_id_attr and getattr(settings, spec.agent_id_attr, None)
-            for spec in specs
+            not spec.instruction_metric_id_attr and spec.agent_id for spec in specs
         )
         if v2v_spec_configured:
             raise RuntimeError("coval_s2s_latency_metric_id is not set")
@@ -1295,7 +1300,7 @@ async def fetch_and_write_v2v(
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
         if benchmark is Benchmark.LLM:
-            specs = llm_specs(await fetch_models(pool))
+            specs = llm_specs(await fetch_models(pool), llm_agent_ids)
             _require_family_test_sets(settings, specs)
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
@@ -1303,9 +1308,9 @@ async def fetch_and_write_v2v(
         matched_run_ids: set[str] = set()
         sampled_runs: list[SampleRun] = []
         for spec in specs:
-            agent_id = getattr(settings, spec.agent_id_attr, None)
+            agent_id = spec.agent_id
             if not agent_id:
-                logger.warning("agent_id_unset", provider=spec.provider, attr=spec.agent_id_attr)
+                logger.warning("agent_id_unset", provider=spec.provider, model=spec.model)
                 continue
             # An agent on its own test set is skipped when that id is missing rather
             # than falling back to the shared one, which would file its runs under
@@ -1456,6 +1461,7 @@ def _run_fetch(
     page_size: int,
     *,
     settings: Settings | None = None,
+    llm_agent_ids: Mapping[str, str] | None = None,
 ) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 
@@ -1472,6 +1478,7 @@ def _run_fetch(
                 only_run_ids=only_run_ids,
                 window_seconds=window_hours * 3600 if only_run_ids else None,
                 page_size=page_size if only_run_ids else WINDOW_PAGE_SIZE,
+                llm_agent_ids=llm_agent_ids,
             )
         )
     except Exception as exc:
