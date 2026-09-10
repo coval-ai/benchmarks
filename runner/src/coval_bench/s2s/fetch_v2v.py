@@ -889,7 +889,7 @@ async def _ingest_run(
         if all_rows:
             captured_at = datetime.now(UTC)
             await writer.record_results(all_rows, created_at=captured_at)
-            if normalized_dual_write_enabled and spec.benchmark is Benchmark.S2S:
+            if normalized_dual_write_enabled and spec.benchmark in (Benchmark.S2S, Benchmark.LLM):
                 from coval_bench.runner.normalized import dual_write
 
                 grouped: dict[str, list[Result]] = {}
@@ -920,7 +920,7 @@ async def _ingest_run(
                             dataset_sha256=normalized_sha256,
                             sample_id=sample_id,
                             entry=spec,
-                            benchmark=Benchmark.S2S,
+                            benchmark=spec.benchmark,
                             results=sample_rows,
                             provider_error=provider_error,
                             captured_at=captured_at,
