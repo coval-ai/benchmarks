@@ -328,7 +328,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
 
     assert applied.exit_code == 0, applied.output
     fetch.assert_called_once()
-    assert fetch.call_args.kwargs["settings"].coval_llm_phonely_agent_id == agent_id
+    assert fetch.call_args.kwargs["llm_agent_ids"] == {"phonely": agent_id}
 
     paused = PHONELY.model_copy(update={"collected": False})
     monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [paused])

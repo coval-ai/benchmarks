@@ -29,6 +29,7 @@ from coval_bench.s2s.conditions import (
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
     FAMILY_HAPPYPATH,
+    FAMILY_INSTR_HEALTH,
     FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
@@ -41,7 +42,7 @@ IDS = {Metric.V2V: "MID", Metric.INSTRUCTION_FOLLOWING: "IID"}
 LATENCY_IDS = {Metric.V2V: "MID"}
 ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
-SPEC = AgentSpec(agent_id_attr="coval_s2s_openai_agent_id", provider="openai", model="gpt-realtime")
+SPEC = AgentSpec(agent_id="a1", provider="openai", model="gpt-realtime")
 PHONELY = RegisteredModel(
     benchmark=Benchmark.LLM,
     provider="phonely",
@@ -50,7 +51,7 @@ PHONELY = RegisteredModel(
     published=False,
 )
 LLM_SPEC = AgentSpec(
-    agent_id_attr="coval_s2s_openai_agent_id",
+    agent_id="a1",
     provider="phonely",
     model="phonely-agent",
     test_set_id_attr="coval_s2s_dental_test_set_id",
@@ -311,7 +312,6 @@ def test_expected_sample_models_excludes_non_publishing_agents() -> None:
         coval_s2s_openai_agent_id="a1",
         coval_s2s_gray_agent_id="a2",
         coval_s2s_red_agent_id="a3",
-        coval_llm_phonely_agent_id="a4",
     )
     expected = fetch_v2v._expected_sample_models(settings)
 
@@ -784,7 +784,6 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     settings = Settings(
         coval_s2s_instruction_metric_id="IID",
         coval_s2s_openai_agent_id="s2s-agent",
-        coval_llm_phonely_agent_id="llm-agent",
         coval_s2s_dental_test_set_id="TSD",
     )
     client = _fake_client({}, {})
@@ -802,26 +801,31 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
         collected=False,
         published=False,
     )
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (SPEC,))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (SPEC,))
     monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=[PHONELY, paused]))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _settings: client)
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
     monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
 
-    statuses = await fetch_v2v.fetch_and_write_v2v(settings, benchmark=Benchmark.LLM)
+    statuses = await fetch_v2v.fetch_and_write_v2v(
+        settings, benchmark=Benchmark.LLM, llm_agent_ids={"phonely": "llm-agent"}
+    )
 
     assert statuses == {"llm-dental:phonely:phonely-agent": RunStatus.SUCCEEDED}
     fetch_one.assert_awaited_once()
     assert fetch_one.await_args is not None
-    assert fetch_one.await_args.kwargs["spec"] == fetch_v2v.llm_specs([PHONELY])[0]
+    assert fetch_one.await_args.kwargs["spec"].agent_id == "llm-agent"
+    assert fetch_one.await_args.kwargs["agent_id"] == "llm-agent"
     assert fetch_one.await_args.kwargs["metric_ids"] == {Metric.INSTRUCTION_FOLLOWING: "IID"}
 
 
 def test_phonely_spec_is_the_llm_dental_text_agent() -> None:
-    (spec,) = fetch_v2v.llm_specs([PHONELY, PHONELY.model_copy(update={"collected": False})])
+    (spec,) = fetch_v2v.llm_specs(
+        [PHONELY, PHONELY.model_copy(update={"collected": False})], {"phonely": "A1"}
+    )
     assert spec == AgentSpec(
-        agent_id_attr="coval_llm_phonely_agent_id",
+        agent_id="A1",
         provider="phonely",
         model="phonely-agent",
         test_set_id_attr="coval_s2s_dental_test_set_id",
@@ -950,12 +954,13 @@ async def test_non_clean_text_personas_are_not_ingested() -> None:
 async def test_fetch_and_write_llm_requires_the_instruction_metric_and_dental_set() -> None:
     with pytest.raises(RuntimeError, match="coval_s2s_instruction_metric_id is not set"):
         await fetch_v2v.fetch_and_write_v2v(
-            Settings(coval_llm_phonely_agent_id="a1"), benchmark=Benchmark.LLM
+            Settings(), benchmark=Benchmark.LLM, llm_agent_ids={"phonely": "a1"}
         )
     with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id is required"):
         await fetch_v2v.fetch_and_write_v2v(
-            Settings(coval_llm_phonely_agent_id="a1", coval_s2s_instruction_metric_id="IID"),
+            Settings(coval_s2s_instruction_metric_id="IID"),
             benchmark=Benchmark.LLM,
+            llm_agent_ids={"phonely": "a1"},
         )
 
 
@@ -968,16 +973,16 @@ async def test_industry_only_deployment_does_not_require_the_latency_metric(
     ``coval_s2s_latency_metric_id`` would otherwise block ingestion for a
     workspace that only ever asks Coval for instruction adherence.
     """
-    industry_spec = next(
-        spec
-        for spec in fetch_v2v.AGENTS
-        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
-    )
     settings = Settings(
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="W1",
         coval_s2s_health_instruction_metric_id="IID",
+    )
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.s2s_specs(settings)
+        if spec.family == FAMILY_INSTR_HEALTH and spec.provider == "openai"
     )
 
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
@@ -989,7 +994,7 @@ async def test_industry_only_deployment_does_not_require_the_latency_metric(
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
         yield MagicMock()
 
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (industry_spec,))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
@@ -1021,16 +1026,16 @@ async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec
     blank-vs-unset risk applies to it individually, instead of the clear
     "*_unset" warning + skip.
     """
-    industry_spec = next(
-        spec
-        for spec in fetch_v2v.AGENTS
-        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
-    )
     settings = Settings(
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="   ",
         coval_s2s_health_instruction_metric_id="   ",
+    )
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.s2s_specs(settings)
+        if spec.family == FAMILY_INSTR_HEALTH and spec.provider == "openai"
     )
 
     fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
@@ -1039,7 +1044,7 @@ async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
         yield MagicMock()
 
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (industry_spec,))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
@@ -1058,17 +1063,17 @@ async def test_expected_behavior_metric_id_merged_into_spec_metric_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Set alongside the domain judge, EBA is fetched too, not instead of it."""
-    industry_spec = next(
-        spec
-        for spec in fetch_v2v.AGENTS
-        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
-    )
     settings = Settings(
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="WS1",
         coval_s2s_health_instruction_metric_id="JUDGE1",
         coval_s2s_industry_expected_behavior_metric_id="EBA1",
+    )
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.s2s_specs(settings)
+        if spec.family == FAMILY_INSTR_HEALTH and spec.provider == "openai"
     )
 
     fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
@@ -1077,7 +1082,7 @@ async def test_expected_behavior_metric_id_merged_into_spec_metric_ids(
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
         yield MagicMock()
 
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (industry_spec,))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
@@ -1096,16 +1101,16 @@ async def test_blank_expected_behavior_metric_id_warns_but_does_not_skip_the_spe
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unlike the domain judge, EBA is optional: its absence logs, not skips."""
-    industry_spec = next(
-        spec
-        for spec in fetch_v2v.AGENTS
-        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
-    )
     settings = Settings(
         coval_s2s_health_openai_agent_id="a1",
         coval_s2s_health_test_set_id="TS1",
         coval_s2s_industry_workspace_id="WS1",
         coval_s2s_health_instruction_metric_id="JUDGE1",
+    )
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.s2s_specs(settings)
+        if spec.family == FAMILY_INSTR_HEALTH and spec.provider == "openai"
     )
 
     fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
@@ -1114,7 +1119,7 @@ async def test_blank_expected_behavior_metric_id_warns_but_does_not_skip_the_spe
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
         yield MagicMock()
 
-    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "s2s_specs", lambda _s: (industry_spec,))
     monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
     monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
     monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
@@ -1263,7 +1268,7 @@ async def test_embargoed_agent_never_becomes_a_sample_candidate() -> None:
         {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "error_status": "SUCCESS"}
     )
     embargoed = AgentSpec(
-        agent_id_attr="coval_s2s_gray_agent_id",
+        agent_id="g1",
         provider="colors",
         model="gray",
         publish_samples=False,
