@@ -13,19 +13,29 @@ from contextlib import nullcontext
 from dataclasses import astuple, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
 import click
 import psycopg
+import psycopg.rows
 import pytest
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
 from click.testing import CliRunner
 from google.cloud import storage as gcs_storage
+from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db.models import ObservationArtifact, ObservationArtifactType
+from coval_bench.db.models import (
+    Benchmark,
+    ObservationArtifact,
+    ObservationArtifactType,
+    Result,
+    ResultStatus,
+)
+from coval_bench.db.writer import RunWriter
 from coval_bench.migrations import backfill_normalized_storage as migration
 from coval_bench.migrations.backfill_normalized_storage import (
     LegacyRow,
@@ -39,6 +49,7 @@ from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
 )
+from coval_bench.runner import normalized as normalized_writer
 
 backfill_pg = postgresql("pg_proc")
 _INI_PATH = Path(__file__).parents[2] / "alembic.ini"
@@ -290,6 +301,235 @@ def test_ttfa_components_and_wer_components_follow_normalized_contract() -> None
     assert ("TTFA", "roundtrip", 10.0, "milliseconds", "component") in values
     assert ("TTFA", "leading_silence", 2.0, "milliseconds", "component") in values
     assert ("WER", "insertions", 1.0, "percent", "component") in values
+
+
+def _wer_expected_values(primary: float = 6.0) -> list[tuple[str, str, float, str, str]]:
+    return [
+        ("WER", "primary", primary, "percent", "primary"),
+        ("WER", "insertions", 1.0, "percent", "component"),
+        ("WER", "deletions", 2.0, "percent", "component"),
+        ("WER", "substitutions", 3.0, "percent", "component"),
+    ]
+
+
+def _wer_live_values(
+    *,
+    reference: float = 100.0,
+    insertion: float = 1.0,
+    deletion: float = 2.0,
+    substitution: float = 3.0,
+) -> list[tuple[str, str, str, float, str]]:
+    return [
+        ("WER", "primary", "percent", 6.0, "primary"),
+        ("WER", "insertions", "percent", 1.0, "component"),
+        ("WER", "deletions", "percent", 2.0, "component"),
+        ("WER", "substitutions", "percent", 3.0, "component"),
+        ("WER", "substitution_count", "count", substitution, "component"),
+        ("WER", "deletion_count", "count", deletion, "component"),
+        ("WER", "insertion_count", "count", insertion, "component"),
+        ("WER", "reference_words", "count", reference, "component"),
+    ]
+
+
+def test_live_wer_count_quartet_is_validated_and_marked_unreconstructable() -> None:
+    matches, limited = migration._live_values_match(_wer_expected_values(), _wer_live_values())
+    assert (matches, limited) == (True, True)
+    assert migration._live_values_match(
+        _wer_expected_values(),
+        [
+            ("WER", "primary", "percent", 6.0, "primary"),
+            ("WER", "insertions", "percent", 1.0, "component"),
+            ("WER", "deletions", "percent", 2.0, "component"),
+            ("WER", "substitutions", "percent", 3.0, "component"),
+        ],
+    ) == (True, False)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda values: values[:-1],
+        lambda values: values[1:],
+        lambda values: values[:1] + values[2:],
+        lambda values: [
+            (*item[:3], float("nan"), item[4]) if item[1] == "insertion_count" else item
+            for item in values
+        ],
+        lambda values: [
+            (*item[:3], float("inf"), item[4]) if item[1] == "reference_words" else item
+            for item in values
+        ],
+        lambda values: values + [("WER", "insertion_count", "count", 1.0, "component")],
+        lambda values: [
+            (*item[:3], -1.0, item[4]) if item[1] == "deletion_count" else item for item in values
+        ],
+        lambda values: [
+            (*item[:3], 1.5, item[4]) if item[1] == "insertion_count" else item for item in values
+        ],
+        lambda values: [
+            (*item[:3], 7.0, item[4]) if item[1] == "reference_words" else item for item in values
+        ],
+        lambda values: [
+            (item[0], item[1], "seconds", item[3], item[4])
+            if item[1] == "insertion_count"
+            else item
+            for item in values
+        ],
+        lambda values: [
+            (item[0], item[1], item[2], item[3], "primary") if item[1] == "deletion_count" else item
+            for item in values
+        ],
+        lambda values: [
+            ("Foreign", item[1], item[2], item[3], item[4])
+            if item[1] == "reference_words"
+            else item
+            for item in values
+        ],
+        lambda values: [
+            (item[0], "unknown", item[2], item[3], item[4])
+            if item[1] == "reference_words"
+            else item
+            for item in values
+        ],
+        lambda values: [
+            (*item[:3], float("nan"), item[4]) if item[1] == "primary" else item for item in values
+        ],
+        lambda values: [
+            (*item[:3], float("inf"), item[4]) if item[1] == "substitutions" else item
+            for item in values
+        ],
+        lambda values: [
+            (*item[:3], 7.0, item[4]) if item[1] == "primary" else item for item in values
+        ],
+    ],
+)
+def test_live_wer_count_quartet_rejects_incomplete_or_inconsistent_payloads(
+    mutation: Any,
+) -> None:
+    assert migration._live_values_match(_wer_expected_values(), mutation(_wer_live_values())) == (
+        False,
+        False,
+    )
+
+
+def test_live_wer_empty_reference_reconciles_insertion_count() -> None:
+    values = _wer_live_values(reference=0.0, insertion=6.0, deletion=0.0, substitution=0.0)
+    values[0] = ("WER", "primary", "percent", 600.0, "primary")
+    values[1] = ("WER", "insertions", "percent", 600.0, "component")
+    values[2] = ("WER", "deletions", "percent", 0.0, "component")
+    values[3] = ("WER", "substitutions", "percent", 0.0, "component")
+    expected = _wer_expected_values(primary=600.0)
+    expected[1:] = [
+        ("WER", "insertions", 600.0, "percent", "component"),
+        ("WER", "deletions", 0.0, "percent", "component"),
+        ("WER", "substitutions", 0.0, "percent", "component"),
+    ]
+    assert migration._live_values_match(expected, values) == (True, True)
+
+
+def test_failed_wer_rejects_any_live_count_values() -> None:
+    failed_expected: list[tuple[str, str, float, str, str]] = []
+    counts = _wer_live_values()
+    assert migration._live_values_match(failed_expected, counts) == (False, False)
+
+
+@pytest.mark.parametrize(
+    ("source_counts", "primary", "percentages"),
+    [
+        ((3, 2, 1, 100), 6.0, (1.0, 2.0, 3.0)),
+        ((None, None, None, None), 6.0, (1.0, 2.0, 3.0)),
+        ((3, None, 1, 100), 6.0, (1.0, 2.0, 3.0)),
+        ((0, 0, 0, 0), 0.0, (0.0, 0.0, 0.0)),
+        # The percentage split uses a different alignment from jiwer counts.
+        ((1, 4, 1, 100), 6.0, (1.0, 2.0, 3.0)),
+    ],
+    ids=["complete", "older", "partial-source", "zero", "different-alignment"],
+)
+def test_real_result_values_reach_live_validator_as_complete_payload(
+    source_counts: tuple[int | None, int | None, int | None, int | None],
+    primary: float,
+    percentages: tuple[float, float, float],
+) -> None:
+    result = Result(
+        run_id=1,
+        provider="provider",
+        model="model",
+        benchmark=Benchmark.STT,
+        metric_type="WER",
+        metric_value=primary,
+        metric_units="percent",
+        transcript="words",
+        status=ResultStatus.SUCCESS,
+        wer_insertions_pct=percentages[0],
+        wer_deletions_pct=percentages[1],
+        wer_substitutions_pct=percentages[2],
+        wer_substitutions=source_counts[0],
+        wer_deletions=source_counts[1],
+        wer_insertions=source_counts[2],
+        wer_reference_words=source_counts[3],
+    )
+    normalized_values = normalized_writer._values("WER", [result], uuid4(), result)
+    actual = [
+        ("WER", value.value_key, value.unit, value.value, value.value_role)
+        for value in normalized_values
+    ]
+    expected: list[tuple[Any, ...]] = [
+        ("WER", "primary", "percent", primary, "primary"),
+        ("WER", "insertions", "percent", percentages[0], "component"),
+        ("WER", "deletions", "percent", percentages[1], "component"),
+        ("WER", "substitutions", "percent", percentages[2], "component"),
+    ]
+    has_counts = all(count is not None for count in source_counts)
+    if has_counts:
+        expected += [
+            ("WER", "substitution_count", "count", source_counts[0], "component"),
+            ("WER", "deletion_count", "count", source_counts[1], "component"),
+            ("WER", "insertion_count", "count", source_counts[2], "component"),
+            ("WER", "reference_words", "count", source_counts[3], "component"),
+        ]
+    assert actual == expected
+
+    row = replace(
+        _row("WER", primary),
+        benchmark="STT",
+        transcript="words",
+        ins=percentages[0],
+        dels=percentages[1],
+        subs=percentages[2],
+    )
+    plan = migration.Planned(
+        [row],
+        "sample",
+        row.dataset_id,
+        row.dataset_sha256,
+        "STT",
+        "dataset_audio",
+        "succeeded",
+        None,
+        None,
+        [("provider_transcript", row.transcript or "")],
+    )
+    cursor = _LiveCursor(plan)
+    cursor.values = actual
+    _, payload, _, _, _ = prepare_provider_transcript("words")
+    digest = hashlib.sha256(payload).hexdigest()
+    cursor.artifacts = [
+        (
+            cursor.audio_id,
+            "provider_transcript",
+            "ProviderTranscript",
+            "v1",
+            f"gs://private/observation-artifacts/v1/provider_transcript/{digest[:2]}/{digest}.json",
+            digest,
+            len(payload),
+            None,
+        ),
+        cursor.artifacts[0],
+    ]
+    cursor.inputs = [("WER", "raw", 0, cursor.audio_id)]
+    validation = _validate_live(cursor, plan)
+    assert validation.matches
+    assert ("wer_counts_not_reconstructable" in validation.tolerated_provenance) == has_counts
 
 
 def test_failed_or_partial_ttfa_components_are_rejected() -> None:
@@ -2335,3 +2575,160 @@ def test_artifact_descriptor_expectation_is_content_addressed() -> None:
         size_bytes=len(payload),
     )
     assert artifact.content_sha256 == digest
+
+
+@pytest.mark.asyncio
+async def test_real_writer_counted_wer_is_read_only_and_idempotent(
+    backfill_pg: psycopg.Connection[Any],
+) -> None:
+    _migrate(backfill_pg)
+    manifest = migration._packaged_manifest("stt-v1")
+    assert manifest is not None
+    filename, samples = next(
+        (name, ids) for name, ids in manifest.stt_samples.items() if len(ids) == 1
+    )
+    run_id = _insert_run(backfill_pg, dataset_id="stt-v1", dataset_sha256=manifest.sha256)
+    result = Result(
+        run_id=run_id,
+        provider="provider",
+        model="model",
+        benchmark=Benchmark.STT,
+        metric_type="WER",
+        metric_value=6.0,
+        metric_units="percent",
+        audio_filename=filename,
+        transcript="words",
+        status=ResultStatus.SUCCESS,
+        wer_insertions_pct=1.0,
+        wer_deletions_pct=2.0,
+        wer_substitutions_pct=3.0,
+        wer_substitutions=3,
+        wer_deletions=2,
+        wer_insertions=1,
+        wer_reference_words=100,
+    )
+    async with AsyncConnectionPool[psycopg.AsyncConnection[dict[str, Any]]](
+        _dsn(backfill_pg),
+        min_size=1,
+        max_size=1,
+        open=False,
+        kwargs={"row_factory": psycopg.rows.dict_row},
+    ) as pool:
+        writer = RunWriter(pool)
+        await writer.record_results([result], created_at=_NOW)
+        await normalized_writer.dual_write(
+            writer=writer,
+            storage_client=_Storage(),
+            bucket="backfill-artifacts",
+            run_id=run_id,
+            dataset_id="stt-v1",
+            dataset_sha256=manifest.sha256,
+            sample_id=samples[0],
+            entry=SimpleNamespace(provider="provider", model="model"),
+            benchmark=Benchmark.STT,
+            results=[result],
+            provider_error=None,
+            captured_at=_NOW,
+            transcript="words",
+            timing_events={"ttft_ms": 10.0},
+        )
+        await writer.refresh_metric_values_bucket(run_id)
+
+    def snapshot(conn: psycopg.Connection[Any]) -> dict[str, list[tuple[Any, ...]]]:
+        return {
+            table: conn.execute(
+                psycopg.sql.SQL(
+                    "SELECT row_to_json(t)::text FROM benchmarks_v2.{} t "
+                    "ORDER BY row_to_json(t)::text"
+                ).format(psycopg.sql.Identifier(table))
+            ).fetchall()
+            for table in (
+                "runs",
+                "results",
+                "benchmark_observations",
+                "observation_artifacts",
+                "metric_evaluations",
+                "metric_evaluation_inputs",
+                "metric_values",
+                "metric_values_by_bucket",
+            )
+        }
+
+    with psycopg.connect(_dsn(backfill_pg)) as read_conn:
+        read_conn.read_only = True
+        assert read_conn.execute("SHOW transaction_read_only").fetchone() == ("on",)
+        before = snapshot(read_conn)
+        reports = [
+            backfill(
+                read_conn,
+                min_result_id=1,
+                max_result_id=1,
+                window_start=_WINDOW_START,
+                window_end=_WINDOW_END,
+                batch_size=1,
+                apply=False,
+            )
+            for _ in range(2)
+        ]
+        assert reports[0] == reports[1]
+        report = reports[0]
+        assert report["live_owned"] == report["reconciled"] == 1
+        assert report["created"] == report["eligible"] == 0
+        assert report["parity_mismatch_count"] == report["rollup_mismatch_count"] == 0
+        assert report["cutover_ready"]
+        assert report["provenance_differences"]["wer_counts_not_reconstructable"] == 1
+        assert snapshot(read_conn) == before
+
+
+@pytest.mark.parametrize("supplemental_counts", [False, True])
+def test_deterministic_wer_payload_stays_exact_in_postgres(
+    backfill_pg: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+    supplemental_counts: bool,
+) -> None:
+    _migrate(backfill_pg)
+    run_id = _insert_run(backfill_pg)
+    result_id = _insert_wer(backfill_pg, run_id, "sample.wav")
+    monkeypatch.setattr(gcs_storage, "Client", _Storage)
+    with monkeypatch.context() as seed:
+        if supplemental_counts:
+            # Seed a valid but foreign-to-backfill count payload through the real
+            # insertion path; restore the actual planner before validating it.
+            seeded_values = [
+                (metric, key, value, unit, role)
+                for metric, key, unit, value, role in _wer_live_values()
+            ]
+            seed.setattr(migration, "_values", lambda _: seeded_values)
+        created = backfill(
+            backfill_pg,
+            min_result_id=result_id,
+            max_result_id=result_id,
+            window_start=_WINDOW_START,
+            window_end=_WINDOW_END,
+            batch_size=1,
+            apply=True,
+            artifact_bucket="backfill-artifacts",
+        )
+        assert created["created"] == 1
+        assert created["cutover_ready"]
+    with psycopg.connect(_dsn(backfill_pg)) as read_conn:
+        read_conn.read_only = True
+        reports = [
+            backfill(
+                read_conn,
+                min_result_id=result_id,
+                max_result_id=result_id,
+                window_start=_WINDOW_START,
+                window_end=_WINDOW_END,
+                batch_size=1,
+                apply=False,
+            )
+            for _ in range(2)
+        ]
+        assert reports[0] == reports[1]
+        assert reports[0]["live_owned"] == reports[0]["created"] == 0
+        assert reports[0]["reconciled"] == (0 if supplemental_counts else 1)
+        assert reports[0]["cutover_ready"] is not supplemental_counts
+        assert reports[0]["parity_mismatch_reasons"] == (
+            {"backfill_payload_mismatch": 1} if supplemental_counts else {}
+        )
