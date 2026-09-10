@@ -5,7 +5,7 @@
 
 Wire protocol: WebSocket, <guava_base_url>/audio/transcriptions (http -> ws, https -> wss).
 Auth: Authorization: Bearer <key>.
-Start: {"type": "start", "domain": <domain>, "partial_transcripts": true}
+Start: {"type": "start", "partial_transcripts": true}, with optional "domain".
 Audio: raw int16-LE PCM, mono, 16 kHz binary frames.
 Close: {"type": "eos"}
 Server messages (JSON, keyed by ``type``):
@@ -67,12 +67,10 @@ class GuavaSTTProvider(STTProvider):
             raise ValueError("guava_base_url is required for the Guava STT provider")
         if api_key is None or not api_key.get_secret_value().strip():
             raise ValueError("guava_api_key is required for the Guava STT provider")
-        if not domain or not domain.strip():
-            raise ValueError("guava_stt_domain is required for the Guava STT provider")
         self._api_key = api_key
         self._model = model
         self._ws_url = ws_url_from_base(base_url)
-        self._domain = domain.strip()
+        self._domain = domain.strip() if domain else None
 
     @property
     def name(self) -> str:
@@ -110,15 +108,10 @@ class GuavaSTTProvider(STTProvider):
                 additional_headers=headers or None,
                 max_size=_MAX_WS_SIZE,
             ) as ws:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "start",
-                            "domain": self._domain,
-                            "partial_transcripts": True,
-                        }
-                    )
-                )
+                start_message: dict[str, Any] = {"type": "start", "partial_transcripts": True}
+                if self._domain:
+                    start_message["domain"] = self._domain
+                await ws.send(json.dumps(start_message))
 
                 send_task = asyncio.create_task(
                     self._send_audio(ws, audio_data, sample_rate, result, realtime_resolution)

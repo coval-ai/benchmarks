@@ -205,9 +205,17 @@ def test_missing_base_url_raises() -> None:
         GuavaSTTProvider(api_key=SecretStr("k"), base_url=None, domain=_DOMAIN)
 
 
-def test_missing_domain_raises() -> None:
-    with pytest.raises(ValueError, match="guava_stt_domain is required"):
-        GuavaSTTProvider(api_key=SecretStr("k"), base_url=_BASE_URL, domain=None)
+@pytest.mark.asyncio
+async def test_missing_domain_uses_server_default() -> None:
+    provider = GuavaSTTProvider(api_key=SecretStr("k"), base_url=_BASE_URL)
+    sent: list[Any] = []
+    with patch(
+        "coval_bench.providers.stt.guava.ws_client.connect",
+        return_value=_fake_connect([{"type": "asr_final", "transcript": "ok"}], sent),
+    ):
+        result = await provider.measure_ttft(_SMALL_PCM, 1, 2, 16000)
+    assert result.error is None
+    assert json.loads(sent[0]) == {"type": "start", "partial_transcripts": True}
 
 
 def test_ws_url_from_base() -> None:
