@@ -79,6 +79,11 @@ class AgentSpec:
     # overriding the global coval_s2s_instruction_metric_id. None uses the
     # global one.
     instruction_metric_id_attr: str | None = None
+    # Settings attr holding this agent's Expected Behavior Adherence metric id.
+    # Fetched and stored under its own metric type alongside (not instead of)
+    # instruction_metric_id_attr's judge score, so the two never collapse into
+    # one chart. None means this agent doesn't have that metric configured.
+    expected_behavior_metric_id_attr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,7 +156,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_health_grok_agent_id",
@@ -161,7 +167,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_health_violet_agent_id",
@@ -171,7 +178,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HEALTH,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_openai_agent_id",
@@ -181,7 +189,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_grok_agent_id",
@@ -191,7 +200,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_home_service_violet_agent_id",
@@ -201,7 +211,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_HOME_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_openai_agent_id",
@@ -211,7 +222,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_grok_agent_id",
@@ -221,7 +233,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
     AgentSpec(
         agent_id_attr="coval_s2s_cust_service_violet_agent_id",
@@ -231,7 +244,8 @@ AGENTS: tuple[AgentSpec, ...] = (
         family=FAMILY_INSTR_CUST_SERVICE,
         publish_samples=False,
         workspace_id_attr="coval_s2s_industry_workspace_id",
-        instruction_metric_id_attr="coval_s2s_industry_instruction_metric_id",
+        instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
+        expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
     ),
 )
 
@@ -498,6 +512,13 @@ def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
 
 
+def _expected_behavior_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Coval's criteria_met_count / criteria_total_count fraction, as a percent."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return round(float(raw) * 100.0, 1), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
 def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     """Interruptions per minute, stored as-is; a clip with no numeric value becomes a FAILED row."""
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
@@ -511,6 +532,7 @@ _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus
     Metric.V2V: _v2v_value,
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
     Metric.INTERRUPTION_RATE: _interruption_value,
+    Metric.EXPECTED_BEHAVIOR_ADHERENCE: _expected_behavior_value,
 }
 
 
@@ -1320,6 +1342,21 @@ async def fetch_and_write_v2v(
                     **metric_ids,
                     Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
                 }
+            if spec.expected_behavior_metric_id_attr:
+                spec_expected_behavior_metric_id = (
+                    getattr(settings, spec.expected_behavior_metric_id_attr) or ""
+                ).strip()
+                if spec_expected_behavior_metric_id:
+                    spec_metric_ids = {
+                        **spec_metric_ids,
+                        Metric.EXPECTED_BEHAVIOR_ADHERENCE: spec_expected_behavior_metric_id,
+                    }
+                else:
+                    logger.warning(
+                        "expected_behavior_metric_id_unset",
+                        provider=spec.provider,
+                        attr=spec.expected_behavior_metric_id_attr,
+                    )
             status_key = f"{spec.family}:{spec.provider}:{spec.model}"
             statuses[status_key], ingested = await _fetch_one_provider(
                 client,

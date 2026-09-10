@@ -224,9 +224,13 @@ class Settings(BaseSettings):
     # one coval_api_key defaults to, so every request for them must carry this
     # header. Opaque id, not secret.
     coval_s2s_industry_workspace_id: str | None = None
-    # Shared across all three industries: reads test_case.expected_behaviors, so
-    # one metric id scores every industry's test set. Opaque id, not secret.
-    coval_s2s_industry_instruction_metric_id: str | None = None
+    # One per industry rather than shared, so this can point at either the
+    # domain-specific judge (fast to validate, already scored on existing
+    # runs) or a shared expected-behavior metric (set all three to the same
+    # id) without a code change either way. Opaque id, not secret.
+    coval_s2s_health_instruction_metric_id: str | None = None
+    coval_s2s_home_service_instruction_metric_id: str | None = None
+    coval_s2s_cust_service_instruction_metric_id: str | None = None
     coval_s2s_health_test_set_id: str | None = None
     coval_s2s_health_openai_agent_id: str | None = None
     coval_s2s_health_grok_agent_id: str | None = None
@@ -239,6 +243,13 @@ class Settings(BaseSettings):
     coval_s2s_cust_service_openai_agent_id: str | None = None
     coval_s2s_cust_service_grok_agent_id: str | None = None
     coval_s2s_cust_service_violet_agent_id: str | None = None
+    # Shared across all three industries (it reads test_case.expected_behaviors
+    # generically, unlike the domain judges), so one field rather than three.
+    # A separate metric from coval_s2s_*_instruction_metric_id above, not a
+    # replacement for it: both are fetched and stored under their own metric
+    # types, so Instruction Adherence and Expected Behavior Adherence stay
+    # distinct charts. Opaque id, not secret.
+    coval_s2s_industry_expected_behavior_metric_id: str | None = None
     # Fetch grid, in seconds, shared by the s2s-fetch and llm-fetch jobs; each job
     # sets S2S_FETCH_PERIOD_SECONDS to match its own trigger cron in benchmark-infra.
     # The 3h default is far below a daily trigger, so an unset job reads stale.

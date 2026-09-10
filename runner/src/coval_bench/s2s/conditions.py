@@ -195,11 +195,22 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
     ),
-    # No V2V or interruption metric is configured for these test sets — instruction
-    # adherence is all they were scored on.
-    DATASET_ID_INSTR_HEALTH: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
-    DATASET_ID_INSTR_HOME_SERVICE: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
-    DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
+    # No V2V or interruption metric is configured for these test sets. Expected
+    # Behavior Adherence is optional, not required: it anchors on the judge
+    # score's conversation ids, so a run rescored for EBA after the fact is
+    # still ingested rather than faulted for arriving late.
+    DATASET_ID_INSTR_HEALTH: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
+    DATASET_ID_INSTR_HOME_SERVICE: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
+    DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(
+        required=Metric.INSTRUCTION_FOLLOWING,
+        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
 }
 
 # Pre-scoping behaviour, for any dataset without an entry above.

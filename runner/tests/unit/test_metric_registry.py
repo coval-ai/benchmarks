@@ -26,6 +26,7 @@ def test_metric_values_match_stored_strings() -> None:
         "V2V",
         "InstructionFollowing",
         "InterruptionRate",
+        "ExpectedBehaviorAdherence",
     }
 
 
@@ -43,6 +44,7 @@ def test_units_match_stored_strings() -> None:
         Metric.V2V: "milliseconds",
         Metric.INSTRUCTION_FOLLOWING: "percent",
         Metric.INTERRUPTION_RATE: "per_minute",
+        Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
@@ -56,14 +58,19 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.TTFT].benchmarks == {Benchmark.STT, Benchmark.LLM}
     assert METRIC_SPECS[Metric.V2V].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].benchmarks == {Benchmark.S2S, Benchmark.LLM}
+    assert METRIC_SPECS[Metric.EXPECTED_BEHAVIOR_ADHERENCE].benchmarks == {Benchmark.S2S}
 
 
 def test_metric_directions() -> None:
-    # Instruction adherence is a pass rate: higher is better. Every other metric
-    # is a latency/error measure: lower is better.
-    assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].direction is MetricDirection.HIGHER_IS_BETTER
+    # Instruction adherence and expected behavior adherence are both pass
+    # rates: higher is better. Every other metric is a latency/error measure:
+    # lower is better.
+    higher_is_better = {Metric.INSTRUCTION_FOLLOWING, Metric.EXPECTED_BEHAVIOR_ADHERENCE}
+    assert all(
+        METRIC_SPECS[m].direction is MetricDirection.HIGHER_IS_BETTER for m in higher_is_better
+    )
     assert all(
         spec.direction is MetricDirection.LOWER_IS_BETTER
         for m, spec in METRIC_SPECS.items()
-        if m is not Metric.INSTRUCTION_FOLLOWING
+        if m not in higher_is_better
     )
