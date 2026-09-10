@@ -2284,7 +2284,7 @@ async def test_ingest_run_dual_writes_llm_rows(
     assert len(rows) == 1
     assert rows[0].benchmark is Benchmark.LLM
     dual_write.assert_awaited_once()
-    kwargs = dual_write.await_args.kwargs
+    kwargs = dual_write.await_args_list[0].kwargs
     assert (kwargs["benchmark"], kwargs["sample_id"]) == (Benchmark.LLM, "R1/s1")
 
 
