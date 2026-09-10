@@ -773,7 +773,7 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
     # only openai runs (gemini unset), and it fully succeeds.
-    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_awaited_once()
 
 
@@ -811,7 +811,7 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings, benchmark=Benchmark.LLM)
 
-    assert statuses == {"phonely:phonely-agent": RunStatus.SUCCEEDED}
+    assert statuses == {"llm-dental:phonely:phonely-agent": RunStatus.SUCCEEDED}
     fetch_one.assert_awaited_once()
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["spec"] == fetch_v2v.llm_specs([PHONELY])[0]
@@ -1052,7 +1052,7 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_not_awaited()
 
 
@@ -2134,6 +2134,6 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    assert statuses == {"openai:gpt-realtime": RunStatus.SUCCEEDED}
+    assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["normalized_dual_write_enabled"] is True

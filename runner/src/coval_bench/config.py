@@ -218,6 +218,26 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
+    # --- Instruction-adherence-by-industry (separate Coval workspace) ---
+    # These agents, test sets and this metric live in a workspace other than the
+    # one coval_api_key defaults to, so every request for them must carry this
+    # header. Opaque id, not secret.
+    coval_s2s_industry_workspace_id: str | None = None
+    # Shared across all three industries: reads test_case.expected_behaviors, so
+    # one metric id scores every industry's test set. Opaque id, not secret.
+    coval_s2s_industry_instruction_metric_id: str | None = None
+    coval_s2s_health_test_set_id: str | None = None
+    coval_s2s_health_openai_agent_id: str | None = None
+    coval_s2s_health_grok_agent_id: str | None = None
+    coval_s2s_health_violet_agent_id: str | None = None
+    coval_s2s_home_service_test_set_id: str | None = None
+    coval_s2s_home_service_openai_agent_id: str | None = None
+    coval_s2s_home_service_grok_agent_id: str | None = None
+    coval_s2s_home_service_violet_agent_id: str | None = None
+    coval_s2s_cust_service_test_set_id: str | None = None
+    coval_s2s_cust_service_openai_agent_id: str | None = None
+    coval_s2s_cust_service_grok_agent_id: str | None = None
+    coval_s2s_cust_service_violet_agent_id: str | None = None
     # Fetch grid, in seconds, shared by the s2s-fetch and llm-fetch jobs; each job
     # sets S2S_FETCH_PERIOD_SECONDS to match its own trigger cron in benchmark-infra.
     # The 3h default is far below a daily trigger, so an unset job reads stale.

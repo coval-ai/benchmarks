@@ -27,12 +27,18 @@ __all__ = [
     "DATASET_ID_HAPPYPATH",
     "DATASET_ID_HAPPYPATH_ACCENTED",
     "DATASET_ID_HAPPYPATH_NOISY",
+    "DATASET_ID_INSTR_CUST_SERVICE",
+    "DATASET_ID_INSTR_HEALTH",
+    "DATASET_ID_INSTR_HOME_SERVICE",
     "DATASET_ID_LLM_DENTAL",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
     "FAMILY_DENTAL",
     "FAMILY_HAPPYPATH",
+    "FAMILY_INSTR_CUST_SERVICE",
+    "FAMILY_INSTR_HEALTH",
+    "FAMILY_INSTR_HOME_SERVICE",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
     "Condition",
@@ -67,6 +73,11 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
 FAMILY_LLM_DENTAL = "llm-dental"
+# One family per industry so their instruction-adherence numbers are never
+# pooled together — each is its own board on the dashboard.
+FAMILY_INSTR_HEALTH = "instruction-adherence-health"
+FAMILY_INSTR_HOME_SERVICE = "instruction-adherence-home-service"
+FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -87,6 +98,10 @@ DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
 # pooled with the voice rows.
 DATASET_ID_LLM_DENTAL = "llm-dental-v1"
 
+DATASET_ID_INSTR_HEALTH = "instruction-adherence-health-v1"
+DATASET_ID_INSTR_HOME_SERVICE = "instruction-adherence-home-service-v1"
+DATASET_ID_INSTR_CUST_SERVICE = "instruction-adherence-cust-service-v1"
+
 # Unlisted pairs are a configuration error, not a silent skip.
 DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_MULTITURN, Condition.CLEAN): DATASET_ID_MULTITURN,
@@ -100,6 +115,9 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_LLM_DENTAL, Condition.CLEAN): DATASET_ID_LLM_DENTAL,
     (FAMILY_LLM_DENTAL, Condition.NOISY): None,
     (FAMILY_LLM_DENTAL, Condition.ACCENTED): None,
+    (FAMILY_INSTR_HEALTH, Condition.CLEAN): DATASET_ID_INSTR_HEALTH,
+    (FAMILY_INSTR_HOME_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_HOME_SERVICE,
+    (FAMILY_INSTR_CUST_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_CUST_SERVICE,
 }
 
 
@@ -177,6 +195,11 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
     ),
+    # No V2V or interruption metric is configured for these test sets — instruction
+    # adherence is all they were scored on.
+    DATASET_ID_INSTR_HEALTH: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
+    DATASET_ID_INSTR_HOME_SERVICE: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
+    DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(required=Metric.INSTRUCTION_FOLLOWING),
 }
 
 # Pre-scoping behaviour, for any dataset without an entry above.
