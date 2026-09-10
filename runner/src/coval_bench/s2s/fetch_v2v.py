@@ -1203,7 +1203,14 @@ async def fetch_and_write_v2v(
 
     metric_id = settings.coval_s2s_latency_metric_id
     if benchmark is Benchmark.S2S and not metric_id:
-        raise RuntimeError("coval_s2s_latency_metric_id is not set")
+        # Industry specs fetch instruction adherence only (see conditions.py);
+        # only a spec still relying on the shared V2V metric makes it required.
+        v2v_spec_configured = any(
+            not spec.instruction_metric_id_attr and getattr(settings, spec.agent_id_attr, None)
+            for spec in specs
+        )
+        if v2v_spec_configured:
+            raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
     # without the filter would pool other sims on the same agents into the S2S
     # rows. Reject a blank (misconfigured) value and require the pair; both
@@ -1288,7 +1295,9 @@ async def fetch_and_write_v2v(
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
                 continue
             spec_workspace_id = (
-                getattr(settings, spec.workspace_id_attr) if spec.workspace_id_attr else None
+                (getattr(settings, spec.workspace_id_attr) or "").strip() or None
+                if spec.workspace_id_attr
+                else None
             )
             if spec.workspace_id_attr and not spec_workspace_id:
                 logger.warning(
@@ -1297,7 +1306,9 @@ async def fetch_and_write_v2v(
                 continue
             spec_metric_ids = metric_ids
             if spec.instruction_metric_id_attr:
-                spec_instruction_metric_id = getattr(settings, spec.instruction_metric_id_attr)
+                spec_instruction_metric_id = (
+                    getattr(settings, spec.instruction_metric_id_attr) or ""
+                ).strip()
                 if not spec_instruction_metric_id:
                     logger.warning(
                         "instruction_metric_id_unset",

@@ -960,6 +960,99 @@ async def test_fetch_and_write_llm_requires_the_instruction_metric_and_dental_se
 
 
 @pytest.mark.asyncio
+async def test_industry_only_deployment_does_not_require_the_latency_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An install with only industry agents configured never measures V2V.
+
+    ``coval_s2s_latency_metric_id`` would otherwise block ingestion for a
+    workspace that only ever asks Coval for instruction adherence.
+    """
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.AGENTS
+        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
+    )
+    settings = Settings(
+        coval_s2s_health_openai_agent_id="a1",
+        coval_s2s_health_test_set_id="TS1",
+        coval_s2s_industry_workspace_id="W1",
+        coval_s2s_industry_instruction_metric_id="IID",
+    )
+
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    values = [{"simulation_output_id": "s1", "value": "YES"}]
+    client = _fake_client(list_json, _run_json(values, metric_id="IID"))
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    key = f"{industry_spec.family}:{industry_spec.provider}:{industry_spec.model}"
+    assert statuses == {key: RunStatus.SUCCEEDED}
+    writer.record_results.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_v2v_still_requires_the_latency_metric_for_legacy_agents() -> None:
+    settings = Settings(coval_s2s_openai_agent_id="a1", coval_s2s_dental_test_set_id="TSD")
+
+    with pytest.raises(RuntimeError, match="coval_s2s_latency_metric_id is not set"):
+        await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+@pytest.mark.asyncio
+async def test_blank_industry_workspace_and_instruction_metric_ids_skip_the_spec(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A whitespace-only shared industry setting must not read as configured.
+
+    Both ids are shared across every industry spec, so a blank value (rather
+    than unset) would otherwise silently send an empty workspace header or
+    mark every industry spec as measuring instruction adherence when none is
+    actually wired up, instead of the clear "*_unset" warning + skip.
+    """
+    industry_spec = next(
+        spec
+        for spec in fetch_v2v.AGENTS
+        if spec.agent_id_attr == "coval_s2s_health_openai_agent_id"
+    )
+    settings = Settings(
+        coval_s2s_health_openai_agent_id="a1",
+        coval_s2s_health_test_set_id="TS1",
+        coval_s2s_industry_workspace_id="   ",
+        coval_s2s_industry_instruction_metric_id="   ",
+    )
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "AGENTS", (industry_spec,))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: _stub_writer())
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    with capture_logs() as logs:
+        statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {}
+    fetch_one.assert_not_awaited()
+    assert any(log["event"] == "workspace_id_unset" for log in logs)
+
+
+@pytest.mark.asyncio
 async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> None:
     writer = _stub_writer()
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
