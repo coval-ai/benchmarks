@@ -9,7 +9,9 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
   (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75/p90/p95/p99
   (percentile_cont), min, max, count. Read from the per-window materialized
   views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
-  runner at the end of each benchmark run — read-only here.
+  runner at the end of each benchmark run — read-only here. Normalized reads
+  compute the same exact statistics from the transactional value projection,
+  with current observation/run eligibility and request-time window boundaries.
 * ``series`` — per (provider, model, metric_type, bucket_at) distribution
   (min/p25/p50/p75/max/value_sum/count), read from the ``results_by_bucket``
   rollup table, filled by the orchestrator's end-of-run hook.
@@ -181,42 +183,40 @@ def _mean_split(column: str) -> str:
 
 _POOLED_TOTAL = _pooled("substitution_count + deletion_count + insertion_count")
 
-# TTFA components have public metric names of their own, hence the UNION ALL.
+# Successful evaluations project their immutable values in the completion
+# transaction. Observation/run metadata and time boundaries remain live. TTFA
+# components expand once here, including evaluations without a literal primary key.
 _NORMALIZED_STATS_SQL = f"""
 WITH evaluations AS (
  SELECT o.provider, o.model, o.dataset_id, e.metric_type,
-        MAX(v.value) FILTER (WHERE v.value_key = 'primary') AS value,
-        MAX(v.value) FILTER (WHERE v.value_key = 'roundtrip') AS roundtrip,
-        MAX(v.value) FILTER (WHERE v.value_key = 'leading_silence') AS leading_silence,
-        MAX(v.value) FILTER (WHERE v.value_key = 'insertions') AS wer_insertions_pct,
-        MAX(v.value) FILTER (WHERE v.value_key = 'deletions') AS wer_deletions_pct,
-        MAX(v.value) FILTER (WHERE v.value_key = 'substitutions') AS wer_substitutions_pct,
-        MAX(v.value) FILTER (WHERE v.value_key = 'substitution_count') AS substitution_count,
-        MAX(v.value) FILTER (WHERE v.value_key = 'deletion_count') AS deletion_count,
-        MAX(v.value) FILTER (WHERE v.value_key = 'insertion_count') AS insertion_count,
-        MAX(v.value) FILTER (WHERE v.value_key = 'reference_words') AS reference_words
- FROM benchmarks_v2.metric_evaluations e
+        e.value, e.roundtrip, e.leading_silence,
+        e.wer_insertions_pct, e.wer_deletions_pct, e.wer_substitutions_pct,
+        e.substitution_count, e.deletion_count, e.insertion_count, e.reference_words
+ FROM benchmarks_v2.dashboard_metric_values e
  JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
  JOIN benchmarks_v2.runs r ON r.id = o.run_id
- JOIN benchmarks_v2.metric_values v ON v.metric_evaluation_id = e.id
- WHERE o.status = 'succeeded' AND e.status = 'succeeded'
-   AND r.status IN ('succeeded', 'partial') AND e.metric_version = 'v1'
-   AND e.evaluation_variant = 'default' AND o.benchmark = %(benchmark)s
+ WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
+   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
+   AND o.benchmark = %(benchmark)s
    AND o.captured_at >= NOW() - %(interval)s::interval
- GROUP BY e.id, o.provider, o.model, o.dataset_id, e.metric_type
+   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)
 ), public_values AS (
- SELECT provider, model, dataset_id, metric_type, value,
-        wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct,
-        substitution_count, deletion_count, insertion_count, reference_words
- FROM evaluations WHERE value IS NOT NULL
- UNION ALL
- SELECT provider, model, dataset_id, 'TTFARoundtrip', roundtrip,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL
- FROM evaluations WHERE metric_type = 'TTFA' AND roundtrip IS NOT NULL
- UNION ALL
- SELECT provider, model, dataset_id, 'TTFALeadingSilence', leading_silence,
-        NULL, NULL, NULL, NULL, NULL, NULL, NULL
- FROM evaluations WHERE metric_type = 'TTFA' AND leading_silence IS NOT NULL
+ SELECT e.provider, e.model, e.dataset_id, p.metric_type, p.value,
+        p.wer_insertions_pct, p.wer_deletions_pct, p.wer_substitutions_pct,
+        p.substitution_count, p.deletion_count, p.insertion_count, p.reference_words
+ FROM evaluations e
+ CROSS JOIN LATERAL (VALUES
+   (e.metric_type, e.value, e.wer_insertions_pct, e.wer_deletions_pct,
+    e.wer_substitutions_pct, e.substitution_count, e.deletion_count,
+    e.insertion_count, e.reference_words),
+   ('TTFARoundtrip', CASE WHEN e.metric_type = 'TTFA' THEN e.roundtrip END,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL),
+   ('TTFALeadingSilence', CASE WHEN e.metric_type = 'TTFA' THEN e.leading_silence END,
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+ ) AS p(metric_type, value, wer_insertions_pct, wer_deletions_pct,
+        wer_substitutions_pct, substitution_count, deletion_count,
+        insertion_count, reference_words)
+ WHERE p.value IS NOT NULL
 )
 SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value,
  COALESCE({_POOLED_TOTAL}, AVG(value))::float8 AS avg_value,
@@ -237,25 +237,37 @@ SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value,
  {_pooled("deletion_count")} AS pooled_deletions_pct,
  {_pooled("substitution_count")} AS pooled_substitutions_pct
 FROM public_values
- WHERE (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)
 GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type
 """  # noqa: S608
 
 _NORMALIZED_DATASETS_SQL = """
-SELECT DISTINCT o.dataset_id FROM benchmarks_v2.metric_values v
-JOIN benchmarks_v2.metric_evaluations e ON e.id = v.metric_evaluation_id
-JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
-JOIN benchmarks_v2.runs r ON r.id = o.run_id
-WHERE o.status = 'succeeded' AND e.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
- AND e.metric_version = 'v1' AND e.evaluation_variant = 'default' AND o.benchmark = %(benchmark)s
- AND o.captured_at >= NOW() - %(interval)s::interval AND v.value_role = 'primary'
- AND o.dataset_id <> %(sentinel)s
-ORDER BY o.dataset_id
+WITH candidate_datasets AS (
+ SELECT DISTINCT o.dataset_id
+ FROM benchmarks_v2.benchmark_observations o
+ WHERE o.status = 'succeeded' AND o.benchmark = %(benchmark)s
+   AND o.captured_at >= NOW() - %(interval)s::interval
+   AND o.dataset_id <> %(sentinel)s
+)
+SELECT d.dataset_id FROM candidate_datasets d
+CROSS JOIN LATERAL (
+ SELECT 1
+ FROM benchmarks_v2.benchmark_observations o
+ JOIN benchmarks_v2.runs r ON r.id = o.run_id
+ JOIN benchmarks_v2.dashboard_metric_values e ON e.observation_id = o.id
+ WHERE o.dataset_id = d.dataset_id AND o.status = 'succeeded'
+   AND o.benchmark = %(benchmark)s
+   AND o.captured_at >= NOW() - %(interval)s::interval
+   AND r.status IN ('succeeded', 'partial')
+   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
+   AND e.has_primary_role
+ LIMIT 1
+) eligible
+ORDER BY d.dataset_id
 """
 
 _NORMALIZED_STATS_BY_DATASET_SQL = (
     _NORMALIZED_STATS_SQL.replace(
-        " WHERE (%(dataset)s = '__all__' OR dataset_id = %(dataset)s)", ""
+        "   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)\n", ""
     )
     .replace(
         "GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type",
