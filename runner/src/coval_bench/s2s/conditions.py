@@ -21,6 +21,7 @@ from coval_bench.registries import Benchmark, Metric
 
 __all__ = [
     "DATASET_ID",
+    "DATASET_ID_BANK",
     "DATASET_ID_DENTAL",
     "DATASET_ID_DENTAL_ACCENTED",
     "DATASET_ID_DENTAL_NOISY",
@@ -34,6 +35,7 @@ __all__ = [
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
     "DEFAULT_CONDITION",
+    "FAMILY_BANK",
     "FAMILY_DENTAL",
     "FAMILY_HAPPYPATH",
     "FAMILY_INSTR_CUST_SERVICE",
@@ -78,6 +80,10 @@ FAMILY_LLM_DENTAL = "llm-dental"
 FAMILY_INSTR_HEALTH = "instruction-adherence-health"
 FAMILY_INSTR_HOME_SERVICE = "instruction-adherence-home-service"
 FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
+# Ultra Bank instruction following: two scenarios, run daily by every S2S agent in
+# the default workspace. Only the clean caller is scheduled; the harder personas
+# exist in Coval but are not ingested until they get a dataset id here.
+FAMILY_BANK = "s2s-bank"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -102,6 +108,8 @@ DATASET_ID_INSTR_HEALTH = "instruction-adherence-health-v1"
 DATASET_ID_INSTR_HOME_SERVICE = "instruction-adherence-home-service-v1"
 DATASET_ID_INSTR_CUST_SERVICE = "instruction-adherence-cust-service-v1"
 
+DATASET_ID_BANK = "s2s-bank-v1"
+
 # Unlisted pairs are a configuration error, not a silent skip.
 DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_MULTITURN, Condition.CLEAN): DATASET_ID_MULTITURN,
@@ -118,6 +126,9 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_INSTR_HEALTH, Condition.CLEAN): DATASET_ID_INSTR_HEALTH,
     (FAMILY_INSTR_HOME_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_HOME_SERVICE,
     (FAMILY_INSTR_CUST_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_CUST_SERVICE,
+    (FAMILY_BANK, Condition.CLEAN): DATASET_ID_BANK,
+    (FAMILY_BANK, Condition.NOISY): None,
+    (FAMILY_BANK, Condition.ACCENTED): None,
 }
 
 
@@ -210,6 +221,15 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(
         required=Metric.INSTRUCTION_FOLLOWING,
         optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
+    ),
+    # The Ultra Bank instruction-following set, the daily public board. Latency is
+    # the anchor because Coval's built-in metric is on every run; "instruction
+    # following" here is the Validate Expected Behaviors judge, a fraction of the
+    # case's expected behaviors met, stored as a percentage under the same metric
+    # the binary judges feed so the adherence chart needs no second series.
+    DATASET_ID_BANK: DatasetMetrics(
+        required=Metric.V2V,
+        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
     ),
 }
 

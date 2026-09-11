@@ -25,6 +25,8 @@ TICK = "2026-07-17T00:00:00Z"
 PREV_BUCKET_AT = datetime(2026, 7, 16, tzinfo=UTC)
 PREV_TICK = "2026-07-16T00:00:00Z"
 TEST_SET = "DvAqQ4md"
+DATASET = "s2s-dental-v1"
+PARTITION = f"{PREFIX}/{DATASET}"
 
 # Real bench persona ids so the label map is exercised too.
 FEMALE = "PN3xgmsqeLDjsNNEA2e55e"
@@ -46,6 +48,7 @@ def _run(
         bucket_at=bucket_at,
         persona_id=persona_id,
         agent_id=agent_id,
+        dataset_id=DATASET,
     )
 
 
@@ -167,6 +170,7 @@ async def _publish(
     return await publish_tick_sample(
         client,
         bucket_name="bkt",
+        dataset_id=DATASET,
         test_set_id=TEST_SET,
         runs=runs,
         rng=random.Random(rng_seed),
@@ -186,7 +190,7 @@ async def test_manifest_labels_the_set_the_runs_came_from() -> None:
     async with _fake_client(cases) as client:
         await _publish(client, storage_client, runs)
 
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert manifest["test_set_id"] == "OWN_SET"
 
 
@@ -198,10 +202,10 @@ async def test_publishes_complete_conversation_for_all_providers() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    assert f"{PREFIX}/{TICK}/openai/gpt-realtime.wav" in bucket.objects
-    assert f"{PREFIX}/{TICK}/google/gemini-live.wav" in bucket.objects
+    assert f"{PARTITION}/{TICK}/openai/gpt-realtime.wav" in bucket.objects
+    assert f"{PARTITION}/{TICK}/google/gemini-live.wav" in bucket.objects
 
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert manifest["schema_version"] == 2
     assert manifest["bucket_at"] == TICK
     assert manifest["test_set_id"] == TEST_SET
@@ -217,7 +221,7 @@ async def test_publishes_complete_conversation_for_all_providers() -> None:
         assert [t["start_offset"] for t in rec["turns"]] == [1.5, 3.0]
         assert [t["end_offset"] for t in rec["turns"]] == [2.25, None]
 
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK]
 
 
 @pytest.mark.asyncio
@@ -229,7 +233,7 @@ async def test_conversation_key_never_mixes_personas() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert (manifest["persona_name"], manifest["test_case_id"]) in {
         ("Standard Female", "b"),
         ("Standard Male", "d"),
@@ -245,7 +249,7 @@ async def test_incomplete_persona_is_skipped_and_other_is_published() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert manifest["persona_name"] == "Standard Male"
     assert manifest["test_case_id"] == "c"
     assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
@@ -265,7 +269,7 @@ async def test_failed_sim_drops_its_test_case_from_the_pool() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 2
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert (manifest["persona_name"], manifest["test_case_id"]) == ("Standard Male", "c")
 
 
@@ -278,7 +282,7 @@ async def test_no_complete_conversation_publishes_nothing() -> None:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 0
-    assert f"{PREFIX}/{TICK}/manifest.json" not in bucket.objects
+    assert f"{PARTITION}/{TICK}/manifest.json" not in bucket.objects
 
 
 @pytest.mark.asyncio
@@ -307,7 +311,7 @@ async def test_persona_missing_a_provider_is_skipped() -> None:
         stored = await _publish(client, storage_client, _runs(include_google_male=False))
 
     assert stored == 2
-    manifest = json.loads(bucket.objects[f"{PREFIX}/{TICK}/manifest.json"])
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
     assert manifest["persona_name"] == "Standard Female"
 
 
@@ -325,25 +329,25 @@ async def test_no_shared_conversation_stores_nothing() -> None:
 @pytest.mark.asyncio
 async def test_existing_manifest_is_never_overwritten() -> None:
     storage_client, bucket = _fake_storage()
-    bucket.objects[f"{PREFIX}/{TICK}/manifest.json"] = b'{"sentinel": true}'
+    bucket.objects[f"{PARTITION}/{TICK}/manifest.json"] = b'{"sentinel": true}'
     cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"], "RG_M": ["b"]}
     async with _fake_client(cases) as client:
         stored = await _publish(client, storage_client, _runs())
 
     assert stored == 0
-    assert bucket.objects[f"{PREFIX}/{TICK}/manifest.json"] == b'{"sentinel": true}'
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]  # index repaired
+    assert bucket.objects[f"{PARTITION}/{TICK}/manifest.json"] == b'{"sentinel": true}'
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK]  # index repaired
 
 
 @pytest.mark.asyncio
 async def test_index_keeps_existing_history() -> None:
     storage_client, bucket = _fake_storage()
-    bucket.objects[samples.INDEX_KEY] = json.dumps([PREV_TICK]).encode()
+    bucket.objects[samples.index_key(DATASET)] = json.dumps([PREV_TICK]).encode()
     cases = {"RO_F": ["b"], "RG_F": ["b"], "RO_M": ["b"], "RG_M": ["b"]}
     async with _fake_client(cases) as client:
         await _publish(client, storage_client, _runs())
 
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK, PREV_TICK]
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK, PREV_TICK]
 
 
 @pytest.mark.asyncio
@@ -355,13 +359,13 @@ async def test_index_stays_newest_first_when_an_older_day_lands_later() -> None:
     """
     storage_client, bucket = _fake_storage()
     newer = ["2026-07-27T00:00:00Z", TICK]
-    bucket.objects[samples.INDEX_KEY] = json.dumps(newer).encode()
+    bucket.objects[samples.index_key(DATASET)] = json.dumps(newer).encode()
     runs = _runs_on(PREV_BUCKET_AT, "_Y")
     cases = {r.coval_run_id: ["b"] for r in runs}
     async with _fake_client(cases) as client:
         await _publish(client, storage_client, runs)
 
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [*newer, PREV_TICK]
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [*newer, PREV_TICK]
 
 
 @pytest.mark.asyncio
@@ -390,13 +394,13 @@ async def test_missed_day_publishes_alongside_the_current_tick() -> None:
 
     assert stored == 4  # two providers x two days
     for tick in (PREV_TICK, TICK):
-        manifest = json.loads(bucket.objects[f"{PREFIX}/{tick}/manifest.json"])
+        manifest = json.loads(bucket.objects[f"{PARTITION}/{tick}/manifest.json"])
         assert manifest["bucket_at"] == tick
         assert {r["provider"] for r in manifest["recordings"]} == {"openai", "google"}
-        assert f"{PREFIX}/{tick}/openai/gpt-realtime.wav" in bucket.objects
-        assert f"{PREFIX}/{tick}/google/gemini-live.wav" in bucket.objects
+        assert f"{PARTITION}/{tick}/openai/gpt-realtime.wav" in bucket.objects
+        assert f"{PARTITION}/{tick}/google/gemini-live.wav" in bucket.objects
     # Published oldest-first, so the index ends up newest-first.
-    assert json.loads(bucket.objects[f"{PREFIX}/index.json"]) == [TICK, PREV_TICK]
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK, PREV_TICK]
 
 
 @pytest.mark.asyncio
@@ -424,10 +428,10 @@ async def test_bucket_missing_an_expected_provider_publishes_nothing() -> None:
 
     # Today is complete and publishes; yesterday is refused outright.
     assert stored == 2
-    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
-    assert f"{PREFIX}/{PREV_TICK}/manifest.json" not in bucket.objects
-    assert f"{PREFIX}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [TICK]
+    assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
+    assert f"{PARTITION}/{PREV_TICK}/manifest.json" not in bucket.objects
+    assert f"{PARTITION}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [TICK]
 
 
 @pytest.mark.asyncio
@@ -441,7 +445,7 @@ async def test_published_day_is_reindexed_even_when_a_provider_is_absent() -> No
     """
     storage_client, bucket = _fake_storage()
     already_there = b'{"schema_version": 2, "bucket_at": "2026-07-16T00:00:00Z"}'
-    bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] = already_there
+    bucket.objects[f"{PARTITION}/{PREV_TICK}/manifest.json"] = already_there
     # Only openai remains for that day, so the provider gate would otherwise fire.
     openai_only = [_run("openai", "gpt-realtime", "RO_F_Y", FEMALE, "AO", PREV_BUCKET_AT)]
     cases = {r.coval_run_id: ["b"] for r in openai_only}
@@ -454,26 +458,26 @@ async def test_published_day_is_reindexed_even_when_a_provider_is_absent() -> No
         )
 
     assert stored == 0
-    assert bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] == already_there
-    assert json.loads(bucket.objects[samples.INDEX_KEY]) == [PREV_TICK]
+    assert bucket.objects[f"{PARTITION}/{PREV_TICK}/manifest.json"] == already_there
+    assert json.loads(bucket.objects[samples.index_key(DATASET)]) == [PREV_TICK]
 
 
 @pytest.mark.asyncio
 async def test_recovery_never_overwrites_an_existing_manifest() -> None:
     storage_client, bucket = _fake_storage()
     already_there = b'{"schema_version": 2, "bucket_at": "2026-07-16T00:00:00Z"}'
-    bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] = already_there
+    bucket.objects[f"{PARTITION}/{PREV_TICK}/manifest.json"] = already_there
     runs = _runs_on(PREV_BUCKET_AT, "_Y") + _runs_on(BUCKET_AT, "_T")
     cases = {r.coval_run_id: ["b", "c"] for r in runs}
     async with _fake_client(cases) as client:
         stored = await _publish(client, storage_client, runs)
 
     assert stored == 2  # only the current tick
-    assert bucket.objects[f"{PREFIX}/{PREV_TICK}/manifest.json"] == already_there
-    assert f"{PREFIX}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
-    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
+    assert bucket.objects[f"{PARTITION}/{PREV_TICK}/manifest.json"] == already_there
+    assert f"{PARTITION}/{PREV_TICK}/openai/gpt-realtime.wav" not in bucket.objects
+    assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
     # The existing day is still repaired into the index.
-    assert PREV_TICK in json.loads(bucket.objects[f"{PREFIX}/index.json"])
+    assert PREV_TICK in json.loads(bucket.objects[samples.index_key(DATASET)])
 
 
 @pytest.mark.asyncio
@@ -488,8 +492,8 @@ async def test_an_unusable_day_does_not_block_the_other() -> None:
         stored = await _publish(client, storage_client, runs)
 
     assert stored == 2
-    assert f"{PREFIX}/{PREV_TICK}/manifest.json" not in bucket.objects
-    assert f"{PREFIX}/{TICK}/manifest.json" in bucket.objects
+    assert f"{PARTITION}/{PREV_TICK}/manifest.json" not in bucket.objects
+    assert f"{PARTITION}/{TICK}/manifest.json" in bucket.objects
 
 
 def test_conversation_turns_coerces_offsets() -> None:
@@ -540,3 +544,32 @@ async def test_failed_recording_download_keeps_the_signature_out_of_the_error(
     assert "https://blobs.test/recordings/sim-1.wav" in message
     assert str(status) in message
     assert "sim-1" in message
+
+
+@pytest.mark.asyncio
+async def test_manifest_and_objects_live_in_the_dataset_partition() -> None:
+    """The dataset id is the partition: nothing lands at the pre-partition root."""
+    client = _fake_client({"RO_F": ["tc1"], "RO_M": ["tc1"], "RG_F": ["tc1"], "RG_M": ["tc1"]})
+    storage_client, bucket = _fake_storage()
+
+    await _publish(client, storage_client, _runs())
+
+    manifest = json.loads(bucket.objects[f"{PARTITION}/{TICK}/manifest.json"])
+    assert manifest["dataset_id"] == DATASET
+    assert f"{PREFIX}/{TICK}/manifest.json" not in bucket.objects
+    assert f"{PREFIX}/index.json" not in bucket.objects
+    assert all(key.startswith(f"{PARTITION}/") for key in bucket.objects)
+
+
+def test_readers_follow_the_partition_and_the_legacy_root() -> None:
+    assert samples.sample_prefix(None) == PREFIX
+    assert samples.index_key(None) == f"{PREFIX}/index.json"
+    assert samples.index_key("instruction-adherence-health-v1") == (
+        f"{PREFIX}/instruction-adherence-health-v1/index.json"
+    )
+    legacy = f"{PREFIX}/{TICK}/openai/gpt-realtime.wav"
+    partitioned = f"{PARTITION}/{TICK}/openai/gpt-realtime.wav"
+    assert samples._own_audio_object(legacy, None, TICK)
+    assert not samples._own_audio_object(legacy, DATASET, TICK)
+    assert samples._own_audio_object(partitioned, DATASET, TICK)
+    assert not samples._own_audio_object(partitioned, None, TICK)

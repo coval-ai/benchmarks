@@ -331,6 +331,7 @@ class S2SSampleOut(BaseModel):
 
     schema_version: int | None = None
     sample_id: str
+    dataset_id: str | None = None
     test_case_id: str
     test_set_id: str | None = None
     persona_name: str | None = None
