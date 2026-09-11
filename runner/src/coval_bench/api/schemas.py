@@ -255,8 +255,10 @@ class TimelinePoint(BaseModel):
     model: str
     metric_type: str
     scheduled_at: datetime
-    value: float
+    value: float | None
     pooled_value: float | None = None
+    aggregation_method: Literal["mean", "ratio", "mean_fallback", "unavailable"] | None = None
+    sample_count: int | None = None
 
 
 class TimelineResponse(BaseModel):

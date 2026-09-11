@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import math
 from enum import StrEnum
+from typing import Literal, Self
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from coval_bench.registries.benchmarks import Benchmark
 
@@ -78,6 +79,44 @@ class MetricValueContract(BaseModel, frozen=True):
     values: tuple[MetricValueDefinition, ...]
     component_sum_tolerance: float | None = None
     optional_all_or_none: tuple[frozenset[str], ...] = ()
+    aggregation_method: Literal["mean", "ratio"]
+    numerator_keys: tuple[str, ...] = ()
+    denominator_key: str | None = None
+    ratio_scale: float = 1.0
+    ratio_fallback: Literal["mean"] | None = None
+
+    @model_validator(mode="after")
+    def validate_aggregation(self) -> Self:
+        """Reject invalid aggregation rules before a contract can be registered."""
+        definitions = {value.key: value for value in self.values}
+        if len(definitions) != len(self.values):
+            raise ValueError("metric value keys must be unique")
+        if self.aggregation_method == "mean":
+            if (
+                self.numerator_keys
+                or self.denominator_key is not None
+                or self.ratio_scale != 1
+                or self.ratio_fallback is not None
+            ):
+                raise ValueError("mean aggregation cannot declare ratio options")
+            return self
+        if not self.numerator_keys or not self.denominator_key:
+            raise ValueError("ratio aggregation requires numerator and denominator keys")
+        if len(set(self.numerator_keys)) != len(self.numerator_keys):
+            raise ValueError("ratio numerator keys must be unique")
+        if self.denominator_key in self.numerator_keys:
+            raise ValueError("ratio numerator and denominator keys must be disjoint")
+        operands = (*self.numerator_keys, self.denominator_key)
+        for key in operands:
+            if key not in definitions:
+                raise ValueError(f"ratio references unknown value key: {key}")
+            if key == "primary" or definitions[key].value_role != MetricValueRole.COMPONENT:
+                raise ValueError("ratio operands must be component values")
+        if len({definitions[key].unit for key in self.numerator_keys}) != 1:
+            raise ValueError("ratio numerator components must use the same unit")
+        if not math.isfinite(self.ratio_scale) or self.ratio_scale <= 0:
+            raise ValueError("ratio scale must be finite and positive")
+        return self
 
 
 # ``units`` values must stay byte-identical to what the orchestrator has
@@ -198,8 +237,23 @@ def _primary(metric: Metric) -> MetricValueDefinition:
 # This is deliberately independent from the legacy result-column layout.  A
 # metric implementation can add a new version without changing public rows.
 METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
-    (metric, "v1"): MetricValueContract(metric=metric, version="v1", values=(_primary(metric),))
-    for metric in Metric
+    (metric, "v1"): MetricValueContract(
+        metric=metric, version="v1", values=(_primary(metric),), aggregation_method="mean"
+    )
+    # List these explicitly: a new enum entry must choose an aggregation rule.
+    for metric in (
+        Metric.TTFT,
+        Metric.TTFS,
+        Metric.TTFA,
+        Metric.TTFA_ROUNDTRIP,
+        Metric.TTFA_LEADING_SILENCE,
+        Metric.RTF,
+        Metric.AUDIO_TO_FINAL,
+        Metric.V2V,
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.INTERRUPTION_RATE,
+        Metric.EXPECTED_BEHAVIOR_ADHERENCE,
+    )
 }
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     metric=Metric.WER,
@@ -218,9 +272,15 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     optional_all_or_none=(
         frozenset({"substitution_count", "deletion_count", "insertion_count", "reference_words"}),
     ),
+    aggregation_method="ratio",
+    numerator_keys=("substitution_count", "deletion_count", "insertion_count"),
+    denominator_key="reference_words",
+    ratio_scale=100.0,
+    ratio_fallback="mean",
 )
 METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
     metric=Metric.TTFA,
+    aggregation_method="mean",
     version="v1",
     values=(
         _primary(Metric.TTFA),
@@ -232,6 +292,19 @@ METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
     component_sum_tolerance=0.001,
     optional_all_or_none=(frozenset({"roundtrip", "leading_silence"}),),
 )
+
+
+if {metric for metric, version in METRIC_VALUE_CONTRACTS if version == "v1"} != set(Metric):
+    raise RuntimeError("Every metric must explicitly declare its v1 value and aggregation contract")
+
+
+# Dashboard reads currently select v1/default. Keep rules versioned in the source
+# registry; this string-keyed view is the adapter for the database's metric names.
+TIMELINE_AGGREGATION_RULES = {
+    metric.value: contract
+    for (metric, version), contract in METRIC_VALUE_CONTRACTS.items()
+    if version == "v1"
+}
 
 
 def validate_metric_contract(metric: Metric | str, version: str) -> MetricValueContract:

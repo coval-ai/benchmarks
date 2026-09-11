@@ -36,6 +36,7 @@ import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
+from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
@@ -68,7 +69,7 @@ from coval_bench.api.schemas import (
     TimelineResponse,
 )
 from coval_bench.config import DATASET_ALL, Settings
-from coval_bench.registries import is_metric_excluded
+from coval_bench.registries import TIMELINE_AGGREGATION_RULES, is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -340,73 +341,108 @@ _NORMALIZED_COMPACT_SERIES_SQL = (
     + _COMPACT_SERIES_TAIL
 )
 
-# Timeline averages are deliberately separate from the legacy series query:
-# the latter preserves its 240-point extrema compaction contract.  ``bucket_at``
-# is the source bucket timestamp, and all bounds are half-open.
-_TIMELINE_AVERAGE_SQL = (
-    "WITH source AS ("
-    " SELECT provider, model, metric_type, bucket_at AS source_at,"
-    " value_sum, sample_count, NULL::float8 AS error_sum,"
-    " NULL::float8 AS reference_word_sum, NULL::float8 AS pooled_value"
-    " FROM benchmarks_v2.results_by_bucket"
-    " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
-    " AND bucket_at >= %(since)s AND bucket_at < %(until)s"
-    "), grouped AS ("
-    " SELECT provider, model, metric_type,"
-    " to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)"
-    " * %(bucket_seconds)s) AS scheduled_at,"
-    " SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,"
-    " MAX(source_at) AS latest_source_at, COUNT(*) AS source_bucket_count"
-    " FROM source GROUP BY provider, model, metric_type, scheduled_at"
-    ") SELECT provider, model, metric_type, scheduled_at,"
-    " value_sum / NULLIF(sample_count, 0) AS value,"
-    " latest_source_at FROM grouped"
-    " ORDER BY scheduled_at, provider, model, metric_type"
+# Rules are data bound through psycopg, including metric and component names.
+# Source buckets retain sums/counts, so larger intervals never average averages.
+_TIMELINE_RULES_SQL = """
+WITH rules AS (
+ SELECT * FROM jsonb_to_recordset(%(aggregation_rules)s::jsonb) AS r(
+   metric_type text, metric_version text, method text, numerator_keys text[],
+   denominator_key text, scale float8, fallback text, units jsonb
+ )
+), source AS (
+"""
+_NORMALIZED_AVERAGE_SOURCE_SQL = """
+ SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
+        r.method, r.fallback, r.scale,
+        MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary') AS primary_sum,
+        MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary') AS sample_count,
+        SUM(b.value_sum) FILTER (WHERE b.value_key = ANY(r.numerator_keys)) AS numerator,
+        SUM(b.value_sum) FILTER (WHERE b.value_key = r.denominator_key) AS denominator,
+        (COUNT(*) = cardinality(r.numerator_keys) + 2
+         AND MIN(b.sample_count) = MAX(b.sample_count)
+         AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
+ FROM benchmarks_v2.metric_values_by_bucket b
+ JOIN rules r USING (metric_type, metric_version)
+ WHERE b.evaluation_variant = 'default'
+   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+   AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
+   AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
+        OR b.value_key = r.denominator_key)
+ GROUP BY b.provider, b.model, b.metric_type, b.bucket_at,
+          r.method, r.fallback, r.scale, r.numerator_keys
+ HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
+    AND COUNT(*) FILTER (WHERE b.value_key = 'primary'
+                         AND b.unit = r.units ->> 'primary') = 1
+"""
+_LEGACY_AVERAGE_SOURCE_SQL = """
+ SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
+        r.method, r.fallback, r.scale,
+        b.value_sum AS primary_sum, b.sample_count,
+        NULL::float8 AS numerator, NULL::float8 AS denominator, FALSE AS complete
+ FROM benchmarks_v2.results_by_bucket b
+ JOIN rules r USING (metric_type)
+ WHERE b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+   AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
+"""
+_TIMELINE_AVERAGE_TAIL_SQL = """
+), grouped AS (
+ SELECT provider, model, metric_type, method, fallback, scale,
+        to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)
+                     * %(bucket_seconds)s) AS scheduled_at,
+        SUM(primary_sum)::float8 / NULLIF(SUM(sample_count), 0) AS mean_value,
+        SUM(sample_count) AS sample_count, MAX(source_at) AS latest_source_at,
+        CASE WHEN BOOL_AND(complete) AND SUM(denominator) > 0
+             THEN scale * SUM(numerator)::float8 / NULLIF(SUM(denominator), 0)
+        END AS ratio_value
+ FROM source
+ GROUP BY provider, model, metric_type, method, fallback, scale, scheduled_at
 )
+SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
+       CASE WHEN method = 'mean' THEN mean_value
+            WHEN ratio_value IS NOT NULL THEN ratio_value
+            WHEN fallback = 'mean' THEN mean_value END AS value,
+       ratio_value AS pooled_value,
+       CASE WHEN method = 'mean' THEN 'mean'
+            WHEN ratio_value IS NOT NULL THEN 'ratio'
+            WHEN fallback = 'mean' THEN 'mean_fallback'
+            ELSE 'unavailable' END AS aggregation_method
+FROM grouped ORDER BY scheduled_at, provider, model, metric_type
+"""
 
-_NORMALIZED_TIMELINE_SOURCE_SQL = _NORMALIZED_BUCKETS_SQL.replace(
-    " AND bucket_at >= NOW() - %(interval)s::interval",
-    " AND bucket_at >= %(since)s AND bucket_at < %(until)s",
-)
-
-_NORMALIZED_TIMELINE_AVERAGE_SQL = (  # noqa: S608
-    "WITH source AS (SELECT provider, model, metric_type, scheduled_at AS source_at,"  # noqa: S608
-    " value_sum, sample_count, error_sum, reference_word_sum, pooled_value"
-    " FROM (" + _NORMALIZED_TIMELINE_SOURCE_SQL + ") b"  # noqa: S608
-    "), grouped AS ("
-    " SELECT provider, model, metric_type,"
-    " to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)"
-    " * %(bucket_seconds)s) AS scheduled_at,"
-    " SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,"
-    " MAX(source_at) AS latest_source_at,"
-    " COUNT(*) AS source_bucket_count,"
-    " COUNT(*) FILTER (WHERE error_sum IS NOT NULL AND reference_word_sum IS NOT NULL)"
-    " AS pooled_bucket_count, SUM(error_sum)::float8 AS error_sum,"
-    " SUM(reference_word_sum)::float8 AS reference_word_sum"
-    " FROM source GROUP BY provider, model, metric_type, scheduled_at"
-    ") SELECT provider, model, metric_type, scheduled_at,"
-    " CASE WHEN metric_type = 'WER' AND pooled_bucket_count = source_bucket_count"
-    " AND reference_word_sum > 0"
-    " THEN 100 * error_sum / NULLIF(reference_word_sum, 0)"
-    " ELSE value_sum / NULLIF(sample_count, 0) END AS value,"
-    " CASE WHEN metric_type = 'WER' AND pooled_bucket_count = source_bucket_count"
-    " AND reference_word_sum > 0"
-    " THEN 100 * error_sum / NULLIF(reference_word_sum, 0) END AS pooled_value,"
-    " latest_source_at FROM grouped"
-    " ORDER BY scheduled_at, provider, model, metric_type"
-)  # noqa: S608
-
-_TIMELINE_ALLOWED_BUCKETS = (60, 300, 900, 1800, 3600, 7200, 14400, 21600, 43200)
+_TIMELINE_ALLOWED_BUCKETS = (3600, 7200, 14400, 21600, 43200)
 
 
 def _timeline_bucket_seconds(duration_seconds: float) -> int:
-    """Choose the smallest supported interval targeting roughly 200 points."""
-    target = max(60.0, duration_seconds / 200.0)
+    """Choose roughly 200 points with one hour as the finest average interval."""
+    target = max(3600.0, duration_seconds / 200.0)
     for seconds in _TIMELINE_ALLOWED_BUCKETS:
         if seconds >= target:
             return seconds
     days = (int(target) + 86399) // 86400
     return days * 86400
+
+
+def _timeline_average_sql(normalized: bool) -> tuple[str, dict[str, Any]]:
+    """Bind the current versioned metric definitions for either storage path."""
+    rules = [
+        {
+            "metric_type": name,
+            "metric_version": rule.version,
+            "method": rule.aggregation_method,
+            "numerator_keys": list(rule.numerator_keys),
+            "denominator_key": rule.denominator_key,
+            "scale": rule.ratio_scale,
+            "fallback": rule.ratio_fallback,
+            "units": {value.key: value.unit for value in rule.values},
+        }
+        for name, rule in TIMELINE_AGGREGATION_RULES.items()
+        if rule.version == "v1"
+    ]
+    source = _NORMALIZED_AVERAGE_SOURCE_SQL if normalized else _LEGACY_AVERAGE_SOURCE_SQL
+    return (
+        _TIMELINE_RULES_SQL + source + _TIMELINE_AVERAGE_TAIL_SQL,
+        {"aggregation_rules": Jsonb(rules)},
+    )
 
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
@@ -574,7 +610,7 @@ async def get_results_timeline(
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     settings: Settings = Depends(get_settings),
 ) -> TimelineResponse:
-    """Return run points or sample-weighted chart averages."""
+    """Return run points or intervals using each metric's aggregation rule."""
     dataset_key = dataset or DATASET_ALL
     bucket_seconds: int | None
     if (since is None) != (until is None):
@@ -607,10 +643,11 @@ async def get_results_timeline(
 
     async def fill() -> TimelineResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        rule_params: dict[str, Any] = {}
         if aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
         else:
-            sql = _NORMALIZED_TIMELINE_AVERAGE_SQL if normalized else _TIMELINE_AVERAGE_SQL
+            sql, rule_params = _timeline_average_sql(normalized)
         params = {
             "benchmark": benchmark,
             "dataset": dataset_key,
@@ -625,6 +662,7 @@ async def get_results_timeline(
             "until": until,
             "bucket_seconds": bucket_seconds,
         }
+        params.update(rule_params)
         async with pool.connection() as conn:
             conn.row_factory = psycopg.rows.dict_row
             rows = await (await conn.execute(sql, params)).fetchall()
