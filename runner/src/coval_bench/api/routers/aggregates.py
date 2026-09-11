@@ -27,13 +27,14 @@ costs one request instead of one per dataset. Series are not batched.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 from collections import defaultdict
 from typing import Any
 
 import psycopg.rows
 import structlog
 from cachetools import TTLCache
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
@@ -129,7 +130,7 @@ _COMPACT_SERIES_TAIL = (
     " FROM selected"
     " WHERE min_rank = 1 OR max_rank = 1 OR ordinal = 1 OR ordinal = group_count"
     " ORDER BY scheduled_at, provider, model, metric_type"
-)
+)  # noqa: S608
 
 _COMPACT_SERIES_SQL = (
     "WITH base AS ("  # noqa: S608
@@ -339,6 +340,74 @@ _NORMALIZED_COMPACT_SERIES_SQL = (
     + _COMPACT_SERIES_TAIL
 )
 
+# Timeline averages are deliberately separate from the legacy series query:
+# the latter preserves its 240-point extrema compaction contract.  ``bucket_at``
+# is the source bucket timestamp, and all bounds are half-open.
+_TIMELINE_AVERAGE_SQL = (
+    "WITH source AS ("
+    " SELECT provider, model, metric_type, bucket_at AS source_at,"
+    " value_sum, sample_count, NULL::float8 AS error_sum,"
+    " NULL::float8 AS reference_word_sum, NULL::float8 AS pooled_value"
+    " FROM benchmarks_v2.results_by_bucket"
+    " WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s"
+    " AND bucket_at >= %(since)s AND bucket_at < %(until)s"
+    "), grouped AS ("
+    " SELECT provider, model, metric_type,"
+    " to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)"
+    " * %(bucket_seconds)s) AS scheduled_at,"
+    " SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,"
+    " MAX(source_at) AS latest_source_at, COUNT(*) AS source_bucket_count"
+    " FROM source GROUP BY provider, model, metric_type, scheduled_at"
+    ") SELECT provider, model, metric_type, scheduled_at,"
+    " value_sum / NULLIF(sample_count, 0) AS value,"
+    " latest_source_at FROM grouped"
+    " ORDER BY scheduled_at, provider, model, metric_type"
+)
+
+_NORMALIZED_TIMELINE_SOURCE_SQL = _NORMALIZED_BUCKETS_SQL.replace(
+    " AND bucket_at >= NOW() - %(interval)s::interval",
+    " AND bucket_at >= %(since)s AND bucket_at < %(until)s",
+)
+
+_NORMALIZED_TIMELINE_AVERAGE_SQL = (  # noqa: S608
+    "WITH source AS (SELECT provider, model, metric_type, scheduled_at AS source_at,"  # noqa: S608
+    " value_sum, sample_count, error_sum, reference_word_sum, pooled_value"
+    " FROM (" + _NORMALIZED_TIMELINE_SOURCE_SQL + ") b"  # noqa: S608
+    "), grouped AS ("
+    " SELECT provider, model, metric_type,"
+    " to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)"
+    " * %(bucket_seconds)s) AS scheduled_at,"
+    " SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,"
+    " MAX(source_at) AS latest_source_at,"
+    " COUNT(*) AS source_bucket_count,"
+    " COUNT(*) FILTER (WHERE error_sum IS NOT NULL AND reference_word_sum IS NOT NULL)"
+    " AS pooled_bucket_count, SUM(error_sum)::float8 AS error_sum,"
+    " SUM(reference_word_sum)::float8 AS reference_word_sum"
+    " FROM source GROUP BY provider, model, metric_type, scheduled_at"
+    ") SELECT provider, model, metric_type, scheduled_at,"
+    " CASE WHEN metric_type = 'WER' AND pooled_bucket_count = source_bucket_count"
+    " AND reference_word_sum > 0"
+    " THEN 100 * error_sum / NULLIF(reference_word_sum, 0)"
+    " ELSE value_sum / NULLIF(sample_count, 0) END AS value,"
+    " CASE WHEN metric_type = 'WER' AND pooled_bucket_count = source_bucket_count"
+    " AND reference_word_sum > 0"
+    " THEN 100 * error_sum / NULLIF(reference_word_sum, 0) END AS pooled_value,"
+    " latest_source_at FROM grouped"
+    " ORDER BY scheduled_at, provider, model, metric_type"
+)  # noqa: S608
+
+_TIMELINE_ALLOWED_BUCKETS = (60, 300, 900, 1800, 3600, 7200, 14400, 21600, 43200)
+
+
+def _timeline_bucket_seconds(duration_seconds: float) -> int:
+    """Choose the smallest supported interval targeting roughly 200 points."""
+    target = max(60.0, duration_seconds / 200.0)
+    for seconds in _TIMELINE_ALLOWED_BUCKETS:
+        if seconds >= target:
+            return seconds
+    days = (int(target) + 86399) // 86400
+    return days * 86400
+
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
     return (row["provider"], row["model"]) not in hidden and not is_metric_excluded(
@@ -491,11 +560,13 @@ async def get_results_aggregates(
 async def get_results_timeline(
     request: Request,
     benchmark: BenchmarkLiteral = Query(...),
-    window: WindowLiteral = Query(default="24h"),
+    window: WindowLiteral | None = Query(default=None),
     dataset: str | None = Query(
         default=None,
         description="Dataset id to aggregate over; omit for pooled all-dataset buckets.",
     ),
+    since: dt.datetime | None = Query(default=None),
+    until: dt.datetime | None = Query(default=None),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     posthog_client: Posthog | None = Depends(get_posthog),
     cache: TTLCache[Any, Any] = Depends(get_cache),
@@ -503,26 +574,64 @@ async def get_results_timeline(
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     settings: Settings = Depends(get_settings),
 ) -> TimelineResponse:
-    """Return chart points without the dashboard's aggregate-stat payload."""
+    """Return run points or sample-weighted chart averages."""
     dataset_key = dataset or DATASET_ALL
+    bucket_seconds: int | None
+    if (since is None) != (until is None):
+        raise HTTPException(status_code=422, detail="since and until must be provided together")
+    if since is not None and until is not None:
+        if window is not None:
+            raise HTTPException(
+                status_code=422, detail="window cannot be combined with since/until"
+            )
+        if since.tzinfo is None or until.tzinfo is None:
+            raise HTTPException(status_code=422, detail="since and until must be timezone-aware")
+        since = since.astimezone(dt.UTC)
+        until = until.astimezone(dt.UTC)
+        if until <= since:
+            raise HTTPException(status_code=422, detail="until must be after since")
+        duration = (until - since).total_seconds()
+        if duration > 30 * 86400:
+            raise HTTPException(status_code=422, detail="timeline range cannot exceed 30 days")
+        response_window: WindowLiteral | None = None
+        bucket_seconds = _timeline_bucket_seconds(duration)
+        aggregation = "average"
+    else:
+        response_window = window or "24h"
+        duration = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}[response_window]
+        now = dt.datetime.now(dt.UTC)
+        since = now - dt.timedelta(seconds=duration)
+        until = now
+        bucket_seconds = _timeline_bucket_seconds(duration) if response_window != "24h" else None
+        aggregation = "run" if response_window == "24h" else "average"
 
     async def fill() -> TimelineResponse:
-        sql = (
-            (_NORMALIZED_COMPACT_SERIES_SQL if window == "30d" else _NORMALIZED_TIMELINE_SQL)
-            if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-            else (_COMPACT_SERIES_SQL if window == "30d" else _TIMELINE_SQL)
-        )
+        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        if aggregation == "run":
+            sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
+        else:
+            sql = _NORMALIZED_TIMELINE_AVERAGE_SQL if normalized else _TIMELINE_AVERAGE_SQL
         params = {
             "benchmark": benchmark,
             "dataset": dataset_key,
-            "interval": WINDOW_INTERVALS[window],
+            # Only the unchanged run query uses this interval; averages use
+            # the explicit source bounds below.
+            "interval": (
+                f"{int(duration)} seconds"
+                if response_window is None
+                else WINDOW_INTERVALS[response_window]
+            ),
+            "since": since,
+            "until": until,
+            "bucket_seconds": bucket_seconds,
         }
         async with pool.connection() as conn:
             conn.row_factory = psycopg.rows.dict_row
             rows = await (await conn.execute(sql, params)).fetchall()
+        visible_rows = [row for row in rows if _visible(row, hidden)]
         return TimelineResponse(
             benchmark=benchmark,
-            window=window,
+            window=response_window,
             dataset=dataset_key,
             points=[
                 TimelinePoint.model_validate(
@@ -535,16 +644,27 @@ async def get_results_timeline(
                         else row["p50"],
                     }
                 )
-                for row in rows
-                if _visible(row, hidden)
+                for row in visible_rows
             ],
+            aggregation=aggregation,
+            bucket_seconds=bucket_seconds,
+            range_start=since,
+            range_end=until,
+            latest_source_at=max(
+                (row.get("latest_source_at", row.get("scheduled_at")) for row in visible_rows),
+                default=None,
+            ),
         )
 
     cache_key = (
         "timeline",
         benchmark,
-        window,
+        response_window,
         dataset_key,
+        aggregation,
+        bucket_seconds,
+        # Preset keys intentionally omit request time; custom bounds are isolated.
+        None if response_window is not None else (since, until),
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
@@ -554,10 +674,11 @@ async def get_results_timeline(
         "results_timeline_queried",
         {
             "benchmark": benchmark,
-            "window": window,
+            "window": response_window,
             "dataset": dataset_key,
+            "aggregation": aggregation,
+            "bucket_seconds": bucket_seconds,
             "point_count": len(response.points),
-            "max_points_per_group": 240 if window == "30d" else None,
             "cache_hit": cache_status != "miss",
             "cache_status": cache_status,
             "$process_person_profile": False,

@@ -263,9 +263,14 @@ class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
-    window: WindowLiteral
+    window: WindowLiteral | None
     dataset: str
     points: list[TimelinePoint]
+    aggregation: Literal["run", "average"] = "run"
+    bucket_seconds: int | None = None
+    range_start: datetime | None = None
+    range_end: datetime | None = None
+    latest_source_at: datetime | None = None
 
 
 class DatasetAggregates(BaseModel):
