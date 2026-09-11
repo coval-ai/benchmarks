@@ -11,6 +11,7 @@ from httpx import AsyncClient
 
 from coval_bench.api.common import MIN_SCORED_SAMPLES
 from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
+from tests.api.test_aggregates import _insert_normalized_metric
 
 
 async def test_24h_window_sorted_ascending(client: AsyncClient, postgresql: Any) -> None:
@@ -227,10 +228,26 @@ async def test_ttft_llm_uses_the_dental_primary_dataset(
     assert response.status_code == 200
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
 
+    for run_id, dataset_id, provider in (
+        (dental_run, "llm-dental-v1", "phonely"),
+        (other_run, "llm-scratch-v1", "acme"),
+    ):
+        await _insert_normalized_metric(
+            postgresql,
+            run_id,
+            dataset_id=dataset_id,
+            metric_type="TTFT",
+            values={"primary": 0.42},
+            benchmark="LLM",
+            provider=provider,
+            model="normalized-model",
+        )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
     response = await client.get("/v1/leaderboard", params=params)
-    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
+        ("phonely", "normalized-model")
+    ]
 
 
 async def test_v2v_llm_incompatible(client: AsyncClient) -> None:
