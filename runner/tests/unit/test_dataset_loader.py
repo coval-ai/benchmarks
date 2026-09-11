@@ -33,6 +33,7 @@ import random
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -337,28 +338,6 @@ def test_gcs_path_resolution(test_settings: Settings, tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_empty_manifest_items(test_settings: Settings, tmp_path: Path) -> None:
-    """Manifest with items: [] → Dataset with empty items list; no exception."""
-    empty_manifest = Manifest(
-        id="stt-v1",
-        version="1.0.0",
-        license="CC-BY-4.0",
-        source="test",
-        items=[],
-    )
-
-    with patch("coval_bench.datasets.loader._load_manifest", return_value=empty_manifest):
-        result = load_stt_dataset(
-            "stt-v1",
-            settings=test_settings,
-            cache_dir=tmp_path,
-            storage_client=MagicMock(),
-        )
-
-    assert result.items == []
-    assert result.id == "stt-v1"
-
-
 def test_manifest_allows_unique_effective_stt_identities() -> None:
     """Explicit and fallback STT identities may coexist when they are distinct."""
     manifest = Manifest(
@@ -548,6 +527,103 @@ def test_load_manifest_reads_packaged_tts_manifest() -> None:
     assert len(manifest.items) == 30  # 30 curated TTS prompts
 
 
+def test_packaged_tts_v2_is_a_private_pointer() -> None:
+    """The prompts never live in the wheel."""
+    manifest = _load_manifest("tts-v2")
+    assert manifest.items == [] and manifest.remote is not None
+
+
+def _remote(tmp_path: Path, body: str) -> tuple[Manifest, MagicMock]:
+    """A pointer to *body* served by a fake bucket, pinned to the body's real hash."""
+    remote_dir = tmp_path / "remote"
+    remote_dir.mkdir()
+    sha = hashlib.sha256(body.encode()).hexdigest()
+    (remote_dir / f"{sha}.json").write_text(body)
+    pointer = Manifest(
+        id="tts-v2",
+        version="2.0.0",
+        license="proprietary",
+        source="test",
+        remote={"bucket": "private", "path": f"tts-v2/{sha}.json", "sha256": sha},
+    )
+    return pointer, _make_fake_storage_client(remote_dir)
+
+
+@pytest.mark.parametrize(
+    ("patch_fields", "message"),
+    [
+        ({}, "either items or a remote pointer"),
+        ({"items": [{"testcase_id": "a", "transcript": "b"}]}, "both items and a remote pointer"),
+        (
+            {"remote": {"bucket": "b", "path": "tts-v2/manifest.json", "sha256": "0" * 64}},
+            "must contain its sha256",
+        ),
+    ],
+)
+def test_manifest_shape_guards(patch_fields: dict[str, Any], message: str) -> None:
+    base: dict[str, Any] = {"id": "tts-v2", "version": "2.0.0", "license": "l", "source": "s"}
+    if "items" in patch_fields:
+        base["remote"] = {"bucket": "b", "path": "tts-v2/" + "0" * 64, "sha256": "0" * 64}
+    with pytest.raises(ValidationError, match=message):
+        Manifest.model_validate(base | patch_fields)
+
+
+@pytest.mark.parametrize(
+    "served",
+    [
+        {"id": "tts-v1", "items": [{"testcase_id": "a", "transcript": "b"}]},
+        {"id": "tts-v2", "remote": {"bucket": "b", "path": "x/" + "1" * 64, "sha256": "1" * 64}},
+    ],
+)
+def test_resolved_manifest_must_match_id_and_carry_items(
+    test_settings: Settings, tmp_path: Path, served: dict[str, Any]
+) -> None:
+    body = json.dumps(served | {"version": "2.0.0", "license": "l", "source": "s"})
+    pointer, client = _remote(tmp_path, body)
+
+    with (
+        patch("coval_bench.datasets.loader._load_manifest", return_value=pointer),
+        pytest.raises(ManifestAlignmentError),
+    ):
+        load_tts_dataset(
+            "tts-v2", settings=test_settings, cache_dir=tmp_path, storage_client=client
+        )
+
+
+def test_remote_tts_manifest_is_fetched_and_verified(
+    test_settings: Settings, tmp_path: Path
+) -> None:
+    full = Manifest(
+        id="tts-v2",
+        version="2.0.0",
+        license="proprietary",
+        source="test",
+        items=[TTSManifestItem(testcase_id="x", transcript="LT-507", spoken_reference="l t")],
+    )
+    pointer, client = _remote(tmp_path, full.model_dump_json())
+
+    with patch("coval_bench.datasets.loader._load_manifest", return_value=pointer):
+        result = load_tts_dataset(
+            "tts-v2", settings=test_settings, cache_dir=tmp_path, storage_client=client
+        )
+
+    assert [i.spoken_reference for i in result.items] == ["l t"]
+
+
+def test_remote_manifest_hash_mismatch_raises(test_settings: Settings, tmp_path: Path) -> None:
+    pointer, client = _remote(tmp_path, "{}")
+    assert pointer.remote is not None
+    (tmp_path / "remote" / pointer.remote.path.rsplit("/", 1)[1]).write_text("tampered")
+
+    with (
+        patch("coval_bench.datasets.loader._load_manifest", return_value=pointer),
+        pytest.raises(DatasetIntegrityError),
+    ):
+        load_tts_dataset(
+            "tts-v2", settings=test_settings, cache_dir=tmp_path, storage_client=client
+        )
+
+
 def test_load_manifest_reads_packaged_stt_manifest() -> None:
     """_load_manifest round-trips the packaged stt-v1.json manifest."""
     from coval_bench.datasets.loader import _load_manifest
@@ -598,30 +674,6 @@ def test_load_dataset_dispatcher_tts(test_settings: Settings, tmp_path: Path) ->
         )
 
     assert isinstance(result, TTSDataset)
-
-
-def test_load_dataset_dispatcher_empty(test_settings: Settings, tmp_path: Path) -> None:
-    """load_dataset with empty items falls through to TTS path without error."""
-    from coval_bench.datasets.loader import TTSDataset, load_dataset
-
-    empty_manifest = Manifest(
-        id="tts-v1",
-        version="1.0.0",
-        license="proprietary",
-        source="test",
-        items=[],
-    )
-
-    with patch("coval_bench.datasets.loader._load_manifest", return_value=empty_manifest):
-        result = load_dataset(
-            "tts-v1",
-            settings=test_settings,
-            cache_dir=tmp_path,
-            storage_client=MagicMock(),
-        )
-
-    assert isinstance(result, TTSDataset)
-    assert result.items == []
 
 
 def test_stale_cache_redownloads(test_settings: Settings, tmp_path: Path) -> None:

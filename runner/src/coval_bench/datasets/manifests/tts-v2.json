@@ -1,0 +1,11 @@
+{
+  "id": "tts-v2",
+  "version": "2.0.0",
+  "license": "Proprietary",
+  "source": "Coval TTS v2 authoring bank (private); remote manifest also carries the tts-v1 prompts",
+  "remote": {
+    "bucket": "coval-benchmarks-datasets-private",
+    "path": "datasets/tts-v2/4aa2aa77fdfa18fb62ea5ee932dd15feaa035e8d9c740f3e199e1fbd2178271f.json",
+    "sha256": "4aa2aa77fdfa18fb62ea5ee932dd15feaa035e8d9c740f3e199e1fbd2178271f"
+  }
+}
