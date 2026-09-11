@@ -76,6 +76,43 @@ async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> No
     assert "authorization" in allowed, f"authorization missing from {allowed!r}"
 
 
+async def test_cors_allowed_headers_are_exactly_the_expected_set(client: AsyncClient) -> None:
+    """Pin the allowlist itself, in both directions.
+
+    Widening it is how a retired proof gets quietly resurrected. Narrowing it is how
+    the last outage happened: #521 dropped X-EA-Token and X-Internal-Key while the
+    dashboard still sent them, and a browser only sends a request whose headers the
+    preflight approved — so every request was cancelled before it left the browser,
+    every leaderboard rendered empty including the public rows, and nothing reached a
+    server to log it.
+
+    Asserting the exact set means either direction fails here and has to be argued for
+    in the diff. Changing this list is a client contract change: check what still sends
+    the header before editing the expectation.
+    """
+    response = await client.options(
+        "/v1/results",
+        headers={
+            "Origin": "https://benchmarks.coval.ai",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization",
+        },
+    )
+    assert response.status_code in (200, 204)
+    allowed = {
+        h.strip().lower()
+        for h in response.headers.get("access-control-allow-headers", "").split(",")
+        if h.strip()
+    }
+    assert allowed == {
+        "accept",
+        "accept-language",
+        "authorization",
+        "content-language",
+        "content-type",
+    }, f"CORS allowlist changed: {sorted(allowed)}"
+
+
 async def test_cors_vercel_canonical_allowed(client: AsyncClient) -> None:
     """The canonical Vercel project URL is in the static allowlist."""
     response = await client.options(
