@@ -49,6 +49,7 @@ def never_shared(response: Response) -> None:
 # that name. Retire one only once nothing stored can still name it.
 _RETIRED_BOARD_KEYS: dict[tuple[str, str], tuple[str, str]] = {
     ("xai", "grok-realtime"): ("xai", "grok-voice-think-fast-1.0"),
+    ("openai", "violet"): ("openai", "gpt-live-1"),
 }
 
 

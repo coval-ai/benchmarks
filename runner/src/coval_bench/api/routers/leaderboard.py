@@ -43,7 +43,7 @@ from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_SQL
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.registries import is_metric_excluded
-from coval_bench.s2s.conditions import DATASET_ID_DENTAL, DATASET_ID_LLM_DENTAL
+from coval_bench.s2s.conditions import DATASET_ID_BANK, DATASET_ID_LLM_DENTAL
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -61,12 +61,12 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFT", "LLM"),
 }
 
-# The headline S2S board is the clean dental condition, which every agent now runs.
-# The multi-turn set is frozen rather than retired: no agent writes to it, but it
-# stays reachable through the aggregates ``dataset`` param, as does ``__all__`` for
-# callers that want every S2S condition pooled. LLM runs the same dental scenario
-# over text.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_DENTAL, "LLM": DATASET_ID_LLM_DENTAL}
+# The headline S2S board is the Ultra Bank instruction-following set, which every
+# S2S agent runs daily. Dental and the multi-turn set are frozen rather than
+# retired: nothing writes to them, but they stay reachable through the aggregates
+# ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
+# pooled. LLM still runs the dental scenario over text.
+_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_BANK, "LLM": DATASET_ID_LLM_DENTAL}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,

@@ -34,6 +34,7 @@ from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
+    FAMILY_BANK,
     FAMILY_DENTAL,
     FAMILY_INSTR_CUST_SERVICE,
     FAMILY_INSTR_HEALTH,
@@ -175,7 +176,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
         AgentSpec(
             agent_id=settings.coval_s2s_health_violet_agent_id,
             provider="openai",
-            model="violet",
+            model="gpt-live-1",
             test_set_id_attr="coval_s2s_health_test_set_id",
             family=FAMILY_INSTR_HEALTH,
             publish_samples=False,
@@ -208,7 +209,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
         AgentSpec(
             agent_id=settings.coval_s2s_home_service_violet_agent_id,
             provider="openai",
-            model="violet",
+            model="gpt-live-1",
             test_set_id_attr="coval_s2s_home_service_test_set_id",
             family=FAMILY_INSTR_HOME_SERVICE,
             publish_samples=False,
@@ -241,13 +242,49 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
         AgentSpec(
             agent_id=settings.coval_s2s_cust_service_violet_agent_id,
             provider="openai",
-            model="violet",
+            model="gpt-live-1",
             test_set_id_attr="coval_s2s_cust_service_test_set_id",
             family=FAMILY_INSTR_CUST_SERVICE,
             publish_samples=False,
             workspace_id_attr="coval_s2s_industry_workspace_id",
             instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
             expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
+        ),
+        # The Ultra Bank set, the daily public board: four agents in the default
+        # workspace on one test set. Its instruction metric is the Validate
+        # Expected Behaviors judge, a fraction rather than a verdict, which the
+        # instruction mapper scales to a percentage.
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_openai_agent_id,
+            provider="openai",
+            model="gpt-realtime",
+            test_set_id_attr="coval_s2s_bank_test_set_id",
+            family=FAMILY_BANK,
+            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_gpt_live_agent_id,
+            provider="openai",
+            model="gpt-live-1",
+            test_set_id_attr="coval_s2s_bank_test_set_id",
+            family=FAMILY_BANK,
+            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_gemini_agent_id,
+            provider="google",
+            model="gemini-live",
+            test_set_id_attr="coval_s2s_bank_test_set_id",
+            family=FAMILY_BANK,
+            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+        ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_xai_agent_id,
+            provider="xai",
+            model="grok-voice-think-fast-2.0",
+            test_set_id_attr="coval_s2s_bank_test_set_id",
+            family=FAMILY_BANK,
+            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
         ),
     )
 
@@ -360,6 +397,12 @@ def _dataset_identity(
     if condition is Condition.CLEAN:
         return dataset_id, test_set_id
     return dataset_id, f"{test_set_id}:{persona_id}"
+
+
+def _fetches_v2v(family: str) -> bool:
+    """Whether *family*'s clean condition asks Coval for V2V latency."""
+    dataset_id = dataset_id_for(family, Condition.CLEAN)
+    return dataset_id is not None and Metric.V2V in condition_for(dataset_id).fetched
 
 
 def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
@@ -509,8 +552,14 @@ def _population_mismatch(
 def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     """YES -> 100.0, NO -> 0.0, UNKNOWN -> no row, so the mean is YES / (YES + NO).
 
-    Raises InvalidInstructionVerdict on any value outside the contract.
+    A composite judge reports the fraction of expected behaviors met instead of a
+    verdict; that fraction becomes a percentage on the same scale, unrounded.
+    Raises InvalidInstructionVerdict on any value outside either contract.
     """
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        if not 0.0 <= raw <= 1.0:
+            raise InvalidInstructionVerdict(f"instruction fraction out of range: {raw!r}")
+        return float(raw) * 100.0, ResultStatus.SUCCESS
     verdict = _instruction_verdict(raw)
     if verdict is None:
         return None
@@ -1002,12 +1051,18 @@ def _backfill_status(statuses: list[RunStatus]) -> RunStatus:
     return RunStatus.PARTIAL
 
 
-def _expected_sample_models(settings: Settings) -> set[tuple[str, str]]:
-    """The pairs a sample must cover; a bucket short one publishes nothing."""
+def _expected_sample_models(settings: Settings, dataset_id: str) -> set[tuple[str, str]]:
+    """The pairs a sample on *dataset_id* must cover; a bucket short one publishes nothing.
+
+    Each dataset is its own samples partition, so only the agents whose clean
+    condition lands there count; a model on another industry's set is not missing.
+    """
     return {
         (spec.provider, spec.model)
         for spec in s2s_specs(settings)
-        if spec.agent_id and spec.publish_samples
+        if spec.agent_id
+        and spec.publish_samples
+        and dataset_id_for(spec.family, Condition.CLEAN) == dataset_id
     }
 
 
@@ -1071,6 +1126,7 @@ async def _fetch_one_provider(
             persona_id=coval_run.persona_id,
             agent_id=agent_id,
             test_set_id=test_set_id or "",
+            dataset_id=dataset_id,
         )
 
     try:
@@ -1231,11 +1287,9 @@ async def fetch_and_write_v2v(
 
     metric_id = settings.coval_s2s_latency_metric_id
     if benchmark is Benchmark.S2S and not metric_id:
-        # Industry specs fetch instruction adherence only (see conditions.py);
-        # only a spec still relying on the shared V2V metric makes it required.
-        v2v_spec_configured = any(
-            not spec.instruction_metric_id_attr and spec.agent_id for spec in specs
-        )
+        # Only a configured spec whose clean condition fetches V2V (see
+        # conditions.py) makes the latency metric required; industry specs don't.
+        v2v_spec_configured = any(spec.agent_id and _fetches_v2v(spec.family) for spec in specs)
         if v2v_spec_configured:
             raise RuntimeError("coval_s2s_latency_metric_id is not set")
     # Instruction ingestion and the test-set filter go together: instruction
@@ -1396,25 +1450,34 @@ async def fetch_and_write_v2v(
                 f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
             )
 
-        # The set the sampled recordings actually came from, which is what labels
-        # the manifest. Gating on the shared ``coval_s2s_test_set_id`` instead would
-        # stop publishing entirely once every agent carries its own set, filling
-        # sampled_runs and then never shipping them.
-        sample_test_set_id = next(
-            (r.test_set_id for r in sampled_runs if r.test_set_id), test_set_id
-        )
-        if settings.s2s_samples_bucket and sampled_runs and sample_test_set_id:
-            expected = _expected_sample_models(settings)
-            missing = expected - {r.key for r in sampled_runs}
+        # One sample per dataset: each industry runs its own test set, so a tick
+        # that pooled them would never find a scenario shared by every model. The
+        # set the recordings actually came from labels the manifest; gating on the
+        # shared ``coval_s2s_test_set_id`` instead would stop publishing entirely
+        # once every agent carries its own set.
+        by_dataset: dict[str, list[SampleRun]] = {}
+        for run in sampled_runs:
+            by_dataset.setdefault(run.dataset_id, []).append(run)
+        for dataset_id, dataset_runs in sorted(by_dataset.items()):
+            sample_test_set_id = next(
+                (r.test_set_id for r in dataset_runs if r.test_set_id), test_set_id
+            )
+            if not (settings.s2s_samples_bucket and sample_test_set_id):
+                continue
+            expected = _expected_sample_models(settings, dataset_id)
+            missing = expected - {r.key for r in dataset_runs}
             if missing:
                 # Error level on purpose: this is the alert that a model is
                 # absent from the window, so no day in it can publish a sample.
-                logger.error("samples_provider_missing", missing=model_labels(missing))
+                logger.error(
+                    "samples_provider_missing", dataset=dataset_id, missing=model_labels(missing)
+                )
             await publish_tick_sample(
                 client,
                 bucket_name=settings.s2s_samples_bucket,
+                dataset_id=dataset_id,
                 test_set_id=sample_test_set_id,
-                runs=sampled_runs,
+                runs=dataset_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
             )

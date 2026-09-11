@@ -27,6 +27,8 @@ from tests.api.conftest import COVAL_ORG, add_models, bearer
 _BUCKET = "test-s2s-samples"
 _SAMPLE = "2026-07-30T00:00:00Z"
 _OTHER_SAMPLE = "2026-07-29T00:00:00Z"
+_DATASET = "instruction-adherence-cust-service-v1"
+_PARTITIONED_SAMPLE = "2026-09-11T00:00:00Z"
 _SIGNED = "https://storage.googleapis.com/signed-for-test"
 
 _PARTNER_ORG = "org_s2s_partner"
@@ -45,11 +47,14 @@ _LIVE = ("openlab", "public-s2s")
 _EMBARGOED = ("acme", "secret-s2s")
 
 
-def _recording(provider: str, model: str, sample_id: str = _SAMPLE) -> dict[str, Any]:
+def _recording(
+    provider: str, model: str, sample_id: str = _SAMPLE, dataset_id: str | None = None
+) -> dict[str, Any]:
+    prefix = f"s2s-samples/{dataset_id}" if dataset_id else "s2s-samples"
     return {
         "provider": provider,
         "model": model,
-        "object": f"s2s-samples/{sample_id}/{provider}/{model}.wav",
+        "object": f"{prefix}/{sample_id}/{provider}/{model}.wav",
         "coval_run_id": "run-1",
         "sim_id": "sim-1",
         "agent_id": "agent-1",
@@ -73,6 +78,16 @@ _OBJECTS: dict[str, Any] = {
         "test_case_id": "tc-secret",
         "persona_name": "Standard Female",
         "recordings": [_recording(*_EMBARGOED, sample_id=_OTHER_SAMPLE)],
+    },
+    # One industry's partition, keyed by its dataset id, alongside the legacy root.
+    f"s2s-samples/{_DATASET}/index.json": [_PARTITIONED_SAMPLE],
+    f"s2s-samples/{_DATASET}/{_PARTITIONED_SAMPLE}/manifest.json": {
+        "schema_version": 2,
+        "bucket_at": _PARTITIONED_SAMPLE,
+        "dataset_id": _DATASET,
+        "test_case_id": "tc-cs",
+        "persona_name": "Standard Customer",
+        "recordings": [_recording(*_LIVE, sample_id=_PARTITIONED_SAMPLE, dataset_id=_DATASET)],
     },
 }
 
@@ -318,3 +333,63 @@ async def test_a_rejected_sample_id_is_never_cached(samples_client: AsyncClient)
     assert res.status_code == 422
     assert res.headers["cache-control"] == "private, no-store"
     assert "Authorization" in res.headers["vary"]
+
+
+# --- dataset partitions -----------------------------------------------------
+
+
+async def test_dataset_param_selects_that_partitions_index(samples_client: AsyncClient) -> None:
+    res = await samples_client.get("/v1/s2s/samples", params={"dataset": _DATASET})
+
+    assert res.status_code == 200
+    assert res.json() == [_PARTITIONED_SAMPLE]
+
+
+async def test_without_dataset_the_legacy_root_is_still_served(
+    samples_client: AsyncClient,
+) -> None:
+    """A dashboard that predates partitioning keeps its card until the root ages out."""
+    res = await samples_client.get("/v1/s2s/samples")
+
+    assert res.json() == [_SAMPLE, _OTHER_SAMPLE]
+    assert (await samples_client.get(f"/v1/s2s/samples/{_PARTITIONED_SAMPLE}")).status_code == 404
+
+
+async def test_partitioned_manifest_carries_its_dataset_into_the_audio_paths(
+    samples_client: AsyncClient,
+) -> None:
+    res = await samples_client.get(
+        f"/v1/s2s/samples/{_PARTITIONED_SAMPLE}", params={"dataset": _DATASET}
+    )
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body["dataset_id"] == _DATASET
+    assert _pairs(body) == [_LIVE]
+    audio_path = body["recordings"][0]["audio_path"]
+    assert audio_path.endswith(f"?dataset={_DATASET}")
+
+    audio = await samples_client.get(audio_path)
+    assert audio.status_code == 200
+    assert (
+        audio.json()["url"]
+        == f"{_SIGNED}/s2s-samples/{_DATASET}/{_PARTITIONED_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}.wav"
+    )
+
+
+async def test_a_recording_is_only_signed_inside_its_own_partition(
+    samples_client: AsyncClient,
+) -> None:
+    """The legacy sample's objects sit at the root, so asking for them under a
+    partition must refuse rather than sign a path outside that partition."""
+    res = await samples_client.get(
+        f"/v1/s2s/samples/{_SAMPLE}/{_LIVE[0]}/{_LIVE[1]}/audio", params={"dataset": _DATASET}
+    )
+
+    assert res.status_code == 404
+
+
+async def test_dataset_param_must_be_one_path_segment(samples_client: AsyncClient) -> None:
+    for bad in ("../other", "s2s/x", "Upper", ""):
+        res = await samples_client.get("/v1/s2s/samples", params={"dataset": bad})
+        assert res.status_code == 422, bad

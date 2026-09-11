@@ -25,9 +25,14 @@ from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
+    DATASET_ID_BANK,
+    DATASET_ID_DENTAL,
+    DATASET_ID_INSTR_CUST_SERVICE,
     DATASET_ID_LLM_DENTAL,
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
+    FAMILY_BANK,
+    FAMILY_DENTAL,
     FAMILY_HAPPYPATH,
     FAMILY_INSTR_HEALTH,
     FAMILY_LLM_DENTAL,
@@ -313,12 +318,36 @@ def test_expected_sample_models_excludes_non_publishing_agents() -> None:
         coval_s2s_gray_agent_id="a2",
         coval_s2s_red_agent_id="a3",
     )
-    expected = fetch_v2v._expected_sample_models(settings)
+    expected = fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL)
 
     assert ("openai", "gpt-realtime") in expected
     assert ("colors", "gray") not in expected
     assert ("colors", "red") not in expected
     assert ("phonely", "phonely-agent") not in expected
+
+
+def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
+    """An agent counts only on its own dataset: a model absent from another set is
+    not a missing provider there, and industry agents never publish at all."""
+    settings = Settings.model_construct(
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_bank_openai_agent_id="b1",
+        coval_s2s_bank_gpt_live_agent_id="b2",
+        coval_s2s_bank_gemini_agent_id="b3",
+        coval_s2s_bank_xai_agent_id="b4",
+        coval_s2s_cust_service_openai_agent_id="c1",
+    )
+
+    assert fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL) == {
+        ("openai", "gpt-realtime")
+    }
+    assert fetch_v2v._expected_sample_models(settings, DATASET_ID_BANK) == {
+        ("openai", "gpt-realtime"),
+        ("openai", "gpt-live-1"),
+        ("google", "gemini-live"),
+        ("xai", "grok-voice-think-fast-2.0"),
+    }
+    assert fetch_v2v._expected_sample_models(settings, DATASET_ID_INSTR_CUST_SERVICE) == set()
 
 
 def test_bucket_start_floors_to_grid() -> None:
@@ -1200,6 +1229,65 @@ async def test_samples_publish_without_the_shared_test_set(
     publish.assert_awaited_once()
     assert publish.await_args is not None
     assert publish.await_args.kwargs["test_set_id"] == "TSD"
+    assert publish.await_args.kwargs["dataset_id"] == DATASET_ID_DENTAL
+
+
+@pytest.mark.asyncio
+async def test_each_dataset_publishes_its_own_sample_tick(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dental and the bank set never share a tick: each partition gets its own
+    publish with only its own runs and only its own expected models."""
+    monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_openai_agent_id="a1",
+        coval_s2s_dental_test_set_id="TSD",
+        coval_s2s_bank_openai_agent_id="b1",
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_instruction_metric_id="BIM",
+        s2s_samples_bucket="bucket",
+    )
+
+    writer = _stub_writer()
+    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "metrics": {
+                    "MID": {"values": [{"simulation_output_id": "s1", "value": 0.5}]},
+                    "BIM": {"values": [{"simulation_output_id": "s1", "value": 0.75}]},
+                }
+            },
+        }
+    }
+    client = _fake_client(list_json, run_json)
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    publish = AsyncMock(return_value=1)
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "publish_tick_sample", publish)
+
+    await fetch_v2v.fetch_and_write_v2v(settings)
+
+    calls = {c.kwargs["dataset_id"]: c.kwargs for c in publish.await_args_list}
+    assert set(calls) == {DATASET_ID_DENTAL, DATASET_ID_BANK}
+    dental, bank = calls[DATASET_ID_DENTAL], calls[DATASET_ID_BANK]
+    assert dental["test_set_id"] == "TSD"
+    assert {r.key for r in dental["runs"]} == {("openai", "gpt-realtime")}
+    assert dental["expected_models"] == {("openai", "gpt-realtime")}
+    assert bank["test_set_id"] == "TSB"
+    assert all(r.dataset_id == DATASET_ID_BANK for r in bank["runs"])
+    assert bank["expected_models"] == {("openai", "gpt-realtime")}
+    # The bank run's judge fraction landed as a percentage under the instruction metric.
+    rows = [r for call in writer.record_results.await_args_list for r in call.args[0]]
+    assert [r.metric_value for r in rows if r.metric_type == "InstructionFollowing"] == [75.0]
 
 
 @pytest.mark.asyncio
@@ -1651,6 +1739,28 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     )
     with pytest.raises(RuntimeError, match="no _VALUE_MAPPERS entry"):
         await fetch_v2v.fetch_and_write_v2v(settings)
+
+
+def test_instruction_value_scales_a_judge_fraction_to_percent() -> None:
+    assert fetch_v2v._instruction_value(0.75) == (75.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(1) == (100.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(0.0) == (0.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value(0.3333333333333333) == (
+        33.33333333333333,
+        ResultStatus.SUCCESS,
+    )
+    assert fetch_v2v._instruction_value("YES") == (100.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._instruction_value("UNKNOWN") is None
+    with pytest.raises(fetch_v2v.InvalidInstructionVerdict):
+        fetch_v2v._instruction_value(1.5)
+    with pytest.raises(fetch_v2v.InvalidInstructionVerdict):
+        fetch_v2v._instruction_value(True)
+
+
+def test_latency_metric_is_required_only_for_a_family_that_fetches_it() -> None:
+    assert fetch_v2v._fetches_v2v(FAMILY_BANK)
+    assert fetch_v2v._fetches_v2v(FAMILY_DENTAL)
+    assert not fetch_v2v._fetches_v2v(FAMILY_INSTR_HEALTH)
 
 
 def test_interruption_value_maps() -> None:
