@@ -84,14 +84,15 @@ def run(kind: str, smoke: bool, source: str) -> None:
     """Execute one benchmark run — invoked by Cloud Run Job."""
     from coval_bench.config import get_settings
     from coval_bench.db.models import RunStatus
-    from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
+    from coval_bench.runner.orchestrator import RunSummary, run_suite
 
     settings = get_settings()
-    summary: RunSummary = asyncio.run(
-        run_benchmarks(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
+    summaries: list[RunSummary] = asyncio.run(
+        run_suite(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
     )
-    click.echo(summary.model_dump_json())
-    if summary.status == str(RunStatus.FAILED):
+    for summary in summaries:
+        click.echo(summary.model_dump_json())
+    if not summaries or any(s.status == str(RunStatus.FAILED) for s in summaries):
         raise click.ClickException("run failed")
 
 

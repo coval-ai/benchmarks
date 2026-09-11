@@ -27,14 +27,17 @@ before that used `stt-v1` alone.
 **TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
 rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
 
-**Per-run sampling.** Each scheduled run draws a random sample of
-`dataset_sample_size` items (default 10) from its manifest before any provider
-is called; each dataset's pool is sampled independently. The sample is drawn
+**Per-run sampling.** Each scheduled run draws a random sample of items from
+its manifest before any provider is called. Shared executions run every 30
+minutes, one per dataset, and take `DATASET_ID` and `DATASET_SAMPLE_SIZE`
+from their scheduler trigger. The dedicated job runs once a day as a single
+execution that walks the suite in `runner/src/coval_bench/datasets/suite.py`,
+which lists its datasets and the sample size for each. The sample is drawn
 once at the start of the run and shared across every model, so all models are
 scored on the identical subset within a run (parity); the draw is independent
 across runs, so the full manifest is covered over time. The manifests still
 carry their complete item sets — sampling only controls how many run each
-cycle. Set `DATASET_SAMPLE_SIZE` ≥ the manifest size to run everything.
+cycle. A size ≥ the manifest length runs everything.
 
 **SHA pinning.** Every audio file referenced by an STT manifest carries a
 `sha256` field. The runner verifies the SHA after fetching from GCS and raises
@@ -46,9 +49,9 @@ TTS items are text-only and have no SHA.
 carry a `version` field. Bumping a dataset re-pins by minting a new manifest;
 retired manifests (`stt-v2.json`) stay for historical reproducibility.
 
-**Aggregation across datasets.** Each dataset runs as its own run (one
-`DATASET_ID` per execution), and a result's dataset is derived from its parent
-run. The aggregation layer pools every result in the window regardless of
+**Aggregation across datasets.** Each dataset runs as its own run (one run
+row per dataset, all on the execution's tick), and a result's dataset is
+derived from its parent run. The aggregation layer pools every result in the window regardless of
 dataset, so headline stats (e.g. pooled WER) blend all datasets that ran.
 `/v1/results` exposes each row's `dataset_id` and takes a `dataset` filter for
 per-dataset inspection. See ADR-023.
