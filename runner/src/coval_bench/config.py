@@ -52,7 +52,8 @@ class Settings(BaseSettings):
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
-    dataset_id: str = "stt-v1"
+    # Unset: dedicated runs walk datasets/suite.py; anything else runs the default dataset.
+    dataset_id: str | None = None
     # Private bucket for additive normalized observation artifacts. The rollout
     # is deliberately fail-closed: enabling writes without a destination is an
     # invalid deployment rather than a silent partial capture.
@@ -63,7 +64,7 @@ class Settings(BaseSettings):
 
     @field_validator("dataset_id")
     @classmethod
-    def _dataset_id_not_reserved(cls, value: str) -> str:
+    def _dataset_id_not_reserved(cls, value: str | None) -> str | None:
         if value == DATASET_ALL:
             raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
         return value
@@ -76,9 +77,9 @@ class Settings(BaseSettings):
             )
         return self
 
-    # Items drawn at random per run from each manifest, shared across all
-    # models for parity. Set >= manifest size to run everything.
-    dataset_sample_size: int = 10
+    # Items drawn at random per run from a manifest, shared across all models
+    # for parity. Unset: the suite's size (dedicated) or 10. >= manifest size runs everything.
+    dataset_sample_size: int | None = None
 
     # --- Runner ---
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
