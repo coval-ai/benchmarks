@@ -1649,7 +1649,11 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
 
 
 def test_interruption_value_maps() -> None:
-    assert fetch_v2v._interruption_value(1.1666666666666632) == (1.17, ResultStatus.SUCCESS)
+    assert fetch_v2v._interruption_value(1.1666666666666632) == (
+        1.1666666666666632,
+        ResultStatus.SUCCESS,
+    )
+    assert fetch_v2v._interruption_value(0.0041) == (0.0041, ResultStatus.SUCCESS)
     assert fetch_v2v._interruption_value(0) == (0.0, ResultStatus.SUCCESS)
     assert fetch_v2v._interruption_value(None) == (None, ResultStatus.FAILED)
     assert fetch_v2v._interruption_value("1.5") == (None, ResultStatus.FAILED)
