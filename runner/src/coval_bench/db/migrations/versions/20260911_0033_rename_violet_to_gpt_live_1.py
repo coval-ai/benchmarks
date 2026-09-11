@@ -1,27 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Rename ``violet`` to ``openai/gpt-live-1``; register it and ``xai/grok-voice`` as early access.
-
-``violet`` was the pre-launch label for the GPT-Live-1 agents on the three
-instruction-adherence industry boards. GPT-Live-1 launched publicly on
-2026-07-08, so the codename no longer protects anything and just reads as an
-unknown model on the dashboard.
-
-``model`` is stored on every results row and is part of the bucket tables'
-primary keys, so every table keyed by (provider, model) is rewritten together.
-Rewriting only some would split the industry series between two keys.
-
-Neither the codename nor ``xai/grok-voice`` was ever registered, so the industry
-boards served both to the public: an unregistered pair cannot be embargoed. Both
-get registry rows here as early access (``published = FALSE``), which is what
-pulls them back behind the gate while giving them a name and a color for the orgs
-that may see them.
-
-The per-window matviews are deliberately not refreshed here: the runner
-refreshes them at the end of each benchmark run (see ``migrations/env.py``),
-and ``REFRESH ... CONCURRENTLY`` cannot run inside a migration's transaction.
-"""
+"""Rename Violet to GPT-Live-1 and register GPT-Live-1 and Grok Voice as early access."""
 
 from __future__ import annotations
 
@@ -49,7 +29,6 @@ def _rename(old: str, new: str) -> None:
 
 
 def upgrade() -> None:
-    """Point every violet row at gpt-live-1 and register both models as early access."""
     _rename("violet", "gpt-live-1")
     op.execute(
         """
@@ -76,7 +55,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Restore the codename and drop both registry rows (tags cascade)."""
     op.execute(
         "DELETE FROM benchmarks_v2.models "
         "WHERE modality = 'S2S' AND updated_by_user_id = 'migration:20260911_0033' "
