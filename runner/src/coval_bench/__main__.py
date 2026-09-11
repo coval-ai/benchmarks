@@ -92,7 +92,7 @@ def run(kind: str, smoke: bool, source: str) -> None:
     )
     for summary in summaries:
         click.echo(summary.model_dump_json())
-    if any(summary.status == str(RunStatus.FAILED) for summary in summaries):
+    if not summaries or any(s.status == str(RunStatus.FAILED) for s in summaries):
         raise click.ClickException("run failed")
 
 

@@ -1148,8 +1148,8 @@ async def run_suite(
     smoke: bool = False,
     source: Literal["shared", "dedicated"] = "shared",
 ) -> list[RunSummary]:
-    """Dedicated walks the suite, one run row per dataset on one tick; else a single run."""
-    if source != "dedicated" or settings.dataset_id is not None or benchmark_kind == "tts":
+    """Dedicated STT walks the suite, one run row per dataset on one tick; else a single run."""
+    if source != "dedicated" or benchmark_kind != "stt" or settings.dataset_id is not None:
         return [
             await run_benchmarks(
                 settings=settings, benchmark_kind=benchmark_kind, smoke=smoke, source=source
@@ -1157,33 +1157,23 @@ async def run_suite(
         ]
 
     scheduled_at = _current_tick(settings)
-    kinds: list[tuple[Literal["stt", "tts"], str | None]] = [
-        ("stt", dataset_id) for dataset_id in DEDICATED_STT_SUITE
-    ]
-    if benchmark_kind == "both":
-        kinds.append(("tts", None))
-
     summaries: list[RunSummary] = []
-    first_error: Exception | None = None
-    for kind, dataset_id in kinds:
+    for dataset_id in DEDICATED_STT_SUITE:
         try:
             summary = await run_benchmarks(
                 settings=settings,
-                benchmark_kind=kind,
+                benchmark_kind="stt",
                 smoke=smoke,
                 source=source,
                 dataset_id=dataset_id,
                 scheduled_at=scheduled_at,
             )
-        except Exception as exc:
-            logger.error("suite_dataset_failed", dataset_id=dataset_id, exc_info=exc)
-            first_error = first_error or exc
+        except Exception:
+            logger.exception("suite_dataset_failed", dataset_id=dataset_id)
             continue
         summaries.append(summary)
         if summary.sigterm:
             break
-    if first_error is not None:
-        raise first_error
     return summaries
 
 
