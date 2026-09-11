@@ -525,9 +525,9 @@ def _expected_behavior_value(raw: object) -> tuple[float | None, ResultStatus] |
 
 
 def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Interruptions per minute, stored as-is; a clip with no numeric value becomes a FAILED row."""
+    """Interruptions per minute, unrounded; a clip with no numeric value becomes a FAILED row."""
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return round(float(raw), 2), ResultStatus.SUCCESS
+        return float(raw), ResultStatus.SUCCESS
     return None, ResultStatus.FAILED
 
 
