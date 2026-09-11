@@ -1148,15 +1148,7 @@ async def run_suite(
     smoke: bool = False,
     source: Literal["shared", "dedicated"] = "shared",
 ) -> list[RunSummary]:
-    """Dedicated: walk the suite, one run row per dataset, all on one tick.
-
-    Everything else is a single run: shared executions get their dataset from
-    the infra trigger, and a configured ``DATASET_ID`` or a TTS-only kind pins
-    one dataset. A dataset that fails outright is logged and the suite moves
-    on; the first such error is re-raised once the loop ends so the job still
-    exits non-zero. A SIGTERM ends the loop, since the task is about to be
-    killed.
-    """
+    """Dedicated walks the suite, one run row per dataset on one tick; else a single run."""
     if source != "dedicated" or settings.dataset_id is not None or benchmark_kind == "tts":
         return [
             await run_benchmarks(
@@ -1216,10 +1208,8 @@ async def run_benchmarks(
             run — dedicated endpoints have their own scheduled job.
         matrix_overrides: Optional list of ``RegisteredModel`` objects that
             override the registry by ``(benchmark, provider, model)`` key.
-        dataset_id: STT dataset for this run; falls back to ``settings.dataset_id``
-            and then the suite default.
-        scheduled_at: Tick the run is attributed to. Suite runs on one execution
-            share it so family datasets draw aligned samples.
+        dataset_id: STT dataset for this run; defaults to ``settings.dataset_id``.
+        scheduled_at: Tick the run is attributed to; suite runs share one.
 
     Returns:
         A :class:`RunSummary` with final counts and run status.

@@ -52,7 +52,6 @@ class Settings(BaseSettings):
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
-    # Unset: dedicated runs walk datasets/suite.py; anything else runs the default dataset.
     dataset_id: str | None = None
     # Private bucket for additive normalized observation artifacts. The rollout
     # is deliberately fail-closed: enabling writes without a destination is an
@@ -77,8 +76,7 @@ class Settings(BaseSettings):
             )
         return self
 
-    # Items drawn at random per run from a manifest, shared across all models
-    # for parity. Unset: the suite's size (dedicated) or 10. >= manifest size runs everything.
+    # Unset: datasets/suite.py decides. >= manifest size runs everything.
     dataset_sample_size: int | None = None
 
     # --- Runner ---

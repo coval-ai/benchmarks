@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from importlib import resources
 from typing import Any
@@ -31,15 +32,16 @@ def _summary(status: str = "succeeded", *, sigterm: bool = False) -> RunSummary:
     )
 
 
-def test_every_suite_dataset_has_a_manifest() -> None:
+def test_suite_sizes_fit_their_manifests() -> None:
     manifests = resources.files("coval_bench.datasets.manifests")
-    for dataset_id in DEDICATED_STT_SUITE:
-        assert manifests.joinpath(f"{dataset_id}.json").is_file(), dataset_id
+    for dataset_id, size in DEDICATED_STT_SUITE.items():
+        items = json.loads(manifests.joinpath(f"{dataset_id}.json").read_text())["items"]
+        assert size <= len(items), dataset_id
 
 
 def test_sample_size_prefers_override_then_suite() -> None:
     assert stt_sample_size("shared", "stt-v3", 7) == 7
-    assert stt_sample_size("dedicated", "stt-wildasr-clean", None) == 12
+    assert stt_sample_size("dedicated", "stt-wildasr-clean", None) == 192
     assert stt_sample_size("shared", "stt-v3", None) == 10
     assert stt_sample_size("dedicated", "stt-v1", None) == 10
     assert tts_sample_size("dedicated", None) == 60
