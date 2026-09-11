@@ -14,8 +14,7 @@ from typing import Literal
 BenchmarkLiteral = Literal["STT", "TTS", "S2S", "LLM"]
 WindowLiteral = Literal["24h", "7d", "30d"]
 
-# LLM results have no normalized writer yet, so its reads stay on legacy storage.
-NORMALIZED_BENCHMARKS: frozenset[str] = frozenset({"STT", "TTS", "S2S"})
+NORMALIZED_BENCHMARKS: frozenset[str] = frozenset({"STT", "TTS", "S2S", "LLM"})
 
 
 def reads_normalized(enabled: bool, benchmark: str) -> bool:

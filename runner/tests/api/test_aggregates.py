@@ -45,6 +45,8 @@ async def _insert_normalized_metric(
     evaluation_status: str = "succeeded",
     metric_version: str = "v1",
     evaluation_variant: str = "default",
+    provider: str = "deepgram",
+    model: str = "nova-3",
 ) -> None:
     """Seed one normalized evaluation for cutover tests."""
     import psycopg
@@ -58,8 +60,8 @@ async def _insert_normalized_metric(
         await conn.execute(
             """INSERT INTO benchmarks_v2.benchmark_observations
                (id, run_id, dataset_id, provider, model, benchmark, captured_at, status)
-               VALUES (%s, %s, %s, 'deepgram', 'nova-3', %s, now(), %s)""",
-            (observation_id, run_id, dataset_id, benchmark, observation_status),
+               VALUES (%s, %s, %s, %s, %s, %s, now(), %s)""",
+            (observation_id, run_id, dataset_id, provider, model, benchmark, observation_status),
         )
         await conn.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
@@ -257,12 +259,28 @@ async def test_llm_instruction_following_is_served_by_aggregates(
     ]
     assert stats[0]["avg_value"] == pytest.approx(75.0)
 
+    normalized_run = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+    for value in (100.0, 100.0, 0.0):
+        await _insert_normalized_metric(
+            postgresql,
+            normalized_run,
+            dataset_id="llm-dental-v1",
+            metric_type="InstructionFollowing",
+            values={"primary": value},
+            benchmark="LLM",
+            provider="phonely",
+            model="phonely-agent",
+        )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
     response = await client.get(
         "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
     )
-    assert response.json()["model_stats"] == stats
+    stats = response.json()["model_stats"]
+    assert [(s["provider"], s["metric_type"], s["sample_count"]) for s in stats] == [
+        ("phonely", "InstructionFollowing", 3)
+    ]
+    assert stats[0]["avg_value"] == pytest.approx(200 / 3)
 
 
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
