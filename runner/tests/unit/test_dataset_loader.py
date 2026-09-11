@@ -561,7 +561,7 @@ def _remote(tmp_path: Path, body: str) -> tuple[Manifest, MagicMock]:
     ],
 )
 def test_manifest_shape_guards(patch_fields: dict[str, Any], message: str) -> None:
-    base = {"id": "tts-v2", "version": "2.0.0", "license": "l", "source": "s"}
+    base: dict[str, Any] = {"id": "tts-v2", "version": "2.0.0", "license": "l", "source": "s"}
     if "items" in patch_fields:
         base["remote"] = {"bucket": "b", "path": "tts-v2/" + "0" * 64, "sha256": "0" * 64}
     with pytest.raises(ValidationError, match=message):
