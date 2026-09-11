@@ -420,7 +420,8 @@ def load_tts_dataset(
     dataset_id:
         Manifest identifier, e.g. ``"tts-v1"``.
     settings:
-        Runner settings; used to build a GCS client for private manifests.
+        Accepted for call-signature symmetry; not consulted. The private-manifest
+        client comes from ``storage_client`` or application-default credentials.
     cache_dir:
         Override the local cache directory for a fetched private manifest.
     storage_client:

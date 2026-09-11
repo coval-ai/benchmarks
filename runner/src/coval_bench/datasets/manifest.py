@@ -115,6 +115,8 @@ class Manifest(BaseModel):
     @model_validator(mode="after")
     def items_consistent(self) -> Manifest:
         """Ensure items are homogeneous and have distinct effective identities."""
+        if not self.items and self.remote is None:
+            raise ValueError(f"Manifest '{self.id}' must carry either items or a remote pointer")
         if self.items and self.remote is not None:
             raise ValueError(f"Manifest '{self.id}' cannot carry both items and a remote pointer")
         if not self.items:
