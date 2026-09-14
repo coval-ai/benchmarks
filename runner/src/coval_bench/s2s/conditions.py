@@ -28,9 +28,6 @@ __all__ = [
     "DATASET_ID_HAPPYPATH",
     "DATASET_ID_HAPPYPATH_ACCENTED",
     "DATASET_ID_HAPPYPATH_NOISY",
-    "DATASET_ID_INSTR_CUST_SERVICE",
-    "DATASET_ID_INSTR_HEALTH",
-    "DATASET_ID_INSTR_HOME_SERVICE",
     "DATASET_ID_LLM_BANK",
     "DATASET_ID_LLM_DENTAL",
     "DATASET_ID_MULTITURN",
@@ -39,9 +36,6 @@ __all__ = [
     "FAMILY_BANK",
     "FAMILY_DENTAL",
     "FAMILY_HAPPYPATH",
-    "FAMILY_INSTR_CUST_SERVICE",
-    "FAMILY_INSTR_HEALTH",
-    "FAMILY_INSTR_HOME_SERVICE",
     "FAMILY_LLM_BANK",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
@@ -77,11 +71,6 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
 FAMILY_LLM_DENTAL = "llm-dental"
-# One family per industry so their instruction-adherence numbers are never
-# pooled together — each is its own board on the dashboard.
-FAMILY_INSTR_HEALTH = "instruction-adherence-health"
-FAMILY_INSTR_HOME_SERVICE = "instruction-adherence-home-service"
-FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
 # Ultra Bank instruction following: two scenarios, run daily by every S2S agent in
 # the default workspace. Only the clean caller is scheduled; the harder personas
 # exist in Coval but are not ingested until they get a dataset id here.
@@ -107,10 +96,6 @@ DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
 # pooled with the voice rows.
 DATASET_ID_LLM_DENTAL = "llm-dental-v1"
 
-DATASET_ID_INSTR_HEALTH = "instruction-adherence-health-v1"
-DATASET_ID_INSTR_HOME_SERVICE = "instruction-adherence-home-service-v1"
-DATASET_ID_INSTR_CUST_SERVICE = "instruction-adherence-cust-service-v1"
-
 DATASET_ID_BANK = "s2s-bank-v1"
 DATASET_ID_LLM_BANK = "llm-bank-v1"
 
@@ -127,9 +112,6 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_LLM_DENTAL, Condition.CLEAN): DATASET_ID_LLM_DENTAL,
     (FAMILY_LLM_DENTAL, Condition.NOISY): None,
     (FAMILY_LLM_DENTAL, Condition.ACCENTED): None,
-    (FAMILY_INSTR_HEALTH, Condition.CLEAN): DATASET_ID_INSTR_HEALTH,
-    (FAMILY_INSTR_HOME_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_HOME_SERVICE,
-    (FAMILY_INSTR_CUST_SERVICE, Condition.CLEAN): DATASET_ID_INSTR_CUST_SERVICE,
     (FAMILY_BANK, Condition.CLEAN): DATASET_ID_BANK,
     (FAMILY_BANK, Condition.NOISY): None,
     (FAMILY_BANK, Condition.ACCENTED): None,
@@ -212,22 +194,6 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
-    ),
-    # No V2V or interruption metric is configured for these test sets. Expected
-    # Behavior Adherence is optional, not required: it anchors on the judge
-    # score's conversation ids, so a run rescored for EBA after the fact is
-    # still ingested rather than faulted for arriving late.
-    DATASET_ID_INSTR_HEALTH: DatasetMetrics(
-        required=Metric.INSTRUCTION_FOLLOWING,
-        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
-    ),
-    DATASET_ID_INSTR_HOME_SERVICE: DatasetMetrics(
-        required=Metric.INSTRUCTION_FOLLOWING,
-        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
-    ),
-    DATASET_ID_INSTR_CUST_SERVICE: DatasetMetrics(
-        required=Metric.INSTRUCTION_FOLLOWING,
-        optional=frozenset({Metric.EXPECTED_BEHAVIOR_ADHERENCE}),
     ),
     # The Ultra Bank instruction-following set, the daily public board. Latency is
     # the anchor because Coval's built-in metric is on every run; "instruction
