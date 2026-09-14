@@ -343,8 +343,10 @@ async def recent_completed_runs(
     (tags are not filterable). ``test_set_id`` narrows to one test set so other
     sims on the same agents (e.g. the single-turn set) are not ingested. Runs
     without a parseable create_time are kept: better to ingest with a fetch-time
-    slot than to drop data. ``workspace_id`` is required for an agent that does
-    not live in the workspace the client's API key defaults to.
+    slot than to drop data. Pages are followed until one reaches past the window,
+    so an agent with several runs a day (one per persona) is never cut off at the
+    first page. ``workspace_id`` is required for an agent that does not live in
+    the workspace the client's API key defaults to.
     """
     window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
@@ -367,6 +369,7 @@ async def recent_completed_runs(
         resp.raise_for_status()
         payload = cast("dict[str, Any]", resp.json())
         raw = cast("list[dict[str, Any]]", payload.get("runs", []))
+        left_window = False
         for r in raw:
             run = CovalRun(
                 run_id=cast("str", r["run_id"]),
@@ -374,10 +377,14 @@ async def recent_completed_runs(
                 persona_id=cast("str", r.get("persona_id") or ""),
             )
             if run.create_time is not None and (now - run.create_time).total_seconds() > window:
+                left_window = True
                 continue
             runs.append(run)
             found_ids.add(run.run_id)
-        if not requested_run_ids or requested_run_ids <= found_ids:
+        if requested_run_ids:
+            if requested_run_ids <= found_ids:
+                break
+        elif left_window or not raw:
             break
         page_token = cast("str | None", payload.get("next_page_token"))
         if not page_token:
