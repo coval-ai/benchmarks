@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
-from coval_bench.contracts import read_contract_file
+from coval_bench.scenarios import read_contract_file
 
 SYSTEM_PROMPT_FILE = "system-prompt.txt"
 TOOLS_FILE = "tool-definitions.json"

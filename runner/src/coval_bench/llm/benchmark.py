@@ -9,8 +9,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from coval_bench import scenarios
 from coval_bench.config import Settings
-from coval_bench.llm import suite
 from coval_bench.llm.agent import load_agent
 from coval_bench.llm.openai_compat import OpenAICompatClient
 from coval_bench.llm.phonely import PhonelyClient
@@ -27,7 +27,7 @@ def openai_client(settings: Settings) -> TurnClient | None:
     key = settings.openai_api_key
     if not (key and key.get_secret_value()):
         return None
-    agent = load_agent(suite.ACTIVE.contract)
+    agent = load_agent(scenarios.ACTIVE.contract)
     return OpenAICompatClient(
         key.get_secret_value(),
         OPENAI_BASE_URL,
@@ -45,7 +45,7 @@ def gemini_client(settings: Settings) -> TurnClient | None:
     key = settings.gemini_api_key
     if not (key and key.get_secret_value()):
         return None
-    agent = load_agent(suite.ACTIVE.contract)
+    agent = load_agent(scenarios.ACTIVE.contract)
     return OpenAICompatClient(
         key.get_secret_value(),
         GEMINI_BASE_URL,

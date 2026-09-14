@@ -16,12 +16,14 @@ import psycopg
 import structlog
 from pydantic import BaseModel, SecretStr
 
+from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.registry_store import fetch_models
-from coval_bench.llm import benchmark, suite
+from coval_bench.llm import benchmark
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
+from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.variants.platforms import redact
 
@@ -69,7 +71,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     ) -> Self:
         proxy_url = settings.llm_proxy_public_url
         proxy_secret = settings.llm_proxy_secret
-        ids = suite.ACTIVE.ids(settings)
+        ids = scenarios.ACTIVE.ids(settings)
         test_set_id = test_set_id or ids.test_set_id
         missing = [
             name
@@ -80,8 +82,8 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
             if not value
         ] + [
             attr
-            for attr in suite.ACTIVE.missing(settings)
-            if not (attr == suite.ACTIVE.test_set_id_attr and test_set_id)
+            for attr in scenarios.ACTIVE.missing(settings, benchmark=Benchmark.LLM)
+            if not (attr == scenarios.ACTIVE.test_set_id_attr and test_set_id)
         ]
         if (
             missing

@@ -21,9 +21,9 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from coval_bench.contracts import read_contract_file, read_private_fixture
 from coval_bench.mocktools.fixtures import MockFixtures, parse_fixtures
 from coval_bench.mocktools.resolver import Resolution, resolve
+from coval_bench.scenarios import read_contract_file, read_private_fixture
 
 TOOL_DEFINITIONS_FILE = "tool-definitions.json"
 

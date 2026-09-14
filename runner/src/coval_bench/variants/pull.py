@@ -5,7 +5,7 @@
 
 The contract is *extracted*, not authored: the scenarios and the agent config
 already exist upstream, so this command dumps them into the packaged
-``contracts/`` tree where they become diffable, hashable artifacts that ship
+``scenarios/`` tree where they become diffable, hashable artifacts that ship
 inside the wheel.
 
 Coval is always the source for the suite. A platform is optional and resolved
@@ -41,7 +41,7 @@ import click
 import httpx
 import structlog
 
-from coval_bench.contracts import contract_sha256
+from coval_bench.scenarios import contract_sha256
 from coval_bench.variants.platforms import FETCHERS, fetch_platform, redact_identifiers
 
 logger = structlog.get_logger("coval_bench.variants.pull")
@@ -136,7 +136,7 @@ def _find_test_set(client: httpx.Client, wanted: str) -> dict[str, Any]:
 @click.option(
     "--out-root",
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path(__file__).resolve().parent.parent / "contracts",
+    default=Path(__file__).resolve().parent.parent / "scenarios",
     show_default=True,
     help="Contracts package dir. Ships in the wheel; the API container reads it at runtime.",
 )
@@ -204,7 +204,10 @@ def pull_contract(
             raise click.ClickException(str(exc)) from exc
 
         # The live agent config is the platform artifact, not a contract file.
-        _write(out_root / "platforms" / f"{platform}-agent.json", config.raw)
+        _write(
+            out_root / "platforms" / f"{platform}-agent.json",
+            redact_identifiers(config.raw, stripped),
+        )
         if redacted_paths:
             click.echo(
                 f"  redacted {len(redacted_paths)} secret field(s): " + ", ".join(redacted_paths)

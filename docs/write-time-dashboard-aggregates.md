@@ -1,16 +1,18 @@
 # Saved dashboard aggregates
 
 BENCH-899 implements run-completion precomputation for the existing normalized
-read flag. Raw observations remain the source of truth. The migration, job, and
-read cutover have not been applied to production.
+read flag. Raw observations remain the source of truth. Production rollout
+requires verifying the migration, initializing saved data, and enabling the job
+before the read cutover.
 
 ## Storage and metric rules
 
-Migration `20260914_0034` is isolated in
-[PR #645](https://github.com/coval-ai/benchmarks/pull/645) and creates three
-materialized views and four tables. The application changes remain in
-[PR #634](https://github.com/coval-ai/benchmarks/pull/634), based on the migration
-branch until it merges.
+Migration `20260914_0034` creates three materialized views and four tables. Its
+separate [PR #645](https://github.com/coval-ai/benchmarks/pull/645) has merged into
+`main`; verify that the migration has also been applied to the database before
+deploying the application. The application was reviewed in
+[PR #634](https://github.com/coval-ai/benchmarks/pull/634) and is delivered through
+a follow-up PR targeting `main`.
 
 | Object | Purpose |
 | --- | --- |
@@ -116,9 +118,10 @@ on no successful execution within 90 minutes. The heartbeat also fires before
 the first successful run, so complete initialization and resume the scheduler as
 part of the same rollout; a deliberately paused job will continue to alert.
 
-1. Merge and apply the migration-only PR #645. Then retarget application PR #634
-   to `main`, merge, and deploy compatible writers with normalized reads still
-   disabled. Views are created without initial population. Deploy
+1. Verify migration `20260914_0034` from the already-merged PR #645 has been
+   applied. Merge the application follow-up PR targeting `main`, and deploy
+   compatible writers with normalized reads still disabled. Views are created
+   without initial population. Deploy
    [frontend PR #95](https://github.com/coval-ai/benchmarks-web/pull/95) alongside
    or immediately afterward: legacy 7d/30d timelines also switch to averages,
    independently of the normalized read flag.

@@ -28,9 +28,9 @@ TEST_SET = "DvAqQ4md"
 DATASET = "s2s-dental-v1"
 PARTITION = f"{PREFIX}/{DATASET}"
 
-# Real bench persona ids so the label map is exercised too.
-FEMALE = "PN3xgmsqeLDjsNNEA2e55e"
-MALE = "9ATy64zKXxSUaVWb5YnQtd"
+FEMALE = "persona-female"
+MALE = "persona-male"
+PERSONA_LABELS = {FEMALE: "Standard Female", MALE: "Standard Male"}
 
 
 def _run(
@@ -174,6 +174,7 @@ async def _publish(
         test_set_id=TEST_SET,
         runs=runs,
         rng=random.Random(rng_seed),
+        persona_labels=PERSONA_LABELS,
         storage_client=storage_client,
         download_client=client,
         expected_models=expected_models,
