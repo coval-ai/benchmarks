@@ -47,6 +47,9 @@ dependencies = [
     "whisper-normalizer>=0.0.10",
     # Analytics
     "posthog>=3.0",
+    # Metrics
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-gcp-monitoring>=1.15.0a0",
 ]
 
 [project.optional-dependencies]
@@ -156,6 +159,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "posthog.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["opentelemetry.exporter.cloud_monitoring.*", "opentelemetry.resourcedetector.gcp_resource_detector.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

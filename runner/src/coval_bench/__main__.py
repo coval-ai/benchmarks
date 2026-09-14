@@ -44,9 +44,12 @@ def cli() -> None:
     from coval_bench.config import get_settings
     from coval_bench.fixture_sources import install_fixture_providers
     from coval_bench.logging import configure_logging
+    from coval_bench.telemetry import configure_metrics, shutdown_metrics
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
+    configure_metrics(settings)
+    click.get_current_context().call_on_close(shutdown_metrics)
     # Every command that reads or hashes a contract gets the same fixture sources
     # the API has. `pull-contract` prints the hash today and the voice-agent
     # ingest will write it onto result rows; a runner that could not see the

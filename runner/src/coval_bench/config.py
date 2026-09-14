@@ -255,6 +255,10 @@ class Settings(BaseSettings):
     posthog_host: str = "https://us.i.posthog.com"
     posthog_disabled: bool = False
 
+    # --- Metrics ---
+    otel_metrics_exporter: Literal["none", "gcp", "console"] = "none"
+    otel_deployment_environment: str = "prod"
+
     # --- API ---
     cors_origins: list[str] = [
         "https://benchmarks.coval.ai",
