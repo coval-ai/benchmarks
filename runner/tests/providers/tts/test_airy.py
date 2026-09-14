@@ -64,7 +64,7 @@ async def test_stream_request_and_first_chunk_timing_produce_24khz_wav(
         assert json.loads(request.content) == {
             "model": "airy-tts-v1",
             "input": "Hello from Airy.",
-            "voice_id": voice,
+            "voice": voice,
             "language": "en",
             "style": "normal",
         }
