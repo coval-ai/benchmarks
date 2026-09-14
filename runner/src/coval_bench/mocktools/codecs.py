@@ -78,9 +78,15 @@ def _coval_header_values(correlation: Correlation) -> dict[str, str]:
     return headers
 
 
+def _rendered(value: object) -> str | None:
+    if not isinstance(value, str) or not value or "{{" in value:
+        return None
+    return value
+
+
 def _coval_headers(headers: Mapping[str, str]) -> Correlation:
-    simulation_id = headers.get(SIMULATION_HEADER)
-    caller_number = headers.get(CALLER_HEADER)
+    simulation_id = _rendered(headers.get(SIMULATION_HEADER))
+    caller_number = _rendered(headers.get(CALLER_HEADER))
     if simulation_id:
         return Correlation(simulation_id, caller_number, source="simulation_header")
     if caller_number:
@@ -100,29 +106,32 @@ def _generic_encode(_calls: list[ToolCall], outcomes: list[Outcome]) -> tuple[An
     return outcomes[0].response, 200
 
 
-def _generic_request(tool: str, args: dict[str, Any], correlation: Correlation) -> Request:
-    return Request(f"/mock/generic/{tool}", _coval_header_values(correlation), dict(args))
+def _bare_request(platform: str) -> Callable[[str, dict[str, Any], Correlation], Request]:
+    def encode_request(tool: str, args: dict[str, Any], correlation: Correlation) -> Request:
+        return Request(f"/mock/{platform}/{tool}", _coval_header_values(correlation), dict(args))
+
+    return encode_request
 
 
-GENERIC = Codec(
-    name="generic",
-    tool_in_path=True,
-    decode=_generic_decode,
-    correlate=lambda _body, headers: _coval_headers(headers),
-    encode=_generic_encode,
-    encode_request=_generic_request,
-)
+def _bare(name: str) -> Codec:
+    """A platform that posts the arguments as the whole body and names the tool in the path."""
+    return Codec(
+        name=name,
+        tool_in_path=True,
+        decode=_generic_decode,
+        correlate=lambda _body, headers: _coval_headers(headers),
+        encode=_generic_encode,
+        encode_request=_bare_request(name),
+    )
+
+
+GENERIC = _bare("generic")
+RETELL = _bare("retell")
 
 
 def _telnyx_decode(body: Body, _headers: Mapping[str, str], tool: str | None) -> list[ToolCall]:
     args = {k: v for k, v in _as_args(body).items() if not k.startswith(PRESET_PREFIX)}
     return [ToolCall(tool=tool or "", args=args)]
-
-
-def _rendered(value: object) -> str | None:
-    if not isinstance(value, str) or not value or "{{" in value:
-        return None
-    return value
 
 
 def _telnyx_correlate(body: Body, headers: Mapping[str, str]) -> Correlation:
@@ -249,6 +258,7 @@ VAPI = Codec(
 
 CODECS: dict[str, Codec] = {
     GENERIC.name: GENERIC,
+    RETELL.name: RETELL,
     TELNYX.name: TELNYX,
     VAPI.name: VAPI,
 }

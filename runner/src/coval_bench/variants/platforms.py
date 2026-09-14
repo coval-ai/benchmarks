@@ -9,8 +9,10 @@ where in its response the system prompt and tool definitions sit. Nothing else
 in the benchmark knows a vendor's name.
 
 Vapi is the first entry because it is the first variant standing, not because it
-is the shape everything else must follow. Telnyx, Pipecat, LiveKit and Twilio
-ConversationRelay each get an entry with the same three answers.
+is the shape everything else must follow. Telnyx, Retell, Pipecat, LiveKit and
+Twilio ConversationRelay each get an entry with the same three answers. Retell's
+answer takes two requests, because its prompt and tools sit on a separate LLM
+object the agent points at.
 """
 
 from __future__ import annotations
@@ -129,6 +131,52 @@ def _telnyx(client: httpx.Client, agent_id: str) -> PlatformConfig:
     )
 
 
+RETELL_ENGINE = "retell-llm"
+Getter = Callable[[str, dict[str, Any] | None], dict[str, Any]]
+
+
+def _json(client: httpx.Client, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    response = client.get(path, params=params)
+    response.raise_for_status()
+    return cast("dict[str, Any]", response.json())
+
+
+def retell_engine(agent: dict[str, Any]) -> tuple[str, int | None]:
+    """The Retell LLM an agent answers with; prompt, greeting and tools live there."""
+    engine = agent.get("response_engine") or {}
+    if engine.get("type") != RETELL_ENGINE:
+        raise RuntimeError(
+            f"retell agent {agent.get('agent_id')!r} uses response engine "
+            f"{engine.get('type')!r}; only {RETELL_ENGINE} carries the prompt and tools"
+        )
+    version = engine.get("version")
+    return str(engine["llm_id"]), int(version) if version is not None else None
+
+
+def read_retell(get: Getter, agent_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The agent and the single-prompt Retell LLM it answers with, at the version it pins."""
+    agent = get(f"/get-agent/{agent_id}", None)
+    llm_id, version = retell_engine(agent)
+    llm = get(f"/get-retell-llm/{llm_id}", {"version": version} if version is not None else None)
+    states = llm.get("states") or []
+    if states:
+        raise RuntimeError(
+            f"retell llm {llm_id!r} has {len(states)} states; their prompts and tools stay live "
+            "outside the contract, so only a single-prompt LLM is supported"
+        )
+    return agent, llm
+
+
+def _retell(client: httpx.Client, agent_id: str) -> PlatformConfig:
+    agent, llm = read_retell(lambda path, params: _json(client, path, params), agent_id)
+    return PlatformConfig(
+        raw={"agent": agent, "llm": llm},
+        system_prompt=str(llm.get("general_prompt") or ""),
+        first_message=str(llm.get("begin_message") or "").strip(),
+        tools=list(llm.get("general_tools") or []),
+    )
+
+
 FETCHERS: dict[str, Fetcher] = {
     "vapi": Fetcher(
         name="vapi",
@@ -143,6 +191,13 @@ FETCHERS: dict[str, Fetcher] = {
         key_env="TELNYX_API_KEY",
         fetch=_telnyx,
         id_help="Telnyx assistant id (assistant-<uuid>)",
+    ),
+    "retell": Fetcher(
+        name="retell",
+        api_base="https://api.retellai.com",
+        key_env="RETELL_API_KEY",
+        fetch=_retell,
+        id_help="Retell agent id (agent_<hex>); its LLM is followed from response_engine",
     ),
 }
 

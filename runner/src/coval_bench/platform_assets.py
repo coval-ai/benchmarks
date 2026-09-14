@@ -25,7 +25,7 @@ from coval_bench.contracts import (
 )
 from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
-from coval_bench.variants.platforms import redact
+from coval_bench.variants.platforms import read_retell, redact, retell_engine
 
 TOOL_TIMEOUT_SECONDS = 20
 SIMULATION_HEADER_TEMPLATE = "{{coval-simulation-id}}"
@@ -345,6 +345,134 @@ def prepare_telnyx(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) 
     return pending
 
 
+# --- retell ----------------------------------------------------------------
+
+RETELL_LLM_FIELDS = frozenset(
+    {"general_tools", "general_prompt", "begin_message", "model", "model_temperature"}
+)
+RETELL_CALLER_TEMPLATE = "{{user_number}}"
+RETELL_ROUTE_VERSION = "latest"
+
+RETELL_PINS: dict[str, Pin] = {
+    "model": lambda stack: stack.llm.model,
+    "model_temperature": lambda stack: stack.llm.temperature,
+    "voice_model": lambda stack: stack.tts.model,
+    "stt_mode": lambda _stack: "fast",
+    "language": lambda _stack: "en-US",
+    "post_call_analysis_model": (
+        lambda stack: "gpt-4.1" if stack.platform_behaviour.vendor_post_call_analysis else None
+    ),
+}
+
+
+def render_retell_tools(
+    definitions: list[dict[str, Any]], mock_base_url: str, secret: str
+) -> list[dict[str, Any]]:
+    base = mock_base_url.rstrip("/")
+    return [
+        {
+            "type": "custom",
+            "name": definition["name"],
+            "description": definition["description"],
+            "url": f"{base}/mock/retell/{definition['name']}",
+            "method": "POST",
+            "headers": {
+                "X-Mock-Tools-Key": secret,
+                "X-Coval-Simulation-Id": SIMULATION_HEADER_TEMPLATE,
+                "X-Coval-Caller-Number": RETELL_CALLER_TEMPLATE,
+            },
+            "parameters": definition["parameters"],
+            "args_at_root": True,
+            "speak_during_execution": False,
+            "speak_after_execution": True,
+            "timeout_ms": TOOL_TIMEOUT_SECONDS * 1000,
+            "max_retry": 0,
+        }
+        for definition in definitions
+    ]
+
+
+class RetellClient(_JsonClient):
+    """Presents the agent and the Retell LLM it answers with as one object.
+
+    Retell keeps prompt, greeting and tools on the LLM, and the agent only points
+    at it, so a read merges the two and a write routes each field to its owner.
+    """
+
+    def __init__(
+        self, api_key: str, base_url: str, transport: httpx.BaseTransport | None = None
+    ) -> None:
+        super().__init__(base_url, {"Authorization": f"Bearer {api_key}"}, transport)
+        self._engines: dict[str, tuple[str, int | None]] = {}
+
+    def __enter__(self) -> RetellClient:
+        return self
+
+    def _read(self, agent_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            agent, llm = read_retell(
+                lambda path, params: self._request("GET", path, params=params), agent_id
+            )
+        except RuntimeError as exc:
+            raise SyncError(str(exc)) from exc
+        self._engines[agent_id] = retell_engine(agent)
+        return agent, llm
+
+    @staticmethod
+    def _llm_params(version: int | None) -> dict[str, Any] | None:
+        return {"version": version} if version is not None else None
+
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        agent, llm = self._read(agent_id)
+        return {**agent, **{key: llm.get(key) for key in RETELL_LLM_FIELDS}}
+
+    def update_agent(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        if agent_id not in self._engines:
+            self._read(agent_id)
+        llm_id, version = self._engines[agent_id]
+        llm_part = {k: v for k, v in body.items() if k in RETELL_LLM_FIELDS}
+        agent_part = {k: v for k, v in body.items() if k not in RETELL_LLM_FIELDS}
+        merged: dict[str, Any] = {}
+        if llm_part:
+            llm = self._request(
+                "PATCH",
+                f"/update-retell-llm/{llm_id}",
+                llm_part,
+                params=self._llm_params(version),
+            )
+            merged.update({key: llm.get(key) for key in RETELL_LLM_FIELDS})
+        if agent_part:
+            merged = {**self._request("PATCH", f"/update-agent/{agent_id}", agent_part), **merged}
+        return merged
+
+    def inbound_agents(self, number: str) -> list[dict[str, Any]]:
+        payload = self._request("GET", f"/get-phone-number/{number}")
+        return list(payload.get("inbound_agents") or [])
+
+    def bind_inbound(self, number: str, agents: list[dict[str, Any]]) -> None:
+        self._request("PATCH", f"/update-phone-number/{number}", {"inbound_agents": agents})
+
+
+def prepare_retell(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) -> list[str]:
+    """Ensure the dialled number answers with this agent's newest draft, so apply reaches calls."""
+    if not isinstance(client, RetellClient):
+        raise SyncError("retell prepare needs a RetellClient")
+    number = spec.dial_target.resolve()
+    if not number.startswith("+"):
+        raise SyncError(f"{number!r} is not an E.164 number; Retell routes inbound by number")
+    agent_id = spec.agent_id.resolve()
+    wanted = [{"agent_id": agent_id, "agent_version": RETELL_ROUTE_VERSION, "weight": 1}]
+    live = client.inbound_agents(number)
+    if live == wanted:
+        return []
+    foreign = {str(a.get("agent_id")) for a in live if isinstance(a, dict)} - {agent_id}
+    if foreign:
+        raise SyncError(f"{number} answers with {sorted(foreign)}; not ours to repoint")
+    if not dry_run:
+        client.bind_inbound(number, wanted)
+    return [f"route:{number}={agent_id}@{RETELL_ROUTE_VERSION}"]
+
+
 # --- the table -------------------------------------------------------------
 
 
@@ -365,6 +493,15 @@ PLATFORMS: dict[str, Platform] = {
         pins=TELNYX_PINS,
         canon=TELNYX_CANON,
         prepare=prepare_telnyx,
+    ),
+    "retell": Platform(
+        name="retell",
+        api_base="https://api.retellai.com",
+        client=RetellClient,
+        tools_path="general_tools",
+        render_tools=render_retell_tools,
+        pins=RETELL_PINS,
+        prepare=prepare_retell,
     ),
 }
 
@@ -405,6 +542,26 @@ AGENTS: tuple[PlatformAgentSpec, ...] = (
         dial_target=SecretRef(
             name="TELNYX_DENTAL_DIAL_TARGET",
             purpose="the sip:...@<sub>.sip.telnyx.com URI Coval dials; names the subdomain",
+        ),
+    ),
+    PlatformAgentSpec(
+        key="retell-dental",
+        platform="retell",
+        suite="dental",
+        agent_id=SecretRef(
+            name="RETELL_DENTAL_AGENT_ID",
+            purpose="the Retell agent id for the dental suite; its LLM is found from the agent",
+        ),
+        api_key=SecretRef(
+            name="RETELL_API_KEY", purpose="the Retell API key for the benchmark workspace"
+        ),
+        mock_secret=SecretRef(
+            name="MOCK_TOOLS_SECRET",
+            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
+        ),
+        dial_target=SecretRef(
+            name="RETELL_DENTAL_DIAL_TARGET",
+            purpose="the E.164 number Coval dials to reach the Retell dental agent",
         ),
     ),
 )
@@ -498,7 +655,7 @@ def apply(
     result = plan(live, wanted, platform.canon)
     result.prepared = prepared
     if result.update and not dry_run:
-        client.update_agent(agent_id, patch_body(live, wanted))
+        client.update_agent(agent_id, patch_body(live, {p: wanted[p] for p in result.update}))
     return result
 
 
@@ -634,19 +791,21 @@ def launch_body(
     metric_ids: tuple[str, ...],
     sample: int,
     seed: int,
+    test_case_ids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     sha = published_contract_sha256(spec.suite)
+    options: dict[str, Any] = {"iteration_count": 1, "concurrency": 1}
+    if test_case_ids:
+        options["test_case_ids"] = list(test_case_ids)
+    else:
+        options["sub_sample_size"] = sample
+        options["sub_sample_seed"] = seed
     return {
         "agent_id": agent_id,
         "persona_id": persona_id,
         "test_set_id": test_set_id,
         "metric_ids": list(metric_ids),
-        "options": {
-            "iteration_count": 1,
-            "concurrency": 1,
-            "sub_sample_size": sample,
-            "sub_sample_seed": seed,
-        },
+        "options": options,
         "metadata": {
             "display_name": f"{spec.key} e2e {sha[:8]}",
             "customer_metadata": {
@@ -786,6 +945,12 @@ def assets_register(agent_key: str, coval_api_base: str, yes: bool) -> None:
 @click.option("--metric-id", "metric_ids", multiple=True, envvar="COVAL_DENTAL_METRIC_IDS")
 @click.option("--sample", default=1, show_default=True, help="Test cases to run; 0 = all.")
 @click.option("--seed", default=847293, show_default=True)
+@click.option(
+    "--test-case",
+    "test_case_ids",
+    multiple=True,
+    help="Run exactly these test case ids instead of a sample.",
+)
 @click.option("--wait/--no-wait", default=False, help="Poll until the run is terminal.")
 @click.option(
     "--allow-drift", is_flag=True, default=False, help="Launch even if the platform agent drifts."
@@ -800,6 +965,7 @@ def assets_launch(
     metric_ids: tuple[str, ...],
     sample: int,
     seed: int,
+    test_case_ids: tuple[str, ...],
     wait: bool,
     allow_drift: bool,
 ) -> None:
@@ -822,7 +988,9 @@ def assets_launch(
                 raise click.ClickException(message)
             click.echo(f"warning: {message}")
         run = coval.launch_run(
-            launch_body(agent_id, spec, persona_id, test_set_id, metric_ids, sample, seed)
+            launch_body(
+                agent_id, spec, persona_id, test_set_id, metric_ids, sample, seed, test_case_ids
+            )
         )
         run_id = str(run.get("run_id") or run.get("id"))
         click.echo(f"run_id: {run_id} status: {run.get('status')}")

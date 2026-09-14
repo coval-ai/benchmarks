@@ -281,17 +281,28 @@ def test_vapi_without_a_header_logs_the_envelope_shape_and_not_its_values(
     assert "call_9" not in repr(kwargs)
 
 
+def test_an_unrendered_header_template_is_not_a_simulation_id() -> None:
+    headers = {"x-coval-simulation-id": "{{coval-simulation-id}}", "x-coval-caller-number": "+1404"}
+    found = GENERIC.correlate({}, headers)
+    assert (found.simulation_id, found.caller_number, found.source) == (
+        None,
+        "+1404",
+        "caller_header",
+    )
+    assert GENERIC.correlate({}, {"x-coval-simulation-id": "{{x}}"}).source == "none"
+
+
 # --- registry --------------------------------------------------------------
 
 
 def test_codec_for_names_the_known_set_on_a_miss() -> None:
-    with pytest.raises(KeyError, match="known: generic, telnyx, vapi"):
-        codec_for("retell")
+    with pytest.raises(KeyError, match="known: generic, retell, telnyx, vapi"):
+        codec_for("synthflow")
 
 
 @pytest.mark.parametrize(
     ("name", "tool_in_path"),
-    [("generic", True), ("telnyx", True), ("vapi", False)],
+    [("generic", True), ("retell", True), ("telnyx", True), ("vapi", False)],
 )
 def test_each_codec_declares_where_the_tool_name_lives(name: str, tool_in_path: bool) -> None:
     assert codec_for(name).tool_in_path is tool_in_path
