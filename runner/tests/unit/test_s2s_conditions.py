@@ -32,9 +32,27 @@ def test_bank_board_anchors_on_latency_and_carries_the_judge() -> None:
         conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.CLEAN)
         == conditions.DATASET_ID_BANK
     )
-    # The harder personas exist in Coval but are not ingested yet.
+    # The generic noise personas never run the bank set; its noise comes as tiers.
     assert conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.NOISY) is None
     assert conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.ACCENTED) is None
+
+
+def test_bank_tiers_anchor_on_the_judge_and_never_ask_for_latency() -> None:
+    """Each difficulty tier is its own dataset, so noise never pools into the
+    clean board, and none of them fetches V2V."""
+    tiers = {
+        conditions.Condition.LOW: conditions.DATASET_ID_BANK_LOW,
+        conditions.Condition.MEDIUM: conditions.DATASET_ID_BANK_MEDIUM,
+        conditions.Condition.HARD: conditions.DATASET_ID_BANK_HARD,
+        conditions.Condition.EXTRA_HARD: conditions.DATASET_ID_BANK_EXTRA_HARD,
+    }
+    assert len(set(tiers.values()) | {conditions.DATASET_ID_BANK}) == 5
+    for condition, dataset_id in tiers.items():
+        assert conditions.dataset_id_for(conditions.FAMILY_BANK, condition) == dataset_id
+        contract = conditions.condition_for(dataset_id)
+        assert contract.required is Metric.INSTRUCTION_FOLLOWING
+        assert contract.optional == frozenset({Metric.INTERRUPTION_RATE})
+        assert Metric.V2V not in contract.fetched
 
 
 def test_unmapped_dataset_keeps_the_pre_scoping_contract() -> None:

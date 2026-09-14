@@ -22,6 +22,10 @@ from coval_bench.registries import Benchmark, Metric
 __all__ = [
     "DATASET_ID",
     "DATASET_ID_BANK",
+    "DATASET_ID_BANK_EXTRA_HARD",
+    "DATASET_ID_BANK_HARD",
+    "DATASET_ID_BANK_LOW",
+    "DATASET_ID_BANK_MEDIUM",
     "DATASET_ID_DENTAL",
     "DATASET_ID_DENTAL_ACCENTED",
     "DATASET_ID_DENTAL_NOISY",
@@ -57,6 +61,10 @@ class Condition(StrEnum):
     CLEAN = "clean"
     NOISY = "noisy"
     ACCENTED = "accented"
+    LOW = "low"
+    MEDIUM = "medium"
+    HARD = "hard"
+    EXTRA_HARD = "extra_hard"
     SKIP = "skip"
 
 
@@ -72,8 +80,9 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 FAMILY_DENTAL = "s2s-dental"
 FAMILY_LLM_DENTAL = "llm-dental"
 # Ultra Bank instruction following: two scenarios, run daily by every S2S agent in
-# the default workspace. Only the clean caller is scheduled; the harder personas
-# exist in Coval but are not ingested until they get a dataset id here.
+# the default workspace, once per caller persona: the clean baseline plus four
+# difficulty tiers. Each tier is its own dataset so noise never pools into the
+# clean numbers and the board can plot adherence across tiers.
 FAMILY_BANK = "s2s-bank"
 FAMILY_LLM_BANK = "llm-bank"
 
@@ -97,6 +106,10 @@ DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
 DATASET_ID_LLM_DENTAL = "llm-dental-v1"
 
 DATASET_ID_BANK = "s2s-bank-v1"
+DATASET_ID_BANK_LOW = "s2s-bank-low-v1"
+DATASET_ID_BANK_MEDIUM = "s2s-bank-medium-v1"
+DATASET_ID_BANK_HARD = "s2s-bank-hard-v1"
+DATASET_ID_BANK_EXTRA_HARD = "s2s-bank-extra-hard-v1"
 DATASET_ID_LLM_BANK = "llm-bank-v1"
 
 # Unlisted pairs are a configuration error, not a silent skip.
@@ -115,6 +128,10 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_BANK, Condition.CLEAN): DATASET_ID_BANK,
     (FAMILY_BANK, Condition.NOISY): None,
     (FAMILY_BANK, Condition.ACCENTED): None,
+    (FAMILY_BANK, Condition.LOW): DATASET_ID_BANK_LOW,
+    (FAMILY_BANK, Condition.MEDIUM): DATASET_ID_BANK_MEDIUM,
+    (FAMILY_BANK, Condition.HARD): DATASET_ID_BANK_HARD,
+    (FAMILY_BANK, Condition.EXTRA_HARD): DATASET_ID_BANK_EXTRA_HARD,
     (FAMILY_LLM_BANK, Condition.CLEAN): DATASET_ID_LLM_BANK,
     (FAMILY_LLM_BANK, Condition.NOISY): None,
     (FAMILY_LLM_BANK, Condition.ACCENTED): None,
@@ -204,6 +221,18 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.V2V,
         optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
     ),
+    **{
+        tier: DatasetMetrics(
+            required=Metric.INSTRUCTION_FOLLOWING,
+            optional=frozenset({Metric.INTERRUPTION_RATE}),
+        )
+        for tier in (
+            DATASET_ID_BANK_LOW,
+            DATASET_ID_BANK_MEDIUM,
+            DATASET_ID_BANK_HARD,
+            DATASET_ID_BANK_EXTRA_HARD,
+        )
+    },
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,

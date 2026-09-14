@@ -188,6 +188,30 @@ async def test_recent_completed_runs_follows_targeted_pagination() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recent_completed_runs_pages_until_the_window_is_left() -> None:
+    """Five personas a day fill a ten-run page in a two-day window; the scan must
+    keep paging while every run is still inside the window, and stop once a
+    page reaches past it."""
+    captured: list[httpx.Request] = []
+    pages = [
+        _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))}),
+        _list_json({"run_id": "R2", "create_time": _iso(timedelta(hours=20))}),
+        _list_json(
+            {"run_id": "R3", "create_time": _iso(timedelta(hours=40))},
+            {"run_id": "R4", "create_time": _iso(timedelta(days=3))},
+        ),
+        _list_json({"run_id": "R5", "create_time": _iso(timedelta(days=4))}),
+    ]
+    async with _fake_client(pages, {}, captured) as client:
+        runs = await fetch_v2v.recent_completed_runs(
+            client, "a1", period_seconds=86_400, page_size=1
+        )
+
+    assert [r.run_id for r in runs] == ["R1", "R2", "R3"]
+    assert len(captured) == 3
+
+
+@pytest.mark.asyncio
 async def test_backfill_ingests_only_named_runs() -> None:
     writer = _stub_writer()
     list_json = _list_json(
