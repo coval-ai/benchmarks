@@ -231,6 +231,14 @@ class SeriesPoint(BaseModel):
     pooled_value: float | None = None
 
 
+class DashboardSnapshot(BaseModel):
+    generation: int
+    as_of: datetime
+    published_at: datetime
+    definition_revision: int
+    stale: bool
+
+
 class AggregatesResponse(BaseModel):
     """Response schema for GET /v1/results/aggregates.
 
@@ -246,6 +254,7 @@ class AggregatesResponse(BaseModel):
     datasets: list[str]
     model_stats: list[ModelStatEntry]
     series: list[SeriesPoint]
+    snapshot: DashboardSnapshot | None = None
 
 
 class TimelinePoint(BaseModel):
@@ -255,17 +264,31 @@ class TimelinePoint(BaseModel):
     model: str
     metric_type: str
     scheduled_at: datetime
-    value: float
+    value: float | None
     pooled_value: float | None = None
+    aggregation_method: Literal["mean", "ratio", "mean_fallback", "unavailable"] | None = None
+    sample_count: int | None = None
+
+
+class DashboardMaterialization(BaseModel):
+    refreshed_at: datetime | None = None
+    stale: bool = False
 
 
 class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
-    window: WindowLiteral
+    window: WindowLiteral | None
     dataset: str
     points: list[TimelinePoint]
+    aggregation: Literal["run", "average"] = "run"
+    bucket_seconds: int | None = None
+    range_start: datetime | None = None
+    range_end: datetime | None = None
+    latest_source_at: datetime | None = None
+    snapshot: DashboardSnapshot | None = None
+    materialization: DashboardMaterialization | None = None
 
 
 class DatasetAggregates(BaseModel):
@@ -287,6 +310,7 @@ class AggregatesByDatasetResponse(BaseModel):
     benchmark: BenchmarkLiteral
     window: WindowLiteral
     blocks: list[DatasetAggregates]
+    snapshot: DashboardSnapshot | None = None
 
 
 class RunsResponse(BaseModel):
@@ -302,6 +326,7 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+    snapshot: DashboardSnapshot | None = None
 
 
 class S2SSampleTurnOut(BaseModel):

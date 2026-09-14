@@ -1445,6 +1445,11 @@ async def fetch_and_write_v2v(
             except Exception:
                 logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
+        try:
+            await writer.refresh_dashboard_summaries()
+        except Exception:
+            logger.warning("dashboard_summaries_refresh_failed", exc_info=True)
+
         if only_run_ids is not None and (unmatched := only_run_ids - matched_run_ids):
             logger.error("backfill_runs_not_found", coval_run_ids=sorted(unmatched))
             raise RuntimeError(

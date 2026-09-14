@@ -1552,6 +1552,13 @@ async def run_benchmarks(
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
                 await _refresh_series_bucket(writer, run_id, settings)
 
+                # Failed runs retain their queued repairs for hourly maintenance.
+                try:
+                    snapshot_status = await writer.refresh_dashboard_summaries(run_id)
+                    logger.info("dashboard_summaries_refresh", status=snapshot_status)
+                except Exception:
+                    logger.warning("dashboard_summaries_refresh_failed", exc_info=True)
+
             finished_at = datetime.now(tz=UTC)
             summary = RunSummary(
                 run_id=run_id,

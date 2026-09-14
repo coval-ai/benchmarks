@@ -242,6 +242,7 @@ async def test_ttft_llm_uses_the_bank_primary_dataset(client: AsyncClient, postg
         )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     response = await client.get("/v1/leaderboard", params=params)
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
         ("phonely", "normalized-model")

@@ -182,6 +182,7 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
+    writer.refresh_dashboard_summaries = AsyncMock(return_value="published")
     writer.refresh_bucket = AsyncMock()
     writer.refresh_metric_values_bucket = AsyncMock()
     writer.pool_diagnostics = MagicMock(return_value={"pool_size": 0})
@@ -309,7 +310,8 @@ def settings() -> Settings:
 
 
 @pytest.mark.asyncio
-async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
+@pytest.mark.parametrize("snapshot_failure", [False, True])
+async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_failure: bool) -> None:
     """1-item dataset, 2 STT providers, happy path → SUCCEEDED."""
     good = _good_transcription()
 
@@ -330,6 +332,8 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
 
     run = _make_run()
     writer = _make_stub_writer(run)
+    if snapshot_failure:
+        writer.refresh_dashboard_summaries.side_effect = RuntimeError("snapshot unavailable")
 
     async with _orchestrator_env(
         audio_path=audio_file,
@@ -359,6 +363,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     assert writer.record_results.await_count >= 2
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
     writer.refresh_stats_matviews.assert_awaited_once_with(1)
+    writer.refresh_dashboard_summaries.assert_awaited_once_with(1)
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
@@ -410,6 +415,7 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     assert summary.fail_count >= 1
     assert summary.success_count >= 1
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.PARTIAL, error=None)
+    writer.refresh_dashboard_summaries.assert_awaited_once_with(1)
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
@@ -461,6 +467,8 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF", "TTFS"}
     assert all(r.status == ResultStatus.FAILED for r in rows)
     assert all("always fails" in (r.error or "") for r in rows)
+    writer.finish_run.assert_awaited_once_with(1, status=RunStatus.FAILED, error=None)
+    writer.refresh_dashboard_summaries.assert_not_awaited()
     writer.refresh_bucket.assert_not_awaited()
     writer.refresh_metric_values_bucket.assert_not_awaited()
 

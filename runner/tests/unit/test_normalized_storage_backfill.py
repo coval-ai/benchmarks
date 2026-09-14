@@ -758,7 +758,11 @@ def test_stt_tts_rollup_sql_never_deletes_or_verifies_s2s_rows() -> None:
 
     cursor = Cursor()
     migration._refresh_bucket(cursor, _NOW)  # type: ignore[arg-type]
-    assert "benchmark IN ('STT','TTS')" in cursor.statements[1]
+    assert all(
+        "benchmark IN ('STT','TTS')" in sql
+        for sql in cursor.statements
+        if sql.lstrip().startswith("DELETE")
+    )
 
 
 def test_backfill_owned_row_keeps_strict_lifecycle_timestamp_comparison() -> None:
@@ -2020,6 +2024,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 
     monkeypatch.setattr(migration, "_insert_plan", insert)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_stored_plan_matches", lambda *_: False)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
     report = migration.backfill(
@@ -2107,6 +2112,7 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
     monkeypatch.setattr(migration, "_insert_plan", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
 
     report = migration.backfill(
