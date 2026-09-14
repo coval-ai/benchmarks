@@ -68,6 +68,35 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("age_minutes, stale", [(70, False), (121, True)])
+async def test_saved_summary_freshness_allows_hourly_maintenance(
+    client: AsyncClient,
+    app: FastAPI,
+    postgresql: Any,
+    age_minutes: int,
+    stale: bool,
+) -> None:
+    app.state.settings.normalized_dashboard_reads_enabled = True
+    run = await _insert_run(postgresql)
+    await _insert_normalized_metric(
+        postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
+    )
+    await refresh_summary_snapshots(app.state.pool)
+    async with app.state.pool.connection() as conn:
+        await conn.execute(
+            "UPDATE benchmarks_v2.dashboard_summary_state SET published_at=%s",
+            (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes),),
+        )
+    response = await client.get(
+        "/v1/results/aggregates", params={"benchmark": "STT", "include_series": "false"}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["model_stats"][0]["avg_value"] == 10
+    assert body["snapshot"]["stale"] is stale
+
+
+@pytest.mark.asyncio
 async def test_saved_hours_partial_boundaries_and_stale_queue(
     client: AsyncClient,
     app: FastAPI,

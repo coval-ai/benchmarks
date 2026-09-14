@@ -56,7 +56,8 @@ Normalized summary consumers read saved rows and state in one repeatable-read
 transaction. Missing, uninitialized, or incompatible storage returns
 `503 dashboard_snapshot_not_ready`. Successful empty snapshots return empty data
 with a generation. Summary and averaged-timeline responses bypass the old TTL
-cache. The frontend indicates when saved data is stale.
+cache. The frontend indicates when saved data is stale. Summary snapshots become
+stale after two hours, allowing two hourly maintenance intervals.
 
 The 24h timeline retains per-run points and local zoom. The 7d view uses hourly
 averages; 30d combines those sufficient statistics into four-hour averages. Zoom
@@ -80,7 +81,7 @@ when changing scheduled time or moving data, including an old bucket that is now
 empty. `--as-of` fixes summary membership for validation/replay. Normal scheduling
 uses the current time so old observations expire without new ingestion.
 
-The infrastructure change defines a database-only Cloud Run job every 15 minutes,
+The infrastructure change defines a database-only Cloud Run job every hour,
 with a 600-second timeout, one retry, and image updates through the existing
 runner image workflow. Its scheduler is created paused.
 

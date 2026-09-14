@@ -57,9 +57,13 @@ async def test_snapshot_rejects_unusable_state(
 
 
 @pytest.mark.asyncio
-async def test_snapshot_marks_old_publication_stale(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("field", ["as_of", "published_at"])
+@pytest.mark.parametrize("age_minutes, stale", [(70, False), (119, False), (121, True)])
+async def test_snapshot_freshness_allows_hourly_maintenance(
+    monkeypatch: pytest.MonkeyPatch, field: str, age_minutes: int, stale: bool
+) -> None:
     monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
     row = _row()
-    row["published_at"] = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=31)
+    row[field] = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes)
     snapshot = await dashboard_snapshots.require_snapshot(_connection(row))
-    assert snapshot.stale is True
+    assert snapshot.stale is stale

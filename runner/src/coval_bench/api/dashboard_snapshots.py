@@ -57,7 +57,8 @@ async def require_snapshot(conn: AsyncConnection[Any]) -> Snapshot:
     if revision != DEFINITION_REVISION or fingerprint != aggregation_fingerprint():
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
     now = dt.datetime.now(dt.UTC)
-    stale = now - min(as_of, published_at) > dt.timedelta(minutes=30)
+    # Allow two hourly maintenance intervals before warning about stale data.
+    stale = now - min(as_of, published_at) > dt.timedelta(hours=2)
     return Snapshot(int(generation), as_of, published_at, int(revision), stale)
 
 
