@@ -5,8 +5,6 @@ from typing import Final
 DEFAULT_STT_DATASET: Final = "stt-v3"
 DEFAULT_SAMPLE_SIZE: Final = 10
 
-# One daily execution drawing half the shared runner's daily volume (24 of its
-# 48 ticks), in the shared suite's proportions.
 DEDICATED_STT_SUITE: Final[dict[str, int]] = {
     "stt-v3": 240,
     "stt-wildasr-clean": 96,
