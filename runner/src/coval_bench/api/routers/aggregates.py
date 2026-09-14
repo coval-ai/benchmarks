@@ -90,20 +90,10 @@ _STATS_SQL_TEMPLATE = (
     " ORDER BY provider, model, metric_type"
 )
 
-_SAVED_STATS_SQL_TEMPLATE = (
-    _STATS_SQL_TEMPLATE.replace(
-        "SELECT provider, model, metric_type,",
-        "SELECT provider, model, m.code AS metric_type,",
-    )
-    .replace(
-        " FROM {view}",
-        " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
-    )
-    .replace(
-        " avg_value,",
-        " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
-        " pooled_substitutions_pct, avg_value,",
-    )
+_SAVED_STATS_SQL_TEMPLATE = _STATS_SQL_TEMPLATE.replace(
+    " avg_value,",
+    " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
+    " pooled_substitutions_pct, avg_value,",
 )
 
 _SERIES_SQL = (
@@ -180,13 +170,6 @@ _STATS_BY_DATASET_SQL_TEMPLATE = (
     " WHERE benchmark = %(benchmark)s"
     " AND dataset_id <> %(sentinel)s"
     " ORDER BY dataset_id, provider, model, metric_type"
-)
-_SAVED_STATS_BY_DATASET_SQL_TEMPLATE = _STATS_BY_DATASET_SQL_TEMPLATE.replace(
-    "SELECT dataset_id, provider, model, metric_type,",
-    "SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,",
-).replace(
-    " FROM {view}",
-    " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
 )
 
 _WER_SPLIT_COMPLETE = (
@@ -390,13 +373,12 @@ _NORMALIZED_AVERAGE_SOURCE_SQL = """
 # branches are deliberately restricted to the partial boundary hours, so a
 # boundary is never counted again after its hourly row is published.
 _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
- SELECT h.provider, h.model, m.code AS metric_type, h.latest_source_at AS source_at,
+ SELECT h.provider, h.model, h.metric_type, h.latest_source_at AS source_at,
         r.method, r.fallback, r.scale, h.primary_sum, h.sample_count,
         h.numerator_sum AS numerator, h.denominator_sum AS denominator,
         h.coverage_complete AS complete
  FROM benchmarks_v2.dashboard_hourly_aggregates h
- JOIN benchmarks_v2.metrics m ON m.id = h.metric_id
- JOIN rules r ON r.metric_type = m.code AND r.metric_version = h.metric_version
+ JOIN rules r USING (metric_type, metric_version)
  WHERE h.benchmark = %(benchmark)s AND h.dataset_id = %(dataset)s
    AND h.evaluation_variant = 'default'
    AND h.hour_at >= date_trunc('hour', %(since)s::timestamptz, 'UTC')
@@ -855,7 +837,7 @@ async def get_results_aggregates_by_dataset(
     async def fill() -> AggregatesByDatasetResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
-            _SAVED_STATS_BY_DATASET_SQL_TEMPLATE.replace(
+            _STATS_BY_DATASET_SQL_TEMPLATE.replace(
                 " avg_value,",
                 " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
                 " pooled_substitutions_pct, avg_value,",

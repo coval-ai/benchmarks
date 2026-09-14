@@ -8,30 +8,20 @@ read cutover have not been applied to production.
 
 Migration `20260914_0034` is isolated in
 [PR #645](https://github.com/coval-ai/benchmarks/pull/645) and creates three
-materialized views and five tables. The application changes remain in
+materialized views and four tables. The application changes remain in
 [PR #634](https://github.com/coval-ai/benchmarks/pull/634), based on the migration
 branch until it merges.
 
 | Object | Purpose |
 | --- | --- |
-| `metrics` | Generated IDs, immutable codes, and mutable display names |
 | `normalized_results_24h`, `_7d`, `_30d` | Exact saved summary statistics, including all six current percentiles |
 | `dashboard_summary_state` | Atomic generation, window boundary, publication time, definition identity |
 | `dashboard_hourly_aggregates` | Primary sums/counts, ratio operands, coverage, latest source time |
 | `dashboard_hourly_state` | Successful coverage, including empty hours, and pending rebuild status |
 | `dashboard_source_refreshes` | Durable requests to rebuild source buckets after run completion |
 
-The migration also creates `metrics`, a database-local dimension with generated
-`BIGINT` IDs, immutable canonical `code` values, and mutable `display_name`
-labels. The twelve current metrics are seeded by the migration.
-Application publication registers any future metric with a matching enum/spec/
-contract definition using `ON CONFLICT DO NOTHING` before writing aggregates,
-then resolves the complete code-to-ID mapping. Definitions are retained for
-historical rows: IDs and codes cannot be changed, and rows cannot be deleted or
-truncated.
-
 Rows retain provider, model, benchmark, dataset (including pooled `__all__`),
-metric ID, version, and evaluation variant as typed dimensions. Numeric statistics
+metric, version, and evaluation variant as typed dimensions. Numeric statistics
 and timestamps are typed columns. Small `metadata JSONB` objects currently hold
 `schema_version: 1`; they are not used for dashboard filtering or arithmetic.
 
@@ -48,13 +38,6 @@ matching operand coverage. The current summary projection supports WER's declare
 ratio and rejects unsupported ratio definitions until the projection is extended.
 A fingerprint of registered contracts prevents reads using old saved definitions.
 Changing materialization semantics also requires a definition revision change.
-The hourly table has a real foreign key to `metrics.id`, so an unknown ID fails
-the write. Materialized views cannot carry foreign keys; their defining SQL uses
-`metric_id_for_code` and fails when a grouped source code has no retained
-definition. Readers join the dimension and return the canonical code as the
-public `metric_type`, preserving the existing API and raw table contract.
-Hourly and summary publication only considers source rows with metric version
-`v1` and evaluation variant `default`; other identities remain isolated.
 
 ## Publication, repair, and readers
 

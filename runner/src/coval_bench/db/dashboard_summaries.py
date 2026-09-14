@@ -13,7 +13,6 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
-from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
 
 SUMMARY_DEFINITION_REVISION = DEFINITION_REVISION
@@ -94,23 +93,6 @@ async def refresh_summary_snapshots(
         if lock_row is None or not lock_row["locked"]:
             return RefreshResult("skipped_lock")
         await conn.execute("SET LOCAL statement_timeout = '550s'")
-        metric_ids = await register_metric_definitions(conn)
-        source_result = await conn.execute(
-            """SELECT DISTINCT e.metric_type
-               FROM benchmarks_v2.dashboard_metric_values e
-               JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
-               JOIN benchmarks_v2.runs r ON r.id = o.run_id
-               WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
-                 AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
-                 AND o.captured_at >= %(since)s - interval '30 days'
-                 AND o.captured_at < %(until)s""",
-            {"since": captured, "until": captured},
-        )
-        source_codes = {str(row["metric_type"]) for row in (await source_result.fetchall())}
-        supported = {metric.value for metric, version in METRIC_VALUE_CONTRACTS if version == "v1"}
-        invalid = sorted((source_codes - set(metric_ids)) | (source_codes - supported))
-        if invalid:
-            raise ValueError("invalid metrics in summary source: " + ", ".join(invalid))
         # The defining SQL reads this transaction-local snapshot boundary.  A
         # failed refresh rolls this provisional update back with the views.
         await conn.execute(
