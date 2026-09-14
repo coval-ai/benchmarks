@@ -16,15 +16,15 @@ from pydantic import BaseModel, Field
 
 from coval_bench.assets import SecretRef
 from coval_bench.config import Settings
-from coval_bench.contracts import (
+from coval_bench.fixture_sources import install_fixture_providers
+from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
+from coval_bench.scenarios import (
     Stack,
     contract_sha256,
     has_private_contract,
     load_stack,
     read_contract_file,
 )
-from coval_bench.fixture_sources import install_fixture_providers
-from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
 from coval_bench.variants.platforms import redact
 
 TOOL_TIMEOUT_SECONDS = 20

@@ -15,7 +15,7 @@ same way `datasets/manifests` is.
 ## Layout
 
 ```
-contracts/
+scenarios/
   stack.json          the pinned component layer, identical for every variant
   dental/
     system-prompt.txt      \  the agent under test. byte-identical across

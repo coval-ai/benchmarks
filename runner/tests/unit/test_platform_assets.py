@@ -11,7 +11,6 @@ import pytest
 
 import coval_bench.platform_assets as platform_assets
 from coval_bench.assets import SecretRef
-from coval_bench.contracts import read_contract_file
 from coval_bench.platform_assets import (
     AGENTS,
     CovalClient,
@@ -29,6 +28,7 @@ from coval_bench.platform_assets import (
     register,
     spec_for,
 )
+from coval_bench.scenarios import read_contract_file
 from coval_bench.variants.platforms import redact
 
 BASE = "https://mock.example.com/"
