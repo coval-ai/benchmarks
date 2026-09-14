@@ -25,8 +25,6 @@ from coval_bench.scenarios import (
     load_stack,
     read_contract_file,
 )
-from coval_bench.fixture_sources import install_fixture_providers
-from coval_bench.mocktools.codecs import PRESET_CALLER, PRESET_SIMULATION, Correlation, codec_for
 from coval_bench.variants.platforms import read_retell, redact, retell_engine
 
 TOOL_TIMEOUT_SECONDS = 20
