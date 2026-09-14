@@ -221,6 +221,8 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
+    # Caller persona id -> label shown on the samples card.
+    s2s_persona_labels: dict[str, str] = Field(default_factory=dict)
     # --- Ultra Bank instruction following (default workspace, the daily board) ---
     # The instruction metric is Coval's Validate Expected Behaviors composite: a
     # 0-1 fraction of the case's expected behaviors met, not a YES/NO verdict.
