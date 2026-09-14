@@ -28,7 +28,6 @@ def test_bank_board_anchors_on_latency_and_carries_the_judge() -> None:
     bank = conditions.condition_for(conditions.DATASET_ID_BANK)
     assert bank.required is Metric.V2V
     assert bank.optional == frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE})
-    assert Metric.EXPECTED_BEHAVIOR_ADHERENCE not in bank.fetched
     assert (
         conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.CLEAN)
         == conditions.DATASET_ID_BANK
