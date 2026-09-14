@@ -353,6 +353,7 @@ RETELL_LLM_FIELDS = frozenset(
 RETELL_CALLER_TEMPLATE = "{{user_number}}"
 RETELL_ROUTE_VERSION = "latest"
 RETELL_VOICE_ID = "11labs-Cimo"
+RETELL_SIP_HOST = "sip.retellai.com"
 
 RETELL_PINS: dict[str, Pin] = {
     "model": lambda stack: stack.llm.model,
@@ -455,13 +456,27 @@ class RetellClient(_JsonClient):
         self._request("PATCH", f"/update-phone-number/{number}", {"inbound_agents": agents})
 
 
+def retell_number(dial_target: str) -> str:
+    """The imported number a ``sip:+E164@sip.retellai.com`` target routes on."""
+    user, _, host = dial_target.partition("@")
+    number = user.lower().removeprefix("sip:")
+    if (
+        not dial_target.lower().startswith("sip:")
+        or host.split(":", 1)[0].lower() != RETELL_SIP_HOST
+    ):
+        raise SyncError(f"{dial_target!r} is not a sip:+E164@{RETELL_SIP_HOST} target")
+    if not number.startswith("+") or not number[1:].isdigit():
+        raise SyncError(
+            f"{dial_target!r} does not carry an E.164 number; Retell routes inbound by number"
+        )
+    return number
+
+
 def prepare_retell(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) -> list[str]:
     """Ensure the dialled number answers with this agent's newest draft, so apply reaches calls."""
     if not isinstance(client, RetellClient):
         raise SyncError("retell prepare needs a RetellClient")
-    number = spec.dial_target.resolve()
-    if not number.startswith("+"):
-        raise SyncError(f"{number!r} is not an E.164 number; Retell routes inbound by number")
+    number = retell_number(spec.dial_target.resolve())
     agent_id = spec.agent_id.resolve()
     wanted = [{"agent_id": agent_id, "agent_version": RETELL_ROUTE_VERSION, "weight": 1}]
     live = client.inbound_agents(number)
@@ -563,7 +578,7 @@ AGENTS: tuple[PlatformAgentSpec, ...] = (
         ),
         dial_target=SecretRef(
             name="RETELL_DENTAL_DIAL_TARGET",
-            purpose="the E.164 number Coval dials to reach the Retell dental agent",
+            purpose="the sip:+E164@sip.retellai.com URI Coval dials; names the imported number",
         ),
     ),
 )

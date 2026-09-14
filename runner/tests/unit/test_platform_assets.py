@@ -412,6 +412,7 @@ from coval_bench.platform_assets import (  # noqa: E402
     TelnyxClient,
     prepare_retell,
     prepare_telnyx,
+    retell_number,
     sip_subdomain,
 )
 
@@ -454,6 +455,7 @@ RETELL_LLM: dict[str, Any] = {
 }
 
 RETELL_NUMBER = "+14045550142"
+RETELL_DIAL = f"sip:{RETELL_NUMBER}@sip.retellai.com"
 RETELL_ROUTE = [{"agent_id": "agent_1", "agent_version": "latest", "weight": 1}]
 
 
@@ -544,7 +546,7 @@ CASES = [
         env={
             "RETELL_DENTAL_AGENT_ID": "agent_1",
             "RETELL_API_KEY": "retell-key",
-            "RETELL_DENTAL_DIAL_TARGET": RETELL_NUMBER,
+            "RETELL_DENTAL_DIAL_TARGET": RETELL_DIAL,
         },
         live=RETELL_AGENT,
         agent_path="/get-agent/agent_1",
@@ -958,15 +960,25 @@ def test_retell_prepare_never_repoints_someone_elses_number(retell_env: Case) ->
         prepare_retell(client, spec_for("retell-dental"), True)
 
 
-def test_retell_prepare_requires_an_e164_dial_target(
-    retell_env: Case, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("RETELL_DENTAL_DIAL_TARGET", "sip:x@sip.retellai.com")
-    with (
-        _platform_client(retell_env, {}) as client,
-        pytest.raises(SyncError, match="not an E.164 number"),
-    ):
-        prepare_retell(client, spec_for("retell-dental"), True)
+@pytest.mark.parametrize(
+    "target", ["sip:+14045550142@sip.retellai.com", "SIP:+14045550142@Sip.RetellAI.com:5060"]
+)
+def test_retell_number_is_read_off_the_sip_dial_target(target: str) -> None:
+    assert retell_number(target) == "+14045550142"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "+14045550142",
+        "sip:dental@sip.retellai.com",
+        "sip:+14045550142@sip.vapi.ai",
+        "sip:14045550142@sip.retellai.com",
+    ],
+)
+def test_retell_number_refuses_anything_else(target: str) -> None:
+    with pytest.raises(SyncError):
+        retell_number(target)
 
 
 def test_launch_body_selects_exact_cases_instead_of_a_sample(env: None) -> None:
