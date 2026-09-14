@@ -56,7 +56,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAPI_DENTAL_ASSISTANT_ID", "asst_1")
     monkeypatch.setenv("VAPI_API_KEY", "vapi-key")
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
-    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:appointment-dental@sip.vapi.ai")
+    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:example-dental@sip.vapi.ai")
     monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: True)
 
 
@@ -249,7 +249,7 @@ def test_plan_summary_names_all_three_buckets() -> None:
 def test_coval_agent_body_dials_the_target_with_the_pinned_codec(env: None) -> None:
     body = coval_agent_body(DENTAL)
     assert body["model_type"] == "MODEL_TYPE_VOICE"
-    assert body["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+    assert body["phone_number"] == "sip:example-dental@sip.vapi.ai"
     assert body["metadata"] == {"audio_codec": "PCMU"}
     assert body["customer_agent_id"] == "vapi-dental"
     assert body["attributes"]["platform"] == "vapi"
@@ -293,7 +293,7 @@ def test_register_creates_the_coval_agent_when_absent(env: None) -> None:
         agent_id, result = register(client, DENTAL)
     assert agent_id == "A" * 22
     assert set(result.update) == set(platform_assets.COVAL_MANAGED)
-    assert state["agents"][0]["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+    assert state["agents"][0]["phone_number"] == "sip:example-dental@sip.vapi.ai"
 
 
 def test_register_patches_only_the_drifted_fields(env: None) -> None:
@@ -303,7 +303,7 @@ def test_register_patches_only_the_drifted_fields(env: None) -> None:
         agent_id, result = register(client, DENTAL)
     assert agent_id == "A"
     assert list(result.update) == ["phone_number"]
-    assert state["patched"] == {"phone_number": "sip:appointment-dental@sip.vapi.ai"}
+    assert state["patched"] == {"phone_number": "sip:example-dental@sip.vapi.ai"}
 
 
 def test_register_matches_on_customer_agent_id_not_display_name(env: None) -> None:
@@ -498,7 +498,7 @@ CASES = [
         env={
             "TELNYX_DENTAL_ASSISTANT_ID": "assistant-1",
             "TELNYX_API_KEY": "telnyx-key",
-            "TELNYX_DENTAL_DIAL_TARGET": "sip:dental@coval-bench-dental.sip.telnyx.com",
+            "TELNYX_DENTAL_DIAL_TARGET": "sip:dental@example-dental.sip.telnyx.com",
             "OPENAI_API_KEY": "openai-key",
             "ELEVENLABS_API_KEY": "eleven-key",
         },
@@ -637,7 +637,7 @@ def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
         return httpx.Response(404, text=request.url.path)
 
     state.setdefault("secrets", list(TELNYX_SECRETS))
-    state.setdefault("sub", "coval-bench-dental")
+    state.setdefault("sub", "example-dental")
     state.setdefault("recv", "from_anyone")
     state.setdefault("route", RETELL_ROUTE)
     return CLIENTS[spec.platform]("key", platform.api_base, transport=httpx.MockTransport(handler))
@@ -742,12 +742,12 @@ def test_telnyx_correlation_rides_in_preset_fields_the_model_cannot_see(telnyx_e
 @pytest.mark.parametrize(
     "target",
     [
-        "sip:dental@coval-bench-dental.sip.telnyx.com",
-        "SIP:x@Coval-Bench-Dental.sip.telnyx.com:5060",
+        "sip:dental@example-dental.sip.telnyx.com",
+        "SIP:x@Example-Dental.sip.telnyx.com:5060",
     ],
 )
 def test_sip_subdomain_is_read_off_the_dial_target(target: str) -> None:
-    assert sip_subdomain(target) == "coval-bench-dental"
+    assert sip_subdomain(target) == "example-dental"
 
 
 @pytest.mark.parametrize(
@@ -768,13 +768,13 @@ def test_telnyx_prepare_lists_missing_secrets_and_subdomain_then_creates_only_th
         assert pending == [
             "integration_secret:coval-bench-elevenlabs",
             "integration_secret:coval-bench-mock",
-            "sip_subdomain:texml-1=coval-bench-dental:from_anyone",
+            "sip_subdomain:texml-1=example-dental:from_anyone",
         ]
         assert state["secrets"] == ["coval", "coval-bench-openai"] and state["sub"] is None
         assert prepare_telnyx(client, spec, False) == pending
         assert prepare_telnyx(client, spec, False) == []
     assert set(state["secrets"]) == {"coval", *TELNYX_SECRETS}
-    assert state["sub"] == "coval-bench-dental"
+    assert state["sub"] == "example-dental"
 
 
 def test_telnyx_prepare_refuses_a_foreign_client(telnyx_env: Case) -> None:
@@ -798,10 +798,10 @@ def test_telnyx_client_updates_with_post_as_the_reference_documents() -> None:
 
 def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env: Case) -> None:
     spec = spec_for("telnyx-dental")
-    state: dict[str, Any] = {"sub": "coval-bench-dental", "recv": "only_my_connections"}
+    state: dict[str, Any] = {"sub": "example-dental", "recv": "only_my_connections"}
     with _platform_client(telnyx_env, state) as client:
         assert prepare_telnyx(client, spec, True) == [
-            "sip_subdomain:texml-1=coval-bench-dental:from_anyone"
+            "sip_subdomain:texml-1=example-dental:from_anyone"
         ]
         prepare_telnyx(client, spec, False)
         assert prepare_telnyx(client, spec, False) == []
