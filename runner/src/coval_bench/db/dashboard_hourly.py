@@ -19,6 +19,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
+from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries.metrics import TIMELINE_AGGREGATION_RULES
 
 HOURLY_DEFINITION_REVISION = DEFINITION_REVISION
@@ -140,6 +141,26 @@ async def refresh_hourly_aggregates(
             # cannot race a source replacement and its dirty marker.
             for hour in normalized:
                 await cur.execute(HOUR_LOCK_SQL, {"hour": hour})
+            metric_ids = await register_metric_definitions(conn)
+            await cur.execute(
+                """SELECT DISTINCT b.metric_type
+                   FROM benchmarks_v2.metric_values_by_bucket b
+                   JOIN unnest(%(hours)s::timestamptz[]) requested(hour_at)
+                     ON b.bucket_at >= requested.hour_at
+                    AND b.bucket_at < requested.hour_at + interval '1 hour'
+                   WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'""",
+                {"hours": normalized},
+            )
+            source_codes = {str(row["metric_type"]) for row in await cur.fetchall()}
+            unknown = sorted(source_codes - set(metric_ids))
+            unsupported = sorted(source_codes - set(TIMELINE_AGGREGATION_RULES))
+            if unknown or unsupported:
+                details = []
+                if unknown:
+                    details.append("unknown definitions: " + ", ".join(unknown))
+                if unsupported:
+                    details.append("unsupported contracts: " + ", ".join(unsupported))
+                raise ValueError("invalid metrics in requested hours: " + "; ".join(details))
             await cur.execute(
                 _SOURCE_SQL,
                 {"aggregation_rules": Jsonb(_rules()), "hours": normalized},
@@ -160,12 +181,12 @@ async def refresh_hourly_aggregates(
                     {"hour": hour},
                 )
                 insert_sql = """INSERT INTO benchmarks_v2.dashboard_hourly_aggregates
-                            (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                            (provider, model, benchmark, dataset_id, metric_id, metric_version,
                              evaluation_variant, hour_at, primary_sum, sample_count, numerator_sum,
                              denominator_sum, coverage_complete, source_count, latest_source_at,
                              definition_revision, metadata)
                             VALUES (%(provider)s, %(model)s, %(benchmark)s, %(dataset_id)s,
-                                    %(metric_type)s, %(metric_version)s, %(evaluation_variant)s,
+                                    %(metric_id)s, %(metric_version)s, %(evaluation_variant)s,
                                     %(hour_at)s, %(primary_sum)s, %(sample_count)s,
                                     %(numerator_sum)s,
                                     %(denominator_sum)s, %(coverage_complete)s, %(source_count)s,
@@ -174,7 +195,11 @@ async def refresh_hourly_aggregates(
                 await cur.executemany(
                     insert_sql,
                     [
-                        {**row, "definition_revision": HOURLY_DEFINITION_REVISION}
+                        {
+                            **row,
+                            "metric_id": metric_ids[str(row["metric_type"])],
+                            "definition_revision": HOURLY_DEFINITION_REVISION,
+                        }
                         for row in by_hour[hour]
                     ],
                 )

@@ -10,7 +10,7 @@ import json
 
 from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
 
-DEFINITION_REVISION = 1
+DEFINITION_REVISION = 2
 
 
 def _canonical(value: object) -> object:
