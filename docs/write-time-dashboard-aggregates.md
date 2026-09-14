@@ -6,7 +6,11 @@ read cutover have not been applied to production.
 
 ## Storage and metric rules
 
-Migration `20260914_0034` creates three materialized views and four tables:
+Migration `20260914_0034` is isolated in
+[PR #645](https://github.com/coval-ai/benchmarks/pull/645) and creates three
+materialized views and four tables. The application changes remain in
+[PR #634](https://github.com/coval-ai/benchmarks/pull/634), based on the migration
+branch until it merges.
 
 | Object | Purpose |
 | --- | --- |
@@ -37,7 +41,20 @@ Changing materialization semantics also requires a definition revision change.
 
 ## Publication, repair, and readers
 
-Run completion durably enqueues its source bucket in the completion transaction.
+Once migration 0034 is applied, run completion durably enqueues its source bucket
+in the completion transaction. If a runner image arrives before the migration,
+an enqueue savepoint isolates missing-table errors so the run's status, finish
+time, and error still commit. The writer emits
+`dashboard_source_refresh_enqueue_skipped` with the run ID and required migration.
+Other enqueue errors still propagate and roll back the completion transaction.
+
+After applying the migration, explicitly repair source buckets for runs completed
+during that gap before enabling saved reads. Use the existing
+`repair-dashboard-aggregates --bucket ...` command with each distinct non-null
+`runs.scheduled_at` for runs that finished during the gap and have normalized
+observations. Include failed runs, since rebuilding also removes contributions.
+Scheduled maintenance cannot discover requests skipped while the queue was absent.
+
 Source replacement takes the UTC-hour lock before the source-bucket lock. It
 claims the pending request before reading source observations, replaces the
 bucket, and marks its hour dirty in one transaction. A failed replacement keeps
@@ -85,9 +102,12 @@ The infrastructure change defines a database-only Cloud Run job every hour,
 with a 600-second timeout, one retry, and image updates through the existing
 runner image workflow. Its scheduler is created paused.
 
-1. Apply the additive migration and deploy compatible writers with normalized
-   reads still disabled. Views are created without initial population.
-2. Run maintenance to initialize source/hour coverage and all summary views.
+1. Merge and apply the migration-only PR #645. Then retarget application PR #634
+   to `main`, merge, and deploy compatible writers with normalized reads still
+   disabled. Views are created without initial population.
+2. If writers ran before the migration, repair their skipped source buckets as
+   described above. Run maintenance to initialize source/hour coverage and all
+   summary views.
 3. Apply the reviewed infrastructure plan through Atlantis, install the compatible
    runner image, and resume the scheduler. Confirm successful recurring refreshes.
 4. Verify production read latency and refresh load, then enable the normalized

@@ -9,6 +9,7 @@ from typing import Any
 import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
+from structlog.testing import capture_logs
 
 from coval_bench.db import dashboard_source
 from coval_bench.db.dashboard_aggregates import repair_dashboard_aggregates
@@ -38,6 +39,93 @@ def test_aggregation_fingerprint_is_hash_seed_independent() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status,error",
+    [
+        (RunStatus.SUCCEEDED, None),
+        (RunStatus.PARTIAL, "cancelled during rollout"),
+        (RunStatus.FAILED, "provider failed during rollout"),
+    ],
+)
+async def test_finish_before_dashboard_migration_preserves_run_completion(
+    pg_conn: psycopg.Connection[Any], status: RunStatus, error: str | None
+) -> None:
+    storage._migrate(pg_conn, "20260911_0033")
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run_id, _observation = await storage._observation(writer)
+        async with pool.connection() as conn:
+            queue = await (
+                await conn.execute(
+                    "SELECT to_regclass('benchmarks_v2.dashboard_source_refreshes') AS table_name"
+                )
+            ).fetchone()
+        assert queue is not None and queue["table_name"] is None
+        with capture_logs() as logs:
+            await writer.finish_run(run_id, status=status, error=error)
+        async with pool.connection() as conn:
+            run = await (
+                await conn.execute(
+                    "SELECT status, finished_at, error FROM benchmarks_v2.runs WHERE id=%s",
+                    (run_id,),
+                )
+            ).fetchone()
+        assert run is not None
+        assert run["status"] == str(status)
+        assert run["finished_at"] is not None
+        assert run["error"] == error
+        assert logs == [
+            {
+                "event": "dashboard_source_refresh_enqueue_skipped",
+                "log_level": "warning",
+                "run_id": run_id,
+                "status": str(status),
+                "reason": "dashboard_storage_unavailable",
+                "required_migration": "20260914_0034",
+            }
+        ]
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_finish_rolls_back_on_other_enqueue_errors(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run_id, _observation = await storage._observation(writer)
+        async with pool.connection() as conn:
+            await conn.execute(
+                "ALTER TABLE benchmarks_v2.dashboard_source_refreshes "
+                "ADD CONSTRAINT reject_test_enqueue CHECK (false) NOT VALID"
+            )
+        with capture_logs() as logs, pytest.raises(psycopg.errors.CheckViolation):
+            await writer.finish_run(run_id, status=RunStatus.FAILED, error="provider failed")
+        async with pool.connection() as conn:
+            run = await (
+                await conn.execute(
+                    "SELECT status, finished_at, error FROM benchmarks_v2.runs WHERE id=%s",
+                    (run_id,),
+                )
+            ).fetchone()
+            queued = await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM benchmarks_v2.dashboard_source_refreshes"
+                )
+            ).fetchone()
+        assert run is not None
+        assert run == {"status": "running", "finished_at": None, "error": None}
+        assert queued is not None and queued["n"] == 0
+        assert logs == []
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
@@ -54,10 +142,20 @@ async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
         )
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
         async with pool.connection() as conn:
+            run = await (
+                await conn.execute(
+                    "SELECT status, finished_at, error, scheduled_at "
+                    "FROM benchmarks_v2.runs WHERE id=%s",
+                    (run_id,),
+                )
+            ).fetchone()
             queued = await (
                 await conn.execute("SELECT bucket_at FROM benchmarks_v2.dashboard_source_refreshes")
             ).fetchone()
-        assert queued is not None
+        assert run is not None
+        assert run["status"] == "succeeded" and run["finished_at"] is not None
+        assert run["error"] is None
+        assert queued is not None and queued["bucket_at"] == run["scheduled_at"]
         bucket = queued["bucket_at"]
         await rebuild_source_bucket(pool, bucket)
         async with pool.connection() as conn:

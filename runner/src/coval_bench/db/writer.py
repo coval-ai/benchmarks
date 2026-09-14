@@ -23,7 +23,9 @@ from datetime import datetime
 from uuid import UUID
 
 import psycopg
+import psycopg.errors
 import psycopg.rows
+import structlog
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
@@ -50,6 +52,7 @@ from coval_bench.registries import (
 )
 
 STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
+logger = structlog.get_logger(__name__)
 
 
 class RunWriter:
@@ -63,7 +66,8 @@ class RunWriter:
         await writer.record_results([result1, result2, ...])
         await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
 
-    All methods raise on error; exceptions are never swallowed.
+    Errors propagate except when ``finish_run`` skips a dashboard enqueue
+    because its storage is unavailable before migration 0034.
     """
 
     def __init__(
@@ -892,7 +896,11 @@ class RunWriter:
         status: RunStatus,
         error: str | None = None,
     ) -> None:
-        """Set ``finished_at = now()`` and update ``status`` / ``error`` on a run row."""
+        """Commit completion and enqueue dashboard maintenance together.
+
+        Before migration 0034, missing dashboard storage skips only the enqueue
+        with a warning. Other enqueue errors still roll back the completion.
+        """
         from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
 
         sql = """
@@ -904,7 +912,19 @@ class RunWriter:
         """
         async with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             await cur.execute(sql, (status, error, run_id))
-            await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
+            try:
+                # A runner image can arrive before migration 0034. Roll back
+                # only the missing-table enqueue, preserving the run outcome.
+                async with conn.transaction():
+                    await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
+            except psycopg.errors.UndefinedTable:
+                logger.warning(
+                    "dashboard_source_refresh_enqueue_skipped",
+                    run_id=run_id,
+                    status=str(status),
+                    reason="dashboard_storage_unavailable",
+                    required_migration="20260914_0034",
+                )
 
     async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
