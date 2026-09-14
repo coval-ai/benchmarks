@@ -70,8 +70,7 @@ WITH evaluations AS (
  ((provider,model,benchmark,dataset_id,public_metric,metric_version,evaluation_variant),
   (provider,model,benchmark,public_metric,metric_version,evaluation_variant))
 )
-SELECT provider,model,benchmark,dataset_id,
-       benchmarks_v2.metric_id_for_code(metric_type) AS metric_id,metric_version,evaluation_variant,
+SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,
        mean_value,COALESCE(pooled_value,mean_for_ratio) avg_value,stddev_value,p25,p50,p75,p90,p95,p99,
        min_value,max_value,sample_count,primary_sample_count,
        COALESCE(pooled_insertions_pct,wer_insertions_pct) AS wer_insertions_pct,
@@ -84,69 +83,20 @@ SELECT provider,model,benchmark,dataset_id,
 
 def upgrade() -> None:
     op.execute("""
-    CREATE TABLE benchmarks_v2.metrics (
-      id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-      code TEXT NOT NULL UNIQUE CHECK (code <> ''),
-      display_name TEXT NOT NULL CHECK (display_name <> ''));
-    INSERT INTO benchmarks_v2.metrics (code,display_name) VALUES
-      ('WER','Word Error Rate'),
-      ('TTFT','Time to First Token'),
-      ('TTFS','Time to Final from Speech'),
-      ('TTFA','Time to First Audio'),
-      ('TTFARoundtrip','TTFA Network Roundtrip'),
-      ('TTFALeadingSilence','TTFA Leading Silence'),
-      ('RTF','Real-Time Factor'),
-      ('AudioToFinal','Audio to Final'),
-      ('V2V','Voice-to-Voice Latency'),
-      ('InstructionFollowing','Instruction Adherence'),
-      ('InterruptionRate','Interruption Rate'),
-      ('ExpectedBehaviorAdherence','Expected Behavior Adherence');
-
-    CREATE FUNCTION benchmarks_v2.preserve_metric_identity() RETURNS trigger
-    LANGUAGE plpgsql AS $$
-    BEGIN
-      IF TG_OP IN ('DELETE','TRUNCATE') THEN
-        RAISE EXCEPTION 'metric definitions must be retained' USING ERRCODE='23514';
-      END IF;
-      IF NEW.id IS DISTINCT FROM OLD.id OR NEW.code IS DISTINCT FROM OLD.code THEN
-        RAISE EXCEPTION 'metric id and code are immutable' USING ERRCODE='23514';
-      END IF;
-      RETURN NEW;
-    END $$;
-    CREATE TRIGGER metrics_preserve_identity BEFORE UPDATE OR DELETE
-      ON benchmarks_v2.metrics FOR EACH ROW
-      EXECUTE FUNCTION benchmarks_v2.preserve_metric_identity();
-    CREATE TRIGGER metrics_preserve_definitions BEFORE TRUNCATE
-      ON benchmarks_v2.metrics FOR EACH STATEMENT
-      EXECUTE FUNCTION benchmarks_v2.preserve_metric_identity();
-
-    CREATE FUNCTION benchmarks_v2.metric_id_for_code(metric_code TEXT) RETURNS BIGINT
-    LANGUAGE plpgsql STABLE AS $$
-    DECLARE resolved_id BIGINT;
-    BEGIN
-      SELECT id INTO resolved_id FROM benchmarks_v2.metrics WHERE code=metric_code;
-      IF NOT FOUND THEN
-        RAISE EXCEPTION 'unknown metric definition: %', metric_code USING ERRCODE='23503';
-      END IF;
-      RETURN resolved_id;
-    END $$;
-    """)
-    op.execute("""
     CREATE TABLE benchmarks_v2.dashboard_summary_state (
       id BOOLEAN PRIMARY KEY CHECK (id), generation BIGINT NOT NULL DEFAULT 0,
       as_of TIMESTAMPTZ, published_at TIMESTAMPTZ, definition_revision INTEGER NOT NULL,
       definition_fingerprint TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{"schema_version" : 1}'::jsonb);
     INSERT INTO benchmarks_v2.dashboard_summary_state (id,definition_revision,definition_fingerprint)
-      VALUES (true,2,'uninitialized');
+      VALUES (true,1,'uninitialized');
     CREATE TABLE benchmarks_v2.dashboard_hourly_aggregates (
       provider TEXT NOT NULL, model TEXT NOT NULL, benchmark TEXT NOT NULL, dataset_id TEXT NOT NULL,
-      metric_id BIGINT NOT NULL REFERENCES benchmarks_v2.metrics(id) ON DELETE RESTRICT,
-      metric_version TEXT NOT NULL, evaluation_variant TEXT NOT NULL,
+      metric_type TEXT NOT NULL, metric_version TEXT NOT NULL, evaluation_variant TEXT NOT NULL,
       hour_at TIMESTAMPTZ NOT NULL, primary_sum DOUBLE PRECISION NOT NULL, sample_count BIGINT NOT NULL,
       numerator_sum DOUBLE PRECISION, denominator_sum DOUBLE PRECISION, coverage_complete BOOLEAN NOT NULL,
       source_count BIGINT NOT NULL, latest_source_at TIMESTAMPTZ, definition_revision INTEGER NOT NULL,
       metadata JSONB NOT NULL DEFAULT '{"schema_version" : 1}'::jsonb,
-      PRIMARY KEY(provider,model,benchmark,dataset_id,metric_id,metric_version,evaluation_variant,hour_at));
+      PRIMARY KEY(provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,hour_at));
     CREATE TABLE benchmarks_v2.dashboard_hourly_state (
       hour_at TIMESTAMPTZ PRIMARY KEY, dirty BOOLEAN NOT NULL, refreshed_at TIMESTAMPTZ,
       definition_revision INTEGER NOT NULL, definition_fingerprint TEXT NOT NULL,
@@ -173,10 +123,10 @@ def upgrade() -> None:
             + " WITH NO DATA"
         )
         op.execute(
-            f"CREATE UNIQUE INDEX normalized_results_{name}_key ON benchmarks_v2.normalized_results_{name} (provider,model,benchmark,dataset_id,metric_id,metric_version,evaluation_variant)"
+            f"CREATE UNIQUE INDEX normalized_results_{name}_key ON benchmarks_v2.normalized_results_{name} (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant)"
         )
         op.execute(
-            f"CREATE INDEX normalized_results_{name}_lookup ON benchmarks_v2.normalized_results_{name} (benchmark,dataset_id,metric_id,metric_version,evaluation_variant)"
+            f"CREATE INDEX normalized_results_{name}_lookup ON benchmarks_v2.normalized_results_{name} (benchmark,dataset_id,metric_type,metric_version,evaluation_variant)"
         )
     op.execute(
         "CREATE INDEX dashboard_hourly_aggregates_hour_idx ON benchmarks_v2.dashboard_hourly_aggregates (hour_at)"
@@ -186,8 +136,7 @@ def upgrade() -> None:
     )
     op.execute("""
       DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='api') THEN
-        GRANT SELECT ON benchmarks_v2.metrics,
-          benchmarks_v2.dashboard_summary_state, benchmarks_v2.dashboard_hourly_aggregates,
+        GRANT SELECT ON benchmarks_v2.dashboard_summary_state, benchmarks_v2.dashboard_hourly_aggregates,
           benchmarks_v2.dashboard_hourly_state, benchmarks_v2.dashboard_source_refreshes,
           benchmarks_v2.normalized_results_24h,
           benchmarks_v2.normalized_results_7d, benchmarks_v2.normalized_results_30d TO api;
@@ -202,6 +151,3 @@ def downgrade() -> None:
     op.execute(
         "DROP TABLE IF EXISTS benchmarks_v2.dashboard_source_refreshes, benchmarks_v2.dashboard_hourly_aggregates, benchmarks_v2.dashboard_hourly_state, benchmarks_v2.dashboard_summary_state"
     )
-    op.execute("DROP FUNCTION benchmarks_v2.metric_id_for_code(TEXT)")
-    op.execute("DROP TABLE benchmarks_v2.metrics")
-    op.execute("DROP FUNCTION benchmarks_v2.preserve_metric_identity()")
