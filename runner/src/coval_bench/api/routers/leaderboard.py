@@ -65,8 +65,7 @@ _VALID_COMBOS: set[tuple[str, str]] = {
 # S2S agent runs daily. Dental and the multi-turn set are frozen rather than
 # retired: nothing writes to them, but they stay reachable through the aggregates
 # ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
-# pooled. LLM runs the same bank scenario over text; its dental rows are frozen
-# the same way.
+# pooled. LLM runs the same bank scenario over text.
 _PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_BANK, "LLM": DATASET_ID_LLM_BANK}
 
 _MV_SQL_TEMPLATE = """

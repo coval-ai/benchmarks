@@ -1,12 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The scenario every LLM agent runs, named once.
-
-A suite pairs the contract the proxy serves with the Coval test set, judge, and
-persona the runs use, so the agent definition, the run template, and the fetch
-all read the same ids.
-"""
+"""The scenario every LLM agent runs, named once."""
 
 from __future__ import annotations
 
@@ -40,7 +35,6 @@ class Suite:
         return SuiteIds(*values)
 
     def missing(self, settings: Settings) -> list[str]:
-        """The setting names still unset or blank, in declaration order."""
         ids = self.ids(settings)
         return [
             attr

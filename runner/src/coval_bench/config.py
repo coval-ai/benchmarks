@@ -251,8 +251,7 @@ class Settings(BaseSettings):
     # Opaque ids, not secrets.
     coval_s2s_bank_test_set_id: str | None = None
     coval_s2s_bank_instruction_metric_id: str | None = None
-    # The clean caller the LLM run template uses; voice runs pick personas through
-    # coval_s2s_condition_personas instead.
+    # The clean caller on the LLM run template; voice picks personas by condition.
     coval_s2s_bank_persona_id: str | None = None
     coval_s2s_bank_openai_agent_id: str | None = None
     coval_s2s_bank_gpt_live_agent_id: str | None = None
