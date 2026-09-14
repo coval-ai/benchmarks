@@ -19,7 +19,7 @@ Sampling failures never fail the fetch — the metric rows are the product.
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -42,20 +42,6 @@ PREFIX = "s2s-samples"
 _TICK_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _INDEX_MAX_ENTRIES = 60
 _DOWNLOAD_TIMEOUT = 120.0
-
-# Multi-turn bench personas, matched by id — raw Coval names are unreliable (the
-# male persona's name carries a trailing space). If the personas churn, update
-# here (or lift into Settings).
-_PERSONA_LABELS: dict[str, str] = {
-    "PN3xgmsqeLDjsNNEA2e55e": "Standard Female",
-    "9ATy64zKXxSUaVWb5YnQtd": "Standard Male",
-    "MUFJdYAHdBHU6UbRRu4ykM": "Standard Customer",
-    "NWTe6Q7B7WvhUfU52A3NY8": "Clean Speech Baseline",
-}
-
-
-def _persona_label(persona_id: str) -> str:
-    return _PERSONA_LABELS.get(persona_id, persona_id)
 
 
 def sample_prefix(dataset_id: str | None) -> str:
@@ -260,6 +246,7 @@ async def publish_tick_sample(
     storage_client: storage.Client | None = None,
     download_client: httpx.AsyncClient | None = None,
     expected_models: set[tuple[str, str]] | None = None,
+    persona_labels: Mapping[str, str] | None = None,
 ) -> int:
     """Copy one multi-turn conversation (every model, one persona) as a v2 sample.
 
@@ -286,6 +273,7 @@ async def publish_tick_sample(
                 rng=rng,
                 storage_client=storage_client,
                 expected_models=expected_models,
+                persona_labels=persona_labels,
             )
     except Exception:
         logger.error("samples_tick_failed", exc_info=True)
@@ -303,6 +291,7 @@ async def _publish_tick_sample(
     rng: Random,
     storage_client: storage.Client | None,
     expected_models: set[tuple[str, str]] | None,
+    persona_labels: Mapping[str, str] | None,
 ) -> int:
     """Publish a sample for EVERY bucket present in ``runs``, oldest first.
 
@@ -338,6 +327,7 @@ async def _publish_tick_sample(
                 bucket_at=bucket_at,
                 rng=rng,
                 expected_models=expected_models,
+                persona_labels=persona_labels,
             )
         except Exception:
             logger.error(
@@ -359,6 +349,7 @@ async def _publish_one_bucket(
     bucket_at: datetime,
     rng: Random,
     expected_models: set[tuple[str, str]] | None,
+    persona_labels: Mapping[str, str] | None,
 ) -> int:
     tick_key = bucket_at.strftime(_TICK_FORMAT)
     tick_prefix = f"{sample_prefix(dataset_id)}/{tick_key}"
@@ -499,7 +490,7 @@ async def _publish_one_bucket(
             # a run predates the field.
             "test_set_id": next((r.test_set_id for r in runs if r.test_set_id), test_set_id),
             "test_case_id": test_case_id,
-            "persona_name": _persona_label(persona_id),
+            "persona_name": (persona_labels or {}).get(persona_id, persona_id),
             "recordings": recordings,
         }
         _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")

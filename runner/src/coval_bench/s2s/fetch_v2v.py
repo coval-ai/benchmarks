@@ -23,19 +23,18 @@ import click
 import httpx
 import structlog
 
+from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
-from coval_bench.llm import suite
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
-    FAMILY_BANK,
     FAMILY_DENTAL,
     FAMILY_INSTR_CUST_SERVICE,
     FAMILY_INSTR_HEALTH,
@@ -258,33 +257,33 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             agent_id=settings.coval_s2s_bank_openai_agent_id,
             provider="openai",
             model="gpt-realtime",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_gpt_live_agent_id,
             provider="openai",
             model="gpt-live-1",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_gemini_agent_id,
             provider="google",
             model="gemini-live",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_xai_agent_id,
             provider="xai",
             model="grok-voice-think-fast-2.0",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
     )
 
@@ -302,11 +301,11 @@ def llm_specs(
             agent_id=agent_ids.get(model.provider),
             provider=model.provider,
             model=model.model,
-            test_set_id_attr=suite.ACTIVE.test_set_id_attr,
-            family=suite.ACTIVE.family,
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.LLM),
             publish_samples=False,
             benchmark=Benchmark.LLM,
-            instruction_metric_id_attr=suite.ACTIVE.instruction_metric_id_attr,
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         )
         for model in models
         if model.benchmark is Benchmark.LLM and model.collected
@@ -1308,7 +1307,7 @@ async def fetch_and_write_v2v(
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
     if benchmark is Benchmark.LLM:
-        unset = suite.ACTIVE.missing(settings)
+        unset = scenarios.ACTIVE.missing(settings, benchmark=Benchmark.LLM)
         if unset:
             raise RuntimeError(f"{', '.join(unset)} is required for the LLM benchmark")
     if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
@@ -1481,6 +1480,7 @@ async def fetch_and_write_v2v(
                 runs=dataset_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
+                persona_labels=settings.s2s_persona_labels,
             )
         logger.info(
             "s2s_fetch_done",

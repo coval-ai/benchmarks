@@ -221,6 +221,8 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
+    # Caller persona id -> label shown on the samples card.
+    s2s_persona_labels: dict[str, str] = Field(default_factory=dict)
     # --- Instruction-adherence-by-industry (separate Coval workspace) ---
     # These agents, test sets and this metric live in a workspace other than the
     # one coval_api_key defaults to, so every request for them must carry this
