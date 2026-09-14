@@ -197,9 +197,9 @@ cap as a degraded-endpoint tripwire.
 
 The shared pool uses HTTP/2 so that every concurrent request to a host
 multiplexes over a single connection. The connection is opened once by
-`warmup()`, and the dataset loop — run at a concurrency of 8 — reuses it, so
-TCP+TLS is paid once and excluded from every TTFA row rather than just the
-first. `http2=True` and the pool limits are set on `TimedTransport`, not on
+`warmup()`, and the dataset loop — run at a concurrency of 8, with each model
+serving one request at a time — reuses it, so TCP+TLS is paid once and
+excluded from every TTFA row rather than just the first. `http2=True` and the pool limits are set on `TimedTransport`, not on
 `AsyncClient`: httpx ignores both when a custom transport is supplied. The
 `api.openai.com` host negotiates HTTP/2; under 8-way concurrency the pool
 stays at one socket per host. Requires the `h2` package

@@ -50,6 +50,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
+from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
@@ -2109,7 +2110,7 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
                 entry=_stt_entry("deepgram", "flux-general-en"),
                 item=_make_dataset_item(audio_file),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=configured,
                 writer=writer,
                 dataset_id="stt-v3",
@@ -3474,7 +3475,7 @@ async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_res
                 entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
                 item=_make_tts_item(),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=enabled,
                 writer=writer,
                 dataset_sha256="a" * 64,
@@ -3543,7 +3544,7 @@ async def test_tts_cancellation_propagates_after_audio_cleanup(
                 entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
                 item=_make_tts_item(),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=enabled,
                 writer=writer,
                 dataset_sha256="a" * 64,
@@ -3581,7 +3582,7 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
     )
 
     rows = await _run_stt_item(
-        entry=entry, item=item, run_id=0, sem=asyncio.Semaphore(1), settings=cfg, writer=None
+        entry=entry, item=item, run_id=0, gate=ModelGate(1), settings=cfg, writer=None
     )
 
     assert rows
@@ -3684,7 +3685,7 @@ async def test_tts_wer_scores_against_spoken_reference(
                 entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
                 item=item,
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=settings,
             )
 
@@ -3730,7 +3731,7 @@ async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings
         "coval_bench.runner.orchestrator._get_stt_providers", return_value={"guava": _Capture}
     ):
         await _run_stt_item(
-            entry=entry, item=item, run_id=0, sem=asyncio.Semaphore(1), settings=cfg, writer=None
+            entry=entry, item=item, run_id=0, gate=ModelGate(1), settings=cfg, writer=None
         )
 
     assert seen["base_url"] == "https://guava.test"

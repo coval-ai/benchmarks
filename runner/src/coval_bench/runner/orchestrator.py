@@ -20,8 +20,9 @@ Design notes
   call time, not at module load, which also lets tests patch ``sys.modules``
   without triggering import errors.  ``coval_bench.registries`` is the
   exception: dependency-light by design, imported eagerly.
-- Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections;
-  dedicated runs use a cap of 1 so a single pinned replica is never contended.
+- Concurrency: a :class:`ModelGate` holds one lock per (provider, model) so a
+  model never serves two of our requests at once, under a global cap of 8 open
+  provider connections. Different models run side by side.
 - Timeouts: ``asyncio.timeout(45)`` for STT, ``asyncio.timeout(60)`` for TTS.
 - Audio cleanup: TTS audio files are deleted in ``finally`` blocks; this module
   owns cleanup, NOT the provider.
@@ -72,6 +73,7 @@ from coval_bench.registries import (
     RegisteredModel,
     Source,
 )
+from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -80,7 +82,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
-_DEDICATED_CONCURRENCY_CAP = 1
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 # Stable contract — matched by the reason classifier and the alerting log metric.
@@ -395,7 +396,7 @@ async def _run_stt_item(
     entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — DatasetItem is a runtime-typed sibling-agent type
     run_id: int,
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     settings: Settings,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
     dataset_id: str | None = None,
@@ -419,7 +420,7 @@ async def _run_stt_item(
     # Reasons already warned at their source; the per-item summary skips these.
     logged_reasons: set[str] = set()
 
-    async with sem:
+    async with gate.slot((entry.provider, entry.model)):
         provider_cls = stt_providers.get(entry.provider)
         if provider_cls is None:
             logger.warning(
@@ -737,7 +738,7 @@ async def _run_stt_item(
             )
 
     if writer is not None and artifact_client is not None:
-        async with sem:
+        async with gate.shared():
             try:
                 from coval_bench.runner.normalized import dual_write
 
@@ -804,7 +805,7 @@ async def _run_tts_item(
     entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — TTSDatasetItem is a runtime-typed sibling-agent type
     run_id: int,
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     settings: Settings,
     voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
@@ -833,7 +834,7 @@ async def _run_tts_item(
     # Reasons already warned at their source; the per-item summary skips these.
     logged_reasons: set[str] = set()
 
-    async with sem:
+    async with gate.slot((entry.provider, entry.model)):
         provider_cls = tts_providers.get(entry.provider)
         if provider_cls is None:
             logger.warning(
@@ -1335,7 +1336,7 @@ async def run_benchmarks(
                 dataset_id=stt_dataset_id,
             )
             stt_artifact_client = None
-        sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
+        gate = ModelGate(_CONCURRENCY_CAP)
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
         # We catch it, cancel the in-flight gather, and finalize the run row as
@@ -1411,7 +1412,7 @@ async def run_benchmarks(
                         entry=entry,
                         item=item,
                         run_id=run_id,
-                        sem=sem,
+                        gate=gate,
                         settings=settings,
                         writer=writer,
                         dataset_id=stt_dataset_id,
@@ -1445,9 +1446,9 @@ async def run_benchmarks(
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
                 logger.info("tts_dataset_sampled", item_count=len(tts_items))
 
-                # Item-major order so the semaphore interleaves providers; a
-                # model-major order would burst one provider with concurrent
-                # requests and skew TTFA.
+                # Item-major order so the gate interleaves providers; a
+                # model-major order would queue one model's items back to back
+                # while the others sit idle.
                 tts_voices = {
                     (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
                     for entry in enabled_tts
@@ -1478,7 +1479,7 @@ async def run_benchmarks(
                         entry=entry,
                         item=item,
                         run_id=run_id,
-                        sem=sem,
+                        gate=gate,
                         settings=settings,
                         voice=voice,
                         writer=writer,
