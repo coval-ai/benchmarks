@@ -76,7 +76,6 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # happy-path on purpose: pooling two populations under one dataset id would break
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
-# The dental scenario over text; frozen, nothing writes to it.
 FAMILY_LLM_DENTAL = "llm-dental"
 # One family per industry so their instruction-adherence numbers are never
 # pooled together — each is its own board on the dashboard.
@@ -87,7 +86,6 @@ FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
 # the default workspace. Only the clean caller is scheduled; the harder personas
 # exist in Coval but are not ingested until they get a dataset id here.
 FAMILY_BANK = "s2s-bank"
-# The bank scenario over text; its own population, never pooled with the voice rows.
 FAMILY_LLM_BANK = "llm-bank"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
@@ -240,7 +238,6 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.V2V,
         optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
     ),
-    # No audio to anchor on, so the expected-behaviors fraction is the anchor.
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,
