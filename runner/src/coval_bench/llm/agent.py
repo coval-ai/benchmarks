@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The dental agent as a prompt and tool list, for models we drive ourselves."""
+"""The agent under test as a prompt and tool list, read from a suite contract."""
 
 from __future__ import annotations
 
@@ -12,21 +12,20 @@ from typing import Any
 
 from coval_bench.contracts import read_contract_file
 
-SUITE = "dental"
-PROMPT_FILE = "_source/coval-prompt.txt"
+SYSTEM_PROMPT_FILE = "system-prompt.txt"
 TOOLS_FILE = "tool-definitions.json"
 
 
 @dataclass(frozen=True)
-class DentalAgent:
+class Agent:
     system_prompt: str
     tools: tuple[dict[str, Any], ...]
 
 
 @cache
-def load_dental_agent() -> DentalAgent:
-    definitions = json.loads(read_contract_file(SUITE, TOOLS_FILE))
-    return DentalAgent(
-        system_prompt=read_contract_file(SUITE, PROMPT_FILE),
+def load_agent(suite: str) -> Agent:
+    definitions = json.loads(read_contract_file(suite, TOOLS_FILE))
+    return Agent(
+        system_prompt=read_contract_file(suite, SYSTEM_PROMPT_FILE),
         tools=tuple({"type": "function", "function": d} for d in definitions),
     )
