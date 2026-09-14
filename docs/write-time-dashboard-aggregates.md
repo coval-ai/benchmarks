@@ -6,22 +6,23 @@ read cutover have not been applied to production.
 
 ## Storage and metric rules
 
-Migration `20260914_0034` is isolated in
-[PR #645](https://github.com/coval-ai/benchmarks/pull/645) and creates three
-materialized views and five tables. The application changes remain in
-[PR #634](https://github.com/coval-ai/benchmarks/pull/634), based on the migration
-branch until it merges.
+Migration `20260914_0034` creates the base saved aggregate tables and views in
+[PR #645](https://github.com/coval-ai/benchmarks/pull/645); the original aggregate
+application is in [PR #634](https://github.com/coval-ai/benchmarks/pull/634).
+The separate [BENCH-906](https://linear.app/coval/issue/BENCH-906) change adds
+migration `20260914_0035` and compatible metric-ID readers and writers. The
+original 0034 migration remains unchanged.
 
 | Object | Purpose |
 | --- | --- |
-| `metrics` | Generated IDs, immutable codes, and mutable display names |
+| `metrics` | Generated IDs, immutable codes, and mutable display names (0035) |
 | `normalized_results_24h`, `_7d`, `_30d` | Exact saved summary statistics, including all six current percentiles |
 | `dashboard_summary_state` | Atomic generation, window boundary, publication time, definition identity |
 | `dashboard_hourly_aggregates` | Primary sums/counts, ratio operands, coverage, latest source time |
 | `dashboard_hourly_state` | Successful coverage, including empty hours, and pending rebuild status |
 | `dashboard_source_refreshes` | Durable requests to rebuild source buckets after run completion |
 
-The migration also creates `metrics`, a database-local dimension with generated
+Migration 0035 creates `metrics`, a database-local dimension with generated
 `BIGINT` IDs, immutable canonical `code` values, and mutable `display_name`
 labels. The twelve current metrics are seeded by the migration.
 Application publication registers any future metric with a matching enum/spec/
@@ -65,8 +66,8 @@ time, and error still commit. The writer emits
 `dashboard_source_refresh_enqueue_skipped` with the run ID and required migration.
 Other enqueue errors still propagate and roll back the completion transaction.
 
-After applying the migration, explicitly repair source buckets for runs completed
-during that gap before enabling saved reads. Use the existing
+After applying 0034, explicitly repair source buckets for runs completed during
+the pre-0034 gap before enabling saved reads. Use the existing
 `repair-dashboard-aggregates --bucket ...` command with each distinct non-null
 `runs.scheduled_at` for runs that finished during the gap and have normalized
 observations. Include failed runs, since rebuilding also removes contributions.
@@ -119,14 +120,17 @@ The infrastructure change defines a database-only Cloud Run job every hour,
 with a 600-second timeout, one retry, and image updates through the existing
 runner image workflow. Its scheduler is created paused.
 
-1. Merge and apply the migration-only PR #645. Then retarget application PR #634
-   to `main`, merge, and deploy compatible writers with normalized reads still
-   disabled. Views are created without initial population.
-2. If writers ran before the migration, repair their skipped source buckets as
-   described above. Run maintenance to initialize source/hour coverage and all
-   summary views.
-3. Apply the reviewed infrastructure plan through Atlantis, install the compatible
-   runner image, and resume the scheduler. Confirm successful recurring refreshes.
+1. Apply the unchanged 0034 prerequisite migration if needed. Disable normalized
+   reads and pause/drain aggregate maintenance and backfill workers before
+   applying 0035, then deploy the compatible BENCH-906 application. Migration
+   0035 recreates saved views unpopulated, preserves hourly
+   rows and summary generation, and invalidates readiness; an unknown historical
+   hourly code fails the whole migration transaction.
+2. Apply the reviewed infrastructure plan through Atlantis and install the
+   compatible runner image in the maintenance job. Keep its scheduler paused.
+3. If writers ran before 0034, repair their skipped source buckets as described
+   above. Run maintenance to initialize source/hour coverage and all summary
+   views, then resume the scheduler and confirm successful recurring refreshes.
 4. Verify production read latency and refresh load, then enable the normalized
    read flag. Disable it to return to legacy reads if needed.
 

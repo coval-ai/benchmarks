@@ -279,6 +279,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(saved, "op", SimpleNamespace(execute=conn.execute)):
             saved.upgrade()
+        metric_ids = import_module(
+            "coval_bench.db.migrations.versions.20260914_0035_dashboard_metric_ids"
+        )
+        with patch.object(metric_ids, "op", SimpleNamespace(execute=conn.execute)):
+            metric_ids.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
