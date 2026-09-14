@@ -52,7 +52,13 @@ from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from coval_bench.scenarios.definitions import ACTIVE, BANK, Scenario, ScenarioIds
+
 __all__ = [
+    "ACTIVE",
+    "BANK",
+    "Scenario",
+    "ScenarioIds",
     "Stack",
     "load_stack",
     "contract_sha256",
@@ -65,7 +71,7 @@ __all__ = [
     "AnnotatedModel",
 ]
 
-_CONTRACTS_PACKAGE = "coval_bench.contracts"
+_CONTRACTS_PACKAGE = "coval_bench.scenarios"
 
 # Files that make up a suite contract, in a fixed order so the hash is stable.
 # Missing entries are skipped, so the hash is meaningful before the contract is
@@ -163,7 +169,7 @@ def _read_bytes(*parts: str) -> bytes:
 
 
 def load_stack() -> Stack:
-    """Parse and validate ``contracts/stack.json``."""
+    """Parse and validate ``scenarios/stack.json``."""
     return Stack.model_validate(json.loads(_read_bytes("stack.json")))
 
 

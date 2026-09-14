@@ -17,7 +17,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-import coval_bench.contracts as contracts_module
+import coval_bench.scenarios as contracts_module
 from coval_bench.mocktools.dispatch import Dispatcher, load_tool_specs
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture
 from tests.api.conftest import MOCK_TOOLS_KEY, _make_db_url

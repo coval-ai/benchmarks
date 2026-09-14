@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from google.api_core.exceptions import NotFound
 
-import coval_bench.contracts as contracts_module
+import coval_bench.scenarios as contracts_module
 from coval_bench.config import Settings
 from coval_bench.fixture_sources import (
     FIXTURE_OBJECT,
@@ -66,7 +66,7 @@ def _client(**objects: bytes) -> Any:
 
 
 def test_the_object_path_mirrors_the_layout_on_disk() -> None:
-    assert FIXTURE_OBJECT.format(suite="dental") == "contracts/dental/mock-tools.json"
+    assert FIXTURE_OBJECT.format(suite="dental") == "scenarios/dental/mock-tools.json"
 
 
 def test_a_seeded_suite_is_returned() -> None:

@@ -3,7 +3,7 @@
 
 """The seeded world the mock tools answer from.
 
-Fixtures live at ``contracts/<suite>/_private/mock-tools.json`` and are never
+Fixtures live at ``scenarios/<suite>/_private/mock-tools.json`` and are never
 committed: they are the answer key. A scenario that says "3:00 PM is
 unavailable" only grades if the agent cannot read that fact anywhere but the
 tool, so the file sits behind the same ``_private/`` rule as the test cases and
@@ -36,7 +36,7 @@ from typing import Any
 
 from pydantic import Field, field_validator
 
-from coval_bench.contracts import AnnotatedModel
+from coval_bench.scenarios import AnnotatedModel
 
 
 class Seed(AnnotatedModel):
