@@ -3,27 +3,22 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException
+from psycopg import AsyncConnection
 
 from coval_bench.api import dashboard_snapshots
 
 
-class _Result:
-    def __init__(self, row: object) -> None:
-        self.row = row
-
-    async def fetchone(self) -> object:
-        return self.row
-
-
-class _Connection:
-    def __init__(self, row: object) -> None:
-        self.row = row
-
-    async def execute(self, _sql: str) -> _Result:
-        return _Result(self.row)
+def _connection(row: object) -> AsyncConnection[Any]:
+    connection = Mock(spec=AsyncConnection)
+    cursor = Mock()
+    cursor.fetchone = AsyncMock(return_value=row)
+    connection.execute = AsyncMock(return_value=cursor)
+    return cast(AsyncConnection[Any], connection)
 
 
 def _row(*, generation: int = 3, revision: int = 1, fingerprint: str = "fp") -> dict[str, object]:
@@ -40,7 +35,7 @@ def _row(*, generation: int = 3, revision: int = 1, fingerprint: str = "fp") -> 
 @pytest.mark.asyncio
 async def test_snapshot_accepts_initialized_current_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
-    snapshot = await dashboard_snapshots.require_snapshot(_Connection(_row()))
+    snapshot = await dashboard_snapshots.require_snapshot(_connection(_row()))
     assert snapshot.generation == 3
     assert snapshot.stale is False
 
@@ -56,7 +51,7 @@ async def test_snapshot_rejects_unusable_state(
 ) -> None:
     monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
     with pytest.raises(HTTPException) as error:
-        await dashboard_snapshots.require_snapshot(_Connection(row))
+        await dashboard_snapshots.require_snapshot(_connection(row))
     assert error.value.status_code == 503
     assert error.value.detail == "dashboard_snapshot_not_ready"
 
@@ -66,5 +61,5 @@ async def test_snapshot_marks_old_publication_stale(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(dashboard_snapshots, "aggregation_fingerprint", lambda: "fp")
     row = _row()
     row["published_at"] = dt.datetime.now(dt.UTC) - dt.timedelta(minutes=31)
-    snapshot = await dashboard_snapshots.require_snapshot(_Connection(row))
+    snapshot = await dashboard_snapshots.require_snapshot(_connection(row))
     assert snapshot.stale is True

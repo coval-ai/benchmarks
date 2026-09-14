@@ -752,12 +752,14 @@ async def _refresh_mv(postgresql: Any) -> None:
         # The normalized API path reads only the atomically published snapshot.
         from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
 
-        pool = AsyncConnectionPool(
-            conninfo=dsn,
-            min_size=1,
-            max_size=1,
-            open=False,
-            kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
+        pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = (
+            AsyncConnectionPool(
+                conninfo=dsn,
+                min_size=1,
+                max_size=1,
+                open=False,
+                kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
+            )
         )
         await pool.open()
         try:

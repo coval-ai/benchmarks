@@ -1950,7 +1950,7 @@ async def _publish_timeline_test_hours(postgresql: Any) -> None:
     from coval_bench.db.dashboard_hourly import floor_hour, refresh_hourly_aggregates
     from tests.api.conftest import _make_db_url
 
-    async with AsyncConnectionPool(
+    async with AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]](
         _make_db_url(postgresql),
         min_size=1,
         max_size=2,
@@ -1964,6 +1964,7 @@ async def _publish_timeline_test_hours(postgresql: Any) -> None:
                     "FROM benchmarks_v2.metric_values_by_bucket"
                 )
             ).fetchone()
+        assert bounds is not None
         now = datetime.now(dt.UTC)
         first = floor_hour(min(now - timedelta(days=30), bounds["first"] or now))
         last = floor_hour(max(now + timedelta(days=1), bounds["last"] or now))

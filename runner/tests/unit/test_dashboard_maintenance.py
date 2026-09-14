@@ -73,6 +73,8 @@ async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
                     "SELECT count(*) AS n FROM benchmarks_v2.dashboard_source_refreshes"
                 )
             ).fetchone()
+        assert state is not None
+        assert remaining is not None
         assert state["dirty"] is True and state["refreshed_at"] is None
         assert remaining["n"] == 0
     finally:
@@ -105,6 +107,8 @@ async def test_hourly_refresh_replaces_rows_and_empty_hour_is_published(
                     (hour,),
                 )
             ).fetchone()
+        assert state is not None
+        assert rows is not None
         assert state["dirty"] is False and state["refreshed_at"] is not None
         assert rows["n"] == 0
     finally:
@@ -127,13 +131,11 @@ async def test_failed_source_rebuild_retains_queue_and_previous_source_rows(
         )
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
         async with pool.connection() as conn:
-            bucket = (
-                await (
-                    await conn.execute(
-                        "SELECT bucket_at FROM benchmarks_v2.dashboard_source_refreshes"
-                    )
-                ).fetchone()
-            )["bucket_at"]
+            queued_bucket = await (
+                await conn.execute("SELECT bucket_at FROM benchmarks_v2.dashboard_source_refreshes")
+            ).fetchone()
+            assert queued_bucket is not None
+            bucket = queued_bucket["bucket_at"]
         await rebuild_source_bucket(pool, bucket)
         async with pool.connection() as conn:
             before = await (
@@ -169,6 +171,7 @@ async def test_failed_source_rebuild_retains_queue_and_previous_source_rows(
                 )
             ).fetchone()
         assert after == before
+        assert queued is not None
         assert queued["n"] == 1
     finally:
         await pool.close()
@@ -232,6 +235,7 @@ async def test_repair_timestamp_move_rebuilds_old_and_new_buckets(
             {"hour_at": new, "dataset_id": "__all__", "n": 1},
             {"hour_at": new, "dataset_id": "observation-dataset", "n": 1},
         ]
+        assert queued is not None
         assert queued["n"] == 0
     finally:
         await pool.close()

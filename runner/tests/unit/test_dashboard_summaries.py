@@ -12,7 +12,6 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db import dashboard_summaries
 from coval_bench.db.dashboard_summaries import (
     SUMMARY_VIEWS,
     RefreshResult,
@@ -40,7 +39,7 @@ def test_registered_contracts_are_supported() -> None:
 def test_changed_wer_ratio_contract_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     original = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
     monkeypatch.setitem(
-        dashboard_summaries.METRIC_VALUE_CONTRACTS,
+        METRIC_VALUE_CONTRACTS,
         (Metric.WER, "v1"),
         original.model_copy(update={"ratio_scale": 1}),
     )
@@ -102,7 +101,9 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
             VALUES (%s,%s,'test','d',%s,'succeeded',%s) RETURNING id""",
             (as_of, as_of, "a" * 64, as_of),
         )
-        run_id = cur.fetchone()[0]
+        run_row = cur.fetchone()
+        assert run_row is not None
+        run_id = run_row[0]
         for i, (value, ins, dele, sub, ref) in enumerate(
             ((10, 1, 1, 1, 10), (20, 1, 0, 0, 10), (30, 0, 1, 0, 10))
         ):
