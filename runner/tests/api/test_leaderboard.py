@@ -11,6 +11,7 @@ from httpx import AsyncClient
 
 from coval_bench.api.common import MIN_SCORED_SAMPLES
 from tests.api.conftest import _insert_result, _insert_run, _refresh_mv
+from tests.api.test_aggregates import _insert_normalized_metric
 
 
 async def test_24h_window_sorted_ascending(client: AsyncClient, postgresql: Any) -> None:
@@ -157,15 +158,15 @@ async def test_excluded_metric_rows_hidden(client: AsyncClient, postgresql: Any)
     assert [(e["provider"], e["model"]) for e in entries] == [("deepgram", "nova-3")]
 
 
-async def test_s2s_leaderboard_uses_the_clean_primary_dataset(
+async def test_s2s_leaderboard_uses_the_bank_primary_dataset(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    """The headline S2S board excludes robustness conditions such as noisy speech."""
-    clean_run = await _insert_run(postgresql, dataset_id="s2s-dental-v1")
-    noisy_run = await _insert_run(postgresql, dataset_id="s2s-dental-noisy-v1")
+    """The headline S2S board is the Ultra Bank set; the frozen dental rows stay out."""
+    primary_run = await _insert_run(postgresql, dataset_id="s2s-bank-v1")
+    dental_run = await _insert_run(postgresql, dataset_id="s2s-dental-v1")
     await _insert_result(
         postgresql,
-        clean_run,
+        primary_run,
         provider="openai",
         model="gpt-realtime",
         metric_type="V2V",
@@ -175,7 +176,7 @@ async def test_s2s_leaderboard_uses_the_clean_primary_dataset(
     )
     await _insert_result(
         postgresql,
-        noisy_run,
+        dental_run,
         provider="google",
         model="gemini-live",
         metric_type="V2V",
@@ -227,10 +228,27 @@ async def test_ttft_llm_uses_the_dental_primary_dataset(
     assert response.status_code == 200
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
 
+    for run_id, dataset_id, provider in (
+        (dental_run, "llm-dental-v1", "phonely"),
+        (other_run, "llm-scratch-v1", "acme"),
+    ):
+        await _insert_normalized_metric(
+            postgresql,
+            run_id,
+            dataset_id=dataset_id,
+            metric_type="TTFT",
+            values={"primary": 0.42},
+            benchmark="LLM",
+            provider=provider,
+            model="normalized-model",
+        )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     response = await client.get("/v1/leaderboard", params=params)
-    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
+    assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == [
+        ("phonely", "normalized-model")
+    ]
 
 
 async def test_v2v_llm_incompatible(client: AsyncClient) -> None:

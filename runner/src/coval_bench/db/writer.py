@@ -770,66 +770,29 @@ class RunWriter:
             await conn.commit()
 
     async def refresh_metric_values_bucket(self, run_id: int) -> None:
-        """Idempotently recompute normalized metric rollups for a run's bucket."""
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-                await cur.execute(
-                    "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s", (run_id,)
-                )
-                row = await cur.fetchone()
-                bucket_at = row["scheduled_at"] if row is not None else None
-                if bucket_at is None:
-                    return
-                params = {"bucket": bucket_at}
-                await cur.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket',"
-                    " extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
-                    params,
-                )
-                await cur.execute(
-                    "DELETE FROM benchmarks_v2.metric_values_by_bucket "
-                    "WHERE bucket_at = %(bucket)s",
-                    params,
-                )
-                await cur.execute(
-                    """
-                    INSERT INTO benchmarks_v2.metric_values_by_bucket
-                    (provider, model, benchmark, dataset_id, metric_type, metric_version,
-                     evaluation_variant, value_key,
-                     unit, bucket_at, min_value, p25, p50, p75, max_value, value_sum, sample_count)
-                    SELECT observation.provider, observation.model, observation.benchmark,
-                           COALESCE(observation.dataset_id, '__all__'), evaluation.metric_type,
-                           evaluation.metric_version, evaluation.evaluation_variant,
-                           value.value_key, value.unit, %(bucket)s,
-                           MIN(value.value)::float8,
-                           PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value.value)::float8,
-                           PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value.value)::float8,
-                           PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY value.value)::float8,
-                           MAX(value.value)::float8, SUM(value.value)::float8, COUNT(*)::int
-                    FROM benchmarks_v2.metric_values value
-                    JOIN benchmarks_v2.metric_evaluations evaluation
-                      ON evaluation.id = value.metric_evaluation_id
-                    JOIN benchmarks_v2.benchmark_observations observation
-                      ON observation.id = evaluation.observation_id
-                    JOIN benchmarks_v2.runs run ON run.id = observation.run_id
-                    WHERE observation.status = 'succeeded'
-                      AND evaluation.status = 'succeeded'
-                      AND run.status IN ('succeeded', 'partial')
-                      AND run.scheduled_at = %(bucket)s
-                    GROUP BY GROUPING SETS (
-                      (observation.provider, observation.model, observation.benchmark,
-                       observation.dataset_id, evaluation.metric_type,
-                       evaluation.metric_version, evaluation.evaluation_variant,
-                       value.value_key, value.unit),
-                      (observation.provider, observation.model, observation.benchmark,
-                       evaluation.metric_type, evaluation.metric_version,
-                       evaluation.evaluation_variant,
-                       value.value_key, value.unit)
-                    )
-                    """,
-                    params,
-                )
-            await conn.commit()
+        """Recompute the run's source bucket and its saved UTC-hour statistics."""
+        from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
+        from coval_bench.db.dashboard_source import rebuild_source_bucket
+
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(
+                "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s", (run_id,)
+            )
+            row = await cur.fetchone()
+        bucket_at = row["scheduled_at"] if row is not None else None
+        if bucket_at is not None:
+            await rebuild_source_bucket(self._pool, bucket_at)
+            await refresh_hourly_aggregates(self._pool, hours=[bucket_at])
+
+    async def refresh_dashboard_summaries(self, run_id: int | None = None) -> str:
+        """Publish normalized summaries independently of legacy maintenance."""
+        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+
+        result = await refresh_summary_snapshots(self._pool, run_id=run_id)
+        return result.status
 
     async def refresh_bucket(self, run_id: int, *, period_seconds: int) -> None:
         """Recompute the series rollup bucket for this run's scheduled_at slot.
@@ -930,6 +893,8 @@ class RunWriter:
         error: str | None = None,
     ) -> None:
         """Set ``finished_at = now()`` and update ``status`` / ``error`` on a run row."""
+        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+
         sql = """
             UPDATE benchmarks_v2.runs
             SET finished_at = now(),
@@ -937,10 +902,9 @@ class RunWriter:
                 error  = %s
             WHERE id = %s
         """
-        async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, (status, error, run_id))
-            await conn.commit()
+        async with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
+            await cur.execute(sql, (status, error, run_id))
+            await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
 
     async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""

@@ -12,9 +12,11 @@ from datetime import datetime, timedelta
 from typing import Any, get_args
 from uuid import uuid4
 
+import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
+from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api.common import (
     MIN_SCORED_SAMPLES,
@@ -30,6 +32,7 @@ from coval_bench.api.routers.aggregates import (
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
+from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import TIMELINE_AGGREGATION_RULES, Metric
 from coval_bench.registries.metrics import (
     MetricValueContract,
@@ -52,9 +55,10 @@ async def _insert_normalized_metric(
     evaluation_status: str = "succeeded",
     metric_version: str = "v1",
     evaluation_variant: str = "default",
+    provider: str = "deepgram",
+    model: str = "nova-3",
 ) -> None:
     """Seed one normalized evaluation for cutover tests."""
-    import psycopg
 
     from tests.api.conftest import _make_db_url
 
@@ -65,8 +69,8 @@ async def _insert_normalized_metric(
         await conn.execute(
             """INSERT INTO benchmarks_v2.benchmark_observations
                (id, run_id, dataset_id, provider, model, benchmark, captured_at, status)
-               VALUES (%s, %s, %s, 'deepgram', 'nova-3', %s, now(), %s)""",
-            (observation_id, run_id, dataset_id, benchmark, observation_status),
+               VALUES (%s, %s, %s, %s, %s, %s, now(), %s)""",
+            (observation_id, run_id, dataset_id, provider, model, benchmark, observation_status),
         )
         await conn.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
@@ -149,7 +153,6 @@ async def _insert_normalized_bucket(
     sample_count: int = 2,
     bucket_at: datetime | None = None,
 ) -> None:
-    import psycopg
 
     from tests.api.conftest import _make_db_url
 
@@ -189,7 +192,9 @@ def test_normalized_query_constants_start_with_sql() -> None:
 
 
 def test_normalized_dataset_listing_excludes_pooled_sentinel() -> None:
-    assert "o.dataset_id <> %(sentinel)s" in _NORMALIZED_DATASETS_SQL
+    assert all(
+        view.startswith("benchmarks_v2.normalized_results_") for view in SUMMARY_VIEWS.values()
+    )
 
 
 async def test_empty_db_returns_empty_blocks(client: AsyncClient) -> None:
@@ -255,6 +260,7 @@ async def test_llm_instruction_following_is_served_by_aggregates(
         )
     await _refresh_mv(postgresql)
 
+    await _refresh_mv(postgresql)
     response = await client.get(
         "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
     )
@@ -265,12 +271,29 @@ async def test_llm_instruction_following_is_served_by_aggregates(
     ]
     assert stats[0]["avg_value"] == pytest.approx(75.0)
 
+    normalized_run = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+    for value in (100.0, 100.0, 0.0):
+        await _insert_normalized_metric(
+            postgresql,
+            normalized_run,
+            dataset_id="llm-dental-v1",
+            metric_type="InstructionFollowing",
+            values={"primary": value},
+            benchmark="LLM",
+            provider="phonely",
+            model="phonely-agent",
+        )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     response = await client.get(
         "/v1/results/aggregates", params={"benchmark": "LLM", "dataset": "llm-dental-v1"}
     )
-    assert response.json()["model_stats"] == stats
+    stats = response.json()["model_stats"]
+    assert [(s["provider"], s["metric_type"], s["sample_count"]) for s in stats] == [
+        ("phonely", "InstructionFollowing", 3)
+    ]
+    assert stats[0]["avg_value"] == pytest.approx(200 / 3)
 
 
 async def test_single_sample_stddev_is_zero(client: AsyncClient, postgresql: Any) -> None:
@@ -429,10 +452,12 @@ async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
     # state exercises the same dependency path as the Cloud Run env flag.
     app = client._transport.app  # type: ignore[attr-defined]
     assert app.state.settings.normalized_dashboard_reads_enabled is False
+    await _refresh_mv(postgresql)
     legacy = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert legacy.json()["model_stats"][0]["avg_value"] == pytest.approx(99.0)
     app.state.settings.normalized_dashboard_reads_enabled = True
 
+    await _refresh_mv(postgresql)
     response = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     assert response.status_code == 200
     body = response.json()
@@ -441,11 +466,13 @@ async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
     assert body["model_stats"][0]["avg_value"] == pytest.approx(6.0)
     assert body["model_stats"][0]["wer_insertions_pct"] == pytest.approx(1.0)
 
+    await _refresh_mv(postgresql)
     scoped = await client.get(
         "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v2"}
     )
     assert scoped.json()["model_stats"][0]["sample_count"] == 1
 
+    await _refresh_mv(postgresql)
     by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
     assert [block["dataset"] for block in by_dataset.json()["blocks"]] == ["stt-v2"]
 
@@ -492,6 +519,7 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     response = await client.get("/v1/results/aggregates", params={"benchmark": "TTS"})
     stats = {row["metric_type"]: row for row in response.json()["model_stats"]}
     assert set(stats) == {"TTFA", "TTFARoundtrip", "TTFALeadingSilence"}
@@ -519,11 +547,13 @@ async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
     app.state.settings.normalized_dashboard_reads_enabled = True
     params = {"benchmark": "TTS", "include_series": "false"}
 
+    await _refresh_mv(postgresql)
     pooled = (await client.get("/v1/results/aggregates", params=params)).json()
     pooled_stats = {row["metric_type"]: row for row in pooled["model_stats"]}
     assert set(pooled_stats) == {"TTFARoundtrip", "TTFALeadingSilence"}
     assert pooled["datasets"] == ["tts-components-v1"]
 
+    await _refresh_mv(postgresql)
     scoped = (
         await client.get(
             "/v1/results/aggregates",
@@ -535,6 +565,7 @@ async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
         "TTFALeadingSilence",
     }
 
+    await _refresh_mv(postgresql)
     by_dataset = (
         await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "TTS"})
     ).json()["blocks"]
@@ -568,6 +599,7 @@ async def test_normalized_stats_pool_scope_and_group_exact_distribution(
     app.state.settings.normalized_dashboard_reads_enabled = True
     params = {"benchmark": "STT", "include_series": "false"}
 
+    await _refresh_mv(postgresql)
     pooled = (await client.get("/v1/results/aggregates", params=params)).json()["model_stats"][0]
     assert pooled["sample_count"] == 4
     assert pooled["mean_value"] == pytest.approx(2.5)
@@ -582,6 +614,7 @@ async def test_normalized_stats_pool_scope_and_group_exact_distribution(
     assert pooled["min_value"] == pytest.approx(1.0)
     assert pooled["max_value"] == pytest.approx(4.0)
 
+    await _refresh_mv(postgresql)
     scoped = (
         await client.get(
             "/v1/results/aggregates",
@@ -591,6 +624,7 @@ async def test_normalized_stats_pool_scope_and_group_exact_distribution(
     assert scoped["sample_count"] == 2
     assert scoped["mean_value"] == pytest.approx(3.5)
 
+    await _refresh_mv(postgresql)
     by_dataset = (
         await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
     ).json()["blocks"]
@@ -604,7 +638,6 @@ async def test_projection_reads_current_metadata_eligibility_and_window(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """Persisted values never freeze live observation/run attributes or time bounds."""
-    import psycopg
 
     from tests.api.conftest import _make_db_url
 
@@ -617,6 +650,7 @@ async def test_projection_reads_current_metadata_eligibility_and_window(
 
     async def read(window: str = "24h") -> dict[str, Any]:
         app.state.response_cache.clear()
+        await _refresh_mv(postgresql)
         response = await client.get(
             "/v1/results/aggregates",
             params={"benchmark": "STT", "include_series": "false", "window": window},
@@ -686,6 +720,7 @@ async def test_normalized_wer_zero_reference_falls_back_to_mean(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     stat = (
         await client.get(
             "/v1/results/aggregates",
@@ -728,6 +763,7 @@ async def test_normalized_wer_count_and_split_cohorts_fall_back_independently(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     stat = (
         await client.get(
             "/v1/results/aggregates",
@@ -765,6 +801,7 @@ async def test_normalized_ttfa_derived_name_collision_keeps_public_count(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     stats = {
         row["metric_type"]: row
         for row in (
@@ -792,16 +829,19 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _refresh_mv(postgresql)
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
     s = s["model_stats"][0]
     keys = ("mean_value", "avg_value", "pooled_value", "wer_substitutions_pct")
     assert [s[k] for k in keys] == pytest.approx([12.5, 2.5, 2.5, 2.5])
     assert (s["pooled_deletions_pct"], s["pooled_insertions_pct"]) == (0, 0)
+    await _refresh_mv(postgresql)
     board = await client.get("/v1/leaderboard", params={"metric": "WER", "benchmark": "STT"})
     assert board.json()["entries"][0]["avg"] == pytest.approx(2.5)
 
     await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
     app.state.response_cache.clear()
+    await _refresh_mv(postgresql)
     s = (await client.get("/v1/results/aggregates", params={"benchmark": "STT"})).json()
     s = s["model_stats"][0]
     assert s["pooled_value"] is None
@@ -829,17 +869,21 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
 
+    await _refresh_mv(postgresql)
     pooled = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     [point] = pooled.json()["series"]
     assert (point["pooled_value"], point["error_sum"], point["reference_word_sum"]) == (5.0, 2, 40)
+    await _publish_timeline_test_hours(postgresql)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
+    await _refresh_mv(postgresql)
     compact = await client.get(
         "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
     )
     [point] = compact.json()["series"]
     assert (point["error_sum"], point["reference_word_sum"]) == (2, 40)
 
+    await _publish_timeline_test_hours(postgresql)
     timeline = await client.get(
         "/v1/results/timeline", params={"benchmark": "STT", "dataset": "stt-v2"}
     )
@@ -850,7 +894,6 @@ async def test_timeline_averages_wer_while_legacy_series_keeps_extrema(
     client: AsyncClient, postgresql: Any
 ) -> None:
     """Mean WER flat across 360 buckets while pooled spikes once: the spike survives."""
-    import psycopg
 
     from tests.api.conftest import _make_db_url
 
@@ -884,12 +927,14 @@ async def test_timeline_averages_wer_while_legacy_series_keeps_extrema(
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
+    await _publish_timeline_test_hours(postgresql)
     response = await client.get(
         "/v1/results/timeline", params={"benchmark": "STT", "window": "30d"}
     )
     points = response.json()["points"]
     assert len(points) < 360
     assert max(p["value"] for p in points) == pytest.approx(18.0)
+    await _refresh_mv(postgresql)
     legacy = await client.get(
         "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
     )
@@ -907,12 +952,14 @@ async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
 
+    await _refresh_mv(postgresql)
     scoped = await client.get(
         "/v1/results/aggregates", params={"benchmark": "STT", "dataset": "stt-v2"}
     )
     assert len(scoped.json()["series"]) == 1
     assert scoped.json()["series"][0]["value_sum"] == pytest.approx(4.0)
 
+    await _publish_timeline_test_hours(postgresql)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert len(timeline.json()["points"]) == 1
     assert timeline.json()["points"][0]["value"] == pytest.approx(3.0)
@@ -1479,7 +1526,6 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exact historical bounds, partial bins, and hidden freshness survive aggregation."""
-    import psycopg
 
     from coval_bench.api.internal import hidden_early_access
     from tests.api.conftest import _make_db_url
@@ -1525,6 +1571,7 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
     app.dependency_overrides[hidden_early_access] = lambda: frozenset(
         {("deepgram", "hidden-model")}
     )
+    await _publish_timeline_test_hours(postgresql)
     response = await client.get("/v1/results/timeline", params=params)
     assert response.status_code == 200
     body = response.json()
@@ -1647,6 +1694,7 @@ async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
                 sample_count=source_count,
                 bucket_at=bucket + timedelta(minutes=offset),
             )
+    await _publish_timeline_test_hours(postgresql)
     response = await client.get(
         "/v1/results/timeline",
         params={
@@ -1668,7 +1716,6 @@ async def test_normalized_timeline_uses_registered_phonetic_ratio(
     client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Timeline ratio rules use pooled operands and preserve incomplete sources as unavailable."""
-    import psycopg
 
     from tests.api.conftest import _make_db_url
 
@@ -1739,6 +1786,7 @@ async def test_normalized_timeline_uses_registered_phonetic_ratio(
                         sample_count,
                     ),
                 )
+    await _publish_timeline_test_hours(postgresql)
     response = await client.get(
         "/v1/results/timeline",
         params={
@@ -1888,9 +1936,39 @@ async def test_timeline_ratio_without_fallback_is_unavailable_on_either_storage_
         run_id = await _insert_run(postgresql, scheduled_at=datetime.now(dt.UTC))
         await _insert_result(postgresql, run_id, metric_value=3)
         await _fill_buckets(postgresql)
+    await _publish_timeline_test_hours(postgresql)
     response = await client.get("/v1/results/timeline", params={"benchmark": "STT", "window": "7d"})
     assert response.status_code == 200
     [point] = response.json()["points"]
     assert point["value"] is None
     assert point["aggregation_method"] == "unavailable"
     assert point["sample_count"] > 0
+
+
+async def _publish_timeline_test_hours(postgresql: Any) -> None:
+    """Prepare occupied and empty hours before testing saved timeline readers."""
+    from coval_bench.db.dashboard_hourly import floor_hour, refresh_hourly_aggregates
+    from tests.api.conftest import _make_db_url
+
+    async with AsyncConnectionPool(
+        _make_db_url(postgresql),
+        min_size=1,
+        max_size=2,
+        open=False,
+        kwargs={"row_factory": psycopg.rows.dict_row},
+    ) as pool:
+        async with pool.connection() as conn:
+            bounds = await (
+                await conn.execute(
+                    "SELECT min(bucket_at) AS first, max(bucket_at) AS last "
+                    "FROM benchmarks_v2.metric_values_by_bucket"
+                )
+            ).fetchone()
+        now = datetime.now(dt.UTC)
+        first = floor_hour(min(now - timedelta(days=30), bounds["first"] or now))
+        last = floor_hour(max(now + timedelta(days=1), bounds["last"] or now))
+        hours = [
+            first + timedelta(hours=i)
+            for i in range(int((last - first).total_seconds() / 3600) + 1)
+        ]
+        await refresh_hourly_aggregates(pool, hours=hours)

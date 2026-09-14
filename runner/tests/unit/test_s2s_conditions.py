@@ -22,6 +22,22 @@ def test_noise_condition_excludes_latency() -> None:
     assert Metric.V2V not in noisy.fetched
 
 
+def test_bank_board_anchors_on_latency_and_carries_the_judge() -> None:
+    """Latency is on every Ultra Bank run; the expected-behaviors judge rides along
+    under the instruction metric so the adherence chart needs no second series."""
+    bank = conditions.condition_for(conditions.DATASET_ID_BANK)
+    assert bank.required is Metric.V2V
+    assert bank.optional == frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE})
+    assert Metric.EXPECTED_BEHAVIOR_ADHERENCE not in bank.fetched
+    assert (
+        conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.CLEAN)
+        == conditions.DATASET_ID_BANK
+    )
+    # The harder personas exist in Coval but are not ingested yet.
+    assert conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.NOISY) is None
+    assert conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.ACCENTED) is None
+
+
 def test_unmapped_dataset_keeps_the_pre_scoping_contract() -> None:
     legacy = conditions.condition_for(conditions.DATASET_ID)
     assert legacy == conditions.DEFAULT_CONDITION

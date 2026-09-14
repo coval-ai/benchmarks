@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from coval_bench.datasets.loader import load_stt_dataset, load_tts_dataset
+from coval_bench.datasets.suite import DEFAULT_STT_DATASET
 from coval_bench.db.models import ResultStatus
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
@@ -170,7 +171,7 @@ async def _run(
 
     if stt_models:
         ds = load_stt_dataset(
-            settings.dataset_id,
+            settings.dataset_id or DEFAULT_STT_DATASET,
             settings=settings,
             sample_size=sample_size,
             rng=random.Random(_SEED),  # noqa: S311

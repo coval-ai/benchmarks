@@ -61,8 +61,11 @@ COLORS = ("colors", "gray")
 # The board key grok-voice-think-fast-1.0 was published under before its rename.
 # Artefacts stored under it stay embargoed alongside the current key.
 XAI_RETIRED = ("xai", "grok-realtime")
+# The codename gpt-live-1 was published under on the industry boards before launch.
+OPENAI_RETIRED = ("openai", "violet")
+RETIRED = frozenset({XAI_RETIRED, OPENAI_RETIRED})
 
-EMBARGOED = frozenset({XAI_1, XAI_2, XAI_RETIRED, COLORS})
+EMBARGOED = frozenset({XAI_1, XAI_2, COLORS}) | RETIRED
 EVERYTHING = EMBARGOED | {PUBLIC}
 
 
@@ -136,7 +139,7 @@ def test_org_sees_its_own_providers_models_and_no_others(
     token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == {COLORS}
+    assert hidden == {COLORS, OPENAI_RETIRED}
 
 
 def test_org_entry_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,7 +149,7 @@ def test_org_entry_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
     token = _mint({"org_id": _ORG_ID})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == {XAI_1, XAI_RETIRED, COLORS}
+    assert hidden == {XAI_1, XAI_RETIRED, COLORS, OPENAI_RETIRED}
 
 
 def test_org_entry_list_of_one_provider_unlocks_all_its_models(
@@ -155,7 +158,7 @@ def test_org_entry_list_of_one_provider_unlocks_all_its_models(
     settings = _settings(monkeypatch, org_providers=json.dumps({_ORG_ID: ["xai"]}))
     token = _mint({"org_id": _ORG_ID})
     hidden, _ = _resolve(settings, f"Bearer {token}")
-    assert hidden == {COLORS}
+    assert hidden == {COLORS, OPENAI_RETIRED}
 
 
 def test_mapped_org_naming_nothing_unlocks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -180,7 +183,7 @@ def test_exclusive_org_sees_only_its_own_provider(monkeypatch: pytest.MonkeyPatc
 
     assert status == "accepted"
     # Public models are hidden too: an exclusive org sees nothing but its own.
-    assert hidden == {PUBLIC, COLORS}
+    assert hidden == {PUBLIC, COLORS, OPENAI_RETIRED}
 
 
 def test_exclusive_org_can_name_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -212,7 +215,7 @@ def test_exclusive_wins_over_additive_for_the_same_org(monkeypatch: pytest.Monke
     token = _mint({"org_id": _ORG_ID})
     hidden, _ = _resolve(settings, f"Bearer {token}")
 
-    assert hidden == {PUBLIC, COLORS}
+    assert hidden == {PUBLIC, COLORS, OPENAI_RETIRED}
 
 
 def test_exclusive_overrides_the_coval_org(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -220,7 +223,7 @@ def test_exclusive_overrides_the_coval_org(monkeypatch: pytest.MonkeyPatch) -> N
     token = _mint({"org_id": _COVAL_ORG})
     hidden, _ = _resolve(settings, f"Bearer {token}")
 
-    assert hidden == {PUBLIC, COLORS}
+    assert hidden == {PUBLIC, COLORS, OPENAI_RETIRED}
 
 
 def test_unmapped_org_is_unaffected_by_the_exclusive_map(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -320,7 +323,7 @@ def test_a_mapped_coval_org_gets_only_its_entry(monkeypatch: pytest.MonkeyPatch)
     token = _mint({"org_id": _COVAL_ORG})
     hidden, status = _resolve(settings, f"Bearer {token}")
     assert status == "accepted"
-    assert hidden == {COLORS}
+    assert hidden == {COLORS, OPENAI_RETIRED}
 
 
 def test_a_coval_email_alone_unlocks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -508,7 +511,7 @@ def test_retired_board_keys_stay_embargoed() -> None:
     key would publish every recording and row published under that name. The
     retired key is embargoed even when no roster entry carries it.
     """
-    assert embargoed_pairs([]) == {XAI_RETIRED}
+    assert embargoed_pairs([]) == RETIRED
     assert embargoed_pairs(_MODELS) == EMBARGOED
 
 
@@ -527,4 +530,4 @@ def test_org_grant_for_a_renamed_model_also_sees_its_history(
     )
     token = _mint({"org_id": _ORG_ID})
     hidden, _ = _resolve(settings, f"Bearer {token}")
-    assert hidden == {XAI_2, COLORS}
+    assert hidden == {XAI_2, COLORS, OPENAI_RETIRED}

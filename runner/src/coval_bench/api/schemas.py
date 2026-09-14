@@ -231,6 +231,14 @@ class SeriesPoint(BaseModel):
     pooled_value: float | None = None
 
 
+class DashboardSnapshot(BaseModel):
+    generation: int
+    as_of: datetime
+    published_at: datetime
+    definition_revision: int
+    stale: bool
+
+
 class AggregatesResponse(BaseModel):
     """Response schema for GET /v1/results/aggregates.
 
@@ -246,6 +254,7 @@ class AggregatesResponse(BaseModel):
     datasets: list[str]
     model_stats: list[ModelStatEntry]
     series: list[SeriesPoint]
+    snapshot: DashboardSnapshot | None = None
 
 
 class TimelinePoint(BaseModel):
@@ -261,6 +270,11 @@ class TimelinePoint(BaseModel):
     sample_count: int | None = None
 
 
+class DashboardMaterialization(BaseModel):
+    refreshed_at: datetime | None = None
+    stale: bool = False
+
+
 class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
@@ -273,6 +287,8 @@ class TimelineResponse(BaseModel):
     range_start: datetime | None = None
     range_end: datetime | None = None
     latest_source_at: datetime | None = None
+    snapshot: DashboardSnapshot | None = None
+    materialization: DashboardMaterialization | None = None
 
 
 class DatasetAggregates(BaseModel):
@@ -294,6 +310,7 @@ class AggregatesByDatasetResponse(BaseModel):
     benchmark: BenchmarkLiteral
     window: WindowLiteral
     blocks: list[DatasetAggregates]
+    snapshot: DashboardSnapshot | None = None
 
 
 class RunsResponse(BaseModel):
@@ -309,6 +326,7 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+    snapshot: DashboardSnapshot | None = None
 
 
 class S2SSampleTurnOut(BaseModel):
@@ -338,6 +356,7 @@ class S2SSampleOut(BaseModel):
 
     schema_version: int | None = None
     sample_id: str
+    dataset_id: str | None = None
     test_case_id: str
     test_set_id: str | None = None
     persona_name: str | None = None

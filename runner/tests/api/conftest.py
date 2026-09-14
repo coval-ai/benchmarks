@@ -274,6 +274,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 f"ON benchmarks_v2.{table} FOR EACH ROW "
                 "EXECUTE FUNCTION benchmarks_v2.guard_terminal_metric_payload()"
             )  # noqa: S608 — table names are fixed fixture constants.
+        saved = import_module(
+            "coval_bench.db.migrations.versions.20260914_0034_dashboard_aggregates"
+        )
+        with patch.object(saved, "op", SimpleNamespace(execute=conn.execute)):
+            saved.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
@@ -738,12 +743,27 @@ async def _insert_result(
 
 
 async def _refresh_mv(postgresql: Any) -> None:
-    """Refresh all per-window stats materialized views."""
+    """Refresh legacy views and the saved dashboard snapshot used by cutover tests."""
     dsn = _make_db_url(postgresql)
     aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
     try:
         for name in _MV_WINDOWS:
             await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
+        # The normalized API path reads only the atomically published snapshot.
+        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+
+        pool = AsyncConnectionPool(
+            conninfo=dsn,
+            min_size=1,
+            max_size=1,
+            open=False,
+            kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
+        )
+        await pool.open()
+        try:
+            await refresh_summary_snapshots(pool)
+        finally:
+            await pool.close()
     finally:
         await aconn.close()
 

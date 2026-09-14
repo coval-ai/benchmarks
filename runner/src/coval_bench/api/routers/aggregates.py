@@ -10,8 +10,8 @@ Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
   (percentile_cont), min, max, count. Read from the per-window materialized
   views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
   runner at the end of each benchmark run — read-only here. Normalized reads
-  compute the same exact statistics from the transactional value projection,
-  with current observation/run eligibility and request-time window boundaries.
+  read atomically published snapshots built from the transactional value projection,
+  with observation/run eligibility and window boundaries fixed at publication.
 * ``series`` — per (provider, model, metric_type, bucket_at) distribution
   (min/p25/p50/p75/max/value_sum/count), read from the ``results_by_bucket``
   rollup table, filled by the orchestrator's end-of-run hook.
@@ -31,11 +31,11 @@ import datetime as dt
 from collections import defaultdict
 from typing import Any
 
-import psycopg.rows
 import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
+from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
@@ -49,6 +49,7 @@ from coval_bench.api.common import (
     has_enough_samples,
     reads_normalized,
 )
+from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
 from coval_bench.api.deps import (
     capture_api_event,
     get_cache,
@@ -69,6 +70,9 @@ from coval_bench.api.schemas import (
     TimelineResponse,
 )
 from coval_bench.config import DATASET_ALL, Settings
+from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
+from coval_bench.db.dashboard_hourly import floor_hour
+from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import TIMELINE_AGGREGATION_RULES, is_metric_excluded
 
 logger = structlog.get_logger("coval_bench.api")
@@ -84,6 +88,12 @@ _STATS_SQL_TEMPLATE = (
     " WHERE benchmark = %(benchmark)s"
     " AND dataset_id = %(dataset)s"
     " ORDER BY provider, model, metric_type"
+)
+
+_SAVED_STATS_SQL_TEMPLATE = _STATS_SQL_TEMPLATE.replace(
+    " avg_value,",
+    " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
+    " pooled_substitutions_pct, avg_value,",
 )
 
 _SERIES_SQL = (
@@ -243,28 +253,12 @@ GROUP BY provider, model, metric_type ORDER BY provider, model, metric_type
 """  # noqa: S608
 
 _NORMALIZED_DATASETS_SQL = """
-WITH candidate_datasets AS (
- SELECT DISTINCT o.dataset_id
- FROM benchmarks_v2.benchmark_observations o
- WHERE o.status = 'succeeded' AND o.benchmark = %(benchmark)s
-   AND o.captured_at >= NOW() - %(interval)s::interval
-   AND o.dataset_id <> %(sentinel)s
-)
-SELECT d.dataset_id FROM candidate_datasets d
-CROSS JOIN LATERAL (
- SELECT 1
- FROM benchmarks_v2.benchmark_observations o
- JOIN benchmarks_v2.runs r ON r.id = o.run_id
- JOIN benchmarks_v2.dashboard_metric_values e ON e.observation_id = o.id
- WHERE o.dataset_id = d.dataset_id AND o.status = 'succeeded'
-   AND o.benchmark = %(benchmark)s
-   AND o.captured_at >= NOW() - %(interval)s::interval
-   AND r.status IN ('succeeded', 'partial')
-   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
-   AND e.has_primary_role
- LIMIT 1
-) eligible
-ORDER BY d.dataset_id
+SELECT DISTINCT dataset_id
+FROM {view}
+WHERE benchmark = %(benchmark)s
+  AND dataset_id <> %(sentinel)s
+  AND primary_sample_count > 0
+ORDER BY dataset_id
 """
 
 _NORMALIZED_STATS_BY_DATASET_SQL = (
@@ -374,6 +368,47 @@ _NORMALIZED_AVERAGE_SOURCE_SQL = """
     AND COUNT(*) FILTER (WHERE b.value_key = 'primary'
                          AND b.unit = r.units ->> 'primary') = 1
 """
+
+# Full UTC hours use the writer-maintained sufficient statistics.  The two raw
+# branches are deliberately restricted to the partial boundary hours, so a
+# boundary is never counted again after its hourly row is published.
+_NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
+ SELECT h.provider, h.model, h.metric_type, h.latest_source_at AS source_at,
+        r.method, r.fallback, r.scale, h.primary_sum, h.sample_count,
+        h.numerator_sum AS numerator, h.denominator_sum AS denominator,
+        h.coverage_complete AS complete
+ FROM benchmarks_v2.dashboard_hourly_aggregates h
+ JOIN rules r USING (metric_type, metric_version)
+ WHERE h.benchmark = %(benchmark)s AND h.dataset_id = %(dataset)s
+   AND h.evaluation_variant = 'default'
+   AND h.hour_at >= date_trunc('hour', %(since)s::timestamptz, 'UTC')
+       + CASE WHEN %(since)s::timestamptz = date_trunc('hour', %(since)s::timestamptz, 'UTC')
+              THEN interval '0' ELSE interval '1 hour' END
+   AND h.hour_at + interval '1 hour' <= %(until)s::timestamptz
+ UNION ALL
+ SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
+        r.method, r.fallback, r.scale,
+        MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary'),
+        MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary'),
+        SUM(b.value_sum) FILTER (WHERE b.value_key = ANY(r.numerator_keys)),
+        SUM(b.value_sum) FILTER (WHERE b.value_key = r.denominator_key),
+        (COUNT(*) = cardinality(r.numerator_keys) + 2
+         AND MIN(b.sample_count) = MAX(b.sample_count)
+         AND BOOL_AND(b.unit = r.units ->> b.value_key))
+ FROM benchmarks_v2.metric_values_by_bucket b JOIN rules r USING (metric_type, metric_version)
+ WHERE b.evaluation_variant = 'default' AND b.benchmark = %(benchmark)s
+   AND b.dataset_id = %(dataset)s AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
+   AND ((%(since)s::timestamptz > date_trunc('hour', %(since)s::timestamptz, 'UTC')
+         AND b.bucket_at < date_trunc('hour', %(since)s::timestamptz, 'UTC') + interval '1 hour')
+        OR (%(until)s::timestamptz > date_trunc('hour', %(until)s::timestamptz, 'UTC')
+            AND b.bucket_at >= date_trunc('hour', %(until)s::timestamptz, 'UTC')))
+   AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
+        OR b.value_key = r.denominator_key)
+ GROUP BY b.provider, b.model, b.metric_type, b.bucket_at,
+          r.method, r.fallback, r.scale, r.numerator_keys
+ HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
+    AND COUNT(*) FILTER (WHERE b.value_key = 'primary' AND b.unit = r.units ->> 'primary') = 1
+"""
 _LEGACY_AVERAGE_SOURCE_SQL = """
  SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
         r.method, r.fallback, r.scale,
@@ -438,11 +473,53 @@ def _timeline_average_sql(normalized: bool) -> tuple[str, dict[str, Any]]:
         for name, rule in TIMELINE_AGGREGATION_RULES.items()
         if rule.version == "v1"
     ]
-    source = _NORMALIZED_AVERAGE_SOURCE_SQL if normalized else _LEGACY_AVERAGE_SOURCE_SQL
+    source = _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL if normalized else _LEGACY_AVERAGE_SOURCE_SQL
     return (
         _TIMELINE_RULES_SQL + source + _TIMELINE_AVERAGE_TAIL_SQL,
         {"aggregation_rules": Jsonb(rules)},
     )
+
+
+async def _hourly_materialization(
+    conn: AsyncConnection[Any], since: dt.datetime, until: dt.datetime
+) -> dict[str, Any] | None:
+    """Check saved full-hour coverage in the caller's repeatable-read snapshot."""
+    first = floor_hour(since)
+    full_start = first if since == first else first + dt.timedelta(hours=1)
+    full_end = floor_hour(until)
+    row = await (
+        await conn.execute(
+            """SELECT COUNT(*) AS expected,
+                  COUNT(s.refreshed_at) AS present,
+                  COALESCE(BOOL_OR(s.dirty), false) AS dirty,
+                  MIN(s.refreshed_at) AS refreshed_at
+           FROM generate_series(%(start)s::timestamptz,
+                                %(end)s::timestamptz - interval '1 hour',
+                                interval '1 hour') g(hour_at)
+           LEFT JOIN benchmarks_v2.dashboard_hourly_state s
+             ON s.hour_at=g.hour_at AND s.definition_revision=%(revision)s
+            AND s.definition_fingerprint=%(fingerprint)s""",
+            {
+                "start": full_start,
+                "end": full_end,
+                "revision": DEFINITION_REVISION,
+                "fingerprint": aggregation_fingerprint(),
+            },
+        )
+    ).fetchone()
+    if row is None or row["present"] != row["expected"]:
+        raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready")
+    queued = await (
+        await conn.execute(
+            """SELECT EXISTS (SELECT 1 FROM benchmarks_v2.dashboard_source_refreshes
+             WHERE bucket_at >= %(since)s AND bucket_at < %(until)s) AS pending""",
+            {"since": since, "until": until},
+        )
+    ).fetchone()
+    return {
+        "refreshed_at": row["refreshed_at"],
+        "stale": bool(row["dirty"]) or bool(queued and queued["pending"]),
+    }
 
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
@@ -498,12 +575,12 @@ async def get_results_aggregates(
     async def fill() -> AggregatesResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
-            _NORMALIZED_STATS_SQL
+            _SAVED_STATS_SQL_TEMPLATE.format(view=SUMMARY_VIEWS[window])
             if normalized
             else _STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
         )
         datasets_sql = (
-            _NORMALIZED_DATASETS_SQL
+            _NORMALIZED_DATASETS_SQL.format(view=SUMMARY_VIEWS[window])
             if normalized
             else _DATASETS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
         )
@@ -512,8 +589,8 @@ async def get_results_aggregates(
             "dataset": dataset_key,
             "interval": WINDOW_INTERVALS[window],
         }
-        async with pool.connection() as conn:
-            conn.row_factory = psycopg.rows.dict_row
+        async with dashboard_read(pool, saved=normalized) as conn:
+            snapshot = await require_snapshot(conn) if normalized else None
             stat_rows = await (await conn.execute(stats_sql, stats_params)).fetchall()
             if include_series:
                 series_rows = await (
@@ -558,6 +635,7 @@ async def get_results_aggregates(
             # Series points are deliberately unflagged: one bucket holds a single
             # run's samples, so every point sits under the floor by design.
             series=[SeriesPoint.model_validate(r) for r in series_rows if _visible(r, hidden)],
+            snapshot=snapshot.as_dict() if snapshot else None,
         )
 
     # The hidden set is part of the key: two callers who can see different models
@@ -571,7 +649,10 @@ async def get_results_aggregates(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
+    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
+        response, cache_status = await fill(), "bypass"
+    else:
+        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
         posthog_client,
@@ -643,6 +724,7 @@ async def get_results_timeline(
 
     async def fill() -> TimelineResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        materialization = None
         rule_params: dict[str, Any] = {}
         if aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
@@ -663,8 +745,9 @@ async def get_results_timeline(
             "bucket_seconds": bucket_seconds,
         }
         params.update(rule_params)
-        async with pool.connection() as conn:
-            conn.row_factory = psycopg.rows.dict_row
+        async with dashboard_read(pool, saved=normalized) as conn:
+            if normalized and aggregation == "average":
+                materialization = await _hourly_materialization(conn, since, until)
             rows = await (await conn.execute(sql, params)).fetchall()
         visible_rows = [row for row in rows if _visible(row, hidden)]
         return TimelineResponse(
@@ -692,6 +775,7 @@ async def get_results_timeline(
                 (row.get("latest_source_at", row.get("scheduled_at")) for row in visible_rows),
                 default=None,
             ),
+            materialization=materialization,
         )
 
     cache_key = (
@@ -706,7 +790,12 @@ async def get_results_timeline(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
+    if aggregation == "average" and reads_normalized(
+        settings.normalized_dashboard_reads_enabled, benchmark
+    ):
+        response, cache_status = await fill(), "bypass"
+    else:
+        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
     capture_api_event(
         posthog_client,
         "results_timeline_queried",
@@ -748,7 +837,11 @@ async def get_results_aggregates_by_dataset(
     async def fill() -> AggregatesByDatasetResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
-            _NORMALIZED_STATS_BY_DATASET_SQL
+            _STATS_BY_DATASET_SQL_TEMPLATE.replace(
+                " avg_value,",
+                " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
+                " pooled_substitutions_pct, avg_value,",
+            ).format(view=SUMMARY_VIEWS[window])
             if normalized
             else _STATS_BY_DATASET_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
         )
@@ -758,8 +851,8 @@ async def get_results_aggregates_by_dataset(
             "interval": WINDOW_INTERVALS[window],
         }
 
-        async with pool.connection() as conn:
-            conn.row_factory = psycopg.rows.dict_row
+        async with dashboard_read(pool, saved=normalized) as conn:
+            snapshot = await require_snapshot(conn) if normalized else None
             rows = await (await conn.execute(stats_sql, params)).fetchall()
 
         grouped: dict[str, list[ModelStatEntry]] = {}
@@ -776,6 +869,7 @@ async def get_results_aggregates_by_dataset(
                 DatasetAggregates(dataset=dataset, model_stats=stats)
                 for dataset, stats in grouped.items()
             ],
+            snapshot=snapshot.as_dict() if snapshot else None,
         )
 
     # The hidden set is part of the key: two callers who can see different models
@@ -787,7 +881,10 @@ async def get_results_aggregates_by_dataset(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
+    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
+        response, cache_status = await fill(), "bypass"
+    else:
+        response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
 
     capture_api_event(
         posthog_client,

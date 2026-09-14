@@ -32,6 +32,7 @@ import wave
 from collections.abc import AsyncIterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
@@ -49,6 +50,7 @@ from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
+from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     RunSummary,
     _dead_providers,
@@ -159,6 +161,7 @@ def _make_tts_item(transcript: str = "hello world") -> Any:
     item = MagicMock()
     item.testcase_id = "tts-0001"
     item.transcript = transcript
+    item.spoken_reference = None
     return item
 
 
@@ -179,6 +182,7 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
+    writer.refresh_dashboard_summaries = AsyncMock(return_value="published")
     writer.refresh_bucket = AsyncMock()
     writer.refresh_metric_values_bucket = AsyncMock()
     writer.pool_diagnostics = MagicMock(return_value={"pool_size": 0})
@@ -306,7 +310,8 @@ def settings() -> Settings:
 
 
 @pytest.mark.asyncio
-async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
+@pytest.mark.parametrize("snapshot_failure", [False, True])
+async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_failure: bool) -> None:
     """1-item dataset, 2 STT providers, happy path → SUCCEEDED."""
     good = _good_transcription()
 
@@ -327,6 +332,8 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
 
     run = _make_run()
     writer = _make_stub_writer(run)
+    if snapshot_failure:
+        writer.refresh_dashboard_summaries.side_effect = RuntimeError("snapshot unavailable")
 
     async with _orchestrator_env(
         audio_path=audio_file,
@@ -356,6 +363,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings) -> None:
     assert writer.record_results.await_count >= 2
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED, error=None)
     writer.refresh_stats_matviews.assert_awaited_once_with(1)
+    writer.refresh_dashboard_summaries.assert_awaited_once_with(1)
     writer.refresh_bucket.assert_awaited_once_with(
         1, period_seconds=settings.schedule_period_seconds
     )
@@ -2107,7 +2115,7 @@ async def test_stt_normalized_timing_includes_finalization_diagnostics(
                 entry=_stt_entry("deepgram", "flux-general-en"),
                 item=_make_dataset_item(audio_file),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=configured,
                 writer=writer,
                 dataset_id="stt-v3",
@@ -3472,7 +3480,7 @@ async def test_tts_normalized_failure_preserves_audio_until_write_and_legacy_res
                 entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
                 item=_make_tts_item(),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=enabled,
                 writer=writer,
                 dataset_sha256="a" * 64,
@@ -3541,7 +3549,7 @@ async def test_tts_cancellation_propagates_after_audio_cleanup(
                 entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
                 item=_make_tts_item(),
                 run_id=1,
-                sem=asyncio.Semaphore(1),
+                gate=ModelGate(1),
                 settings=enabled,
                 writer=writer,
                 dataset_sha256="a" * 64,
@@ -3579,7 +3587,7 @@ async def test_stt_missing_endpoint_url_yields_error_rows(
     )
 
     rows = await _run_stt_item(
-        entry=entry, item=item, run_id=0, sem=asyncio.Semaphore(1), settings=cfg, writer=None
+        entry=entry, item=item, run_id=0, gate=ModelGate(1), settings=cfg, writer=None
     )
 
     assert rows
@@ -3649,3 +3657,87 @@ async def test_transcribe_does_not_retry_other_errors(tmp_path: Path) -> None:
     ):
         await _transcribe_with_whisper(audio, _TEST_SETTINGS)
     assert client.audio.transcriptions.create.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_tts_wer_scores_against_spoken_reference(
+    audio_file: Path, settings: Settings
+) -> None:
+    """When an item carries a spoken reference, WER is measured against it, not the prompt."""
+    provider = MagicMock()
+    provider.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="voice",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    item = _make_tts_item("Your reference is LT-507.")
+    item.spoken_reference = "your reference is l t five oh seven"
+
+    async with _orchestrator_env(
+        audio_path=audio_file, tts_providers={"elevenlabs": MagicMock(return_value=provider)}
+    ):
+        with patch(
+            "coval_bench.runner.orchestrator._transcribe_with_whisper",
+            new_callable=AsyncMock,
+            return_value="your reference is l t five oh seven",
+        ):
+            results = await _run_tts_item(
+                entry=_tts_entry("elevenlabs", "eleven_flash_v2_5", "voice"),
+                item=item,
+                run_id=1,
+                gate=ModelGate(1),
+                settings=settings,
+            )
+
+    wer_rows = [r for r in results if r.metric_type == "WER"]
+    assert len(wer_rows) == 1
+    assert wer_rows[0].metric_value == 0.0
+
+
+@pytest.mark.asyncio
+async def test_stt_guava_receives_base_url_and_domain(audio_file: Path, settings: Settings) -> None:
+    """The orchestrator wires Guava's endpoint settings into the provider constructor."""
+    seen: dict[str, Any] = {}
+
+    class _Capture:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.update(kwargs)
+            raise RuntimeError("stop here")
+
+    entry = RegisteredModel(
+        benchmark=Benchmark.STT,
+        provider="guava",
+        model="daytona-stt",
+        source=Source.OFFICIAL_API,
+        collected=True,
+        published=False,
+    )
+    item = SimpleNamespace(
+        path=audio_file,
+        transcript="hello",
+        duration_sec=0.032,
+        speech_end_offset_ms=None,
+        sample_id=None,
+    )
+    cfg = settings.model_copy(
+        update={
+            "guava_api_key": SecretStr("k"),
+            "guava_base_url": "https://guava.test",
+            "guava_stt_domain": "healthcare",
+        }
+    )
+
+    with patch(
+        "coval_bench.runner.orchestrator._get_stt_providers", return_value={"guava": _Capture}
+    ):
+        await _run_stt_item(
+            entry=entry, item=item, run_id=0, gate=ModelGate(1), settings=cfg, writer=None
+        )
+
+    assert seen["base_url"] == "https://guava.test"
+    assert seen["domain"] == "healthcare"

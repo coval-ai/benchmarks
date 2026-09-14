@@ -20,8 +20,9 @@ Design notes
   call time, not at module load, which also lets tests patch ``sys.modules``
   without triggering import errors.  ``coval_bench.registries`` is the
   exception: dependency-light by design, imported eagerly.
-- Concurrency: ``asyncio.Semaphore(8)`` caps simultaneous provider connections;
-  dedicated runs use a cap of 1 so a single pinned replica is never contended.
+- Concurrency: a :class:`ModelGate` holds one lock per (provider, model) so a
+  model never serves two of our requests at once, under a global cap of 8 open
+  provider connections. Different models run side by side.
 - Timeouts: ``asyncio.timeout(45)`` for STT, ``asyncio.timeout(60)`` for TTS.
 - Audio cleanup: TTS audio files are deleted in ``finally`` blocks; this module
   owns cleanup, NOT the provider.
@@ -54,6 +55,12 @@ from posthog import Posthog
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel
 
+from coval_bench.datasets.suite import (
+    DEDICATED_STT_SUITE,
+    DEFAULT_STT_DATASET,
+    stt_sample_size,
+    tts_sample_size,
+)
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.providers._http_session import close_all as _close_http_clients
@@ -66,6 +73,7 @@ from coval_bench.registries import (
     RegisteredModel,
     Source,
 )
+from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.retry import with_retry
 
 if TYPE_CHECKING:
@@ -74,7 +82,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.runner")
 
 _CONCURRENCY_CAP = 8
-_DEDICATED_CONCURRENCY_CAP = 1
 _STT_TIMEOUT_S = 45
 _TTS_TIMEOUT_S = 60
 # Stable contract — matched by the reason classifier and the alerting log metric.
@@ -103,6 +110,7 @@ class RunSummary(BaseModel):
     total_results: int
     success_count: int
     fail_count: int
+    sigterm: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +396,7 @@ async def _run_stt_item(
     entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — DatasetItem is a runtime-typed sibling-agent type
     run_id: int,
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     settings: Settings,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
     dataset_id: str | None = None,
@@ -412,7 +420,7 @@ async def _run_stt_item(
     # Reasons already warned at their source; the per-item summary skips these.
     logged_reasons: set[str] = set()
 
-    async with sem:
+    async with gate.slot((entry.provider, entry.model)):
         provider_cls = stt_providers.get(entry.provider)
         if provider_cls is None:
             logger.warning(
@@ -730,7 +738,7 @@ async def _run_stt_item(
             )
 
     if writer is not None and artifact_client is not None:
-        async with sem:
+        async with gate.shared():
             try:
                 from coval_bench.runner.normalized import dual_write
 
@@ -739,7 +747,7 @@ async def _run_stt_item(
                     storage_client=artifact_client,
                     bucket=settings.benchmark_artifact_bucket,
                     run_id=run_id,
-                    dataset_id=dataset_id or settings.dataset_id,
+                    dataset_id=dataset_id or settings.dataset_id or DEFAULT_STT_DATASET,
                     dataset_sha256=dataset_sha256,
                     sample_id=item.sample_id or audio_path.name,
                     entry=entry,
@@ -797,7 +805,7 @@ async def _run_tts_item(
     entry: RegisteredModel,
     item: Any,  # noqa: ANN401 — TTSDatasetItem is a runtime-typed sibling-agent type
     run_id: int,
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     settings: Settings,
     voice: str | None = None,
     writer: Any | None = None,  # noqa: ANN401 — RunWriter, lazy-imported in caller
@@ -826,7 +834,7 @@ async def _run_tts_item(
     # Reasons already warned at their source; the per-item summary skips these.
     logged_reasons: set[str] = set()
 
-    async with sem:
+    async with gate.slot((entry.provider, entry.model)):
         provider_cls = tts_providers.get(entry.provider)
         if provider_cls is None:
             logger.warning(
@@ -956,7 +964,8 @@ async def _run_tts_item(
                 # genuine failure worth surfacing as a FAILED row rather than silently dropping.
                 if whisper_transcript is not None:
                     try:
-                        wer_result = compute_wer(transcript, whisper_transcript)
+                        reference = item.spoken_reference or transcript
+                        wer_result = compute_wer(reference, whisper_transcript)
                         results.append(
                             Result(
                                 run_id=run_id,
@@ -1127,6 +1136,48 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
                 break
 
 
+def _current_tick(settings: Settings) -> datetime:
+    period = settings.schedule_period_seconds
+    epoch = int(datetime.now(tz=UTC).timestamp())
+    return datetime.fromtimestamp(epoch - epoch % period, tz=UTC)
+
+
+async def run_suite(
+    *,
+    settings: Settings,
+    benchmark_kind: Literal["stt", "tts", "both"] = "both",
+    smoke: bool = False,
+    source: Literal["shared", "dedicated"] = "shared",
+) -> list[RunSummary]:
+    """Dedicated STT walks the suite, one run row per dataset on one tick; else a single run."""
+    if source != "dedicated" or benchmark_kind != "stt" or settings.dataset_id is not None:
+        return [
+            await run_benchmarks(
+                settings=settings, benchmark_kind=benchmark_kind, smoke=smoke, source=source
+            )
+        ]
+
+    scheduled_at = _current_tick(settings)
+    summaries: list[RunSummary] = []
+    for dataset_id in DEDICATED_STT_SUITE:
+        try:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=smoke,
+                source=source,
+                dataset_id=dataset_id,
+                scheduled_at=scheduled_at,
+            )
+        except Exception:
+            logger.exception("suite_dataset_failed", dataset_id=dataset_id)
+            continue
+        summaries.append(summary)
+        if summary.sigterm:
+            break
+    return summaries
+
+
 async def run_benchmarks(
     *,
     settings: Settings,
@@ -1134,6 +1185,8 @@ async def run_benchmarks(
     smoke: bool = False,
     source: Literal["shared", "dedicated"] = "shared",
     matrix_overrides: list[RegisteredModel] | None = None,
+    dataset_id: str | None = None,
+    scheduled_at: datetime | None = None,
 ) -> RunSummary:
     """Execute one complete benchmark run.
 
@@ -1146,6 +1199,8 @@ async def run_benchmarks(
             run — dedicated endpoints have their own scheduled job.
         matrix_overrides: Optional list of ``RegisteredModel`` objects that
             override the registry by ``(benchmark, provider, model)`` key.
+        dataset_id: STT dataset for this run; defaults to ``settings.dataset_id``.
+        scheduled_at: Tick the run is attributed to; suite runs share one.
 
     Returns:
         A :class:`RunSummary` with final counts and run status.
@@ -1161,6 +1216,9 @@ async def run_benchmarks(
     Result = models_mod.Result
     ResultStatus = models_mod.ResultStatus
     load_dataset = _get_load_dataset()
+    stt_dataset_id = dataset_id or settings.dataset_id or DEFAULT_STT_DATASET
+    stt_size = stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size)
+    tts_size = tts_sample_size(source, settings.dataset_sample_size)
 
     posthog_client: Posthog | None = None
     if not settings.posthog_disabled and settings.posthog_project_token:
@@ -1222,7 +1280,7 @@ async def run_benchmarks(
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id (its TTS rows are attributed to
         # tts-v1 at the aggregation layer).
-        run_dataset_id = "tts-v1" if benchmark_kind == "tts" else settings.dataset_id
+        run_dataset_id = "tts-v1" if benchmark_kind == "tts" else stt_dataset_id
 
         # Dataset SHA256 for the run record (computed from the packaged manifest)
         try:
@@ -1234,9 +1292,8 @@ async def run_benchmarks(
         except Exception:
             dataset_sha256 = "unknown"
 
-        period = settings.schedule_period_seconds
-        epoch = int(datetime.now(tz=UTC).timestamp())
-        scheduled_at = datetime.fromtimestamp(epoch - epoch % period, tz=UTC)
+        if scheduled_at is None:
+            scheduled_at = _current_tick(settings)
         run = await writer.start_run(
             dataset_id=run_dataset_id,
             dataset_sha256=dataset_sha256,
@@ -1276,10 +1333,10 @@ async def run_benchmarks(
         ):
             logger.warning(
                 "normalized_stt_manifest_sha_unavailable",
-                dataset_id=settings.dataset_id,
+                dataset_id=stt_dataset_id,
             )
             stt_artifact_client = None
-        sem = asyncio.Semaphore(_DEDICATED_CONCURRENCY_CAP if dedicated else _CONCURRENCY_CAP)
+        gate = ModelGate(_CONCURRENCY_CAP)
 
         # Cloud Run sends SIGTERM ~10s before SIGKILL when a task hits its timeout.
         # We catch it, cancel the in-flight gather, and finalize the run row as
@@ -1341,10 +1398,10 @@ async def run_benchmarks(
             # ------------------------------------------------------------------
             if benchmark_kind in ("stt", "both") and enabled_stt:
                 stt_dataset = load_dataset(
-                    settings.dataset_id,
+                    stt_dataset_id,
                     settings=settings,
-                    sample_size=None if smoke else settings.dataset_sample_size,
-                    rng=_get_family_rng()(settings.dataset_id, scheduled_at),
+                    sample_size=None if smoke else stt_size,
+                    rng=_get_family_rng()(stt_dataset_id, scheduled_at),
                 )
                 items = stt_dataset.items[:1] if smoke else stt_dataset.items
                 logger.info("stt_dataset_sampled", item_count=len(items))
@@ -1355,10 +1412,10 @@ async def run_benchmarks(
                         entry=entry,
                         item=item,
                         run_id=run_id,
-                        sem=sem,
+                        gate=gate,
                         settings=settings,
                         writer=writer,
-                        dataset_id=settings.dataset_id,
+                        dataset_id=stt_dataset_id,
                         dataset_sha256=dataset_sha256,
                         artifact_client=stt_artifact_client,
                     )
@@ -1384,14 +1441,14 @@ async def run_benchmarks(
                 tts_dataset = load_dataset(
                     "tts-v1",
                     settings=settings,
-                    sample_size=None if smoke else settings.dataset_sample_size,
+                    sample_size=None if smoke else tts_size,
                 )
                 tts_items = tts_dataset.items[:1] if smoke else tts_dataset.items
                 logger.info("tts_dataset_sampled", item_count=len(tts_items))
 
-                # Item-major order so the semaphore interleaves providers; a
-                # model-major order would burst one provider with concurrent
-                # requests and skew TTFA.
+                # Item-major order so the gate interleaves providers; a
+                # model-major order would queue one model's items back to back
+                # while the others sit idle.
                 tts_voices = {
                     (entry.provider, entry.model): _assign_tts_voices(entry, len(tts_items), run_id)
                     for entry in enabled_tts
@@ -1422,7 +1479,7 @@ async def run_benchmarks(
                         entry=entry,
                         item=item,
                         run_id=run_id,
-                        sem=sem,
+                        gate=gate,
                         settings=settings,
                         voice=voice,
                         writer=writer,
@@ -1494,6 +1551,12 @@ async def run_benchmarks(
 
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
                 await _refresh_series_bucket(writer, run_id, settings)
+
+            try:
+                snapshot_status = await writer.refresh_dashboard_summaries(run_id)
+                logger.info("dashboard_summaries_refresh", status=snapshot_status)
+            except Exception:
+                logger.warning("dashboard_summaries_refresh_failed", exc_info=True)
 
             finished_at = datetime.now(tz=UTC)
             summary = RunSummary(
@@ -1606,6 +1669,7 @@ async def run_benchmarks(
                 total_results=total_results,
                 success_count=success_count,
                 fail_count=fail_count,
+                sigterm=True,
             )
 
         except Exception as exc:

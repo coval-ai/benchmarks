@@ -3,10 +3,12 @@
 
 """Publish one multi-turn conversation sample per fetch tick.
 
-Each tick picks ONE (scenario, persona) present for every benchmarked model,
-uploads each model's full-conversation recording plus its per-agent transcript
-into the public samples bucket, and writes a ``manifest.json`` keyed by the
-timeline bucket timestamp. Only a fully-complete sample (audio + transcript for
+Each dataset is its own partition under ``PREFIX``: a tick picks ONE (scenario,
+persona) present for every model benchmarked on that dataset, uploads each
+model's full-conversation recording plus its per-agent transcript into the
+samples bucket, and writes a ``manifest.json`` keyed by the timeline bucket
+timestamp. Ticks published before partitioning sit at the root and stay readable
+until the TTL prunes them. Only a fully-complete sample (audio + transcript for
 every model) is published; otherwise the tick is skipped. The dashboard reads the
 manifests directly (public bucket, no API hop); a rolling ``index.json`` lists
 the available ticks newest-first. The bucket's 30-day TTL prunes old ticks.
@@ -37,7 +39,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("coval_bench.s2s.samples")
 
 PREFIX = "s2s-samples"
-INDEX_KEY = f"{PREFIX}/index.json"
 _TICK_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _INDEX_MAX_ENTRIES = 60
 _DOWNLOAD_TIMEOUT = 120.0
@@ -48,11 +49,22 @@ _DOWNLOAD_TIMEOUT = 120.0
 _PERSONA_LABELS: dict[str, str] = {
     "PN3xgmsqeLDjsNNEA2e55e": "Standard Female",
     "9ATy64zKXxSUaVWb5YnQtd": "Standard Male",
+    "MUFJdYAHdBHU6UbRRu4ykM": "Standard Customer",
+    "NWTe6Q7B7WvhUfU52A3NY8": "Clean Speech Baseline",
 }
 
 
 def _persona_label(persona_id: str) -> str:
     return _PERSONA_LABELS.get(persona_id, persona_id)
+
+
+def sample_prefix(dataset_id: str | None) -> str:
+    """Where a dataset's ticks live; ``None`` is the pre-partition root layout."""
+    return f"{PREFIX}/{dataset_id}" if dataset_id else PREFIX
+
+
+def index_key(dataset_id: str | None) -> str:
+    return f"{sample_prefix(dataset_id)}/index.json"
 
 
 @dataclass(frozen=True)
@@ -72,6 +84,8 @@ class SampleRun:
     # The set this run actually came from. Agents no longer share one, so the
     # manifest cannot label a recording with the caller-wide configured id.
     test_set_id: str = ""
+    # The dataset the run's rows landed under, which is the samples partition.
+    dataset_id: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
@@ -205,7 +219,7 @@ def _upload(bucket: storage.Bucket, key: str, data: bytes, content_type: str) ->
     bucket.blob(key).upload_from_string(data, content_type=content_type)
 
 
-def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
+def _update_index(bucket: storage.Bucket, dataset_id: str | None, tick_key: str) -> None:
     """Add the tick to index.json, kept newest-first (single writer — no race to guard).
 
     Sorted rather than prepended because ticks are not always written in
@@ -219,7 +233,7 @@ def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
     failure leaves the existing index untouched so a transient error can't
     erase the history.
     """
-    blob = bucket.blob(INDEX_KEY)
+    blob = bucket.blob(index_key(dataset_id))
     ticks: list[str]
     try:
         decoded = json.loads(blob.download_as_bytes())
@@ -232,13 +246,14 @@ def _update_index(bucket: storage.Bucket, tick_key: str) -> None:
         logger.error("samples_index_read_failed", tick=tick_key, exc_info=True)
         return
     ticks = sorted({tick_key, *ticks}, reverse=True)[:_INDEX_MAX_ENTRIES]
-    _upload(bucket, INDEX_KEY, json.dumps(ticks).encode(), "application/json")
+    _upload(bucket, index_key(dataset_id), json.dumps(ticks).encode(), "application/json")
 
 
 async def publish_tick_sample(
     client: httpx.AsyncClient,
     *,
     bucket_name: str,
+    dataset_id: str,
     test_set_id: str,
     runs: list[SampleRun],
     rng: Random,
@@ -247,6 +262,9 @@ async def publish_tick_sample(
     expected_models: set[tuple[str, str]] | None = None,
 ) -> int:
     """Copy one multi-turn conversation (every model, one persona) as a v2 sample.
+
+    ``dataset_id`` names the partition the tick lands in; every model in ``runs``
+    is expected to have been benchmarked on it.
 
     ``expected_models`` is the configured ``(provider, model)`` set a sample must
     cover. Pass it: without it completeness is judged against whichever models
@@ -262,6 +280,7 @@ async def publish_tick_sample(
                 client,
                 download_client or default_download,
                 bucket_name=bucket_name,
+                dataset_id=dataset_id,
                 test_set_id=test_set_id,
                 runs=runs,
                 rng=rng,
@@ -278,6 +297,7 @@ async def _publish_tick_sample(
     download_client: httpx.AsyncClient,
     *,
     bucket_name: str,
+    dataset_id: str,
     test_set_id: str,
     runs: list[SampleRun],
     rng: Random,
@@ -312,6 +332,7 @@ async def _publish_tick_sample(
                 client,
                 download_client,
                 bucket=bucket,
+                dataset_id=dataset_id,
                 test_set_id=test_set_id,
                 runs=by_bucket[bucket_at],
                 bucket_at=bucket_at,
@@ -332,6 +353,7 @@ async def _publish_one_bucket(
     download_client: httpx.AsyncClient,
     *,
     bucket: storage.Bucket,
+    dataset_id: str,
     test_set_id: str,
     runs: list[SampleRun],
     bucket_at: datetime,
@@ -339,14 +361,15 @@ async def _publish_one_bucket(
     expected_models: set[tuple[str, str]] | None,
 ) -> int:
     tick_key = bucket_at.strftime(_TICK_FORMAT)
-    manifest_key = f"{PREFIX}/{tick_key}/manifest.json"
+    tick_prefix = f"{sample_prefix(dataset_id)}/{tick_key}"
+    manifest_key = f"{tick_prefix}/manifest.json"
     # Ahead of every other gate: an already-published day needs no runs at all,
     # only its index entry restored if that write once failed. Gating this behind
     # the checks below would strand such a day for good — its runs age out of the
     # window, so no later fetch would revisit the bucket to repair it.
     if bucket.blob(manifest_key).exists():
-        _update_index(bucket, tick_key)
-        logger.info("samples_tick_exists", tick=tick_key)
+        _update_index(bucket, dataset_id, tick_key)
+        logger.info("samples_tick_exists", dataset=dataset_id, tick=tick_key)
         return 0
 
     expected = expected_models or {r.key for r in runs}
@@ -455,7 +478,7 @@ async def _publish_one_bucket(
 
         recordings: list[dict[str, Any]] = []
         for s_run, s_sim_id, s_audio, s_turns in staged:
-            key = f"{PREFIX}/{tick_key}/{s_run.provider}/{s_run.model}.wav"
+            key = f"{tick_prefix}/{s_run.provider}/{s_run.model}.wav"
             _upload(bucket, key, s_audio, "audio/wav")
             recordings.append(
                 {
@@ -471,6 +494,7 @@ async def _publish_one_bucket(
         manifest = {
             "schema_version": 2,
             "bucket_at": tick_key,
+            "dataset_id": dataset_id,
             # The recordings' own set, falling back to the configured one only when
             # a run predates the field.
             "test_set_id": next((r.test_set_id for r in runs if r.test_set_id), test_set_id),
@@ -479,9 +503,10 @@ async def _publish_one_bucket(
             "recordings": recordings,
         }
         _upload(bucket, manifest_key, json.dumps(manifest).encode(), "application/json")
-        _update_index(bucket, tick_key)
+        _update_index(bucket, dataset_id, tick_key)
         logger.info(
             "samples_tick_stored",
+            dataset=dataset_id,
             tick=tick_key,
             recordings=len(recordings),
             persona=persona_id,
@@ -504,16 +529,17 @@ AUDIO_URL_TTL = timedelta(minutes=10)
 
 def load_sample_ids(
     bucket_name: str,
+    dataset_id: str | None,
     *,
     storage_client: storage.Client | None = None,
 ) -> list[str]:
-    raw = read_json(bucket_name, INDEX_KEY, storage_client=storage_client)
+    raw = read_json(bucket_name, index_key(dataset_id), storage_client=storage_client)
     if not isinstance(raw, list):
         return []
     return sorted((s for s in raw if isinstance(s, str)), reverse=True)
 
 
-def _own_audio_object(key: object, sample_id: str) -> bool:
+def _own_audio_object(key: object, dataset_id: str | None, sample_id: str) -> bool:
     """True only for a recording key that lives inside this sample's own directory.
 
     The manifest is ours, but a stale or malformed one must not be able to steer
@@ -524,7 +550,7 @@ def _own_audio_object(key: object, sample_id: str) -> bool:
     """
     return (
         isinstance(key, str)
-        and key.startswith(f"{PREFIX}/{sample_id}/")
+        and key.startswith(f"{sample_prefix(dataset_id)}/{sample_id}/")
         and key.endswith(".wav")
         and ".." not in key
     )
@@ -532,6 +558,7 @@ def _own_audio_object(key: object, sample_id: str) -> bool:
 
 def load_sample(
     bucket_name: str,
+    dataset_id: str | None,
     sample_id: str,
     *,
     hidden: frozenset[tuple[str, str]],
@@ -539,7 +566,7 @@ def load_sample(
 ) -> dict[str, Any] | None:
     raw = read_json(
         bucket_name,
-        f"{PREFIX}/{sample_id}/manifest.json",
+        f"{sample_prefix(dataset_id)}/{sample_id}/manifest.json",
         storage_client=storage_client,
     )
     if not isinstance(raw, dict):
@@ -548,7 +575,7 @@ def load_sample(
         rec
         for rec in raw.get("recordings", [])
         if isinstance(rec, dict)
-        and _own_audio_object(rec.get("object"), sample_id)
+        and _own_audio_object(rec.get("object"), dataset_id, sample_id)
         and (rec.get("provider"), rec.get("model")) not in hidden
     ]
     return {**raw, "recordings": recordings}
@@ -556,6 +583,7 @@ def load_sample(
 
 def audio_object_key(
     bucket_name: str,
+    dataset_id: str | None,
     sample_id: str,
     provider: str,
     model: str,
@@ -563,7 +591,9 @@ def audio_object_key(
     hidden: frozenset[tuple[str, str]],
     storage_client: storage.Client | None = None,
 ) -> str | None:
-    sample = load_sample(bucket_name, sample_id, hidden=hidden, storage_client=storage_client)
+    sample = load_sample(
+        bucket_name, dataset_id, sample_id, hidden=hidden, storage_client=storage_client
+    )
     if sample is None:
         return None
     for rec in sample["recordings"]:
