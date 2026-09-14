@@ -80,6 +80,10 @@ _MV_SQL_TEMPLATE = """
       AND dataset_id = %(dataset)s
     ORDER BY avg_value ASC
 """
+_SAVED_MV_SQL_TEMPLATE = _MV_SQL_TEMPLATE.replace(
+    "FROM {view}",
+    "FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
+).replace("WHERE metric_type = %(metric)s", "WHERE m.code = %(metric)s")
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -121,7 +125,7 @@ async def get_leaderboard(
         "interval": WINDOW_INTERVALS[window],
     }
     normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-    sql = _MV_SQL_TEMPLATE.format(
+    sql = (_SAVED_MV_SQL_TEMPLATE if normalized else _MV_SQL_TEMPLATE).format(
         view=SUMMARY_VIEWS[window] if normalized else WINDOW_VIEWS[window]
     )
 

@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Registry of benchmark metrics and their display metadata.
 
-``Metric`` values are the canonical strings stored in
-``benchmarks_v2.results.metric_type``. ``METRIC_SPECS`` carries the display
-metadata (units, ranking direction, decimals, applicable benchmarks) consumed
-app-side against already-aggregated rows; the database stores plain strings.
+``Metric`` values are the canonical public metric codes. ``METRIC_SPECS``
+carries display metadata (including the display name) consumed app-side; saved
+dashboard aggregates identify metrics by the database ``metrics.id`` dimension,
+while raw result tables continue to store these codes as plain strings.
 """
 
 from __future__ import annotations
