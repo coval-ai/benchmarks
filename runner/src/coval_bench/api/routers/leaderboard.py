@@ -43,7 +43,7 @@ from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import is_metric_excluded
-from coval_bench.s2s.conditions import DATASET_ID_BANK, DATASET_ID_LLM_DENTAL
+from coval_bench.s2s.conditions import DATASET_ID_BANK, DATASET_ID_LLM_BANK
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -65,8 +65,8 @@ _VALID_COMBOS: set[tuple[str, str]] = {
 # S2S agent runs daily. Dental and the multi-turn set are frozen rather than
 # retired: nothing writes to them, but they stay reachable through the aggregates
 # ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
-# pooled. LLM still runs the dental scenario over text.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_BANK, "LLM": DATASET_ID_LLM_DENTAL}
+# pooled. LLM runs the same bank scenario over text.
+_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_BANK, "LLM": DATASET_ID_LLM_BANK}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,

@@ -44,30 +44,26 @@ def test_unmapped_dataset_keeps_the_pre_scoping_contract() -> None:
     assert legacy.required is Metric.V2V
 
 
-def test_llm_dental_contract_uses_instruction_and_local_ttft() -> None:
-    llm = conditions.condition_for(conditions.DATASET_ID_LLM_DENTAL)
-    assert llm.benchmark is Benchmark.LLM
-    assert llm.required is Metric.INSTRUCTION_FOLLOWING
-    assert llm.optional == frozenset()
-    assert llm.local == frozenset({Metric.TTFT})
-    assert (
-        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.CLEAN)
-        == conditions.DATASET_ID_LLM_DENTAL
-    )
-    assert (
-        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.NOISY) is None
-    )
-    assert (
-        conditions.dataset_id_for(conditions.FAMILY_LLM_DENTAL, conditions.Condition.ACCENTED)
-        is None
-    )
-    existing = {
+def test_llm_contracts_use_instruction_and_local_ttft() -> None:
+    llm_families = {
+        conditions.FAMILY_LLM_DENTAL: conditions.DATASET_ID_LLM_DENTAL,
+        conditions.FAMILY_LLM_BANK: conditions.DATASET_ID_LLM_BANK,
+    }
+    for family, dataset_id in llm_families.items():
+        llm = conditions.condition_for(dataset_id)
+        assert llm.benchmark is Benchmark.LLM
+        assert llm.required is Metric.INSTRUCTION_FOLLOWING
+        assert llm.optional == frozenset()
+        assert llm.local == frozenset({Metric.TTFT})
+        assert conditions.dataset_id_for(family, conditions.Condition.CLEAN) == dataset_id
+        assert conditions.dataset_id_for(family, conditions.Condition.NOISY) is None
+    voice = {
         dataset_id: condition
         for dataset_id, condition in conditions.CONDITIONS.items()
-        if dataset_id != conditions.DATASET_ID_LLM_DENTAL
+        if dataset_id not in llm_families.values()
     }
-    assert all(condition.benchmark is Benchmark.S2S for condition in existing.values())
-    assert all(not condition.local for condition in existing.values())
+    assert all(condition.benchmark is Benchmark.S2S for condition in voice.values())
+    assert all(not condition.local for condition in voice.values())
 
 
 def test_every_condition_metric_supports_its_benchmark() -> None:

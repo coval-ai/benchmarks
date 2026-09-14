@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The sync-llm command and the Phonely text agent it defines."""
+"""The sync-llm command and the text agents it defines."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from click.testing import CliRunner
 from pydantic import SecretStr
 
 from coval_bench.config import Settings
-from coval_bench.llm import benchmark, coval_agent
+from coval_bench.llm import coval_agent
 from coval_bench.llm.coval_agent import (
     CovalTextAgentDefinition,
     CovalTextClient,
@@ -38,8 +38,9 @@ DEFINITION = CovalTextAgentDefinition(
     provider="phonely",
     proxy_url="https://api.example.com",
     proxy_secret=SecretStr(SECRET),
-    test_set_id="TSDENTAL",
+    test_set_id="TSBANK",
     instruction_metric_id="M" * 22,
+    persona_id="P" * 22,
 )
 
 
@@ -68,7 +69,7 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
         if request.method == "GET":
             state_key, response_key = {
                 "/agents": ("agents", "agents"),
-                "/test-sets/TSDENTAL/agents": ("test_set_agents", "agents"),
+                "/test-sets/TSBANK/agents": ("test_set_agents", "agents"),
                 "/run-templates": ("run_templates", "run_templates"),
                 "/scheduled-runs": ("scheduled_runs", "scheduled_runs"),
             }[path]
@@ -80,7 +81,7 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
             return httpx.Response(200, json={"agent": created})
         if path.startswith("/agents/"):
             return httpx.Response(200, json={"agent": {**state["agents"][0], **body}})
-        if path == "/test-sets/TSDENTAL/agents:add":
+        if path == "/test-sets/TSBANK/agents:add":
             state["test_set_agents"].extend({"id": i} for i in body["agent_ids"])
             return httpx.Response(200, json={})
         if path == "/run-templates":
@@ -124,21 +125,23 @@ def test_body_renders_the_proxy_contract_and_survives_covals_substitution() -> N
 
 
 def test_from_settings_names_every_missing_setting() -> None:
-    with pytest.raises(SyncError, match="llm_proxy_public_url, llm_proxy_secret"):
+    with pytest.raises(SyncError, match="llm_proxy_public_url, .*coval_s2s_bank_persona_id"):
         CovalTextAgentDefinition.from_settings(
             "phonely",
-            Settings(coval_s2s_dental_test_set_id="T", coval_s2s_instruction_metric_id="M"),
+            Settings(coval_s2s_bank_test_set_id="T", coval_s2s_bank_instruction_metric_id="M"),
         )
     definition = CovalTextAgentDefinition.from_settings(
         "phonely",
         Settings(
             llm_proxy_public_url="https://api.example.com/",
             llm_proxy_secret=SecretStr(SECRET),
-            coval_s2s_instruction_metric_id="M",
+            coval_s2s_bank_instruction_metric_id="M",
+            coval_s2s_bank_persona_id="P",
         ),
         test_set_id="T",
     )
     assert (definition.proxy_url, definition.test_set_id) == ("https://api.example.com", "T")
+    assert definition.persona_id == "P"
 
 
 def test_sync_creates_everything_when_absent() -> None:
@@ -155,14 +158,14 @@ def test_sync_creates_everything_when_absent() -> None:
     ]
     assert [path for path, _ in state["writes"]] == [
         "/agents",
-        "/test-sets/TSDENTAL/agents:add",
+        "/test-sets/TSBANK/agents:add",
         "/run-templates",
         "/scheduled-runs",
     ]
     template = state["writes"][2][1]
     assert template["agent_ids"] == ["A" * 22]
-    assert template["persona_ids"] == [benchmark.DEFAULT_PERSONA_ID]
-    assert template["test_set_ids"] == ["TSDENTAL"]
+    assert template["persona_ids"] == ["P" * 22]
+    assert template["test_set_ids"] == ["TSBANK"]
     assert template["metric_ids"] == ["M" * 22]
     assert template["iteration_count"] == 1
     assert "options" not in template
@@ -217,7 +220,7 @@ def test_sync_patches_only_the_drifted_template_fields() -> None:
     live_template = {
         **DEFINITION.run_template_body("A"),
         "id": "T",
-        "persona_ids": [benchmark.DEFAULT_PERSONA_ID, "9ATy64zKXxSUaVWb5YnQtd"],
+        "persona_ids": ["P" * 22, "9ATy64zKXxSUaVWb5YnQtd"],
         "concurrency": 1,
     }
     state = _state(
@@ -234,7 +237,7 @@ def test_sync_patches_only_the_drifted_template_fields() -> None:
         assert state["writes"] == []
         sync(client, DEFINITION)
 
-    assert state["writes"] == [("/run-templates/T", {"persona_id": benchmark.DEFAULT_PERSONA_ID})]
+    assert state["writes"] == [("/run-templates/T", {"persona_id": "P" * 22})]
 
 
 def test_sync_looks_up_by_customer_id_filter_and_never_adopts_a_name_only_match() -> None:
@@ -283,8 +286,9 @@ def test_cli_prints_the_agent_id_and_never_the_secret(monkeypatch: pytest.Monkey
         lambda: Settings(
             llm_proxy_public_url="https://api.example.com",
             llm_proxy_secret=SecretStr(SECRET),
-            coval_s2s_dental_test_set_id="TSDENTAL",
-            coval_s2s_instruction_metric_id="M" * 22,
+            coval_s2s_bank_test_set_id="TSBANK",
+            coval_s2s_bank_instruction_metric_id="M" * 22,
+            coval_s2s_bank_persona_id="P" * 22,
         ),
     )
     monkeypatch.setattr(coval_agent, "CovalTextClient", lambda *_args: _client(state))
@@ -314,8 +318,9 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
     settings = Settings(
         llm_proxy_public_url="https://api.example.com",
         llm_proxy_secret=SecretStr(SECRET),
-        coval_s2s_dental_test_set_id="TSDENTAL",
-        coval_s2s_instruction_metric_id="M" * 22,
+        coval_s2s_bank_test_set_id="TSBANK",
+        coval_s2s_bank_instruction_metric_id="M" * 22,
+        coval_s2s_bank_persona_id="P" * 22,
     )
     fetch = MagicMock()
     monkeypatch.setenv("COVAL_API_KEY", "coval-key")

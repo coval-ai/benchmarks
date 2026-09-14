@@ -23,6 +23,9 @@ contracts/
     tool-definitions.json  /
     _source/               pulled from the platform, never edited by hand
     _private/              the evaluator. hashed, never committed
+  bank/
+    system-prompt.txt      the Ultra Bank agent, authored here and served by the
+    tool-definitions.json  LLM proxy; the test set and judge stay in Coval
   platforms/
     <platform>-agent.json  the only permitted difference, published for audit
 ```

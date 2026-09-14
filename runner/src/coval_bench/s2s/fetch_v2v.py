@@ -28,6 +28,7 @@ from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
+from coval_bench.llm import suite
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
@@ -39,7 +40,6 @@ from coval_bench.s2s.conditions import (
     FAMILY_INSTR_CUST_SERVICE,
     FAMILY_INSTR_HEALTH,
     FAMILY_INSTR_HOME_SERVICE,
-    FAMILY_LLM_DENTAL,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -292,7 +292,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
 def llm_specs(
     models: Iterable[RegisteredModel], agent_ids: Mapping[str, str] | None = None
 ) -> tuple[AgentSpec, ...]:
-    """Every collected LLM model, driven over the same dental set through the proxy.
+    """Every collected LLM model, driven over the active suite through the proxy.
 
     TTFT comes from the proxy's own turn log rather than from Coval.
     """
@@ -302,10 +302,11 @@ def llm_specs(
             agent_id=agent_ids.get(model.provider),
             provider=model.provider,
             model=model.model,
-            test_set_id_attr="coval_s2s_dental_test_set_id",
-            family=FAMILY_LLM_DENTAL,
+            test_set_id_attr=suite.ACTIVE.test_set_id_attr,
+            family=suite.ACTIVE.family,
             publish_samples=False,
             benchmark=Benchmark.LLM,
+            instruction_metric_id_attr=suite.ACTIVE.instruction_metric_id_attr,
         )
         for model in models
         if model.benchmark is Benchmark.LLM and model.collected
@@ -1306,8 +1307,10 @@ async def fetch_and_write_v2v(
         )
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
-    if benchmark is Benchmark.LLM and not instruction_metric_id:
-        raise RuntimeError("coval_s2s_instruction_metric_id is not set")
+    if benchmark is Benchmark.LLM:
+        unset = suite.ACTIVE.missing(settings)
+        if unset:
+            raise RuntimeError(f"{', '.join(unset)} is required for the LLM benchmark")
     if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
         raise RuntimeError(
             "coval_s2s_instruction_metric_id and coval_s2s_test_set_id must be set together"
@@ -1320,8 +1323,6 @@ async def fetch_and_write_v2v(
     raw_dental = settings.coval_s2s_dental_test_set_id
     if raw_dental is not None and not raw_dental.strip():
         raise RuntimeError("coval_s2s_dental_test_set_id must not be blank")
-    if benchmark is Benchmark.LLM and not raw_dental:
-        raise RuntimeError("coval_s2s_dental_test_set_id is required for the LLM benchmark")
     _require_family_test_sets(settings, specs)
     # The noisy persona only separates conditions within a test set, so without
     # one it would silently never take effect.

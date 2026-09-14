@@ -28,14 +28,14 @@ from coval_bench.s2s.conditions import (
     DATASET_ID_BANK,
     DATASET_ID_DENTAL,
     DATASET_ID_INSTR_CUST_SERVICE,
-    DATASET_ID_LLM_DENTAL,
+    DATASET_ID_LLM_BANK,
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
     FAMILY_BANK,
     FAMILY_DENTAL,
     FAMILY_HAPPYPATH,
     FAMILY_INSTR_HEALTH,
-    FAMILY_LLM_DENTAL,
+    FAMILY_LLM_BANK,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -59,10 +59,11 @@ LLM_SPEC = AgentSpec(
     agent_id="a1",
     provider="phonely",
     model="phonely-agent",
-    test_set_id_attr="coval_s2s_dental_test_set_id",
-    family=FAMILY_LLM_DENTAL,
+    test_set_id_attr="coval_s2s_bank_test_set_id",
+    family=FAMILY_LLM_BANK,
     publish_samples=False,
     benchmark=Benchmark.LLM,
+    instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
 )
 
 
@@ -812,9 +813,10 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     settings = Settings(
-        coval_s2s_instruction_metric_id="IID",
         coval_s2s_openai_agent_id="s2s-agent",
-        coval_s2s_dental_test_set_id="TSD",
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_instruction_metric_id="IID",
+        coval_s2s_bank_persona_id="PID",
     )
     client = _fake_client({}, {})
     writer = _stub_writer()
@@ -842,7 +844,7 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
         settings, benchmark=Benchmark.LLM, llm_agent_ids={"phonely": "llm-agent"}
     )
 
-    assert statuses == {"llm-dental:phonely:phonely-agent": RunStatus.SUCCEEDED}
+    assert statuses == {"llm-bank:phonely:phonely-agent": RunStatus.SUCCEEDED}
     fetch_one.assert_awaited_once()
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["spec"].agent_id == "llm-agent"
@@ -850,7 +852,7 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     assert fetch_one.await_args.kwargs["metric_ids"] == {Metric.INSTRUCTION_FOLLOWING: "IID"}
 
 
-def test_phonely_spec_is_the_llm_dental_text_agent() -> None:
+def test_phonely_spec_is_the_llm_bank_text_agent() -> None:
     (spec,) = fetch_v2v.llm_specs(
         [PHONELY, PHONELY.model_copy(update={"collected": False})], {"phonely": "A1"}
     )
@@ -858,12 +860,13 @@ def test_phonely_spec_is_the_llm_dental_text_agent() -> None:
         agent_id="A1",
         provider="phonely",
         model="phonely-agent",
-        test_set_id_attr="coval_s2s_dental_test_set_id",
-        family=FAMILY_LLM_DENTAL,
+        test_set_id_attr="coval_s2s_bank_test_set_id",
+        family=FAMILY_LLM_BANK,
         publish_samples=False,
         benchmark=Benchmark.LLM,
+        instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
     )
-    assert condition_for(DATASET_ID_LLM_DENTAL) == DatasetMetrics(
+    assert condition_for(DATASET_ID_LLM_BANK) == DatasetMetrics(
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
@@ -894,7 +897,7 @@ async def _fetch_llm(
 
 
 @pytest.mark.asyncio
-async def test_text_agent_uses_instruction_as_the_clean_dental_anchor() -> None:
+async def test_text_agent_uses_instruction_as_the_clean_bank_anchor() -> None:
     writer = _stub_writer()
     writer.conversation_ttft = AsyncMock(return_value={"s1": 0.4126})
     values = [
@@ -906,7 +909,7 @@ async def test_text_agent_uses_instruction_as_the_clean_dental_anchor() -> None:
         status, ingested = await _fetch_llm(writer, values)
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
-    assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_DENTAL
+    assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_BANK
     writer.conversation_ttft.assert_awaited_once_with(["s1", "s2"])
     rows = writer.record_results.await_args.args[0]
     assert {(r.metric_type, r.audio_filename, r.metric_value, r.metric_units) for r in rows} == {
@@ -941,7 +944,7 @@ async def test_ingest_run_defaults_to_writing_local_metrics() -> None:
             spec=LLM_SPEC,
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
-            condition=condition_for(DATASET_ID_LLM_DENTAL),
+            condition=condition_for(DATASET_ID_LLM_BANK),
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
@@ -981,14 +984,10 @@ async def test_non_clean_text_personas_are_not_ingested() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_and_write_llm_requires_the_instruction_metric_and_dental_set() -> None:
-    with pytest.raises(RuntimeError, match="coval_s2s_instruction_metric_id is not set"):
+async def test_fetch_and_write_llm_names_the_missing_suite_setting() -> None:
+    with pytest.raises(RuntimeError, match="coval_s2s_bank_persona_id"):
         await fetch_v2v.fetch_and_write_v2v(
-            Settings(), benchmark=Benchmark.LLM, llm_agent_ids={"phonely": "a1"}
-        )
-    with pytest.raises(RuntimeError, match="coval_s2s_dental_test_set_id is required"):
-        await fetch_v2v.fetch_and_write_v2v(
-            Settings(coval_s2s_instruction_metric_id="IID"),
+            Settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_instruction_metric_id="IID"),
             benchmark=Benchmark.LLM,
             llm_agent_ids={"phonely": "a1"},
         )
@@ -2388,7 +2387,7 @@ async def test_ingest_run_dual_writes_llm_rows(
             coval_run=CovalRun(run_id="R1", create_time=None),
             metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID"},
             condition=condition,
-            dataset_id="llm-dental-v1",
+            dataset_id="llm-bank-v1",
             period_seconds=10_800,
             normalized_dual_write_enabled=True,
         )
