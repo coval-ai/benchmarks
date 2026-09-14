@@ -5,16 +5,17 @@ from typing import Final
 DEFAULT_STT_DATASET: Final = "stt-v3"
 DEFAULT_SAMPLE_SIZE: Final = 10
 
-# One daily execution matching the shared runner's 48 ticks a day.
+# One daily execution drawing half the shared runner's daily volume (24 of its
+# 48 ticks), in the shared suite's proportions.
 DEDICATED_STT_SUITE: Final[dict[str, int]] = {
-    "stt-v3": 480,
-    "stt-wildasr-clean": 192,
-    "stt-wildasr-clipping": 48,
-    "stt-wildasr-farfield": 48,
-    "stt-wildasr-noisegap": 48,
-    "stt-wildasr-phonecodec": 48,
-    "stt-wildasr-reverb": 48,
-    "stt-wildasr-accent": 48,
+    "stt-v3": 240,
+    "stt-wildasr-clean": 96,
+    "stt-wildasr-clipping": 24,
+    "stt-wildasr-farfield": 24,
+    "stt-wildasr-noisegap": 24,
+    "stt-wildasr-phonecodec": 24,
+    "stt-wildasr-reverb": 24,
+    "stt-wildasr-accent": 24,
 }
 
 DEDICATED_TTS_SAMPLE_SIZE: Final = 60
