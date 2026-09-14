@@ -33,8 +33,6 @@ from google.api_core.exceptions import GoogleAPIError
 from google.cloud import storage
 
 from coval_bench.config import get_settings
-from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
-from coval_bench.db.dashboard_source import mark_source_hour_dirty
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
@@ -1559,7 +1557,6 @@ def _insert_plan(
 
 def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -> None:
     """Refresh only STT/TTS rows; S2S owns its independent rollup population."""
-    mark_source_hour_dirty(cur, bucket_at)
     params = {"bucket": bucket_at}
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket', extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
@@ -1783,7 +1780,6 @@ def backfill(
     )
     phase = "operation"
     lock_acquired = False
-    affected_buckets: set[datetime] = set()
     reporter.phase_started(phase, report)
     try:
         if apply and not artifact_bucket:
@@ -1855,14 +1851,13 @@ def backfill(
                             conn, p, True, artifact_bucket, client, report, report_mismatch=False
                         )
                     buckets = {p.first.scheduled_at for p in batch}
-                    for bucket_at in sorted(bucket for bucket in buckets if bucket is not None):
+                    for bucket_at in buckets:
                         if bucket_at is None:
                             raise RuntimeError(
                                 "scheduled_at changed during immutable plan execution"
                             )
                         with conn.cursor() as cur:
                             _refresh_bucket(cur, bucket_at)
-                        affected_buckets.add(bucket_at)
                         report["buckets"] += 1
             reporter.completed_page(sorted({row.run_id for row in rows}), rows, report, phase=phase)
         reporter.phase_completed(phase, report)
@@ -1915,9 +1910,6 @@ def backfill(
             lambda: reporter.completed_unit(report, phase=phase),
         )
         reporter.phase_completed(phase, report)
-        if apply and affected_buckets:
-            conn.commit()
-            refresh_backfilled_dashboard(conn, buckets=sorted(affected_buckets))
         _set_ready(report, dry_run=False)
         reporter.phase_completed("operation", report)
         return report

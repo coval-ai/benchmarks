@@ -19,12 +19,7 @@ from typing import Any
 import click
 
 from coval_bench import __version__
-from coval_bench.db.cli import (
-    db_check,
-    db_migrate,
-    refresh_dashboard_aggregates,
-    repair_dashboard_aggregates,
-)
+from coval_bench.db.cli import db_check, db_migrate
 from coval_bench.llm.coval_agent import sync_llm
 from coval_bench.migrations.backfill_normalized_s2s_storage import (
     backfill_normalized_s2s_storage_cli,
@@ -108,8 +103,6 @@ def db() -> None:
 
 db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
-db.add_command(refresh_dashboard_aggregates)
-db.add_command(repair_dashboard_aggregates)
 
 
 @cli.group()

@@ -16,9 +16,6 @@ db-check  Open a connection, run ``SELECT 1``, print OK and exit 0.
 from __future__ import annotations
 
 import asyncio
-import json
-from dataclasses import asdict
-from datetime import datetime
 from pathlib import Path
 
 import click
@@ -59,58 +56,3 @@ def db_check() -> None:
 
     asyncio.run(_check())
     click.echo("db-check: OK")
-
-
-def _timestamp(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise click.BadParameter("use an ISO timestamp with timezone") from exc
-    if parsed.tzinfo is None:
-        raise click.BadParameter("timestamp must include a timezone")
-    return parsed
-
-
-@click.command(name="refresh-dashboard-aggregates")
-@click.option("--as-of", type=str, help="Fixed UTC snapshot boundary for validation or replay.")
-def refresh_dashboard_aggregates(as_of: str | None) -> None:
-    """Reconcile source/hour repairs and publish rolling summary snapshots."""
-    from coval_bench.config import get_settings
-    from coval_bench.db.conn import lifespan_pool
-    from coval_bench.db.dashboard_aggregates import reconcile_dashboard_aggregates
-
-    at = _timestamp(as_of)
-
-    async def refresh() -> None:
-        async with lifespan_pool(get_settings()) as pool:
-            result = await reconcile_dashboard_aggregates(pool, as_of=at)
-            click.echo(json.dumps(asdict(result)))
-
-    asyncio.run(refresh())
-
-
-@click.command(name="repair-dashboard-aggregates")
-@click.option(
-    "--bucket",
-    multiple=True,
-    required=True,
-    help="Source bucket timestamp; include old and new timestamps for corrections.",
-)
-@click.option("--as-of", type=str, help="Fixed summary snapshot boundary.")
-def repair_dashboard_aggregates(bucket: tuple[str, ...], as_of: str | None) -> None:
-    """Rebuild explicit source buckets, their hours, and all summary windows."""
-    from coval_bench.config import get_settings
-    from coval_bench.db.conn import lifespan_pool
-    from coval_bench.db.dashboard_aggregates import repair_dashboard_aggregates as repair
-
-    buckets = [parsed for value in bucket if (parsed := _timestamp(value)) is not None]
-    at = _timestamp(as_of)
-
-    async def refresh() -> None:
-        async with lifespan_pool(get_settings()) as pool:
-            result = await repair(pool, buckets=buckets, as_of=at)
-            click.echo(json.dumps(asdict(result)))
-
-    asyncio.run(refresh())
