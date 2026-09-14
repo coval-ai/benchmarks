@@ -56,7 +56,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VAPI_DENTAL_ASSISTANT_ID", "asst_1")
     monkeypatch.setenv("VAPI_API_KEY", "vapi-key")
     monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
-    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:appointment-dental@sip.vapi.ai")
+    monkeypatch.setenv("VAPI_DENTAL_DIAL_TARGET", "sip:example-dental@sip.vapi.ai")
     monkeypatch.setattr(platform_assets, "has_private_contract", lambda suite: True)
 
 
@@ -74,9 +74,9 @@ def test_secret_ref_names_what_is_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_spec_for_names_the_known_set() -> None:
-    with pytest.raises(KeyError, match="known: telnyx-dental, vapi-dental"):
-        spec_for("retell-dental")
-    assert {s.key for s in AGENTS} == {"vapi-dental", "telnyx-dental"}
+    with pytest.raises(KeyError, match="known: retell-dental, telnyx-dental, vapi-dental"):
+        spec_for("synthflow-dental")
+    assert {s.key for s in AGENTS} == {"vapi-dental", "telnyx-dental", "retell-dental"}
 
 
 # --- render ----------------------------------------------------------------
@@ -89,8 +89,10 @@ def test_desired_resolves_the_secret_and_targets_model_tools(env: None) -> None:
 
 
 def test_desired_refuses_an_unknown_platform(env: None) -> None:
-    stranger = DENTAL.model_copy(update={"platform": "retell"})
-    with pytest.raises(SyncError, match="unknown platform 'retell'; known: telnyx, vapi"):
+    stranger = DENTAL.model_copy(update={"platform": "synthflow"})
+    with pytest.raises(
+        SyncError, match="unknown platform 'synthflow'; known: retell, telnyx, vapi"
+    ):
         desired(stranger, BASE)
 
 
@@ -247,7 +249,7 @@ def test_plan_summary_names_all_three_buckets() -> None:
 def test_coval_agent_body_dials_the_target_with_the_pinned_codec(env: None) -> None:
     body = coval_agent_body(DENTAL)
     assert body["model_type"] == "MODEL_TYPE_VOICE"
-    assert body["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+    assert body["phone_number"] == "sip:example-dental@sip.vapi.ai"
     assert body["metadata"] == {"audio_codec": "PCMU"}
     assert body["customer_agent_id"] == "vapi-dental"
     assert body["attributes"]["platform"] == "vapi"
@@ -291,7 +293,7 @@ def test_register_creates_the_coval_agent_when_absent(env: None) -> None:
         agent_id, result = register(client, DENTAL)
     assert agent_id == "A" * 22
     assert set(result.update) == set(platform_assets.COVAL_MANAGED)
-    assert state["agents"][0]["phone_number"] == "sip:appointment-dental@sip.vapi.ai"
+    assert state["agents"][0]["phone_number"] == "sip:example-dental@sip.vapi.ai"
 
 
 def test_register_patches_only_the_drifted_fields(env: None) -> None:
@@ -301,7 +303,7 @@ def test_register_patches_only_the_drifted_fields(env: None) -> None:
         agent_id, result = register(client, DENTAL)
     assert agent_id == "A"
     assert list(result.update) == ["phone_number"]
-    assert state["patched"] == {"phone_number": "sip:appointment-dental@sip.vapi.ai"}
+    assert state["patched"] == {"phone_number": "sip:example-dental@sip.vapi.ai"}
 
 
 def test_register_matches_on_customer_agent_id_not_display_name(env: None) -> None:
@@ -404,9 +406,13 @@ from coval_bench.mocktools.codecs import (  # noqa: E402
     codec_for,
 )
 from coval_bench.platform_assets import (  # noqa: E402
+    RETELL_LLM_FIELDS,
     TELNYX_SECRETS,
+    RetellClient,
     TelnyxClient,
+    prepare_retell,
     prepare_telnyx,
+    retell_number,
     sip_subdomain,
 )
 
@@ -425,6 +431,33 @@ TELNYX_LIVE: dict[str, Any] = {
     "tools": [{"type": "hangup", "shared": True, "tool_id": "tool-1"}],
 }
 
+RETELL_AGENT: dict[str, Any] = {
+    "agent_id": "agent_1",
+    "agent_name": "Retell Dental",
+    "version": 4,
+    "is_published": False,
+    "response_engine": {"type": "retell-llm", "llm_id": "llm_1", "version": None},
+    "voice_id": "11labs-Cimo",
+    "voice_model": "eleven_flash_v2",
+    "language": "en-US",
+    "stt_mode": "fast",
+    "post_call_analysis_model": None,
+}
+
+RETELL_LLM: dict[str, Any] = {
+    "llm_id": "llm_1",
+    "version": 2,
+    "model": "gpt-4.1",
+    "model_temperature": 0,
+    "general_prompt": "You are the front desk.",
+    "begin_message": "Thanks for calling BrightSmile.",
+    "general_tools": [{"type": "end_call", "name": "end_call", "description": "End the call."}],
+}
+
+RETELL_NUMBER = "+14045550142"
+RETELL_DIAL = f"sip:{RETELL_NUMBER}@sip.retellai.com"
+RETELL_ROUTE = [{"agent_id": "agent_1", "agent_version": "latest", "weight": 1}]
+
 
 @dataclass(frozen=True)
 class Case:
@@ -442,6 +475,8 @@ class Case:
     pins: dict[str, Any]
     wraps_in_data: bool
     echo: Any = None
+    update_path: str | None = None
+    view: dict[str, Any] | None = None
 
 
 CASES = [
@@ -463,7 +498,7 @@ CASES = [
         env={
             "TELNYX_DENTAL_ASSISTANT_ID": "assistant-1",
             "TELNYX_API_KEY": "telnyx-key",
-            "TELNYX_DENTAL_DIAL_TARGET": "sip:dental@coval-bench-dental.sip.telnyx.com",
+            "TELNYX_DENTAL_DIAL_TARGET": "sip:dental@example-dental.sip.telnyx.com",
             "OPENAI_API_KEY": "openai-key",
             "ELEVENLABS_API_KEY": "eleven-key",
         },
@@ -506,6 +541,33 @@ CASES = [
             ],
         },
     ),
+    Case(
+        key="retell-dental",
+        env={
+            "RETELL_DENTAL_AGENT_ID": "agent_1",
+            "RETELL_API_KEY": "retell-key",
+            "RETELL_DENTAL_DIAL_TARGET": RETELL_DIAL,
+        },
+        live=RETELL_AGENT,
+        agent_path="/get-agent/agent_1",
+        update_method="PATCH",
+        update_path="/update-retell-llm/llm_1",
+        tool_name=lambda t: t["name"],
+        tool_url=lambda t: t["url"],
+        secret_in_config=True,
+        expected_drift=frozenset({"general_tools"}),
+        pins={
+            "model": "gpt-4.1",
+            "model_temperature": 0,
+            "voice_model": "eleven_flash_v2",
+            "voice_id": "11labs-Cimo",
+            "stt_mode": "fast",
+            "language": "en-US",
+            "post_call_analysis_model": None,
+        },
+        wraps_in_data=False,
+        view={**RETELL_AGENT, **{k: RETELL_LLM[k] for k in RETELL_LLM_FIELDS}},
+    ),
 ]
 
 
@@ -519,7 +581,7 @@ def case(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> Cas
     return chosen
 
 
-CLIENTS: dict[str, Any] = {"vapi": VapiClient, "telnyx": TelnyxClient}
+CLIENTS: dict[str, Any] = {"vapi": VapiClient, "telnyx": TelnyxClient, "retell": RetellClient}
 
 
 def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
@@ -539,6 +601,21 @@ def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
             echoed = case.echo(state["patched"]) if case.echo else state["patched"]
             state["live"] = {**case.live, **echoed}
             return httpx.Response(200, json=agent(state["live"]))
+        if request.url.path == "/get-retell-llm/llm_1" and request.method == "GET":
+            return httpx.Response(200, json=state.get("llm", RETELL_LLM))
+        if request.url.path == "/update-retell-llm/llm_1":
+            state["patched"] = json.loads(request.content)
+            state["llm"] = {**state.get("llm", RETELL_LLM), **state["patched"]}
+            return httpx.Response(200, json=state["llm"])
+        if request.url.path == "/update-agent/agent_1":
+            state["agent_patched"] = json.loads(request.content)
+            state["live"] = {**state.get("live", case.live), **state["agent_patched"]}
+            return httpx.Response(200, json=state["live"])
+        if request.url.path == f"/get-phone-number/{RETELL_NUMBER}":
+            return httpx.Response(200, json={"inbound_agents": state["route"]})
+        if request.url.path == f"/update-phone-number/{RETELL_NUMBER}":
+            state["route"] = json.loads(request.content)["inbound_agents"]
+            return httpx.Response(200, json={"inbound_agents": state["route"]})
         if request.url.path == "/v2/integration_secrets" and request.method == "GET":
             return httpx.Response(200, json={"data": [{"identifier": i} for i in state["secrets"]]})
         if request.url.path == "/v2/integration_secrets":
@@ -560,8 +637,9 @@ def _platform_client(case: Case, state: dict[str, Any]) -> Any:  # noqa: ANN401
         return httpx.Response(404, text=request.url.path)
 
     state.setdefault("secrets", list(TELNYX_SECRETS))
-    state.setdefault("sub", "coval-bench-dental")
+    state.setdefault("sub", "example-dental")
     state.setdefault("recv", "from_anyone")
+    state.setdefault("route", RETELL_ROUTE)
     return CLIENTS[spec.platform]("key", platform.api_base, transport=httpx.MockTransport(handler))
 
 
@@ -605,7 +683,7 @@ def test_every_platform_pins_what_its_row_declares(case: Case) -> None:
 
 def test_plan_flags_exactly_the_drift_on_the_live_agent(case: Case) -> None:
     spec = spec_for(case.key)
-    result = plan(case.live, desired(spec, BASE), platform_for(spec).canon)
+    result = plan(case.view or case.live, desired(spec, BASE), platform_for(spec).canon)
     assert set(result.update) == set(case.expected_drift)
 
 
@@ -618,7 +696,7 @@ def test_dry_run_reports_without_writing_then_apply_converges(case: Case) -> Non
         assert set(preview.update) == set(case.expected_drift)
         assert all(method == "GET" for method, _ in state["calls"])
         applied = apply(client, spec, wanted)
-        assert (case.update_method, case.agent_path) in state["calls"]
+        assert (case.update_method, case.update_path or case.agent_path) in state["calls"]
         assert set(applied.update) == set(case.expected_drift)
         assert drift(client, spec, BASE) == []
 
@@ -664,12 +742,12 @@ def test_telnyx_correlation_rides_in_preset_fields_the_model_cannot_see(telnyx_e
 @pytest.mark.parametrize(
     "target",
     [
-        "sip:dental@coval-bench-dental.sip.telnyx.com",
-        "SIP:x@Coval-Bench-Dental.sip.telnyx.com:5060",
+        "sip:dental@example-dental.sip.telnyx.com",
+        "SIP:x@Example-Dental.sip.telnyx.com:5060",
     ],
 )
 def test_sip_subdomain_is_read_off_the_dial_target(target: str) -> None:
-    assert sip_subdomain(target) == "coval-bench-dental"
+    assert sip_subdomain(target) == "example-dental"
 
 
 @pytest.mark.parametrize(
@@ -690,13 +768,13 @@ def test_telnyx_prepare_lists_missing_secrets_and_subdomain_then_creates_only_th
         assert pending == [
             "integration_secret:coval-bench-elevenlabs",
             "integration_secret:coval-bench-mock",
-            "sip_subdomain:texml-1=coval-bench-dental:from_anyone",
+            "sip_subdomain:texml-1=example-dental:from_anyone",
         ]
         assert state["secrets"] == ["coval", "coval-bench-openai"] and state["sub"] is None
         assert prepare_telnyx(client, spec, False) == pending
         assert prepare_telnyx(client, spec, False) == []
     assert set(state["secrets"]) == {"coval", *TELNYX_SECRETS}
-    assert state["sub"] == "coval-bench-dental"
+    assert state["sub"] == "example-dental"
 
 
 def test_telnyx_prepare_refuses_a_foreign_client(telnyx_env: Case) -> None:
@@ -720,10 +798,10 @@ def test_telnyx_client_updates_with_post_as_the_reference_documents() -> None:
 
 def test_telnyx_prepare_reopens_a_subdomain_locked_to_own_connections(telnyx_env: Case) -> None:
     spec = spec_for("telnyx-dental")
-    state: dict[str, Any] = {"sub": "coval-bench-dental", "recv": "only_my_connections"}
+    state: dict[str, Any] = {"sub": "example-dental", "recv": "only_my_connections"}
     with _platform_client(telnyx_env, state) as client:
         assert prepare_telnyx(client, spec, True) == [
-            "sip_subdomain:texml-1=coval-bench-dental:from_anyone"
+            "sip_subdomain:texml-1=example-dental:from_anyone"
         ]
         prepare_telnyx(client, spec, False)
         assert prepare_telnyx(client, spec, False) == []
@@ -738,3 +816,189 @@ def test_telnyx_canon_ignores_what_the_server_adds_to_tools(telnyx_env: Case) ->
     assert TELNYX_CANON["tools"](echoed) == [tool]
     assert TELNYX_CANON["tool_ids"](None) == []
     assert TELNYX_CANON["tool_ids"](["t"]) == ["t"]
+
+
+# --- retell only: the agent and its LLM are two objects --------------------
+
+
+@pytest.fixture
+def retell_env(monkeypatch: pytest.MonkeyPatch) -> Case:
+    chosen = next(c for c in CASES if c.key == "retell-dental")
+    for name, value in chosen.env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("MOCK_TOOLS_SECRET", SECRET)
+    return chosen
+
+
+def test_retell_get_agent_merges_the_llm_fields_the_agent_only_points_at(
+    retell_env: Case,
+) -> None:
+    state: dict[str, Any] = {}
+    with _platform_client(retell_env, state) as client:
+        live = client.get_agent("agent_1")
+    assert state["calls"] == [("GET", "/get-agent/agent_1"), ("GET", "/get-retell-llm/llm_1")]
+    assert live["voice_id"] == "11labs-Cimo"
+    assert live["general_prompt"] == "You are the front desk."
+    assert live["general_tools"] == RETELL_LLM["general_tools"]
+    assert live["version"] == RETELL_AGENT["version"]
+
+
+def test_retell_apply_patches_only_the_llm_when_only_tools_drift(retell_env: Case) -> None:
+    spec = spec_for("retell-dental")
+    state: dict[str, Any] = {}
+    with _platform_client(retell_env, state) as client:
+        apply(client, spec, desired(spec, BASE))
+    assert [path for _, path in state["calls"]] == [
+        "/get-agent/agent_1",
+        "/get-retell-llm/llm_1",
+        f"/get-phone-number/{RETELL_NUMBER}",
+        "/update-retell-llm/llm_1",
+    ]
+    assert set(state["patched"]) == {"general_tools"}
+    assert len(state["patched"]["general_tools"]) == 5
+    assert "agent_patched" not in state
+
+
+def test_retell_update_routes_each_field_to_its_owner(retell_env: Case) -> None:
+    state: dict[str, Any] = {}
+    with _platform_client(retell_env, state) as client:
+        merged = client.update_agent("agent_1", {"general_tools": [], "voice_id": "11labs-Kate"})
+    assert state["patched"] == {"general_tools": []}
+    assert state["agent_patched"] == {"voice_id": "11labs-Kate"}
+    assert merged["general_tools"] == [] and merged["voice_id"] == "11labs-Kate"
+    assert {"general_tools", "general_prompt", "begin_message"} <= RETELL_LLM_FIELDS
+
+
+def test_retell_refuses_an_agent_that_does_not_answer_with_a_retell_llm(retell_env: Case) -> None:
+    engine = {"type": "conversation-flow", "conversation_flow_id": "cf_1"}
+    state: dict[str, Any] = {"live": {**RETELL_AGENT, "response_engine": engine}}
+    with (
+        _platform_client(retell_env, state) as client,
+        pytest.raises(SyncError, match="'conversation-flow'; only retell-llm"),
+    ):
+        client.get_agent("agent_1")
+
+
+def test_retell_follows_the_llm_version_the_agent_pins(retell_env: Case) -> None:
+    engine = {**RETELL_AGENT["response_engine"], "version": 3}
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "retell-llm" in request.url.path:
+            seen.append(dict(request.url.params))
+            return httpx.Response(200, json=RETELL_LLM)
+        return httpx.Response(200, json={**RETELL_AGENT, "response_engine": engine})
+
+    transport = httpx.MockTransport(handler)
+    with RetellClient("k", "https://api.retellai.com", transport=transport) as client:
+        client.get_agent("agent_1")
+        client.update_agent("agent_1", {"general_tools": []})
+    assert seen == [{"version": "3"}, {"version": "3"}]
+
+
+def test_retell_tools_speak_no_filler_and_never_retry(retell_env: Case) -> None:
+    (tool, *_) = desired(spec_for("retell-dental"), BASE)["general_tools"]
+    assert tool["type"] == "custom" and tool["method"] == "POST"
+    assert tool["args_at_root"] is True
+    assert tool["speak_during_execution"] is False
+    assert tool["max_retry"] == 0
+    assert tool["headers"] == {
+        "X-Mock-Tools-Key": SECRET,
+        "X-Coval-Simulation-Id": "{{coval-simulation-id}}",
+        "X-Coval-Caller-Number": "{{user_number}}",
+    }
+
+
+def test_retell_apply_sends_each_owner_only_what_drifted(retell_env: Case) -> None:
+    spec = spec_for("retell-dental")
+    state: dict[str, Any] = {"live": {**RETELL_AGENT, "voice_model": "eleven_turbo_v2"}}
+    with _platform_client(retell_env, state) as client:
+        result = apply(client, spec, desired(spec, BASE))
+    assert set(result.update) == {"general_tools", "voice_model"}
+    assert set(state["patched"]) == {"general_tools"}
+    assert state["agent_patched"] == {"voice_model": "eleven_flash_v2"}
+
+
+def test_retell_refuses_a_multi_state_llm(retell_env: Case) -> None:
+    llm = {**RETELL_LLM, "states": [{"name": "book", "state_prompt": "Book.", "tools": []}]}
+    state: dict[str, Any] = {"llm": llm}
+    with (
+        _platform_client(retell_env, state) as client,
+        pytest.raises(SyncError, match="has 1 states"),
+    ):
+        client.get_agent("agent_1")
+
+
+def test_retell_prepare_reports_then_binds_the_number_to_the_newest_draft(
+    retell_env: Case,
+) -> None:
+    spec = spec_for("retell-dental")
+    state: dict[str, Any] = {"route": []}
+    with _platform_client(retell_env, state) as client:
+        pending = prepare_retell(client, spec, True)
+        assert pending == [f"route:{RETELL_NUMBER}=agent_1@latest"]
+        assert state["route"] == []
+        assert prepare_retell(client, spec, False) == pending
+        assert prepare_retell(client, spec, False) == []
+    assert state["route"] == RETELL_ROUTE
+
+
+def test_retell_prepare_flags_a_number_pinned_to_a_published_version(retell_env: Case) -> None:
+    pinned = [{"agent_id": "agent_1", "agent_version": 3, "weight": 1}]
+    with _platform_client(retell_env, {"route": pinned}) as client:
+        assert prepare_retell(client, spec_for("retell-dental"), True) == [
+            f"route:{RETELL_NUMBER}=agent_1@latest"
+        ]
+
+
+def test_retell_prepare_never_repoints_someone_elses_number(retell_env: Case) -> None:
+    theirs = [{"agent_id": "agent_9", "agent_version": "latest", "weight": 1}]
+    with (
+        _platform_client(retell_env, {"route": theirs}) as client,
+        pytest.raises(SyncError, match="agent_9.*not ours to repoint"),
+    ):
+        prepare_retell(client, spec_for("retell-dental"), True)
+
+
+@pytest.mark.parametrize(
+    "target", ["sip:+14045550142@sip.retellai.com", "SIP:+14045550142@Sip.RetellAI.com:5060"]
+)
+def test_retell_number_is_read_off_the_sip_dial_target(target: str) -> None:
+    assert retell_number(target) == "+14045550142"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "+14045550142",
+        "sip:dental@sip.retellai.com",
+        "sip:+14045550142@sip.vapi.ai",
+        "sip:14045550142@sip.retellai.com",
+    ],
+)
+def test_retell_number_refuses_anything_else(target: str) -> None:
+    with pytest.raises(SyncError):
+        retell_number(target)
+
+
+def test_launch_body_selects_exact_cases_instead_of_a_sample(env: None) -> None:
+    body = launch_body("A" * 22, DENTAL, "P" * 22, "T" * 8, (), 1, 42, ("C" * 22,))
+    assert body["options"] == {
+        "iteration_count": 1,
+        "concurrency": 1,
+        "test_case_ids": ["C" * 22],
+    }
+
+
+def test_retell_apply_writes_nothing_when_the_agent_is_rejected(retell_env: Case) -> None:
+    spec = spec_for("retell-dental")
+    llm = {**RETELL_LLM, "states": [{"name": "book", "state_prompt": "Book.", "tools": []}]}
+    state: dict[str, Any] = {"llm": llm, "route": []}
+    with (
+        _platform_client(retell_env, state) as client,
+        pytest.raises(SyncError, match="has 1 states"),
+    ):
+        apply(client, spec, desired(spec, BASE))
+    assert state["route"] == []
+    assert "patched" not in state and "agent_patched" not in state
+    assert all(method == "GET" for method, _ in state["calls"])

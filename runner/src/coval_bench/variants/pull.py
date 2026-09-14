@@ -204,7 +204,10 @@ def pull_contract(
             raise click.ClickException(str(exc)) from exc
 
         # The live agent config is the platform artifact, not a contract file.
-        _write(out_root / "platforms" / f"{platform}-agent.json", config.raw)
+        _write(
+            out_root / "platforms" / f"{platform}-agent.json",
+            redact_identifiers(config.raw, stripped),
+        )
         if redacted_paths:
             click.echo(
                 f"  redacted {len(redacted_paths)} secret field(s): " + ", ".join(redacted_paths)

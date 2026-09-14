@@ -300,9 +300,19 @@ async def test_every_contract_tool_is_answerable(
 async def test_an_unknown_platform_names_the_known_set(
     client: AsyncClient, mock_app: FastAPI
 ) -> None:
-    response = await client.post("/mock/retell/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    response = await client.post(
+        "/mock/synthflow/lookup_patient", json={"phone": PHONE}, headers=AUTH
+    )
     assert response.status_code == 404
-    assert "known: generic, telnyx, vapi" in response.json()["detail"]
+    assert "known: generic, retell, telnyx, vapi" in response.json()["detail"]
+
+
+async def test_retell_posts_the_arguments_as_the_whole_body(
+    client: AsyncClient, mock_app: FastAPI
+) -> None:
+    response = await client.post("/mock/retell/lookup_patient", json={"phone": PHONE}, headers=AUTH)
+    assert response.status_code == 200
+    assert response.json()["patient_name"] == "Marcus Lee"
 
 
 async def test_a_body_platform_rejects_the_path_shape_with_a_hint(
