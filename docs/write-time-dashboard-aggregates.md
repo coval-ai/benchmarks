@@ -63,8 +63,12 @@ so retries do not double-count. Synchronous normalized backfills use the same
 lock order and publish affected hours after committing their source updates.
 
 Summary publication uses a separate advisory lock and can coalesce running
-siblings. Normalized summary failure is independent of legacy maintenance and
-run outcome. Scheduled reconciliation drains pending source requests and missing
+siblings. The STT/TTS completion hook publishes only after succeeded or partial
+runs. Failed runs keep their queued source repairs for hourly maintenance without
+waiting for summary publication. If the last sibling fails after earlier siblings
+deferred publication, the hourly job publishes their results. Normalized summary
+failure is independent of legacy maintenance and run outcome.
+Scheduled reconciliation drains pending source requests and missing
 or dirty hours, then refreshes summaries even if another maintenance stage fails.
 Each phase has a time limit; completed hour repairs remain committed. A failed
 stage makes the maintenance command fail so it can be retried.
@@ -75,6 +79,12 @@ transaction. Missing, uninitialized, or incompatible storage returns
 with a generation. Summary and averaged-timeline responses bypass the old TTL
 cache. The frontend indicates when saved data is stale. Summary snapshots become
 stale after two hours, allowing two hourly maintenance intervals.
+
+Averaged timelines require every complete hour to have a compatible publication
+record, including hours with no samples. Missing records still return 503: run
+completion queues a source repair before the rebuild marks its hour dirty, so a
+missing hour is not proof that no data exists. Maintenance alerts cover failed
+executions and no successful execution within 90 minutes.
 
 The 24h timeline retains per-run points and local zoom. The 7d view uses hourly
 averages; 30d combines those sufficient statistics into four-hour averages. Zoom
@@ -101,15 +111,23 @@ uses the current time so old observations expire without new ingestion.
 The infrastructure change defines a database-only Cloud Run job every hour,
 with a 600-second timeout, one retry, and image updates through the existing
 runner image workflow. Its scheduler is created paused.
+The existing alerting module pages on any failed execution in the last hour and
+on no successful execution within 90 minutes. The heartbeat also fires before
+the first successful run, so complete initialization and resume the scheduler as
+part of the same rollout; a deliberately paused job will continue to alert.
 
 1. Merge and apply the migration-only PR #645. Then retarget application PR #634
    to `main`, merge, and deploy compatible writers with normalized reads still
-   disabled. Views are created without initial population.
+   disabled. Views are created without initial population. Deploy
+   [frontend PR #95](https://github.com/coval-ai/benchmarks-web/pull/95) alongside
+   or immediately afterward: legacy 7d/30d timelines also switch to averages,
+   independently of the normalized read flag.
 2. If writers ran before the migration, repair their skipped source buckets as
    described above. Run maintenance to initialize source/hour coverage and all
    summary views.
 3. Apply the reviewed infrastructure plan through Atlantis, install the compatible
    runner image, and resume the scheduler. Confirm successful recurring refreshes.
+   Verify the `dashboard-aggregates` failure and 90-minute heartbeat alerts.
 4. Verify production read latency and refresh load, then enable the normalized
    read flag. Disable it to return to legacy reads if needed.
 
