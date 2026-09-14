@@ -9,9 +9,11 @@ read cutover have not been applied to production.
 Migration `20260914_0034` creates the base saved aggregate tables and views in
 [PR #645](https://github.com/coval-ai/benchmarks/pull/645); the original aggregate
 application is in [PR #634](https://github.com/coval-ai/benchmarks/pull/634).
-The separate [BENCH-906](https://linear.app/coval/issue/BENCH-906) change adds
-migration `20260914_0035` and compatible metric-ID readers and writers. The
-original 0034 migration remains unchanged.
+Migration `20260914_0035` is isolated in
+[PR #650](https://github.com/coval-ai/benchmarks/pull/650). Compatible metric-ID
+readers, writers, and regression tests are in
+[PR #649](https://github.com/coval-ai/benchmarks/pull/649), stacked on that
+migration branch. The original 0034 migration remains unchanged.
 
 | Object | Purpose |
 | --- | --- |
@@ -119,6 +121,11 @@ uses the current time so old observations expire without new ingestion.
 The infrastructure change defines a database-only Cloud Run job every hour,
 with a 600-second timeout, one retry, and image updates through the existing
 runner image workflow. Its scheduler is created paused.
+
+Merge order is #645 (tables), #634 (aggregate application), #650 (metric-ID
+migration), then #649 (metric-ID application). Retarget each dependent PR to
+`main` after its prerequisites merge. Merging a migration PR does not apply it
+to the database.
 
 1. Apply the unchanged 0034 prerequisite migration if needed. Disable normalized
    reads and pause/drain aggregate maintenance and backfill workers before
