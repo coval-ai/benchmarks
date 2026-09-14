@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat-completions accumulator, generic client, and dental agent tests."""
+"""Chat-completions accumulator, generic client, and contract agent tests."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from coval_bench.llm.dental import load_dental_agent
+from coval_bench.llm.agent import load_agent
 from coval_bench.llm.openai_compat import (
     AuthError,
     OpenAICompatClient,
@@ -123,7 +123,7 @@ async def test_client_classifies_http_errors(status: int, error: type[Exception]
         await client.aclose()
 
 
-def test_dental_agent_carries_the_contract_prompt_and_tools() -> None:
-    agent = load_dental_agent()
-    assert "BrightSmile Dental" in agent.system_prompt
-    assert "lookup_patient" in {tool["function"]["name"] for tool in agent.tools}
+def test_bank_agent_carries_the_contract_prompt_and_no_tools() -> None:
+    agent = load_agent("bank")
+    assert "Ultra Bank Bot" in agent.system_prompt
+    assert agent.tools == ()

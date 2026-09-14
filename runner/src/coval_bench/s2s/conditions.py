@@ -31,6 +31,7 @@ __all__ = [
     "DATASET_ID_INSTR_CUST_SERVICE",
     "DATASET_ID_INSTR_HEALTH",
     "DATASET_ID_INSTR_HOME_SERVICE",
+    "DATASET_ID_LLM_BANK",
     "DATASET_ID_LLM_DENTAL",
     "DATASET_ID_MULTITURN",
     "DATASET_ID_MULTITURN_NOISY",
@@ -41,6 +42,7 @@ __all__ = [
     "FAMILY_INSTR_CUST_SERVICE",
     "FAMILY_INSTR_HEALTH",
     "FAMILY_INSTR_HOME_SERVICE",
+    "FAMILY_LLM_BANK",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
     "Condition",
@@ -74,6 +76,7 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # happy-path on purpose: pooling two populations under one dataset id would break
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
+# The dental scenario over text. Frozen: the LLM board moved to the bank suite.
 FAMILY_LLM_DENTAL = "llm-dental"
 # One family per industry so their instruction-adherence numbers are never
 # pooled together — each is its own board on the dashboard.
@@ -84,6 +87,9 @@ FAMILY_INSTR_CUST_SERVICE = "instruction-adherence-cust-service"
 # the default workspace. Only the clean caller is scheduled; the harder personas
 # exist in Coval but are not ingested until they get a dataset id here.
 FAMILY_BANK = "s2s-bank"
+# The same bank scenario over text, through the LLM proxy: the same test set and
+# judge as FAMILY_BANK, but its own population, never pooled with the voice rows.
+FAMILY_LLM_BANK = "llm-bank"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
 # set, split by caller condition so background noise never pools into the clean
@@ -109,6 +115,7 @@ DATASET_ID_INSTR_HOME_SERVICE = "instruction-adherence-home-service-v1"
 DATASET_ID_INSTR_CUST_SERVICE = "instruction-adherence-cust-service-v1"
 
 DATASET_ID_BANK = "s2s-bank-v1"
+DATASET_ID_LLM_BANK = "llm-bank-v1"
 
 # Unlisted pairs are a configuration error, not a silent skip.
 DATASET_IDS: dict[tuple[str, Condition], str | None] = {
@@ -129,6 +136,9 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_BANK, Condition.CLEAN): DATASET_ID_BANK,
     (FAMILY_BANK, Condition.NOISY): None,
     (FAMILY_BANK, Condition.ACCENTED): None,
+    (FAMILY_LLM_BANK, Condition.CLEAN): DATASET_ID_LLM_BANK,
+    (FAMILY_LLM_BANK, Condition.NOISY): None,
+    (FAMILY_LLM_BANK, Condition.ACCENTED): None,
 }
 
 
@@ -230,6 +240,14 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     DATASET_ID_BANK: DatasetMetrics(
         required=Metric.V2V,
         optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
+    ),
+    # Text has no audio to anchor on, so the same expected-behaviors fraction that
+    # is optional for the voice rows is the anchor here; TTFT comes from the
+    # proxy's turn log rather than from Coval.
+    DATASET_ID_LLM_BANK: DatasetMetrics(
+        benchmark=Benchmark.LLM,
+        required=Metric.INSTRUCTION_FOLLOWING,
+        local=frozenset({Metric.TTFT}),
     ),
 }
 

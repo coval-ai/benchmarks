@@ -194,15 +194,13 @@ async def test_s2s_leaderboard_uses_the_bank_primary_dataset(
     ]
 
 
-async def test_ttft_llm_uses_the_dental_primary_dataset(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    """The LLM board reads the text dental dataset; rows under other datasets stay out."""
-    dental_run = await _insert_run(postgresql, dataset_id="llm-dental-v1")
+async def test_ttft_llm_uses_the_bank_primary_dataset(client: AsyncClient, postgresql: Any) -> None:
+    """The LLM board reads the text bank dataset; rows under other datasets stay out."""
+    bank_run = await _insert_run(postgresql, dataset_id="llm-bank-v1")
     other_run = await _insert_run(postgresql, dataset_id="llm-scratch-v1")
     await _insert_result(
         postgresql,
-        dental_run,
+        bank_run,
         provider="phonely",
         model="phonely-agent",
         metric_type="TTFT",
@@ -229,7 +227,7 @@ async def test_ttft_llm_uses_the_dental_primary_dataset(
     assert [(e["provider"], e["model"]) for e in response.json()["entries"]] == expected
 
     for run_id, dataset_id, provider in (
-        (dental_run, "llm-dental-v1", "phonely"),
+        (bank_run, "llm-bank-v1", "phonely"),
         (other_run, "llm-scratch-v1", "acme"),
     ):
         await _insert_normalized_metric(
