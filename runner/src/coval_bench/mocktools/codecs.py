@@ -85,6 +85,10 @@ def _rendered(value: object) -> str | None:
 
 
 def _coval_headers(headers: Mapping[str, str]) -> Correlation:
+    for header in (SIMULATION_HEADER, CALLER_HEADER):
+        raw = headers.get(header)
+        if raw and _rendered(raw) is None:
+            logger.warning("mock_tool_header_unrendered", header=header, value=raw)
     simulation_id = _rendered(headers.get(SIMULATION_HEADER))
     caller_number = _rendered(headers.get(CALLER_HEADER))
     if simulation_id:

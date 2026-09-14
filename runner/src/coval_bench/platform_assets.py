@@ -352,11 +352,13 @@ RETELL_LLM_FIELDS = frozenset(
 )
 RETELL_CALLER_TEMPLATE = "{{user_number}}"
 RETELL_ROUTE_VERSION = "latest"
+RETELL_VOICE_ID = "11labs-Cimo"
 
 RETELL_PINS: dict[str, Pin] = {
     "model": lambda stack: stack.llm.model,
     "model_temperature": lambda stack: stack.llm.temperature,
     "voice_model": lambda stack: stack.tts.model,
+    "voice_id": lambda _stack: RETELL_VOICE_ID,
     "stt_mode": lambda _stack: "fast",
     "language": lambda _stack: "en-US",
     "post_call_analysis_model": (
@@ -649,11 +651,10 @@ def apply(
     client: AgentClient, spec: PlatformAgentSpec, wanted: dict[str, Any], *, dry_run: bool = False
 ) -> Plan:
     platform = platform_for(spec)
-    prepared = platform.prepare(client, spec, dry_run) if platform.prepare else []
     agent_id = spec.agent_id.resolve()
     live = client.get_agent(agent_id)
     result = plan(live, wanted, platform.canon)
-    result.prepared = prepared
+    result.prepared = platform.prepare(client, spec, dry_run) if platform.prepare else []
     if result.update and not dry_run:
         client.update_agent(agent_id, patch_body(live, {p: wanted[p] for p in result.update}))
     return result

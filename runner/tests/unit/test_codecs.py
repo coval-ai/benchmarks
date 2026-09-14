@@ -281,9 +281,18 @@ def test_vapi_without_a_header_logs_the_envelope_shape_and_not_its_values(
     assert "call_9" not in repr(kwargs)
 
 
-def test_an_unrendered_header_template_is_not_a_simulation_id() -> None:
+def test_an_unrendered_header_template_is_not_a_simulation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = MagicMock()
+    monkeypatch.setattr(codecs, "logger", fake)
     headers = {"x-coval-simulation-id": "{{coval-simulation-id}}", "x-coval-caller-number": "+1404"}
     found = GENERIC.correlate({}, headers)
+    fake.warning.assert_called_once_with(
+        "mock_tool_header_unrendered",
+        header="x-coval-simulation-id",
+        value="{{coval-simulation-id}}",
+    )
     assert (found.simulation_id, found.caller_number, found.source) == (
         None,
         "+1404",

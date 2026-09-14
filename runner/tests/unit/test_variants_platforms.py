@@ -11,7 +11,13 @@ from typing import Any
 import httpx
 import pytest
 
-from coval_bench.variants.platforms import FETCHERS, fetch_platform, read_retell, retell_engine
+from coval_bench.variants.platforms import (
+    FETCHERS,
+    fetch_platform,
+    read_retell,
+    redact_identifiers,
+    retell_engine,
+)
 
 Handler = Any
 
@@ -125,3 +131,18 @@ def test_read_retell_refuses_a_multi_state_llm() -> None:
         pytest.raises(RuntimeError, match="has 1 states; their prompts and tools stay live"),
     ):
         read_retell(lambda path, params: client.get(path, params=params).json(), "agent_1")
+
+
+def test_the_platform_dump_hides_retell_object_ids_but_keeps_the_voice() -> None:
+    found: list[str] = []
+    out = redact_identifiers({"agent": RETELL_AGENT, "llm": RETELL_LLM}, found)
+    assert out["agent"]["agent_id"] == "[REDACTED]"
+    assert out["agent"]["response_engine"]["llm_id"] == "[REDACTED]"
+    assert out["llm"]["llm_id"] == "[REDACTED]"
+    assert out["agent"]["voice_id"] == "11labs-Adrian"
+    assert set(found) == {
+        "agent.agent_id",
+        "agent.response_engine.llm_id",
+        "llm.llm_id",
+        "llm.general_tools[0].name",
+    }

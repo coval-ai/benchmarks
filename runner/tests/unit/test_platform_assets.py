@@ -436,7 +436,7 @@ RETELL_AGENT: dict[str, Any] = {
     "version": 4,
     "is_published": False,
     "response_engine": {"type": "retell-llm", "llm_id": "llm_1", "version": None},
-    "voice_id": "11labs-Adrian",
+    "voice_id": "11labs-Cimo",
     "voice_model": "eleven_flash_v2",
     "language": "en-US",
     "stt_mode": "fast",
@@ -558,6 +558,7 @@ CASES = [
             "model": "gpt-4.1",
             "model_temperature": 0,
             "voice_model": "eleven_flash_v2",
+            "voice_id": "11labs-Cimo",
             "stt_mode": "fast",
             "language": "en-US",
             "post_call_analysis_model": None,
@@ -834,7 +835,7 @@ def test_retell_get_agent_merges_the_llm_fields_the_agent_only_points_at(
     with _platform_client(retell_env, state) as client:
         live = client.get_agent("agent_1")
     assert state["calls"] == [("GET", "/get-agent/agent_1"), ("GET", "/get-retell-llm/llm_1")]
-    assert live["voice_id"] == "11labs-Adrian"
+    assert live["voice_id"] == "11labs-Cimo"
     assert live["general_prompt"] == "You are the front desk."
     assert live["general_tools"] == RETELL_LLM["general_tools"]
     assert live["version"] == RETELL_AGENT["version"]
@@ -846,9 +847,9 @@ def test_retell_apply_patches_only_the_llm_when_only_tools_drift(retell_env: Cas
     with _platform_client(retell_env, state) as client:
         apply(client, spec, desired(spec, BASE))
     assert [path for _, path in state["calls"]] == [
-        f"/get-phone-number/{RETELL_NUMBER}",
         "/get-agent/agent_1",
         "/get-retell-llm/llm_1",
+        f"/get-phone-number/{RETELL_NUMBER}",
         "/update-retell-llm/llm_1",
     ]
     assert set(state["patched"]) == {"general_tools"}
@@ -859,10 +860,10 @@ def test_retell_apply_patches_only_the_llm_when_only_tools_drift(retell_env: Cas
 def test_retell_update_routes_each_field_to_its_owner(retell_env: Case) -> None:
     state: dict[str, Any] = {}
     with _platform_client(retell_env, state) as client:
-        merged = client.update_agent("agent_1", {"general_tools": [], "voice_id": "11labs-Cimo"})
+        merged = client.update_agent("agent_1", {"general_tools": [], "voice_id": "11labs-Kate"})
     assert state["patched"] == {"general_tools": []}
-    assert state["agent_patched"] == {"voice_id": "11labs-Cimo"}
-    assert merged["general_tools"] == [] and merged["voice_id"] == "11labs-Cimo"
+    assert state["agent_patched"] == {"voice_id": "11labs-Kate"}
+    assert merged["general_tools"] == [] and merged["voice_id"] == "11labs-Kate"
     assert {"general_tools", "general_prompt", "begin_message"} <= RETELL_LLM_FIELDS
 
 
@@ -975,3 +976,17 @@ def test_launch_body_selects_exact_cases_instead_of_a_sample(env: None) -> None:
         "concurrency": 1,
         "test_case_ids": ["C" * 22],
     }
+
+
+def test_retell_apply_writes_nothing_when_the_agent_is_rejected(retell_env: Case) -> None:
+    spec = spec_for("retell-dental")
+    llm = {**RETELL_LLM, "states": [{"name": "book", "state_prompt": "Book.", "tools": []}]}
+    state: dict[str, Any] = {"llm": llm, "route": []}
+    with (
+        _platform_client(retell_env, state) as client,
+        pytest.raises(SyncError, match="has 1 states"),
+    ):
+        apply(client, spec, desired(spec, BASE))
+    assert state["route"] == []
+    assert "patched" not in state and "agent_patched" not in state
+    assert all(method == "GET" for method, _ in state["calls"])

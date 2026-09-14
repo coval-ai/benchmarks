@@ -37,7 +37,9 @@ SECRET_KEY = re.compile(r"(api[_-]?key|[_-]key$|secret|token|password|bearer|aut
 # target is directly abusable, and the rest map the benchmark onto real
 # production objects. `display_name` and `voice_id` are deliberately absent,
 # being methodology a reader needs.
-IDENTIFIER_KEYS = frozenset({"id", "name", "customer_agent_id", "phone_number", "endpoint"})
+IDENTIFIER_KEYS = frozenset(
+    {"id", "agent_id", "llm_id", "name", "customer_agent_id", "phone_number", "endpoint"}
+)
 
 
 def redact_identifiers(node: Any, found: list[str], path: str = "") -> Any:  # noqa: ANN401
