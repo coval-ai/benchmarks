@@ -20,7 +20,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("tts-rt-v1", "tts-rt-v2")
 _VALID_VOICES = (
     "Maya",
     "Daniel",
@@ -59,8 +58,6 @@ class SonioxTTSProvider(TTSProvider):
     """Soniox TTS provider using WebSocket streaming (JSON frames, base64 audio)."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Soniox TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
             raise ValueError(f"Invalid Soniox TTS voice {voice!r}. Valid: {_VALID_VOICES}")
         self._model = model

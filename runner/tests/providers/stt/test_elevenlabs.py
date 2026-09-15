@@ -108,16 +108,6 @@ def test_provider_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invalid model
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid ElevenLabs model"):
-        ElevenLabsSTTProvider(api_key=SecretStr("k"), model="bad-model")
-
-
-# ---------------------------------------------------------------------------
 # Invalid sample rate
 # ---------------------------------------------------------------------------
 

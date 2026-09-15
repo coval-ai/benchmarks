@@ -254,11 +254,6 @@ async def test_azure_tts_stream_end_without_turn_end(fake_settings: Settings) ->
     result.audio_path.unlink()
 
 
-def test_azure_tts_invalid_model_raises(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Azure TTS model"):
-        AzureTTSProvider(fake_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_azure_tts_empty_voice_raises(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice name"):
         AzureTTSProvider(fake_settings, model="neural", voice="")

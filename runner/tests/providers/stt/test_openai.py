@@ -403,11 +403,6 @@ def test_openai_default_model_is_whisper() -> None:
     assert OpenAISTTProvider(api_key=SecretStr("test")).model == "gpt-realtime-whisper"
 
 
-def test_openai_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid OpenAI STT model"):
-        OpenAISTTProvider(api_key=SecretStr("test"), model="whisper-1")
-
-
 @pytest.mark.asyncio
 async def test_openai_session_update_carries_model(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes

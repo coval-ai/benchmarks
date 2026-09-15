@@ -20,7 +20,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _DEFAULT_WS_URL = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime"
-_VALID_MODELS = ("qwen3-tts-flash-realtime",)
 _VALID_VOICES = ("Cherry", "Ethan")
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
@@ -30,8 +29,6 @@ class AlibabaTTSProvider(TTSProvider):
     """Alibaba Cloud TTS provider using the DashScope realtime WebSocket (Qwen3-TTS-Flash)."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Alibaba TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
             raise ValueError(f"Invalid Alibaba TTS voice {voice!r}. Valid: {_VALID_VOICES}")
         self._model = model

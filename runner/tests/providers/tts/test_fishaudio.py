@@ -184,11 +184,6 @@ async def test_fishaudio_tts_ttfa_on_first_chunk(fishaudio_settings: Settings) -
     result.audio_path.unlink()
 
 
-def test_fishaudio_tts_invalid_model_raises(fishaudio_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Fish Audio TTS model"):
-        FishAudioTTSProvider(fishaudio_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_fishaudio_tts_missing_voice_raises(fishaudio_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         FishAudioTTSProvider(fishaudio_settings, model="s1", voice="")

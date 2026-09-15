@@ -45,7 +45,6 @@ from coval_bench.providers.stt._transcript_utils import (
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("gpt-realtime-whisper", "gpt-4o-transcribe", "gpt-4o-mini-transcribe")
 _WS_URL = "wss://api.openai.com/v1/realtime?intent=transcription"
 _INPUT_SAMPLE_RATE = 24000
 _READY_TIMEOUT_S = 30.0
@@ -62,8 +61,6 @@ class OpenAISTTProvider(STTProvider):
     """OpenAI Realtime API STT provider for the realtime transcription models."""
 
     def __init__(self, api_key: SecretStr, model: str = "gpt-realtime-whisper") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid OpenAI STT model {model!r}. Valid: {_VALID_MODELS}")
         self._api_key = api_key
         self._model = model
 

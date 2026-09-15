@@ -369,16 +369,6 @@ def test_build_websocket_url_flux_multi() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invalid model
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Deepgram model"):
-        DeepgramProvider(api_key=SecretStr("k"), model="nova-99")
-
-
-# ---------------------------------------------------------------------------
 # Failure path — empty event stream
 # ---------------------------------------------------------------------------
 

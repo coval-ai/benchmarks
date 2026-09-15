@@ -57,15 +57,9 @@ def _decode_event(raw: str | bytes) -> dict[str, Any]:
 class GeminiSTTProvider(STTProvider):
     """Gemini Live API streaming transcription provider."""
 
-    _VALID_MODELS = frozenset({"gemini-3.5-transcribe-live"})
-
     def __init__(
         self, api_key: SecretStr | None, model: str = "gemini-3.5-transcribe-live"
     ) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Gemini STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("gemini_api_key is required for the Gemini STT provider")
         self._api_key = api_key

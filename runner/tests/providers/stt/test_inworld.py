@@ -206,11 +206,6 @@ def test_provider_model() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Inworld STT model"):
-        InworldSTTProvider(api_key=SecretStr("k"), model="inworld-stt-preview")
-
-
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="inworld_api_key is required"):
         InworldSTTProvider(api_key=None)

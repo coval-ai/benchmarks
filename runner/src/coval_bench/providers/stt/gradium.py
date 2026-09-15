@@ -46,13 +46,7 @@ _FLUSH_WAIT_S = 2.0
 class GradiumSTTProvider(STTProvider):
     """Gradium streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"default"})
-
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Gradium STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._api_key = api_key
         self._model = model
 

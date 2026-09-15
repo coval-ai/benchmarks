@@ -78,16 +78,6 @@ def test_provider_model() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invalid model
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Smallest STT model"):
-        SmallestSTTProvider(api_key=SecretStr("k"), model="bad-model")
-
-
-# ---------------------------------------------------------------------------
 # Empty stream
 # ---------------------------------------------------------------------------
 

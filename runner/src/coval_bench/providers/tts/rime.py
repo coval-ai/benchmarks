@@ -31,8 +31,6 @@ _MODEL_SAMPLE_RATES: dict[str, int] = {
 class RimeTTSProvider(TTSProvider):
     """Rime TTS provider using WebSocket /ws3 JSON streaming."""
 
-    _VALID_MODELS = frozenset({"arcana", "coda", "mistv3"})
-
     def __init__(self, settings: Settings, model: str, voice: str | None) -> None:
         self._model = model
         self._voice = voice or "luna"
@@ -52,19 +50,6 @@ class RimeTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Rime /ws3 WebSocket and return a TTSResult."""
-        if not self._model_supported(self._model):
-            return TTSResult(
-                provider="rime",
-                model=self._model,
-                voice=self._voice,
-                ttfa_ms=None,
-                audio_path=None,
-                error=(
-                    f"Unsupported Rime model: {self._model}. "
-                    f"Valid models: {sorted(self._VALID_MODELS)}"
-                ),
-            )
-
         audio_chunks: list[bytes] = []
         start: float | None = None
         first_chunk_at: float | None = None

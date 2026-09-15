@@ -340,22 +340,6 @@ async def test_rime_empty_chunk_not_counted(fake_settings: Settings) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Model validation
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_rime_invalid_model(fake_settings: Settings) -> None:
-    """Unknown model returns error result without opening a WS connection."""
-    provider = RimeTTSProvider(fake_settings, model="mistv4", voice="luna")
-    result = await provider.synthesize("test")
-    assert result.error is not None
-    assert "Unsupported" in result.error
-    assert result.audio_path is None
-    assert result.ttfa_ms is None
-
-
-# ---------------------------------------------------------------------------
 # Voice fallback
 # ---------------------------------------------------------------------------
 

@@ -177,8 +177,6 @@ def test_zoom_requires_both_credentials(fake_api_key: SecretStr) -> None:
         ZoomSTTProvider(api_key=None, api_secret=SecretStr("s"))
     with pytest.raises(ValueError, match="zoom_api_secret"):
         ZoomSTTProvider(api_key=fake_api_key, api_secret=None)
-    with pytest.raises(ValueError, match="Invalid Zoom STT model"):
-        ZoomSTTProvider(api_key=fake_api_key, api_secret=SecretStr("s"), model="scribe-9000")
 
 
 @pytest.mark.asyncio

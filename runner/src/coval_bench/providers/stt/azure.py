@@ -51,16 +51,12 @@ _SPEECH_CONFIG = {
 class AzureSTTProvider(STTProvider):
     """Azure AI Speech real-time streaming STT provider (raw WebSocket)."""
 
-    _VALID_MODELS = frozenset({"default"})
-
     def __init__(
         self,
         api_key: SecretStr,
         model: str = "default",
         region: str | None = None,
     ) -> None:
-        if not self._model_supported(model):
-            raise ValueError(f"Invalid Azure model {model!r}. Valid: {sorted(self._VALID_MODELS)}")
         if region is None:
             raise ValueError("AzureSTTProvider requires region (set Settings.azure_region)")
         if api_key is None:

@@ -58,13 +58,7 @@ _ENGLISH_MODEL = "velma-2-stt-streaming-english-v2"
 class ModulateSTTProvider(STTProvider):
     """Modulate streaming STT provider."""
 
-    _VALID_MODELS = frozenset({_MULTILINGUAL_MODEL, _ENGLISH_MODEL})
-
     def __init__(self, api_key: SecretStr | None, model: str = _ENGLISH_MODEL) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Modulate model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("modulate_api_key is required for the Modulate STT provider")
         self._api_key = api_key

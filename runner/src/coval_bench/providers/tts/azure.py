@@ -61,13 +61,7 @@ _SYNTHESIS_CONTEXT = {
 class AzureTTSProvider(TTSProvider):
     """Azure AI Speech real-time streaming TTS provider (raw WebSocket)."""
 
-    _VALID_MODELS = frozenset({"neural", "dragon-hd-latest"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Azure TTS model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if not voice:
             raise ValueError("AzureTTSProvider requires a voice name (e.g. en-US-AvaNeural)")
         if settings.azure_api_key is None:

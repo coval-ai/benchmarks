@@ -195,11 +195,6 @@ def test_provider_model() -> None:
     assert make_provider().model == "daytona-stt"
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Guava STT model"):
-        GuavaSTTProvider(api_key=SecretStr("k"), model="whisper", base_url=_BASE_URL)
-
-
 def test_missing_base_url_raises() -> None:
     with pytest.raises(ValueError, match="guava_base_url is required"):
         GuavaSTTProvider(api_key=SecretStr("k"), base_url=None, domain=_DOMAIN)

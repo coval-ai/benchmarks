@@ -29,13 +29,7 @@ _OUTPUT_FORMAT = "pcm_24000"
 class SpeechifyTTSProvider(TTSProvider):
     """Speechify TTS provider over the REST streaming endpoint."""
 
-    _VALID_MODELS = frozenset({"simba-3.2", "simba-3.0"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in self._VALID_MODELS:
-            raise ValueError(
-                f"Unsupported Speechify model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
         self._voice = voice
 

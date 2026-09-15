@@ -74,13 +74,7 @@ _LAST_FRAMES_KEPT = 3
 class AtlasTTSProvider(TTSProvider):
     """Atlas TTS provider using the streaming WebSocket API (binary PCM frames)."""
 
-    _VALID_MODELS = frozenset(HTTP_MODELS)
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Atlas TTS model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
         self._voice = voice
 

@@ -70,13 +70,7 @@ def _error_text(msg: dict[str, Any]) -> str | None:
 class Reson8STTProvider(STTProvider):
     """Reson8 streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"realtime"})
-
     def __init__(self, api_key: SecretStr | None, model: str = "realtime") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Reson8 STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None or not api_key.get_secret_value().strip():
             raise ValueError("reson8_api_key is required for the Reson8 STT provider")
         self._api_key = api_key

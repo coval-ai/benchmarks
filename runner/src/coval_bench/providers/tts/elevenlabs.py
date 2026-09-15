@@ -36,14 +36,9 @@ _LAST_FRAMES_KEPT = 3
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over per-model WebSocket endpoints."""
 
-    _VALID_MODELS = frozenset({"eleven_v3_conversational", "eleven_flash_v2_5"})
     _DIALOGUE_MODELS = frozenset({"eleven_v3_conversational"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in self._VALID_MODELS:
-            raise ValueError(
-                f"Unsupported ElevenLabs model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
         self._voice = voice
 

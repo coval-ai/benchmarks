@@ -197,19 +197,6 @@ def test_chirp3_uses_us() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invalid model
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_model_raises() -> None:
-    with (
-        patch("coval_bench.providers.stt.google.SpeechClient", return_value=MagicMock()),
-        pytest.raises(ValueError, match="Invalid Google STT model"),
-    ):
-        GoogleSTTProvider(api_key=SecretStr("k"), model="bad-model", project_id="test-project")
-
-
-# ---------------------------------------------------------------------------
 # Failure path — streaming_recognize raises
 # ---------------------------------------------------------------------------
 
