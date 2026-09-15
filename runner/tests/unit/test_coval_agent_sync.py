@@ -89,7 +89,19 @@ def _client(state: dict[str, Any]) -> CovalTextClient:
             state["run_templates"].append(created)
             return httpx.Response(200, json={"run_template": created})
         if path.startswith("/run-templates/"):
-            return httpx.Response(200, json={"run_template": {**state["run_templates"][0], **body}})
+            template = state["run_templates"][0]
+            allowed = {
+                "display_name",
+                "agent_ids",
+                "persona_ids",
+                "test_set_ids",
+                "metric_ids",
+                "iteration_count",
+                "concurrency",
+            }
+            if not state.get("ignore_template_updates"):
+                template.update({key: value for key, value in body.items() if key in allowed})
+            return httpx.Response(200, json={"run_template": template})
         if path == "/scheduled-runs":
             return httpx.Response(200, json={"scheduled_run": {**body, "id": "S" * 22}})
         if path.startswith("/scheduled-runs/"):
@@ -216,11 +228,13 @@ def test_sync_patches_drifted_metadata_wholesale_and_leaves_the_rest() -> None:
     assert state["writes"] == [("/agents/A", {"metadata": DEFINITION.agent_body()["metadata"]})]
 
 
-def test_sync_patches_only_the_drifted_template_fields() -> None:
+@pytest.mark.parametrize("ignore_updates", [False, True])
+def test_sync_reconciles_template_or_reports_ignored_update(ignore_updates: bool) -> None:
     live_template = {
         **DEFINITION.run_template_body("A"),
         "id": "T",
         "persona_ids": ["P" * 22, "Q" * 22],
+        "test_set_ids": ["OLDSET00"],
         "concurrency": 1,
     }
     state = _state(
@@ -232,12 +246,20 @@ def test_sync_patches_only_the_drifted_template_fields() -> None:
     with _client(state) as client:
         assert (
             sync(client, DEFINITION, dry_run=True).actions[2]
-            == "run template: patch ['persona_ids']"
+            == "run template: patch ['persona_ids', 'test_set_ids']"
         )
         assert state["writes"] == []
-        sync(client, DEFINITION)
+        state["ignore_template_updates"] = ignore_updates
+        if ignore_updates:
+            with pytest.raises(SyncError, match="run template update did not apply"):
+                sync(client, DEFINITION)
+        else:
+            sync(client, DEFINITION)
+            assert live_template["persona_ids"] == [DEFINITION.persona_id]
+            assert live_template["test_set_ids"] == [DEFINITION.test_set_id]
+            assert sync(client, DEFINITION).actions[2] == "run template: unchanged"
 
-    assert state["writes"] == [("/run-templates/T", {"persona_id": "P" * 22})]
+    assert len(state["writes"]) == 1
 
 
 def test_sync_looks_up_by_customer_id_filter_and_never_adopts_a_name_only_match() -> None:
