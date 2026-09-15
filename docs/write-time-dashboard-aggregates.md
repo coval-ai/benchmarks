@@ -179,7 +179,7 @@ part of the same rollout; a deliberately paused job will continue to alert.
 Converting metric identity in the other normalized tables is a separate
 follow-up in [BENCH-911](https://linear.app/coval/issue/BENCH-911/extend-metric-ids-to-normalized-evaluations-and-source-rollups).
 
-### Normalized metric-ID backfill (Delivery A)
+### Normalized metric-ID backfill
 
 Migration `0036` adds nullable `metric_id` columns to normalized evaluations,
 their successful dashboard projections, and source buckets. Apply it before
@@ -214,11 +214,11 @@ coverage alongside the existing raw and rollup parity checks:
 python runner/scripts/check_normalized_readiness.py --database-url "$DATABASE_URL"
 ```
 
-Delivery B is a separate release. After the preflight reports zero pending,
+Non-null enforcement requires a separate migration. After the preflight reports zero pending,
 unknown, and mismatched rows across repeated runs, validate foreign keys and
 projection/parent agreement, then add the non-null and ID-based uniqueness
 constraints. Keep the code columns and compatibility keys until every writer
-has been upgraded. To roll back Delivery A before that release, stop the
+has been upgraded. To roll back before non-null enforcement, stop the
 backfill and deploy the prior application; leave nullable columns in place so
 the retained code keys continue to serve retries. Do not drop or rewrite
 historical rows as part of rollback.
