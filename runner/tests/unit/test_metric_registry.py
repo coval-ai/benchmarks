@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from coval_bench.db.models import Benchmark
 from coval_bench.registries import METRIC_SPECS, Metric, MetricDirection
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, MetricValueContract
 
 
 def test_every_metric_has_a_spec() -> None:
@@ -74,3 +77,33 @@ def test_metric_directions() -> None:
         for m, spec in METRIC_SPECS.items()
         if m not in higher_is_better
     )
+
+
+def test_aggregation_declarations_are_explicit_and_versioned() -> None:
+    assert MetricValueContract.model_fields["aggregation_method"].is_required()
+    for (metric, version), rule in METRIC_VALUE_CONTRACTS.items():
+        assert rule.metric == metric and rule.version == version
+        assert rule.aggregation_method == ("ratio" if metric == Metric.WER else "mean")
+    assert METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")].ratio_fallback == "mean"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"aggregation_method": "mean"},
+        {"numerator_keys": ()},
+        {"denominator_key": None},
+        {"numerator_keys": ("unknown",)},
+        {"numerator_keys": ("primary",)},
+        {"numerator_keys": ("insertion_count", "insertion_count")},
+        {"denominator_key": "insertion_count"},
+        {"ratio_scale": 0},
+        {"ratio_scale": -1},
+        {"ratio_scale": float("inf")},
+        {"ratio_scale": float("nan")},
+    ],
+)
+def test_invalid_aggregation_contracts_fail_on_construction(changes: dict[str, object]) -> None:
+    data = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")].model_dump()
+    with pytest.raises(ValueError):
+        MetricValueContract.model_validate({**data, **changes})

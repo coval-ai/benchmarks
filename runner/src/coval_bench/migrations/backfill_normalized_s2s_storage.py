@@ -29,6 +29,8 @@ import click
 import psycopg
 
 from coval_bench.config import get_settings
+from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
+from coval_bench.db.dashboard_source import mark_source_hour_dirty
 from coval_bench.s2s.fetch_v2v import _normalized_dataset_sha256
 
 _OBS_NAMESPACE = uuid.UUID("0c43bb05-d3e4-5d07-b9d9-1e4e7e18f9f2")
@@ -767,6 +769,7 @@ WHERE bucket_at=%(bucket)s AND benchmark='S2S'
 
 
 def _refresh(cur: psycopg.Cursor[Any], bucket: datetime) -> None:
+    mark_source_hour_dirty(cur, bucket)
     params = {"bucket": bucket}
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended('metric_values_by_bucket',extract(epoch FROM %(bucket)s::timestamptz)::bigint))",
@@ -965,6 +968,7 @@ def backfill(
     )
     phase = "operation"
     lock_acquired = False
+    affected_buckets: set[datetime] = set()
     progress.phase_started(phase, report)
     try:
         phase = "qualifying_run_count"
@@ -1013,6 +1017,7 @@ def backfill(
                         {plan.first.scheduled_at for plan in plans if plan.first.scheduled_at}
                     ):
                         _refresh(cur, bucket)
+                        affected_buckets.add(bucket)
                         delta.buckets += 1
                 _merge_source_delta(report, delta)
             else:
@@ -1126,6 +1131,9 @@ def backfill(
                     progress.completed_unit(report, phase=phase)
         progress.phase_completed(phase, report)
 
+        if apply and affected_buckets:
+            conn.commit()
+            refresh_backfilled_dashboard(conn, buckets=sorted(affected_buckets))
         _finalize_report(report, apply=apply)
         progress.phase_completed("operation", report)
         return report

@@ -137,6 +137,7 @@ def _stub_writer() -> MagicMock:
     writer.refresh_bucket = AsyncMock()
     writer.refresh_metric_values_bucket = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
+    writer.refresh_dashboard_summaries = AsyncMock(return_value="published")
     return writer
 
 
@@ -2256,8 +2257,10 @@ async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_failure", [False, True])
 async def test_fetch_and_write_v2v_propagates_normalized_gate(
     monkeypatch: pytest.MonkeyPatch,
+    snapshot_failure: bool,
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
     settings = Settings(
@@ -2269,6 +2272,8 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
     )
     client = _fake_client({}, {})
     writer = _stub_writer()
+    if snapshot_failure:
+        writer.refresh_dashboard_summaries.side_effect = RuntimeError("snapshot unavailable")
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -2282,6 +2287,7 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
+    writer.refresh_dashboard_summaries.assert_awaited_once_with()
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["normalized_dual_write_enabled"] is True
