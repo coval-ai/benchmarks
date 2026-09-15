@@ -169,6 +169,37 @@ class ResultsResponse(BaseModel):
     results: list[ResultOut]
 
 
+class ResultComponentOut(BaseModel):
+    value: float
+    unit: str
+
+
+class ResultV2Out(BaseModel):
+    evaluation_id: uuid.UUID
+    observation_id: uuid.UUID
+    run_id: int
+    metric_type: str
+    metric_version: str
+    evaluation_variant: str
+    evaluation_status: Literal["queued", "running", "succeeded", "failed"]
+    run_status: Literal["running", "succeeded", "partial", "failed"]
+    value: float | None
+    unit: str | None
+    provider: str
+    model: str
+    voice: str | None
+    benchmark: BenchmarkLiteral
+    dataset_id: str
+    sample_id: str
+    captured_at: datetime
+    components: dict[str, ResultComponentOut] = Field(default_factory=dict)
+
+
+class ResultsV2Response(BaseModel):
+    results: list[ResultV2Out]
+    next_cursor: str | None
+
+
 class ModelStatEntry(BaseModel):
     """Per-(provider, model, metric_type) aggregate stats.
 

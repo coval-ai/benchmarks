@@ -231,8 +231,10 @@ def _load_schema(**connect_kwargs: Any) -> None:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.benchmark_observations (
                 id uuid PRIMARY KEY, run_id bigint NOT NULL REFERENCES benchmarks_v2.runs(id),
-                dataset_id text NOT NULL, provider text NOT NULL, model text NOT NULL,
-                benchmark text NOT NULL, captured_at timestamptz NOT NULL DEFAULT now(),
+                dataset_id text NOT NULL, dataset_sha256 text NOT NULL DEFAULT 'sha256test',
+                sample_id text NOT NULL DEFAULT 'sample-1', provider text NOT NULL,
+                model text NOT NULL, voice text, benchmark text NOT NULL,
+                captured_at timestamptz NOT NULL DEFAULT now(),
                 status text NOT NULL
             );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_evaluations (
