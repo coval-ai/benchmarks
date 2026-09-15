@@ -35,6 +35,7 @@ from google.cloud import storage
 from coval_bench.config import get_settings
 from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
 from coval_bench.db.dashboard_source import mark_source_hour_dirty
+from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
     prepare_timing_events,
@@ -1500,8 +1501,8 @@ def _insert_plan(
         for metric, values in grouped.items():
             eid = uuid.uuid5(_EVAL_NAMESPACE, f"{plan.id}|{metric}|v1|default")
             cur.execute(
-                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,%s,'v1','default','inline','queued')",
-                (eid, plan.id, metric),
+                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_id,metric_type,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),%s,'v1','default','inline','queued')",
+                (eid, plan.id, metric, metric),
             )
             input_id = artifact_ids.get(
                 "provider_transcript"
@@ -1571,7 +1572,7 @@ def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -
     )
     cur.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,
+        (provider,model,benchmark,dataset_id,metric_id,metric_type,metric_version,evaluation_variant,
          value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
         """
         + _ROLLUP_PAYLOAD_SQL,
@@ -1581,7 +1582,7 @@ def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -
 
 _ROLLUP_PAYLOAD_SQL = """
 SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
-       e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
+       COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
        MIN(v.value)::float8,
        PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY v.value)::float8,
        PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY v.value)::float8,
@@ -1596,15 +1597,16 @@ WHERE o.status='succeeded' AND e.status='succeeded'
   AND r.status IN ('succeeded','partial')
   AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
-  (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,o.dataset_id,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit),
-  (o.provider,o.model,o.benchmark,e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit)
 )
 """
 
 _STORED_ROLLUP_SQL = """
-SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+SELECT provider,model,benchmark,dataset_id,
+       COALESCE(metric_id,benchmarks_v2.metric_id_for_code(metric_type)),metric_type,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
 FROM benchmarks_v2.metric_values_by_bucket
@@ -1836,6 +1838,7 @@ def backfill(
         lock_acquired = True
         # ``pg_advisory_lock`` is session scoped.  Commit the implicit SELECT
         # transaction now so each following ``conn.transaction`` is top-level.
+        register_metric_definitions_sync(conn)
         conn.commit()
         for rows, complete in _complete_pages(
             conn, window, batch_size, report["skipped_by_reason"]

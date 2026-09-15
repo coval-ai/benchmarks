@@ -34,6 +34,7 @@ from coval_bench.api.routers.aggregates import (
     _timeline_bucket_seconds,
 )
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
+from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, TIMELINE_AGGREGATION_RULES, Metric
 from coval_bench.registries.metrics import (
     MetricValueContract,
@@ -83,8 +84,12 @@ async def _insert_normalized_metric(
                 metric_type,
                 metric_version,
                 evaluation_variant,
-                "running",
+                "queued",
             ),
+        )
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations SET status = 'running' WHERE id = %s",
+            (evaluation_id,),
         )
         for key, component in values.items():
             await conn.execute(
@@ -437,6 +442,27 @@ async def test_dataset_filter_splits_and_default_pools(
     ).json()
     assert missing["model_stats"] == []
     assert missing["datasets"] == ["stt-v1", "stt-v3"]
+
+
+async def test_normalized_raw_dataset_query_resolves_metric_ids(postgresql: Any) -> None:
+    from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_BY_DATASET_SQL
+    from tests.api.conftest import _make_db_url
+
+    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
+    await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
+    async with (
+        await psycopg.AsyncConnection.connect(_make_db_url(postgresql)) as conn,
+        conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+    ):
+        await cur.execute(
+            _NORMALIZED_STATS_BY_DATASET_SQL,
+            {"benchmark": "STT", "interval": "7 days"},
+        )
+        rows = await cur.fetchall()
+    assert len(rows) == 1
+    assert rows[0]["dataset_id"] == "stt-v2"
+    assert rows[0]["metric_type"] == "WER"
+    assert rows[0]["avg_value"] == pytest.approx(6.0)
 
 
 async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
@@ -1570,6 +1596,7 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
+        await register_metric_definitions(conn)
         for model, metric, dataset, source_at, total, count in rows:
             source_params = (model, metric, dataset, source_at, total, count)
             if normalized:
@@ -1792,6 +1819,7 @@ async def test_normalized_timeline_uses_registered_phonetic_ratio(
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
+        await register_metric_definitions(conn)
         for bucket, values in rows:
             for key, value_sum, sample_count in values:
                 await conn.execute(

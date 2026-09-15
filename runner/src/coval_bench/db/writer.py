@@ -50,6 +50,7 @@ from coval_bench.registries import (
     validate_metric_values,
     validate_preprocessing_artifact_contract,
 )
+from coval_bench.registries.metrics import METRIC_SPECS
 
 STATS_MATVIEWS: tuple[str, ...] = ("results_24h", "results_7d", "results_30d")
 logger = structlog.get_logger(__name__)
@@ -395,12 +396,12 @@ class RunWriter:
             raise ValueError("metric evaluation inputs must not repeat an artifact")
         sql = """
             INSERT INTO benchmarks_v2.metric_evaluations
-            (observation_id, metric_type, metric_version, evaluation_variant, executor,
+            (observation_id, metric_id, metric_type, metric_version, evaluation_variant, executor,
              external_request_id, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (observation_id, metric_type, metric_version, evaluation_variant)
             DO NOTHING
-            RETURNING id, observation_id, metric_type, metric_version,
+            RETURNING id, observation_id, metric_id, metric_type, metric_version,
                       evaluation_variant, executor,
                       external_request_id,
                       status, started_at, finished_at, error, created_at, updated_at
@@ -408,9 +409,44 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
+                    "SELECT id FROM benchmarks_v2.metrics WHERE code = %s",
+                    (evaluation.metric_type,),
+                )
+                metric_row = await cur.fetchone()
+                if metric_row is None:
+                    # This path is for a newly registered known metric only;
+                    # normal evaluations resolve the existing row directly.
+                    try:
+                        Metric(evaluation.metric_type)
+                    except ValueError as exc:
+                        raise ValueError(f"unknown metric_type {evaluation.metric_type!r}") from exc
+                    await cur.execute(
+                        """INSERT INTO benchmarks_v2.metrics (code, display_name)
+                           VALUES (%s, %s) ON CONFLICT (code) DO NOTHING RETURNING id""",
+                        (
+                            evaluation.metric_type,
+                            METRIC_SPECS[Metric(evaluation.metric_type)].display_name,
+                        ),
+                    )
+                    metric_row = await cur.fetchone()
+                    if metric_row is None:
+                        await cur.execute(
+                            "SELECT id FROM benchmarks_v2.metrics WHERE code = %s",
+                            (evaluation.metric_type,),
+                        )
+                        metric_row = await cur.fetchone()
+                if metric_row is None:
+                    raise RuntimeError(
+                        f"metric definition is unavailable: {evaluation.metric_type}"
+                    )
+                metric_id = int(metric_row["id"])
+                if evaluation.metric_id is not None and evaluation.metric_id != metric_id:
+                    raise ValueError("metric code and id must refer to the same definition")
+                await cur.execute(
                     sql,
                     (
                         evaluation.observation_id,
+                        metric_id,
                         evaluation.metric_type,
                         evaluation.metric_version,
                         evaluation.evaluation_variant,
@@ -423,7 +459,7 @@ class RunWriter:
                 created = row is not None
                 if row is None:
                     await cur.execute(
-                        """SELECT id, observation_id, metric_type, metric_version,
+                        """SELECT id, observation_id, metric_id, metric_type, metric_version,
                                   evaluation_variant, executor,
                                   external_request_id, status, started_at, finished_at, error,
                                   created_at, updated_at
@@ -439,6 +475,16 @@ class RunWriter:
                         ),
                     )
                     row = await cur.fetchone()
+                    if row is not None and row["metric_id"] is None:
+                        await cur.execute(
+                            """UPDATE benchmarks_v2.metric_evaluations
+                               SET metric_id = %s WHERE id = %s
+                               RETURNING id, observation_id, metric_id, metric_type, metric_version,
+                                         evaluation_variant, executor, external_request_id, status,
+                                         started_at, finished_at, error, created_at, updated_at""",
+                            (metric_id, row["id"]),
+                        )
+                        row = await cur.fetchone()
                 if row is not None:
                     await cur.execute(
                         """SELECT observation_artifact_id, preprocessing_artifact_id,
@@ -527,7 +573,7 @@ class RunWriter:
                     """UPDATE benchmarks_v2.metric_evaluations
                        SET status = %s, started_at = %s, updated_at = now()
                        WHERE id = %s AND status = %s
-                       RETURNING id, observation_id, metric_type, metric_version,
+                       RETURNING id, observation_id, metric_id, metric_type, metric_version,
                                  evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",
@@ -552,7 +598,7 @@ class RunWriter:
                        SET status = %s, started_at = COALESCE(started_at, %s), finished_at = %s,
                            error = %s, updated_at = now()
                        WHERE id = %s AND status IN (%s, %s)
-                       RETURNING id, observation_id, metric_type, metric_version,
+                       RETURNING id, observation_id, metric_id, metric_type, metric_version,
                                  evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",

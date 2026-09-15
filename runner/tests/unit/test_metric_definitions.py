@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Metric identities retain references without changing raw metric codes."""
 
+import asyncio
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, cast
@@ -11,7 +12,10 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
-from coval_bench.db.metric_definitions import register_metric_definitions
+from coval_bench.db.metric_definitions import (
+    register_metric_definitions,
+    register_metric_definitions_sync,
+)
 from coval_bench.registries.metrics import (
     METRIC_SPECS,
     METRIC_VALUE_CONTRACTS,
@@ -147,20 +151,21 @@ async def test_future_metric_is_registered_before_hourly_publication(
     monkeypatch.setitem(METRIC_VALUE_CONTRACTS, (future, "v1"), contract)
     monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, future.value, contract)
     hour = datetime(2026, 9, 14, 12, tzinfo=UTC)
-    _bucket(metric_pg, hour, [(future.value, "primary", "seconds", 12.0, 3)])
     assert (
         metric_pg.execute(
             "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
         ).fetchone()
         is None
     )
+    registered_id = register_metric_definitions_sync(metric_pg)[future.value]
+    _bucket(metric_pg, hour, [(future.value, "primary", "seconds", 12.0, 3)])
     pool = await open_pool(metric_pg)
     try:
         assert await refresh_hourly_aggregates(pool, hours=[hour]) == 1
         first = metric_pg.execute(
             "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
         ).fetchone()
-        assert first is not None and first[0] > 0
+        assert first is not None and first[0] == registered_id
         assert await refresh_hourly_aggregates(pool, hours=[hour]) == 1
         assert (
             metric_pg.execute(
@@ -179,3 +184,36 @@ async def test_future_metric_is_registered_before_hourly_publication(
         ).fetchall() == [(future.value,)]
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_registration_uses_one_catalog_identity(
+    metric_pg: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FutureMetric(StrEnum):
+        VALUE = "ConcurrentMetric"
+
+    apply_migrations(metric_pg)
+    metric_pg.autocommit = True
+    monkeypatch.setitem(
+        METRIC_SPECS,
+        cast(Metric, FutureMetric.VALUE),
+        METRIC_SPECS[Metric.TTFT].model_copy(update={"display_name": "Concurrent metric"}),
+    )
+    pool = await open_pool(metric_pg)
+    barrier = asyncio.Barrier(2)
+
+    async def allocate() -> int:
+        async with pool.connection() as conn, conn.transaction():
+            await barrier.wait()
+            return (await register_metric_definitions(conn))[FutureMetric.VALUE]
+
+    try:
+        first, second = await asyncio.wait_for(asyncio.gather(allocate(), allocate()), timeout=5)
+    finally:
+        await pool.close()
+    assert first == second
+    assert metric_pg.execute(
+        "SELECT id,display_name FROM benchmarks_v2.metrics WHERE code='ConcurrentMetric'"
+    ).fetchall() == [(first, "Concurrent metric")]

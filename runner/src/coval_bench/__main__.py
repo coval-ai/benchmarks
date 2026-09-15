@@ -26,6 +26,7 @@ from coval_bench.db.cli import (
     repair_dashboard_aggregates,
 )
 from coval_bench.llm.coval_agent import sync_llm
+from coval_bench.migrations.backfill_normalized_metric_ids import backfill_normalized_metric_ids_cli
 from coval_bench.migrations.backfill_normalized_s2s_storage import (
     backfill_normalized_s2s_storage_cli,
 )
@@ -122,6 +123,7 @@ def migrate() -> None:
 
 migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
 migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
+migrate.add_command(backfill_normalized_metric_ids_cli, name="backfill-normalized-metric-ids")
 migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 

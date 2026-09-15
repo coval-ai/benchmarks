@@ -179,6 +179,58 @@ part of the same rollout; a deliberately paused job will continue to alert.
 Converting metric identity in the other normalized tables is a separate
 follow-up in [BENCH-911](https://linear.app/coval/issue/BENCH-911/extend-metric-ids-to-normalized-evaluations-and-source-rollups).
 
+### Normalized metric-ID backfill (Delivery A)
+
+Migration `0036` adds nullable `metric_id` columns to normalized evaluations,
+their successful dashboard projections, and source buckets. Apply it before
+running the operator command below. The command registers only definitions
+already known to the runner and preserves the existing catalog IDs.
+
+```sh
+python -m coval_bench migrate backfill-normalized-metric-ids
+python -m coval_bench migrate backfill-normalized-metric-ids --apply \
+  --batch-size 1000 --max-runtime-seconds 600
+# For large tables, build/recover temporary null-ID indexes concurrently first:
+python -m coval_bench migrate backfill-normalized-metric-ids --apply \
+  --create-pending-indexes
+```
+
+The first invocation is a read-only preflight. `--apply` is required for
+writes. Evaluations are hydrated first, projections copy the parent effective
+identity second, and source buckets are hydrated last. Each batch is a separate
+transaction, selects null IDs with `SKIP LOCKED`, and can be
+rerun after interruption. `--max-batches` and `--max-runtime-seconds` bound an
+operator run; the final report includes pending, unknown-code, mismatch, and
+skipped-batch counts. `verification_complete: false` means the time limit
+prevented final verification; rerun the read-only preflight before using the
+coverage counts as final. Unknown codes and code/ID conflicts fail closed for manual
+reconciliation. The command changes only `metric_id`; scores, dimensions,
+timestamps, and payloads are never rewritten.
+
+Run the read-only readiness checker after each bounded run. It reports ID
+coverage alongside the existing raw and rollup parity checks:
+
+```sh
+python runner/scripts/check_normalized_readiness.py --database-url "$DATABASE_URL"
+```
+
+Delivery B is a separate release. After the preflight reports zero pending,
+unknown, and mismatched rows across repeated runs, validate foreign keys and
+projection/parent agreement, then add the non-null and ID-based uniqueness
+constraints. Keep the code columns and compatibility keys until every writer
+has been upgraded. To roll back Delivery A before that release, stop the
+backfill and deploy the prior application; leave nullable columns in place so
+the retained code keys continue to serve retries. Do not drop or rewrite
+historical rows as part of rollback.
+
+The backfill is intentionally excluded from ordinary startup and Alembic
+upgrade execution. Measure table sizes, index use, lock wait behavior, and
+batch throughput in the target environment first. If a large deployment needs
+additional acceleration, an operator may create temporary partial indexes
+concurrently and remove them after reconciliation. The explicit
+`--create-pending-indexes` mode removes invalid leftovers from an interrupted
+concurrent build before retrying.
+
 Do not infer production performance from the small runtime smoke test. Local
 validation exercised real Alembic migration, normalized RunWriter completion,
 the maintenance CLI, and all four HTTP consumers. With 12 observations in one

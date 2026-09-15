@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from psycopg import AsyncConnection
+from psycopg import AsyncConnection, Connection
 
 from coval_bench.registries.metrics import METRIC_SPECS
 
@@ -34,9 +34,42 @@ async def register_metric_definitions(conn: AsyncConnection[Any]) -> dict[str, i
             {"codes": [code for code, _display_name in definitions]},
         )
     ).fetchall()
-    mapping = {str(row["code"]): int(row["id"]) for row in rows}
+    return _mapping(rows, definitions)
+
+
+def _mapping(rows: list[Any], definitions: list[tuple[str, str]]) -> dict[str, int]:
+    """Normalize tuple- and mapping-style rows returned by psycopg."""
+    mapping = {
+        str(row["code"] if isinstance(row, dict) else row[0]): int(
+            row["id"] if isinstance(row, dict) else row[1]
+        )
+        for row in rows
+    }
     expected = {code for code, _display_name in definitions}
     if set(mapping) != expected:
         missing = ", ".join(sorted(expected - set(mapping)))
         raise RuntimeError(f"metric definition registry is incomplete: {missing}")
     return mapping
+
+
+def register_metric_definitions_sync(conn: Connection[Any]) -> dict[str, int]:
+    """Register and resolve the known catalog in a synchronous transaction.
+
+    The helper deliberately never commits; callers own transaction boundaries.
+    """
+    definitions_by_code = {metric.value: spec.display_name for metric, spec in METRIC_SPECS.items()}
+    definitions = sorted(definitions_by_code.items(), key=lambda item: item[0])
+    with conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO benchmarks_v2.metrics (code, display_name)
+               VALUES (%(code)s, %(display_name)s)
+               ON CONFLICT (code) DO NOTHING""",
+            [{"code": code, "display_name": display_name} for code, display_name in definitions],
+        )
+        cur.execute(
+            """SELECT code, id FROM benchmarks_v2.metrics
+               WHERE code = ANY(%(codes)s::text[]) ORDER BY code""",
+            {"codes": [code for code, _display_name in definitions]},
+        )
+        rows = cur.fetchall()
+    return _mapping(rows, definitions)

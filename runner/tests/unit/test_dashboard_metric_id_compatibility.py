@@ -142,11 +142,10 @@ def _seed_0034(conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -
                     status=ObservationStatus.SUCCEEDED,
                 )
             )
-            evaluation = await writer_seed._evaluation(writer, observation)
-            assert evaluation.id is not None
+            evaluation_id = await writer_seed._historical_evaluation(pool, observation)
             await writer.complete_metric_evaluation(
-                evaluation.id,
-                values=writer_seed._wer_values(evaluation.id),
+                evaluation_id,
+                values=writer_seed._wer_values(evaluation_id),
                 finished_at=_AS_OF,
             )
             await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
@@ -195,7 +194,7 @@ def test_populated_upgrade_preserves_data_and_requires_republication(
     retained = {table: _rows(conn, table) for table in _RETAINED}
     summaries = {view: _rows(conn, view) for view in _VIEWS}
     conn.execute("GRANT USAGE ON SCHEMA benchmarks_v2 TO api")
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
 
     assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("20260914_0035",)
     assert conn.execute("SELECT count(*) FROM benchmarks_v2.metrics").fetchone() == (12,)
@@ -258,7 +257,7 @@ def test_unknown_historical_code_rolls_back_schema_rows_views_and_revision(
     tables = (*_RETAINED, "dashboard_hourly_aggregates", "dashboard_summary_state", *_VIEWS)
     before = {table: _rows(conn, table) for table in tables}
     with pytest.raises(IntegrityError, match="unknown metric definition"):
-        _migrate(conn, "head")
+        _migrate(conn, "20260914_0035")
     assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("20260914_0034",)
     assert conn.execute("SELECT to_regclass('benchmarks_v2.metrics')").fetchone() == (None,)
     assert conn.execute(
@@ -276,7 +275,7 @@ def test_downgrade_retains_codes_and_values_and_allows_reupgrade(
     _seed_0034(conn, monkeypatch)
     hourly = _rows(conn, "dashboard_hourly_aggregates")
     retained = {table: _rows(conn, table) for table in _RETAINED}
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     _migrate(conn, "20260914_0034", down=True)
     assert _rows(conn, "dashboard_hourly_aggregates") == hourly
     assert {table: _rows(conn, table) for table in _RETAINED} == retained
@@ -286,7 +285,7 @@ def test_downgrade_retains_codes_and_values_and_allows_reupgrade(
         FROM benchmarks_v2.dashboard_summary_state"""
     ).fetchone() == (7, None, None, 1, "uninitialized")
     assert _populated(conn) == [False, False, False]
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     assert _code_rows(conn, "dashboard_hourly_aggregates") == hourly
     assert {table: _rows(conn, table) for table in _RETAINED} == retained
     assert _populated(conn) == [False, False, False]
@@ -314,7 +313,7 @@ def test_old_and_new_writes_share_identity_and_preserve_version_variant_keys(
     metric_ids_pg: psycopg.Connection[Any],
 ) -> None:
     conn = metric_ids_pg
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     conn.autocommit = True
     ids = dict(conn.execute("SELECT code,id FROM benchmarks_v2.metrics").fetchall())
     _insert_hourly(conn, "WER", None)
@@ -376,7 +375,7 @@ def test_invalid_identity_writes_roll_back(
     error: type[psycopg.Error],
 ) -> None:
     conn = metric_ids_pg
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     conn.autocommit = True
     ids = dict(conn.execute("SELECT code,id FROM benchmarks_v2.metrics").fetchall())
     metric_id = None if metric is None else ids.get(metric, -1)
@@ -389,7 +388,7 @@ def test_conflicting_update_does_not_change_retained_identity(
     metric_ids_pg: psycopg.Connection[Any],
 ) -> None:
     conn = metric_ids_pg
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     conn.autocommit = True
     ids = dict(conn.execute("SELECT code,id FROM benchmarks_v2.metrics").fetchall())
     _insert_hourly(conn, "WER", None)
@@ -418,7 +417,7 @@ def test_metric_definitions_retain_immutable_identity(
     metric_ids_pg: psycopg.Connection[Any], statement: str
 ) -> None:
     conn = metric_ids_pg
-    _migrate(conn, "head")
+    _migrate(conn, "20260914_0035")
     conn.autocommit = True
     before = _rows(conn, "metrics")
     with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():

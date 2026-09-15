@@ -563,6 +563,10 @@ def test_s2s_refresh_preserves_and_ignores_same_bucket_non_s2s_rollups(
     _, low, high = _seed_conversation(s2s_db, metrics=(("V2V", 210.0, "success"),))
     with s2s_db.cursor() as cur:
         cur.execute(
+            "INSERT INTO benchmarks_v2.metrics (code,display_name) "
+            "VALUES ('MOS','Mean opinion score')"
+        )
+        cur.execute(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
                 (provider,model,benchmark,dataset_id,metric_type,metric_version,
                  evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
