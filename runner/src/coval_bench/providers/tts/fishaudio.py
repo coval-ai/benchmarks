@@ -23,7 +23,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("s1", "s2.1-pro", "s2.1-pro-free")
 _WS_URL = "wss://api.fish.audio/v1/tts/live"
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
@@ -33,8 +32,6 @@ class FishAudioTTSProvider(TTSProvider):
     """Fish Audio TTS provider using WebSocket streaming."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Fish Audio TTS model {model!r}. Valid: {_VALID_MODELS}")
         if not voice:
             raise ValueError("Fish Audio TTS requires a voice (library reference_id)")
         self._model = model

@@ -131,9 +131,8 @@ async def test_failed_or_incompatible_stream_never_saves_audio(
     [
         (None, _MODEL, "nari_api_key"),
         (SecretStr("test-private-key\n"), _MODEL, "nari_api_key"),
-        (SecretStr("k"), "qwen3-tts:free", "Invalid Nari TTS model"),
     ],
-    ids=["missing-key", "malformed-key", "model"],
+    ids=["missing-key", "malformed-key"],
 )
 def test_construction_guards(api_key: SecretStr | None, model: str, match: str) -> None:
     settings = Settings(_env_file=None, nari_api_key=api_key)

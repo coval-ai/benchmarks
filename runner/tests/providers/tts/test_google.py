@@ -134,19 +134,6 @@ async def test_google_no_audio(fake_settings: Settings, sample_text: str) -> Non
     assert result.audio_path is None
 
 
-@pytest.mark.asyncio
-async def test_google_unsupported_model(fake_settings: Settings, sample_text: str) -> None:
-    client, _ = _make_client()
-
-    with patch.object(google_tts, "_get_shared_client", return_value=client):
-        provider = GoogleTTSProvider(fake_settings, model="chirp-2-hd", voice=CHIRP_VOICE)
-        result = await provider.synthesize(sample_text)
-
-    assert result.error is not None and "Unsupported" in result.error
-    assert result.audio_path is None
-    client.streaming_synthesize.assert_not_called()
-
-
 def test_google_properties(fake_settings: Settings) -> None:
     provider = GoogleTTSProvider(fake_settings, model=CHIRP_MODEL, voice=CHIRP_VOICE)
     assert provider.name == "google-chirp-3-hd"

@@ -50,8 +50,6 @@ def ws_url_from_base(base_url: str) -> str:
 class GuavaSTTProvider(STTProvider):
     """Guava STT provider"""
 
-    _VALID_MODELS = frozenset({"daytona-stt"})
-
     def __init__(
         self,
         api_key: SecretStr | None,
@@ -59,10 +57,6 @@ class GuavaSTTProvider(STTProvider):
         base_url: str | None = None,
         domain: str | None = None,
     ) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Guava STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if not base_url:
             raise ValueError("guava_base_url is required for the Guava STT provider")
         if api_key is None or not api_key.get_secret_value().strip():

@@ -242,11 +242,6 @@ async def test_minimax_tts_ttfa_on_first_chunk(minimax_settings: Settings) -> No
     result.audio_path.unlink()
 
 
-def test_minimax_tts_invalid_model_raises(minimax_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid MiniMax TTS model"):
-        MinimaxTTSProvider(minimax_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_minimax_tts_missing_voice_raises(minimax_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         MinimaxTTSProvider(minimax_settings, model="speech-2.8-hd", voice="")

@@ -38,13 +38,7 @@ _INIT_TIMEOUT_S = 10.0
 class GladiaSTTProvider(STTProvider):
     """Gladia real-time STT provider."""
 
-    _VALID_MODELS = frozenset({"solaria-1"})
-
     def __init__(self, api_key: SecretStr | None, model: str = "solaria-1") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Gladia STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("gladia_api_key is required for the Gladia STT provider")
         self._api_key = api_key

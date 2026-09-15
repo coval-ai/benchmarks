@@ -37,15 +37,7 @@ _FINAL_WAIT_S = 5.0
 class DeepgramProvider(STTProvider):
     """Deepgram streaming STT provider."""
 
-    _VALID_MODELS = frozenset(
-        {"default", "nova-2", "nova-3", "flux-general-en", "flux-general-multi"}
-    )
-
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Deepgram model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._api_key = api_key
         self._model = model
 

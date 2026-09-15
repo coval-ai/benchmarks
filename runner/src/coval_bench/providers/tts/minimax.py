@@ -28,7 +28,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("speech-2.8-hd", "speech-2.8-turbo")
 _WS_URL = "wss://api.minimax.io/ws/v1/t2a_v2"
 _SAMPLE_RATE = 24000
 _MAX_WS_SIZE = 16 * 1024 * 1024
@@ -38,8 +37,6 @@ class MinimaxTTSProvider(TTSProvider):
     """MiniMax TTS provider using WebSocket streaming."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid MiniMax TTS model {model!r}. Valid: {_VALID_MODELS}")
         if not voice:
             raise ValueError("MiniMax TTS requires a voice (voice_id)")
         self._model = model

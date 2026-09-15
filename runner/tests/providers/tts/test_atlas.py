@@ -296,11 +296,6 @@ async def test_unknown_voice_falls_back_to_dax(fake_settings: Settings) -> None:
     assert _provider(fake_settings, voice="not-a-voice")._voice == "dax"
 
 
-def test_invalid_model_is_rejected(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Atlas TTS model"):
-        AtlasTTSProvider(fake_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_missing_key_is_rejected() -> None:
     settings = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",

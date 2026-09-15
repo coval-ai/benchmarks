@@ -139,11 +139,6 @@ def test_provider_model() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Gladia STT model"):
-        GladiaSTTProvider(api_key=SecretStr("k"), model="solaria-3")
-
-
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="gladia_api_key is required"):
         GladiaSTTProvider(api_key=None)

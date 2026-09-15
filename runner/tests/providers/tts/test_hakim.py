@@ -180,11 +180,6 @@ async def test_hakim_tts_ttfa_on_first_binary_frame(hakim_settings: Settings) ->
     result.audio_path.unlink()
 
 
-def test_hakim_tts_invalid_model_raises(hakim_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Hakim TTS model"):
-        HakimTTSProvider(hakim_settings, model="hakim-v2", voice=_VOICE)
-
-
 def test_hakim_tts_missing_voice_raises(hakim_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         HakimTTSProvider(hakim_settings, model=_MODEL, voice="")

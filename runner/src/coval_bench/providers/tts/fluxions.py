@@ -30,7 +30,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("vui",)
 _BASE_URL = "https://api.fluxions.ai"
 _WS_URL = "wss://api.fluxions.ai/vui/v1/tts/ws"
 _SAMPLE_RATE = 24000
@@ -54,8 +53,6 @@ class FluxionsTTSProvider(TTSProvider):
     """Fluxions VUI TTS provider using WebSocket streaming (binary PCM frames)."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Fluxions TTS model {model!r}. Valid: {_VALID_MODELS}")
         if not voice:
             raise ValueError("Fluxions TTS requires a voice")
         api_key_secret = settings.fluxions_api_key

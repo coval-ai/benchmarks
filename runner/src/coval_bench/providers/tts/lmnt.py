@@ -27,8 +27,6 @@ SAMPLE_RATE = 24000
 class LmntTTSProvider(TTSProvider):
     """LMNT TTS provider using the speech sessions WebSocket API."""
 
-    _VALID_MODELS = frozenset({"blizzard"})
-
     def __init__(self, settings: Settings, model: str, voice: str | None) -> None:
         self._model = model
         self._voice = voice or "leah"
@@ -48,19 +46,6 @@ class LmntTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via an LMNT speech session and return a TTSResult."""
-        if not self._model_supported(self._model):
-            return TTSResult(
-                provider="lmnt",
-                model=self._model,
-                voice=self._voice,
-                ttfa_ms=None,
-                audio_path=None,
-                error=(
-                    f"Unsupported LMNT model: {self._model}. "
-                    f"Valid models: {sorted(self._VALID_MODELS)}"
-                ),
-            )
-
         audio_chunks: list[bytes] = []
         start: float | None = None
         first_chunk_at: float | None = None

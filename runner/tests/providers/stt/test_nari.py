@@ -183,7 +183,5 @@ async def test_nari_rejects_wrong_audio_format(
 def test_nari_construction_guards() -> None:
     provider = NariSTTProvider(api_key=SecretStr("k"))
     assert (provider.name, provider.model) == ("nari", "qwen3-asr-fast")
-    with pytest.raises(ValueError, match="Invalid Nari STT model"):
-        NariSTTProvider(api_key=SecretStr("k"), model="qwen3-asr-fast:free")
     with pytest.raises(ValueError, match="nari_api_key is required"):
         NariSTTProvider(api_key=None)

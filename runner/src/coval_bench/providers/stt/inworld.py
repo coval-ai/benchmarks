@@ -38,13 +38,7 @@ _CLOSE_WAIT_S = 5.0
 class InworldSTTProvider(STTProvider):
     """Inworld AI streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"inworld-stt-1"})
-
     def __init__(self, api_key: SecretStr | None, model: str = "inworld-stt-1") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Inworld STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None or not api_key.get_secret_value().strip():
             raise ValueError("inworld_api_key is required for the Inworld STT provider")
         self._api_key = api_key

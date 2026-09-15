@@ -92,7 +92,7 @@ async def test_speechify_all_models() -> None:
 
     _install_mock(handler)
 
-    for model in SpeechifyTTSProvider._VALID_MODELS:
+    for model in ("simba-3.2", "simba-3.0"):
         provider = SpeechifyTTSProvider(_settings(), model=model, voice=_VOICE)
         result = await provider.synthesize("test")
         assert result.error is None, f"{model}: {result.error}"
@@ -175,11 +175,6 @@ def test_speechify_name_and_model() -> None:
     p = SpeechifyTTSProvider(_settings(), model="simba-3.0", voice=_VOICE)
     assert p.name == "speechify-simba-3.0"
     assert p.model == "simba-3.0"
-
-
-def test_speechify_rejects_unsupported_model() -> None:
-    with pytest.raises(ValueError, match="Unsupported Speechify model"):
-        SpeechifyTTSProvider(_settings(), model="simba-english", voice=_VOICE)
 
 
 def test_speechify_missing_api_key() -> None:

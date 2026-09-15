@@ -25,13 +25,7 @@ _WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket"
 class SonioxSTTProvider(STTProvider):
     """Soniox streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"stt-rt-v4", "stt-rt-v5"})
-
     def __init__(self, api_key: SecretStr | None, model: str = "stt-rt-v5") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Soniox STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("soniox_api_key is required for the Soniox STT provider")
         self._api_key = api_key

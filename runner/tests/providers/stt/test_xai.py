@@ -500,11 +500,6 @@ def test_xai_provider_name() -> None:
     assert provider.name == "xai-grok-stt"
 
 
-def test_xai_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid xAI STT model"):
-        XaiSTTProvider(api_key=SecretStr("k"), model="bad-model")
-
-
 @pytest.mark.asyncio
 async def test_xai_rejects_non_pcm16(fake_api_key: SecretStr) -> None:
     provider = XaiSTTProvider(api_key=fake_api_key, model="grok-stt")

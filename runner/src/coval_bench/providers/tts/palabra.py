@@ -21,7 +21,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("palabra-tts-v1",)
 _VALID_VOICES = ("default_low", "default_high")
 _WS_URL = "wss://stream.us.palabra.ai/tts-api/v1/text-to-speech/stream"
 _SAMPLE_RATE = 24000
@@ -31,8 +30,6 @@ class PalabraTTSProvider(TTSProvider):
     """Palabra TTS provider using WebSocket streaming (JSON frames, base64 audio)."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Palabra TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
             raise ValueError(f"Invalid Palabra TTS voice {voice!r}. Valid: {_VALID_VOICES}")
         self._model = model

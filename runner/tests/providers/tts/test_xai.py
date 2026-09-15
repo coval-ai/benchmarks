@@ -191,11 +191,6 @@ async def test_xai_tts_skips_empty_audio_delta(fake_settings: Settings) -> None:
     assert result.ttfa_ms is None
 
 
-def test_xai_tts_invalid_model_raises(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid xAI TTS model"):
-        XaiTTSProvider(fake_settings, model="not-a-model", voice="eve")
-
-
 def test_xai_tts_invalid_voice_raises(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Invalid xAI TTS voice"):
         XaiTTSProvider(fake_settings, model="grok-tts", voice="not-a-voice")

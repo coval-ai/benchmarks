@@ -38,13 +38,7 @@ _SESSION_CREATED_TIMEOUT_S = 10.0
 class MistralSTTProvider(STTProvider):
     """Mistral Voxtral realtime transcription provider."""
 
-    _VALID_MODELS = frozenset({_DEFAULT_MODEL})
-
     def __init__(self, api_key: SecretStr, model: str = _DEFAULT_MODEL) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Mistral model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._api_key = api_key
         self._model = model
 

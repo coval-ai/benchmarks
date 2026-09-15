@@ -226,11 +226,6 @@ def test_groq_valid_voices_accepted(fake_settings: Settings) -> None:
         assert p._voice == voice
 
 
-def test_groq_invalid_model_raises(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Groq TTS model"):
-        GroqTTSProvider(fake_settings, model="whisper-large-v3", voice="autumn")
-
-
 def test_groq_missing_api_key_raises() -> None:
     settings = Settings(
         database_url="postgresql://runner:password@localhost:5432/benchmarks",

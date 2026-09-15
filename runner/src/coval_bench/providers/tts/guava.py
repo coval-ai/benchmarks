@@ -37,13 +37,7 @@ _ENDPOINT = "/audio/speech"
 class GuavaTTSProvider(TTSProvider):
     """Guava TTS provider."""
 
-    _VALID_MODELS = frozenset({"daytona-tts"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in self._VALID_MODELS:
-            raise ValueError(
-                f"Unsupported Guava model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
         self._voice = voice
 

@@ -224,16 +224,6 @@ def test_provider_name_linden() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invalid model
-# ---------------------------------------------------------------------------
-
-
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Speechmatics model"):
-        SpeechmaticsProvider(api_key=SecretStr("k"), model="bad-model")
-
-
-# ---------------------------------------------------------------------------
 # Failure path — empty stream (no RecognitionStarted → never proceeds)
 # ---------------------------------------------------------------------------
 

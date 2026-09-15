@@ -33,13 +33,7 @@ _AGENT_WS_URL = "wss://preview.rt.speechmatics.com/v2/agent"
 class SpeechmaticsProvider(STTProvider):
     """Speechmatics real-time STT provider."""
 
-    _VALID_MODELS = frozenset({"default", "enhanced", "broadcast", "linden-1"})
-
     def __init__(self, api_key: SecretStr, model: str = "default") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Speechmatics model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._api_key = api_key
         self._model = model
         self._is_agent = model == "linden-1"

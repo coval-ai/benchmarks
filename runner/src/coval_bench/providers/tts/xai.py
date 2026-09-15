@@ -20,7 +20,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("grok-tts",)
 _VALID_VOICES = ("eve", "ara", "rex", "sal", "leo", "carina", "altair")
 _BASE_WS_URL = "wss://api.x.ai/v1/tts"
 _SAMPLE_RATE = 24000
@@ -30,8 +29,6 @@ class XaiTTSProvider(TTSProvider):
     """xAI Grok TTS provider using WebSocket streaming."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid xAI TTS model {model!r}. Valid: {_VALID_MODELS}")
         if voice not in _VALID_VOICES:
             raise ValueError(f"Invalid xAI TTS voice {voice!r}. Valid: {_VALID_VOICES}")
         self._model = model

@@ -182,11 +182,6 @@ def test_guava_name_and_model() -> None:
     assert p.model == "daytona-tts"
 
 
-def test_guava_rejects_unsupported_model() -> None:
-    with pytest.raises(ValueError, match="Unsupported Guava model"):
-        GuavaTTSProvider(_settings(), model="nonexistent", voice=_VOICE)
-
-
 def test_guava_missing_base_url() -> None:
     with pytest.raises(ValueError, match="guava_base_url"):
         GuavaTTSProvider(_settings(guava_base_url=None), model="daytona-tts", voice=_VOICE)
