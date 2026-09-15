@@ -264,10 +264,17 @@ def sync(
         if drift.update:
             result.actions.append(f"run template: patch {sorted(drift.update)}")
             if not dry_run:
-                client.update_run_template(
+                template = client.update_run_template(
                     str(template["id"]),
                     benchmark.template_patch_body(wanted_template, drift.update),
                 )
+                remaining = plan(
+                    template, {path: wanted_template[path] for path in benchmark.TEMPLATE_MANAGED}
+                )
+                if remaining.update:
+                    raise SyncError(
+                        f"run template update did not apply: {sorted(remaining.update)}"
+                    )
         else:
             result.actions.append("run template: unchanged")
     template_id = str(template["id"])

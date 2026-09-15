@@ -63,11 +63,6 @@ CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
 }
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")
-_TEMPLATE_PATCH_KEYS = {
-    "agent_ids": "agent_id",
-    "persona_ids": "persona_id",
-    "test_set_ids": "test_set_id",
-}
 
 
 @dataclass(frozen=True)
@@ -104,12 +99,4 @@ def run_template_body(
 
 
 def template_patch_body(wanted: dict[str, Any], paths: Iterable[str]) -> dict[str, Any]:
-    body: dict[str, Any] = {}
-    for path in paths:
-        singular = _TEMPLATE_PATCH_KEYS.get(path)
-        if singular is None:
-            body[path] = wanted[path]
-            continue
-        (only,) = wanted[path]
-        body[singular] = only
-    return body
+    return {path: wanted[path] for path in paths}
