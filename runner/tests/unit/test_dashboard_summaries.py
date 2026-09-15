@@ -200,6 +200,10 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
             evaluation_id = uuid4()
             with summary_pg.cursor() as cur:
                 cur.execute(
+                    "INSERT INTO benchmarks_v2.metrics (code,display_name) "
+                    "VALUES ('UnknownSummaryMetric','Unknown summary metric')"
+                )
+                cur.execute(
                     """INSERT INTO benchmarks_v2.benchmark_observations
                     (id,run_id,dataset_id,dataset_sha256,sample_id,provider,model,benchmark,
                      source_kind,captured_at,status)

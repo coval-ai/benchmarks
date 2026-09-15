@@ -389,6 +389,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
             "metric_evaluations": {
                 "id",
                 "observation_id",
+                "metric_id",
                 "metric_type",
                 "metric_version",
                 "evaluation_variant",
@@ -429,6 +430,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "model",
                 "benchmark",
                 "dataset_id",
+                "metric_id",
                 "metric_type",
                 "metric_version",
                 "evaluation_variant",
@@ -1742,6 +1744,10 @@ def test_database_success_validation_is_metric_agnostic(
             )
             cur.execute("COMMIT")
 
+        cur.execute(
+            "INSERT INTO benchmarks_v2.metrics (code,display_name) "
+            "VALUES ('FutureMetric','Future metric')"
+        )
         complete_direct(
             "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.PRIMARY),)
         )
