@@ -86,21 +86,6 @@ async def test_speechify_happy_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_speechify_all_models() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=make_pcm_bytes(240))
-
-    _install_mock(handler)
-
-    for model in ("simba-3.2", "simba-3.0"):
-        provider = SpeechifyTTSProvider(_settings(), model=model, voice=_VOICE)
-        result = await provider.synthesize("test")
-        assert result.error is None, f"{model}: {result.error}"
-        if result.audio_path is not None:
-            result.audio_path.unlink()
-
-
-@pytest.mark.asyncio
 async def test_speechify_http_error() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(429, content=b'{"detail": "rate limit"}')

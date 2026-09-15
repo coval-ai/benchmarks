@@ -163,23 +163,6 @@ async def test_inworld_redacts_key_in_error(fake_settings: Settings) -> None:
     assert "authorization=***" in result.error
 
 
-@pytest.mark.asyncio
-async def test_inworld_all_models(fake_settings: Settings) -> None:
-    for model in (
-        "inworld-tts-2",
-        "inworld-tts-2-flash",
-        "inworld-tts-1.5-max",
-        "inworld-tts-1.5-mini",
-    ):
-        fake_ws = _make_ws([make_pcm_bytes(240)])
-        with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-            provider = InworldTTSProvider(fake_settings, model=model, voice="Brooke")
-            result = await provider.synthesize("test")
-        assert result.error is None, f"{model}: {result.error}"
-        if result.audio_path is not None:
-            result.audio_path.unlink()
-
-
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------

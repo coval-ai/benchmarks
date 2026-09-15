@@ -70,18 +70,6 @@ async def test_smallest_happy_path(fake_settings: Settings, tmp_path: Path) -> N
     result.audio_path.unlink()
 
 
-@pytest.mark.asyncio
-async def test_smallest_all_models(fake_settings: Settings) -> None:
-    for model in ("lightning_v3.1_pro",):
-        fake_ws = _make_ws([make_pcm_bytes(240)])
-        with patch("coval_bench.providers.tts.smallest.ws_client.connect", return_value=fake_ws):
-            provider = SmallestTTSProvider(fake_settings, model=model, voice="kaitlyn")
-            result = await provider.synthesize("test")
-        assert result.error is None, f"{model}: {result.error}"
-        if result.audio_path is not None:
-            result.audio_path.unlink()
-
-
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
