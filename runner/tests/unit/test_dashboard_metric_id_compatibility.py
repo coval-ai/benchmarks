@@ -219,7 +219,7 @@ def test_populated_upgrade_preserves_data_and_requires_republication(
             assert result.status == "published" and result.generation == 8
             async with pool.connection() as reader:
                 snapshot = await require_snapshot(reader)
-                assert snapshot.generation == 8 and snapshot.definition_revision == 1
+                assert snapshot.generation == 8 and snapshot.definition_revision == 2
         finally:
             await pool.close()
 

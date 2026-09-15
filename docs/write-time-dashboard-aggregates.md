@@ -41,6 +41,26 @@ ratio and rejects unsupported ratio definitions until the projection is extended
 A fingerprint of registered contracts prevents reads using old saved definitions.
 Changing materialization semantics also requires a definition revision change.
 
+### Stable metric identities
+
+Migration `20260914_0035`, delivered in [PR #650](https://github.com/coval-ai/benchmarks/pull/650),
+adds the `metrics` dimension and generated IDs to hourly and summary storage.
+Both `metric_id` and `metric_type` remain available; the hourly trigger keeps
+them consistent so existing code-based writers remain compatible. Raw
+evaluations and source buckets continue to store canonical metric codes.
+
+[PR #649](https://github.com/coval-ai/benchmarks/pull/649) uses those IDs in
+dashboard publication and joins them back to codes for API responses. Before
+publication, registration inserts missing registry definitions without replacing
+existing IDs or display names. Unknown or unsupported source definitions fail
+the transaction, preserving the previous publication.
+
+Metric-ID application rollout requires 0035 and does not change its SQL. It
+advances the application definition revision from 1 to 2, so a refresh completed
+by the older application must be repeated after deploying the new application.
+The schema migration's compatibility columns do not make old publication
+fingerprints compatible with the new application.
+
 ## Publication, repair, and readers
 
 Once migration 0034 is applied, run completion durably enqueues its source bucket
@@ -133,6 +153,31 @@ part of the same rollout; a deliberately paused job will continue to alert.
    Verify the `dashboard-aggregates` failure and 90-minute heartbeat alerts.
 4. Verify production read latency and refresh load, then enable the normalized
    read flag. Disable it to return to legacy reads if needed.
+
+### Metric-ID application cutover and 30-day backfill
+
+1. Verify migration `20260914_0035` is applied. Disable normalized saved reads
+   and pause/drain aggregate maintenance and backfill workers while deploying
+   the metric-ID application to the runner, API, and maintenance job. Mixed
+   application revisions can publish incompatible fingerprints.
+2. Repair missing or skipped source buckets needed for the last 30 days with
+   `python -m coval_bench db repair-dashboard-aggregates --bucket <ISO_TIME>`.
+   Repeat `--bucket` for additional timestamps. Maintenance cannot discover
+   historical source buckets that were never queued.
+3. Run `python -m coval_bench db refresh-dashboard-aggregates` using the new
+   application. It rebuilds rolling 30-day hourly coverage and publishes the
+   24h, 7d, and 30d summaries. Each maintenance phase has a time limit; completed
+   hours remain committed, so repeat while pending work decreases. Older dirty
+   or queued work can also be processed; 30 days is the required coverage,
+   not a strict processing cutoff. This rebuild uses saved observations and
+   does not rerun benchmarks or scoring.
+4. Verify source repairs are drained, required hourly coverage is complete,
+   summaries are published, and representative 7d/30d API responses preserve
+   metric codes and expected values. Resume scheduling and enable saved reads
+   after these checks pass.
+
+Converting metric identity in the other normalized tables is a separate
+follow-up in [BENCH-911](https://linear.app/coval/issue/BENCH-911/extend-metric-ids-to-normalized-evaluations-and-source-rollups).
 
 Do not infer production performance from the small runtime smoke test. Local
 validation exercised real Alembic migration, normalized RunWriter completion,

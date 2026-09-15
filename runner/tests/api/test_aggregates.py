@@ -9,7 +9,8 @@ import asyncio
 import datetime as dt
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from typing import Any, get_args
+from enum import StrEnum
+from typing import Any, cast, get_args
 from uuid import uuid4
 
 import psycopg
@@ -33,7 +34,7 @@ from coval_bench.api.routers.aggregates import (
     _timeline_bucket_seconds,
 )
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
-from coval_bench.registries import TIMELINE_AGGREGATION_RULES, Metric
+from coval_bench.registries import METRIC_SPECS, TIMELINE_AGGREGATION_RULES, Metric
 from coval_bench.registries.metrics import (
     MetricValueContract,
     MetricValueDefinition,
@@ -483,6 +484,8 @@ async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
 async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
     client: AsyncClient, postgresql: Any
 ) -> None:
+    from tests.api.conftest import _make_db_url
+
     valid_run = await _insert_run(postgresql, dataset_id="tts-v1")
     await _insert_normalized_metric(
         postgresql,
@@ -526,6 +529,16 @@ async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(
     assert stats["TTFA"]["avg_value"] == pytest.approx(120.0)
     assert stats["TTFARoundtrip"]["avg_value"] == pytest.approx(75.0)
     assert stats["TTFALeadingSilence"]["avg_value"] == pytest.approx(45.0)
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        ids = await (
+            await conn.execute(
+                """SELECT code, id FROM benchmarks_v2.metrics
+                   WHERE code IN ('TTFA', 'TTFARoundtrip', 'TTFALeadingSilence')"""
+            )
+        ).fetchall()
+    assert len({row[1] for row in ids}) == 3
 
 
 async def test_normalized_component_only_ttfa_is_visible_and_discovers_dataset(
@@ -1533,6 +1546,15 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
     monkeypatch.setitem(
         TIMELINE_AGGREGATION_RULES, "FutureMetric", TIMELINE_AGGREGATION_RULES["TTFS"]
     )
+
+    class FutureMetric(StrEnum):
+        VALUE = "FutureMetric"
+
+    monkeypatch.setitem(
+        METRIC_SPECS,
+        cast(Metric, FutureMetric.VALUE),
+        METRIC_SPECS[Metric.TTFS].model_copy(update={"display_name": "Future metric"}),
+    )
     app.state.settings.normalized_dashboard_reads_enabled = normalized
     start = datetime(2026, 1, 1, 0, 30, tzinfo=dt.UTC)
     end = start + timedelta(days=7)
@@ -1735,6 +1757,15 @@ async def test_normalized_timeline_uses_registered_phonetic_ratio(
         ratio_scale=100.0,
     )
     monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, "PhoneticAccuracy", rule)
+
+    class PhoneticMetric(StrEnum):
+        VALUE = "PhoneticAccuracy"
+
+    monkeypatch.setitem(
+        METRIC_SPECS,
+        cast(Metric, PhoneticMetric.VALUE),
+        METRIC_SPECS[Metric.RTF].model_copy(update={"display_name": "Phonetic accuracy"}),
+    )
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
     start = datetime(2026, 8, 1, tzinfo=dt.UTC)

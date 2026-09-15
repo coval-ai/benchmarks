@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from psycopg import AsyncConnection
 
 from coval_bench.api import dashboard_snapshots
+from coval_bench.db.dashboard_contracts import DEFINITION_REVISION
 
 
 def _connection(row: object) -> AsyncConnection[Any]:
@@ -21,7 +22,9 @@ def _connection(row: object) -> AsyncConnection[Any]:
     return cast(AsyncConnection[Any], connection)
 
 
-def _row(*, generation: int = 3, revision: int = 1, fingerprint: str = "fp") -> dict[str, object]:
+def _row(
+    *, generation: int = 3, revision: int = DEFINITION_REVISION, fingerprint: str = "fp"
+) -> dict[str, object]:
     now = dt.datetime.now(dt.UTC)
     return {
         "generation": generation,
@@ -43,8 +46,8 @@ async def test_snapshot_accepts_initialized_current_state(monkeypatch: pytest.Mo
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "row",
-    [None, _row(generation=0), _row(revision=99), _row(fingerprint="old")],
-    ids=["missing", "unpublished", "revision", "fingerprint"],
+    [None, _row(generation=0), _row(revision=1), _row(revision=99), _row(fingerprint="old")],
+    ids=["missing", "unpublished", "previous_revision", "unknown_revision", "fingerprint"],
 )
 async def test_snapshot_rejects_unusable_state(
     monkeypatch: pytest.MonkeyPatch, row: object
