@@ -41,11 +41,13 @@ import openai
 import psycopg
 import pytest
 import structlog
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from posthog import Posthog
 from psycopg_pool import PoolTimeout
 from pydantic import SecretStr
 from structlog.testing import capture_logs
 
+from coval_bench import telemetry
 from coval_bench.config import Settings
 from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
 from coval_bench.providers.base import TranscriptionResult, TTSResult
@@ -62,6 +64,7 @@ from coval_bench.runner.orchestrator import (
     run_benchmarks,
 )
 from coval_bench.runner.retry import with_retry
+from tests.unit.test_telemetry import counter_points
 
 # ---------------------------------------------------------------------------
 # Shared test settings
@@ -2966,6 +2969,69 @@ async def test_partial_run_emits_run_partial_with_cause(
     # The healthy provider must never appear in the failure list.
     assert "deepgram" not in message
     assert _events(captured, "RUN_FAILED") == []
+
+
+@pytest.mark.asyncio
+async def test_partial_run_counts_items_and_run(audio_file: Path, settings: Settings) -> None:
+    """benchmark_items carries a per-provider result; benchmark_runs carries the status."""
+    provider_ok = MagicMock()
+    provider_ok.measure_ttft = AsyncMock(return_value=_good_transcription())
+    provider_bad = MagicMock()
+    provider_bad.measure_ttft = AsyncMock(side_effect=RuntimeError("boom"))
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    reader = InMemoryMetricReader()
+    telemetry.configure_metrics(settings, readers=[reader])
+    try:
+        async with _orchestrator_env(
+            audio_path=audio_file,
+            stt_items=[_make_dataset_item(audio_file) for _ in range(3)],
+            stt_providers={
+                "deepgram": MagicMock(return_value=provider_ok),
+                "elevenlabs": MagicMock(return_value=provider_bad),
+            },
+            run=run,
+            writer=writer,
+        ) as _:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=False,
+                matrix_overrides=[
+                    _stt_entry("deepgram", "nova-2"),
+                    _stt_entry("elevenlabs", "scribe_v2_realtime"),
+                ],
+            )
+        points = counter_points(reader)
+    finally:
+        telemetry.shutdown_metrics()
+
+    assert summary.status == str(RunStatus.PARTIAL)
+    items = points[telemetry.ITEMS_COUNTER]
+    assert (
+        items[(("kind", "stt"), ("model", "nova-2"), ("provider", "deepgram"), ("result", "ok"))]
+        == 3
+    )
+    assert (
+        items[
+            (
+                ("kind", "stt"),
+                ("model", "scribe_v2_realtime"),
+                ("provider", "elevenlabs"),
+                ("result", "error"),
+            )
+        ]
+        == 3
+    )
+    assert not any(k for k in items if ("provider", "deepgram") in k and ("result", "error") in k)
+    assert not any(k for k in items if ("provider", "elevenlabs") in k and ("result", "ok") in k)
+    runs = points[telemetry.RUNS_COUNTER]
+    assert len(runs) == 1
+    ((labels, count),) = runs.items()
+    assert count == 1
+    assert dict(labels)["kind"] == "stt"
+    assert dict(labels)["status"] == "partial"
 
 
 @pytest.mark.asyncio

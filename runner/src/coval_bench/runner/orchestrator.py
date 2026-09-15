@@ -55,6 +55,7 @@ from posthog import Posthog
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel
 
+from coval_bench import telemetry
 from coval_bench.datasets.suite import (
     DEDICATED_STT_SUITE,
     DEFAULT_STT_DATASET,
@@ -219,6 +220,19 @@ def _log_item_failures(
     }
     if reasons:
         logger.warning(event, provider=provider, model=model, item=item, reasons=reasons)
+
+
+def _record_item_metric(
+    entry: RegisteredModel,
+    results: list[Any],
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+) -> None:
+    """Count the item on ``benchmark_items``; a provider that produced no rows is not counted."""
+    result = telemetry.item_result(results, result_status)
+    if result is not None:
+        telemetry.record_item(
+            kind=str(entry.benchmark), provider=entry.provider, model=entry.model, result=result
+        )
 
 
 def _dead_providers(
@@ -724,6 +738,7 @@ async def _run_stt_item(
         model=entry.model,
         item=audio_path.name,
     )
+    _record_item_metric(entry, results, ResultStatus)
 
     captured_at = datetime.now(UTC)
     if writer is not None and results:
@@ -1078,6 +1093,7 @@ async def _run_tts_item(
         model=entry.model,
         item=item.testcase_id,
     )
+    _record_item_metric(entry, results, ResultStatus)
 
     return results
 
@@ -1579,6 +1595,7 @@ async def run_benchmarks(
                 fail_count=fail_count,
                 duration_s=duration_s,
             )
+            telemetry.record_run(kind=benchmark_kind, status=str(final_status))
             _emit_posthog(
                 posthog_client,
                 "benchmark_run_completed",
@@ -1647,6 +1664,7 @@ async def run_benchmarks(
                 fail_count=fail_count,
                 duration_s=sigterm_duration_s,
             )
+            telemetry.record_run(kind=benchmark_kind, status=str(RunStatus.PARTIAL))
             _emit_posthog(
                 posthog_client,
                 "benchmark_run_completed",
@@ -1678,6 +1696,7 @@ async def run_benchmarks(
             # metric), update run row, then re-raise so the job exits non-zero.
             err_msg = _truncate(str(exc))
             log_run_failed(err_msg, exc)
+            telemetry.record_run(kind=benchmark_kind, status=str(RunStatus.FAILED))
             try:
                 await writer.finish_run(run_id, status=RunStatus.FAILED, error=err_msg)
             except Exception as write_exc:
