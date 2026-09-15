@@ -59,7 +59,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
                WHERE attrelid=%s::regclass AND attnum>0 AND NOT attisdropped""",
             (f"benchmarks_v2.{table}",),
         ).fetchall()
-        assert ("metric_id",) in columns and ("metric_type",) not in columns
+        assert ("metric_id",) in columns and ("metric_type",) in columns
 
 
 @pytest.mark.parametrize(

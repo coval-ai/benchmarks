@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501, S608
-"""Give saved dashboard aggregates stable metric identities."""
+"""Add dashboard metric identities while retaining code-based compatibility."""
 
 from __future__ import annotations
 
@@ -59,6 +59,50 @@ _METRICS_SQL = """
       END IF;
       RETURN resolved_id;
     END $$;
+
+    CREATE FUNCTION benchmarks_v2.metric_code_for_id(metric_identity BIGINT) RETURNS TEXT
+    LANGUAGE plpgsql STABLE AS $$
+    DECLARE resolved_code TEXT;
+    BEGIN
+      SELECT code INTO resolved_code FROM benchmarks_v2.metrics WHERE id=metric_identity;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'unknown metric identity: %', metric_identity USING ERRCODE='23503';
+      END IF;
+      RETURN resolved_code;
+    END $$;
+    """
+
+_HOURLY_COMPATIBILITY_SQL = """
+    CREATE FUNCTION benchmarks_v2.sync_dashboard_metric_identity() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+    BEGIN
+      -- An UPDATE from either application changes only its own identifier.
+      -- Discard the unchanged counterpart before resolving the new identity.
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.metric_type IS DISTINCT FROM OLD.metric_type
+           AND NEW.metric_id IS NOT DISTINCT FROM OLD.metric_id THEN
+          NEW.metric_id := NULL;
+        ELSIF NEW.metric_id IS DISTINCT FROM OLD.metric_id
+           AND NEW.metric_type IS NOT DISTINCT FROM OLD.metric_type THEN
+          NEW.metric_type := NULL;
+        END IF;
+      END IF;
+      IF NEW.metric_id IS NULL AND NEW.metric_type IS NULL THEN
+        RAISE EXCEPTION 'a metric code or id is required' USING ERRCODE='23502';
+      ELSIF NEW.metric_id IS NULL THEN
+        NEW.metric_id := benchmarks_v2.metric_id_for_code(NEW.metric_type);
+      ELSIF NEW.metric_type IS NULL THEN
+        NEW.metric_type := benchmarks_v2.metric_code_for_id(NEW.metric_id);
+      ELSIF NEW.metric_id <> benchmarks_v2.metric_id_for_code(NEW.metric_type) THEN
+        RAISE EXCEPTION 'metric code and id must refer to the same definition'
+          USING ERRCODE='23514';
+      END IF;
+      RETURN NEW;
+    END $$;
+    CREATE TRIGGER dashboard_hourly_sync_metric_identity
+      BEFORE INSERT OR UPDATE OF metric_type, metric_id
+      ON benchmarks_v2.dashboard_hourly_aggregates FOR EACH ROW
+      EXECUTE FUNCTION benchmarks_v2.sync_dashboard_metric_identity();
     """
 
 _VIEW_SQL = """
@@ -132,9 +176,8 @@ SELECT provider,model,benchmark,dataset_id,
 
 
 def _replace_summary_views(*, metric_ids: bool) -> None:
-    column = "metric_id" if metric_ids else "metric_type"
     projection = (
-        "benchmarks_v2.metric_id_for_code(metric_type) AS metric_id"
+        "metric_type, benchmarks_v2.metric_id_for_code(metric_type) AS metric_id"
         if metric_ids
         else "metric_type"
     )
@@ -147,11 +190,15 @@ def _replace_summary_views(*, metric_ids: bool) -> None:
             + " WITH NO DATA"
         )
         op.execute(
-            f"CREATE UNIQUE INDEX normalized_results_{name}_key ON benchmarks_v2.normalized_results_{name} (provider,model,benchmark,dataset_id,{column},metric_version,evaluation_variant)"
+            f"CREATE UNIQUE INDEX normalized_results_{name}_key ON benchmarks_v2.normalized_results_{name} (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant)"
         )
         op.execute(
-            f"CREATE INDEX normalized_results_{name}_lookup ON benchmarks_v2.normalized_results_{name} (benchmark,dataset_id,{column},metric_version,evaluation_variant)"
+            f"CREATE INDEX normalized_results_{name}_lookup ON benchmarks_v2.normalized_results_{name} (benchmark,dataset_id,metric_type,metric_version,evaluation_variant)"
         )
+        if metric_ids:
+            op.execute(
+                f"CREATE INDEX normalized_results_{name}_metric_id_lookup ON benchmarks_v2.normalized_results_{name} (benchmark,dataset_id,metric_id,metric_version,evaluation_variant)"
+            )
     op.execute("""
       DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='api') THEN
         GRANT SELECT ON benchmarks_v2.normalized_results_24h,
@@ -162,14 +209,16 @@ def _replace_summary_views(*, metric_ids: bool) -> None:
 
 def upgrade() -> None:
     op.execute(_METRICS_SQL)
-    # Keep hourly values and keys intact. An unknown code aborts this migration
-    # transaction before either schema or data changes become visible.
+    # Retain the existing code-based key for the deployed application. Both
+    # applications can write during the transition; the trigger keeps their
+    # identifiers consistent. Unknown historical codes abort the transaction.
     op.execute("""
       ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
-        ALTER COLUMN metric_type TYPE BIGINT
-          USING benchmarks_v2.metric_id_for_code(metric_type);
+        ADD COLUMN metric_id BIGINT;
+      UPDATE benchmarks_v2.dashboard_hourly_aggregates
+        SET metric_id=benchmarks_v2.metric_id_for_code(metric_type);
       ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
-        RENAME COLUMN metric_type TO metric_id;
+        ALTER COLUMN metric_id SET NOT NULL;
       ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
         ADD CONSTRAINT dashboard_hourly_aggregates_metric_id_fkey
           FOREIGN KEY (metric_id) REFERENCES benchmarks_v2.metrics(id) ON DELETE RESTRICT;
@@ -177,8 +226,9 @@ def upgrade() -> None:
         as_of=NULL, published_at=NULL, definition_revision=2,
         definition_fingerprint='uninitialized' WHERE id=true;
     """)
-    # These are derived caches. Retain the generation but require compatible
-    # publication before readers can use the recreated views.
+    op.execute(_HOURLY_COMPATIBILITY_SQL)
+    # Retain the generation but invalidate these derived caches. Either
+    # application can republish and read its own definition revision.
     _replace_summary_views(metric_ids=True)
     op.execute("""
       DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname='api') THEN
@@ -189,23 +239,13 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("""
-      CREATE FUNCTION benchmarks_v2.metric_code_for_id(metric_identity BIGINT) RETURNS TEXT
-      LANGUAGE plpgsql STABLE AS $$
-      DECLARE resolved_code TEXT;
-      BEGIN
-        SELECT code INTO resolved_code FROM benchmarks_v2.metrics WHERE id=metric_identity;
-        IF NOT FOUND THEN
-          RAISE EXCEPTION 'unknown metric identity: %', metric_identity USING ERRCODE='23503';
-        END IF;
-        RETURN resolved_code;
-      END $$;
+      DROP TRIGGER dashboard_hourly_sync_metric_identity
+        ON benchmarks_v2.dashboard_hourly_aggregates;
+      DROP FUNCTION benchmarks_v2.sync_dashboard_metric_identity();
       ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
         DROP CONSTRAINT dashboard_hourly_aggregates_metric_id_fkey;
       ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
-        ALTER COLUMN metric_id TYPE TEXT
-          USING benchmarks_v2.metric_code_for_id(metric_id);
-      ALTER TABLE benchmarks_v2.dashboard_hourly_aggregates
-        RENAME COLUMN metric_id TO metric_type;
+        DROP COLUMN metric_id;
       UPDATE benchmarks_v2.dashboard_summary_state SET
         as_of=NULL, published_at=NULL, definition_revision=1,
         definition_fingerprint='uninitialized' WHERE id=true;

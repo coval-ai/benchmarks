@@ -3,15 +3,15 @@
 
 """Where the seeded world comes from when it is not in the checkout.
 
-``contracts`` deliberately knows nothing about storage; it exposes a seam and
+``scenarios`` deliberately knows nothing about storage; it exposes a seam and
 this module fills it. Keeping the two apart is what lets the fixtures move to a
 different store later without touching the contract or the published hash.
 
 The object path mirrors the layout on disk, so it is a mechanical function of
 the suite name and nothing has to be remembered:
 
-    disk  contracts/<suite>/_private/mock-tools.json
-    gcs   gs://<bucket>/contracts/<suite>/mock-tools.json
+    disk  scenarios/<suite>/_private/mock-tools.json
+    gcs   gs://<bucket>/scenarios/<suite>/mock-tools.json
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from coval_bench import gcs
-from coval_bench.contracts import FixtureProvider, register_fixture_provider
+from coval_bench.scenarios import FixtureProvider, register_fixture_provider
 
 if TYPE_CHECKING:
     from google.cloud import storage
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger("coval_bench.fixtures")
 
-FIXTURE_OBJECT = "contracts/{suite}/mock-tools.json"
+FIXTURE_OBJECT = "scenarios/{suite}/mock-tools.json"
 
 
 def gcs_fixture_provider(

@@ -27,6 +27,7 @@ from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench import scenarios
 from coval_bench.api.common import (
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
@@ -43,7 +44,7 @@ from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import is_metric_excluded
-from coval_bench.s2s.conditions import DATASET_ID_BANK, DATASET_ID_LLM_BANK
+from coval_bench.registries.benchmarks import Benchmark
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -66,7 +67,9 @@ _VALID_COMBOS: set[tuple[str, str]] = {
 # retired: nothing writes to them, but they stay reachable through the aggregates
 # ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
 # pooled. LLM runs the same bank scenario over text.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_BANK, "LLM": DATASET_ID_LLM_BANK}
+_PRIMARY_DATASET_BY_BENCHMARK = {
+    b.value: scenarios.ACTIVE.primary_dataset(b) for b in (Benchmark.S2S, Benchmark.LLM)
+}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,

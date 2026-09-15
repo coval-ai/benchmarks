@@ -23,23 +23,19 @@ import click
 import httpx
 import structlog
 
+from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.db.writer import RunWriter
-from coval_bench.llm import suite
 from coval_bench.registries import METRIC_SPECS, Metric
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.s2s.conditions import (
     DATASET_ID,
     DEFAULT_CONDITION,
-    FAMILY_BANK,
     FAMILY_DENTAL,
-    FAMILY_INSTR_CUST_SERVICE,
-    FAMILY_INSTR_HEALTH,
-    FAMILY_INSTR_HOME_SERVICE,
     FAMILY_MULTITURN,
     Condition,
     DatasetMetrics,
@@ -81,11 +77,6 @@ class AgentSpec:
     # overriding the global coval_s2s_instruction_metric_id. None uses the
     # global one.
     instruction_metric_id_attr: str | None = None
-    # Settings attr holding this agent's Expected Behavior Adherence metric id.
-    # Fetched and stored under its own metric type alongside (not instead of)
-    # instruction_metric_id_attr's judge score, so the two never collapse into
-    # one chart. None means this agent doesn't have that metric configured.
-    expected_behavior_metric_id_attr: str | None = None
 
 
 @dataclass(frozen=True)
@@ -148,108 +139,6 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=FAMILY_DENTAL,
             publish_samples=False,
         ),
-        # Instruction adherence by industry: a separate Coval workspace, one family
-        # per industry so they're never pooled together on the dashboard. No V2V is
-        # measured here, so these never reach the public samples card.
-        AgentSpec(
-            agent_id=settings.coval_s2s_health_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr="coval_s2s_health_test_set_id",
-            family=FAMILY_INSTR_HEALTH,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_health_grok_agent_id,
-            provider="xai",
-            model="grok-voice",
-            test_set_id_attr="coval_s2s_health_test_set_id",
-            family=FAMILY_INSTR_HEALTH,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_health_violet_agent_id,
-            provider="openai",
-            model="gpt-live-1",
-            test_set_id_attr="coval_s2s_health_test_set_id",
-            family=FAMILY_INSTR_HEALTH,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_health_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_home_service_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr="coval_s2s_home_service_test_set_id",
-            family=FAMILY_INSTR_HOME_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_home_service_grok_agent_id,
-            provider="xai",
-            model="grok-voice",
-            test_set_id_attr="coval_s2s_home_service_test_set_id",
-            family=FAMILY_INSTR_HOME_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_home_service_violet_agent_id,
-            provider="openai",
-            model="gpt-live-1",
-            test_set_id_attr="coval_s2s_home_service_test_set_id",
-            family=FAMILY_INSTR_HOME_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_home_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_cust_service_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr="coval_s2s_cust_service_test_set_id",
-            family=FAMILY_INSTR_CUST_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_cust_service_grok_agent_id,
-            provider="xai",
-            model="grok-voice",
-            test_set_id_attr="coval_s2s_cust_service_test_set_id",
-            family=FAMILY_INSTR_CUST_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_cust_service_violet_agent_id,
-            provider="openai",
-            model="gpt-live-1",
-            test_set_id_attr="coval_s2s_cust_service_test_set_id",
-            family=FAMILY_INSTR_CUST_SERVICE,
-            publish_samples=False,
-            workspace_id_attr="coval_s2s_industry_workspace_id",
-            instruction_metric_id_attr="coval_s2s_cust_service_instruction_metric_id",
-            expected_behavior_metric_id_attr="coval_s2s_industry_expected_behavior_metric_id",
-        ),
         # The Ultra Bank set, the daily public board: four agents in the default
         # workspace on one test set. Its instruction metric is the Validate
         # Expected Behaviors judge, a fraction rather than a verdict, which the
@@ -258,33 +147,33 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             agent_id=settings.coval_s2s_bank_openai_agent_id,
             provider="openai",
             model="gpt-realtime",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_gpt_live_agent_id,
             provider="openai",
             model="gpt-live-1",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_gemini_agent_id,
             provider="google",
             model="gemini-live",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
         AgentSpec(
             agent_id=settings.coval_s2s_bank_xai_agent_id,
             provider="xai",
             model="grok-voice-think-fast-2.0",
-            test_set_id_attr="coval_s2s_bank_test_set_id",
-            family=FAMILY_BANK,
-            instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
     )
 
@@ -302,11 +191,11 @@ def llm_specs(
             agent_id=agent_ids.get(model.provider),
             provider=model.provider,
             model=model.model,
-            test_set_id_attr=suite.ACTIVE.test_set_id_attr,
-            family=suite.ACTIVE.family,
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.LLM),
             publish_samples=False,
             benchmark=Benchmark.LLM,
-            instruction_metric_id_attr=suite.ACTIVE.instruction_metric_id_attr,
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         )
         for model in models
         if model.benchmark is Benchmark.LLM and model.collected
@@ -454,8 +343,10 @@ async def recent_completed_runs(
     (tags are not filterable). ``test_set_id`` narrows to one test set so other
     sims on the same agents (e.g. the single-turn set) are not ingested. Runs
     without a parseable create_time are kept: better to ingest with a fetch-time
-    slot than to drop data. ``workspace_id`` is required for an agent that does
-    not live in the workspace the client's API key defaults to.
+    slot than to drop data. Pages are followed until one reaches past the window,
+    so an agent with several runs a day (one per persona) is never cut off at the
+    first page. ``workspace_id`` is required for an agent that does not live in
+    the workspace the client's API key defaults to.
     """
     window = window_seconds or max(WINDOW_FLOOR_SECONDS, 2 * period_seconds)
     filt = f'status="COMPLETED" AND agent_id="{agent_id}"'
@@ -478,6 +369,7 @@ async def recent_completed_runs(
         resp.raise_for_status()
         payload = cast("dict[str, Any]", resp.json())
         raw = cast("list[dict[str, Any]]", payload.get("runs", []))
+        left_window = False
         for r in raw:
             run = CovalRun(
                 run_id=cast("str", r["run_id"]),
@@ -485,10 +377,14 @@ async def recent_completed_runs(
                 persona_id=cast("str", r.get("persona_id") or ""),
             )
             if run.create_time is not None and (now - run.create_time).total_seconds() > window:
+                left_window = True
                 continue
             runs.append(run)
             found_ids.add(run.run_id)
-        if not requested_run_ids or requested_run_ids <= found_ids:
+        if requested_run_ids:
+            if requested_run_ids <= found_ids:
+                break
+        elif left_window or not raw:
             break
         page_token = cast("str | None", payload.get("next_page_token"))
         if not page_token:
@@ -567,13 +463,6 @@ def _instruction_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     return (100.0 if verdict else 0.0), ResultStatus.SUCCESS
 
 
-def _expected_behavior_value(raw: object) -> tuple[float | None, ResultStatus] | None:
-    """Coval's criteria_met_count / criteria_total_count fraction, as a percent."""
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return round(float(raw) * 100.0, 1), ResultStatus.SUCCESS
-    return None, ResultStatus.FAILED
-
-
 def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None:
     """Interruptions per minute, unrounded; a clip with no numeric value becomes a FAILED row."""
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
@@ -587,7 +476,6 @@ _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus
     Metric.V2V: _v2v_value,
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
     Metric.INTERRUPTION_RATE: _interruption_value,
-    Metric.EXPECTED_BEHAVIOR_ADHERENCE: _expected_behavior_value,
 }
 
 
@@ -1056,7 +944,7 @@ def _expected_sample_models(settings: Settings, dataset_id: str) -> set[tuple[st
     """The pairs a sample on *dataset_id* must cover; a bucket short one publishes nothing.
 
     Each dataset is its own samples partition, so only the agents whose clean
-    condition lands there count; a model on another industry's set is not missing.
+    condition lands there count; a model on another set is not missing.
     """
     return {
         (spec.provider, spec.model)
@@ -1289,7 +1177,7 @@ async def fetch_and_write_v2v(
     metric_id = settings.coval_s2s_latency_metric_id
     if benchmark is Benchmark.S2S and not metric_id:
         # Only a configured spec whose clean condition fetches V2V (see
-        # conditions.py) makes the latency metric required; industry specs don't.
+        # conditions.py) makes the latency metric required.
         v2v_spec_configured = any(spec.agent_id and _fetches_v2v(spec.family) for spec in specs)
         if v2v_spec_configured:
             raise RuntimeError("coval_s2s_latency_metric_id is not set")
@@ -1308,7 +1196,7 @@ async def fetch_and_write_v2v(
     instruction_metric_id = raw_instr or None
     test_set_id = raw_test_set or None
     if benchmark is Benchmark.LLM:
-        unset = suite.ACTIVE.missing(settings)
+        unset = scenarios.ACTIVE.missing(settings, benchmark=Benchmark.LLM)
         if unset:
             raise RuntimeError(f"{', '.join(unset)} is required for the LLM benchmark")
     if benchmark is Benchmark.S2S and bool(instruction_metric_id) != bool(test_set_id):
@@ -1402,21 +1290,6 @@ async def fetch_and_write_v2v(
                     **metric_ids,
                     Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
                 }
-            if spec.expected_behavior_metric_id_attr:
-                spec_expected_behavior_metric_id = (
-                    getattr(settings, spec.expected_behavior_metric_id_attr) or ""
-                ).strip()
-                if spec_expected_behavior_metric_id:
-                    spec_metric_ids = {
-                        **spec_metric_ids,
-                        Metric.EXPECTED_BEHAVIOR_ADHERENCE: spec_expected_behavior_metric_id,
-                    }
-                else:
-                    logger.warning(
-                        "expected_behavior_metric_id_unset",
-                        provider=spec.provider,
-                        attr=spec.expected_behavior_metric_id_attr,
-                    )
             status_key = f"{spec.family}:{spec.provider}:{spec.model}"
             statuses[status_key], ingested = await _fetch_one_provider(
                 client,
@@ -1456,7 +1329,7 @@ async def fetch_and_write_v2v(
                 f"targeted backfill did not recover runs: {', '.join(sorted(unmatched))}"
             )
 
-        # One sample per dataset: each industry runs its own test set, so a tick
+        # One sample per dataset: each family runs its own test set, so a tick
         # that pooled them would never find a scenario shared by every model. The
         # set the recordings actually came from labels the manifest; gating on the
         # shared ``coval_s2s_test_set_id`` instead would stop publishing entirely
@@ -1486,6 +1359,7 @@ async def fetch_and_write_v2v(
                 runs=dataset_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
+                persona_labels=settings.s2s_persona_labels,
             )
         logger.info(
             "s2s_fetch_done",

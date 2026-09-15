@@ -126,8 +126,10 @@ async def test_finish_rolls_back_on_other_enqueue_errors(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [RunStatus.SUCCEEDED, RunStatus.PARTIAL, RunStatus.FAILED])
 async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
     pg_conn: psycopg.Connection[Any],
+    status: RunStatus,
 ) -> None:
     apply_migrations(pg_conn)
     pool = await storage._pool(pg_conn)
@@ -140,7 +142,7 @@ async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
             values=storage._wer_values(storage._required(evaluation.id)),
             finished_at=storage._NOW,
         )
-        await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+        await writer.finish_run(run_id, status=status)
         async with pool.connection() as conn:
             run = await (
                 await conn.execute(
@@ -153,7 +155,7 @@ async def test_finish_enqueues_source_then_rebuild_marks_hour_dirty(
                 await conn.execute("SELECT bucket_at FROM benchmarks_v2.dashboard_source_refreshes")
             ).fetchone()
         assert run is not None
-        assert run["status"] == "succeeded" and run["finished_at"] is not None
+        assert run["status"] == str(status) and run["finished_at"] is not None
         assert run["error"] is None
         assert queued is not None and queued["bucket_at"] == run["scheduled_at"]
         bucket = queued["bucket_at"]

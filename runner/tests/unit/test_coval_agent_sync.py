@@ -220,7 +220,7 @@ def test_sync_patches_only_the_drifted_template_fields() -> None:
     live_template = {
         **DEFINITION.run_template_body("A"),
         "id": "T",
-        "persona_ids": ["P" * 22, "9ATy64zKXxSUaVWb5YnQtd"],
+        "persona_ids": ["P" * 22, "Q" * 22],
         "concurrency": 1,
     }
     state = _state(
