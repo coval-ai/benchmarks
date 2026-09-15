@@ -28,7 +28,7 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 try:
-    from google.cloud import texttospeech
+    import google.cloud.texttospeech as texttospeech
 
     GOOGLE_TTS_AVAILABLE = True
 except ImportError:
