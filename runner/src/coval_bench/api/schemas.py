@@ -169,12 +169,12 @@ class ResultsResponse(BaseModel):
     results: list[ResultOut]
 
 
-class NormalizedComponentOut(BaseModel):
+class ResultComponentOut(BaseModel):
     value: float
     unit: str
 
 
-class NormalizedResultOut(BaseModel):
+class ResultV2Out(BaseModel):
     evaluation_id: uuid.UUID
     observation_id: uuid.UUID
     run_id: int
@@ -192,11 +192,11 @@ class NormalizedResultOut(BaseModel):
     dataset_id: str
     sample_id: str
     captured_at: datetime
-    components: dict[str, NormalizedComponentOut] = Field(default_factory=dict)
+    components: dict[str, ResultComponentOut] = Field(default_factory=dict)
 
 
-class NormalizedResultsResponse(BaseModel):
-    results: list[NormalizedResultOut]
+class ResultsV2Response(BaseModel):
+    results: list[ResultV2Out]
     next_cursor: str | None
 
 

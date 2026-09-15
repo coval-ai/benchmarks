@@ -36,7 +36,7 @@ def _seed_completed_evaluation(
     captured_at: datetime,
     sample_id: str,
 ) -> UUID:
-    """Insert one completed normalized evaluation using the current schema."""
+    """Insert one completed metric evaluation using the current schema."""
     observation_id = uuid4()
     evaluation_id = uuid4()
     conn.execute(
@@ -233,7 +233,7 @@ async def _insert_evaluation(
 
 
 @pytest.mark.asyncio
-async def test_primary_role_and_components_are_normalized(
+async def test_primary_role_and_components_preserve_stored_values(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql)
@@ -420,8 +420,8 @@ async def test_openapi_marks_nullable_values_and_optional_components(
     client: AsyncClient,
 ) -> None:
     document = (await client.get("/openapi.json")).json()
-    result_schema = document["components"]["schemas"]["NormalizedResultOut"]
-    response_schema = document["components"]["schemas"]["NormalizedResultsResponse"]
+    result_schema = document["components"]["schemas"]["ResultV2Out"]
+    response_schema = document["components"]["schemas"]["ResultsV2Response"]
     assert "value" in result_schema["required"] and "unit" in result_schema["required"]
     assert "components" not in result_schema["required"]
     assert any(item.get("type") == "null" for item in result_schema["properties"]["value"]["anyOf"])
@@ -693,7 +693,7 @@ async def test_v2_visibility_is_before_limit_and_cursor_scope_changes_are_reject
 async def test_cursor_validation_time_conflicts_and_frozen_bounds(
     client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from coval_bench.api.routers import normalized_results as normalized_router
+    from coval_bench.api.routers import results_v2 as results_router
 
     run_id = await _insert_run(postgresql)
     now = datetime.now(UTC).replace(microsecond=0)
@@ -761,7 +761,7 @@ async def test_cursor_validation_time_conflicts_and_frozen_bounds(
         def now(cls, tz: Any = None) -> LaterDateTime:
             return cls.fromtimestamp((now + timedelta(days=2)).timestamp(), tz=tz)
 
-    monkeypatch.setattr(normalized_router, "datetime", LaterDateTime)
+    monkeypatch.setattr(results_router, "datetime", LaterDateTime)
     continued = await client.get(
         "/v2/results", params={"window": "24h", "limit": 100, "cursor": relative_cursor}
     )

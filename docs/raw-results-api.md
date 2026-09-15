@@ -1,4 +1,4 @@
-# Raw results API
+# Results API v2
 
 `GET /v2/results` returns one item per metric evaluation, including its
 observation, metric version, and variant. See the API service's `/docs` or

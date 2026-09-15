@@ -56,7 +56,7 @@ dataset, so headline stats (e.g. pooled WER) blend all datasets that ran.
 `/v1/results` exposes each row's `dataset_id` and takes a `dataset` filter for
 per-dataset inspection. See ADR-023.
 
-The [v2 raw results API](raw-results-api.md) exposes normalized evaluations and
+The [results API v2](raw-results-api.md) exposes metric evaluations and
 their observation's dataset ID, with optional metric components and pagination.
 
 **Rebuilding from scratch.** `coval-build-dataset` applies each dataset's

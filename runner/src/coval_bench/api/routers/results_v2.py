@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evaluation-level reads from normalized benchmark storage."""
+"""Evaluation-level reads from benchmark storage."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.api.deps import get_pool
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.schemas import NormalizedResultsResponse
+from coval_bench.api.schemas import ResultsV2Response
 
 router = APIRouter(tags=["results"])
 _CURSOR_VERSION = 1
@@ -114,11 +114,11 @@ def _parse_cursor(
 
 @router.get(
     "/results",
-    response_model=NormalizedResultsResponse,
+    response_model=ResultsV2Response,
     response_model_exclude_unset=True,
 )
 @limiter.limit("60/minute")
-async def list_normalized_results(
+async def list_results(
     request: Request,
     run_id: int | None = Query(default=None, gt=0),
     provider: str | None = Query(default=None),
@@ -164,7 +164,7 @@ async def list_normalized_results(
     ),
     pool: AsyncConnectionPool[Any] = Depends(get_pool),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
-) -> NormalizedResultsResponse:
+) -> ResultsV2Response:
     """Return one item per metric evaluation, newest observation first."""
     since = _utc(since, "since")
     until = _utc(until, "until")
@@ -316,4 +316,4 @@ async def list_normalized_results(
                 "anchor_id": str(last["evaluation_id"]),
             }
         )
-    return NormalizedResultsResponse(results=response_rows, next_cursor=next_cursor)
+    return ResultsV2Response(results=response_rows, next_cursor=next_cursor)
