@@ -207,6 +207,66 @@ async def test_writer_retry_hydrates_existing_identity(historical: Any, status: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
+async def test_concurrent_historical_retries_preserve_identity_and_payload(
+    historical: Any, status: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = _payloads(historical)
+    stored = historical.execute(
+        "SELECT id, observation_id FROM benchmarks_v2.metric_evaluations WHERE status=%s",
+        (status,),
+    ).fetchone()
+    request = MetricEvaluation(
+        observation_id=stored[1],
+        metric_type="WER",
+        metric_version="v1",
+        evaluation_variant=status,
+        executor=MetricExecutor.INLINE,
+        status=ProcessingStatus.QUEUED,
+    )
+    target_id = stored[0]
+    barrier = asyncio.Barrier(2)
+    connections: set[int] = set()
+    original_fetchone = psycopg.AsyncCursor.fetchone
+
+    async def fetchone(cursor: Any) -> Any:
+        row = await original_fetchone(cursor)
+        if isinstance(row, dict) and row.get("id") == target_id and row.get("metric_id") is None:
+            connections.add(id(cursor.connection))
+            await barrier.wait()
+        return row
+
+    monkeypatch.setattr(psycopg.AsyncCursor, "fetchone", fetchone)
+    pool = await writer_seed._pool(historical)
+    try:
+        writer = RunWriter(pool)
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                writer.insert_metric_evaluation(request),
+                writer.insert_metric_evaluation(request),
+                return_exceptions=True,
+            ),
+            timeout=5,
+        )
+        first, second = results
+        assert isinstance(first, MetricEvaluation)
+        assert isinstance(second, MetricEvaluation)
+        assert first.id == second.id == target_id
+        assert first.metric_id == second.metric_id
+        assert (
+            first.metric_id
+            == historical.execute(
+                "SELECT id FROM benchmarks_v2.metrics WHERE code='WER'"
+            ).fetchone()[0]
+        )
+        assert first.status.value == second.status.value == status
+        assert len(connections) == 2
+    finally:
+        await pool.close()
+    assert _payloads(historical) == before
+
+
+@pytest.mark.asyncio
 async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(historical: Any) -> None:
     observation_id = historical.execute(
         "SELECT observation_id FROM benchmarks_v2.metric_evaluations LIMIT 1"

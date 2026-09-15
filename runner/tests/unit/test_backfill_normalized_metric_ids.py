@@ -43,26 +43,32 @@ def _upgrade(conn: psycopg.Connection[Any], revision: str) -> None:
 
 def _seed_0035(conn: psycopg.Connection[Any]) -> None:
     _upgrade(conn, "20260914_0035")
-    run = conn.execute(
+    run_row = conn.execute(
         """INSERT INTO benchmarks_v2.runs
            (started_at, finished_at, runner_sha, dataset_id, dataset_sha256, status)
            VALUES (now(), now(), 'test', 'metric-id-test', %s, 'succeeded') RETURNING id""",
         (_SHA,),
-    ).fetchone()[0]
-    observation = conn.execute(
+    ).fetchone()
+    assert run_row is not None
+    run = run_row[0]
+    observation_row = conn.execute(
         """INSERT INTO benchmarks_v2.benchmark_observations
            (run_id, dataset_id, dataset_sha256, sample_id, provider, model, benchmark,
             source_kind, status)
            VALUES (%s, 'metric-id-test', %s, 'sample-1', 'provider', 'model', 'STT',
                    'dataset_audio', 'succeeded') RETURNING id""",
         (run, _SHA),
-    ).fetchone()[0]
-    evaluation = conn.execute(
+    ).fetchone()
+    assert observation_row is not None
+    observation = observation_row[0]
+    evaluation_row = conn.execute(
         """INSERT INTO benchmarks_v2.metric_evaluations
            (observation_id, metric_type, metric_version, executor, status)
            VALUES (%s, 'WER', 'v1', 'test', 'queued') RETURNING id""",
         (observation,),
-    ).fetchone()[0]
+    ).fetchone()
+    assert evaluation_row is not None
+    evaluation = evaluation_row[0]
     conn.execute(
         """INSERT INTO benchmarks_v2.dashboard_metric_values
            (evaluation_id, observation_id, metric_type, metric_version, evaluation_variant,
@@ -95,7 +101,8 @@ def _counts(conn: psycopg.Connection[Any]) -> tuple[int, int, int]:
                   (SELECT COUNT(*) FROM benchmarks_v2.dashboard_metric_values WHERE metric_id IS NULL),
                   (SELECT COUNT(*) FROM benchmarks_v2.metric_values_by_bucket WHERE metric_id IS NULL)"""
     ).fetchone()
-    return tuple(int(value) for value in row)
+    assert row is not None
+    return int(row[0]), int(row[1]), int(row[2])
 
 
 def test_dry_run_does_not_mutate_any_normalized_table(seeded: Any) -> None:
@@ -162,7 +169,9 @@ def test_advisory_owner_lock_is_reported_and_released(seeded: Any) -> None:
 def test_locked_rows_are_skipped_then_resume(seeded: Any) -> None:
     other = psycopg.connect(_dsn(seeded), autocommit=False)
     try:
-        row_id = other.execute("SELECT id FROM benchmarks_v2.metric_evaluations").fetchone()[0]
+        row = other.execute("SELECT id FROM benchmarks_v2.metric_evaluations").fetchone()
+        assert row is not None
+        row_id = row[0]
         other.execute(
             "SELECT id FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE", (row_id,)
         )

@@ -476,15 +476,29 @@ class RunWriter:
                     )
                     row = await cur.fetchone()
                     if row is not None and row["metric_id"] is None:
+                        evaluation_id = row["id"]
                         await cur.execute(
                             """UPDATE benchmarks_v2.metric_evaluations
-                               SET metric_id = %s WHERE id = %s
+                               SET metric_id = %s WHERE id = %s AND metric_id IS NULL
                                RETURNING id, observation_id, metric_id, metric_type, metric_version,
                                          evaluation_variant, executor, external_request_id, status,
                                          started_at, finished_at, error, created_at, updated_at""",
-                            (metric_id, row["id"]),
+                            (metric_id, evaluation_id),
                         )
                         row = await cur.fetchone()
+                        if row is None:
+                            await cur.execute(
+                                """SELECT id, observation_id, metric_id, metric_type,
+                                          metric_version,
+                                          evaluation_variant, executor,
+                                          external_request_id, status, started_at,
+                                          finished_at, error,
+                                          created_at, updated_at
+                                   FROM benchmarks_v2.metric_evaluations
+                                   WHERE id = %s""",
+                                (evaluation_id,),
+                            )
+                            row = await cur.fetchone()
                 if row is not None:
                     await cur.execute(
                         """SELECT observation_artifact_id, preprocessing_artifact_id,
