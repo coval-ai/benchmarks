@@ -51,6 +51,7 @@ from coval_bench.api.routers import (
     leaderboard,
     llm_proxy,
     mocktools,
+    normalized_results,
     pricing,
     providers,
     results,
@@ -209,6 +210,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(robots.router)
     app.include_router(runs.router, prefix="/v1")
     app.include_router(results.router, prefix="/v1")
+    app.include_router(normalized_results.router, prefix="/v2")
     app.include_router(aggregates.router, prefix="/v1")
     app.include_router(leaderboard.router, prefix="/v1")
     app.include_router(providers.router, prefix="/v1")
