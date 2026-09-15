@@ -239,7 +239,9 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 id uuid PRIMARY KEY,
                 observation_id uuid NOT NULL REFERENCES benchmarks_v2.benchmark_observations(id),
                 metric_type text NOT NULL, metric_version text NOT NULL,
-                evaluation_variant text NOT NULL, status text NOT NULL
+                evaluation_variant text NOT NULL, status text NOT NULL,
+                executor text NOT NULL DEFAULT 'fixture', external_request_id text,
+                created_at timestamptz NOT NULL DEFAULT now()
             );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_values (
                 metric_evaluation_id uuid NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id),
@@ -284,6 +286,24 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(metric_ids, "op", SimpleNamespace(execute=conn.execute)):
             metric_ids.upgrade()
+        lifecycle = import_module(
+            "coval_bench.db.migrations.versions.20260818_0018_normalized_benchmark_storage"
+        )
+        statements: list[str] = []
+        with patch.object(lifecycle, "op", SimpleNamespace(execute=statements.append)):
+            lifecycle.upgrade()
+        # Use the shipped validator; full payload constraints use the writer fixture.
+        lifecycle_sql = statements[0]
+        start = lifecycle_sql.index("CREATE FUNCTION benchmarks_v2.validate_metric_transition()")
+        end = lifecycle_sql.index(
+            "CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact()", start
+        )
+        conn.execute(lifecycle_sql[start:end])
+        normalized_metric_ids = import_module(
+            "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
+        )
+        with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
+            normalized_metric_ids.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.

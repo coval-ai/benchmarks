@@ -218,6 +218,14 @@ class _Connection:
             return _Cursor([])
         if query == "SELECT now()":
             return _Cursor([(AS_OF,)])
+        if query == readiness._METRIC_ID_READINESS_SQL:
+            return _Cursor(
+                [
+                    ("dashboard_metric_values", 0, 0),
+                    ("metric_evaluations", 0, 0),
+                    ("metric_values_by_bucket", 0, 0),
+                ]
+            )
         if query == readiness._LATEST_ELIGIBLE_BUCKET_SQL:
             return _Cursor([(AS_OF,)]) if copied_params["benchmark"] == "STT" else _Cursor([])
         if query == readiness._HISTORICAL_COVERAGE_BUCKET_SQL:

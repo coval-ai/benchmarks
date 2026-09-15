@@ -31,6 +31,7 @@ import psycopg
 from coval_bench.config import get_settings
 from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
 from coval_bench.db.dashboard_source import mark_source_hour_dirty
+from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.s2s.fetch_v2v import _normalized_dataset_sha256
 
 _OBS_NAMESPACE = uuid.UUID("0c43bb05-d3e4-5d07-b9d9-1e4e7e18f9f2")
@@ -672,9 +673,9 @@ def _insert_plan(cur: psycopg.Cursor[Any], plan: Plan) -> tuple[int, int]:
         evaluation_id = plan.evaluation_id(metric)
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status)
-               VALUES (%s,%s,%s,'v1','default','coval_api','queued')""",
-            (evaluation_id, plan.id, metric),
+               (id,observation_id,metric_id,metric_type,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),%s,'v1','default','coval_api','queued')""",
+            (evaluation_id, plan.id, metric, metric),
         )
         cur.execute(
             "UPDATE benchmarks_v2.metric_evaluations SET status='running',started_at=%s WHERE id=%s",
@@ -740,7 +741,7 @@ def _merge_verification_delta(report: dict[str, Any], delta: PageDelta) -> None:
 
 _ROLLUP_PAYLOAD_SQL = """
 SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
-       e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
+       COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
        MIN(v.value)::float8,
        PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY v.value)::float8,
        PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY v.value)::float8,
@@ -753,14 +754,15 @@ JOIN benchmarks_v2.runs r ON r.id=o.run_id
 WHERE o.benchmark='S2S' AND o.status='succeeded' AND e.status='succeeded'
   AND r.status IN ('succeeded','partial') AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
-  (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,o.dataset_id,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit),
-  (o.provider,o.model,o.benchmark,e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit)
 )
 """
 _STORED_ROLLUP_SQL = """
-SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+SELECT provider,model,benchmark,dataset_id,
+       COALESCE(metric_id,benchmarks_v2.metric_id_for_code(metric_type)),metric_type,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
 FROM benchmarks_v2.metric_values_by_bucket
@@ -782,7 +784,7 @@ def _refresh(cur: psycopg.Cursor[Any], bucket: datetime) -> None:
     )
     cur.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-           (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,
+           (provider,model,benchmark,dataset_id,metric_id,metric_type,metric_version,evaluation_variant,
             value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
         """
         + _ROLLUP_PAYLOAD_SQL,
@@ -978,8 +980,9 @@ def backfill(
         if apply:
             with conn.cursor() as cur:
                 cur.execute("SELECT pg_advisory_lock(hashtextextended(%s,0))", (_LOCK,))
-            conn.commit()
             lock_acquired = True
+            register_metric_definitions_sync(conn)
+            conn.commit()
 
         phase = "source_reconciliation"
         progress.phase_started(phase, report, total_runs=progress.total_runs)

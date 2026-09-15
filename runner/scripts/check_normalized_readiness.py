@@ -9,6 +9,9 @@ the latest seven-day window has exact raw public-row and materialized-rollup
 parity. Every parity query is time-bounded and the checker never writes.
 """
 
+# SQL below is fixed to the benchmark schema; table names are not user input.
+# ruff: noqa: E501, S608
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +31,28 @@ DEFAULT_CHUNK_HOURS = 1
 DEFAULT_STATEMENT_TIMEOUT_SECONDS = 30
 DEFAULT_TOTAL_TIMEOUT_SECONDS = 600
 _BENCHMARKS = ("STT", "TTS", "S2S")
+_METRIC_ID_READINESS_SQL = """
+SELECT table_name,
+       COUNT(*) FILTER (WHERE metric_id IS NULL) AS missing_ids,
+       COUNT(*) FILTER (
+         WHERE metrics.id IS NULL OR metric_id <> metrics.id
+            OR (table_name = 'dashboard_metric_values'
+                AND (parent_metric_id IS NULL OR metric_id <> parent_metric_id))
+       ) AS mismatched_ids
+FROM (
+  SELECT 'metric_evaluations' AS table_name, metric_id, metric_type, NULL::bigint AS parent_metric_id
+  FROM benchmarks_v2.metric_evaluations
+  UNION ALL
+  SELECT 'dashboard_metric_values', p.metric_id, p.metric_type, e.metric_id
+  FROM benchmarks_v2.dashboard_metric_values p
+  LEFT JOIN benchmarks_v2.metric_evaluations e ON e.id = p.evaluation_id
+  UNION ALL
+  SELECT 'metric_values_by_bucket', metric_id, metric_type, NULL::bigint
+  FROM benchmarks_v2.metric_values_by_bucket
+) rows
+LEFT JOIN benchmarks_v2.metrics ON metrics.code = rows.metric_type
+GROUP BY table_name ORDER BY table_name
+"""
 
 
 class Cursor(Protocol):
@@ -552,7 +577,7 @@ def check(
 
     raw_count, raw_details = _summarize_counter(raw_counter)
     rollup_count, rollup_details = _summarize_counter(rollup_counter)
-    return evaluate_readiness(
+    report = evaluate_readiness(
         as_of=as_of,
         buckets=buckets,
         raw_mismatches=raw_details,
@@ -561,6 +586,16 @@ def check(
         raw_mismatch_count=raw_count,
         rollup_mismatch_count=rollup_count,
     )
+    metric_id_rows = runner.execute("metric_id_coverage", _METRIC_ID_READINESS_SQL).fetchall()
+    metric_ids = {
+        str(row[0]): {"missing": int(row[1]), "mismatched": int(row[2])} for row in metric_id_rows
+    }
+    report["metric_id_coverage"] = metric_ids
+    report["metric_id_ready"] = bool(metric_ids) and all(
+        values["missing"] == 0 and values["mismatched"] == 0 for values in metric_ids.values()
+    )
+    report["ready"] = report["ready"] and report["metric_id_ready"]
+    return report
 
 
 class _JsonArgumentParser(argparse.ArgumentParser):

@@ -142,11 +142,10 @@ def _seed_0034(conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -
                     status=ObservationStatus.SUCCEEDED,
                 )
             )
-            evaluation = await writer_seed._evaluation(writer, observation)
-            assert evaluation.id is not None
+            evaluation_id = await writer_seed._historical_evaluation(pool, observation)
             await writer.complete_metric_evaluation(
-                evaluation.id,
-                values=writer_seed._wer_values(evaluation.id),
+                evaluation_id,
+                values=writer_seed._wer_values(evaluation_id),
                 finished_at=_AS_OF,
             )
             await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)

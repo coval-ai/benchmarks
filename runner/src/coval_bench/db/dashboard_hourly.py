@@ -77,7 +77,9 @@ WITH rules AS (
 ), requested_hours AS (
   SELECT unnest(%(hours)s::timestamptz[]) AS hour_at
 ), source AS (
-  SELECT b.provider, b.model, b.benchmark, b.dataset_id, b.metric_type,
+  SELECT b.provider, b.model, b.benchmark, b.dataset_id,
+         COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type)) AS metric_id,
+         b.metric_type,
          b.metric_version, b.evaluation_variant, b.bucket_at AS source_at,
          h.hour_at,
          r.method, r.fallback, r.scale, r.numerator_keys, r.denominator_key,
@@ -96,14 +98,15 @@ WITH rules AS (
   WHERE b.evaluation_variant = 'default'
     AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
          OR b.value_key = r.denominator_key)
-  GROUP BY b.provider, b.model, b.benchmark, b.dataset_id, b.metric_type,
+  GROUP BY b.provider, b.model, b.benchmark, b.dataset_id,
+           COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type)), b.metric_type,
            b.metric_version, b.evaluation_variant, b.bucket_at,
            r.method, r.fallback, r.scale, r.numerator_keys, r.denominator_key, h.hour_at
   HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
      AND COUNT(*) FILTER (WHERE b.value_key = 'primary'
                           AND b.unit = r.units ->> 'primary') = 1
 ), grouped AS (
-  SELECT provider, model, benchmark, dataset_id, metric_type, metric_version,
+  SELECT provider, model, benchmark, dataset_id, metric_id, metric_type, metric_version,
          evaluation_variant,
          hour_at,
          SUM(primary_sum)::float8 AS primary_sum,
@@ -114,10 +117,10 @@ WITH rules AS (
          COUNT(*)::bigint AS source_count, MAX(source_at) AS latest_source_at,
          method, fallback, scale
   FROM source
-  GROUP BY provider, model, benchmark, dataset_id, metric_type, metric_version,
+  GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_type, metric_version,
            evaluation_variant, hour_at, method, fallback, scale
 )
-SELECT provider, model, benchmark, dataset_id, metric_type, metric_version,
+SELECT provider, model, benchmark, dataset_id, metric_id, metric_type, metric_version,
        evaluation_variant, hour_at, primary_sum, sample_count,
        numerator_sum, denominator_sum, coverage_complete, source_count,
        latest_source_at
@@ -192,12 +195,15 @@ async def refresh_hourly_aggregates(
                                     %(denominator_sum)s, %(coverage_complete)s, %(source_count)s,
                                     %(latest_source_at)s, %(definition_revision)s,
                                     '{"schema_version": 1}'::jsonb)"""
+                if any(
+                    row["metric_id"] != metric_ids[str(row["metric_type"])] for row in by_hour[hour]
+                ):
+                    raise ValueError("source bucket metric identity disagrees with catalog")
                 await cur.executemany(
                     insert_sql,
                     [
                         {
                             **row,
-                            "metric_id": metric_ids[str(row["metric_type"])],
                             "definition_revision": HOURLY_DEFINITION_REVISION,
                         }
                         for row in by_hour[hour]

@@ -1791,6 +1791,7 @@ def test_progress_failure_keeps_last_completed_checkpoint_without_detail_leakage
 def test_apply_cancellation_emits_checkpoint_then_unlocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
     stream = io.StringIO()
     reporter = migration.ProgressReporter("apply", 1, 9, 1, stream=stream, monotonic=_Clock())
@@ -1967,6 +1968,7 @@ def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None
 def test_apply_replans_for_fresh_verification_without_retaining_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), benchmark="STT")
     plan = migration.Planned(
         [row],
@@ -2047,6 +2049,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 def test_apply_verification_skips_are_reported_and_block_readiness(
     monkeypatch: pytest.MonkeyPatch, verification_reason: str
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), benchmark="STT")
     verification_row = replace(row, scheduled_at=None)
     plan = migration.Planned(
