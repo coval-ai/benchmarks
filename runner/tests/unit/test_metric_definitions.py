@@ -147,7 +147,6 @@ async def test_future_metric_is_registered_before_hourly_publication(
     monkeypatch.setitem(METRIC_VALUE_CONTRACTS, (future, "v1"), contract)
     monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, future.value, contract)
     hour = datetime(2026, 9, 14, 12, tzinfo=UTC)
-    _bucket(metric_pg, hour, [(future.value, "primary", "seconds", 12.0, 3)])
     assert (
         metric_pg.execute(
             "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)
@@ -156,6 +155,9 @@ async def test_future_metric_is_registered_before_hourly_publication(
     )
     pool = await open_pool(metric_pg)
     try:
+        async with pool.connection() as conn:
+            await register_metric_definitions(conn)
+        _bucket(metric_pg, hour, [(future.value, "primary", "seconds", 12.0, 3)])
         assert await refresh_hourly_aggregates(pool, hours=[hour]) == 1
         first = metric_pg.execute(
             "SELECT id FROM benchmarks_v2.metrics WHERE code=%s", (future.value,)

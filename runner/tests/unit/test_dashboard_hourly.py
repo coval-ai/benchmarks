@@ -218,6 +218,10 @@ async def test_unknown_metric_rolls_back_previous_hour_and_state(
         await refresh_hourly_aggregates(pool, hours=[hour])
         with pg_conn.cursor() as cur:
             cur.execute(
+                "INSERT INTO benchmarks_v2.metrics (code,display_name) "
+                "VALUES ('UnknownMetric','Unknown metric')"
+            )
+            cur.execute(
                 """INSERT INTO benchmarks_v2.metric_values_by_bucket
                 (provider, model, benchmark, dataset_id, metric_type, metric_version,
                  evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
