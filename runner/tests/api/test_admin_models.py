@@ -550,3 +550,35 @@ async def test_llm_configuration_roundtrips_and_validates(client: AsyncClient) -
             json={"collected": False, "llm_config": invalid_identity},
         )
         assert response.status_code == 422
+
+
+async def test_register_gpt5_variants_through_admin_api(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(admin_models, "_implemented_providers", _real_implemented)
+    headers = _admin_headers()
+    for effort in ["minimal", "medium"]:
+        response = await client.post(
+            "/v1/admin/models",
+            headers=headers,
+            json={
+                "modality": "LLM",
+                "provider": "openai",
+                "model": f"gpt-5-{effort}",
+                "creator": "openai",
+                "region": "us",
+                "arena_enabled": False,
+                "collected": True,
+                "published": False,
+                "llm_config": {"upstream_model": "gpt-5", "reasoning_effort": effort},
+            },
+        )
+        assert response.status_code == 201, response.text
+    response = await client.get("/v1/admin/models", headers=headers)
+    models = response.json()["models"]
+    assert {m["model"]: m["llm_config"]["reasoning_effort"] for m in models} == {
+        "gpt-5-minimal": "minimal",
+        "gpt-5-medium": "medium",
+    }
+    assert len({m["id"] for m in models}) == 2
+    assert all(m["collected"] and not m["published"] for m in models)

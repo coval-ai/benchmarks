@@ -1,6 +1,6 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Move LLM request configuration into the registry and register GPT-5 variants."""
+"""Move existing LLM request configuration into the registry."""
 
 from alembic import op
 
@@ -41,36 +41,12 @@ def upgrade() -> None:
             ON benchmarks_v2.models (provider)
             WHERE modality = 'LLM' AND llm_config->>'legacy_provider_route' = 'true';
 
-        WITH added AS (
-            INSERT INTO benchmarks_v2.models
-                (modality, provider, model, creator, source, licensing, region,
-                 arena_enabled, collected, published, llm_config, updated_by_user_id)
-            SELECT 'LLM', 'openai', 'gpt-5-' || effort, 'openai', 'official-api',
-                   'proprietary', 'us', false, true, false,
-                   jsonb_build_object('upstream_model', 'gpt-5',
-                                      'reasoning_effort', effort,
-                                      'legacy_provider_route', false),
-                   'migration:20260916_0037'
-            FROM (VALUES ('minimal'), ('medium')) AS variants(effort)
-            ON CONFLICT (modality, provider, model) DO NOTHING
-            RETURNING *
-        )
-        INSERT INTO benchmarks_v2.model_history
-            (model_id, modality, provider, model, old, new, changed_by_user_id)
-        SELECT id, modality, provider, model, NULL,
-               to_jsonb(added) - 'updated_by_email', 'migration:20260916_0037'
-        FROM added;
     """)
 
 
 def downgrade() -> None:
-    # Remove only unedited seed entries. Results use provider/model keys and are
-    # retained. Restore provenance on compatibility rows for earlier downgrades.
+    # Restore provenance on compatibility rows for earlier downgrades.
     op.execute("""
-        DELETE FROM benchmarks_v2.models
-        WHERE updated_by_user_id = 'migration:20260916_0037'
-          AND modality = 'LLM' AND provider = 'openai'
-          AND model IN ('gpt-5-minimal', 'gpt-5-medium');
         UPDATE benchmarks_v2.models m
         SET updated_by_user_id = h.old->>'updated_by_user_id',
             updated_at = (h.old->>'updated_at')::timestamptz

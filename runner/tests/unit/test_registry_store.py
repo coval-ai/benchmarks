@@ -334,7 +334,7 @@ def test_color_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]) -> No
     _with_store(registry_pg, scenario)
 
 
-def test_llm_migration_registers_variants_and_preserves_legacy_identity(
+def test_llm_migration_preserves_existing_models_without_registering_variants(
     registry_pg: psycopg.Connection[Any],
 ) -> None:
     from pathlib import Path
@@ -368,13 +368,7 @@ def test_llm_migration_registers_variants_and_preserves_legacy_identity(
         try:
             models = {m.model: m for m in await fetch_models(pool) if m.benchmark is Benchmark.LLM}
             identities = set()
-            for name, effort in [("gpt-5-minimal", "minimal"), ("gpt-5-medium", "medium")]:
-                model = models[name]
-                assert model.collected and not model.published and not model.arena_enabled
-                assert model.llm_config is not None
-                assert model.llm_config.upstream_model == "gpt-5"
-                assert model.llm_config.reasoning_effort == effort
-                assert not model.llm_config.legacy_provider_route
+            assert set(models) == {"phonely-agent", "gpt-4.1", "gemini-2.5-flash"}
             for model in models.values():
                 assert model.llm_config is not None
                 definition = CovalTextAgentDefinition(
@@ -395,7 +389,8 @@ def test_llm_migration_registers_variants_and_preserves_legacy_identity(
             assert google is not None and google.reasoning_effort == "none"
             history = await RegistryStore(pool).recent_history()
             assert any(
-                change.new.get("llm_config", {}).get("reasoning_effort") == "minimal"
+                change.old is not None
+                and change.new.get("llm_config", {}).get("upstream_model") == "gpt-4.1"
                 for changes in history.values()
                 for change in changes
             )
