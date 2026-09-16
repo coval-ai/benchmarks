@@ -27,6 +27,12 @@ def test_contract_reads_the_shared_files(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(contract.digest) == 64
 
 
+def test_prompt_can_arrive_base64_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
+    monkeypatch.setenv("SYSTEM_PROMPT_B64", "WW91IGFyZSBsaW5lIG9uZS4KTGluZSB0d28uCg==")
+    assert load_contract("dental").system_prompt == "You are line one.\nLine two."
+
+
 def test_missing_prompt_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
     with pytest.raises(ValueError, match="system prompt"):

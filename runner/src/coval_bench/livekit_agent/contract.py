@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -24,6 +25,10 @@ class Contract:
 
 
 def _text(suite: str, filename: str, env: str) -> str:
+    """The suite file, unless the plain or base64 environment override is set."""
+    encoded = os.environ.get(f"{env}_B64")
+    if encoded:
+        return base64.b64decode(encoded).decode("utf-8").strip()
     override = os.environ.get(env)
     if override:
         return override
