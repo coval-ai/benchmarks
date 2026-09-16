@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
+from coval_bench.scenarios import binding_for_dataset
 
 
 class RunOut(BaseModel):
@@ -293,11 +294,36 @@ class TimelineResponse(BaseModel):
     materialization: DashboardMaterialization | None = None
 
 
+class DatasetPersona(BaseModel):
+    """The caller persona a dataset was run with, as declared in the runner's registry."""
+
+    slug: str
+    label: str
+    description: str
+    order: int
+    anchor: Literal["latency", "judge"]
+
+    @classmethod
+    def for_dataset(cls, dataset_id: str) -> DatasetPersona | None:
+        bound = binding_for_dataset(dataset_id)
+        if bound is None:
+            return None
+        slug, persona, binding = bound
+        return cls(
+            slug=slug,
+            label=persona.label,
+            description=persona.description,
+            order=persona.order,
+            anchor=binding.anchor,
+        )
+
+
 class DatasetAggregates(BaseModel):
     """Per-model stats for one dataset — one block of the by-dataset response."""
 
     dataset: str
     model_stats: list[ModelStatEntry]
+    persona: DatasetPersona | None = None
 
 
 class AggregatesByDatasetResponse(BaseModel):

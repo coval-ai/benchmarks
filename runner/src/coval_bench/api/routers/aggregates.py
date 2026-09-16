@@ -64,6 +64,7 @@ from coval_bench.api.schemas import (
     AggregatesByDatasetResponse,
     AggregatesResponse,
     DatasetAggregates,
+    DatasetPersona,
     ModelStatEntry,
     SeriesPoint,
     TimelinePoint,
@@ -896,7 +897,11 @@ async def get_results_aggregates_by_dataset(
             benchmark=benchmark,
             window=window,
             blocks=[
-                DatasetAggregates(dataset=dataset, model_stats=stats)
+                DatasetAggregates(
+                    dataset=dataset,
+                    model_stats=stats,
+                    persona=DatasetPersona.for_dataset(dataset),
+                )
                 for dataset, stats in grouped.items()
             ],
             snapshot=snapshot.as_dict() if snapshot else None,
