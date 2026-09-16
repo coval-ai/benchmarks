@@ -179,7 +179,7 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
 
 
 def llm_specs(
-    models: Iterable[RegisteredModel], agent_ids: Mapping[str, str] | None = None
+    models: Iterable[RegisteredModel], agent_ids: Mapping[tuple[str, str], str] | None = None
 ) -> tuple[AgentSpec, ...]:
     """Every collected LLM model, driven over the active suite through the proxy.
 
@@ -188,7 +188,7 @@ def llm_specs(
     agent_ids = agent_ids or {}
     return tuple(
         AgentSpec(
-            agent_id=agent_ids.get(model.provider),
+            agent_id=agent_ids.get((model.provider, model.model)),
             provider=model.provider,
             model=model.model,
             test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
@@ -1162,7 +1162,7 @@ async def fetch_and_write_v2v(
     only_run_ids: frozenset[str] | None = None,
     window_seconds: int | None = None,
     page_size: int = WINDOW_PAGE_SIZE,
-    llm_agent_ids: Mapping[str, str] | None = None,
+    llm_agent_ids: Mapping[tuple[str, str], str] | None = None,
 ) -> dict[str, RunStatus]:
     """Ingest the selected benchmark's providers; return per-provider status.
 
@@ -1404,7 +1404,7 @@ def _run_fetch(
     page_size: int,
     *,
     settings: Settings | None = None,
-    llm_agent_ids: Mapping[str, str] | None = None,
+    llm_agent_ids: Mapping[tuple[str, str], str] | None = None,
 ) -> None:
     from coval_bench.logging import configure_logging, log_run_failed, log_run_partial
 

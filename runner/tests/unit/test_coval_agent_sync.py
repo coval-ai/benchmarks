@@ -24,18 +24,21 @@ from coval_bench.llm.coval_agent import (
 )
 from coval_bench.platform_assets import SyncError
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 
 SECRET = "proxy-secret-value"  # noqa: S105
 PHONELY = RegisteredModel(
     benchmark=Benchmark.LLM,
     provider="phonely",
     model="phonely-agent",
+    llm_config=LLMConfig(upstream_model="phonely-agent", legacy_provider_route=True),
     collected=True,
     published=False,
 )
 DEFINITION = CovalTextAgentDefinition(
     provider="phonely",
+    model="phonely-agent",
+    legacy_provider_route=True,
     proxy_url="https://api.example.com",
     proxy_secret=SecretStr(SECRET),
     test_set_id="TSBANK",
@@ -120,7 +123,10 @@ def test_body_renders_the_proxy_contract_and_survives_covals_substitution() -> N
     assert body["customer_agent_id"] == "benchmarks-phonely-text"
     assert body["display_name"] == "Benchmarks: Phonely text agent"
     assert body["model_type"] == "MODEL_TYPE_CHAT"
-    assert body["metadata"]["chat_endpoint"] == "https://api.example.com/llm/phonely/chat"
+    assert (
+        body["metadata"]["chat_endpoint"]
+        == "https://api.example.com/llm/phonely/chat?benchmark_model=phonely-agent"
+    )
     assert body["metadata"]["authorization_header"] == f"Bearer {SECRET}"
     substituted = (
         body["metadata"]["input_template"]
@@ -140,11 +146,17 @@ def test_from_settings_names_every_missing_setting() -> None:
     with pytest.raises(SyncError, match="llm_proxy_public_url, .*coval_s2s_bank_persona_id"):
         CovalTextAgentDefinition.from_settings(
             "phonely",
-            Settings(coval_s2s_bank_test_set_id="T", coval_s2s_bank_instruction_metric_id="M"),
+            model="phonely-agent",
+            legacy_provider_route=True,
+            settings=Settings(
+                coval_s2s_bank_test_set_id="T", coval_s2s_bank_instruction_metric_id="M"
+            ),
         )
     definition = CovalTextAgentDefinition.from_settings(
         "phonely",
-        Settings(
+        model="phonely-agent",
+        legacy_provider_route=True,
+        settings=Settings(
             llm_proxy_public_url="https://api.example.com/",
             llm_proxy_secret=SecretStr(SECRET),
             coval_s2s_bank_instruction_metric_id="M",
@@ -318,12 +330,12 @@ def test_cli_prints_the_agent_id_and_never_the_secret(monkeypatch: pytest.Monkey
 
     dry = CliRunner().invoke(sync_llm, ["--dry-run"])
     assert dry.exit_code == 0, dry.output
-    assert "COVAL_LLM_PHONELY_AGENT_ID=<created on apply>" in dry.output
+    assert "phonely/phonely-agent agent_id=<created on apply>" in dry.output
     assert state["writes"] == []
 
     applied = CliRunner().invoke(sync_llm, [])
     assert applied.exit_code == 0, applied.output
-    assert f"COVAL_LLM_PHONELY_AGENT_ID={'A' * 22}" in applied.output
+    assert f"phonely/phonely-agent agent_id={'A' * 22}" in applied.output
     assert "llm_sync_fetch_deferred" in applied.output
     assert SECRET not in dry.output + applied.output
 
@@ -355,7 +367,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
 
     assert applied.exit_code == 0, applied.output
     fetch.assert_called_once()
-    assert fetch.call_args.kwargs["llm_agent_ids"] == {"phonely": agent_id}
+    assert fetch.call_args.kwargs["llm_agent_ids"] == {("phonely", "phonely-agent"): agent_id}
 
     paused = PHONELY.model_copy(update={"collected": False})
     monkeypatch.setattr(coval_agent, "load_llm_models", lambda _settings: [paused])
@@ -363,7 +375,7 @@ def test_cli_syncs_completed_runs_into_the_database(monkeypatch: pytest.MonkeyPa
     applied = CliRunner().invoke(sync_llm, [])
 
     assert applied.exit_code == 0, applied.output
-    assert "phonely scheduled run: disable" in applied.output
+    assert "phonely/phonely-agent scheduled run: disable" in applied.output
     fetch.assert_not_called()
 
 
@@ -376,3 +388,80 @@ def test_cli_logs_automation_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     assert failed.exit_code == 1
     assert '"event": "RUN_FAILED"' in failed.output
     assert "sync-llm needs" in failed.output
+
+
+def test_multiple_openai_models_have_distinct_stable_coval_identities() -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    definitions = [
+        DEFINITION.model_copy(
+            update={
+                "provider": "openai",
+                "model": model,
+                "legacy_provider_route": model == "gpt-4.1",
+            }
+        )
+        for model in ["gpt-4.1", "gpt-5-minimal", "gpt-5-medium"]
+    ]
+    assert definitions[0].customer_agent_id == "benchmarks-openai-text"
+    assert definitions[0].run_name == "benchmarks-openai-text-daily"
+    assert len({definition.customer_agent_id for definition in definitions}) == 3
+    assert len({definition.run_name for definition in definitions}) == 3
+    for definition in definitions:
+        metadata = definition.agent_body()["metadata"]
+        for field in ["chat_endpoint", "initialization_endpoint"]:
+            assert parse_qs(urlparse(metadata[field]).query) == {
+                "benchmark_model": [definition.model]
+            }
+        assert definition.key == ("openai", definition.model)
+
+
+def test_cli_keeps_all_models_from_one_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from coval_bench.s2s.fetch_v2v import llm_specs
+
+    models = [
+        PHONELY.model_copy(
+            update={
+                "provider": "openai",
+                "model": model,
+                "llm_config": LLMConfig.model_validate(
+                    {
+                        "upstream_model": "gpt-4.1" if model == "gpt-4.1" else "gpt-5",
+                        "reasoning_effort": None
+                        if model == "gpt-4.1"
+                        else model.removeprefix("gpt-5-"),
+                        "legacy_provider_route": model == "gpt-4.1",
+                    }
+                ),
+            }
+        )
+        for model in ["gpt-4.1", "gpt-5-minimal", "gpt-5-medium"]
+    ]
+    settings = Settings(
+        llm_proxy_public_url="https://api.example.com",
+        llm_proxy_secret=SecretStr(SECRET),
+        coval_s2s_bank_test_set_id="TSBANK",
+        coval_s2s_bank_instruction_metric_id="M",
+        coval_s2s_bank_persona_id="P",
+    )
+    fetch = MagicMock()
+    monkeypatch.setenv("COVAL_API_KEY", "coval-key")
+    monkeypatch.setattr(coval_agent, "get_settings", lambda: settings)
+    monkeypatch.setattr(coval_agent, "load_llm_models", lambda _: models)
+    monkeypatch.setattr(coval_agent, "CovalTextClient", MagicMock())
+    monkeypatch.setattr(
+        coval_agent,
+        "sync",
+        lambda _client, definition, **_kw: coval_agent.SyncResult(
+            agent_id=f"agent-{definition.model}"
+        ),
+    )
+    monkeypatch.setattr("coval_bench.s2s.fetch_v2v._run_fetch", fetch)
+    result = CliRunner().invoke(sync_llm, [])
+    assert result.exit_code == 0, result.output
+    mapping = fetch.call_args.kwargs["llm_agent_ids"]
+    assert mapping == {("openai", model.model): f"agent-{model.model}" for model in models}
+    specs = llm_specs(models, mapping)
+    assert [(spec.model, spec.agent_id) for spec in specs] == [
+        (model.model, f"agent-{model.model}") for model in models
+    ]

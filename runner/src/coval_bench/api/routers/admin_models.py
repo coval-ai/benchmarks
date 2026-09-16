@@ -50,7 +50,7 @@ from coval_bench.registries.provider_keys import provider_names
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_coval_admin)])
 
 # PATCH fields where null is a value, not an omission.
-_NULLABLE_FIELDS = frozenset({"voice", "creator", "region", "color"})
+_NULLABLE_FIELDS = frozenset({"voice", "creator", "region", "color", "llm_config"})
 
 
 def _model_out(record: ModelRecord, history: list[ModelChange]) -> AdminModelOut:
@@ -73,6 +73,10 @@ def _implemented_providers(modality: Benchmark) -> frozenset[str] | None:
 
 async def _validate_model(candidate: NewModel | ModelRecord, store: RegistryStore) -> None:
     """The write-time rules the registry's review used to enforce; 422 on violation."""
+    if candidate.llm_config is not None and candidate.modality is not Benchmark.LLM:
+        raise HTTPException(422, "llm_config is LLM-only")
+    if candidate.modality is Benchmark.LLM and candidate.collected and candidate.llm_config is None:
+        raise HTTPException(422, "a collected LLM model needs llm_config")
     implemented = _implemented_providers(candidate.modality)
     if candidate.collected and implemented is not None and candidate.provider not in implemented:
         raise HTTPException(
@@ -206,6 +210,11 @@ async def update_admin_model(
         raise HTTPException(404, "no such model")
     candidate = ModelRecord.model_validate({**current.model_dump(), **changes})
     await _validate_model(candidate, store)
+    if current.llm_config is not None and (
+        candidate.llm_config is None
+        or candidate.llm_config.legacy_provider_route != current.llm_config.legacy_provider_route
+    ):
+        raise HTTPException(422, "keep the existing LLM agent identity; pause with collected=false")
     try:
         result = await store.update_model(
             model_id,

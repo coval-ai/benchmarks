@@ -861,7 +861,7 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
 
     statuses = await fetch_v2v.fetch_and_write_v2v(
-        settings, benchmark=Benchmark.LLM, llm_agent_ids={"phonely": "llm-agent"}
+        settings, benchmark=Benchmark.LLM, llm_agent_ids={("phonely", "phonely-agent"): "llm-agent"}
     )
 
     assert statuses == {"llm-bank:phonely:phonely-agent": RunStatus.SUCCEEDED}
@@ -874,7 +874,8 @@ async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
 
 def test_phonely_spec_is_the_llm_bank_text_agent() -> None:
     (spec,) = fetch_v2v.llm_specs(
-        [PHONELY, PHONELY.model_copy(update={"collected": False})], {"phonely": "A1"}
+        [PHONELY, PHONELY.model_copy(update={"collected": False})],
+        {("phonely", "phonely-agent"): "A1"},
     )
     assert spec == AgentSpec(
         agent_id="A1",
@@ -1009,7 +1010,7 @@ async def test_fetch_and_write_llm_names_the_missing_suite_setting() -> None:
         await fetch_v2v.fetch_and_write_v2v(
             Settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_instruction_metric_id="IID"),
             benchmark=Benchmark.LLM,
-            llm_agent_ids={"phonely": "a1"},
+            llm_agent_ids={("phonely", "phonely-agent"): "a1"},
         )
 
 

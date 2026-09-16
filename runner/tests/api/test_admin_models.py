@@ -499,3 +499,86 @@ async def test_tag_creation_is_coval_gated(client: AsyncClient) -> None:
     assert created.json() == body
     assert (await client.post("/v1/tags", json=body, headers=_admin_headers())).status_code == 409
     assert (await client.get("/v1/tags")).json() == {"tags": [body]}
+
+
+async def test_llm_configuration_roundtrips_and_validates(client: AsyncClient) -> None:
+    headers = _admin_headers()
+    body = {
+        "modality": "LLM",
+        "provider": "acme",
+        "model": "reasoning-comparison",
+        "collected": True,
+        "arena_enabled": False,
+    }
+    missing = await client.post("/v1/admin/models", headers=headers, json=body)
+    assert missing.status_code == 422
+    config = {
+        "upstream_model": "vendor-model",
+        "reasoning_effort": "minimal",
+        "legacy_provider_route": False,
+    }
+    created = await client.post(
+        "/v1/admin/models", headers=headers, json={**body, "llm_config": config}
+    )
+    assert created.status_code == 201, created.text
+    row = created.json()
+    assert row["llm_config"] == config
+    config["reasoning_effort"] = "medium"
+    changed = await client.patch(
+        f"/v1/admin/models/{row['id']}",
+        headers={**headers, "If-Match": row["updated_at"]},
+        json={"llm_config": config},
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["model"]["llm_config"] == config
+    listed = await client.get("/v1/admin/models", headers=headers)
+    assert listed.json()["models"][0]["llm_config"] == config
+    for invalid in [{**config, "reasoning_effort": "typo"}, {**config, "temperature": 1}]:
+        response = await client.post(
+            "/v1/admin/models", headers=headers, json={**body, "llm_config": invalid}
+        )
+        assert response.status_code == 422
+    wrong_modality = await client.post(
+        "/v1/admin/models", headers=headers, json={**body, "modality": "STT", "llm_config": config}
+    )
+    assert wrong_modality.status_code == 422
+
+    for invalid_identity in [None, {**config, "legacy_provider_route": True}]:
+        response = await client.patch(
+            f"/v1/admin/models/{row['id']}",
+            headers={**headers, "If-Match": changed.json()["model"]["updated_at"]},
+            json={"collected": False, "llm_config": invalid_identity},
+        )
+        assert response.status_code == 422
+
+
+async def test_register_gpt5_variants_through_admin_api(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(admin_models, "_implemented_providers", _real_implemented)
+    headers = _admin_headers()
+    for effort in ["minimal", "medium"]:
+        response = await client.post(
+            "/v1/admin/models",
+            headers=headers,
+            json={
+                "modality": "LLM",
+                "provider": "openai",
+                "model": f"gpt-5-{effort}",
+                "creator": "openai",
+                "region": "us",
+                "arena_enabled": False,
+                "collected": True,
+                "published": False,
+                "llm_config": {"upstream_model": "gpt-5", "reasoning_effort": effort},
+            },
+        )
+        assert response.status_code == 201, response.text
+    response = await client.get("/v1/admin/models", headers=headers)
+    models = response.json()["models"]
+    assert {m["model"]: m["llm_config"]["reasoning_effort"] for m in models} == {
+        "gpt-5-minimal": "minimal",
+        "gpt-5-medium": "medium",
+    }
+    assert len({m["id"] for m in models}) == 2
+    assert all(m["collected"] and not m["published"] for m in models)
