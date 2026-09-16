@@ -10,6 +10,7 @@ from coval_bench.livekit_agent.contract import load_contract, read_tool_definiti
 from coval_bench.livekit_agent.correlation import from_attributes
 from coval_bench.livekit_agent.tools import MockToolsClient, build_tools
 from coval_bench.mocktools.codecs import Correlation
+from coval_bench.platform_assets import render_livekit_tools
 
 CORRELATION = Correlation("sim-123", "+15550100000", source="sip_header")
 
@@ -98,3 +99,12 @@ async def test_tools_keep_the_contract_schema_and_route_by_name() -> None:
     assert infos[1].raw_schema["description"] == definitions[1]["description"]
     await tools[1]({"date": "2026-10-01", "appointment_type": "cleaning"})  # type: ignore[operator]
     assert calls == [("check_availability", {"date": "2026-10-01", "appointment_type": "cleaning"})]
+
+
+def test_livekit_renderer_is_the_contract_verbatim() -> None:
+    definitions = read_tool_definitions("dental")
+    rendered = render_livekit_tools(definitions, "https://ignored", "ignored")
+    assert rendered == [
+        {"name": d["name"], "description": d["description"], "parameters": d["parameters"]}
+        for d in definitions
+    ]

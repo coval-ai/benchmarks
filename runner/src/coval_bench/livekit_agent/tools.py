@@ -13,7 +13,7 @@ from livekit.agents.llm import Tool, Toolset
 
 from coval_bench.api.routers.mocktools import SECRET_HEADER
 from coval_bench.mocktools.codecs import Correlation, codec_for
-from coval_bench.platform_assets import TOOL_TIMEOUT_SECONDS
+from coval_bench.platform_assets import TOOL_TIMEOUT_SECONDS, render_livekit_tools
 
 CODEC = codec_for("livekit")
 Poster = Callable[[str, dict[str, Any], Correlation], Awaitable[str]]
@@ -49,17 +49,12 @@ def build_tools(
 ) -> list[Tool | Toolset]:
     """One raw-schema tool per definition; name, description and parameters are verbatim."""
     tools: list[Tool | Toolset] = []
-    for definition in definitions:
-        name = str(definition["name"])
+    for schema in render_livekit_tools(definitions, "", ""):
+        name = str(schema["name"])
 
         async def handler(raw_arguments: dict[str, object], _name: str = name) -> str:
             return await poster(_name, dict(raw_arguments), correlation)
 
-        schema = {
-            "name": name,
-            "description": str(definition["description"]),
-            "parameters": definition["parameters"],
-        }
         tools.append(function_tool(handler, raw_schema=schema))
     return tools
 

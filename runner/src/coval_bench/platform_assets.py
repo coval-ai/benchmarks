@@ -490,6 +490,20 @@ def prepare_retell(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) 
     return [f"route:{number}={agent_id}@{RETELL_ROUTE_VERSION}"]
 
 
+def render_livekit_tools(
+    definitions: list[dict[str, Any]], _mock_base_url: str, _secret: str
+) -> list[dict[str, Any]]:
+    """The raw function schemas the LiveKit agent registers; the agent posts them itself."""
+    return [
+        {
+            "name": definition["name"],
+            "description": definition["description"],
+            "parameters": definition["parameters"],
+        }
+        for definition in definitions
+    ]
+
+
 # --- the table -------------------------------------------------------------
 
 
