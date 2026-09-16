@@ -22,6 +22,8 @@ from coval_bench.db.dashboard_summaries import RefreshResult, refresh_summary_sn
 
 logger = structlog.get_logger(__name__)
 
+_MAINTENANCE_TIMEOUT_SECONDS = 540
+
 
 @dataclass(frozen=True)
 class MaintenanceResult:
@@ -37,6 +39,7 @@ async def reconcile_dashboard_aggregates(
     at = as_of or datetime.now(UTC)
     if at.tzinfo is None:
         raise ValueError("as_of must include a timezone")
+    deadline = asyncio.get_running_loop().time() + _MAINTENANCE_TIMEOUT_SECONDS
     failures: list[Exception] = []
     sources = 0
     hours = 0
@@ -67,7 +70,7 @@ async def reconcile_dashboard_aggregates(
         logger.error("dashboard_hourly_reconciliation_failed", exc_info=True)
     summary = RefreshResult("skipped_lock")
     try:
-        async with asyncio.timeout(180):
+        async with asyncio.timeout_at(deadline):
             summary = await refresh_summary_snapshots(pool, as_of=at)
     except Exception as exc:
         failures.append(exc)

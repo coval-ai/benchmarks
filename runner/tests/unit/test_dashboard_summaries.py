@@ -6,12 +6,14 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
+from coval_bench.db import dashboard_summaries
 from coval_bench.db.dashboard_summaries import (
     SUMMARY_VIEWS,
     RefreshResult,
@@ -61,17 +63,25 @@ def test_naive_as_of_is_rejected() -> None:
 
 def test_empty_snapshot_publishes_state_and_all_views(
     summary_pg: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     apply_migrations(summary_pg)
 
     async def scenario() -> None:
         pool = await open_pool(summary_pg)
         try:
-            from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
-
-            result = await refresh_summary_snapshots(pool)
+            logger = MagicMock()
+            monkeypatch.setattr(dashboard_summaries, "logger", logger)
+            result = await dashboard_summaries.refresh_summary_snapshots(pool)
             assert result.status == "published"
             assert result.generation == 1
+            completed = [
+                call.kwargs
+                for call in logger.info.call_args_list
+                if call.args[0] == "dashboard_summary_view_refresh_completed"
+            ]
+            assert [event["window"] for event in completed] == ["24h", "7d", "30d"]
+            assert all(event["elapsed_seconds"] >= 0 for event in completed)
             async with pool.connection() as conn:
                 state = await conn.execute(
                     "SELECT generation,as_of,published_at "
