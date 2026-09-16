@@ -17,6 +17,9 @@ from pydantic import SecretStr
 from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
 from tests.providers.stt.conftest import FakeWebSocket, load_fixture_events
 
+# A synthetic Pro id: the tests pin the id-to-wire rule, not any registry entry.
+PRO_MODEL = "universal-1.2-pro"
+
 
 def make_provider() -> AssemblyAIProvider:
     return AssemblyAIProvider(api_key=SecretStr("test-key-assemblyai"))
@@ -108,16 +111,14 @@ async def test_universal_streaming_terminates_without_force_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_universal_3_5_pro_force_endpoint_before_terminate(
-    fake_api_key: SecretStr,
-) -> None:
+async def test_pro_force_endpoint_before_terminate(fake_api_key: SecretStr) -> None:
     sent: list[Any] = []
     final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
     ws = FakeWebSocket([final], on_send=sent.append)
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.5-pro")
+    provider = AssemblyAIProvider(api_key=fake_api_key, model=PRO_MODEL)
 
     with patch(
         "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
@@ -149,24 +150,21 @@ def test_provider_name() -> None:
     assert p.name == "assemblyai-universal-streaming"
 
 
-def test_provider_name_universal_3_5_pro() -> None:
-    p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-3.5-pro")
-    assert p.name == "assemblyai-universal-3.5-pro"
-
-
 def test_provider_name_universal_streaming_multilingual() -> None:
     p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-streaming-multilingual")
     assert p.name == "assemblyai-universal-streaming-multilingual"
 
 
 @pytest.mark.asyncio
-async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretStr) -> None:
-    """The friendly model id maps to the API's speech_model value on the wire."""
+async def test_pro_url_uses_api_speech_model_and_voice_agent_config(
+    fake_api_key: SecretStr,
+) -> None:
+    """Any Pro id maps to the API speech_model and gets the min_latency voice-agent preset."""
     ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
     cm = MagicMock()
     cm.__aenter__ = AsyncMock(return_value=ws)
     cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.5-pro")
+    provider = AssemblyAIProvider(api_key=fake_api_key, model=PRO_MODEL)
 
     with patch(
         "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
@@ -180,37 +178,9 @@ async def test_universal_3_5_pro_url_uses_api_speech_model(fake_api_key: SecretS
         )
 
     url = mock_connect.call_args.args[0]
-    assert "speech_model=universal-3-5-pro" in url
+    assert "speech_model=universal-1-2-pro" in url
     assert "end_of_turn_confidence_threshold=1.0" in url
-
-
-@pytest.mark.asyncio
-async def test_universal_3_5_pro_url_has_voice_agent_config(fake_api_key: SecretStr) -> None:
-    """universal-3.5-pro connects with the vendor's min_latency voice-agent preset."""
-    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
-    cm = MagicMock()
-    cm.__aenter__ = AsyncMock(return_value=ws)
-    cm.__aexit__ = AsyncMock(return_value=False)
-    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.5-pro")
-
-    with patch(
-        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
-    ) as mock_connect:
-        await provider.measure_ttft(
-            audio_data=b"\x00" * 640,
-            channels=1,
-            sample_width=2,
-            sample_rate=16000,
-            realtime_resolution=0.01,
-        )
-
-    url = mock_connect.call_args.args[0]
     assert "mode=min_latency" in url
-
-    # Other models keep the stock configuration
-    from coval_bench.providers.stt.assemblyai import _MODEL_EXTRA_PARAMS
-
-    assert set(_MODEL_EXTRA_PARAMS) == {"universal-3.5-pro"}
 
 
 @pytest.mark.asyncio
@@ -246,9 +216,10 @@ async def test_universal_streaming_multilingual_url_uses_api_speech_model(
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
+@pytest.mark.parametrize("model", ["bad-model", f"{PRO_MODEL}-x", "universal-pro"])
+def test_invalid_model_raises(model: str) -> None:
     with pytest.raises(ValueError, match="Invalid AssemblyAI model"):
-        AssemblyAIProvider(api_key=SecretStr("k"), model="bad-model")
+        AssemblyAIProvider(api_key=SecretStr("k"), model=model)
 
 
 # ---------------------------------------------------------------------------
