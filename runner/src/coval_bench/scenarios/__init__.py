@@ -58,7 +58,6 @@ from coval_bench.scenarios.personas import (
     PersonaRegistry,
     binding_for_dataset,
     load_personas,
-    persona_for_dataset,
 )
 
 __all__ = [
@@ -81,7 +80,6 @@ __all__ = [
     "PersonaRegistry",
     "binding_for_dataset",
     "load_personas",
-    "persona_for_dataset",
 ]
 
 _CONTRACTS_PACKAGE = "coval_bench.scenarios"
