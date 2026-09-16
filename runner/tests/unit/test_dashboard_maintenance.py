@@ -51,7 +51,7 @@ async def test_reconciliation_gives_summary_the_remaining_maintenance_budget(
         deadlines.append(deadline)
         return real_timeout_at(deadline)
 
-    monkeypatch.setattr(dashboard_aggregates.asyncio, "timeout_at", recording_timeout_at)
+    monkeypatch.setattr(asyncio, "timeout_at", recording_timeout_at)
     loop = asyncio.get_running_loop()
     before = loop.time()
     result = await dashboard_aggregates.reconcile_dashboard_aggregates(

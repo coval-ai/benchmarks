@@ -70,9 +70,6 @@ async def reconcile_dashboard_aggregates(
         logger.error("dashboard_hourly_reconciliation_failed", exc_info=True)
     summary = RefreshResult("skipped_lock")
     try:
-        # Source and hourly reconciliation usually finish quickly. Give the
-        # summary refresh the rest of the job's existing 540-second budget
-        # instead of imposing a second, premature 180-second deadline.
         async with asyncio.timeout_at(deadline):
             summary = await refresh_summary_snapshots(pool, as_of=at)
     except Exception as exc:
