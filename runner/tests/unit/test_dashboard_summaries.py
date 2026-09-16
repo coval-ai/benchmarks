@@ -11,6 +11,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
+from structlog.testing import capture_logs
 
 from coval_bench.db.dashboard_summaries import (
     SUMMARY_VIEWS,
@@ -69,9 +70,17 @@ def test_empty_snapshot_publishes_state_and_all_views(
         try:
             from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
 
-            result = await refresh_summary_snapshots(pool)
+            with capture_logs() as logs:
+                result = await refresh_summary_snapshots(pool)
             assert result.status == "published"
             assert result.generation == 1
+            completed = [
+                event
+                for event in logs
+                if event["event"] == "dashboard_summary_view_refresh_completed"
+            ]
+            assert [event["window"] for event in completed] == ["24h", "7d", "30d"]
+            assert all(event["elapsed_seconds"] >= 0 for event in completed)
             async with pool.connection() as conn:
                 state = await conn.execute(
                     "SELECT generation,as_of,published_at "

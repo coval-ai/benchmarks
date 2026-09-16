@@ -1,25 +1,69 @@
 """Migration-backed checks for dashboard source maintenance boundaries."""
 
+import asyncio
 import os
 import subprocess
 import sys
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 from structlog.testing import capture_logs
 
-from coval_bench.db import dashboard_source
-from coval_bench.db.dashboard_aggregates import repair_dashboard_aggregates
+from coval_bench.db import dashboard_aggregates, dashboard_source
+from coval_bench.db.dashboard_aggregates import MaintenanceResult, repair_dashboard_aggregates
 from coval_bench.db.dashboard_source import rebuild_source_bucket
+from coval_bench.db.dashboard_summaries import RefreshResult
 from coval_bench.db.models import RunStatus
 from coval_bench.db.writer import RunWriter
 from tests.unit import test_normalized_db_writer as storage
 from tests.unit.conftest import apply_migrations
 
 pg_conn = postgresql("pg_proc")
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_gives_summary_the_remaining_maintenance_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = MagicMock()
+    conn = AsyncMock()
+    cursor = AsyncMock()
+    cursor.fetchall.return_value = []
+    conn.execute.return_value = cursor
+    connection_context = AsyncMock()
+    connection_context.__aenter__.return_value = conn
+    pool.connection.return_value = connection_context
+
+    monkeypatch.setattr(
+        dashboard_aggregates, "pending_hourly_aggregates", AsyncMock(return_value=[])
+    )
+    refresh = AsyncMock(return_value=RefreshResult("published", 7))
+    monkeypatch.setattr(dashboard_aggregates, "refresh_summary_snapshots", refresh)
+
+    deadlines: list[float] = []
+    real_timeout_at = asyncio.timeout_at
+
+    def recording_timeout_at(deadline: float) -> asyncio.Timeout:
+        deadlines.append(deadline)
+        return real_timeout_at(deadline)
+
+    monkeypatch.setattr(dashboard_aggregates.asyncio, "timeout_at", recording_timeout_at)
+    loop = asyncio.get_running_loop()
+    before = loop.time()
+    result = await dashboard_aggregates.reconcile_dashboard_aggregates(
+        pool, as_of=datetime(2026, 9, 16, tzinfo=UTC)
+    )
+    after = loop.time()
+
+    assert result == MaintenanceResult(0, 0, RefreshResult("published", 7))
+    assert len(deadlines) == 1
+    assert deadlines[0] - before >= dashboard_aggregates._MAINTENANCE_TIMEOUT_SECONDS - 0.1
+    assert deadlines[0] - after <= dashboard_aggregates._MAINTENANCE_TIMEOUT_SECONDS
+    refresh.assert_awaited_once_with(pool, as_of=datetime(2026, 9, 16, tzinfo=UTC))
 
 
 def test_aggregation_fingerprint_is_hash_seed_independent() -> None:

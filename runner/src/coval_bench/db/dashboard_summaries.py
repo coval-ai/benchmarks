@@ -5,16 +5,20 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from dataclasses import dataclass
 from typing import Literal
 
 import psycopg
 import psycopg.rows
+import structlog
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
+
+logger = structlog.get_logger(__name__)
 
 SUMMARY_DEFINITION_REVISION = DEFINITION_REVISION
 SUMMARY_VIEWS = {
@@ -125,17 +129,45 @@ async def refresh_summary_snapshots(
         if row is None:
             raise RuntimeError("dashboard summary state is missing")
         generation = int(row["generation"]) + 1
-        for _key, view in SUMMARY_VIEWS.items():
-            populated = await conn.execute(
-                "SELECT relispopulated FROM pg_class WHERE oid = %(view)s::regclass",
-                {"view": view},
+        for window, view in SUMMARY_VIEWS.items():
+            started_at = time.monotonic()
+            concurrent: bool | None = None
+            logger.info(
+                "dashboard_summary_view_refresh_started",
+                window=window,
+                view=view,
+                generation=generation,
             )
-            populated_row = await populated.fetchone()
-            if populated_row is None:
-                raise RuntimeError(f"dashboard summary view is missing: {view}")
-            is_populated = populated_row["relispopulated"]
-            mode = "CONCURRENTLY " if is_populated else ""
-            await conn.execute(f"REFRESH MATERIALIZED VIEW {mode}{view}")  # noqa: S608
+            try:
+                populated = await conn.execute(
+                    "SELECT relispopulated FROM pg_class WHERE oid = %(view)s::regclass",
+                    {"view": view},
+                )
+                populated_row = await populated.fetchone()
+                if populated_row is None:
+                    raise RuntimeError(f"dashboard summary view is missing: {view}")
+                concurrent = bool(populated_row["relispopulated"])
+                mode = "CONCURRENTLY " if concurrent else ""
+                await conn.execute(f"REFRESH MATERIALIZED VIEW {mode}{view}")  # noqa: S608
+            except BaseException:
+                logger.error(
+                    "dashboard_summary_view_refresh_failed",
+                    window=window,
+                    view=view,
+                    generation=generation,
+                    concurrent=concurrent,
+                    elapsed_seconds=round(time.monotonic() - started_at, 3),
+                    exc_info=True,
+                )
+                raise
+            logger.info(
+                "dashboard_summary_view_refresh_completed",
+                window=window,
+                view=view,
+                generation=generation,
+                concurrent=concurrent,
+                elapsed_seconds=round(time.monotonic() - started_at, 3),
+            )
         await conn.execute(
             """UPDATE benchmarks_v2.dashboard_summary_state
                    SET generation=%(generation)s, as_of=%(as_of)s, published_at=clock_timestamp(),
