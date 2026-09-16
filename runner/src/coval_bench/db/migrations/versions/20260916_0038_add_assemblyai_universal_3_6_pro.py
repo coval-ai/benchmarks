@@ -4,7 +4,7 @@
 """Register AssemblyAI universal-3.6-pro (STT), not yet collected.
 
 Revision ID: 20260916_0038
-Revises:     20260915_0036
+Revises:     20260916_0037
 Create Date: 2026-09-11
 
 Registered with ``collected`` and ``published`` both off, the way new models
@@ -20,7 +20,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "20260916_0038"
-down_revision = "20260915_0036"
+down_revision = "20260916_0037"
 branch_labels = None
 depends_on = None
 
