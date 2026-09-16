@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,7 @@ class Contract:
     system_prompt: str
     first_message: str
     digest: str
+    prompt_digest: str
 
 
 def _text(suite: str, filename: str, env: str) -> str:
@@ -43,14 +45,21 @@ def load_contract(suite: str) -> Contract:
     system_prompt = _text(suite, PROMPT_FILE, "SYSTEM_PROMPT")
     if not system_prompt:
         raise ValueError(f"no system prompt: commit {suite}/{PROMPT_FILE} or set SYSTEM_PROMPT")
+    first_message = _text(suite, FIRST_MESSAGE_FILE, "FIRST_MESSAGE")
     return Contract(
         suite=suite,
         stack=load_stack(),
         tools=tools,
         system_prompt=system_prompt,
-        first_message=_text(suite, FIRST_MESSAGE_FILE, "FIRST_MESSAGE"),
+        first_message=first_message,
         digest=public_contract_sha256(suite),
+        prompt_digest=prompt_sha256(system_prompt, first_message),
     )
+
+
+def prompt_sha256(system_prompt: str, first_message: str) -> str:
+    """Digest of the prompt and greeting actually running; overrides bypass the public digest."""
+    return hashlib.sha256(f"{system_prompt}\x00{first_message}".encode()).hexdigest()
 
 
 def read_tool_definitions(suite: str) -> list[dict[str, Any]]:

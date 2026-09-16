@@ -17,6 +17,7 @@ from coval_bench.platform_assets import TOOL_TIMEOUT_SECONDS, render_livekit_too
 
 CODEC = codec_for("livekit")
 Poster = Callable[[str, dict[str, Any], Correlation], Awaitable[str]]
+CorrelationSource = Callable[[], Correlation]
 
 
 class MockToolsClient:
@@ -45,15 +46,15 @@ class MockToolsClient:
 
 
 def build_tools(
-    definitions: list[dict[str, Any]], poster: Poster, correlation: Correlation
+    definitions: list[dict[str, Any]], poster: Poster, correlation: CorrelationSource
 ) -> list[Tool | Toolset]:
-    """One raw-schema tool per definition; name, description and parameters are verbatim."""
+    """One raw-schema tool per definition; the correlation is resolved at each call."""
     tools: list[Tool | Toolset] = []
     for schema in render_livekit_tools(definitions, "", ""):
         name = str(schema["name"])
 
         async def handler(raw_arguments: dict[str, object], _name: str = name) -> str:
-            return await poster(_name, dict(raw_arguments), correlation)
+            return await poster(_name, dict(raw_arguments), correlation())
 
         tools.append(function_tool(handler, raw_schema=schema))
     return tools

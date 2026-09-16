@@ -20,6 +20,7 @@ from livekit.plugins import deepgram, elevenlabs, openai, silero
 from coval_bench.livekit_agent import correlation as corr
 from coval_bench.livekit_agent.contract import Contract, load_contract
 from coval_bench.livekit_agent.tools import build_tools, client_from_env
+from coval_bench.mocktools.codecs import Correlation
 
 logger = logging.getLogger("coval_bench.livekit_agent")
 
@@ -61,7 +62,12 @@ VAD = silero.VAD.load(min_silence_duration=VAD_MIN_SILENCE_SECONDS)
 
 logger.info(
     "agent_contract",
-    extra={"suite": CONTRACT.suite, "contract_digest": CONTRACT.digest, "agent_name": AGENT_NAME},
+    extra={
+        "suite": CONTRACT.suite,
+        "contract_digest": CONTRACT.digest,
+        "prompt_digest": CONTRACT.prompt_digest,
+        "agent_name": AGENT_NAME,
+    },
 )
 
 
@@ -69,13 +75,19 @@ logger.info(
 async def answer(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     participant = corr.sip_participant(ctx.room) or await ctx.wait_for_participant()
-    correlation = corr.from_attributes(dict(participant.attributes))
+    at_join = corr.from_attributes(dict(participant.attributes))
     logger.info(
-        "call_started",
-        extra={"simulation_id": correlation.simulation_id, "source": correlation.source},
+        "call_started", extra={"simulation_id": at_join.simulation_id, "source": at_join.source}
     )
+
+    def current_correlation() -> Correlation:
+        """SIP header attributes land asynchronously, so re-read them at each tool call."""
+        latest = corr.from_attributes(dict(participant.attributes))
+        return latest if latest.simulation_id else at_join
+
     mock = client_from_env()
-    tools = build_tools(CONTRACT.tools, mock.call, correlation)
+    ctx.add_shutdown_callback(mock.aclose)
+    tools = build_tools(CONTRACT.tools, mock.call, current_correlation)
     session = build_session(CONTRACT, VAD)
     await session.start(
         agent=Agent(instructions=CONTRACT.system_prompt, tools=tools), room=ctx.room

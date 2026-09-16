@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("livekit.agents")
 
-from coval_bench.livekit_agent.contract import load_contract, read_tool_definitions
+from coval_bench.livekit_agent.contract import load_contract, prompt_sha256, read_tool_definitions
 from coval_bench.livekit_agent.correlation import from_attributes
 from coval_bench.livekit_agent.tools import MockToolsClient, build_tools
 from coval_bench.mocktools.codecs import Correlation
@@ -32,6 +32,19 @@ def test_prompt_can_arrive_base64_encoded(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
     monkeypatch.setenv("SYSTEM_PROMPT_B64", "WW91IGFyZSBsaW5lIG9uZS4KTGluZSB0d28uCg==")
     assert load_contract("dental").system_prompt == "You are line one.\nLine two."
+
+
+def test_prompt_digest_tracks_the_override_while_the_public_digest_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FIRST_MESSAGE", raising=False)
+    monkeypatch.setenv("SYSTEM_PROMPT", "prompt A")
+    first = load_contract("dental")
+    monkeypatch.setenv("SYSTEM_PROMPT", "prompt B")
+    second = load_contract("dental")
+    assert first.digest == second.digest
+    assert first.prompt_digest != second.prompt_digest
+    assert first.prompt_digest == prompt_sha256("prompt A", first.first_message)
 
 
 def test_missing_prompt_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -92,13 +105,28 @@ async def test_tools_keep_the_contract_schema_and_route_by_name() -> None:
         return "{}"
 
     definitions = read_tool_definitions("dental")
-    tools = build_tools(definitions, poster, CORRELATION)
+    tools = build_tools(definitions, poster, lambda: CORRELATION)
     infos = [getattr(tool, "info") for tool in tools]  # noqa: B009
     assert [info.name for info in infos] == [d["name"] for d in definitions]
     assert infos[1].raw_schema["parameters"] == definitions[1]["parameters"]
     assert infos[1].raw_schema["description"] == definitions[1]["description"]
     await tools[1]({"date": "2026-10-01", "appointment_type": "cleaning"})  # type: ignore[operator]
     assert calls == [("check_availability", {"date": "2026-10-01", "appointment_type": "cleaning"})]
+
+
+async def test_tools_resolve_the_correlation_at_call_time() -> None:
+    seen: list[Correlation] = []
+    holder = {"value": Correlation()}
+
+    async def poster(_t: str, _a: dict[str, Any], correlation: Correlation) -> str:
+        seen.append(correlation)
+        return "{}"
+
+    tools = build_tools(read_tool_definitions("dental")[:1], poster, lambda: holder["value"])
+    await tools[0]({})  # type: ignore[operator]
+    holder["value"] = CORRELATION
+    await tools[0]({})  # type: ignore[operator]
+    assert seen == [Correlation(), CORRELATION]
 
 
 def test_livekit_renderer_is_the_contract_verbatim() -> None:
