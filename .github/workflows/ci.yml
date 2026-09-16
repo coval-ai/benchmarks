@@ -53,7 +53,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: runner
-        run: uv sync --frozen --dev
+        run: uv sync --frozen --dev --extra livekit
 
       # -----------------------------------------------------------------------
       # Lint & format

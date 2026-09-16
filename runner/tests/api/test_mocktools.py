@@ -304,7 +304,7 @@ async def test_an_unknown_platform_names_the_known_set(
         "/mock/synthflow/lookup_patient", json={"phone": PHONE}, headers=AUTH
     )
     assert response.status_code == 404
-    assert "known: generic, retell, telnyx, vapi" in response.json()["detail"]
+    assert "known: generic, livekit, retell, telnyx, vapi" in response.json()["detail"]
 
 
 async def test_retell_posts_the_arguments_as_the_whole_body(
