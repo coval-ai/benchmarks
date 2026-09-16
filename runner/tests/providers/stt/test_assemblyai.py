@@ -210,7 +210,7 @@ async def test_universal_3_5_pro_url_has_voice_agent_config(fake_api_key: Secret
     # Other models keep the stock configuration
     from coval_bench.providers.stt.assemblyai import _MODEL_EXTRA_PARAMS
 
-    assert set(_MODEL_EXTRA_PARAMS) == {"universal-3.5-pro"}
+    assert set(_MODEL_EXTRA_PARAMS) == {"universal-3.5-pro", "universal-3.6-pro"}
 
 
 @pytest.mark.asyncio
@@ -239,6 +239,70 @@ async def test_universal_streaming_multilingual_url_uses_api_speech_model(
     assert "speech_model=universal-streaming-multilingual" in url
     assert "language_code" not in url
     assert "end_of_turn_confidence_threshold" not in url
+
+
+# ---------------------------------------------------------------------------
+# universal-3.6-pro — wired like universal-3.5-pro so results are comparable
+# ---------------------------------------------------------------------------
+
+
+def test_provider_name_universal_3_6_pro() -> None:
+    p = AssemblyAIProvider(api_key=SecretStr("k"), model="universal-3.6-pro")
+    assert p.name == "assemblyai-universal-3.6-pro"
+
+
+@pytest.mark.asyncio
+async def test_universal_3_6_pro_url_uses_api_speech_model(fake_api_key: SecretStr) -> None:
+    """The friendly model id maps to the API's speech_model value on the wire."""
+    ws = FakeWebSocket([{"type": "Turn", "end_of_turn": True, "transcript": "hi"}])
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.6-pro")
+
+    with patch(
+        "coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm
+    ) as mock_connect:
+        await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    url = mock_connect.call_args.args[0]
+    assert "speech_model=universal-3-6-pro" in url
+    assert "end_of_turn_confidence_threshold=1.0" in url
+    assert "mode=min_latency" in url
+
+
+@pytest.mark.asyncio
+async def test_universal_3_6_pro_force_endpoint_before_terminate(
+    fake_api_key: SecretStr,
+) -> None:
+    """3.6-pro is TTFS-measured: ForceEndpoint at speech-end, then Terminate."""
+    sent: list[Any] = []
+    final = {"type": "Turn", "end_of_turn": True, "transcript": "hello world"}
+    ws = FakeWebSocket([final], on_send=sent.append)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = AssemblyAIProvider(api_key=fake_api_key, model="universal-3.6-pro")
+
+    with patch("coval_bench.providers.stt.assemblyai.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=b"\x00" * 640,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.01,
+        )
+
+    text = [m for m in sent if isinstance(m, str)]
+    assert '"ForceEndpoint"' in text[-2]
+    assert '"Terminate"' in text[-1]
+    assert result.audio_to_final_seconds is not None
 
 
 # ---------------------------------------------------------------------------

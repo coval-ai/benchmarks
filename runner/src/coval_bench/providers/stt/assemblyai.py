@@ -3,7 +3,8 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Models: universal-streaming, universal-streaming-multilingual, universal-3.5-pro
+Models: universal-streaming, universal-streaming-multilingual, universal-3.5-pro,
+        universal-3.6-pro
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -34,10 +35,11 @@ _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
     "universal-streaming-multilingual": "universal-streaming-multilingual",
     "universal-3.5-pro": "universal-3-5-pro",
+    "universal-3.6-pro": "universal-3-6-pro",
 }
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
 
-_FORCE_ENDPOINT_MODELS = frozenset({"universal-3.5-pro"})
+_FORCE_ENDPOINT_MODELS = frozenset({"universal-3.5-pro", "universal-3.6-pro"})
 
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
 # semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
@@ -56,6 +58,9 @@ _FINAL_WAIT_S = 5.0
 # https://www.assemblyai.com/docs/streaming/prompting-and-keyterms
 _MODEL_EXTRA_PARAMS: dict[str, dict[str, str]] = {
     "universal-3.5-pro": {
+        "mode": "min_latency",
+    },
+    "universal-3.6-pro": {
         "mode": "min_latency",
     },
 }
