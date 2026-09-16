@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,51 +16,40 @@ from coval_bench.llm.openai_compat import OpenAICompatClient
 from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 
-OPENAI_BASE_URL = "https://api.openai.com/v1"
-# Must match the model column of the collected LLM row for this provider.
-OPENAI_MODEL = "gpt-4.1"
+ModelKey = tuple[str, str]
+ClientKey = tuple[str, str, LLMConfig]
 
 
-def openai_client(settings: Settings) -> TurnClient | None:
-    key = settings.openai_api_key
+def make_client(settings: Settings, model: RegisteredModel) -> TurnClient | None:
+    config = model.llm_config
+    if config is None:
+        return None
+    if model.provider == "phonely":
+        return PhonelyClient.from_settings(settings)
+    if model.provider == "openai":
+        key = settings.openai_api_key
+        base_url = "https://api.openai.com/v1"
+    elif model.provider == "google":
+        key = settings.gemini_api_key
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+    else:
+        return None
+    extra_body = {"reasoning_effort": config.reasoning_effort} if config.reasoning_effort else {}
     if not (key and key.get_secret_value()):
         return None
     agent = load_agent(scenarios.ACTIVE.contract)
     return OpenAICompatClient(
         key.get_secret_value(),
-        OPENAI_BASE_URL,
-        OPENAI_MODEL,
+        base_url,
+        config.upstream_model,
         agent.system_prompt,
         list(agent.tools),
+        extra_body=extra_body,
     )
 
 
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-GEMINI_MODEL = "gemini-2.5-flash"
-
-
-def gemini_client(settings: Settings) -> TurnClient | None:
-    key = settings.gemini_api_key
-    if not (key and key.get_secret_value()):
-        return None
-    agent = load_agent(scenarios.ACTIVE.contract)
-    return OpenAICompatClient(
-        key.get_secret_value(),
-        GEMINI_BASE_URL,
-        GEMINI_MODEL,
-        agent.system_prompt,
-        list(agent.tools),
-        extra_body={"reasoning_effort": "none"},
-    )
-
-
-CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
-    "phonely": PhonelyClient.from_settings,
-    "openai": openai_client,
-    "google": gemini_client,
-}
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")
 
@@ -74,15 +63,6 @@ class ProxiedModel:
 
 def llm_models(models: Iterable[RegisteredModel]) -> list[RegisteredModel]:
     return [model for model in models if model.benchmark is Benchmark.LLM]
-
-
-def make_clients(settings: Settings) -> dict[str, TurnClient]:
-    clients: dict[str, TurnClient] = {}
-    for provider, factory in CLIENT_FACTORIES.items():
-        client = factory(settings)
-        if client is not None:
-            clients[provider] = client
-    return clients
 
 
 def run_template_body(
