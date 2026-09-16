@@ -67,7 +67,7 @@ class PlatformAgentSpec(BaseModel, frozen=True, extra="forbid"):
     platform: str
     suite: str
     agent_id: SecretRef
-    api_key: SecretRef
+    api_key: SecretRef | None = None
     mock_secret: SecretRef
     dial_target: SecretRef
 
@@ -493,6 +493,8 @@ def prepare_retell(client: AgentClient, spec: PlatformAgentSpec, dry_run: bool) 
 # --- the table -------------------------------------------------------------
 
 
+CODE_MANAGED: frozenset[str] = frozenset({"livekit"})
+
 PLATFORMS: dict[str, Platform] = {
     "vapi": Platform(
         name="vapi",
@@ -581,7 +583,30 @@ AGENTS: tuple[PlatformAgentSpec, ...] = (
             purpose="the sip:+E164@sip.retellai.com URI Coval dials; names the imported number",
         ),
     ),
+    PlatformAgentSpec(
+        key="livekit-dental",
+        platform="livekit",
+        suite="dental",
+        agent_id=SecretRef(
+            name="LIVEKIT_DENTAL_AGENT_NAME",
+            purpose="the dispatch name the LiveKit dental agent registers under",
+        ),
+        mock_secret=SecretRef(
+            name="MOCK_TOOLS_SECRET",
+            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
+        ),
+        dial_target=SecretRef(
+            name="LIVEKIT_DENTAL_DIAL_TARGET",
+            purpose="the sip:+E164@<sub>.sip.livekit.cloud URI Coval dials; names the trunk",
+        ),
+    ),
 )
+
+
+def _vendor_key(spec: PlatformAgentSpec) -> str:
+    if spec.api_key is None:
+        raise SyncError(f"{spec.key} has no vendor API: {spec.platform} is code-managed")
+    return spec.api_key.resolve()
 
 
 def spec_for(key: str) -> PlatformAgentSpec:
@@ -593,6 +618,11 @@ def spec_for(key: str) -> PlatformAgentSpec:
 
 
 def platform_for(spec: PlatformAgentSpec) -> Platform:
+    if spec.platform in CODE_MANAGED:
+        raise SyncError(
+            f"{spec.platform} is code-managed: its configuration is the deployed agent image, "
+            "so there is nothing to plan or apply; register and launch still work"
+        )
     platform = PLATFORMS.get(spec.platform)
     if platform is None:
         known = ", ".join(sorted(PLATFORMS))
@@ -799,6 +829,15 @@ def drift(client: AgentClient, spec: PlatformAgentSpec, mock_base_url: str) -> l
     return sorted(result.update) + result.prepared
 
 
+def vendor_drift(spec: PlatformAgentSpec, mock_base_url: str, api_base: str | None) -> list[str]:
+    """What apply would still change on the vendor; nothing when the platform is code-managed."""
+    if spec.platform in CODE_MANAGED:
+        return []
+    platform = platform_for(spec)
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
+        return drift(client, spec, mock_base_url)
+
+
 def launch_body(
     agent_id: str,
     spec: PlatformAgentSpec,
@@ -876,7 +915,7 @@ def assets_plan(agent_key: str, mock_base_url: str, api_base: str | None) -> Non
     spec = spec_for(agent_key)
     platform = platform_for(spec)
     wanted = desired(spec, mock_base_url)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
         _echo_plan(apply(client, spec, wanted, dry_run=True))
 
 
@@ -890,7 +929,7 @@ def assets_apply(agent_key: str, mock_base_url: str, api_base: str | None, yes: 
     spec = spec_for(agent_key)
     platform = platform_for(spec)
     wanted = desired(spec, mock_base_url)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
         preview = apply(client, spec, wanted, dry_run=True)
         click.echo(preview.summary())
         if not preview.update and not preview.prepared:
@@ -988,9 +1027,7 @@ def assets_launch(
     """Launch one Coval run against this variant, once both the platform and Coval agent match."""
     spec = spec_for(agent_key)
     install_fixture_providers(Settings())
-    platform = platform_for(spec)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
-        pending = drift(client, spec, mock_base_url)
+    pending = vendor_drift(spec, mock_base_url, api_base)
     with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as coval:
         agent_id, coval_plan = register(coval, spec, dry_run=True)
         if not agent_id:

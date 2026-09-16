@@ -27,6 +27,7 @@ from coval_bench.platform_assets import (
     platform_for,
     register,
     spec_for,
+    vendor_drift,
 )
 from coval_bench.scenarios import read_contract_file
 from coval_bench.variants.platforms import redact
@@ -74,9 +75,41 @@ def test_secret_ref_names_what_is_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_spec_for_names_the_known_set() -> None:
-    with pytest.raises(KeyError, match="known: retell-dental, telnyx-dental, vapi-dental"):
+    with pytest.raises(KeyError, match="known: livekit-dental, retell-dental, telnyx-dental, vapi"):
         spec_for("synthflow-dental")
-    assert {s.key for s in AGENTS} == {"vapi-dental", "telnyx-dental", "retell-dental"}
+    assert {s.key for s in AGENTS} == {
+        "vapi-dental",
+        "telnyx-dental",
+        "retell-dental",
+        "livekit-dental",
+    }
+
+
+# --- code-managed platforms --------------------------------------------------
+
+
+def test_code_managed_platform_refuses_plan_and_apply(env: None) -> None:
+    spec = spec_for("livekit-dental")
+    assert spec.api_key is None
+    with pytest.raises(SyncError, match="code-managed"):
+        platform_for(spec)
+    with pytest.raises(SyncError, match="code-managed"):
+        desired(spec, BASE)
+
+
+def test_code_managed_platform_has_no_vendor_drift_to_block_launch(env: None) -> None:
+    assert vendor_drift(spec_for("livekit-dental"), BASE, None) == []
+
+
+def test_code_managed_agent_still_registers_with_coval(
+    env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = "sip:+15550100001@example.sip.livekit.cloud;transport=tcp"
+    monkeypatch.setenv("LIVEKIT_DENTAL_DIAL_TARGET", target)
+    body = coval_agent_body(spec_for("livekit-dental"))
+    assert body["phone_number"] == target
+    assert body["attributes"]["platform"] == "livekit"
+    assert body["tags"] == ["orchestration", "dental", "livekit"]
 
 
 # --- render ----------------------------------------------------------------
