@@ -17,6 +17,8 @@ same way `datasets/manifests` is.
 ```
 scenarios/
   stack.json          the pinned component layer, identical for every variant
+  personas.json       the caller personas: label, description, order, dataset id
+  annotated.py        the shared contract-model base
   dental/
     system-prompt.txt      \  the agent under test. byte-identical across
     first-message.txt       |  variants, covered by the contract hash

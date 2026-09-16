@@ -50,9 +50,15 @@ import json
 from collections.abc import Callable
 from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, model_validator
-
+from coval_bench.scenarios.annotated import AnnotatedModel
 from coval_bench.scenarios.definitions import ACTIVE, BANK, Scenario, ScenarioIds
+from coval_bench.scenarios.personas import (
+    Persona,
+    PersonaBinding,
+    PersonaRegistry,
+    load_personas,
+    persona_for_dataset,
+)
 
 __all__ = [
     "ACTIVE",
@@ -69,6 +75,11 @@ __all__ = [
     "FixtureProvider",
     "register_fixture_provider",
     "AnnotatedModel",
+    "Persona",
+    "PersonaBinding",
+    "PersonaRegistry",
+    "load_personas",
+    "persona_for_dataset",
 ]
 
 _CONTRACTS_PACKAGE = "coval_bench.scenarios"
@@ -89,64 +100,41 @@ PUBLIC_CONTRACT_FILES: tuple[str, ...] = (
 PRIVATE_CONTRACT_FILES: tuple[str, ...] = ("_private/mock-tools.json",)
 
 
-class _Annotated(BaseModel):
-    """Base for contract models: required fields, plus ``_``-prefixed notes."""
-
-    model_config = ConfigDict(extra="allow", frozen=True)
-
-    @model_validator(mode="after")
-    def _only_underscore_extras(self) -> _Annotated:
-        extras = self.__pydantic_extra__ or {}
-        unknown = sorted(k for k in extras if not k.startswith("_"))
-        if unknown:
-            raise ValueError(
-                f"unknown key(s) {unknown} in {type(self).__name__}; "
-                "rationale keys must start with '_'"
-            )
-        return self
-
-
-# Public name for the convention above. The mock fixtures are contract-adjacent
-# and carry the same "required fields plus `_`-prefixed rationale" rule, so they
-# subclass this rather than restating it.
-AnnotatedModel = _Annotated
-
-
-class LlmPin(_Annotated):
+class LlmPin(AnnotatedModel):
     provider: str
     model: str
     temperature: float
 
 
-class SttPin(_Annotated):
+class SttPin(AnnotatedModel):
     provider: str
     model: str
     fallback_model: str
     keyterms_source: str
 
 
-class TtsPin(_Annotated):
+class TtsPin(AnnotatedModel):
     provider: str
     model: str
     voice_id: str
     voice_name: str
 
 
-class TurnTakingPin(_Annotated):
+class TurnTakingPin(AnnotatedModel):
     end_of_turn_target_ms: int
 
 
-class MediaPin(_Annotated):
+class MediaPin(AnnotatedModel):
     codec: Literal["PCMU", "L16"]
     sample_rate_hz: int
 
 
-class PlatformBehaviourPin(_Annotated):
+class PlatformBehaviourPin(AnnotatedModel):
     native_auto_hangup: bool
     vendor_post_call_analysis: bool
 
 
-class Stack(_Annotated):
+class Stack(AnnotatedModel):
     """The pinned component layer. One stack for every variant.
 
     Transport is deliberately absent: it is declared per variant on the

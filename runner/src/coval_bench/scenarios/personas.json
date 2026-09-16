@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "The caller personas: what each is called, how it is described to a reader,",
+    "and where its runs are stored. Coval owns what a persona does (noise,",
+    "speakerphone, cell audio); this file owns how we present it and which",
+    "dataset id its conversations land under. Coval ids live in Terraform.",
+    "",
+    "personas: one entry per slug. The slug is an identifier and never changes;",
+    "the label is display text and may. order is the x-axis position, clean first.",
+    "bindings: per family, which personas run and which dataset id each encodes.",
+    "anchor names the metric every optional metric's population must match:",
+    "latency (V2V) when the audio is clean, judge (instruction following) when it",
+    "is not, because noise sits in the lane VAD uses for turn boundaries."
+  ],
+
+  "personas": {
+    "clean": {
+      "label": "Clean",
+      "description": "The baseline caller: a clear voice with no background noise, no audio degradation and no interruptions.",
+      "order": 0,
+      "_coval": "Clean Speech Baseline"
+    },
+    "low": {
+      "label": "Low",
+      "description": "The same caller in a busy office, with steady background chatter and keyboard noise behind the voice.",
+      "order": 1,
+      "_coval": "Low Difficulty"
+    },
+    "medium": {
+      "label": "Medium",
+      "description": "Office noise plus a speakerphone: the caller's voice arrives slightly hollow and distant, as from a desk phone on speaker.",
+      "order": 2,
+      "_coval": "Medium Difficulty"
+    },
+    "hard": {
+      "label": "Hard",
+      "description": "Office noise over a poor mobile connection: the voice drops in and out, with the compression artefacts of a weak cell signal.",
+      "order": 3,
+      "_coval": "Hard Difficulty"
+    },
+    "extra_hard": {
+      "label": "Extra hard",
+      "description": "Office noise plus a bad speakerphone: heavy room echo and muffling on top of the background chatter, the hardest audio in the set.",
+      "order": 4,
+      "_coval": "Extra Hard Difficulty"
+    }
+  },
+
+  "bindings": {
+    "s2s-bank": {
+      "clean": {"dataset_id": "s2s-bank-v1", "anchor": "latency"},
+      "low": {"dataset_id": "s2s-bank-low-v1", "anchor": "judge"},
+      "medium": {"dataset_id": "s2s-bank-medium-v1", "anchor": "judge"},
+      "hard": {"dataset_id": "s2s-bank-hard-v1", "anchor": "judge"},
+      "extra_hard": {"dataset_id": "s2s-bank-extra-hard-v1", "anchor": "judge"}
+    }
+  }
+}
