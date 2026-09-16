@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -18,49 +18,47 @@ from coval_bench.llm.turn import TurnClient
 from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 
-OPENAI_BASE_URL = "https://api.openai.com/v1"
-# Must match the model column of the collected LLM row for this provider.
-OPENAI_MODEL = "gpt-4.1"
-
-
-def openai_client(settings: Settings) -> TurnClient | None:
-    key = settings.openai_api_key
-    if not (key and key.get_secret_value()):
-        return None
-    agent = load_agent(scenarios.ACTIVE.contract)
-    return OpenAICompatClient(
-        key.get_secret_value(),
-        OPENAI_BASE_URL,
-        OPENAI_MODEL,
-        agent.system_prompt,
-        list(agent.tools),
-    )
-
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-GEMINI_MODEL = "gemini-2.5-flash"
-
-
-def gemini_client(settings: Settings) -> TurnClient | None:
-    key = settings.gemini_api_key
-    if not (key and key.get_secret_value()):
-        return None
-    agent = load_agent(scenarios.ACTIVE.contract)
-    return OpenAICompatClient(
-        key.get_secret_value(),
-        GEMINI_BASE_URL,
-        GEMINI_MODEL,
-        agent.system_prompt,
-        list(agent.tools),
-        extra_body={"reasoning_effort": "none"},
-    )
-
-
-CLIENT_FACTORIES: dict[str, Callable[[Settings], TurnClient | None]] = {
-    "phonely": PhonelyClient.from_settings,
-    "openai": openai_client,
-    "google": gemini_client,
+# Preserve existing provider-only routes and Coval identities during rollout.
+LEGACY_MODELS = {
+    "phonely": "phonely-agent",
+    "openai": "gpt-4.1",
+    "google": "gemini-2.5-flash",
 }
+# These registry names are distinct benchmark configurations of upstream gpt-5.
+GPT5_REASONING = {"gpt-5-minimal": "minimal", "gpt-5-medium": "medium"}
+ModelKey = tuple[str, str]
+
+
+def make_client(settings: Settings, provider: str, model: str) -> TurnClient | None:
+    if provider == "phonely":
+        # Phonely hosts one configured agent rather than accepting a model name.
+        return PhonelyClient.from_settings(settings) if model == "phonely-agent" else None
+    if provider == "openai":
+        key = settings.openai_api_key
+        base_url = "https://api.openai.com/v1"
+        effort = GPT5_REASONING.get(model)
+        upstream_model = "gpt-5" if effort else model
+        extra_body = {"reasoning_effort": effort} if effort else {}
+    elif provider == "google":
+        key = settings.gemini_api_key
+        base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+        upstream_model = model
+        extra_body = {"reasoning_effort": "none"}
+    else:
+        return None
+    if not (key and key.get_secret_value()):
+        return None
+    agent = load_agent(scenarios.ACTIVE.contract)
+    return OpenAICompatClient(
+        key.get_secret_value(),
+        base_url,
+        upstream_model,
+        agent.system_prompt,
+        list(agent.tools),
+        extra_body=extra_body,
+    )
+
+
 ITERATION_COUNT = 1
 TEMPLATE_MANAGED = ("agent_ids", "persona_ids", "test_set_ids", "metric_ids", "iteration_count")
 
@@ -76,12 +74,12 @@ def llm_models(models: Iterable[RegisteredModel]) -> list[RegisteredModel]:
     return [model for model in models if model.benchmark is Benchmark.LLM]
 
 
-def make_clients(settings: Settings) -> dict[str, TurnClient]:
-    clients: dict[str, TurnClient] = {}
-    for provider, factory in CLIENT_FACTORIES.items():
-        client = factory(settings)
+def make_clients(settings: Settings) -> dict[ModelKey, TurnClient]:
+    clients: dict[ModelKey, TurnClient] = {}
+    for provider, model in LEGACY_MODELS.items():
+        client = make_client(settings, provider, model)
         if client is not None:
-            clients[provider] = client
+            clients[provider, model] = client
     return clients
 
 

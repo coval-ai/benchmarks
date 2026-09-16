@@ -55,6 +55,8 @@ The web FE lives in the private `coval-ai/benchmarks-web` repo — run it agains
 
 All env vars are documented in `src/coval_bench/config.py`. Provider keys are optional; tests don't need them.
 
+For the GPT-5 minimal/medium comparison, see the [LLM rollout guide](../docs/llm-gpt5-rollout.md).
+
 Normalized observation dual writes are additive, private, and disabled by default.
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
 enable the STT/TTS rollout; legacy result writes remain the source of truth.

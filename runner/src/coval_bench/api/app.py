@@ -63,7 +63,7 @@ from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.fixture_sources import install_fixture_providers
-from coval_bench.llm.benchmark import llm_models, make_clients
+from coval_bench.llm.benchmark import llm_models, make_client, make_clients
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
 
@@ -147,8 +147,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     logger.warning("llm_client_check_skipped", exc_info=True)
                 else:
                     for model in llm_models(roster):
-                        if model.collected and model.provider not in llm_clients:
-                            logger.error("llm_client_missing", provider=model.provider)
+                        if model.collected and (model.provider, model.model) not in llm_clients:
+                            client = make_client(resolved, model.provider, model.model)
+                            if client is None:
+                                logger.error(
+                                    "llm_client_missing", provider=model.provider, model=model.model
+                                )
+                            else:
+                                llm_clients[model.provider, model.model] = client
                 yield
         finally:
             for llm_client in llm_clients.values():

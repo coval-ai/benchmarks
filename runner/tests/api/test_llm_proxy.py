@@ -76,7 +76,7 @@ async def bind_phonely(app: FastAPI) -> AsyncIterator[Callable[[Handler], None]]
         "https://phonely.test",
         transport=httpx.MockTransport(lambda request: handlers[-1](request)),
     )
-    app.state.llm_clients = {"phonely": client}
+    app.state.llm_clients = {("phonely", "phonely-agent"): client}
     yield handlers.append
     await client.aclose()
 
@@ -98,7 +98,7 @@ async def test_proxy_auth_configuration_and_route_location(
     client: AsyncClient, app: FastAPI
 ) -> None:
     configured_clients = app.state.llm_clients
-    assert isinstance(configured_clients["phonely"], PhonelyClient)
+    assert isinstance(configured_clients["phonely", "phonely-agent"], PhonelyClient)
     assert (await client.post("/llm/phonely/session", json={})).status_code == 401
     assert (
         await client.post(
@@ -109,11 +109,14 @@ async def test_proxy_auth_configuration_and_route_location(
     assert (await client.post("/llm/unknown/session", json={}, headers=AUTH)).status_code == 404
     assert (await client.post("/llm/paused/session", json={}, headers=AUTH)).status_code == 404
 
+    original_settings = app.state.settings
+    app.state.settings = original_settings.model_copy(update={"phonely_api_key": None})
     app.state.llm_clients = {}
     assert (await client.post("/llm/phonely/session", json={}, headers=AUTH)).status_code == 503
     lowercase = {"Authorization": f"bearer {LLM_PROXY_KEY}"}
     lowercase_response = await client.post("/llm/phonely/session", json={}, headers=lowercase)
     assert lowercase_response.status_code == 503
+    app.state.settings = original_settings
     app.state.llm_clients = configured_clients
     settings = app.state.settings
     app.state.settings = settings.model_copy(update={"llm_proxy_secret": SecretStr("")})
@@ -304,3 +307,77 @@ async def test_proxy_is_not_rate_limited(
         )
     )
     assert {response.status_code for response in responses} == {200}
+
+
+async def test_openai_variants_route_and_record_the_selected_model(
+    client: AsyncClient, app: FastAPI, postgresql: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, content=_sse({"content": "Welcome to Ultra Bank"}))
+
+    # Exercise the real factories and streaming parser with only transport stubbed.
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **_kw: httpx.MockTransport(handler))
+    app.state.settings = app.state.settings.model_copy(update={"openai_api_key": SecretStr("test")})
+    names = ["gpt-4.1", "gpt-5-minimal", "gpt-5-medium"]
+    add_models(
+        postgresql,
+        *[
+            RegisteredModel(
+                benchmark=Benchmark.LLM,
+                provider="openai",
+                model=name,
+                collected=True,
+                published=False,
+            )
+            for name in names
+        ],
+    )
+    previous = app.state.llm_clients
+    app.state.llm_clients = {}
+    try:
+        for index, name in enumerate(names):
+            # The legacy provider-only endpoint must keep serving GPT-4.1.
+            query = "" if name == "gpt-4.1" else f"?benchmark_model={name}"
+            session = await client.post(f"/llm/openai/session{query}", json={}, headers=AUTH)
+            assert session.status_code == 200
+            response = await client.post(
+                f"/llm/openai/chat{query}",
+                headers=AUTH,
+                json={
+                    "model": session.json()["sessionId"],
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "simulation_id": f"variant-{index}",
+                },
+            )
+            assert response.status_code == 200, response.text
+        assert [body["model"] for body in captured] == ["gpt-4.1", "gpt-5", "gpt-5"]
+        assert [body.get("reasoning_effort") for body in captured] == [None, "minimal", "medium"]
+        assert len({json.dumps(body["messages"]) for body in captured}) == 1
+        rows = await _turn_rows(postgresql)
+        assert [(row["simulation_id"], row["model"]) for row in rows] == [
+            (f"variant-{i}", name) for i, name in enumerate(names)
+        ]
+        assert all(row["provider"] == "openai" and row["ttft_ms"] >= 0 for row in rows)
+        assert set(app.state.llm_clients) == {("openai", name) for name in names}
+        for name in ["unknown", "gpt-5"]:
+            response = await client.post(
+                f"/llm/openai/session?benchmark_model={name}", headers=AUTH, json={}
+            )
+            assert response.status_code == 404
+        # Removing collection must take effect even while the client is cached.
+        with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+            conn.execute(
+                "UPDATE benchmarks_v2.models SET collected=false "
+                "WHERE modality='LLM' AND provider='openai' AND model='gpt-5-medium'"
+            )
+        response = await client.post(
+            "/llm/openai/session?benchmark_model=gpt-5-medium", headers=AUTH, json={}
+        )
+        assert response.status_code == 404
+    finally:
+        for upstream in app.state.llm_clients.values():
+            await upstream.aclose()
+        app.state.llm_clients = previous

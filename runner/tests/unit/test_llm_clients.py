@@ -18,8 +18,8 @@ def test_compat_clients_need_their_key(
     provider: str, key_env: str, model: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(key_env, raising=False)
-    assert provider not in make_clients(Settings(_env_file=None))
+    assert (provider, model) not in make_clients(Settings(_env_file=None))
     monkeypatch.setenv(key_env, "k")
     clients = make_clients(Settings(_env_file=None))
-    assert isinstance(clients[provider], OpenAICompatClient)
-    assert model in repr(clients[provider])
+    assert isinstance(clients[provider, model], OpenAICompatClient)
+    assert model in repr(clients[provider, model])

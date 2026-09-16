@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Self
+from urllib.parse import urlencode
 
 import click
 import httpx
@@ -41,6 +43,7 @@ MANAGED = ("display_name", "metadata", "test_set_ids")
 
 class CovalTextAgentDefinition(BaseModel, frozen=True):
     provider: str
+    model: str
     proxy_url: str
     proxy_secret: SecretStr
     test_set_id: str
@@ -49,16 +52,30 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     collected: bool = True
 
     @property
+    def key(self) -> benchmark.ModelKey:
+        return self.provider, self.model
+
+    @property
+    def identity(self) -> str:
+        if benchmark.LEGACY_MODELS.get(self.provider) == self.model:
+            return self.provider
+        suffix = hashlib.sha256(self.model.encode()).hexdigest()[:16]
+        return f"{self.provider}-{suffix}"
+
+    @property
     def customer_agent_id(self) -> str:
-        return f"benchmarks-{self.provider}-text"
+        return f"benchmarks-{self.identity}-text"
 
     @property
     def display_name(self) -> str:
-        return f"Benchmarks: {self.provider.capitalize()} text agent"
+        label = self.provider.capitalize()
+        if benchmark.LEGACY_MODELS.get(self.provider) != self.model:
+            label += f" {self.model}"
+        return f"Benchmarks: {label} text agent"
 
     @property
     def run_name(self) -> str:
-        return f"benchmarks-{self.provider}-text-daily"
+        return f"benchmarks-{self.identity}-text-daily"
 
     @classmethod
     def from_settings(
@@ -66,6 +83,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         provider: str,
         settings: Settings,
         *,
+        model: str,
         test_set_id: str | None = None,
         collected: bool = True,
     ) -> Self:
@@ -96,6 +114,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
             raise SyncError(f"sync-llm needs {', '.join(missing)} set")
         return cls(
             provider=provider,
+            model=model,
             proxy_url=proxy_url.rstrip("/"),
             proxy_secret=proxy_secret,
             test_set_id=test_set_id,
@@ -105,13 +124,14 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         )
 
     def agent_body(self) -> dict[str, Any]:
+        query = urlencode({"benchmark_model": self.model})
         return {
             "display_name": self.display_name,
             "customer_agent_id": self.customer_agent_id,
             "model_type": MODEL_TYPE,
             "metadata": {
-                "chat_endpoint": f"{self.proxy_url}/llm/{self.provider}/chat",
-                "initialization_endpoint": f"{self.proxy_url}/llm/{self.provider}/session",
+                "chat_endpoint": f"{self.proxy_url}/llm/{self.provider}/chat?{query}",
+                "initialization_endpoint": f"{self.proxy_url}/llm/{self.provider}/session?{query}",
                 "initialization_payload": "{}",
                 "authorization_header": f"Bearer {self.proxy_secret.get_secret_value()}",
                 "input_template": INPUT_TEMPLATE,
@@ -316,7 +336,11 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
     try:
         definitions = [
             CovalTextAgentDefinition.from_settings(
-                model.provider, settings, test_set_id=test_set_id, collected=model.collected
+                model.provider,
+                settings,
+                model=model.model,
+                test_set_id=test_set_id,
+                collected=model.collected,
             )
             for model in load_llm_models(settings)
         ]
@@ -325,41 +349,48 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
                 click.echo(json.dumps(definition.redacted_body(), indent=2, sort_keys=True))
         with CovalTextClient(COVAL_API_KEY.resolve(), coval_api_base) as client:
             results = {
-                definition.provider: sync(client, definition, dry_run=dry_run)
+                definition.key: sync(client, definition, dry_run=dry_run)
                 for definition in definitions
             }
     except (SyncError, RuntimeError, httpx.HTTPError, psycopg.Error) as exc:
         if not dry_run:
             run_logger.error("RUN_FAILED", error=str(exc), exc_info=exc)
         raise click.ClickException(str(exc)) from exc
-    for provider, result in results.items():
+    for (provider, model), result in results.items():
         for action in result.actions:
-            click.echo(f"{provider} {action}")
-        click.echo(
-            f"COVAL_LLM_{provider.upper()}_AGENT_ID={result.agent_id or '<created on apply>'}"
-        )
+            click.echo(f"{provider}/{model} {action}")
+        click.echo(f"{provider}/{model} agent_id={result.agent_id or '<created on apply>'}")
     if dry_run:
         return
-    fetchable: dict[str, str] = {}
+    fetchable: dict[benchmark.ModelKey, str] = {}
     for definition, result in zip(definitions, results.values(), strict=True):
         provider = definition.provider
         if not definition.collected:
-            run_logger.info("llm_sync_fetch_skipped", provider=provider, reason="not_collected")
+            run_logger.info(
+                "llm_sync_fetch_skipped",
+                provider=provider,
+                model=definition.model,
+                reason="not_collected",
+            )
         elif "scheduled run: create" in result.actions:
             run_logger.info(
-                "llm_sync_fetch_deferred", provider=provider, reason="scheduled_run_created"
+                "llm_sync_fetch_deferred",
+                provider=provider,
+                model=definition.model,
+                reason="scheduled_run_created",
             )
         else:
-            fetchable[provider] = result.agent_id
+            fetchable[definition.key] = result.agent_id
     if fetchable:
         from coval_bench.registries.benchmarks import Benchmark
         from coval_bench.s2s.fetch_v2v import _run_fetch
 
         _run_fetch(Benchmark.LLM, (), 720, 100, settings=settings, llm_agent_ids=fetchable)
-    for provider, result in results.items():
+    for (provider, model), result in results.items():
         run_logger.info(
             "llm_sync_completed",
             provider=provider,
+            model=model,
             agent_id=result.agent_id,
             actions=result.actions,
         )
