@@ -3,7 +3,7 @@
 
 """AssemblyAI real-time STT provider (v3 streaming API).
 
-Models: universal-streaming, universal-streaming-multilingual, universal-3.5-pro
+Models: universal-streaming, universal-streaming-multilingual, universal-N.M-pro
 Wire protocol: WebSocket, wss://streaming.assemblyai.com/v3/ws
 Auth: Authorization: <key>
 Close: {"type": "Terminate"}
@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import time  # monotonic clock — wall-clock can step on NTP sync
 from typing import Any
 from urllib.parse import urlencode
@@ -33,11 +34,11 @@ logger = structlog.get_logger(__name__)
 _SPEECH_MODEL_MAP: dict[str, str] = {
     "universal-streaming": "universal-streaming-english",
     "universal-streaming-multilingual": "universal-streaming-multilingual",
-    "universal-3.5-pro": "universal-3-5-pro",
 }
+# Pro releases (universal-3.5-pro, universal-3.6-pro, ...) need no code change: the
+# registry id maps to the API's speech_model by swapping dots for dashes.
+_PRO_MODEL = re.compile(r"^universal-\d+(?:\.\d+)?-pro$")
 _WS_BASE = "wss://streaming.assemblyai.com/v3/ws"
-
-_FORCE_ENDPOINT_MODELS = frozenset({"universal-3.5-pro"})
 
 # 1.0 = pure VAD silence-latency mode: the model never declares end-of-turn on a
 # semantic guess, only on our ForceEndpoint at speech-end (TTFS parity). A lower
@@ -49,27 +50,33 @@ _END_OF_TURN_CONFIDENCE_THRESHOLD = 1.0
 # timeout — the outer per-item timeout still bounds the run.
 _FINAL_WAIT_S = 5.0
 
-# Vendor-recommended voice-agent configuration, applied per model on top of the
-# base connection params. mode=min_latency is the documented accuracy/latency
+# Vendor-recommended voice-agent configuration for Pro models, applied on top of
+# the base connection params. mode=min_latency is the documented accuracy/latency
 # preset for voice agents (sets interruption_delay, turn-silence windows,
 # continuous_partials, vad_threshold as a bundle):
 # https://www.assemblyai.com/docs/streaming/prompting-and-keyterms
-_MODEL_EXTRA_PARAMS: dict[str, dict[str, str]] = {
-    "universal-3.5-pro": {
-        "mode": "min_latency",
-    },
-}
+_PRO_EXTRA_PARAMS: dict[str, str] = {"mode": "min_latency"}
+
+
+def _is_pro(model: str) -> bool:
+    return _PRO_MODEL.match(model) is not None
+
+
+def _speech_model(model: str) -> str:
+    return _SPEECH_MODEL_MAP.get(model) or model.replace(".", "-")
 
 
 class AssemblyAIProvider(STTProvider):
     """AssemblyAI v3 streaming STT provider."""
 
-    _VALID_MODELS = frozenset(_SPEECH_MODEL_MAP)
+    def _model_supported(self, model: str) -> bool:
+        return model in _SPEECH_MODEL_MAP or _is_pro(model)
 
     def __init__(self, api_key: SecretStr, model: str = "universal-streaming") -> None:
         if not self._model_supported(model):
             raise ValueError(
-                f"Invalid AssemblyAI model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
+                f"Invalid AssemblyAI model {model!r}. "
+                f"Valid: {sorted(_SPEECH_MODEL_MAP)} or universal-N.M-pro"
             )
         self._api_key = api_key
         self._model = model
@@ -98,13 +105,10 @@ class AssemblyAIProvider(STTProvider):
         total_start = time.monotonic()
 
         try:
-            speech_model = _SPEECH_MODEL_MAP[self._model]
-            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={speech_model}"
-            if self._model in _FORCE_ENDPOINT_MODELS:
+            url = f"{_WS_BASE}?sample_rate={sample_rate}&speech_model={_speech_model(self._model)}"
+            if _is_pro(self._model):
                 url += f"&end_of_turn_confidence_threshold={_END_OF_TURN_CONFIDENCE_THRESHOLD}"
-            extra_params = _MODEL_EXTRA_PARAMS.get(self._model)
-            if extra_params:
-                url += "&" + urlencode(extra_params)
+                url += "&" + urlencode(_PRO_EXTRA_PARAMS)
             headers = {"Authorization": self._api_key.get_secret_value()}
             final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
@@ -162,7 +166,7 @@ class AssemblyAIProvider(STTProvider):
             async for chunk, start in paced_chunks(audio_data, chunk_size, byte_rate):
                 result.audio_start_time = start
                 await ws.send(chunk)
-            if self._model in _FORCE_ENDPOINT_MODELS:
+            if _is_pro(self._model):
                 final_event.clear()
                 await ws.send(json.dumps({"type": "ForceEndpoint"}))
                 with contextlib.suppress(TimeoutError):
