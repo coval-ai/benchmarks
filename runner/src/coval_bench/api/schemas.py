@@ -106,6 +106,8 @@ class ModelInfo(BaseModel):
     # The series color the registry records for the model, as lowercase
     # ``#rrggbb``. None means the site picks one from its built-in palette.
     color: str | None = None
+    # What the site labels the model. None means the site picks the label itself.
+    display_name: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -508,6 +510,7 @@ class AdminModelOut(BaseModel):
     published: bool
     tags: list[str] = []
     color: str | None = None
+    display_name: str | None = None
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -538,12 +541,14 @@ class AdminModelCreate(BaseModel):
     published: bool = False
     tags: list[str] = []
     color: HexColor = None
+    display_name: str | None = Field(default=None, min_length=1)
 
 
 class AdminModelPatch(BaseModel):
     """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
 
-    ``color`` null returns the model to the site's built-in palette.
+    ``color`` null returns the model to the site's built-in palette; ``display_name``
+    null returns it to the site's built-in label.
     """
 
     provider: str | None = Field(default=None, min_length=1)
@@ -560,6 +565,7 @@ class AdminModelPatch(BaseModel):
     published: bool | None = None
     tags: list[str] | None = None
     color: HexColor = None
+    display_name: str | None = Field(default=None, min_length=1)
 
 
 class AdminModelUpdateResponse(BaseModel):
