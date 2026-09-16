@@ -671,7 +671,7 @@ def test_llm_benchmark_rows_are_accepted(pg_conn: psycopg.Connection[Any]) -> No
             "SELECT collected, published, arena_enabled, updated_by_user_id "
             "FROM benchmarks_v2.models WHERE modality = 'LLM' AND provider = 'phonely'"
         )
-        assert cur.fetchall() == [(True, False, False, "migration:20260901_0025")]
+        assert cur.fetchall() == [(True, False, False, "migration:20260916_0037")]
 
 
 def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[Any]) -> None:

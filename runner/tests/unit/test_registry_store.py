@@ -332,3 +332,74 @@ def test_color_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]) -> No
         assert [change.new["color"] for change in changes] == [None, "#1db098", None]
 
     _with_store(registry_pg, scenario)
+
+
+def test_llm_migration_registers_variants_and_preserves_legacy_identity(
+    registry_pg: psycopg.Connection[Any],
+) -> None:
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+    from pydantic import SecretStr
+
+    from coval_bench.db.registry_store import fetch_models
+    from coval_bench.llm.coval_agent import CovalTextAgentDefinition
+
+    from .conftest import async_dsn
+
+    cfg = Config(str(Path(__file__).parents[2] / "alembic.ini"))
+    cfg.set_main_option(
+        "sqlalchemy.url", async_dsn(registry_pg).replace("postgresql://", "postgresql+psycopg://")
+    )
+    command.upgrade(cfg, "20260915_0036")
+    registry_pg.execute("""
+        INSERT INTO benchmarks_v2.models
+            (modality,provider,model,collected,published,updated_by_user_id)
+        VALUES ('LLM','openai','gpt-4.1',true,false,'test'),
+               ('LLM','google','gemini-2.5-flash',true,false,'test')
+        ON CONFLICT DO NOTHING
+    """)
+    registry_pg.commit()
+    command.upgrade(cfg, "head")
+
+    async def verify() -> None:
+        pool = await open_pool(registry_pg)
+        try:
+            models = {m.model: m for m in await fetch_models(pool) if m.benchmark is Benchmark.LLM}
+            identities = set()
+            for name, effort in [("gpt-5-minimal", "minimal"), ("gpt-5-medium", "medium")]:
+                model = models[name]
+                assert model.collected and not model.published and not model.arena_enabled
+                assert model.llm_config is not None
+                assert model.llm_config.upstream_model == "gpt-5"
+                assert model.llm_config.reasoning_effort == effort
+                assert not model.llm_config.legacy_provider_route
+            for model in models.values():
+                assert model.llm_config is not None
+                definition = CovalTextAgentDefinition(
+                    provider=model.provider,
+                    model=model.model,
+                    legacy_provider_route=model.llm_config.legacy_provider_route,
+                    proxy_url="https://example.com",
+                    proxy_secret=SecretStr("test"),
+                    test_set_id="test",
+                    instruction_metric_id="test",
+                    persona_id="test",
+                )
+                identities.add(definition.customer_agent_id)
+                if model.llm_config.legacy_provider_route:
+                    assert definition.customer_agent_id == f"benchmarks-{model.provider}-text"
+            assert len(identities) == len(models)
+            google = models["gemini-2.5-flash"].llm_config
+            assert google is not None and google.reasoning_effort == "none"
+            history = await RegistryStore(pool).recent_history()
+            assert any(
+                change.new.get("llm_config", {}).get("reasoning_effort") == "minimal"
+                for changes in history.values()
+                for change in changes
+            )
+        finally:
+            await pool.close()
+
+    asyncio.run(verify())

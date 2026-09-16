@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
+from coval_bench.registries.models import LLMConfig
 
 
 class RunOut(BaseModel):
@@ -494,6 +495,7 @@ class AdminModelOut(BaseModel):
 
     id: int
     modality: Benchmark
+    llm_config: LLMConfig | None = None
     provider: str
     model: str
     voice: str | None = None
@@ -524,6 +526,7 @@ class AdminModelCreate(BaseModel):
     """POST body for /v1/admin/models. The defaults land the model Hidden."""
 
     modality: Benchmark
+    llm_config: LLMConfig | None = None
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
     voice: str | None = Field(default=None, min_length=1)
@@ -546,6 +549,7 @@ class AdminModelPatch(BaseModel):
     ``color`` null returns the model to the site's built-in palette.
     """
 
+    llm_config: LLMConfig | None = None
     provider: str | None = Field(default=None, min_length=1)
     model: str | None = Field(default=None, min_length=1)
     voice: str | None = Field(default=None, min_length=1)

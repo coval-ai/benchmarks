@@ -6,8 +6,10 @@ from __future__ import annotations
 import pytest
 
 from coval_bench.config import Settings
-from coval_bench.llm.benchmark import make_clients
+from coval_bench.llm.benchmark import make_client
 from coval_bench.llm.openai_compat import OpenAICompatClient
+from coval_bench.registries.benchmarks import Benchmark
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 
 
 @pytest.mark.parametrize(
@@ -17,9 +19,17 @@ from coval_bench.llm.openai_compat import OpenAICompatClient
 def test_compat_clients_need_their_key(
     provider: str, key_env: str, model: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    registered = RegisteredModel(
+        benchmark=Benchmark.LLM,
+        provider=provider,
+        model=model,
+        llm_config=LLMConfig(upstream_model=model),
+        collected=True,
+        published=False,
+    )
     monkeypatch.delenv(key_env, raising=False)
-    assert (provider, model) not in make_clients(Settings(_env_file=None))
+    assert make_client(Settings(_env_file=None), registered) is None
     monkeypatch.setenv(key_env, "k")
-    clients = make_clients(Settings(_env_file=None))
-    assert isinstance(clients[provider, model], OpenAICompatClient)
-    assert model in repr(clients[provider, model])
+    client = make_client(Settings(_env_file=None), registered)
+    assert isinstance(client, OpenAICompatClient)
+    assert model in repr(client)

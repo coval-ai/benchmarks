@@ -50,6 +50,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     instruction_metric_id: str
     persona_id: str
     collected: bool = True
+    legacy_provider_route: bool = False
 
     @property
     def key(self) -> benchmark.ModelKey:
@@ -57,7 +58,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
 
     @property
     def identity(self) -> str:
-        if benchmark.LEGACY_MODELS.get(self.provider) == self.model:
+        if self.legacy_provider_route:
             return self.provider
         suffix = hashlib.sha256(self.model.encode()).hexdigest()[:16]
         return f"{self.provider}-{suffix}"
@@ -69,7 +70,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     @property
     def display_name(self) -> str:
         label = self.provider.capitalize()
-        if benchmark.LEGACY_MODELS.get(self.provider) != self.model:
+        if not self.legacy_provider_route:
             label += f" {self.model}"
         return f"Benchmarks: {label} text agent"
 
@@ -84,6 +85,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         settings: Settings,
         *,
         model: str,
+        legacy_provider_route: bool = False,
         test_set_id: str | None = None,
         collected: bool = True,
     ) -> Self:
@@ -115,6 +117,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
         return cls(
             provider=provider,
             model=model,
+            legacy_provider_route=legacy_provider_route,
             proxy_url=proxy_url.rstrip("/"),
             proxy_secret=proxy_secret,
             test_set_id=test_set_id,
@@ -334,15 +337,27 @@ def sync_llm(dry_run: bool, test_set_id: str | None, coval_api_base: str) -> Non
         configure_logging(level=settings.log_level)
     run_logger = structlog.get_logger("coval_bench.llm.coval_agent")
     try:
+        roster = load_llm_models(settings)
+        missing_config = [
+            f"{m.provider}/{m.model}" for m in roster if m.collected and m.llm_config is None
+        ]
+        if missing_config:
+            raise SyncError(
+                f"LLM registry configuration is missing for {', '.join(missing_config)}"
+            )
         definitions = [
             CovalTextAgentDefinition.from_settings(
                 model.provider,
                 settings,
                 model=model.model,
+                legacy_provider_route=model.llm_config.legacy_provider_route
+                if model.llm_config
+                else False,
                 test_set_id=test_set_id,
                 collected=model.collected,
             )
-            for model in load_llm_models(settings)
+            for model in roster
+            if model.llm_config is not None
         ]
         if dry_run:
             for definition in definitions:

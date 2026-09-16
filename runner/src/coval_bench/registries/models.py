@@ -14,7 +14,7 @@ import re
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel
+from pydantic import AfterValidator, BaseModel, Field
 
 from coval_bench.registries.benchmarks import Benchmark
 
@@ -82,6 +82,16 @@ class Voice(BaseModel, frozen=True, extra="forbid"):
     accent: str | None = None
 
 
+class LLMConfig(BaseModel, frozen=True, extra="forbid"):
+    """Registry-owned request settings and compatibility with existing agents."""
+
+    upstream_model: str = Field(min_length=1)
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None = None
+    # Existing agents used provider-only identities and URLs. Only their original
+    # registry row retains this flag; new entries get model-specific identities.
+    legacy_provider_route: bool = False
+
+
 class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     """A single benchmarked model: identity, display metadata, run config."""
 
@@ -113,3 +123,4 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # The series color the site draws the model in, as lowercase ``#rrggbb``.
     # None means the site picks one from its built-in palette.
     color: HexColor = None
+    llm_config: LLMConfig | None = None

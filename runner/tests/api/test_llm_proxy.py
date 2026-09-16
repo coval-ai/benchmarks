@@ -22,7 +22,7 @@ from pydantic import SecretStr
 
 from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 from tests.api.conftest import LLM_PROXY_KEY, _make_db_url, add_models
 
 AUTH = {"Authorization": f"Bearer {LLM_PROXY_KEY}"}
@@ -55,6 +55,7 @@ def _llm_model(provider: str, *, collected: bool) -> RegisteredModel:
         benchmark=Benchmark.LLM,
         provider=provider,
         model=f"{provider}-agent",
+        llm_config=LLMConfig(upstream_model=f"{provider}-agent", legacy_provider_route=True),
         collected=collected,
         published=False,
     )
@@ -76,7 +77,9 @@ async def bind_phonely(app: FastAPI) -> AsyncIterator[Callable[[Handler], None]]
         "https://phonely.test",
         transport=httpx.MockTransport(lambda request: handlers[-1](request)),
     )
-    app.state.llm_clients = {("phonely", "phonely-agent"): client}
+    app.state.llm_clients = {
+        ("phonely", "phonely-agent", _llm_model("phonely", collected=True).llm_config): client
+    }
     yield handlers.append
     await client.aclose()
 
@@ -98,7 +101,12 @@ async def test_proxy_auth_configuration_and_route_location(
     client: AsyncClient, app: FastAPI
 ) -> None:
     configured_clients = app.state.llm_clients
-    assert isinstance(configured_clients["phonely", "phonely-agent"], PhonelyClient)
+    assert isinstance(
+        configured_clients[
+            "phonely", "phonely-agent", _llm_model("phonely", collected=True).llm_config
+        ],
+        PhonelyClient,
+    )
     assert (await client.post("/llm/phonely/session", json={})).status_code == 401
     assert (
         await client.post(
@@ -329,6 +337,15 @@ async def test_openai_variants_route_and_record_the_selected_model(
                 benchmark=Benchmark.LLM,
                 provider="openai",
                 model=name,
+                llm_config=LLMConfig.model_validate(
+                    {
+                        "upstream_model": "gpt-4.1" if name == "gpt-4.1" else "gpt-5",
+                        "reasoning_effort": None
+                        if name == "gpt-4.1"
+                        else name.removeprefix("gpt-5-"),
+                        "legacy_provider_route": name == "gpt-4.1",
+                    }
+                ),
                 collected=True,
                 published=False,
             )
@@ -361,12 +378,27 @@ async def test_openai_variants_route_and_record_the_selected_model(
             (f"variant-{i}", name) for i, name in enumerate(names)
         ]
         assert all(row["provider"] == "openai" and row["ttft_ms"] >= 0 for row in rows)
-        assert set(app.state.llm_clients) == {("openai", name) for name in names}
+        assert {key[:2] for key in app.state.llm_clients} == {("openai", name) for name in names}
         for name in ["unknown", "gpt-5"]:
             response = await client.post(
                 f"/llm/openai/session?benchmark_model={name}", headers=AUTH, json={}
             )
             assert response.status_code == 404
+        # Registry edits must take effect without restarting or reusing a stale client.
+        with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
+            conn.execute(
+                "UPDATE benchmarks_v2.models SET llm_config = "
+                "jsonb_build_object('upstream_model', 'future-model', 'reasoning_effort', 'high') "
+                "WHERE modality='LLM' AND provider='openai' AND model='gpt-5-minimal'"
+            )
+        response = await client.post(
+            "/llm/openai/chat?benchmark_model=gpt-5-minimal",
+            headers=AUTH,
+            json={"model": "changed-config", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+        assert response.status_code == 200, response.text
+        assert captured[-1]["model"] == "future-model"
+        assert captured[-1]["reasoning_effort"] == "high"
         # Removing collection must take effect even while the client is cached.
         with psycopg.connect(_make_db_url(postgresql), autocommit=True) as conn:
             conn.execute(

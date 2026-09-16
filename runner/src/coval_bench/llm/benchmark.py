@@ -16,43 +16,34 @@ from coval_bench.llm.openai_compat import OpenAICompatClient
 from coval_bench.llm.phonely import PhonelyClient
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 
-# Preserve existing provider-only routes and Coval identities during rollout.
-LEGACY_MODELS = {
-    "phonely": "phonely-agent",
-    "openai": "gpt-4.1",
-    "google": "gemini-2.5-flash",
-}
-# These registry names are distinct benchmark configurations of upstream gpt-5.
-GPT5_REASONING = {"gpt-5-minimal": "minimal", "gpt-5-medium": "medium"}
 ModelKey = tuple[str, str]
+ClientKey = tuple[str, str, LLMConfig]
 
 
-def make_client(settings: Settings, provider: str, model: str) -> TurnClient | None:
-    if provider == "phonely":
-        # Phonely hosts one configured agent rather than accepting a model name.
-        return PhonelyClient.from_settings(settings) if model == "phonely-agent" else None
-    if provider == "openai":
+def make_client(settings: Settings, model: RegisteredModel) -> TurnClient | None:
+    config = model.llm_config
+    if config is None:
+        return None
+    if model.provider == "phonely":
+        return PhonelyClient.from_settings(settings)
+    if model.provider == "openai":
         key = settings.openai_api_key
         base_url = "https://api.openai.com/v1"
-        effort = GPT5_REASONING.get(model)
-        upstream_model = "gpt-5" if effort else model
-        extra_body = {"reasoning_effort": effort} if effort else {}
-    elif provider == "google":
+    elif model.provider == "google":
         key = settings.gemini_api_key
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
-        upstream_model = model
-        extra_body = {"reasoning_effort": "none"}
     else:
         return None
+    extra_body = {"reasoning_effort": config.reasoning_effort} if config.reasoning_effort else {}
     if not (key and key.get_secret_value()):
         return None
     agent = load_agent(scenarios.ACTIVE.contract)
     return OpenAICompatClient(
         key.get_secret_value(),
         base_url,
-        upstream_model,
+        config.upstream_model,
         agent.system_prompt,
         list(agent.tools),
         extra_body=extra_body,
@@ -72,15 +63,6 @@ class ProxiedModel:
 
 def llm_models(models: Iterable[RegisteredModel]) -> list[RegisteredModel]:
     return [model for model in models if model.benchmark is Benchmark.LLM]
-
-
-def make_clients(settings: Settings) -> dict[ModelKey, TurnClient]:
-    clients: dict[ModelKey, TurnClient] = {}
-    for provider, model in LEGACY_MODELS.items():
-        client = make_client(settings, provider, model)
-        if client is not None:
-            clients[provider, model] = client
-    return clients
 
 
 def run_template_body(

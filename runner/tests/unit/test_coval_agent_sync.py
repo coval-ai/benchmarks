@@ -24,19 +24,21 @@ from coval_bench.llm.coval_agent import (
 )
 from coval_bench.platform_assets import SyncError
 from coval_bench.registries.benchmarks import Benchmark
-from coval_bench.registries.models import RegisteredModel
+from coval_bench.registries.models import LLMConfig, RegisteredModel
 
 SECRET = "proxy-secret-value"  # noqa: S105
 PHONELY = RegisteredModel(
     benchmark=Benchmark.LLM,
     provider="phonely",
     model="phonely-agent",
+    llm_config=LLMConfig(upstream_model="phonely-agent", legacy_provider_route=True),
     collected=True,
     published=False,
 )
 DEFINITION = CovalTextAgentDefinition(
     provider="phonely",
     model="phonely-agent",
+    legacy_provider_route=True,
     proxy_url="https://api.example.com",
     proxy_secret=SecretStr(SECRET),
     test_set_id="TSBANK",
@@ -145,6 +147,7 @@ def test_from_settings_names_every_missing_setting() -> None:
         CovalTextAgentDefinition.from_settings(
             "phonely",
             model="phonely-agent",
+            legacy_provider_route=True,
             settings=Settings(
                 coval_s2s_bank_test_set_id="T", coval_s2s_bank_instruction_metric_id="M"
             ),
@@ -152,6 +155,7 @@ def test_from_settings_names_every_missing_setting() -> None:
     definition = CovalTextAgentDefinition.from_settings(
         "phonely",
         model="phonely-agent",
+        legacy_provider_route=True,
         settings=Settings(
             llm_proxy_public_url="https://api.example.com/",
             llm_proxy_secret=SecretStr(SECRET),
@@ -390,7 +394,13 @@ def test_multiple_openai_models_have_distinct_stable_coval_identities() -> None:
     from urllib.parse import parse_qs, urlparse
 
     definitions = [
-        DEFINITION.model_copy(update={"provider": "openai", "model": model})
+        DEFINITION.model_copy(
+            update={
+                "provider": "openai",
+                "model": model,
+                "legacy_provider_route": model == "gpt-4.1",
+            }
+        )
         for model in ["gpt-4.1", "gpt-5-minimal", "gpt-5-medium"]
     ]
     assert definitions[0].customer_agent_id == "benchmarks-openai-text"
@@ -410,7 +420,21 @@ def test_cli_keeps_all_models_from_one_provider(monkeypatch: pytest.MonkeyPatch)
     from coval_bench.s2s.fetch_v2v import llm_specs
 
     models = [
-        PHONELY.model_copy(update={"provider": "openai", "model": model})
+        PHONELY.model_copy(
+            update={
+                "provider": "openai",
+                "model": model,
+                "llm_config": LLMConfig.model_validate(
+                    {
+                        "upstream_model": "gpt-4.1" if model == "gpt-4.1" else "gpt-5",
+                        "reasoning_effort": None
+                        if model == "gpt-4.1"
+                        else model.removeprefix("gpt-5-"),
+                        "legacy_provider_route": model == "gpt-4.1",
+                    }
+                ),
+            }
+        )
         for model in ["gpt-4.1", "gpt-5-minimal", "gpt-5-medium"]
     ]
     settings = Settings(

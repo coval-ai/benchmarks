@@ -26,7 +26,7 @@ from starlette.requests import Request
 from coval_bench.api import clerk, google_auth
 from coval_bench.config import Settings
 from coval_bench.db.registry_store import RegistryStore, TagRecord, fetch_models
-from coval_bench.llm.benchmark import LEGACY_MODELS, ModelKey, ProxiedModel, llm_models, make_client
+from coval_bench.llm.benchmark import ClientKey, ProxiedModel, llm_models, make_client
 from coval_bench.llm.turn import TurnClient
 from coval_bench.registries import RegisteredModel
 
@@ -148,22 +148,28 @@ async def get_proxied_model(
     benchmark_model: str | None = None,
 ) -> ProxiedModel:
     """The collected LLM model behind a /llm/{provider} route, or fail closed."""
-    model = benchmark_model if benchmark_model is not None else LEGACY_MODELS.get(provider)
     registered = next(
         (
             m
             for m in llm_models(models)
-            if m.provider == provider and m.model == model and m.collected
+            if m.provider == provider
+            and m.collected
+            and m.llm_config is not None
+            and (
+                m.model == benchmark_model
+                if benchmark_model is not None
+                else m.llm_config.legacy_provider_route
+            )
         ),
         None,
     )
-    if registered is None:
+    if registered is None or registered.llm_config is None:
         raise HTTPException(404, f"{provider} is not a collected LLM benchmark model")
-    clients: dict[ModelKey, TurnClient] = getattr(request.app.state, "llm_clients", {})
-    key = (provider, registered.model)
+    clients: dict[ClientKey, TurnClient] = getattr(request.app.state, "llm_clients", {})
+    key = (provider, registered.model, registered.llm_config)
     client = clients.get(key)
     if client is None:
-        client = make_client(get_settings(request), *key)
+        client = make_client(get_settings(request), registered)
         if client is not None:
             clients[key] = client
     if client is None:
