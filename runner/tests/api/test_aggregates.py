@@ -1283,6 +1283,40 @@ async def test_by_dataset_groups_stats_per_dataset(client: AsyncClient, postgres
     assert v3["model_stats"][0]["wer_substitutions_pct"] == pytest.approx(1.5)
 
 
+async def test_by_dataset_attaches_the_bound_persona(client: AsyncClient, postgresql: Any) -> None:
+    """A dataset bound in personas.json carries its persona; any other dataset carries none."""
+    for dataset_id, model in (
+        ("s2s-bank-hard-v1", "gpt-realtime"),
+        ("s2s-dental-v1", "gemini-live"),
+    ):
+        run_id = await _insert_run(postgresql, dataset_id=dataset_id)
+        await _insert_result(
+            postgresql,
+            run_id,
+            provider="anyone",
+            model=model,
+            benchmark="S2S",
+            metric_type="V2V",
+            metric_value=900.0,
+            metric_units="ms",
+        )
+    await _refresh_mv(postgresql)
+
+    blocks = (
+        await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "S2S"})
+    ).json()["blocks"]
+    by_dataset = {block["dataset"]: block["persona"] for block in blocks}
+    assert by_dataset["s2s-dental-v1"] is None
+    assert by_dataset["s2s-bank-hard-v1"] == {
+        "slug": "hard",
+        "label": "Hard",
+        "description": by_dataset["s2s-bank-hard-v1"]["description"],
+        "order": 3,
+        "anchor": "judge",
+    }
+    assert by_dataset["s2s-bank-hard-v1"]["description"].startswith("Office noise")
+
+
 async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql)
     old = datetime.now(dt.UTC) - timedelta(days=10)

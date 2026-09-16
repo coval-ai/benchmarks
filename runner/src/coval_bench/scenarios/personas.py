@@ -74,11 +74,17 @@ def load_personas() -> PersonaRegistry:
     return PersonaRegistry.model_validate(json.loads(raw))
 
 
-def persona_for_dataset(dataset_id: str) -> tuple[str, Persona] | None:
-    """The slug and persona a dataset id is bound to, or None when no family binds it."""
+def binding_for_dataset(dataset_id: str) -> tuple[str, Persona, PersonaBinding] | None:
+    """The slug, persona and binding a dataset id is bound to, or None when no family binds it."""
     registry = load_personas()
     for slugs in registry.bindings.values():
         for slug, binding in slugs.items():
             if binding.dataset_id == dataset_id:
-                return slug, registry.personas[slug]
+                return slug, registry.personas[slug], binding
     return None
+
+
+def persona_for_dataset(dataset_id: str) -> tuple[str, Persona] | None:
+    """The slug and persona a dataset id is bound to, or None when no family binds it."""
+    bound = binding_for_dataset(dataset_id)
+    return None if bound is None else bound[:2]
