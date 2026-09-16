@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The 20260911_0033 seed: AssemblyAI universal-3.6-pro joins the model registry.
+"""The 20260916_0038 seed: AssemblyAI universal-3.6-pro joins the model registry.
 
 Uses ``pytest-postgresql`` (embedded ``pg_ctl``, no Docker) to spin up a real
 Postgres and run every migration to head. No remote DB is ever contacted.

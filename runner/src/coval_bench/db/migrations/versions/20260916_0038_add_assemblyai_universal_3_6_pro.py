@@ -3,8 +3,8 @@
 
 """Register AssemblyAI universal-3.6-pro (STT), not yet collected.
 
-Revision ID: 20260911_0033
-Revises:     20260910_0032
+Revision ID: 20260916_0038
+Revises:     20260915_0036
 Create Date: 2026-09-11
 
 Registered with ``collected`` and ``published`` both off, the way new models
@@ -19,8 +19,8 @@ from __future__ import annotations
 
 from alembic import op
 
-revision = "20260911_0033"
-down_revision = "20260910_0032"
+revision = "20260916_0038"
+down_revision = "20260915_0036"
 branch_labels = None
 depends_on = None
 
@@ -33,7 +33,7 @@ def upgrade() -> None:
              on_prem, region, arena_enabled, collected, published, updated_by_user_id)
         VALUES
             ('STT', 'assemblyai', 'universal-3.6-pro', NULL, 'official-api', 'proprietary',
-             TRUE, 'us', FALSE, FALSE, FALSE, 'migration:20260911_0033')
+             TRUE, 'us', FALSE, FALSE, FALSE, 'migration:20260916_0038')
         ON CONFLICT (modality, provider, model) DO NOTHING;
 
         INSERT INTO benchmarks_v2.model_tags (model_id, tag)
@@ -43,7 +43,7 @@ def upgrade() -> None:
             ('code-switching'), ('diarization'), ('keyterm-biasing'), ('multilingual'), ('vad')
         ) AS t(tag)
         WHERE m.modality = 'STT' AND m.provider = 'assemblyai' AND m.model = 'universal-3.6-pro'
-          AND m.updated_by_user_id = 'migration:20260911_0033'
+          AND m.updated_by_user_id = 'migration:20260916_0038'
         ON CONFLICT DO NOTHING;
         """
     )
@@ -54,7 +54,7 @@ def downgrade() -> None:
     op.execute(
         """
         DELETE FROM benchmarks_v2.models
-        WHERE updated_by_user_id = 'migration:20260911_0033'
+        WHERE updated_by_user_id = 'migration:20260916_0038'
           AND modality = 'STT' AND provider = 'assemblyai' AND model = 'universal-3.6-pro';
         """
     )
