@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
-from structlog.testing import capture_logs
 
 from coval_bench.db import dashboard_summaries
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
@@ -41,10 +41,14 @@ def test_failed_view_refresh_rolls_back_state_and_prior_views(
             broken = dict(SUMMARY_VIEWS)
             broken["30d"] = "benchmarks_v2.missing_summary_view"
             monkeypatch.setattr(dashboard_summaries, "SUMMARY_VIEWS", broken)
-            with capture_logs() as logs, pytest.raises(psycopg.errors.UndefinedTable):
+            logger = MagicMock()
+            monkeypatch.setattr(dashboard_summaries, "logger", logger)
+            with pytest.raises(psycopg.errors.UndefinedTable):
                 await dashboard_summaries.refresh_summary_snapshots(pool, as_of=second_as_of)
             failed = [
-                event for event in logs if event["event"] == "dashboard_summary_view_refresh_failed"
+                call.kwargs
+                for call in logger.error.call_args_list
+                if call.args[0] == "dashboard_summary_view_refresh_failed"
             ]
             assert len(failed) == 1
             assert failed[0]["window"] == "30d"
