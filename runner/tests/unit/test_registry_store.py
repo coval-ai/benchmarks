@@ -332,3 +332,26 @@ def test_color_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]) -> No
         assert [change.new["color"] for change in changes] == [None, "#1db098", None]
 
     _with_store(registry_pg, scenario)
+
+
+def test_display_name_roundtrips_and_clears(registry_pg: psycopg.Connection[Any]) -> None:
+    async def scenario(store: RegistryStore) -> None:
+        created = await store.insert_model(_new_model(), **_EDITOR)
+        assert created.display_name is None
+        result = await store.update_model(
+            created.id, {"display_name": "Acme"}, expected_updated_at=created.updated_at, **_EDITOR
+        )
+        assert result is not None
+        _, named = result
+        assert named.display_name == "Acme"
+        assert (await store.get_model(created.id)) == named
+        result = await store.update_model(
+            created.id, {"display_name": None}, expected_updated_at=named.updated_at, **_EDITOR
+        )
+        assert result is not None
+        _, cleared = result
+        assert cleared.display_name is None
+        changes = await store.history(created.id)
+        assert [change.new["display_name"] for change in changes] == [None, "Acme", None]
+
+    _with_store(registry_pg, scenario)

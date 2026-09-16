@@ -390,6 +390,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 collected     boolean NOT NULL,
                 published     boolean NOT NULL,
                 color         text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$'),
+                display_name  text CHECK (display_name IS NULL OR display_name <> ''),
                 updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
                 updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
                 updated_at    timestamptz NOT NULL DEFAULT now(),
@@ -490,8 +491,8 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
                  on_prem, region, arena_enabled, collected, published, color,
-                 updated_by_user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+                 display_name, updated_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
             """,
             (
@@ -509,6 +510,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.collected,
                 model.published,
                 model.color,
+                model.display_name,
             ),
         ).fetchone()
         assert row is not None

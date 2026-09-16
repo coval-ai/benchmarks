@@ -451,6 +451,30 @@ async def test_a_color_is_six_hex_digits_or_nothing(client: AsyncClient, color: 
     assert response.status_code == 422
 
 
+async def test_display_name_is_set_cleared_and_reaches_the_catalogue(client: AsyncClient) -> None:
+    created = (await _post_model(client, published=True, display_name="Acme One")).json()
+    assert created["display_name"] == "Acme One"
+    assert created["history"][0]["new"]["display_name"] == "Acme One"
+
+    public = (await client.get("/v1/providers")).json()
+    (entry,) = [m for e in public["stt"] for m in e["models"] if e["provider"] == "acme"]
+    assert entry["display_name"] == "Acme One"
+
+    # Null is a value here: the site goes back to labelling the model itself.
+    cleared = await _patch(client, created["id"], created["updated_at"], {"display_name": None})
+    assert cleared.status_code == 200
+    model = cleared.json()["model"]
+    assert model["display_name"] is None
+    assert model["history"][0]["old"]["display_name"] == "Acme One"
+
+
+async def test_an_empty_display_name_is_rejected(client: AsyncClient) -> None:
+    assert (await _post_model(client, display_name="")).status_code == 422
+    created = (await _post_model(client)).json()
+    response = await _patch(client, created["id"], created["updated_at"], {"display_name": ""})
+    assert response.status_code == 422
+
+
 async def test_patch_unknown_model_is_404(client: AsyncClient) -> None:
     created = (await _post_model(client)).json()
     response = await _patch(client, created["id"] + 1, created["updated_at"], {})

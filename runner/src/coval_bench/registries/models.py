@@ -113,3 +113,6 @@ class RegisteredModel(BaseModel, frozen=True, extra="forbid"):
     # The series color the site draws the model in, as lowercase ``#rrggbb``.
     # None means the site picks one from its built-in palette.
     color: HexColor = None
+    # What the site labels the model. None means the site still picks the label
+    # from its compiled slug-to-name map.
+    display_name: str | None = None
