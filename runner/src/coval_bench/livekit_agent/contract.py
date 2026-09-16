@@ -1,4 +1,4 @@
-"""The slice of the suite contract the worker needs, read through the runner's loaders."""
+"""The slice of the suite contract the agent needs, read through the runner's loaders."""
 
 from __future__ import annotations
 

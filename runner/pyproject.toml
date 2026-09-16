@@ -57,7 +57,7 @@ google-stt = ["google-cloud-speech>=2.27"]
 google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS streaming
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
-livekit = ["livekit-agents[deepgram,openai,elevenlabs,silero]~=1.6"]  # the LiveKit worker image only
+livekit = ["livekit-agents[deepgram,openai,elevenlabs,silero]~=1.6"]  # the LiveKit agent image only
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"

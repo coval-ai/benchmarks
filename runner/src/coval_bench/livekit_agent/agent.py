@@ -60,7 +60,7 @@ CONTRACT = load_contract(SUITE)
 VAD = silero.VAD.load(min_silence_duration=VAD_MIN_SILENCE_SECONDS)
 
 logger.info(
-    "worker_contract",
+    "agent_contract",
     extra={"suite": CONTRACT.suite, "contract_digest": CONTRACT.digest, "agent_name": AGENT_NAME},
 )
 
