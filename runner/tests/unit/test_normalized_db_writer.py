@@ -120,6 +120,27 @@ async def _evaluation(
     return await writer.start_metric_evaluation(_required(queued.id), started_at=_NOW)
 
 
+async def _historical_evaluation(pool: AsyncConnectionPool[Any], observation: Observation) -> Any:
+    """Seed an evaluation before the metric catalog exists."""
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute(
+                """INSERT INTO benchmarks_v2.metric_evaluations
+               (observation_id,metric_type,metric_version,executor,status)
+               VALUES (%s,'WER','v1','inline','queued') RETURNING id""",
+                (_required(observation.id),),
+            )
+        ).fetchone()
+        evaluation_id = row["id"]
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations "
+            "SET status='running',started_at=%s WHERE id=%s",
+            (_NOW, evaluation_id),
+        )
+        await conn.commit()
+    return evaluation_id
+
+
 def _word_artifact(observation_id: Any, *, sha: str = _SHA) -> PreprocessingArtifact:
     return PreprocessingArtifact(
         observation_id=observation_id,
@@ -389,6 +410,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
             "metric_evaluations": {
                 "id",
                 "observation_id",
+                "metric_id",
                 "metric_type",
                 "metric_version",
                 "evaluation_variant",
@@ -429,6 +451,7 @@ def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) 
                 "model",
                 "benchmark",
                 "dataset_id",
+                "metric_id",
                 "metric_type",
                 "metric_version",
                 "evaluation_variant",
@@ -1742,6 +1765,10 @@ def test_database_success_validation_is_metric_agnostic(
             )
             cur.execute("COMMIT")
 
+        cur.execute(
+            "INSERT INTO benchmarks_v2.metrics (code,display_name) "
+            "VALUES ('FutureMetric','Future metric')"
+        )
         complete_direct(
             "FutureMetric", "v9", (("score", "custom_unit", 1.0, MetricValueRole.PRIMARY),)
         )

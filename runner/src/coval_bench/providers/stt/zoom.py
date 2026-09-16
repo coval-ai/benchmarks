@@ -30,18 +30,12 @@ _EOT_SILENCE_S = 2.0
 class ZoomSTTProvider(STTProvider):
     """Zoom Scribe streaming STT provider."""
 
-    _VALID_MODELS = frozenset({"scribe"})
-
     def __init__(
         self,
         api_key: SecretStr | None,
         api_secret: SecretStr | None,
         model: str = "scribe",
     ) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Zoom STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("zoom_api_key is required for the Zoom STT provider")
         if api_secret is None:

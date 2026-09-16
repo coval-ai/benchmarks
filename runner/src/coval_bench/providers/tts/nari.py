@@ -34,13 +34,7 @@ _SPEECH_PATH = "/v1/audio/speech"
 class NariTTSProvider(TTSProvider):
     """Synthesize English benchmark prompts with Nari's hosted Qwen3-TTS models."""
 
-    _VALID_MODELS = frozenset({"qwen3-tts", "qwen3-tts-fast"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Nari TTS model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         api_key_secret = settings.nari_api_key
         if api_key_secret is None or not api_key_secret.get_secret_value():
             raise ValueError("nari_api_key is required in Settings")

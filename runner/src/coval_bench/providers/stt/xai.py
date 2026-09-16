@@ -26,7 +26,6 @@ from coval_bench.providers.stt._transcript_utils import (
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("grok-stt",)
 _BASE_WS_URL = "wss://api.x.ai/v1/stt"
 _FINAL_WAIT_S = 5.0
 
@@ -52,8 +51,6 @@ class XaiSTTProvider(STTProvider):
     """xAI `/v1/stt` realtime WebSocket provider."""
 
     def __init__(self, api_key: SecretStr, model: str = "grok-stt") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid xAI STT model {model!r}. Valid: {_VALID_MODELS}")
         self._api_key = api_key
         self._model = model
 

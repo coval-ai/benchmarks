@@ -43,7 +43,8 @@ async def get_pool(
 ) -> AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]:
     """Return the process-singleton async connection pool.
 
-    The pool is created once per process (first call wins).  Callers are
+    The pool lives until ``lifespan_pool`` closes it, after which the next call
+    builds a fresh one; psycopg refuses to reopen a closed pool.  Callers are
     responsible for calling ``.open()`` before use and ``.close()`` at shutdown.
     Prefer ``lifespan_pool`` for FastAPI; use this directly in the runner
     orchestrator's startup/shutdown hooks.
@@ -79,9 +80,12 @@ async def lifespan_pool(
                 app.state.pool = pool
                 yield
     """
+    global _pool
     pool = await get_pool(settings)
     await pool.open()
     try:
         yield pool
     finally:
         await pool.close()
+        if _pool is pool:
+            _pool = None

@@ -79,11 +79,6 @@ def test_provider_model() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Cartesia STT model"):
-        CartesiaSTTProvider(api_key=SecretStr("k"), model="ink-whisper")
-
-
 @pytest.mark.asyncio
 async def test_stereo_rejected(fake_api_key: SecretStr, audio_pcm_bytes: bytes) -> None:
     provider = CartesiaSTTProvider(api_key=fake_api_key)

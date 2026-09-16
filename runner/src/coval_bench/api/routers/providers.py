@@ -115,6 +115,7 @@ def _build_provider_map(
                 early_access=not m.published,
                 tags=_model_tags(m, vocabulary),
                 color=m.color,
+                display_name=m.display_name,
             )
         )
     return result

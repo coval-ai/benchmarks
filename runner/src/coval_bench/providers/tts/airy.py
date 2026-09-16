@@ -35,11 +35,7 @@ _STREAM_PATH = "/v1/audio/speech/stream"
 class AiryTTSProvider(TTSProvider):
     """Synthesize English benchmark prompts with airy-tts-v1 in normal style."""
 
-    _VALID_MODELS = frozenset({"airy-tts-v1"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if not self._model_supported(model):
-            raise ValueError(f"Unsupported Airy model: {model!r}")
         api_key_secret = settings.airy_api_key
         if api_key_secret is None or not api_key_secret.get_secret_value():
             raise ValueError("airy_api_key is required in Settings")

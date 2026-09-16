@@ -208,11 +208,6 @@ async def test_alibaba_tts_ttfa_on_first_delta(alibaba_settings: Settings) -> No
     result.audio_path.unlink()
 
 
-def test_alibaba_tts_invalid_model_raises(alibaba_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Alibaba TTS model"):
-        AlibabaTTSProvider(alibaba_settings, model="not-a-model", voice="Cherry")
-
-
 def test_alibaba_tts_invalid_voice_raises(alibaba_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Invalid Alibaba TTS voice"):
         AlibabaTTSProvider(alibaba_settings, model=_MODEL, voice="not-a-voice")

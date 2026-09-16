@@ -758,7 +758,11 @@ def test_stt_tts_rollup_sql_never_deletes_or_verifies_s2s_rows() -> None:
 
     cursor = Cursor()
     migration._refresh_bucket(cursor, _NOW)  # type: ignore[arg-type]
-    assert "benchmark IN ('STT','TTS')" in cursor.statements[1]
+    assert all(
+        "benchmark IN ('STT','TTS')" in sql
+        for sql in cursor.statements
+        if sql.lstrip().startswith("DELETE")
+    )
 
 
 def test_backfill_owned_row_keeps_strict_lifecycle_timestamp_comparison() -> None:
@@ -1787,6 +1791,7 @@ def test_progress_failure_keeps_last_completed_checkpoint_without_detail_leakage
 def test_apply_cancellation_emits_checkpoint_then_unlocks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), id=9, run_id=7, benchmark="STT")
     stream = io.StringIO()
     reporter = migration.ProgressReporter("apply", 1, 9, 1, stream=stream, monotonic=_Clock())
@@ -1963,6 +1968,7 @@ def test_scheduled_buckets_uses_nullable_timestamp_keyset_across_pages() -> None
 def test_apply_replans_for_fresh_verification_without_retaining_pages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), benchmark="STT")
     plan = migration.Planned(
         [row],
@@ -2020,6 +2026,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 
     monkeypatch.setattr(migration, "_insert_plan", insert)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_stored_plan_matches", lambda *_: False)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
     report = migration.backfill(
@@ -2042,6 +2049,7 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 def test_apply_verification_skips_are_reported_and_block_readiness(
     monkeypatch: pytest.MonkeyPatch, verification_reason: str
 ) -> None:
+    monkeypatch.setattr(migration, "register_metric_definitions_sync", lambda _: {})
     row = replace(_row("WER", 1.0), benchmark="STT")
     verification_row = replace(row, scheduled_at=None)
     plan = migration.Planned(
@@ -2107,6 +2115,7 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
     monkeypatch.setattr(migration, "_insert_plan", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
+    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
 
     report = migration.backfill(

@@ -19,8 +19,14 @@ from typing import Any
 import click
 
 from coval_bench import __version__
-from coval_bench.db.cli import db_check, db_migrate
+from coval_bench.db.cli import (
+    db_check,
+    db_migrate,
+    refresh_dashboard_aggregates,
+    repair_dashboard_aggregates,
+)
 from coval_bench.llm.coval_agent import sync_llm
+from coval_bench.migrations.backfill_normalized_metric_ids import backfill_normalized_metric_ids_cli
 from coval_bench.migrations.backfill_normalized_s2s_storage import (
     backfill_normalized_s2s_storage_cli,
 )
@@ -44,9 +50,12 @@ def cli() -> None:
     from coval_bench.config import get_settings
     from coval_bench.fixture_sources import install_fixture_providers
     from coval_bench.logging import configure_logging
+    from coval_bench.telemetry import configure_metrics, shutdown_metrics
 
     settings = get_settings()
     configure_logging(level=settings.log_level)
+    configure_metrics(settings)
+    click.get_current_context().call_on_close(shutdown_metrics)
     # Every command that reads or hashes a contract gets the same fixture sources
     # the API has. `pull-contract` prints the hash today and the voice-agent
     # ingest will write it onto result rows; a runner that could not see the
@@ -84,14 +93,15 @@ def run(kind: str, smoke: bool, source: str) -> None:
     """Execute one benchmark run — invoked by Cloud Run Job."""
     from coval_bench.config import get_settings
     from coval_bench.db.models import RunStatus
-    from coval_bench.runner.orchestrator import RunSummary, run_benchmarks
+    from coval_bench.runner.orchestrator import RunSummary, run_suite
 
     settings = get_settings()
-    summary: RunSummary = asyncio.run(
-        run_benchmarks(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
+    summaries: list[RunSummary] = asyncio.run(
+        run_suite(settings=settings, benchmark_kind=kind, smoke=smoke, source=source)  # type: ignore[arg-type]
     )
-    click.echo(summary.model_dump_json())
-    if summary.status == str(RunStatus.FAILED):
+    for summary in summaries:
+        click.echo(summary.model_dump_json())
+    if not summaries or any(s.status == str(RunStatus.FAILED) for s in summaries):
         raise click.ClickException("run failed")
 
 
@@ -102,6 +112,8 @@ def db() -> None:
 
 db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
+db.add_command(refresh_dashboard_aggregates)
+db.add_command(repair_dashboard_aggregates)
 
 
 @cli.group()
@@ -111,6 +123,7 @@ def migrate() -> None:
 
 migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
 migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
+migrate.add_command(backfill_normalized_metric_ids_cli, name="backfill-normalized-metric-ids")
 migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
 migrate.add_command(import_legacy_cli, name="import-legacy")
 

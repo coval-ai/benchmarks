@@ -21,13 +21,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-import psycopg.rows
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
+from coval_bench import scenarios
 from coval_bench.api.common import (
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
@@ -36,14 +36,15 @@ from coval_bench.api.common import (
     has_enough_samples,
     reads_normalized,
 )
+from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
-from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_SQL
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL, Settings
+from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import is_metric_excluded
-from coval_bench.s2s.conditions import DATASET_ID_DENTAL, DATASET_ID_LLM_DENTAL
+from coval_bench.registries.benchmarks import Benchmark
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -61,12 +62,14 @@ _VALID_COMBOS: set[tuple[str, str]] = {
     ("TTFT", "LLM"),
 }
 
-# The headline S2S board is the clean dental condition, which every agent now runs.
-# The multi-turn set is frozen rather than retired: no agent writes to it, but it
-# stays reachable through the aggregates ``dataset`` param, as does ``__all__`` for
-# callers that want every S2S condition pooled. LLM runs the same dental scenario
-# over text.
-_PRIMARY_DATASET_BY_BENCHMARK = {"S2S": DATASET_ID_DENTAL, "LLM": DATASET_ID_LLM_DENTAL}
+# The headline S2S board is the Ultra Bank instruction-following set, which every
+# S2S agent runs daily. Dental and the multi-turn set are frozen rather than
+# retired: nothing writes to them, but they stay reachable through the aggregates
+# ``dataset`` param, as does ``__all__`` for callers that want every S2S condition
+# pooled. LLM runs the same bank scenario over text.
+_PRIMARY_DATASET_BY_BENCHMARK = {
+    b.value: scenarios.ACTIVE.primary_dataset(b) for b in (Benchmark.S2S, Benchmark.LLM)
+}
 
 _MV_SQL_TEMPLATE = """
     SELECT provider, model,
@@ -80,6 +83,10 @@ _MV_SQL_TEMPLATE = """
       AND dataset_id = %(dataset)s
     ORDER BY avg_value ASC
 """
+_SAVED_MV_SQL_TEMPLATE = _MV_SQL_TEMPLATE.replace(
+    "FROM {view}",
+    "FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
+).replace("WHERE metric_type = %(metric)s", "WHERE m.code = %(metric)s")
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -121,23 +128,16 @@ async def get_leaderboard(
         "interval": WINDOW_INTERVALS[window],
     }
     normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
-    sql = (
-        _NORMALIZED_STATS_SQL if normalized else _MV_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+    sql = (_SAVED_MV_SQL_TEMPLATE if normalized else _MV_SQL_TEMPLATE).format(
+        view=SUMMARY_VIEWS[window] if normalized else WINDOW_VIEWS[window]
     )
 
-    async with pool.connection() as conn:
-        conn.row_factory = psycopg.rows.dict_row
+    async with dashboard_read(pool, saved=normalized) as conn:
+        snapshot = await require_snapshot(conn) if normalized else None
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
     if normalized:
-        entry_rows = sorted(
-            (
-                {**r, "avg": r["avg_value"], "n": r["sample_count"]}
-                for r in entry_rows
-                if r["metric_type"] == metric
-            ),
-            key=lambda r: r["avg"],
-        )
+        entry_rows = sorted(entry_rows, key=lambda r: r["avg"])
 
     entries = [
         LeaderboardEntry.model_validate(r)
@@ -166,4 +166,9 @@ async def get_leaderboard(
             "$process_person_profile": False,
         },
     )
-    return LeaderboardResponse(metric=metric, window=window, entries=entries)
+    return LeaderboardResponse(
+        metric=metric,
+        window=window,
+        entries=entries,
+        snapshot=snapshot.as_dict() if snapshot else None,
+    )

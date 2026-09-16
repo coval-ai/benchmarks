@@ -55,8 +55,6 @@ class GoogleSTTProvider(STTProvider):
     Requires:      Application Default Credentials (the runner service account in Cloud Run).
     """
 
-    _VALID_MODELS = frozenset({"default", "chirp_2", "chirp_3"})
-
     def __init__(
         self,
         api_key: SecretStr,
@@ -66,10 +64,6 @@ class GoogleSTTProvider(STTProvider):
         if not GOOGLE_AVAILABLE:
             raise ImportError(
                 "google-cloud-speech is not installed. Install it with: uv sync --extra google-stt"
-            )
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Google STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
             )
         if project_id is None:
             raise ValueError(

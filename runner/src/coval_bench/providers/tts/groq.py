@@ -41,13 +41,7 @@ _SAMPLE_RATE = 24000
 
 
 class GroqTTSProvider(TTSProvider):
-    _VALID_MODELS = frozenset({MODEL_ID})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in self._VALID_MODELS:
-            raise ValueError(
-                f"Invalid Groq TTS model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
 
         self._voice = voice

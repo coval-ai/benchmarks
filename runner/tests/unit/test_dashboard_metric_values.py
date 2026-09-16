@@ -30,8 +30,7 @@ async def test_projection_seeds_existing_values_and_downgrades(
     try:
         writer = RunWriter(pool)
         _, observation = await storage._observation(writer)
-        evaluation = await storage._evaluation(writer, observation)
-        evaluation_id = storage._required(evaluation.id)
+        evaluation_id = await storage._historical_evaluation(pool, observation)
         await writer.complete_metric_evaluation(
             evaluation_id,
             values=storage._wer_values(evaluation_id),
@@ -183,8 +182,7 @@ async def test_projection_upgrade_nowait_does_not_interrupt_completion(
     try:
         writer = RunWriter(pool)
         _, observation = await storage._observation(writer)
-        evaluation = await storage._evaluation(writer, observation)
-        evaluation_id = storage._required(evaluation.id)
+        evaluation_id = await storage._historical_evaluation(pool, observation)
         async with pool.connection() as conn:
             await conn.execute(
                 "SELECT id FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE",

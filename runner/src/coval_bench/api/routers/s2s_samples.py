@@ -3,6 +3,11 @@
 
 """GET /v1/s2s/samples — conversation samples from the private samples bucket.
 
+Samples are partitioned by dataset id, one industry per partition, and every
+route takes the partition as ``?dataset=``. Without it the routes read the
+pre-partition root layout, so a dashboard that predates the split keeps working
+until those ticks age out.
+
 The bucket allows no anonymous read. The API reads each manifest as its own
 service account, drops the recordings this caller may not see (their transcripts
 go with them, since both live in the same object), and hands back an API route
@@ -26,7 +31,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Path, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from posthog import Posthog
 from starlette.requests import Request
 
@@ -49,6 +54,8 @@ logger = structlog.get_logger("coval_bench.api.s2s_samples")
 router = APIRouter(tags=["s2s"])
 
 _SAMPLE_ID = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
+# A dataset id is one path segment of the bucket layout; the pattern keeps it so.
+_DATASET_ID = r"^[a-z0-9][a-z0-9-]*$"
 
 
 def _sees_any_s2s_model(
@@ -57,11 +64,19 @@ def _sees_any_s2s_model(
     return any(m.benchmark is Benchmark.S2S and (m.provider, m.model) not in hidden for m in models)
 
 
-def _audio_path(sample_id: str, provider: str, model: str) -> str:
-    return (
+def _audio_path(dataset_id: str | None, sample_id: str, provider: str, model: str) -> str:
+    path = (
         f"/v1/s2s/samples/{quote(sample_id, safe='')}"
         f"/{quote(provider, safe='')}/{quote(model, safe='')}/audio"
     )
+    return f"{path}?dataset={quote(dataset_id, safe='')}" if dataset_id else path
+
+
+_DATASET_QUERY = Query(
+    default=None,
+    pattern=_DATASET_ID,
+    description="Samples partition (an S2S dataset id); omitted reads the legacy root layout.",
+)
 
 
 @router.get("/s2s/samples", response_model=list[str])
@@ -69,6 +84,7 @@ def _audio_path(sample_id: str, provider: str, model: str) -> str:
 async def list_s2s_samples(
     request: Request,
     response: Response,
+    dataset: str | None = _DATASET_QUERY,
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     models: Sequence[RegisteredModel] = Depends(get_models),
@@ -77,7 +93,7 @@ async def list_s2s_samples(
     never_shared(response)
     if not settings.s2s_samples_bucket or not _sees_any_s2s_model(models, hidden):
         return []
-    return await asyncio.to_thread(load_sample_ids, settings.s2s_samples_bucket)
+    return await asyncio.to_thread(load_sample_ids, settings.s2s_samples_bucket, dataset)
 
 
 @router.get("/s2s/samples/{sample_id}", response_model=S2SSampleOut)
@@ -86,6 +102,7 @@ async def get_s2s_sample(
     request: Request,
     response: Response,
     sample_id: str = Path(pattern=_SAMPLE_ID),
+    dataset: str | None = _DATASET_QUERY,
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
     posthog_client: Posthog | None = Depends(get_posthog),
@@ -101,7 +118,7 @@ async def get_s2s_sample(
         raise HTTPException(404, "s2s samples are not configured")
 
     sample = await asyncio.to_thread(
-        load_sample, settings.s2s_samples_bucket, sample_id, hidden=hidden
+        load_sample, settings.s2s_samples_bucket, dataset, sample_id, hidden=hidden
     )
     if sample is None or not sample["recordings"]:
         raise HTTPException(404, f"no s2s sample for {sample_id}")
@@ -110,7 +127,7 @@ async def get_s2s_sample(
         S2SSampleRecordingOut(
             provider=rec["provider"],
             model=rec["model"],
-            audio_path=_audio_path(sample_id, rec["provider"], rec["model"]),
+            audio_path=_audio_path(dataset, sample_id, rec["provider"], rec["model"]),
             coval_run_id=rec["coval_run_id"],
             sim_id=rec["sim_id"],
             agent_id=rec.get("agent_id"),
@@ -121,6 +138,7 @@ async def get_s2s_sample(
     out = S2SSampleOut(
         schema_version=sample.get("schema_version"),
         sample_id=sample_id,
+        dataset_id=sample.get("dataset_id"),
         test_case_id=sample["test_case_id"],
         test_set_id=sample.get("test_set_id"),
         persona_name=sample.get("persona_name"),
@@ -150,6 +168,7 @@ async def get_s2s_sample_audio(
     provider: str,
     model: str,
     sample_id: str = Path(pattern=_SAMPLE_ID),
+    dataset: str | None = _DATASET_QUERY,
     settings: Settings = Depends(get_settings),
     hidden: frozenset[tuple[str, str]] = Depends(hidden_early_access),
 ) -> S2SSampleAudioOut:
@@ -161,6 +180,7 @@ async def get_s2s_sample_audio(
     key = await asyncio.to_thread(
         audio_object_key,
         settings.s2s_samples_bucket,
+        dataset,
         sample_id,
         provider,
         model,

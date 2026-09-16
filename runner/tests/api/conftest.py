@@ -239,7 +239,9 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 id uuid PRIMARY KEY,
                 observation_id uuid NOT NULL REFERENCES benchmarks_v2.benchmark_observations(id),
                 metric_type text NOT NULL, metric_version text NOT NULL,
-                evaluation_variant text NOT NULL, status text NOT NULL
+                evaluation_variant text NOT NULL, status text NOT NULL,
+                executor text NOT NULL DEFAULT 'fixture', external_request_id text,
+                created_at timestamptz NOT NULL DEFAULT now()
             );
             CREATE TABLE IF NOT EXISTS benchmarks_v2.metric_values (
                 metric_evaluation_id uuid NOT NULL REFERENCES benchmarks_v2.metric_evaluations(id),
@@ -274,6 +276,34 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 f"ON benchmarks_v2.{table} FOR EACH ROW "
                 "EXECUTE FUNCTION benchmarks_v2.guard_terminal_metric_payload()"
             )  # noqa: S608 — table names are fixed fixture constants.
+        saved = import_module(
+            "coval_bench.db.migrations.versions.20260914_0034_dashboard_aggregates"
+        )
+        with patch.object(saved, "op", SimpleNamespace(execute=conn.execute)):
+            saved.upgrade()
+        metric_ids = import_module(
+            "coval_bench.db.migrations.versions.20260914_0035_dashboard_metric_ids"
+        )
+        with patch.object(metric_ids, "op", SimpleNamespace(execute=conn.execute)):
+            metric_ids.upgrade()
+        lifecycle = import_module(
+            "coval_bench.db.migrations.versions.20260818_0018_normalized_benchmark_storage"
+        )
+        statements: list[str] = []
+        with patch.object(lifecycle, "op", SimpleNamespace(execute=statements.append)):
+            lifecycle.upgrade()
+        # Use the shipped validator; full payload constraints use the writer fixture.
+        lifecycle_sql = statements[0]
+        start = lifecycle_sql.index("CREATE FUNCTION benchmarks_v2.validate_metric_transition()")
+        end = lifecycle_sql.index(
+            "CREATE FUNCTION benchmarks_v2.guard_immutable_preprocessing_artifact()", start
+        )
+        conn.execute(lifecycle_sql[start:end])
+        normalized_metric_ids = import_module(
+            "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
+        )
+        with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
+            normalized_metric_ids.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
@@ -360,6 +390,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 collected     boolean NOT NULL,
                 published     boolean NOT NULL,
                 color         text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$'),
+                display_name  text CHECK (display_name IS NULL OR display_name <> ''),
                 updated_by_user_id text NOT NULL CHECK (updated_by_user_id <> ''),
                 updated_by_email   text CHECK (updated_by_email IS NULL OR updated_by_email <> ''),
                 updated_at    timestamptz NOT NULL DEFAULT now(),
@@ -460,8 +491,8 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
             INSERT INTO benchmarks_v2.models
                 (modality, provider, model, voice, voices, creator, source, licensing,
                  on_prem, region, arena_enabled, collected, published, color,
-                 updated_by_user_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
+                 display_name, updated_by_user_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'tests')
             RETURNING id
             """,
             (
@@ -479,6 +510,7 @@ def _insert_models(conn: psycopg.Connection[Any], models: Sequence[RegisteredMod
                 model.collected,
                 model.published,
                 model.color,
+                model.display_name,
             ),
         ).fetchone()
         assert row is not None
@@ -738,12 +770,29 @@ async def _insert_result(
 
 
 async def _refresh_mv(postgresql: Any) -> None:
-    """Refresh all per-window stats materialized views."""
+    """Refresh legacy views and the saved dashboard snapshot used by cutover tests."""
     dsn = _make_db_url(postgresql)
     aconn = await psycopg.AsyncConnection.connect(dsn, autocommit=True)
     try:
         for name in _MV_WINDOWS:
             await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
+        # The normalized API path reads only the atomically published snapshot.
+        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+
+        pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = (
+            AsyncConnectionPool(
+                conninfo=dsn,
+                min_size=1,
+                max_size=1,
+                open=False,
+                kwargs={"autocommit": True, "row_factory": psycopg.rows.dict_row},
+            )
+        )
+        await pool.open()
+        try:
+            await refresh_summary_snapshots(pool)
+        finally:
+            await pool.close()
     finally:
         await aconn.close()
 

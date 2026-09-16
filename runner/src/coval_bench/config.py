@@ -52,7 +52,7 @@ class Settings(BaseSettings):
 
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
-    dataset_id: str = "stt-v1"
+    dataset_id: str | None = None
     # Private bucket for additive normalized observation artifacts. The rollout
     # is deliberately fail-closed: enabling writes without a destination is an
     # invalid deployment rather than a silent partial capture.
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
 
     @field_validator("dataset_id")
     @classmethod
-    def _dataset_id_not_reserved(cls, value: str) -> str:
+    def _dataset_id_not_reserved(cls, value: str | None) -> str | None:
         if value == DATASET_ALL:
             raise ValueError(f"dataset_id {DATASET_ALL!r} is reserved for pooled aggregates")
         return value
@@ -76,9 +76,8 @@ class Settings(BaseSettings):
             )
         return self
 
-    # Items drawn at random per run from each manifest, shared across all
-    # models for parity. Set >= manifest size to run everything.
-    dataset_sample_size: int = 10
+    # Unset: datasets/suite.py decides. >= manifest size runs everything.
+    dataset_sample_size: int | None = None
 
     # --- Runner ---
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -165,6 +164,7 @@ class Settings(BaseSettings):
     # convention used by the STT/TTS orchestrator.
     vapi_api_key: SecretStr | None = None
     telnyx_api_key: SecretStr | None = None
+    retell_api_key: SecretStr | None = None
     # --- Mock tools appliance ---
     # The shared secret every platform's tool runner presents. Absent means the
     # endpoint refuses every call: an open mock would let anyone write rows into
@@ -222,37 +222,25 @@ class Settings(BaseSettings):
     # Exhaustive: a persona absent from this map faults its provider rather than
     # counting as clean, which would be invisible in the data and the logs.
     coval_s2s_condition_personas: dict[str, str] = Field(default_factory=dict)
-    # --- Instruction-adherence-by-industry (separate Coval workspace) ---
-    # These agents, test sets and this metric live in a workspace other than the
-    # one coval_api_key defaults to, so every request for them must carry this
-    # header. Opaque id, not secret.
-    coval_s2s_industry_workspace_id: str | None = None
-    # One per industry rather than shared, so this can point at either the
-    # domain-specific judge (fast to validate, already scored on existing
-    # runs) or a shared expected-behavior metric (set all three to the same
-    # id) without a code change either way. Opaque id, not secret.
-    coval_s2s_health_instruction_metric_id: str | None = None
-    coval_s2s_home_service_instruction_metric_id: str | None = None
-    coval_s2s_cust_service_instruction_metric_id: str | None = None
-    coval_s2s_health_test_set_id: str | None = None
-    coval_s2s_health_openai_agent_id: str | None = None
-    coval_s2s_health_grok_agent_id: str | None = None
-    coval_s2s_health_violet_agent_id: str | None = None
-    coval_s2s_home_service_test_set_id: str | None = None
-    coval_s2s_home_service_openai_agent_id: str | None = None
-    coval_s2s_home_service_grok_agent_id: str | None = None
-    coval_s2s_home_service_violet_agent_id: str | None = None
-    coval_s2s_cust_service_test_set_id: str | None = None
-    coval_s2s_cust_service_openai_agent_id: str | None = None
-    coval_s2s_cust_service_grok_agent_id: str | None = None
-    coval_s2s_cust_service_violet_agent_id: str | None = None
+    # Caller persona id -> label shown on the samples card.
+    s2s_persona_labels: dict[str, str] = Field(default_factory=dict)
+    # --- Ultra Bank instruction following (default workspace, the daily board) ---
+    # The instruction metric is Coval's Validate Expected Behaviors composite: a
+    # 0-1 fraction of the case's expected behaviors met, not a YES/NO verdict.
+    # Opaque ids, not secrets.
+    coval_s2s_bank_test_set_id: str | None = None
+    coval_s2s_bank_instruction_metric_id: str | None = None
+    coval_s2s_bank_persona_id: str | None = None
+    coval_s2s_bank_openai_agent_id: str | None = None
+    coval_s2s_bank_gpt_live_agent_id: str | None = None
+    coval_s2s_bank_gemini_agent_id: str | None = None
+    coval_s2s_bank_xai_agent_id: str | None = None
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a
     # replacement for it: both are fetched and stored under their own metric
     # types, so Instruction Adherence and Expected Behavior Adherence stay
     # distinct charts. Opaque id, not secret.
-    coval_s2s_industry_expected_behavior_metric_id: str | None = None
     # Fetch grid, in seconds, shared by the s2s-fetch and llm-fetch jobs; each job
     # sets S2S_FETCH_PERIOD_SECONDS to match its own trigger cron in benchmark-infra.
     # The 3h default is far below a daily trigger, so an unset job reads stale.
@@ -266,6 +254,10 @@ class Settings(BaseSettings):
     posthog_project_token: str = ""
     posthog_host: str = "https://us.i.posthog.com"
     posthog_disabled: bool = False
+
+    # --- Metrics ---
+    otel_metrics_exporter: Literal["none", "gcp", "console"] = "none"
+    otel_deployment_environment: str = "prod"
 
     # --- API ---
     cors_origins: list[str] = [

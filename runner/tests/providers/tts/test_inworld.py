@@ -163,18 +163,6 @@ async def test_inworld_redacts_key_in_error(fake_settings: Settings) -> None:
     assert "authorization=***" in result.error
 
 
-@pytest.mark.asyncio
-async def test_inworld_all_models(fake_settings: Settings) -> None:
-    for model in InworldTTSProvider._VALID_MODELS:
-        fake_ws = _make_ws([make_pcm_bytes(240)])
-        with patch("coval_bench.providers.tts.inworld.ws_client.connect", return_value=fake_ws):
-            provider = InworldTTSProvider(fake_settings, model=model, voice="Brooke")
-            result = await provider.synthesize("test")
-        assert result.error is None, f"{model}: {result.error}"
-        if result.audio_path is not None:
-            result.audio_path.unlink()
-
-
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
@@ -249,11 +237,6 @@ def test_inworld_accepts_tts_2_flash(fake_settings: Settings) -> None:
     p = InworldTTSProvider(fake_settings, model="inworld-tts-2-flash", voice="Brooke")
     assert p.name == "inworld-tts-2-flash"
     assert p.model == "inworld-tts-2-flash"
-
-
-def test_inworld_rejects_unsupported_model(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Unsupported Inworld model"):
-        InworldTTSProvider(fake_settings, model="not-a-real-model", voice="Brooke")
 
 
 # ---------------------------------------------------------------------------

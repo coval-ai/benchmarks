@@ -34,13 +34,7 @@ _WS_URL = "wss://api.smallest.ai/waves/v1/tts/live"
 class SmallestTTSProvider(TTSProvider):
     """Smallest AI Lightning TTS provider using WebSocket streaming."""
 
-    _VALID_MODELS = frozenset({"lightning_v3.1_pro"})
-
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in self._VALID_MODELS:
-            raise ValueError(
-                f"Unsupported Smallest AI model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         self._model = model
         self._voice = voice
 

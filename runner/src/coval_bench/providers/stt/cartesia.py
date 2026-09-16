@@ -24,7 +24,6 @@ from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("ink-2",)
 _WS_BASE_URL = "wss://api.cartesia.ai/stt/websocket"
 _CARTESIA_VERSION = "2025-11-04"
 
@@ -33,8 +32,6 @@ class CartesiaSTTProvider(STTProvider):
     """Cartesia Ink streaming STT provider."""
 
     def __init__(self, api_key: SecretStr, model: str = "ink-2") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Cartesia STT model {model!r}. Valid: {_VALID_MODELS}")
         self._api_key = api_key
         self._model = model
 

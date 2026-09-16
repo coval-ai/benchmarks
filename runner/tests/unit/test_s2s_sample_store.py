@@ -45,16 +45,19 @@ def _manifest(*recordings: dict[str, Any]) -> dict[str, Any]:
 
 def test_load_sample_ids_newest_first() -> None:
     client = _FakeClient({"s2s-samples/index.json": ["2026-07-28T00:00:00Z", _SAMPLE]})
-    assert load_sample_ids(_BUCKET, storage_client=client) == [_SAMPLE, "2026-07-28T00:00:00Z"]
+    assert load_sample_ids(_BUCKET, None, storage_client=client) == [
+        _SAMPLE,
+        "2026-07-28T00:00:00Z",
+    ]
 
 
 def test_load_sample_ids_missing_index_is_empty() -> None:
-    assert load_sample_ids(_BUCKET, storage_client=_FakeClient({})) == []
+    assert load_sample_ids(_BUCKET, None, storage_client=_FakeClient({})) == []
 
 
 def test_load_sample_ids_drops_non_strings() -> None:
     client = _FakeClient({"s2s-samples/index.json": [_SAMPLE, 7, None]})
-    assert load_sample_ids(_BUCKET, storage_client=client) == [_SAMPLE]
+    assert load_sample_ids(_BUCKET, None, storage_client=client) == [_SAMPLE]
 
 
 # --- load_sample: the embargo filter ----------------------------------------
@@ -69,7 +72,7 @@ def test_load_sample_strips_hidden_recordings() -> None:
         }
     )
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=_HIDDEN, storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=_HIDDEN, storage_client=client)
 
     assert sample is not None
     assert [(r["provider"], r["model"]) for r in sample["recordings"]] == [
@@ -80,7 +83,7 @@ def test_load_sample_strips_hidden_recordings() -> None:
 def test_load_sample_hidden_recording_takes_its_transcript_with_it() -> None:
     client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-voice-think-fast-1.0"))})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=_HIDDEN, storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=_HIDDEN, storage_client=client)
 
     assert sample is not None
     assert sample["recordings"] == []
@@ -96,7 +99,7 @@ def test_load_sample_keeps_everything_for_an_unrestricted_caller() -> None:
         }
     )
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=client)
 
     assert sample is not None
     assert len(sample["recordings"]) == 2
@@ -120,7 +123,7 @@ def test_load_sample_tolerates_v1_manifests() -> None:
     }
     client = _FakeClient({_MANIFEST_KEY: v1})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=_HIDDEN, storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=_HIDDEN, storage_client=client)
 
     assert sample is not None
     assert len(sample["recordings"]) == 1
@@ -132,7 +135,7 @@ def test_load_sample_drops_recordings_without_an_object() -> None:
     del broken["recordings"][0]["object"]
     client = _FakeClient({_MANIFEST_KEY: broken})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=client)
 
     assert sample is not None
     assert sample["recordings"] == []
@@ -143,7 +146,7 @@ def test_load_sample_drops_an_object_from_another_sample() -> None:
     strayed["recordings"][0]["object"] = "s2s-samples/2026-01-01T00:00:00Z/openai.wav"
     client = _FakeClient({_MANIFEST_KEY: strayed})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=client)
 
     assert sample is not None
     assert sample["recordings"] == []
@@ -154,7 +157,7 @@ def test_load_sample_drops_an_object_that_is_not_audio() -> None:
     strayed["recordings"][0]["object"] = _MANIFEST_KEY
     client = _FakeClient({_MANIFEST_KEY: strayed})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=client)
 
     assert sample is not None
     assert sample["recordings"] == []
@@ -165,14 +168,17 @@ def test_load_sample_drops_a_traversing_object() -> None:
     strayed["recordings"][0]["object"] = f"s2s-samples/{_SAMPLE}/../../secrets/leak.wav"
     client = _FakeClient({_MANIFEST_KEY: strayed})
 
-    sample = load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=client)
+    sample = load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=client)
 
     assert sample is not None
     assert sample["recordings"] == []
 
 
 def test_load_sample_missing_manifest_is_none() -> None:
-    assert load_sample(_BUCKET, _SAMPLE, hidden=frozenset(), storage_client=_FakeClient({})) is None
+    assert (
+        load_sample(_BUCKET, None, _SAMPLE, hidden=frozenset(), storage_client=_FakeClient({}))
+        is None
+    )
 
 
 # --- audio_object_key: the check the redirect route relies on ---------------
@@ -182,7 +188,7 @@ def test_audio_object_key_returns_the_stored_path() -> None:
     client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("openai", "gpt-realtime"))})
 
     key = audio_object_key(
-        _BUCKET, _SAMPLE, "openai", "gpt-realtime", hidden=frozenset(), storage_client=client
+        _BUCKET, None, _SAMPLE, "openai", "gpt-realtime", hidden=frozenset(), storage_client=client
     )
 
     assert key == f"s2s-samples/{_SAMPLE}/openai/gpt-realtime.wav"
@@ -192,7 +198,13 @@ def test_audio_object_key_refuses_a_hidden_model() -> None:
     client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("xai", "grok-voice-think-fast-1.0"))})
 
     key = audio_object_key(
-        _BUCKET, _SAMPLE, "xai", "grok-voice-think-fast-1.0", hidden=_HIDDEN, storage_client=client
+        _BUCKET,
+        None,
+        _SAMPLE,
+        "xai",
+        "grok-voice-think-fast-1.0",
+        hidden=_HIDDEN,
+        storage_client=client,
     )
 
     assert key is None
@@ -205,6 +217,7 @@ def test_audio_object_key_refuses_an_object_outside_the_sample() -> None:
 
     key = audio_object_key(
         _BUCKET,
+        None,
         _SAMPLE,
         "openai",
         "gpt-realtime",
@@ -219,7 +232,7 @@ def test_audio_object_key_unknown_model_is_none() -> None:
     client = _FakeClient({_MANIFEST_KEY: _manifest(_recording("openai", "gpt-realtime"))})
 
     key = audio_object_key(
-        _BUCKET, _SAMPLE, "openai", "no-such-model", hidden=frozenset(), storage_client=client
+        _BUCKET, None, _SAMPLE, "openai", "no-such-model", hidden=frozenset(), storage_client=client
     )
 
     assert key is None
@@ -228,6 +241,7 @@ def test_audio_object_key_unknown_model_is_none() -> None:
 def test_audio_object_key_missing_manifest_is_none() -> None:
     key = audio_object_key(
         _BUCKET,
+        None,
         _SAMPLE,
         "openai",
         "gpt-realtime",

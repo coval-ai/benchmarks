@@ -11,7 +11,6 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from coval_bench.contracts import has_private_contract
 from coval_bench.mocktools.dispatch import (
     Dispatcher,
     ToolSpec,
@@ -22,6 +21,7 @@ from coval_bench.mocktools.dispatch import (
 from coval_bench.mocktools.fixtures import MockFixtures, Seed, ToolFixture, parse_fixtures
 from coval_bench.mocktools.keyterms import extract_keyterms
 from coval_bench.mocktools.resolver import FUZZY_THRESHOLD, resolve
+from coval_bench.scenarios import has_private_contract
 
 PHONE = "2065550180"
 PHONE_WITH_SEPARATORS = "206-555-0180"

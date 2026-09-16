@@ -287,11 +287,6 @@ def test_elevenlabs_name_and_model(fake_settings: Settings) -> None:
     assert p.model == _MODEL
 
 
-def test_elevenlabs_rejects_unsupported_model(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Unsupported ElevenLabs model"):
-        ElevenLabsTTSProvider(fake_settings, model="eleven_turbo_v2_5", voice="v")
-
-
 # ---------------------------------------------------------------------------
 # Missing API key
 # ---------------------------------------------------------------------------

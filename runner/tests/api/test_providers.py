@@ -90,7 +90,14 @@ async def test_providers_shape(client: AsyncClient) -> None:
     for board in ("stt", "tts", "s2s", "llm"):
         assert isinstance(data[board], list)
     first_model = data["tts"][0]["models"][0]
-    assert set(first_model) == {"model", "disabled", "early_access", "tags", "color"}
+    assert set(first_model) == {
+        "model",
+        "disabled",
+        "early_access",
+        "tags",
+        "color",
+        "display_name",
+    }
 
 
 async def test_a_recorded_color_rides_along_with_the_model(
@@ -105,6 +112,19 @@ async def test_a_recorded_color_rides_along_with_the_model(
     public = await _public(client)
     assert _entry(public, "acme", "painted")["color"] == "#1db098"
     assert _entry(public, "acme", "plain")["color"] is None
+
+
+async def test_a_recorded_display_name_rides_along_with_the_model(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    add_models(
+        postgresql,
+        _model(Benchmark.STT, "acme", "named", display_name="Named Model"),
+        _model(Benchmark.STT, "acme", "plain"),
+    )
+    public = await _public(client)
+    assert _entry(public, "acme", "named")["display_name"] == "Named Model"
+    assert _entry(public, "acme", "plain")["display_name"] is None
 
 
 async def test_publication_alone_decides_public_visibility(
@@ -312,3 +332,18 @@ async def test_the_catalogue_survives_a_database_without_the_color_column(
         conn.close()
     public = await _public(client)
     assert _entry(public, "acme", "m")["color"] is None
+
+
+async def test_the_catalogue_survives_a_database_without_the_display_name_column(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Migration 0037 lags the deploy; colors still read while display names read as unset."""
+    add_models(postgresql, _model(Benchmark.STT, "acme", "m", color="#1db098", display_name="M"))
+    conn = psycopg.connect(_make_db_url(postgresql))
+    try:
+        conn.execute("ALTER TABLE benchmarks_v2.models DROP COLUMN display_name")
+        conn.commit()
+    finally:
+        conn.close()
+    entry = _entry(await _public(client), "acme", "m")
+    assert (entry["color"], entry["display_name"]) == ("#1db098", None)

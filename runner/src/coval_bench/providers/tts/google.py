@@ -28,7 +28,7 @@ from coval_bench.providers.tts._common import finalize_tts_result
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 try:
-    from google.cloud import texttospeech
+    import google.cloud.texttospeech as texttospeech
 
     GOOGLE_TTS_AVAILABLE = True
 except ImportError:
@@ -55,8 +55,6 @@ class GoogleTTSProvider(TTSProvider):
     Install with:  uv sync --extra google-tts
     Requires:      Application Default Credentials (the runner service account in Cloud Run).
     """
-
-    _VALID_MODELS = frozenset({"chirp-3-hd", "gemini-2.5-flash-tts"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         if not GOOGLE_TTS_AVAILABLE:
@@ -99,19 +97,6 @@ class GoogleTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via StreamingSynthesize and return a TTSResult."""
-        if not self._model_supported(self._model):
-            return TTSResult(
-                provider="google",
-                model=self._model,
-                voice=self._voice,
-                ttfa_ms=None,
-                audio_path=None,
-                error=(
-                    f"Unsupported Google TTS model: {self._model}. "
-                    f"Valid: {sorted(self._VALID_MODELS)}"
-                ),
-            )
-
         audio_chunks: list[bytes] = []
         start: float | None = None
         first_chunk_at: float | None = None

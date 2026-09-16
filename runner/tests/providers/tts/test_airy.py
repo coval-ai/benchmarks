@@ -154,11 +154,6 @@ def test_malformed_key_is_rejected_without_exposing_it(suffix: str) -> None:
     assert "test-private-key" not in str(exc.value)
 
 
-def test_invalid_model_is_rejected(airy_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="model"):
-        airy.AiryTTSProvider(airy_settings, model="unknown-model", voice=_VOICE)
-
-
 @pytest.mark.asyncio
 async def test_warmup_uses_head_without_synthesizing(
     airy_settings: Settings, monkeypatch: pytest.MonkeyPatch

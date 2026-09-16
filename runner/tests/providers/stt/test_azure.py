@@ -280,11 +280,6 @@ def test_provider_name() -> None:
     assert make_provider().name == "azure"
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Azure model"):
-        AzureSTTProvider(api_key=SecretStr("k"), model="bad-model", region=REGION)
-
-
 def test_missing_region_raises() -> None:
     with pytest.raises(ValueError, match="requires region"):
         AzureSTTProvider(api_key=SecretStr("k"))

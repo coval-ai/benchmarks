@@ -47,13 +47,7 @@ class _TranscriptionAborted(Exception):
 class NariSTTProvider(STTProvider):
     """Nari Labs streaming STT provider for the hosted Qwen3-ASR models."""
 
-    _VALID_MODELS = frozenset({"qwen3-asr", "qwen3-asr-fast"})
-
     def __init__(self, api_key: SecretStr | None, model: str = "qwen3-asr-fast") -> None:
-        if not self._model_supported(model):
-            raise ValueError(
-                f"Invalid Nari STT model {model!r}. Valid: {sorted(self._VALID_MODELS)}"
-            )
         if api_key is None:
             raise ValueError("nari_api_key is required for the Nari STT provider")
         self._api_key = api_key

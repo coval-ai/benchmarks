@@ -217,11 +217,6 @@ async def test_deepdub_tts_silent_stream_is_a_failure(deepdub_settings: Settings
     assert result.ttfa_ms is None
 
 
-def test_deepdub_tts_invalid_model_raises(deepdub_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Unsupported Deepdub model"):
-        DeepdubTTSProvider(deepdub_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_deepdub_tts_missing_voice_raises(deepdub_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         DeepdubTTSProvider(deepdub_settings, model=_MODEL, voice="")

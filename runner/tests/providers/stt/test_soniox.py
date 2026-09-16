@@ -124,11 +124,6 @@ def test_stt_rt_v4_still_supported() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Soniox STT model"):
-        SonioxSTTProvider(api_key=SecretStr("k"), model="stt-rt-preview")
-
-
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="soniox_api_key is required"):
         SonioxSTTProvider(api_key=None)

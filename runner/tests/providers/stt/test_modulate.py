@@ -214,11 +214,6 @@ def test_provider_model() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Modulate model"):
-        ModulateSTTProvider(api_key=SecretStr("k"), model="velma-3")
-
-
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="modulate_api_key is required"):
         ModulateSTTProvider(api_key=None)

@@ -211,11 +211,6 @@ async def test_soniox_tts_skips_empty_audio(fake_settings: Settings) -> None:
     assert result.ttfa_ms is None
 
 
-def test_soniox_tts_invalid_model_raises(fake_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Soniox TTS model"):
-        SonioxTTSProvider(fake_settings, model="not-a-model", voice="Adrian")
-
-
 def test_soniox_tts_invalid_voice_raises(fake_settings: Settings) -> None:
     with pytest.raises(ValueError, match="Invalid Soniox TTS voice"):
         SonioxTTSProvider(fake_settings, model="tts-rt-v1", voice="not-a-voice")

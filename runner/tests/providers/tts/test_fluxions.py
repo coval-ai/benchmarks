@@ -237,11 +237,6 @@ async def test_fluxions_tts_ttfa_on_first_chunk(fluxions_settings: Settings) -> 
     result.audio_path.unlink()
 
 
-def test_fluxions_tts_invalid_model_raises(fluxions_settings: Settings) -> None:
-    with pytest.raises(ValueError, match="Invalid Fluxions TTS model"):
-        FluxionsTTSProvider(fluxions_settings, model="not-a-model", voice=_VOICE)
-
-
 def test_fluxions_tts_missing_voice_raises(fluxions_settings: Settings) -> None:
     with pytest.raises(ValueError, match="requires a voice"):
         FluxionsTTSProvider(fluxions_settings, model="vui", voice="")

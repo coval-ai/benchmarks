@@ -54,6 +54,7 @@ EDITABLE_FIELDS = frozenset(
         "published",
         "tags",
         "color",
+        "display_name",
     }
 )
 
@@ -96,6 +97,7 @@ class NewModel(BaseModel):
     published: bool = False
     tags: tuple[str, ...] = ()
     color: HexColor = None
+    display_name: str | None = None
 
     @field_validator("tags")
     @classmethod
@@ -132,8 +134,8 @@ class ModelChange(BaseModel):
 _SELECT_MODELS = """
     SELECT m.id, m.modality, m.provider, m.model, m.voice, m.voices, m.creator,
            m.source, m.licensing, m.on_prem, m.region, m.arena_enabled,
-           m.collected, m.published, m.color, m.updated_by_user_id, m.updated_by_email,
-           m.updated_at, COALESCE(t.tags, '{}') AS tags
+           m.collected, m.published, m.color, m.display_name, m.updated_by_user_id,
+           m.updated_by_email, m.updated_at, COALESCE(t.tags, '{}') AS tags
     FROM benchmarks_v2.models m
     LEFT JOIN (
         SELECT model_id, array_agg(tag ORDER BY tag) AS tags
@@ -145,9 +147,9 @@ _SELECT_MODELS = """
 _INSERT_MODEL = """
     INSERT INTO benchmarks_v2.models
         (modality, provider, model, voice, voices, creator, source, licensing,
-         on_prem, region, arena_enabled, collected, published, color,
+         on_prem, region, arena_enabled, collected, published, color, display_name,
          updated_by_user_id, updated_by_email)
-    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     RETURNING id, updated_at
 """
 
@@ -156,6 +158,7 @@ _UPDATE_MODEL = """
     SET provider = %s, model = %s, voice = %s, voices = %s, creator = %s,
         source = %s, licensing = %s, on_prem = %s, region = %s,
         arena_enabled = %s, collected = %s, published = %s, color = %s,
+        display_name = %s,
         updated_by_user_id = %s, updated_by_email = %s,
         -- Strictly monotonic per row: the 412 stale check compares this exactly,
         -- so same-microsecond updates must still produce a new value.
@@ -172,11 +175,22 @@ _INSERT_HISTORY = """
 """
 
 
-# The same read for a database that migration 0029 has not reached yet. The API
-# deploys ahead of its migrations, and this is the read behind /v1/providers and
-# the orchestrator's roster — the whole site goes dark if it fails for the window
-# between the two. Every color reads as unset until the column exists.
-_SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS.replace("m.color,", "NULL AS color,")
+# The same read for a database the latest column migrations have not reached
+# yet, newest column first. The API deploys ahead of its migrations, and this is
+# the read behind /v1/providers and the orchestrator's roster — the whole site
+# goes dark if it fails for the window between the two. Each missing column
+# reads as unset until it exists.
+_SELECT_MODELS_BEFORE_DISPLAY_NAME = _SELECT_MODELS.replace(
+    "m.display_name,", "NULL AS display_name,"
+)
+_SELECT_MODELS_BEFORE_COLOR = _SELECT_MODELS_BEFORE_DISPLAY_NAME.replace(
+    "m.color,", "NULL AS color,"
+)
+_SELECT_MODELS_SHAPES = (
+    _SELECT_MODELS,
+    _SELECT_MODELS_BEFORE_DISPLAY_NAME,
+    _SELECT_MODELS_BEFORE_COLOR,
+)
 
 
 def _record(row: Mapping[str, Any]) -> ModelRecord:
@@ -228,16 +242,16 @@ class RegistryStore:
         clause: str,
         params: tuple[Any, ...],
     ) -> list[psycopg.rows.DictRow]:
-        """Read model rows, falling back to the pre-0029 shape while the column is missing."""
-        try:
-            return await (await conn.execute(f"{_SELECT_MODELS} {clause}", params)).fetchall()
-        except psycopg.errors.UndefinedColumn:
-            # The failed statement aborted the connection's implicit transaction;
-            # clear it so the retry is not refused with InFailedSqlTransaction.
-            await conn.rollback()
-            return await (
-                await conn.execute(f"{_SELECT_MODELS_BEFORE_COLOR} {clause}", params)
-            ).fetchall()
+        """Read model rows, falling back to older shapes while a column is missing."""
+        *newer, oldest = _SELECT_MODELS_SHAPES
+        for sql in newer:
+            try:
+                return await (await conn.execute(f"{sql} {clause}", params)).fetchall()
+            except psycopg.errors.UndefinedColumn:
+                # The failed statement aborted the connection's implicit transaction;
+                # clear it so the retry is not refused with InFailedSqlTransaction.
+                await conn.rollback()
+        return await (await conn.execute(f"{oldest} {clause}", params)).fetchall()
 
     async def insert_model(
         self,
@@ -268,6 +282,7 @@ class RegistryStore:
                             new.collected,
                             new.published,
                             new.color,
+                            new.display_name,
                             user_id,
                             email,
                         ),
@@ -356,6 +371,7 @@ class RegistryStore:
                             merged.collected,
                             merged.published,
                             merged.color,
+                            merged.display_name,
                             user_id,
                             email,
                             model_id,
@@ -462,6 +478,7 @@ def _registered(record: ModelRecord) -> RegisteredModel:
         published=record.published,
         arena_enabled=record.arena_enabled,
         color=record.color,
+        display_name=record.display_name,
     )
 
 

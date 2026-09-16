@@ -410,11 +410,6 @@ def test_mistral_provider_name() -> None:
     assert provider.name == "mistral-voxtral-mini-transcribe-realtime-2602"
 
 
-def test_mistral_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Mistral model"):
-        MistralSTTProvider(api_key=SecretStr("k"), model="bad-model")
-
-
 @pytest.mark.asyncio
 async def test_mistral_rejects_stereo(fake_api_key: SecretStr) -> None:
     provider = MistralSTTProvider(api_key=fake_api_key)

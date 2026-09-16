@@ -106,6 +106,8 @@ class ModelInfo(BaseModel):
     # The series color the registry records for the model, as lowercase
     # ``#rrggbb``. None means the site picks one from its built-in palette.
     color: str | None = None
+    # What the site labels the model. None means the site picks the label itself.
+    display_name: str | None = None
 
 
 class ProviderInfo(BaseModel):
@@ -231,6 +233,14 @@ class SeriesPoint(BaseModel):
     pooled_value: float | None = None
 
 
+class DashboardSnapshot(BaseModel):
+    generation: int
+    as_of: datetime
+    published_at: datetime
+    definition_revision: int
+    stale: bool
+
+
 class AggregatesResponse(BaseModel):
     """Response schema for GET /v1/results/aggregates.
 
@@ -246,6 +256,7 @@ class AggregatesResponse(BaseModel):
     datasets: list[str]
     model_stats: list[ModelStatEntry]
     series: list[SeriesPoint]
+    snapshot: DashboardSnapshot | None = None
 
 
 class TimelinePoint(BaseModel):
@@ -255,17 +266,31 @@ class TimelinePoint(BaseModel):
     model: str
     metric_type: str
     scheduled_at: datetime
-    value: float
+    value: float | None
     pooled_value: float | None = None
+    aggregation_method: Literal["mean", "ratio", "mean_fallback", "unavailable"] | None = None
+    sample_count: int | None = None
+
+
+class DashboardMaterialization(BaseModel):
+    refreshed_at: datetime | None = None
+    stale: bool = False
 
 
 class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
-    window: WindowLiteral
+    window: WindowLiteral | None
     dataset: str
     points: list[TimelinePoint]
+    aggregation: Literal["run", "average"] = "run"
+    bucket_seconds: int | None = None
+    range_start: datetime | None = None
+    range_end: datetime | None = None
+    latest_source_at: datetime | None = None
+    snapshot: DashboardSnapshot | None = None
+    materialization: DashboardMaterialization | None = None
 
 
 class DatasetAggregates(BaseModel):
@@ -287,6 +312,7 @@ class AggregatesByDatasetResponse(BaseModel):
     benchmark: BenchmarkLiteral
     window: WindowLiteral
     blocks: list[DatasetAggregates]
+    snapshot: DashboardSnapshot | None = None
 
 
 class RunsResponse(BaseModel):
@@ -302,6 +328,7 @@ class LeaderboardResponse(BaseModel):
     metric: Literal["WER", "TTFA", "TTFT", "TTFS", "V2V"]
     window: Literal["24h", "7d", "30d"]
     entries: list[LeaderboardEntry]
+    snapshot: DashboardSnapshot | None = None
 
 
 class S2SSampleTurnOut(BaseModel):
@@ -331,6 +358,7 @@ class S2SSampleOut(BaseModel):
 
     schema_version: int | None = None
     sample_id: str
+    dataset_id: str | None = None
     test_case_id: str
     test_set_id: str | None = None
     persona_name: str | None = None
@@ -482,6 +510,7 @@ class AdminModelOut(BaseModel):
     published: bool
     tags: list[str] = []
     color: str | None = None
+    display_name: str | None = None
     updated_by_user_id: str
     updated_by_email: str | None = None
     updated_at: datetime
@@ -512,12 +541,14 @@ class AdminModelCreate(BaseModel):
     published: bool = False
     tags: list[str] = []
     color: HexColor = None
+    display_name: str | None = Field(default=None, min_length=1)
 
 
 class AdminModelPatch(BaseModel):
     """PATCH body for /v1/admin/models/{id}; absent fields stay unchanged.
 
-    ``color`` null returns the model to the site's built-in palette.
+    ``color`` null returns the model to the site's built-in palette; ``display_name``
+    null returns it to the site's built-in label.
     """
 
     provider: str | None = Field(default=None, min_length=1)
@@ -534,6 +565,7 @@ class AdminModelPatch(BaseModel):
     published: bool | None = None
     tags: list[str] | None = None
     color: HexColor = None
+    display_name: str | None = Field(default=None, min_length=1)
 
 
 class AdminModelUpdateResponse(BaseModel):

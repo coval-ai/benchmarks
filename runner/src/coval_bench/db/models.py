@@ -221,6 +221,7 @@ class PreprocessingArtifact(BaseModel):
 class MetricEvaluation(BaseModel):
     id: UUID | None = None
     observation_id: UUID
+    metric_id: int | None = None
     metric_type: str = Field(min_length=1)
     metric_version: str = Field(min_length=1)
     evaluation_variant: str = Field(default="default", min_length=1)

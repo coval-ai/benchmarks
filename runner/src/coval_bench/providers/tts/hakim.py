@@ -18,7 +18,6 @@ from coval_bench.providers.tts._common import finalize_tts_result
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("hakim-fast-v1",)
 _WS_URL = "wss://api.tryhakim.ai/v1/audio/speech/stream"
 _SAMPLE_RATE = 24000
 _CFG = 3
@@ -30,8 +29,6 @@ class HakimTTSProvider(TTSProvider):
     """Hakim AI TTS provider using the realtime WebSocket API (binary PCM frames)."""
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Hakim TTS model {model!r}. Valid: {_VALID_MODELS}")
         if not voice:
             raise ValueError("Hakim TTS requires a voice")
         self._model = model

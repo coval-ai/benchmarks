@@ -260,11 +260,6 @@ def test_provider_name_and_model() -> None:
     assert provider.model == "realtime"
 
 
-def test_invalid_model_raises() -> None:
-    with pytest.raises(ValueError, match="Invalid Reson8 STT model"):
-        Reson8STTProvider(api_key=SecretStr("k"), model="turns")
-
-
 def test_missing_api_key_raises() -> None:
     with pytest.raises(ValueError, match="reson8_api_key is required"):
         Reson8STTProvider(api_key=None)

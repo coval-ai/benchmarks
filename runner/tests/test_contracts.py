@@ -10,8 +10,8 @@ import json
 import pytest
 from pydantic import ValidationError
 
-import coval_bench.contracts as contracts_module
-from coval_bench.contracts import (
+import coval_bench.scenarios as contracts_module
+from coval_bench.scenarios import (
     LlmPin,
     Stack,
     contract_sha256,

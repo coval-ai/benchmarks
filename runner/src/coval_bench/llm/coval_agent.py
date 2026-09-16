@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Coval side of the Phonely text agent, defined in code and pushed idempotently."""
+"""The Coval side of every text agent, defined in code and pushed idempotently."""
 
 from __future__ import annotations
 
@@ -16,12 +16,14 @@ import psycopg
 import structlog
 from pydantic import BaseModel, SecretStr
 
+from coval_bench import scenarios
 from coval_bench.config import Settings, get_settings
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.registry_store import fetch_models
 from coval_bench.llm import benchmark
 from coval_bench.logging import configure_logging
 from coval_bench.platform_assets import COVAL_API_BASE, COVAL_API_KEY, CovalClient, SyncError, plan
+from coval_bench.registries.benchmarks import Benchmark
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.variants.platforms import redact
 
@@ -43,6 +45,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     proxy_secret: SecretStr
     test_set_id: str
     instruction_metric_id: str
+    persona_id: str
     collected: bool = True
 
     @property
@@ -68,26 +71,36 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
     ) -> Self:
         proxy_url = settings.llm_proxy_public_url
         proxy_secret = settings.llm_proxy_secret
-        dental = test_set_id or settings.coval_s2s_dental_test_set_id
-        metric = settings.coval_s2s_instruction_metric_id
+        ids = scenarios.ACTIVE.ids(settings)
+        test_set_id = test_set_id or ids.test_set_id
         missing = [
             name
             for name, value in (
                 ("llm_proxy_public_url", proxy_url),
                 ("llm_proxy_secret", proxy_secret),
-                ("coval_s2s_dental_test_set_id", dental),
-                ("coval_s2s_instruction_metric_id", metric),
             )
             if not value
+        ] + [
+            attr
+            for attr in scenarios.ACTIVE.missing(settings, benchmark=Benchmark.LLM)
+            if not (attr == scenarios.ACTIVE.test_set_id_attr and test_set_id)
         ]
-        if missing or proxy_url is None or proxy_secret is None or not dental or not metric:
+        if (
+            missing
+            or proxy_url is None
+            or proxy_secret is None
+            or not test_set_id
+            or not ids.instruction_metric_id
+            or not ids.persona_id
+        ):
             raise SyncError(f"sync-llm needs {', '.join(missing)} set")
         return cls(
             provider=provider,
             proxy_url=proxy_url.rstrip("/"),
             proxy_secret=proxy_secret,
-            test_set_id=dental,
-            instruction_metric_id=metric,
+            test_set_id=test_set_id,
+            instruction_metric_id=ids.instruction_metric_id,
+            persona_id=ids.persona_id,
             collected=collected,
         )
 
@@ -126,7 +139,7 @@ class CovalTextAgentDefinition(BaseModel, frozen=True):
 
     def run_template_body(self, agent_id: str) -> dict[str, Any]:
         return benchmark.run_template_body(
-            self.run_name, agent_id, self.test_set_id, self.instruction_metric_id
+            self.run_name, agent_id, self.test_set_id, self.instruction_metric_id, self.persona_id
         )
 
 
@@ -251,10 +264,17 @@ def sync(
         if drift.update:
             result.actions.append(f"run template: patch {sorted(drift.update)}")
             if not dry_run:
-                client.update_run_template(
+                template = client.update_run_template(
                     str(template["id"]),
                     benchmark.template_patch_body(wanted_template, drift.update),
                 )
+                remaining = plan(
+                    template, {path: wanted_template[path] for path in benchmark.TEMPLATE_MANAGED}
+                )
+                if remaining.update:
+                    raise SyncError(
+                        f"run template update did not apply: {sorted(remaining.update)}"
+                    )
         else:
             result.actions.append("run template: unchanged")
     template_id = str(template["id"])
@@ -279,7 +299,7 @@ def sync(
 @click.option(
     "--dry-run", is_flag=True, default=False, help="Report what would change; write nothing."
 )
-@click.option("--test-set-id", default=None, help="Override coval_s2s_dental_test_set_id.")
+@click.option("--test-set-id", default=None, help="Override the suite's test set id.")
 @click.option(
     "--coval-api-base", envvar="COVAL_API_BASE", default=COVAL_API_BASE, show_default=True
 )

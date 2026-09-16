@@ -27,7 +27,6 @@ from coval_bench.providers.stt._pacing import paced_chunks
 
 logger = structlog.get_logger(__name__)
 
-_VALID_MODELS = ("pulse",)
 _WS_BASE_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 
 
@@ -35,8 +34,6 @@ class SmallestSTTProvider(STTProvider):
     """Smallest AI Pulse streaming STT provider."""
 
     def __init__(self, api_key: SecretStr, model: str = "pulse") -> None:
-        if model not in _VALID_MODELS:
-            raise ValueError(f"Invalid Smallest STT model {model!r}. Valid: {_VALID_MODELS}")
         self._api_key = api_key
         self._model = model
 
