@@ -76,7 +76,8 @@ async def test_stepfun_tts_happy_path_and_wire_shape(fake_settings: Settings) ->
 
     assert captured["url"] == f"wss://api.stepfun.ai/v1/realtime/audio?model={_MODEL}"
     assert captured["kwargs"] == {
-        "additional_headers": {"Authorization": "Bearer test-stepfun-key"}
+        "additional_headers": {"Authorization": "Bearer test-stepfun-key"},
+        "max_size": 16 * 1024 * 1024,
     }
     sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
     assert [m["type"] for m in sent] == ["tts.create", "tts.text.delta", "tts.text.done"]
