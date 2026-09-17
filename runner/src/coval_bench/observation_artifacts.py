@@ -8,9 +8,9 @@ import hashlib
 import json
 import wave
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from google.api_core.exceptions import PreconditionFailed
+from google.api_core.exceptions import GoogleAPIError, PreconditionFailed
 from google.cloud import storage
 
 from coval_bench.db.models import ObservationArtifact, ObservationArtifactType
@@ -24,6 +24,90 @@ def _canonical_json(value: object) -> bytes:
 
 def _artifact_key(artifact_type: ObservationArtifactType, digest: str, extension: str) -> str:
     return f"observation-artifacts/v1/{artifact_type}/{digest[:2]}/{digest}.{extension}"
+
+
+def immutable_object_key(prefix: str, digest: str, suffix: str = "json") -> str:
+    """Return a deterministic private object key for a frozen payload."""
+    if not prefix or prefix.startswith("/") or ".." in prefix.split("/"):
+        raise ValueError("prefix must be a relative object prefix")
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise ValueError("digest must be a lowercase SHA-256 hex digest")
+    return f"{prefix.rstrip('/')}/{digest[:2]}/{digest}.{suffix}"
+
+
+def immutable_object_uri(bucket_name: str, key: str) -> str:
+    return f"gs://{bucket_name}/{key}"
+
+
+def upload_immutable_object(
+    client: storage.Client,
+    bucket_name: str,
+    key: str,
+    payload: bytes,
+    *,
+    content_type: str = "application/octet-stream",
+    max_attempts: int = 3,
+) -> str:
+    """Create an object once, accepting only an exact immutable collision.
+
+    The operation is retried only for transport/service failures.  A
+    precondition conflict is verified and is never retried.
+    """
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be positive")
+    digest = hashlib.sha256(payload).hexdigest()
+    blob = client.bucket(bucket_name).blob(key)
+    blob.metadata = {"sha256": digest}
+
+    def verify() -> None:
+        blob.reload()
+        remote = cast(bytes, blob.download_as_bytes())
+        metadata = blob.metadata or {}
+        if (
+            remote != payload
+            or blob.size != len(payload)
+            or blob.content_type != content_type
+            or metadata.get("sha256") != digest
+        ):
+            raise ValueError("immutable object collision does not match expected content")
+
+    for attempt in range(max_attempts):
+        try:
+            blob.upload_from_string(payload, content_type=content_type, if_generation_match=0)
+            verify()
+            return immutable_object_uri(bucket_name, key)
+        except PreconditionFailed:
+            verify()
+            return immutable_object_uri(bucket_name, key)
+        except (GoogleAPIError, OSError, TimeoutError):
+            if attempt + 1 >= max_attempts:
+                raise
+    raise AssertionError("unreachable")
+
+
+def upload_immutable_json(
+    client: storage.Client,
+    bucket_name: str,
+    prefix: str,
+    value: object,
+    *,
+    max_attempts: int = 3,
+) -> tuple[str, str]:
+    """Serialize and upload a canonical JSON object; return URI and digest."""
+    payload = _canonical_json(value)
+    digest = hashlib.sha256(payload).hexdigest()
+    key = immutable_object_key(prefix, digest)
+    return (
+        upload_immutable_object(
+            client,
+            bucket_name,
+            key,
+            payload,
+            content_type="application/json",
+            max_attempts=max_attempts,
+        ),
+        digest,
+    )
 
 
 def prepare_provider_transcript(
@@ -92,6 +176,33 @@ def _upload(
         gcs_uri=f"gs://{bucket_name}/{key}",
         content_sha256=digest,
         size_bytes=len(payload),
+        duration_ms=duration_ms,
+    )
+
+
+def upload_prepared_observation_artifact(
+    client: storage.Client,
+    bucket_name: str,
+    artifact_type: ObservationArtifactType,
+    payload: bytes,
+    *,
+    extension: str,
+    content_type: str,
+    schema_name: str,
+    schema_version: str = "v1",
+    duration_ms: float | None = None,
+) -> ObservationArtifact:
+    """Upload frozen artifact bytes without reconstructing their payload."""
+    if schema_version != "v1":
+        raise ValueError(f"unsupported observation artifact schema version {schema_version!r}")
+    return _upload(
+        client,
+        bucket_name,
+        artifact_type,
+        payload,
+        extension=extension,
+        content_type=content_type,
+        schema_name=schema_name,
         duration_ms=duration_ms,
     )
 

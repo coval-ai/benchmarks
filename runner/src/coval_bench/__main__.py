@@ -34,6 +34,7 @@ from coval_bench.migrations.backfill_normalized_storage import backfill_normaliz
 from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
 from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.platform_assets import platform_assets
+from coval_bench.runner.capture_cli import capture
 from coval_bench.s2s.fetch_v2v import fetch_s2s
 from coval_bench.variants.pull import pull_contract
 
@@ -114,6 +115,7 @@ db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
 db.add_command(refresh_dashboard_aggregates)
 db.add_command(repair_dashboard_aggregates)
+db.add_command(capture)
 
 
 @cli.group()

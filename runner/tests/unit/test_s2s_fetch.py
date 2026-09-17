@@ -23,6 +23,12 @@ from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
+from coval_bench.runner.capture import (
+    ImportRunClaim,
+    RunSeal,
+    build_capture_identity,
+    identity_digest,
+)
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
     DATASET_ID_BANK,
@@ -30,6 +36,7 @@ from coval_bench.s2s.conditions import (
     DATASET_ID_LLM_BANK,
     DATASET_ID_MULTITURN,
     DATASET_ID_MULTITURN_NOISY,
+    DEFAULT_CONDITION,
     FAMILY_BANK,
     FAMILY_DENTAL,
     FAMILY_HAPPYPATH,
@@ -157,6 +164,9 @@ def _stub_writer() -> MagicMock:
     )
     writer.coval_run_ingested = AsyncMock(return_value=False)
     writer.coval_metric_ingested = AsyncMock(return_value=False)
+    writer.get_run = AsyncMock(return_value=writer.start_run.return_value)
+    writer.reserve_run_id = AsyncMock(return_value=1)
+    writer.ensure_capture_run = AsyncMock(return_value=writer.start_run.return_value)
     writer.conversation_ttft = AsyncMock(return_value={})
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
@@ -1438,6 +1448,21 @@ def test_dataset_identity() -> None:
     assert single_turn[0] == "s2s-v1"
 
 
+def test_import_identity_hashes_coval_test_set_provenance() -> None:
+    identity = fetch_v2v._import_identity(
+        spec=SPEC,
+        coval_run=CovalRun(run_id="external", create_time=None),
+        dataset_id="s2s-multiturn-v1",
+        dataset_sha256="8ef475f7-5b57-46db-939e-45b10486cba8",
+        workspace_id=None,
+    )
+
+    assert (
+        identity.dataset_sha256
+        == hashlib.sha256(b"8ef475f7-5b57-46db-939e-45b10486cba8").hexdigest()
+    )
+
+
 def test_dataset_identity_splits_the_noisy_caller() -> None:
     """The pre-map setting still splits the noisy persona while the map is unset."""
     assert fetch_v2v._dataset_identity("TS1", "PN", "PN") == (
@@ -2314,6 +2339,308 @@ async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
     writer.record_results.assert_awaited_once()
     writer.finish_run.assert_awaited_once()
     dual_write.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("spec", "condition", "metric_ids"),
+    [
+        (SPEC, DEFAULT_CONDITION, LATENCY_IDS),
+        (
+            LLM_SPEC,
+            DatasetMetrics(
+                benchmark=Benchmark.LLM,
+                required=Metric.INSTRUCTION_FOLLOWING,
+            ),
+            {Metric.INSTRUCTION_FOLLOWING: "IID"},
+        ),
+    ],
+)
+async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_partial(
+    monkeypatch: pytest.MonkeyPatch,
+    spec: AgentSpec,
+    condition: DatasetMetrics,
+    metric_ids: dict[Metric, str],
+) -> None:
+    writer = _stub_writer()
+    writer.finish_run_exact = AsyncMock()
+    persist = AsyncMock(return_value="pending")
+    upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
+    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
+    monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _c, _b, claim: claim)
+    metric_id = next(iter(metric_ids.values()))
+    metric_value: object = "YES" if spec.benchmark is Benchmark.LLM else 0.5
+    coval_run = CovalRun(run_id="R1", create_time=None)
+    import_identity = fetch_v2v._import_identity(
+        spec=spec,
+        coval_run=coval_run,
+        dataset_id="required-v1",
+        dataset_sha256="f" * 64,
+        workspace_id=None,
+    )
+
+    async with _fake_client(
+        {}, _run_json([{"simulation_output_id": "s1", "value": metric_value}], metric_id)
+    ) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=spec,
+            coval_run=coval_run,
+            metric_ids=metric_ids,
+            condition=condition,
+            dataset_id="required-v1",
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_dual_write_enabled=True,
+            normalized_capture_required=True,
+            artifact_client=object(),
+            artifact_bucket="private",
+            import_identity=import_identity,
+            import_generation=0,
+        )
+
+    assert status is RunStatus.PARTIAL
+    writer.record_results.assert_not_awaited()
+    writer.start_run.assert_not_awaited()
+    writer.reserve_run_id.assert_awaited_once()
+    writer.ensure_capture_run.assert_awaited_once()
+    persist.assert_awaited_once()
+    writer.finish_run_exact.assert_awaited_once()
+    assert writer.finish_run_exact.await_args.kwargs["status"] is RunStatus.PARTIAL
+    assert writer.finish_run_exact.await_args.kwargs["error"] == "normalized capture pending"
+    assert upload_state.call_args_list[0].args[3] == "manifest"
+    assert upload_state.call_args_list[1].args[3] == "seal"
+
+
+@pytest.mark.asyncio
+async def test_required_import_restart_reuses_durable_claim_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    writer.finish_run_exact = AsyncMock()
+    persist = AsyncMock(return_value="completed")
+    upload_state = MagicMock(return_value=("gs://private/state", "a" * 64))
+    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
+    coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
+    identity = fetch_v2v._import_identity(
+        spec=SPEC,
+        coval_run=coval_run,
+        dataset_id="required-v1",
+        dataset_sha256="f" * 64,
+        workspace_id="workspace",
+    )
+    claim = ImportRunClaim(
+        identity=identity,
+        generation=0,
+        run_id=41,
+        started_at=datetime(2026, 9, 17, tzinfo=UTC),
+        scheduled_at=datetime(2026, 9, 17, tzinfo=UTC),
+        captured_at=datetime(2026, 9, 17, tzinfo=UTC),
+        metric_types=[str(Metric.V2V)],
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=coval_run,
+            metric_ids=LATENCY_IDS,
+            dataset_id="required-v1",
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_capture_required=True,
+            artifact_client=object(),
+            artifact_bucket="private",
+            workspace_id="workspace",
+            import_identity=identity,
+            import_generation=0,
+            import_claim=claim,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.start_run.assert_not_awaited()
+    writer.reserve_run_id.assert_not_awaited()
+    writer.ensure_capture_run.assert_awaited_once()
+    assert writer.ensure_capture_run.await_args.args[0] == 41
+    persist.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_required_import_adopts_concurrent_seal_without_failing_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    writer.finish_run_exact = AsyncMock()
+    persist = AsyncMock(return_value="completed")
+    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
+    identity = fetch_v2v._import_identity(
+        spec=SPEC,
+        coval_run=coval_run,
+        dataset_id="required-v1",
+        dataset_sha256="f" * 64,
+        workspace_id="workspace",
+    )
+    started_at = datetime(2026, 9, 17, tzinfo=UTC)
+    claim = ImportRunClaim(
+        identity=identity,
+        generation=0,
+        run_id=41,
+        started_at=started_at,
+        scheduled_at=started_at,
+        captured_at=started_at,
+        metric_types=[str(Metric.V2V)],
+    )
+    capture_id = identity_digest(
+        build_capture_identity(
+            run_id=41,
+            benchmark="S2S",
+            dataset_id="required-v1",
+            sample_id="external-run/s1",
+            provider=SPEC.provider,
+            model=SPEC.model,
+            capture_id="external-run:external-run/s1",
+        )
+    )
+    winner_finished_at = started_at + timedelta(minutes=1)
+    winner_seal = RunSeal(
+        run_id=41,
+        intended_status=str(RunStatus.SUCCEEDED),
+        stored_status=str(RunStatus.SUCCEEDED),
+        finished_at=winner_finished_at,
+        expected_capture_ids=[capture_id],
+    )
+    seal_calls = 0
+
+    def upload_state(
+        _client: object, _bucket: str, _run_id: int, kind: str, value: object
+    ) -> tuple[str, str]:
+        nonlocal seal_calls
+        if kind == "seal":
+            seal_calls += 1
+            if seal_calls == 1:
+                raise ValueError("concurrent seal")
+            assert value == winner_seal
+        return f"gs://private/{kind}", "a" * 64
+
+    monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
+    monkeypatch.setattr(
+        fetch_v2v,
+        "read_run_state",
+        lambda _client, _bucket, _run_id, kind: (
+            winner_seal.model_dump(mode="json") if kind == "seal" else None
+        ),
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=coval_run,
+            metric_ids=LATENCY_IDS,
+            dataset_id="required-v1",
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_capture_required=True,
+            artifact_client=object(),
+            artifact_bucket="private",
+            workspace_id="workspace",
+            import_identity=identity,
+            import_generation=0,
+            import_claim=claim,
+        )
+
+    assert status is RunStatus.SUCCEEDED
+    writer.finish_run.assert_not_awaited()
+    writer.finish_run_exact.assert_awaited_once()
+    assert writer.finish_run_exact.await_args.kwargs["finished_at"] == winner_finished_at
+    assert writer.finish_run_exact.await_args.kwargs["status"] is RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_required_import_manifest_failure_remains_resumable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = _stub_writer()
+    writer.finish_run_exact = AsyncMock()
+    persist = AsyncMock(return_value="completed")
+    monkeypatch.setattr("coval_bench.runner.normalized.persist_capture", persist)
+    coval_run = CovalRun(run_id="external-run", create_time=datetime(2026, 9, 17, tzinfo=UTC))
+    identity = fetch_v2v._import_identity(
+        spec=SPEC,
+        coval_run=coval_run,
+        dataset_id="required-v1",
+        dataset_sha256="f" * 64,
+        workspace_id="workspace",
+    )
+    started_at = datetime(2026, 9, 17, tzinfo=UTC)
+    claim = ImportRunClaim(
+        identity=identity,
+        generation=0,
+        run_id=41,
+        started_at=started_at,
+        scheduled_at=started_at,
+        captured_at=started_at,
+        metric_types=[str(Metric.V2V)],
+    )
+    upload_state = MagicMock(side_effect=OSError("manifest unavailable"))
+    monkeypatch.setattr("coval_bench.runner.capture.upload_run_state", upload_state)
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+
+    async with _fake_client({}, _run_json(values)) as client:
+        first = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=coval_run,
+            metric_ids=LATENCY_IDS,
+            dataset_id="required-v1",
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_capture_required=True,
+            artifact_client=object(),
+            artifact_bucket="private",
+            workspace_id="workspace",
+            import_identity=identity,
+            import_generation=0,
+            import_claim=claim,
+        )
+
+    assert first is RunStatus.PARTIAL
+    writer.finish_run.assert_not_awaited()
+    upload_state.side_effect = None
+    upload_state.return_value = ("gs://private/state", "a" * 64)
+
+    async with _fake_client({}, _run_json(values)) as client:
+        second = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=coval_run,
+            metric_ids=LATENCY_IDS,
+            dataset_id="required-v1",
+            dataset_sha256="f" * 64,
+            period_seconds=10_800,
+            normalized_capture_required=True,
+            artifact_client=object(),
+            artifact_bucket="private",
+            workspace_id="workspace",
+            import_identity=identity,
+            import_generation=0,
+            import_claim=claim,
+        )
+
+    assert second is RunStatus.SUCCEEDED
+    writer.finish_run.assert_not_awaited()
+    writer.ensure_capture_run.assert_awaited()
+    assert {call.args[0] for call in writer.ensure_capture_run.await_args_list} == {41}
 
 
 @pytest.mark.asyncio

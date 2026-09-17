@@ -57,7 +57,48 @@ All env vars are documented in `src/coval_bench/config.py`. Provider keys are op
 
 Normalized observation dual writes are additive, private, and disabled by default.
 Set both `BENCHMARK_ARTIFACT_BUCKET` and `NORMALIZED_DUAL_WRITE_ENABLED=true` to
-enable the STT/TTS rollout; legacy result writes remain the source of truth.
+enable the normalized rollout; legacy result writes remain the source of truth.
+
+### Required normalized capture and recovery
+
+`NORMALIZED_CAPTURE_REQUIRED=true` adds a fail-closed durability boundary while
+preserving legacy writes. It also requires `NORMALIZED_DUAL_WRITE_ENABLED=true`
+and `BENCHMARK_ARTIFACT_BUCKET`. Before provider warmup or Coval run fetches, the
+runner verifies the dataset hashes, normalized database schema, and private GCS
+create/read/list access.
+
+For each completed provider call, the first acknowledged durable write is an
+immutable GCS envelope containing the frozen legacy rows, normalized evaluation
+shape, original timestamps and artifact bytes. Database and artifact replay then
+uses that envelope. A storage or database backlog leaves an otherwise successful
+run `partial` with `normalized capture pending`; recovery promotes it to the
+provider-derived sealed status only after all receipts exist and the dashboard
+repair enqueue commits. Genuine provider failures remain captured failures.
+
+Inspect one run without exposing payloads:
+
+```bash
+coval-bench db capture status --run-id 123 --limit 100
+```
+
+Replay a bounded page. Pass a returned `next_cursor` to continue:
+
+```bash
+coval-bench db capture recover --run-id 123 --limit 100
+coval-bench db capture recover --run-id 123 --limit 100 --cursor 'gs://...'
+```
+
+An unsealed run indicates cancellation or process loss before normal finalization.
+Replay it only after confirming provider work has stopped, using
+`--abandoned`. Conflicting immutable claims fail recovery and require inspection;
+the command logs only run IDs and digests, never transcripts or audio.
+
+There is one unavoidable window: a process can die after provider completion but
+before its first envelope upload. The run manifest makes the missing expected
+capture visible, but bytes that never reached durable storage cannot be replayed.
+Envelopes and receipts are retained; remote deletion requires a separately
+approved lifecycle policy. Required mode is not enabled by this change and must
+be rolled out separately.
 
 ### API auth
 

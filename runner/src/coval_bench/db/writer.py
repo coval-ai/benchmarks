@@ -146,9 +146,181 @@ class RunWriter:
             await conn.commit()
         return Run.model_validate(dict(row))
 
+    async def get_run(self, run_id: int) -> Run:
+        """Return one run for recovery decisions without changing it."""
+        async with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(
+                """SELECT id, started_at, finished_at, scheduled_at, dataset_id,
+                          dataset_sha256, status, error, persona_id
+                   FROM benchmarks_v2.runs WHERE id = %s""",
+                (run_id,),
+            )
+            row = await cur.fetchone()
+        if row is None:
+            raise ValueError(f"run {run_id} does not exist")
+        return Run.model_validate(dict(row))
+
+    async def reserve_run_id(self) -> int:
+        """Reserve a run primary key without creating a visible run row."""
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute("SELECT nextval(pg_get_serial_sequence('benchmarks_v2.runs', 'id'))")
+            row = await cur.fetchone()
+            await conn.commit()
+        if row is None:
+            raise RuntimeError("run ID sequence returned no value")
+        return int(row[0] if not isinstance(row, dict) else next(iter(row.values())))
+
+    async def ensure_capture_run(
+        self,
+        run_id: int,
+        *,
+        started_at: datetime,
+        dataset_id: str,
+        dataset_sha256: str,
+        scheduled_at: datetime,
+        persona_id: str | None,
+    ) -> Run:
+        """Insert or exactly retrieve a run elected by a durable import claim."""
+        fields = (
+            "id",
+            "started_at",
+            "scheduled_at",
+            "dataset_id",
+            "dataset_sha256",
+            "persona_id",
+        )
+        expected = (
+            run_id,
+            started_at,
+            scheduled_at,
+            dataset_id,
+            dataset_sha256,
+            persona_id or None,
+        )
+        async with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(
+                """INSERT INTO benchmarks_v2.runs
+                           (id, runner_sha, started_at, dataset_id, dataset_sha256,
+                            status, scheduled_at, persona_id)
+                       VALUES (%s, 'untracked', %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (id) DO NOTHING""",
+                (
+                    run_id,
+                    started_at,
+                    dataset_id,
+                    dataset_sha256,
+                    RunStatus.RUNNING,
+                    scheduled_at,
+                    persona_id or None,
+                ),
+            )
+            await cur.execute(
+                """SELECT id, started_at, finished_at, scheduled_at, dataset_id,
+                              dataset_sha256, status, error, persona_id
+                       FROM benchmarks_v2.runs WHERE id = %s FOR UPDATE""",
+                (run_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise RuntimeError("capture run insert returned no row")
+            actual = tuple(row[field] for field in fields)
+            if actual != expected:
+                raise ValueError("capture run conflicts with durable import claim")
+        return Run.model_validate(dict(row))
+
     async def record_result(self, result: Result) -> None:
         """Insert a single ``benchmarks_v2.results`` row in its own transaction."""
         await self.record_results([result])
+
+    async def preflight_required_capture_schema(self) -> None:
+        """Fail before provider work when normalized capture/publication is unavailable."""
+        required = (
+            "runs",
+            "results",
+            "metrics",
+            "benchmark_observations",
+            "observation_artifacts",
+            "metric_evaluations",
+            "metric_evaluation_inputs",
+            "metric_values",
+            "dashboard_source_refreshes",
+        )
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT name
+                   FROM unnest(%s::text[]) AS name
+                   WHERE to_regclass('benchmarks_v2.' || name) IS NULL""",
+                (list(required),),
+            )
+            missing = [
+                str(row[0] if not isinstance(row, dict) else row["name"])
+                for row in await cur.fetchall()
+            ]
+        if missing:
+            raise RuntimeError(
+                "required normalized capture schema is unavailable: " + ", ".join(missing)
+            )
+        await self._assert_required_capture_privileges()
+
+    async def _assert_required_capture_privileges(self) -> None:
+        """Check write/publication privileges without attempting a mutating probe."""
+        tables = (
+            "metrics",
+            "benchmark_observations",
+            "observation_artifacts",
+            "metric_evaluations",
+            "metric_evaluation_inputs",
+            "metric_values",
+            "results",
+            "runs",
+            "dashboard_source_refreshes",
+        )
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT table_name
+                   FROM unnest(%s::text[]) AS table_name
+                   WHERE NOT has_table_privilege(
+                       current_user,
+                       'benchmarks_v2.' || table_name,
+                       'SELECT,INSERT,UPDATE'
+                   )""",
+                (list(tables),),
+            )
+            denied = [
+                str(row[0] if not isinstance(row, dict) else row["table_name"])
+                for row in await cur.fetchall()
+            ]
+        if denied:
+            raise RuntimeError(
+                "required normalized capture privileges unavailable: " + ", ".join(denied)
+            )
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT table_name
+                   FROM unnest(%s::text[]) AS table_name
+                   WHERE NOT has_sequence_privilege(
+                       current_user,
+                       pg_get_serial_sequence('benchmarks_v2.' || table_name, 'id'),
+                       'USAGE'
+                   )""",
+                (["runs", "results", "metrics"],),
+            )
+            denied_sequences = [
+                str(row[0] if not isinstance(row, dict) else row["table_name"])
+                for row in await cur.fetchall()
+            ]
+        if denied_sequences:
+            raise RuntimeError(
+                "required normalized capture sequence privileges unavailable: "
+                + ", ".join(denied_sequences)
+            )
 
     async def record_results(
         self,
@@ -217,6 +389,138 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.executemany(sql, params)
+            await conn.commit()
+
+    async def reserve_result_ids(self, count: int) -> list[int]:
+        """Reserve ordered legacy result IDs for durable, exact replay."""
+        if count < 0:
+            raise ValueError("result ID count must be non-negative")
+        if count == 0:
+            return []
+        async with self._pool.connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                """SELECT nextval(
+                           pg_get_serial_sequence('benchmarks_v2.results', 'id')
+                       )
+                   FROM generate_series(1, %s)""",
+                (count,),
+            )
+            rows = await cur.fetchall()
+            await conn.commit()
+        return [
+            int(row[0] if not isinstance(row, dict) else next(iter(row.values()))) for row in rows
+        ]
+
+    async def record_results_exact(
+        self,
+        results: Sequence[Result],
+        *,
+        created_at: datetime,
+        capture_identity: str,
+        result_ids: Sequence[int],
+    ) -> None:
+        """Replay one frozen legacy batch under an identity-scoped lock.
+
+        A complete exact batch is a no-op.  Partial rows, duplicate rows, or
+        any differing immutable field are conflicts rather than silently
+        accepted retries.
+        """
+        if not results:
+            if result_ids:
+                raise ValueError("empty legacy replay cannot have allocated result IDs")
+            return
+        if len(result_ids) != len(results) or len(set(result_ids)) != len(result_ids):
+            raise ValueError("exact legacy replay requires one unique ID per row")
+        if any(result_id <= 0 for result_id in result_ids):
+            raise ValueError("exact legacy replay IDs must be positive")
+        scope = {(row.run_id, row.provider, row.model, row.voice, row.benchmark) for row in results}
+        if len(scope) != 1:
+            raise ValueError("exact legacy replay requires one run/model/voice/benchmark scope")
+        fields = (
+            "id",
+            "run_id",
+            "provider",
+            "model",
+            "voice",
+            "benchmark",
+            "metric_type",
+            "metric_value",
+            "metric_units",
+            "audio_filename",
+            "transcript",
+            "status",
+            "error",
+            "http_version",
+            "submit_to_headers_ms",
+            "wer_insertions_pct",
+            "wer_deletions_pct",
+            "wer_substitutions_pct",
+            "variant_id",
+            "transport",
+            "test_case_id",
+            "created_at",
+        )
+        expected = sorted(
+            [
+                tuple(
+                    result_ids[index]
+                    if field == "id"
+                    else created_at
+                    if field == "created_at"
+                    else getattr(row, field)
+                    for field in fields
+                )
+                for index, row in enumerate(results)
+            ],
+            key=repr,
+        )
+        sql_insert = """
+            INSERT INTO benchmarks_v2.results
+                (id, run_id, provider, model, voice, benchmark, metric_type, metric_value,
+                 metric_units, audio_filename, transcript, status, error, http_version,
+                 submit_to_headers_ms, wer_insertions_pct, wer_deletions_pct,
+                 wer_substitutions_pct, variant_id, transport, test_case_id, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO NOTHING
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                await cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (capture_identity,),
+                )
+                await cur.execute(
+                    """SELECT id, run_id, provider, model, voice, benchmark, metric_type,
+                              metric_value, metric_units, audio_filename, transcript, status,
+                              error, http_version, submit_to_headers_ms, wer_insertions_pct,
+                              wer_deletions_pct, wer_substitutions_pct, variant_id, transport,
+                              test_case_id, created_at
+                       FROM benchmarks_v2.results
+                       WHERE id = ANY(%s::bigint[])
+                       FOR UPDATE""",
+                    (list(result_ids),),
+                )
+                stored = await cur.fetchall()
+                actual = sorted([tuple(row[field] for field in fields) for row in stored], key=repr)
+                if stored and any(row not in expected for row in actual):
+                    raise ValueError("exact legacy replay conflicts with an allocated result ID")
+                await cur.executemany(sql_insert, expected)
+                await cur.execute(
+                    """SELECT id, run_id, provider, model, voice, benchmark, metric_type,
+                              metric_value, metric_units, audio_filename, transcript, status,
+                              error, http_version, submit_to_headers_ms, wer_insertions_pct,
+                              wer_deletions_pct, wer_substitutions_pct, variant_id, transport,
+                              test_case_id, created_at
+                       FROM benchmarks_v2.results
+                       WHERE id = ANY(%s::bigint[])
+                       FOR UPDATE""",
+                    (list(result_ids),),
+                )
+                stored = await cur.fetchall()
+                actual = sorted([tuple(row[field] for field in fields) for row in stored], key=repr)
+                if actual != expected:
+                    raise ValueError("exact legacy replay conflicts with stored batch")
             await conn.commit()
 
     async def insert_observation(self, observation: Observation) -> Observation:
@@ -372,7 +676,11 @@ class RunWriter:
         return stored
 
     async def insert_metric_evaluation(
-        self, evaluation: MetricEvaluation, *, inputs: Sequence[MetricEvaluationInput] = ()
+        self,
+        evaluation: MetricEvaluation,
+        *,
+        inputs: Sequence[MetricEvaluationInput] = (),
+        validate_contract: bool = True,
     ) -> MetricEvaluation:
         """Create a queued evaluation or retrieve the same evaluation on retry."""
         if (
@@ -382,7 +690,8 @@ class RunWriter:
             or evaluation.error is not None
         ):
             raise ValueError("metric evaluations must be created queued")
-        validate_metric_contract(evaluation.metric_type, evaluation.metric_version)
+        if validate_contract:
+            validate_metric_contract(evaluation.metric_type, evaluation.metric_version)
         input_keys = [(item.input_role, item.input_order) for item in inputs]
         if len(input_keys) != len(set(input_keys)):
             raise ValueError("metric evaluation inputs must have unique role/order pairs")
@@ -599,6 +908,36 @@ class RunWriter:
             raise ValueError(f"metric evaluation {evaluation_id} is not queued")
         return MetricEvaluation.model_validate(dict(row))
 
+    async def start_metric_evaluation_exact(
+        self, evaluation_id: UUID, *, started_at: datetime
+    ) -> MetricEvaluation:
+        """Start or verify a replayed evaluation without timestamp drift."""
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                await cur.execute(
+                    """SELECT id, observation_id, metric_id, metric_type, metric_version,
+                              evaluation_variant, executor, external_request_id, status,
+                              started_at, finished_at, error, created_at, updated_at
+                       FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE""",
+                    (evaluation_id,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise ValueError(f"metric evaluation {evaluation_id} does not exist")
+                if row["status"] == ProcessingStatus.QUEUED:
+                    await cur.execute(
+                        """UPDATE benchmarks_v2.metric_evaluations
+                           SET status = %s, started_at = %s, updated_at = now()
+                           WHERE id = %s""",
+                        (ProcessingStatus.RUNNING, started_at, evaluation_id),
+                    )
+                    row["status"] = ProcessingStatus.RUNNING
+                    row["started_at"] = started_at
+                elif row["started_at"] != started_at:
+                    raise ValueError("metric evaluation replay conflicts with started_at")
+            await conn.commit()
+        return MetricEvaluation.model_validate(dict(row))
+
     async def fail_metric_evaluation(
         self, evaluation_id: UUID, *, finished_at: datetime, error: str
     ) -> MetricEvaluation:
@@ -630,6 +969,49 @@ class RunWriter:
             await conn.commit()
         if row is None:
             raise ValueError(f"metric evaluation {evaluation_id} is not queued or running")
+        return MetricEvaluation.model_validate(dict(row))
+
+    async def fail_metric_evaluation_exact(
+        self, evaluation_id: UUID, *, started_at: datetime, finished_at: datetime, error: str
+    ) -> MetricEvaluation:
+        """Fail or verify a replayed evaluation using its frozen timestamps."""
+        if not error:
+            raise ValueError("failed metric evaluations require an error")
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+                await cur.execute(
+                    """SELECT id, observation_id, metric_id, metric_type, metric_version,
+                              evaluation_variant, executor, external_request_id, status,
+                              started_at, finished_at, error, created_at, updated_at
+                       FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE""",
+                    (evaluation_id,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    raise ValueError(f"metric evaluation {evaluation_id} does not exist")
+                if row["status"] == ProcessingStatus.FAILED:
+                    if (
+                        row["started_at"] != started_at
+                        or row["finished_at"] != finished_at
+                        or row["error"] != error
+                    ):
+                        raise ValueError("metric failure replay conflicts with stored result")
+                elif row["status"] == ProcessingStatus.SUCCEEDED:
+                    raise ValueError("metric failure replay conflicts with succeeded result")
+                else:
+                    await cur.execute(
+                        """UPDATE benchmarks_v2.metric_evaluations
+                           SET status = %s, started_at = %s, finished_at = %s,
+                               error = %s, updated_at = now() WHERE id = %s""",
+                        (ProcessingStatus.FAILED, started_at, finished_at, error, evaluation_id),
+                    )
+                    row.update(
+                        status=ProcessingStatus.FAILED,
+                        started_at=started_at,
+                        finished_at=finished_at,
+                        error=error,
+                    )
+            await conn.commit()
         return MetricEvaluation.model_validate(dict(row))
 
     async def insert_preprocessing_artifact(
@@ -719,6 +1101,7 @@ class RunWriter:
         values: Sequence[MetricValue],
         artifacts: Sequence[MetricArtifact] = (),
         finished_at: datetime,
+        validate_contract: bool = True,
     ) -> None:
         """Atomically succeed a running evaluation; exact replays are harmless."""
         if not values:
@@ -738,14 +1121,6 @@ class RunWriter:
                 evaluation = await cur.fetchone()
                 if evaluation is None:
                     raise ValueError(f"metric evaluation {evaluation_id} does not exist")
-                validate_metric_values(
-                    evaluation["metric_type"],
-                    evaluation["metric_version"],
-                    tuple(
-                        (value.value_key, value.unit, value.value, value.value_role)
-                        for value in values
-                    ),
-                )
                 if evaluation["status"] == ProcessingStatus.SUCCEEDED:
                     if evaluation["finished_at"] != finished_at:
                         raise ValueError("metric completion replay conflicts with stored result")
@@ -794,6 +1169,15 @@ class RunWriter:
                     return
                 if evaluation["status"] != ProcessingStatus.RUNNING:
                     raise ValueError("only running metric evaluations may be completed")
+                if validate_contract:
+                    validate_metric_values(
+                        evaluation["metric_type"],
+                        evaluation["metric_version"],
+                        tuple(
+                            (value.value_key, value.unit, value.value, value.value_role)
+                            for value in values
+                        ),
+                    )
                 await cur.executemany(
                     """INSERT INTO benchmarks_v2.metric_values
                        (metric_evaluation_id, value_key, unit, value, value_role)
@@ -985,6 +1369,97 @@ class RunWriter:
                     reason="dashboard_storage_unavailable",
                     required_migration="20260914_0034",
                 )
+
+    async def finish_run_exact(
+        self,
+        run_id: int,
+        *,
+        status: RunStatus,
+        finished_at: datetime,
+        error: str | None = None,
+        allow_capture_recovery: bool = False,
+    ) -> None:
+        """Replay run completion while preserving the original finish time."""
+        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+
+        async with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(
+                """SELECT status, finished_at, error FROM benchmarks_v2.runs
+                       WHERE id = %s FOR UPDATE""",
+                (run_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise ValueError(f"run {run_id} does not exist")
+            if row["finished_at"] is not None:
+                exact = (
+                    row["status"] == status
+                    and row["finished_at"] == finished_at
+                    and row["error"] == error
+                )
+                recoverable_partial = (
+                    allow_capture_recovery
+                    and row["status"] == RunStatus.PARTIAL
+                    and row["finished_at"] == finished_at
+                    and row["error"] == "normalized capture pending"
+                )
+                if recoverable_partial:
+                    await cur.execute(
+                        "UPDATE benchmarks_v2.runs SET status = %s, error = %s WHERE id = %s",
+                        (status, error, run_id),
+                    )
+                elif not exact:
+                    raise ValueError("run completion replay conflicts with stored result")
+            else:
+                await cur.execute(
+                    """UPDATE benchmarks_v2.runs SET finished_at = %s, status = %s,
+                                  error = %s WHERE id = %s""",
+                    (finished_at, status, error, run_id),
+                )
+            try:
+                async with conn.transaction():
+                    await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
+            except psycopg.errors.UndefinedTable:
+                logger.warning(
+                    "dashboard_source_refresh_enqueue_skipped",
+                    run_id=run_id,
+                    status=str(status),
+                    reason="dashboard_storage_unavailable",
+                    required_migration="20260914_0034",
+                )
+
+    async def mark_run_capture_pending(self, run_id: int, *, finished_at: datetime) -> None:
+        """Downgrade a finalized non-failed run when its final receipt is missing."""
+        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+
+        async with (
+            self._pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(
+                """SELECT status, finished_at, error FROM benchmarks_v2.runs
+                   WHERE id = %s FOR UPDATE""",
+                (run_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                raise ValueError(f"run {run_id} does not exist")
+            if row["finished_at"] != finished_at:
+                raise ValueError("capture-pending downgrade conflicts with finished_at")
+            if row["status"] == RunStatus.FAILED:
+                raise ValueError("failed provider runs cannot be relabeled as capture pending")
+            await cur.execute(
+                """UPDATE benchmarks_v2.runs
+                   SET status = %s, error = 'normalized capture pending'
+                   WHERE id = %s""",
+                (RunStatus.PARTIAL, run_id),
+            )
+            await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
 
     async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
