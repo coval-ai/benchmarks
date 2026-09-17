@@ -67,7 +67,7 @@ class PlatformAgentSpec(BaseModel, frozen=True, extra="forbid"):
     platform: str
     suite: str
     agent_id: SecretRef
-    api_key: SecretRef
+    api_key: SecretRef | None = None
     mock_secret: SecretRef
     dial_target: SecretRef
 
@@ -507,6 +507,8 @@ def render_livekit_tools(
 # --- the table -------------------------------------------------------------
 
 
+CODE_MANAGED: frozenset[str] = frozenset({"livekit"})
+
 PLATFORMS: dict[str, Platform] = {
     "vapi": Platform(
         name="vapi",
@@ -595,7 +597,30 @@ AGENTS: tuple[PlatformAgentSpec, ...] = (
             purpose="the sip:+E164@sip.retellai.com URI Coval dials; names the imported number",
         ),
     ),
+    PlatformAgentSpec(
+        key="livekit-dental",
+        platform="livekit",
+        suite="dental",
+        agent_id=SecretRef(
+            name="LIVEKIT_DENTAL_AGENT_NAME",
+            purpose="the dispatch name the LiveKit dental agent registers under",
+        ),
+        mock_secret=SecretRef(
+            name="MOCK_TOOLS_SECRET",
+            purpose="the shared secret the mock tool endpoint requires on X-Mock-Tools-Key",
+        ),
+        dial_target=SecretRef(
+            name="LIVEKIT_DENTAL_DIAL_TARGET",
+            purpose="the sip:+E164@<sub>.sip.livekit.cloud URI Coval dials; names the trunk",
+        ),
+    ),
 )
+
+
+def _vendor_key(spec: PlatformAgentSpec) -> str:
+    if spec.api_key is None:
+        raise SyncError(f"{spec.key} has no vendor API: {spec.platform} is code-managed")
+    return spec.api_key.resolve()
 
 
 def spec_for(key: str) -> PlatformAgentSpec:
@@ -607,6 +632,11 @@ def spec_for(key: str) -> PlatformAgentSpec:
 
 
 def platform_for(spec: PlatformAgentSpec) -> Platform:
+    if spec.platform in CODE_MANAGED:
+        raise SyncError(
+            f"{spec.platform} is code-managed: its configuration is the deployed agent image, "
+            "so there is nothing to plan or apply; register and launch still work"
+        )
     platform = PLATFORMS.get(spec.platform)
     if platform is None:
         known = ", ".join(sorted(PLATFORMS))
@@ -813,6 +843,15 @@ def drift(client: AgentClient, spec: PlatformAgentSpec, mock_base_url: str) -> l
     return sorted(result.update) + result.prepared
 
 
+def vendor_drift(spec: PlatformAgentSpec, mock_base_url: str, api_base: str | None) -> list[str]:
+    """What apply would still change on the vendor; nothing when the platform is code-managed."""
+    if spec.platform in CODE_MANAGED:
+        return []
+    platform = platform_for(spec)
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
+        return drift(client, spec, mock_base_url)
+
+
 def launch_body(
     agent_id: str,
     spec: PlatformAgentSpec,
@@ -856,9 +895,25 @@ _agent_option = click.option(
 _mock_base_url_option = click.option(
     "--mock-base-url",
     envvar="MOCK_TOOLS_BASE_URL",
-    required=True,
-    help="Where the mock tool service is reachable, e.g. https://api.example.com",
+    default=None,
+    help=(
+        "Where the mock tool service is reachable, e.g. https://api.example.com. "
+        "Not read when launching a code-managed arm, whose image carries its own."
+    ),
 )
+
+
+def mock_base_url_for(
+    spec: PlatformAgentSpec, value: str | None, *, needed_for_code_managed: bool
+) -> str:
+    """The mock service URL a command reads, or empty when a code-managed arm never reads it."""
+    if value:
+        return value
+    if not needed_for_code_managed and spec.platform in CODE_MANAGED:
+        return ""
+    raise click.UsageError(f"--mock-base-url (or MOCK_TOOLS_BASE_URL) is required for {spec.key}")
+
+
 _api_base_option = click.option(
     "--api-base", default=None, help="Override the platform's API base URL."
 )
@@ -885,12 +940,12 @@ def platform_assets() -> None:
 @_agent_option
 @_mock_base_url_option
 @_api_base_option
-def assets_plan(agent_key: str, mock_base_url: str, api_base: str | None) -> None:
+def assets_plan(agent_key: str, mock_base_url: str | None, api_base: str | None) -> None:
     """Show what apply would change on the platform; writes nothing."""
     spec = spec_for(agent_key)
     platform = platform_for(spec)
-    wanted = desired(spec, mock_base_url)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
+    wanted = desired(spec, mock_base_url_for(spec, mock_base_url, needed_for_code_managed=True))
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
         _echo_plan(apply(client, spec, wanted, dry_run=True))
 
 
@@ -899,12 +954,14 @@ def assets_plan(agent_key: str, mock_base_url: str, api_base: str | None) -> Non
 @_mock_base_url_option
 @_api_base_option
 @click.option("--yes", is_flag=True, default=False, help="Skip the confirmation prompt.")
-def assets_apply(agent_key: str, mock_base_url: str, api_base: str | None, yes: bool) -> None:
+def assets_apply(
+    agent_key: str, mock_base_url: str | None, api_base: str | None, yes: bool
+) -> None:
     """Prepare the platform's prerequisites, then patch the managed fields on the live agent."""
     spec = spec_for(agent_key)
     platform = platform_for(spec)
-    wanted = desired(spec, mock_base_url)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
+    wanted = desired(spec, mock_base_url_for(spec, mock_base_url, needed_for_code_managed=True))
+    with platform.client(_vendor_key(spec), api_base or platform.api_base) as client:
         preview = apply(client, spec, wanted, dry_run=True)
         click.echo(preview.summary())
         if not preview.update and not preview.prepared:
@@ -923,10 +980,18 @@ def assets_apply(agent_key: str, mock_base_url: str, api_base: str | None, yes: 
 @_mock_base_url_option
 @click.option("--tool", default="lookup_patient", show_default=True)
 @click.option("--arg", "args", multiple=True, help="key=value, repeatable.")
-def assets_smoke(agent_key: str, mock_base_url: str, tool: str, args: tuple[str, ...]) -> None:
+def assets_smoke(
+    agent_key: str, mock_base_url: str | None, tool: str, args: tuple[str, ...]
+) -> None:
     """Fire one tool call at /mock exactly as this platform would, and print the answer."""
     spec = spec_for(agent_key)
-    codec = codec_for(spec.platform)
+    mock_base_url = mock_base_url_for(spec, mock_base_url, needed_for_code_managed=True)
+    try:
+        codec = codec_for(spec.platform)
+    except KeyError as exc:
+        raise click.ClickException(
+            f"no tool codec is registered for {spec.platform}; smoke needs the image that ships it"
+        ) from exc
     definitions = json.loads(read_contract_file(spec.suite, "tool-definitions.json"))
     if tool not in {d["name"] for d in definitions}:
         raise click.ClickException(f"{tool!r} is not in the {spec.suite} contract")
@@ -987,7 +1052,7 @@ def assets_register(agent_key: str, coval_api_base: str, yes: bool) -> None:
 )
 def assets_launch(
     agent_key: str,
-    mock_base_url: str,
+    mock_base_url: str | None,
     api_base: str | None,
     coval_api_base: str,
     persona_id: str,
@@ -1001,10 +1066,9 @@ def assets_launch(
 ) -> None:
     """Launch one Coval run against this variant, once both the platform and Coval agent match."""
     spec = spec_for(agent_key)
+    mock_base_url = mock_base_url_for(spec, mock_base_url, needed_for_code_managed=False)
     install_fixture_providers(Settings())
-    platform = platform_for(spec)
-    with platform.client(spec.api_key.resolve(), api_base or platform.api_base) as client:
-        pending = drift(client, spec, mock_base_url)
+    pending = vendor_drift(spec, mock_base_url, api_base)
     with CovalClient(COVAL_API_KEY.resolve(), coval_api_base) as coval:
         agent_id, coval_plan = register(coval, spec, dry_run=True)
         if not agent_id:

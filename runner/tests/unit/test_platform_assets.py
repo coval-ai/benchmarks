@@ -6,8 +6,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import click
 import httpx
 import pytest
+from click.testing import CliRunner
 
 import coval_bench.platform_assets as platform_assets
 from coval_bench.assets import SecretRef
@@ -22,11 +24,13 @@ from coval_bench.platform_assets import (
     desired,
     drift,
     launch_body,
+    mock_base_url_for,
     patch_body,
     plan,
     platform_for,
     register,
     spec_for,
+    vendor_drift,
 )
 from coval_bench.scenarios import read_contract_file
 from coval_bench.variants.platforms import redact
@@ -74,9 +78,70 @@ def test_secret_ref_names_what_is_missing(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_spec_for_names_the_known_set() -> None:
-    with pytest.raises(KeyError, match="known: retell-dental, telnyx-dental, vapi-dental"):
+    with pytest.raises(KeyError, match="known: livekit-dental, retell-dental, telnyx-dental, vapi"):
         spec_for("synthflow-dental")
-    assert {s.key for s in AGENTS} == {"vapi-dental", "telnyx-dental", "retell-dental"}
+    assert {s.key for s in AGENTS} == {
+        "vapi-dental",
+        "telnyx-dental",
+        "retell-dental",
+        "livekit-dental",
+    }
+
+
+# --- code-managed platforms --------------------------------------------------
+
+
+def test_code_managed_platform_refuses_plan_and_apply(env: None) -> None:
+    spec = spec_for("livekit-dental")
+    assert spec.api_key is None
+    with pytest.raises(SyncError, match="code-managed"):
+        platform_for(spec)
+    with pytest.raises(SyncError, match="code-managed"):
+        desired(spec, BASE)
+
+
+def test_code_managed_platform_has_no_vendor_drift_to_block_launch(env: None) -> None:
+    assert vendor_drift(spec_for("livekit-dental"), BASE, None) == []
+
+
+def test_code_managed_agent_still_registers_with_coval(
+    env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = "sip:+15550100001@example.sip.livekit.cloud;transport=tcp"
+    monkeypatch.setenv("LIVEKIT_DENTAL_DIAL_TARGET", target)
+    body = coval_agent_body(spec_for("livekit-dental"))
+    assert body["phone_number"] == target
+    assert body["attributes"]["platform"] == "livekit"
+    assert body["tags"] == ["orchestration", "dental", "livekit"]
+
+
+def test_mock_base_url_is_optional_only_where_a_code_managed_arm_never_reads_it() -> None:
+    livekit = spec_for("livekit-dental")
+    assert mock_base_url_for(livekit, None, needed_for_code_managed=False) == ""
+    assert mock_base_url_for(livekit, BASE, needed_for_code_managed=False) == BASE
+    with pytest.raises(click.UsageError, match="livekit-dental"):
+        mock_base_url_for(livekit, None, needed_for_code_managed=True)
+    with pytest.raises(click.UsageError, match="vapi-dental"):
+        mock_base_url_for(DENTAL, None, needed_for_code_managed=False)
+
+
+def test_launch_cli_demands_the_mock_url_for_vendor_arms_only(
+    env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MOCK_TOOLS_BASE_URL", raising=False)
+    monkeypatch.delenv("COVAL_API_KEY", raising=False)
+    common = ["launch", "--persona-id", "p", "--test-set-id", "t"]
+    vendor = CliRunner().invoke(
+        platform_assets.platform_assets, [*common, "--agent", "vapi-dental"]
+    )
+    assert vendor.exit_code == 2
+    assert "--mock-base-url" in vendor.output
+    code_managed = CliRunner().invoke(
+        platform_assets.platform_assets, [*common, "--agent", "livekit-dental"]
+    )
+    assert "--mock-base-url" not in code_managed.output
+    assert isinstance(code_managed.exception, RuntimeError)
+    assert "COVAL_API_KEY" in str(code_managed.exception)
 
 
 # --- render ----------------------------------------------------------------
