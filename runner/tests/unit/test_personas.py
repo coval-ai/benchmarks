@@ -10,12 +10,7 @@ from pydantic import ValidationError
 
 from coval_bench.registries import Metric
 from coval_bench.s2s import conditions
-from coval_bench.scenarios import (
-    PersonaRegistry,
-    binding_for_dataset,
-    load_personas,
-    persona_for_dataset,
-)
+from coval_bench.scenarios import PersonaRegistry, binding_for_dataset, load_personas
 
 _ANCHOR_METRIC = {"latency": Metric.V2V, "judge": Metric.INSTRUCTION_FOLLOWING}
 
@@ -47,23 +42,16 @@ def test_every_ingested_bank_dataset_is_bound() -> None:
     assert bound == ingested
 
 
-def test_persona_for_dataset_resolves_bound_ids_only() -> None:
-    resolved = persona_for_dataset(conditions.DATASET_ID_BANK_HARD)
-    assert resolved is not None
-    slug, persona = resolved
-    assert (slug, persona.label) == ("hard", "Hard")
-    assert persona_for_dataset(conditions.DATASET_ID_DENTAL) is None
-    assert persona_for_dataset("no-such-dataset") is None
-
-
 def test_binding_for_dataset_carries_the_anchor() -> None:
     bound = binding_for_dataset(conditions.DATASET_ID_BANK)
     assert bound is not None
     slug, _persona, binding = bound
     assert (slug, binding.anchor) == ("clean", "latency")
     hard = binding_for_dataset(conditions.DATASET_ID_BANK_HARD)
-    assert hard is not None and hard[2].anchor == "judge"
+    assert hard is not None
+    assert (hard[0], hard[1].label, hard[2].anchor) == ("hard", "Hard", "judge")
     assert binding_for_dataset(conditions.DATASET_ID_DENTAL) is None
+    assert binding_for_dataset("no-such-dataset") is None
 
 
 def _registry(**overrides: object) -> dict[str, object]:

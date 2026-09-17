@@ -82,9 +82,3 @@ def binding_for_dataset(dataset_id: str) -> tuple[str, Persona, PersonaBinding] 
             if binding.dataset_id == dataset_id:
                 return slug, registry.personas[slug], binding
     return None
-
-
-def persona_for_dataset(dataset_id: str) -> tuple[str, Persona] | None:
-    """The slug and persona a dataset id is bound to, or None when no family binds it."""
-    bound = binding_for_dataset(dataset_id)
-    return None if bound is None else bound[:2]
