@@ -41,6 +41,7 @@ from coval_bench.providers.tts.rime import RimeTTSProvider
 from coval_bench.providers.tts.smallest import SmallestTTSProvider
 from coval_bench.providers.tts.soniox import SonioxTTSProvider
 from coval_bench.providers.tts.speechify import SpeechifyTTSProvider
+from coval_bench.providers.tts.stepfun import StepfunTTSProvider
 from coval_bench.providers.tts.xai import XaiTTSProvider
 
 try:
@@ -85,6 +86,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "murf": MurfTTSProvider,
     "hakim": HakimTTSProvider,
     "nari": NariTTSProvider,
+    "stepfun": StepfunTTSProvider,
 }
 
 if HumeTTSProvider is not None:
@@ -112,6 +114,7 @@ __all__ = [
     "MinimaxTTSProvider",
     "MurfTTSProvider",
     "NariTTSProvider",
+    "StepfunTTSProvider",
     "SmallestTTSProvider",
     "XaiTTSProvider",
     "GroqTTSProvider",

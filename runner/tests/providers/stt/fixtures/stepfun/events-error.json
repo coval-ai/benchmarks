@@ -1,0 +1,4 @@
+[
+  {"event_id": "evt_1", "type": "session.updated", "meta": {"session_id": "sess_err", "timestamp": 1766468589041}, "session": {"audio": {"input": {"transcription": {"language": "en"}}}}},
+  {"event_id": "evt_2", "type": "error", "meta": {"session_id": "sess_err", "timestamp": 1766468589900}, "error": {"type": "invalid_request_error", "code": "invalid_value", "message": "Invalid parameter value", "param": "audio", "event_id": "event_2"}}
+]
