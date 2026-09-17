@@ -85,7 +85,8 @@ def _seed_0035(conn: psycopg.Connection[Any]) -> None:
                    'primary', '%', now(), 1, 1, 1, 1, 1, 1, 1)"""
     )
     conn.commit()
-    _upgrade(conn, "head")
+    # This fixture intentionally exercises the nullable hydration stage.
+    _upgrade(conn, "20260915_0036")
 
 
 @pytest.fixture
@@ -204,7 +205,8 @@ def test_unknown_code_fails_closed_without_known_writes(backfill_pg: Any) -> Non
         (obs,),
     )
     backfill_pg.commit()
-    _upgrade(backfill_pg, "head")
+    # Leave metric_id nullable so the backfill can report the unknown code.
+    _upgrade(backfill_pg, "20260915_0036")
     backfill_pg.autocommit = True
     report = backfill(backfill_pg, apply=True)
     assert report.status == "needs_reconciliation"

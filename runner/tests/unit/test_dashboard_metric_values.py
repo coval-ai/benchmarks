@@ -38,7 +38,7 @@ async def test_projection_seeds_existing_values_and_downgrades(
         )
     finally:
         await pool.close()
-    storage._migrate(pg_conn)
+    storage._migrate(pg_conn, "20260910_0031")
     pg_conn.autocommit = True
     row = pg_conn.execute(
         "SELECT value, wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct, "
@@ -196,7 +196,7 @@ async def test_projection_upgrade_nowait_does_not_interrupt_completion(
             # The writer holds evaluations ROW SHARE and values ROW EXCLUSIVE.
             # An ordered blocking migration lock could deadlock its final UPDATE.
             with pytest.raises(OperationalError, match="could not obtain lock") as error:
-                storage._migrate(pg_conn)
+                storage._migrate(pg_conn, "20260910_0031")
             assert isinstance(error.value.orig, psycopg.errors.LockNotAvailable)
             await conn.execute(
                 "UPDATE benchmarks_v2.metric_evaluations "
@@ -204,7 +204,7 @@ async def test_projection_upgrade_nowait_does_not_interrupt_completion(
                 (storage._NOW + timedelta(seconds=1), evaluation_id),
             )
             await conn.commit()
-        storage._migrate(pg_conn)
+        storage._migrate(pg_conn, "20260910_0031")
         async with pool.connection() as conn:
             row = await (
                 await conn.execute(
