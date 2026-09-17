@@ -253,6 +253,7 @@ async def list_results(
         params[f"hidden_provider_{index}"] = hidden_provider
         params[f"hidden_model_{index}"] = hidden_model
     if cursor is not None:
+        conditions.append("o.captured_at <= %(anchor_time)s")
         conditions.append("(o.captured_at, e.id) < (%(anchor_time)s, %(anchor_id)s)")
         params["anchor_time"] = anchor_time
         params["anchor_id"] = anchor_id
@@ -266,8 +267,7 @@ async def list_results(
           FROM benchmarks_v2.metric_evaluations e
           JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
           JOIN benchmarks_v2.runs r ON r.id = o.run_id
-          JOIN benchmarks_v2.metrics m
-            ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
+          JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
           WHERE {" AND ".join(conditions)}
           ORDER BY o.captured_at DESC, e.id DESC
           LIMIT %(page_limit)s
