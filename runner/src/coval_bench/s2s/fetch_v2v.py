@@ -175,6 +175,14 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=scenarios.ACTIVE.family(Benchmark.S2S),
             instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_stepfun_agent_id,
+            provider="stepfun",
+            model="stepaudio-3-realtime-preview",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
+        ),
     )
 
 
@@ -1242,9 +1250,11 @@ async def fetch_and_write_v2v(
         raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")
 
     async with _client(settings) as client, lifespan_pool(settings) as pool:
+        models = await fetch_models(pool)
         if benchmark is Benchmark.LLM:
-            specs = llm_specs(await fetch_models(pool), llm_agent_ids)
+            specs = llm_specs(models, llm_agent_ids)
             _require_family_test_sets(settings, specs)
+        registered = frozenset((m.provider, m.model) for m in models)
         writer = RunWriter(pool)
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
@@ -1254,6 +1264,14 @@ async def fetch_and_write_v2v(
             agent_id = spec.agent_id
             if not agent_id:
                 logger.warning("agent_id_unset", provider=spec.provider, model=spec.model)
+                continue
+            if (spec.provider, spec.model) not in registered:
+                logger.error(
+                    "model_unregistered",
+                    provider=spec.provider,
+                    model=spec.model,
+                    fix="add the registry row (published=false) before enabling this agent",
+                )
                 continue
             # An agent on its own test set is skipped when that id is missing rather
             # than falling back to the shared one, which would file its runs under

@@ -46,6 +46,32 @@ LATENCY_IDS = {Metric.V2V: "MID"}
 ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 
 SPEC = AgentSpec(agent_id="a1", provider="openai", model="gpt-realtime")
+
+
+def _every_s2s_row() -> list[RegisteredModel]:
+    """One unpublished registry row per S2S spec, as production has."""
+    agent_fields: dict[str, Any] = {
+        name: "x"
+        for name in Settings.model_fields
+        if name.startswith("coval_s2s_") and name.endswith("_agent_id")
+    }
+    return [
+        RegisteredModel(
+            benchmark=Benchmark.S2S,
+            provider=spec.provider,
+            model=spec.model,
+            collected=True,
+            published=False,
+        )
+        for spec in fetch_v2v.s2s_specs(Settings.model_construct(**agent_fields))
+    ]
+
+
+@pytest.fixture(autouse=True)
+def _registry_has_every_s2s_arm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=_every_s2s_row()))
+
+
 PHONELY = RegisteredModel(
     benchmark=Benchmark.LLM,
     provider="phonely",
@@ -359,6 +385,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         coval_s2s_bank_gpt_live_agent_id="b2",
         coval_s2s_bank_gemini_agent_id="b3",
         coval_s2s_bank_xai_agent_id="b4",
+        coval_s2s_bank_stepfun_agent_id="b5",
     )
 
     assert fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL) == {
@@ -369,6 +396,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("openai", "gpt-live-1"),
         ("google", "gemini-live"),
         ("xai", "grok-voice-think-fast-2.0"),
+        ("stepfun", "stepaudio-3-realtime-preview"),
     }
 
 
@@ -826,6 +854,38 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     writer.refresh_stats_matviews.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_bank_stepfun_agent_id="b5",
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_instruction_metric_id="IID",
+        coval_s2s_bank_persona_id="PID",
+    )
+    client = _fake_client({}, {})
+    writer = _stub_writer()
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+    without_stepfun = [m for m in _every_s2s_row() if m.provider != "stepfun"]
+    monkeypatch.setattr(fetch_v2v, "fetch_models", AsyncMock(return_value=without_stepfun))
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _settings: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {}
+    fetch_one.assert_not_awaited()
 
 
 @pytest.mark.asyncio
