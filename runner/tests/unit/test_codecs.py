@@ -305,13 +305,13 @@ def test_an_unrendered_header_template_is_not_a_simulation_id(
 
 
 def test_codec_for_names_the_known_set_on_a_miss() -> None:
-    with pytest.raises(KeyError, match="known: generic, retell, telnyx, vapi"):
+    with pytest.raises(KeyError, match="known: generic, livekit, retell, telnyx, vapi"):
         codec_for("synthflow")
 
 
 @pytest.mark.parametrize(
     ("name", "tool_in_path"),
-    [("generic", True), ("retell", True), ("telnyx", True), ("vapi", False)],
+    [("generic", True), ("livekit", True), ("retell", True), ("telnyx", True), ("vapi", False)],
 )
 def test_each_codec_declares_where_the_tool_name_lives(name: str, tool_in_path: bool) -> None:
     assert codec_for(name).tool_in_path is tool_in_path

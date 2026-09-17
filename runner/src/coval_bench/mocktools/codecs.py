@@ -131,6 +131,7 @@ def _bare(name: str) -> Codec:
 
 GENERIC = _bare("generic")
 RETELL = _bare("retell")
+LIVEKIT = _bare("livekit")
 
 
 def _telnyx_decode(body: Body, _headers: Mapping[str, str], tool: str | None) -> list[ToolCall]:
@@ -263,6 +264,7 @@ VAPI = Codec(
 CODECS: dict[str, Codec] = {
     GENERIC.name: GENERIC,
     RETELL.name: RETELL,
+    LIVEKIT.name: LIVEKIT,
     TELNYX.name: TELNYX,
     VAPI.name: VAPI,
 }
