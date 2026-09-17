@@ -573,6 +573,9 @@ _LOCAL_SOURCES: dict[
     Metric, Callable[[RunWriter, Sequence[str]], Awaitable[Mapping[str, float]]]
 ] = {
     Metric.TTFT: lambda writer, sim_ids: writer.conversation_ttft(sim_ids),
+    Metric.TIME_TO_FIRST_SENTENCE: (
+        lambda writer, sim_ids: writer.conversation_first_sentence(sim_ids)
+    ),
 }
 
 

@@ -71,7 +71,10 @@ def test_llm_contracts_use_instruction_and_local_ttft() -> None:
         assert llm.benchmark is Benchmark.LLM
         assert llm.required is Metric.INSTRUCTION_FOLLOWING
         assert llm.optional == frozenset()
-        assert llm.local == frozenset({Metric.TTFT})
+        assert Metric.TTFT in llm.local and llm.local <= {
+            Metric.TTFT,
+            Metric.TIME_TO_FIRST_SENTENCE,
+        }
         assert conditions.dataset_id_for(family, conditions.Condition.CLEAN) == dataset_id
         assert conditions.dataset_id_for(family, conditions.Condition.NOISY) is None
     voice = {

@@ -179,6 +179,8 @@ async def test_chat_buffers_the_stream_strips_metadata_and_records_timing(
     assert len(rows) == 1
     assert (rows[0]["simulation_id"], rows[0]["turn_index"]) == ("sim-1", 1)
     assert rows[0]["total_ms"] >= rows[0]["ttft_ms"] >= 0
+    assert rows[0]["first_sentence_ms"] == rows[0]["total_ms"]
+    assert rows[0]["first_sentence_chars"] == 4096
 
 
 async def test_tool_only_turn_has_string_content_and_openai_tool_calls(

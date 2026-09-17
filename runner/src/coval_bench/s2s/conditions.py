@@ -236,7 +236,7 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,
-        local=frozenset({Metric.TTFT}),
+        local=frozenset({Metric.TTFT, Metric.TIME_TO_FIRST_SENTENCE}),
     ),
 }
 

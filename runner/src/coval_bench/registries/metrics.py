@@ -25,6 +25,7 @@ class Metric(StrEnum):
     WER = "WER"
     TTFT = "TTFT"
     TTFS = "TTFS"
+    TIME_TO_FIRST_SENTENCE = "TimeToFirstSentence"
     TTFA = "TTFA"
     TTFA_ROUNDTRIP = "TTFARoundtrip"
     TTFA_LEADING_SILENCE = "TTFALeadingSilence"
@@ -136,6 +137,15 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=2,
         benchmarks=frozenset({Benchmark.STT, Benchmark.LLM}),
     ),
+    # Deliberately mixes generation speed with sentence length: a voice pipeline
+    # cannot start speaking before the first sentence is complete.
+    Metric.TIME_TO_FIRST_SENTENCE: MetricSpec(
+        display_name="Time to First Sentence",
+        units="seconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=2,
+        benchmarks=frozenset({Benchmark.LLM}),
+    ),
     Metric.TTFS: MetricSpec(
         display_name="Time to Final from Speech",
         units="seconds",
@@ -243,6 +253,7 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
     # List these explicitly: a new enum entry must choose an aggregation rule.
     for metric in (
         Metric.TTFT,
+        Metric.TIME_TO_FIRST_SENTENCE,
         Metric.TTFS,
         Metric.TTFA,
         Metric.TTFA_ROUNDTRIP,
