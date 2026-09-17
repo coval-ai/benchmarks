@@ -123,6 +123,7 @@ class Settings(BaseSettings):
     hakimai_api_key: SecretStr | None = None
     modulate_api_key: SecretStr | None = None
     nari_api_key: SecretStr | None = None
+    stepfun_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
     deepdub_api_key: SecretStr | None = None
