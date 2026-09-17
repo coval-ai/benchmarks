@@ -35,6 +35,7 @@ from coval_bench.providers.stt.revai import RevAISTTProvider
 from coval_bench.providers.stt.smallest import SmallestSTTProvider
 from coval_bench.providers.stt.soniox import SonioxSTTProvider
 from coval_bench.providers.stt.speechmatics import SpeechmaticsProvider
+from coval_bench.providers.stt.stepfun import StepfunSTTProvider
 from coval_bench.providers.stt.together import TogetherSTTProvider
 from coval_bench.providers.stt.xai import XaiSTTProvider
 from coval_bench.providers.stt.zoom import ZoomSTTProvider
@@ -69,6 +70,7 @@ STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "smallest": SmallestSTTProvider,
     "soniox": SonioxSTTProvider,
     "speechmatics": SpeechmaticsProvider,
+    "stepfun": StepfunSTTProvider,
     "together": TogetherSTTProvider,
     "xai": XaiSTTProvider,
     "zoom": ZoomSTTProvider,
@@ -100,6 +102,7 @@ __all__ = [
     "SmallestSTTProvider",
     "SonioxSTTProvider",
     "SpeechmaticsProvider",
+    "StepfunSTTProvider",
     "TogetherSTTProvider",
     "XaiSTTProvider",
     "ZoomSTTProvider",
