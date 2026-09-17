@@ -236,6 +236,7 @@ class Settings(BaseSettings):
     coval_s2s_bank_gpt_live_agent_id: str | None = None
     coval_s2s_bank_gemini_agent_id: str | None = None
     coval_s2s_bank_xai_agent_id: str | None = None
+    coval_s2s_bank_stepfun_agent_id: str | None = None
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a

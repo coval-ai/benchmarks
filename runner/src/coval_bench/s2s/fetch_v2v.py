@@ -175,6 +175,14 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=scenarios.ACTIVE.family(Benchmark.S2S),
             instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
         ),
+        AgentSpec(
+            agent_id=settings.coval_s2s_bank_stepfun_agent_id,
+            provider="stepfun",
+            model="stepaudio-3-realtime-preview",
+            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
+            family=scenarios.ACTIVE.family(Benchmark.S2S),
+            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
+        ),
     )
 
 

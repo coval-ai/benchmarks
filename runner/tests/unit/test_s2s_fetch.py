@@ -359,6 +359,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         coval_s2s_bank_gpt_live_agent_id="b2",
         coval_s2s_bank_gemini_agent_id="b3",
         coval_s2s_bank_xai_agent_id="b4",
+        coval_s2s_bank_stepfun_agent_id="b5",
     )
 
     assert fetch_v2v._expected_sample_models(settings, DATASET_ID_DENTAL) == {
@@ -369,6 +370,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("openai", "gpt-live-1"),
         ("google", "gemini-live"),
         ("xai", "grok-voice-think-fast-2.0"),
+        ("stepfun", "stepaudio-3-realtime-preview"),
     }
 
 
