@@ -68,7 +68,7 @@ class _Blob:
         try:
             return self._client.objects[self.name]
         except KeyError as exc:
-            raise NotFound("missing") from exc
+            raise cast(type[Exception], NotFound)("missing") from exc
 
     @property
     def size(self) -> int | None:
@@ -84,9 +84,9 @@ class _Blob:
         assert if_generation_match == 0
         if self._client.fail_uploads:
             self._client.fail_uploads -= 1
-            raise ServiceUnavailable("temporary")
+            raise cast(type[Exception], ServiceUnavailable)("temporary")
         if self.name in self._client.objects:
-            raise PreconditionFailed("exists")
+            raise cast(type[Exception], PreconditionFailed)("exists")
         record = _BlobRecord()
         record.payload = payload
         record.metadata = self.metadata

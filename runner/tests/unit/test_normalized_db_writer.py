@@ -345,6 +345,7 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
                     (run_id,),
                 )
             ).fetchone()
+        assert count is not None
         assert count["count"] == 1
 
         conflicting = result.model_copy(update={"metric_value": 11.0})
@@ -370,6 +371,7 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
                     (run_id,),
                 )
             ).fetchone()
+        assert count is not None
         assert count["count"] == 2
 
         await writer.insert_observation(
@@ -423,6 +425,7 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
                     (_NOW,),
                 )
             ).fetchone()
+        assert refresh_count is not None
         assert refresh_count["count"] == 1
     finally:
         await pool.close()
