@@ -28,6 +28,9 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _WS_URL = "wss://api.stepfun.ai/v1/realtime/audio"
 _SAMPLE_RATE = 24000
+# The closing audio.done frame repeats the whole clip as base64, so a long prompt
+# overruns the library default of 1 MiB.
+_MAX_WS_SIZE = 16 * 1024 * 1024
 
 
 class StepfunTTSProvider(TTSProvider):
@@ -57,7 +60,9 @@ class StepfunTTSProvider(TTSProvider):
         try:
             headers = {"Authorization": f"Bearer {self._api_key}"}
             async with ws_client.connect(
-                f"{_WS_URL}?model={self._model}", additional_headers=headers
+                f"{_WS_URL}?model={self._model}",
+                additional_headers=headers,
+                max_size=_MAX_WS_SIZE,
             ) as ws:
                 async for raw in ws:
                     if isinstance(raw, bytes):
