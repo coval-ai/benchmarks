@@ -70,4 +70,5 @@ PROVIDER_ENV: dict[str, str] = {
     "deepdub": "DEEPDUB_API_KEY",
     "atlas": "ATLAS_API_KEY",
     "nari": "NARI_API_KEY",
+    "stepfun": "STEPFUN_API_KEY",
 }

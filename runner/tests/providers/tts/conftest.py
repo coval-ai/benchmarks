@@ -57,6 +57,7 @@ def fake_settings(tmp_path: Path) -> Settings:
         elevenlabs_api_key=SecretStr("test-elevenlabs-key"),
         atlas_api_key=SecretStr("test-atlas-key"),
         nari_api_key=SecretStr("test-nari-key"),
+        stepfun_api_key=SecretStr("test-stepfun-key"),
         deepgram_api_key=SecretStr("test-deepgram-key"),
         hume_api_key=SecretStr("test-hume-key"),
         rime_api_key=SecretStr("test-rime-key"),
