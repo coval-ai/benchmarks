@@ -9,11 +9,15 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from httpx import AsyncClient
+from sqlalchemy import create_engine
 
 from coval_bench.registries import Benchmark, RegisteredModel
 from tests.api.conftest import (
@@ -35,7 +39,6 @@ def _seed_completed_evaluation(
     *,
     captured_at: datetime,
     sample_id: str,
-    metric_type: str = "WER",
 ) -> UUID:
     """Insert one completed metric evaluation using the current schema."""
     observation_id = uuid4()
@@ -54,9 +57,9 @@ def _seed_completed_evaluation(
         """
         INSERT INTO benchmarks_v2.metric_evaluations
           (id, observation_id, metric_type, metric_version, evaluation_variant, status)
-        VALUES (%s, %s, %s, 'v1', %s, 'queued')
+        VALUES (%s, %s, 'WER', 'v1', %s, 'queued')
         """,
-        (evaluation_id, observation_id, metric_type, sample_id),
+        (evaluation_id, observation_id, sample_id),
     )
     conn.execute(
         "UPDATE benchmarks_v2.metric_evaluations SET status='running' WHERE id=%s",
@@ -77,9 +80,24 @@ def _seed_completed_evaluation(
     return evaluation_id
 
 
+def _apply_metric_id_enforcement(dsn: str) -> None:
+    migration = import_module(
+        "coval_bench.db.migrations.versions.20260917_0039_normalized_metric_id_not_null"
+    )
+    engine = create_engine(dsn.replace("postgresql://", "postgresql+psycopg://"))
+    try:
+        with engine.connect() as connection:
+            context = MigrationContext.configure(connection)
+            operations = Operations(context)
+            with patch.object(migration, "op", operations):
+                migration.upgrade()
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture
 def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
-    """Create genuine pre-0036 NULL and post-0036 populated identities."""
+    """Create backfilled historical and post-0036 populated identities."""
     dsn = _make_db_url(postgresql)
     normalized_metric_ids = import_module(
         "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
@@ -108,6 +126,18 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
             normalized_metric_ids.upgrade()
+        for table in (
+            "metric_evaluations",
+            "dashboard_metric_values",
+            "metric_values_by_bucket",
+        ):
+            conn.execute(
+                f"UPDATE benchmarks_v2.{table} "  # noqa: S608
+                "SET metric_id = benchmarks_v2.metric_id_for_code(metric_type) "
+                "WHERE metric_id IS NULL"
+            )
+    _apply_metric_id_enforcement(dsn)
+    with psycopg.connect(dsn, autocommit=True) as conn:
         fresh_id = _seed_completed_evaluation(
             conn,
             run_id,
@@ -115,40 +145,6 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
             sample_id="fresh-row",
         )
     return int(run_id), historical_id, fresh_id
-
-
-@pytest.fixture
-def unknown_metric_id_row(postgresql: Any) -> tuple[int, UUID]:
-    """Create one pre-0036 NULL-ID row whose code is absent from the catalog."""
-    dsn = _make_db_url(postgresql)
-    normalized_metric_ids = import_module(
-        "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
-    )
-    with psycopg.connect(dsn, autocommit=True) as conn:
-        with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
-            normalized_metric_ids.downgrade()
-        run_row = conn.execute(
-            """
-            INSERT INTO benchmarks_v2.runs
-              (runner_sha, dataset_id, dataset_sha256, status, scheduled_at)
-            VALUES ('unknown-metric-test', 'historical-dataset', %s, 'succeeded', now())
-            RETURNING id
-            """,
-            ("c" * 64,),
-        ).fetchone()
-        assert run_row is not None
-        unknown_id = _seed_completed_evaluation(
-            conn,
-            run_row[0],
-            captured_at=datetime.now(UTC),
-            sample_id="unknown-row",
-            metric_type="HistoricalUnknown",
-        )
-        with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
-            normalized_metric_ids.upgrade()
-    return int(run_row[0]), unknown_id
 
 
 @pytest.fixture
@@ -600,7 +596,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
 
 
 @pytest.mark.asyncio
-async def test_mixed_historical_and_fresh_metric_ids_are_read_without_backfill(
+async def test_backfilled_historical_and_fresh_metric_ids_are_read_by_catalog_id(
     mixed_metric_id_rows: tuple[int, UUID, UUID], client: AsyncClient, postgresql: Any
 ) -> None:
     run_id, historical_id, fresh_id = mixed_metric_id_rows
@@ -650,21 +646,22 @@ async def test_mixed_historical_and_fresh_metric_ids_are_read_without_backfill(
         assert catalog_row is not None
         catalog_id = catalog_row[0]
     by_id = {row[0]: row[1] for row in identities}
-    assert by_id[historical_id] is None
+    assert by_id[historical_id] == catalog_id
     assert by_id[fresh_id] == catalog_id
-
-
-@pytest.mark.asyncio
-async def test_unknown_historical_metric_code_keeps_resolver_error(
-    unknown_metric_id_row: tuple[int, UUID], client: AsyncClient
-) -> None:
-    run_id, unknown_id = unknown_metric_id_row
-    assert unknown_id
-    with pytest.raises(psycopg.errors.ForeignKeyViolation, match="unknown metric definition"):
-        await client.get(
-            "/v2/results",
-            params={"run_id": run_id, "metric_type": "HistoricalUnknown"},
-        )
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        for table in (
+            "metric_evaluations",
+            "dashboard_metric_values",
+            "metric_values_by_bucket",
+        ):
+            row = await (
+                await conn.execute(
+                    f"SELECT count(*) FROM benchmarks_v2.{table} WHERE metric_id IS NULL"  # noqa: S608
+                )
+            ).fetchone()
+            assert row == (0,)
 
 
 @pytest.mark.asyncio
