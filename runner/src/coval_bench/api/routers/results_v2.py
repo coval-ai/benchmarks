@@ -267,7 +267,15 @@ async def list_results(
           FROM benchmarks_v2.metric_evaluations e
           JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
           JOIN benchmarks_v2.runs r ON r.id = o.run_id
-          JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
+          JOIN LATERAL (
+            -- LIMIT 1 keeps this as a per-evaluation lookup instead of a global join.
+            SELECT catalog.id, catalog.code
+            FROM benchmarks_v2.metrics catalog
+            WHERE catalog.id = COALESCE(
+              e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type)
+            )
+            LIMIT 1
+          ) m ON TRUE
           WHERE {" AND ".join(conditions)}
           ORDER BY o.captured_at DESC, e.id DESC
           LIMIT %(page_limit)s
