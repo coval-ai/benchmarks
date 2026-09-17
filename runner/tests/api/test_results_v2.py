@@ -9,11 +9,15 @@ from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import psycopg
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from httpx import AsyncClient
+from sqlalchemy import create_engine
 
 from coval_bench.registries import Benchmark, RegisteredModel
 from tests.api.conftest import (
@@ -76,9 +80,24 @@ def _seed_completed_evaluation(
     return evaluation_id
 
 
+def _apply_metric_id_enforcement(dsn: str) -> None:
+    migration = import_module(
+        "coval_bench.db.migrations.versions.20260917_0039_normalized_metric_id_not_null"
+    )
+    engine = create_engine(dsn.replace("postgresql://", "postgresql+psycopg://"))
+    try:
+        with engine.connect() as connection:
+            context = MigrationContext.configure(connection)
+            operations = Operations(context)
+            with patch.object(migration, "op", operations):
+                migration.upgrade()
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture
 def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
-    """Create genuine pre-0036 NULL and post-0036 populated identities."""
+    """Create backfilled historical and post-0036 populated identities."""
     dsn = _make_db_url(postgresql)
     normalized_metric_ids = import_module(
         "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
@@ -107,6 +126,18 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
             normalized_metric_ids.upgrade()
+        for table in (
+            "metric_evaluations",
+            "dashboard_metric_values",
+            "metric_values_by_bucket",
+        ):
+            conn.execute(
+                f"UPDATE benchmarks_v2.{table} "  # noqa: S608
+                "SET metric_id = benchmarks_v2.metric_id_for_code(metric_type) "
+                "WHERE metric_id IS NULL"
+            )
+    _apply_metric_id_enforcement(dsn)
+    with psycopg.connect(dsn, autocommit=True) as conn:
         fresh_id = _seed_completed_evaluation(
             conn,
             run_id,
@@ -134,6 +165,7 @@ async def _insert_evaluation(
     postgresql: Any,
     run_id: int,
     *,
+    evaluation_id: UUID | None = None,
     captured_at: datetime | None = None,
     metric_type: str = "TTFA",
     metric_version: str = "v1",
@@ -147,9 +179,10 @@ async def _insert_evaluation(
     sample_id: str | None = None,
     dataset_id: str = "stt-v2",
     benchmark: str = "STT",
+    observation_status: str = "succeeded",
     observation_id: UUID | None = None,
 ) -> tuple[UUID, UUID]:
-    evaluation_id = uuid4()
+    evaluation_id = evaluation_id or uuid4()
     existing_observation_id = observation_id
     observation_id = observation_id or uuid4()
     sample_id = sample_id or f"sample-{evaluation_id}"
@@ -183,6 +216,11 @@ async def _insert_evaluation(
                     captured_at or datetime.now(UTC),
                 ),
             )
+            if observation_status != "succeeded":
+                await conn.execute(
+                    "UPDATE benchmarks_v2.benchmark_observations SET status = %s WHERE id = %s",
+                    (observation_status, observation_id),
+                )
         await conn.execute(
             """
             INSERT INTO benchmarks_v2.metric_evaluations
@@ -401,6 +439,51 @@ async def test_evaluation_and_run_status_filters_are_independent(
 
 
 @pytest.mark.asyncio
+async def test_failed_observation_evaluation_is_eligible(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    run_id = await _insert_run(postgresql, status="partial")
+    evaluation_id, _ = await _insert_evaluation(
+        postgresql,
+        run_id,
+        status="failed",
+        value=None,
+        observation_status="failed",
+    )
+    response = await client.get(
+        "/v2/results",
+        params={"evaluation_status": "failed", "run_status": "partial"},
+    )
+    assert response.status_code == 200
+    assert [row["evaluation_id"] for row in response.json()["results"]] == [str(evaluation_id)]
+    assert response.json()["results"][0]["value"] is None
+
+
+@pytest.mark.asyncio
+async def test_newer_ineligible_evaluation_does_not_consume_page_slot(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    run_id = await _insert_run(postgresql, status="succeeded")
+    older_id, _ = await _insert_evaluation(
+        postgresql,
+        run_id,
+        captured_at=datetime.now(UTC) - timedelta(minutes=1),
+        status="succeeded",
+    )
+    await _insert_evaluation(
+        postgresql,
+        run_id,
+        captured_at=datetime.now(UTC),
+        status="failed",
+        value=None,
+    )
+    response = await client.get("/v2/results", params={"run_id": run_id, "limit": 1})
+    assert response.status_code == 200
+    assert [row["evaluation_id"] for row in response.json()["results"]] == [str(older_id)]
+    assert response.json()["next_cursor"] is None
+
+
+@pytest.mark.asyncio
 async def test_explicit_time_bounds_are_half_open(client: AsyncClient, postgresql: Any) -> None:
     run_id = await _insert_run(postgresql)
     since = datetime.now(UTC) - timedelta(hours=2)
@@ -440,6 +523,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
     first_id, observation_id = await _insert_evaluation(
         postgresql,
         run_id,
+        evaluation_id=UUID("00000000-0000-4000-8000-000000000001"),
         captured_at=captured_at,
         metric_type="TTFA",
         metric_version="v1",
@@ -448,29 +532,41 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
     second_id, _ = await _insert_evaluation(
         postgresql,
         run_id,
+        evaluation_id=UUID("00000000-0000-4000-8000-000000000004"),
         observation_id=observation_id,
         metric_type="TTFA",
         metric_version="v2",
         evaluation_variant="alt",
         components=(("second_component", 2, "ms"),),
     )
-    third_id, _ = await _insert_evaluation(
+    third_id, second_observation_id = await _insert_evaluation(
         postgresql,
         run_id,
+        evaluation_id=UUID("00000000-0000-4000-8000-000000000003"),
         captured_at=captured_at,
         metric_type="WER",
         components=(("third_component", 3, "percent"),),
     )
-    expected = sorted((str(first_id), str(second_id), str(third_id)), reverse=True)
+    fourth_id, _ = await _insert_evaluation(
+        postgresql,
+        run_id,
+        evaluation_id=UUID("00000000-0000-4000-8000-000000000002"),
+        captured_at=captured_at,
+        observation_id=second_observation_id,
+        metric_type="TTFT",
+        components=(("fourth_component", 4, "seconds"),),
+    )
+    expected = sorted((str(first_id), str(second_id), str(third_id), str(fourth_id)), reverse=True)
 
-    plain = await client.get("/v2/results", params={"run_id": run_id, "limit": 2})
+    plain = await client.get("/v2/results", params={"run_id": run_id, "limit": 3})
     detailed = await client.get(
         "/v2/results",
-        params={"run_id": run_id, "limit": 2, "include_components": "true"},
+        params={"run_id": run_id, "limit": 3, "include_components": "true"},
     )
     assert plain.status_code == detailed.status_code == 200
-    assert [row["evaluation_id"] for row in plain.json()["results"]] == expected[:2]
-    assert [row["evaluation_id"] for row in detailed.json()["results"]] == expected[:2]
+    assert [row["evaluation_id"] for row in plain.json()["results"]] == expected[:3]
+    assert [row["evaluation_id"] for row in detailed.json()["results"]] == expected[:3]
+    assert len({row["observation_id"] for row in plain.json()["results"]}) == 2
     assert plain.json()["next_cursor"] == detailed.json()["next_cursor"]
 
     second_page = await client.get(
@@ -484,11 +580,12 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
     )
     assert second_page.status_code == 200
     second_row = second_page.json()["results"][0]
-    assert [second_row["evaluation_id"]] == expected[2:]
+    assert [second_row["evaluation_id"]] == expected[3:]
     component_by_id = {
         str(first_id): {"first_component": {"value": 1, "unit": "ms"}},
         str(second_id): {"second_component": {"value": 2, "unit": "ms"}},
         str(third_id): {"third_component": {"value": 3, "unit": "percent"}},
+        str(fourth_id): {"fourth_component": {"value": 4, "unit": "seconds"}},
     }
     assert second_row["components"] == component_by_id[second_row["evaluation_id"]]
     assert second_page.json()["next_cursor"] is None
@@ -499,7 +596,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
 
 
 @pytest.mark.asyncio
-async def test_mixed_historical_and_fresh_metric_ids_are_read_without_backfill(
+async def test_backfilled_historical_and_fresh_metric_ids_are_read_by_catalog_id(
     mixed_metric_id_rows: tuple[int, UUID, UUID], client: AsyncClient, postgresql: Any
 ) -> None:
     run_id, historical_id, fresh_id = mixed_metric_id_rows
@@ -549,8 +646,22 @@ async def test_mixed_historical_and_fresh_metric_ids_are_read_without_backfill(
         assert catalog_row is not None
         catalog_id = catalog_row[0]
     by_id = {row[0]: row[1] for row in identities}
-    assert by_id[historical_id] is None
+    assert by_id[historical_id] == catalog_id
     assert by_id[fresh_id] == catalog_id
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), autocommit=True
+    ) as conn:
+        for table in (
+            "metric_evaluations",
+            "dashboard_metric_values",
+            "metric_values_by_bucket",
+        ):
+            row = await (
+                await conn.execute(
+                    f"SELECT count(*) FROM benchmarks_v2.{table} WHERE metric_id IS NULL"  # noqa: S608
+                )
+            ).fetchone()
+            assert row == (0,)
 
 
 @pytest.mark.asyncio
