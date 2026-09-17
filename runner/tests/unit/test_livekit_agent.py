@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -6,7 +7,13 @@ import pytest
 
 pytest.importorskip("livekit.agents")
 
-from coval_bench.livekit_agent.contract import load_contract, prompt_sha256, read_tool_definitions
+from coval_bench.livekit_agent.contract import (
+    endpointing_delay,
+    keyterms,
+    load_contract,
+    prompt_sha256,
+    read_tool_definitions,
+)
 from coval_bench.livekit_agent.correlation import from_attributes
 from coval_bench.livekit_agent.tools import MockToolsClient, build_tools
 from coval_bench.mocktools.codecs import Correlation
@@ -51,6 +58,33 @@ def test_missing_prompt_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SYSTEM_PROMPT", raising=False)
     with pytest.raises(ValueError, match="system prompt"):
         load_contract("dental")
+
+
+def test_endpointing_delay_lands_on_the_pinned_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """800 ms pin minus the 300 ms Silero silence window: the headline turn-taking parity number."""
+    monkeypatch.setenv("SYSTEM_PROMPT", "p")
+    contract = load_contract("dental")
+    assert contract.stack.turn_taking.end_of_turn_target_ms == 800
+    assert endpointing_delay(contract) == pytest.approx(0.5)
+    short = replace(
+        contract,
+        stack=contract.stack.model_copy(
+            update={
+                "turn_taking": contract.stack.turn_taking.model_copy(
+                    update={"end_of_turn_target_ms": 200}
+                )
+            }
+        ),
+    )
+    assert endpointing_delay(short) == 0.0
+
+
+def test_keyterms_are_required_and_split_on_commas(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DEEPGRAM_KEYTERMS", raising=False)
+    with pytest.raises(ValueError, match="DEEPGRAM_KEYTERMS"):
+        keyterms()
+    monkeypatch.setenv("DEEPGRAM_KEYTERMS", " Invisalign, amoxicillin ,, ")
+    assert keyterms() == ["Invisalign", "amoxicillin"]
 
 
 def test_correlation_prefers_the_coval_header_then_the_sip_number() -> None:

@@ -13,6 +13,8 @@ from coval_bench.scenarios import Stack, load_stack, public_contract_sha256, rea
 TOOLS_FILE = "tool-definitions.json"
 PROMPT_FILE = "system-prompt.txt"
 FIRST_MESSAGE_FILE = "first-message.txt"
+KEYTERMS_ENV = "DEEPGRAM_KEYTERMS"
+VAD_MIN_SILENCE_SECONDS = 0.3
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,21 @@ def load_contract(suite: str) -> Contract:
         digest=public_contract_sha256(suite),
         prompt_digest=prompt_sha256(system_prompt, first_message),
     )
+
+
+def endpointing_delay(contract: Contract) -> float:
+    """The fixed delay after VAD silence that lands on the pinned end-of-turn target."""
+    target = contract.stack.turn_taking.end_of_turn_target_ms / 1000
+    return max(target - VAD_MIN_SILENCE_SECONDS, 0.0)
+
+
+def keyterms() -> list[str]:
+    """The Deepgram keyterm list the stack pins for nova-3; unset is a deploy error, not silence."""
+    raw = os.environ.get(KEYTERMS_ENV, "")
+    terms = [term.strip() for term in raw.split(",") if term.strip()]
+    if not terms:
+        raise ValueError(f"{KEYTERMS_ENV} is unset; stack.json pins keyterm prompting for nova-3")
+    return terms
 
 
 def prompt_sha256(system_prompt: str, first_message: str) -> str:
