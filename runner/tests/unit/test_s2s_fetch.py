@@ -168,6 +168,7 @@ def _stub_writer() -> MagicMock:
     writer.reserve_run_id = AsyncMock(return_value=1)
     writer.ensure_capture_run = AsyncMock(return_value=writer.start_run.return_value)
     writer.conversation_ttft = AsyncMock(return_value={})
+    writer.conversation_first_sentence = AsyncMock(return_value={})
     writer.record_results = AsyncMock()
     writer.finish_run = AsyncMock()
     writer.refresh_bucket = AsyncMock()
@@ -959,7 +960,7 @@ def test_phonely_spec_is_the_llm_bank_text_agent() -> None:
     assert condition_for(DATASET_ID_LLM_BANK) == DatasetMetrics(
         benchmark=Benchmark.LLM,
         required=Metric.INSTRUCTION_FOLLOWING,
-        local=frozenset({Metric.TTFT}),
+        local=frozenset({Metric.TTFT, Metric.TIME_TO_FIRST_SENTENCE}),
     )
 
 
@@ -990,6 +991,7 @@ async def _fetch_llm(
 async def test_text_agent_uses_instruction_as_the_clean_bank_anchor() -> None:
     writer = _stub_writer()
     writer.conversation_ttft = AsyncMock(return_value={"s1": 0.4126})
+    writer.conversation_first_sentence = AsyncMock(return_value={"s1": 0.9, "s2": 1.1})
     values = [
         {"simulation_output_id": "s1", "value": "YES"},
         {"simulation_output_id": "s2", "value": "NO"},
@@ -1006,6 +1008,8 @@ async def test_text_agent_uses_instruction_as_the_clean_bank_anchor() -> None:
         (Metric.INSTRUCTION_FOLLOWING, "R1/s1", 100.0, "percent"),
         (Metric.INSTRUCTION_FOLLOWING, "R1/s2", 0.0, "percent"),
         (Metric.TTFT, "R1/s1", 0.413, "seconds"),
+        (Metric.TIME_TO_FIRST_SENTENCE, "R1/s1", 0.9, "seconds"),
+        (Metric.TIME_TO_FIRST_SENTENCE, "R1/s2", 1.1, "seconds"),
     }
     assert all(r.benchmark is Benchmark.LLM for r in rows)
     gaps = [log for log in logs if log["event"] == "local_metric_coverage_gap"]

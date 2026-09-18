@@ -37,6 +37,39 @@ def test_accumulator_times_the_first_meaningful_delta() -> None:
     assert result.total_ms == pytest.approx(500.0)
 
 
+def test_accumulator_times_the_first_sentence_when_the_next_delta_confirms_it() -> None:
+    turn = TurnAccumulator(0.0)
+    turn.feed(_chunk({"content": "Hours are 9 A.M."}), 0.1)
+    turn.feed(_chunk({"content": " to 6 P.M. on"}), 0.2)
+    turn.feed(_chunk({"content": " weekdays."}), 0.3)
+    turn.feed(_chunk({"content": " Anything else?"}, "stop"), 0.4)
+    result = turn.result(0.5)
+
+    assert result.first_sentence_ms == pytest.approx(300.0)
+    assert result.first_sentence_chars == len("Hours are 9 A.M. to 6 P.M. on weekdays.")
+
+
+def test_accumulator_finds_a_sentence_boundary_inside_one_delta() -> None:
+    turn = TurnAccumulator(0.0)
+    turn.feed(_chunk({"content": "Thanks! What is your"}), 0.2)
+    turn.feed(_chunk({"content": " phone number?"}, "stop"), 0.3)
+    result = turn.result(0.4)
+
+    assert result.first_sentence_ms == pytest.approx(200.0)
+    assert result.first_sentence_chars == len("Thanks!")
+
+
+def test_accumulator_falls_back_to_the_whole_turn_without_a_boundary() -> None:
+    turn = TurnAccumulator(0.0)
+    turn.feed(_chunk({"content": "one two"}), 0.1)
+    turn.feed(_chunk({"content": " three"}, "stop"), 0.2)
+    assert turn.result(0.3).first_sentence_ms == pytest.approx(300.0)
+
+    trailing = TurnAccumulator(0.0)
+    trailing.feed(_chunk({"content": "Done."}, "stop"), 0.1)
+    assert trailing.result(0.3).first_sentence_ms == pytest.approx(100.0)
+
+
 def test_accumulator_reassembles_tool_calls_and_keeps_truncation() -> None:
     turn = TurnAccumulator(5.0)
     first = {"index": 0, "id": "call-1", "function": {"name": "end", "arguments": '{"reason":'}}
@@ -47,6 +80,7 @@ def test_accumulator_reassembles_tool_calls_and_keeps_truncation() -> None:
 
     assert result.finish_reason == "tool_calls"
     assert result.ttft_ms == pytest.approx(200.0)
+    assert result.first_sentence_ms is None
     assert result.tool_calls == (
         {
             "id": "call-1",

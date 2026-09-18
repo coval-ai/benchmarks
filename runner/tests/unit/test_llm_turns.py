@@ -13,7 +13,11 @@ import psycopg.errors
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db.llm_turns import fetch_conversation_ttft, insert_turn
+from coval_bench.db.llm_turns import (
+    fetch_conversation_first_sentence,
+    fetch_conversation_ttft,
+    insert_turn,
+)
 
 from .conftest import apply_migrations, open_pool
 
@@ -29,11 +33,11 @@ def test_turn_timings_average_the_latest_row_per_turn(
         pool = await open_pool(llm_pg)
         try:
             assert await fetch_conversation_ttft(pool, []) == {}
-            for simulation_id, turn_index, ttft_ms in (
-                ("sim-1", 0, 100.0),
-                ("sim-1", 1, 900.0),
-                ("sim-1", 1, 300.0),
-                ("sim-2", 0, 500.0),
+            for simulation_id, turn_index, ttft_ms, first_sentence_ms in (
+                ("sim-1", 0, 100.0, 120.0),
+                ("sim-1", 1, 900.0, 950.0),
+                ("sim-1", 1, 300.0, 340.0),
+                ("sim-2", 0, 500.0, None),
             ):
                 await insert_turn(
                     pool,
@@ -43,10 +47,15 @@ def test_turn_timings_average_the_latest_row_per_turn(
                     model="phonely-agent",
                     ttft_ms=ttft_ms,
                     total_ms=ttft_ms + 50,
+                    first_sentence_ms=first_sentence_ms,
+                    first_sentence_chars=None if first_sentence_ms is None else 12,
                 )
             assert await fetch_conversation_ttft(pool, ["sim-1", "sim-2", "missing"]) == {
                 "sim-1": pytest.approx(0.2),
                 "sim-2": pytest.approx(0.5),
+            }
+            assert await fetch_conversation_first_sentence(pool, ["sim-1", "sim-2"]) == {
+                "sim-1": pytest.approx(0.23),
             }
         finally:
             await pool.close()

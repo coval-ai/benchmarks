@@ -211,7 +211,7 @@ def _load_schema(**connect_kwargs: Any) -> None:
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)
-        # Per-turn LLM proxy timing (mirrors migration 20260902_0026).
+        # Per-turn LLM proxy timing (mirrors migrations 20260902_0026 + 20260917_0040).
         conn.execute("""
             CREATE TABLE IF NOT EXISTS benchmarks_v2.llm_turns (
                 id             bigserial PRIMARY KEY,
@@ -224,6 +224,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
                         'NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)),
                 total_ms       double precision NOT NULL CHECK (total_ms >= ttft_ms),
                 output_tokens  integer CHECK (output_tokens IS NULL OR output_tokens >= 0),
+                first_sentence_ms    double precision CHECK (
+                    first_sentence_ms IS NULL
+                    OR (first_sentence_ms >= ttft_ms AND first_sentence_ms <= total_ms)),
+                first_sentence_chars integer CHECK (
+                    first_sentence_chars IS NULL OR first_sentence_chars > 0),
                 created_at     timestamptz NOT NULL DEFAULT now()
             )
         """)

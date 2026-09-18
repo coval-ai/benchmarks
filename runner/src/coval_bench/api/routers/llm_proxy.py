@@ -85,6 +85,8 @@ async def _record_turn(
             ttft_ms=result.ttft_ms,
             total_ms=result.total_ms,
             output_tokens=result.output_tokens,
+            first_sentence_ms=result.first_sentence_ms,
+            first_sentence_chars=result.first_sentence_chars,
         )
     except Exception:
         logger.error(

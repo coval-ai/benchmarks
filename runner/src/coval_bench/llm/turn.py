@@ -27,6 +27,8 @@ class TurnResult:
     ttft_ms: float
     total_ms: float
     output_tokens: int | None
+    first_sentence_ms: float | None
+    first_sentence_chars: int | None
 
 
 class TurnClient(Protocol):

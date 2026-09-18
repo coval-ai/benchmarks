@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from typing import Any
@@ -16,6 +17,12 @@ from coval_bench.llm.turn import Session, TurnError, TurnResult
 
 # Turns are seconds apart; a 5s keepalive would put a TLS handshake inside most TTFTs.
 LIMITS = httpx.Limits(max_connections=20, max_keepalive_connections=8, keepalive_expiry=300.0)
+
+# A sentence ends at terminal punctuation followed by whitespace, when the word
+# before it ends in a lowercase letter or digit. Uppercase excludes "A.M." style
+# initialisms, which voice-tuned models spell out.
+_SENTENCE_END = re.compile(r"(?<=[a-z0-9])[.!?]+[\"')\]]*(?=\s)")
+_SENTENCE_TAIL = re.compile(r"(?<=[a-z0-9])[.!?]+[\"')\]]*$")
 
 
 class UpstreamError(TurnError):
@@ -37,10 +44,30 @@ class TurnAccumulator:
         self._finish_reason: str | None = None
         self._complete = False
         self._output_tokens: int | None = None
+        self._first_sentence_at: float | None = None
+        self._first_sentence_chars: int | None = None
+        self._pending_sentence_at: float | None = None
 
     def _stamp_first_token(self, now: float) -> None:
         if self._first_token_at is None:
             self._first_token_at = now
+
+    def _track_sentence(self, delta: str, now: float) -> None:
+        if self._first_sentence_at is not None:
+            return
+        if self._pending_sentence_at is not None and delta[:1].isspace():
+            self._first_sentence_at = self._pending_sentence_at
+            self._first_sentence_chars = len("".join(self._content).rstrip())
+            return
+        self._pending_sentence_at = None
+        text = "".join(self._content) + delta
+        match = _SENTENCE_END.search(text)
+        if match is not None:
+            self._first_sentence_at = now
+            self._first_sentence_chars = match.end()
+        elif _SENTENCE_TAIL.search(text) is not None:
+            # The boundary is confirmed only once the next delta opens with whitespace.
+            self._pending_sentence_at = now
 
     def feed(self, line: str, now: float) -> None:
         """Consume one SSE line; irrelevant or malformed lines are ignored."""
@@ -79,6 +106,7 @@ class TurnAccumulator:
             content = delta.get("content")
             if isinstance(content, str) and content:
                 self._stamp_first_token(now)
+                self._track_sentence(content, now)
                 self._content.append(content)
             raw_tool_calls = delta.get("tool_calls")
             if isinstance(raw_tool_calls, list) and raw_tool_calls:
@@ -132,13 +160,27 @@ class TurnAccumulator:
         finish_reason = self._finish_reason or "stop"
         if tool_calls and finish_reason == "stop":
             finish_reason = "tool_calls"
+        content = "".join(self._content)
+        first_sentence_at = self._first_sentence_at
+        first_sentence_chars = self._first_sentence_chars
+        if first_sentence_at is None and self._pending_sentence_at is not None:
+            first_sentence_at = self._pending_sentence_at
+            first_sentence_chars = len(content.rstrip())
+        if first_sentence_at is None and content.strip():
+            # No boundary at all: the whole turn is the first sentence.
+            first_sentence_at = now
+            first_sentence_chars = len(content.strip())
         return TurnResult(
-            content="".join(self._content),
+            content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
             ttft_ms=(self._first_token_at - self._started_at) * 1000,
             total_ms=(now - self._started_at) * 1000,
             output_tokens=self._output_tokens,
+            first_sentence_ms=(
+                None if first_sentence_at is None else (first_sentence_at - self._started_at) * 1000
+            ),
+            first_sentence_chars=first_sentence_chars,
         )
 
 

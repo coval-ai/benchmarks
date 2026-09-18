@@ -108,8 +108,12 @@ def test_all_lifecycle_states_backfill_without_changing_payloads(historical: Any
     assert result.updated["metric_evaluations"] == 4
     assert result.updated["dashboard_metric_values"] == 1
     assert _payloads(historical) == before
+    # Apply registers definitions added since the seed, never touching existing rows.
     assert (
-        historical.execute("SELECT * FROM benchmarks_v2.metrics ORDER BY id").fetchall() == catalog
+        historical.execute("SELECT * FROM benchmarks_v2.metrics ORDER BY id").fetchall()[
+            : len(catalog)
+        ]
+        == catalog
     )
     assert (
         historical.execute("SELECT * FROM benchmarks_v2.dashboard_summary_state").fetchall()
