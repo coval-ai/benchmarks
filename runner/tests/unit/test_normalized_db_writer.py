@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
@@ -307,6 +308,127 @@ async def _run_dual_write_retry_case(
         cur.execute("SELECT status FROM benchmarks_v2.metric_evaluations")
         row = cur.fetchone()
         assert row is not None and row[0] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_exact_capture_replay_serializes_and_promotes_pending_run(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    _migrate(pg_conn)
+    pool = await _pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run = await writer.start_run(dataset_id="stt-v1", dataset_sha256=_SHA, scheduled_at=_NOW)
+        run_id = _required(run.id)
+        result = _dual_result(run_id)
+        captured_at = _NOW + timedelta(seconds=1)
+        first_ids = await writer.reserve_result_ids(1)
+
+        await asyncio.gather(
+            writer.record_results_exact(
+                [result],
+                created_at=captured_at,
+                capture_identity="capture-one",
+                result_ids=first_ids,
+            ),
+            writer.record_results_exact(
+                [result],
+                created_at=captured_at,
+                capture_identity="capture-one",
+                result_ids=first_ids,
+            ),
+        )
+        async with pool.connection() as conn:
+            count = await (
+                await conn.execute(
+                    "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
+                    (run_id,),
+                )
+            ).fetchone()
+        assert count is not None
+        assert count["count"] == 1
+
+        conflicting = result.model_copy(update={"metric_value": 11.0})
+        with pytest.raises(ValueError, match="conflicts"):
+            await writer.record_results_exact(
+                [conflicting],
+                created_at=captured_at,
+                capture_identity="capture-one",
+                result_ids=first_ids,
+            )
+
+        second_ids = await writer.reserve_result_ids(1)
+        await writer.record_results_exact(
+            [result],
+            created_at=captured_at,
+            capture_identity="capture-two",
+            result_ids=second_ids,
+        )
+        async with pool.connection() as conn:
+            count = await (
+                await conn.execute(
+                    "SELECT count(*) FROM benchmarks_v2.results WHERE run_id = %s",
+                    (run_id,),
+                )
+            ).fetchone()
+        assert count is not None
+        assert count["count"] == 2
+
+        await writer.insert_observation(
+            Observation(
+                run_id=run_id,
+                dataset_id="stt-v1",
+                dataset_sha256=_SHA,
+                sample_id="sample",
+                provider="provider",
+                model="model",
+                benchmark=Benchmark.STT,
+                source_kind=ObservationSourceKind.DATASET_AUDIO,
+                status=ObservationStatus.SUCCEEDED,
+            )
+        )
+
+        finished_at = _NOW + timedelta(minutes=1)
+        await writer.finish_run_exact(
+            run_id,
+            status=RunStatus.PARTIAL,
+            finished_at=finished_at,
+            error="normalized capture pending",
+        )
+        await writer.finish_run_exact(
+            run_id,
+            status=RunStatus.SUCCEEDED,
+            finished_at=finished_at,
+            allow_capture_recovery=True,
+        )
+        stored = await writer.get_run(run_id)
+        assert stored.status is RunStatus.SUCCEEDED
+        assert stored.finished_at == finished_at
+        assert stored.error is None
+
+        await writer.mark_run_capture_pending(run_id, finished_at=finished_at)
+        pending = await writer.get_run(run_id)
+        assert pending.status is RunStatus.PARTIAL
+        assert pending.error == "normalized capture pending"
+        await writer.finish_run_exact(
+            run_id,
+            status=RunStatus.SUCCEEDED,
+            finished_at=finished_at,
+            allow_capture_recovery=True,
+        )
+
+        async with pool.connection() as conn:
+            refresh_count = await (
+                await conn.execute(
+                    """SELECT count(*) FROM benchmarks_v2.dashboard_source_refreshes
+                       WHERE bucket_at = %s""",
+                    (_NOW,),
+                )
+            ).fetchone()
+        assert refresh_count is not None
+        assert refresh_count["count"] == 1
+    finally:
+        await pool.close()
 
 
 @pytest.mark.parametrize("mode", ["observation", "evaluation", "complete"])

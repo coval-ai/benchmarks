@@ -50,3 +50,17 @@ def test_normalized_dual_write_is_default_off_and_requires_bucket() -> None:
     )
     with pytest.raises(ValueError, match="benchmark_artifact_bucket"):
         _settings(normalized_dual_write_enabled=True)
+
+
+def test_required_normalized_capture_requires_explicit_dual_write_and_bucket() -> None:
+    assert _settings().normalized_capture_required is False
+    with pytest.raises(ValueError, match="normalized_dual_write_enabled"):
+        _settings(normalized_capture_required=True, benchmark_artifact_bucket="private")
+    with pytest.raises(ValueError, match="benchmark_artifact_bucket"):
+        _settings(normalized_capture_required=True, normalized_dual_write_enabled=True)
+    settings = _settings(
+        normalized_capture_required=True,
+        normalized_dual_write_enabled=True,
+        benchmark_artifact_bucket="private",
+    )
+    assert settings.normalized_capture_required is True

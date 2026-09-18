@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # invalid deployment rather than a silent partial capture.
     benchmark_artifact_bucket: str = ""
     normalized_dual_write_enabled: bool = False
+    # Required mode makes the immutable capture envelope the acknowledgement
+    # boundary.  It is intentionally opt-in and never enables dual writes by
+    # itself.
+    normalized_capture_required: bool = False
     # Dashboard reads can be validated independently from additive capture.
     normalized_dashboard_reads_enabled: bool = False
 
@@ -73,6 +77,14 @@ class Settings(BaseSettings):
         if self.normalized_dual_write_enabled and not self.benchmark_artifact_bucket:
             raise ValueError(
                 "benchmark_artifact_bucket is required when normalized dual write is enabled"
+            )
+        if self.normalized_capture_required and not self.normalized_dual_write_enabled:
+            raise ValueError(
+                "normalized_dual_write_enabled is required when normalized capture is required"
+            )
+        if self.normalized_capture_required and not self.benchmark_artifact_bucket:
+            raise ValueError(
+                "benchmark_artifact_bucket is required when normalized capture is required"
             )
         return self
 
