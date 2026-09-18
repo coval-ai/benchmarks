@@ -60,6 +60,9 @@ SIMULATION_HEADER = "X-Simulation-Id"
 # most one batch can hold a thread.
 EXPORT_TIMEOUT_S = 30
 MAX_CONCURRENT_EXPORTS = 8
+# Exports waiting on the semaphore hold their calls and responses in memory, so
+# a slow Coval drops new copies past this point instead of growing without end.
+MAX_PENDING_EXPORTS = 64
 
 # One provider for the process, with no span processor attached: spans are
 # collected by hand and posted as a batch, rather than exported one by one as
@@ -240,6 +243,15 @@ def schedule_export(
             logger.warning("mock_tool_traces_disabled", reason="no coval api key configured")
             _disabled_warned = True
         return False
+    if len(_tasks) >= MAX_PENDING_EXPORTS:
+        logger.warning(
+            "mock_tool_spans_dropped",
+            simulation_id=simulation_id,
+            platform=platform,
+            count=len(calls),
+            pending=len(_tasks),
+        )
+        return False
     task = asyncio.get_running_loop().create_task(
         _export(
             api_key.get_secret_value(),
@@ -256,3 +268,16 @@ def schedule_export(
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
     return True
+
+
+async def drain(timeout_s: float = EXPORT_TIMEOUT_S) -> int:
+    """Wait for queued exports at shutdown; returns how many were abandoned."""
+    if not _tasks:
+        return 0
+    _, pending = await asyncio.wait(set(_tasks), timeout=timeout_s)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+        logger.warning("mock_tool_spans_abandoned", count=len(pending))
+    return len(pending)

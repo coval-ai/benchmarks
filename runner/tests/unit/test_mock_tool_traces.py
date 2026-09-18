@@ -261,6 +261,68 @@ async def test_with_a_key_the_batch_is_posted_off_the_request_path(
     assert posted == [("sim_abc123", "https://coval.invalid/v1/traces", 2)]
 
 
+async def test_the_pending_queue_is_bounded_and_overflow_is_dropped_with_a_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = asyncio.Event()
+
+    async def held_export(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
+        await gate.wait()
+
+    monkeypatch.setattr(traces, "_export", held_export)
+    monkeypatch.setattr(traces, "MAX_PENDING_EXPORTS", 2)
+    warnings: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        traces.logger, "warning", lambda event, **kw: warnings.append((str(event), kw))
+    )
+    key = SecretStr("k-test")
+
+    assert schedule_export(api_key=key, **_common()) is True
+    assert schedule_export(api_key=key, **_common()) is True
+    assert schedule_export(api_key=key, **_common()) is False
+    assert len(traces._tasks) == 2  # noqa: SLF001
+    assert warnings == [
+        (
+            "mock_tool_spans_dropped",
+            {"simulation_id": "sim_abc123", "platform": "vapi", "count": 1, "pending": 2},
+        )
+    ]
+
+    gate.set()
+    await asyncio.gather(*traces._tasks)  # noqa: SLF001
+
+
+async def test_drain_waits_for_queued_exports(monkeypatch: pytest.MonkeyPatch) -> None:
+    finished = asyncio.Event()
+
+    async def quick_export(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
+        await asyncio.sleep(0)
+        finished.set()
+
+    monkeypatch.setattr(traces, "_export", quick_export)
+    schedule_export(api_key=SecretStr("k-test"), **_common())
+
+    assert await traces.drain(timeout_s=1) == 0
+    assert finished.is_set()
+    assert not traces._tasks  # noqa: SLF001
+
+
+async def test_drain_abandons_a_stuck_export_after_the_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def stuck_export(*_args: Any, **_kwargs: Any) -> None:  # noqa: ANN401
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(traces, "_export", stuck_export)
+    warnings: list[str] = []
+    monkeypatch.setattr(traces.logger, "warning", lambda event, **_kw: warnings.append(str(event)))
+    schedule_export(api_key=SecretStr("k-test"), **_common())
+
+    assert await traces.drain(timeout_s=0.01) == 1
+    assert warnings == ["mock_tool_spans_abandoned"]
+    assert not traces._tasks  # noqa: SLF001
+
+
 def _common() -> dict[str, Any]:
     return {
         "api_base": "https://coval.invalid/v1",
