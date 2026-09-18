@@ -43,11 +43,12 @@ _items: OtelCounter | None = None
 _runs: OtelCounter | None = None
 
 
-def _build_resource(settings: Settings) -> Resource:
+def build_resource(settings: Settings, service_name: str = SERVICE_NAME) -> Resource:
+    """Who is reporting: shared by the metrics pipeline and the mock-tool traces."""
     instance = os.environ.get("CLOUD_RUN_EXECUTION") or socket.gethostname()
     return Resource.create(
         {
-            "service.name": SERVICE_NAME,
+            "service.name": service_name,
             "service.instance.id": instance,
             "deployment.environment": settings.otel_deployment_environment,
         }
@@ -82,7 +83,7 @@ def configure_metrics(settings: Settings, *, readers: Sequence[MetricReader] | N
             )
             return
 
-    _provider = MeterProvider(resource=_build_resource(settings), metric_readers=list(readers))
+    _provider = MeterProvider(resource=build_resource(settings), metric_readers=list(readers))
     meter = _provider.get_meter("coval_bench")
     _items = meter.create_counter(
         ITEMS_COUNTER, unit="1", description="Dataset items run per provider, model and result"

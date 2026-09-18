@@ -33,12 +33,15 @@ from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
+from coval_bench.mocktools.traces import coval_exporter, export_tool_spans
+from coval_bench.telemetry import build_resource
 
 logger = structlog.get_logger("coval_bench.mocktools")
 
 router = APIRouter(prefix="/mock", tags=["mock-tools"])
 
 SECRET_HEADER = "X-Mock-Tools-Key"  # noqa: S105 — a header name, not a credential
+TRACE_SERVICE_NAME = "benchmarks-mock-tools"
 
 
 def require_mock_secret(
@@ -91,6 +94,7 @@ async def _answer(
     pool: AsyncConnectionPool[Any],
 ) -> JSONResponse:
     started = time.perf_counter()
+    started_ns = time.time_ns()
     calls = codec.decode(body, request.headers, tool)
     correlation = codec.correlate(body, request.headers)
     outcomes = [dispatcher.call(call.tool, call.args) for call in calls]
@@ -100,6 +104,7 @@ async def _answer(
     if remaining > 0:
         await asyncio.sleep(remaining)
     latency_ms = (time.perf_counter() - started) * 1000 / max(len(calls), 1)
+    ended_ns = time.time_ns()
 
     for call, outcome in zip(calls, outcomes, strict=True):
         background.add_task(
@@ -125,6 +130,23 @@ async def _answer(
         )
     if not calls:
         logger.warning("mock_tool_call_empty", platform=codec.name)
+    elif correlation.simulation_id and settings.coval_api_key:
+        background.add_task(
+            export_tool_spans,
+            coval_exporter(settings.coval_api_key.get_secret_value(), correlation.simulation_id),
+            build_resource(settings, TRACE_SERVICE_NAME),
+            codec.name,
+            calls,
+            outcomes,
+            started_ns,
+            ended_ns,
+        )
+    else:
+        logger.warning(
+            "mock_tool_spans_skipped",
+            platform=codec.name,
+            reason="no simulation id" if not correlation.simulation_id else "no coval api key",
+        )
 
     payload, status = codec.encode(calls, outcomes)
     return JSONResponse(payload, status_code=status)
