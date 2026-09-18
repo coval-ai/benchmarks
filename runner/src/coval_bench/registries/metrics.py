@@ -33,6 +33,7 @@ class Metric(StrEnum):
     V2V = "V2V"
     INSTRUCTION_FOLLOWING = "InstructionFollowing"
     INTERRUPTION_RATE = "InterruptionRate"
+    CALL_LENGTH = "CallLength"
     EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
 
 
@@ -204,6 +205,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=2,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    Metric.CALL_LENGTH: MetricSpec(
+        display_name="Call Length",
+        units="seconds",
+        direction=MetricDirection.LOWER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
     Metric.EXPECTED_BEHAVIOR_ADHERENCE: MetricSpec(
         display_name="Expected Behavior Adherence",
         # Coval reports criteria_met_count / criteria_total_count as a 0-1
@@ -252,6 +260,7 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.V2V,
         Metric.INSTRUCTION_FOLLOWING,
         Metric.INTERRUPTION_RATE,
+        Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
     )
 }

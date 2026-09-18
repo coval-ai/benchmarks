@@ -29,6 +29,7 @@ def test_metric_values_match_stored_strings() -> None:
         "V2V",
         "InstructionFollowing",
         "InterruptionRate",
+        "CallLength",
         "ExpectedBehaviorAdherence",
     }
 
@@ -47,6 +48,7 @@ def test_units_match_stored_strings() -> None:
         Metric.V2V: "milliseconds",
         Metric.INSTRUCTION_FOLLOWING: "percent",
         Metric.INTERRUPTION_RATE: "per_minute",
+        Metric.CALL_LENGTH: "seconds",
         Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected

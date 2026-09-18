@@ -27,7 +27,9 @@ def test_bank_board_anchors_on_latency_and_carries_the_judge() -> None:
     under the instruction metric so the adherence chart needs no second series."""
     bank = conditions.condition_for(conditions.DATASET_ID_BANK)
     assert bank.required is Metric.V2V
-    assert bank.optional == frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE})
+    assert bank.optional == frozenset(
+        {Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
+    )
     assert (
         conditions.dataset_id_for(conditions.FAMILY_BANK, conditions.Condition.CLEAN)
         == conditions.DATASET_ID_BANK
@@ -51,7 +53,7 @@ def test_bank_tiers_anchor_on_the_judge_and_never_ask_for_latency() -> None:
         assert conditions.dataset_id_for(conditions.FAMILY_BANK, condition) == dataset_id
         contract = conditions.condition_for(dataset_id)
         assert contract.required is Metric.INSTRUCTION_FOLLOWING
-        assert contract.optional == frozenset({Metric.INTERRUPTION_RATE})
+        assert contract.optional == frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH})
         assert Metric.V2V not in contract.fetched
 
 
