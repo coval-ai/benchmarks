@@ -70,6 +70,32 @@ async def test_inworld_success(fake_api_key: SecretStr, audio_pcm_bytes: bytes) 
 
 
 @pytest.mark.asyncio
+async def test_inworld_ends_stream_with_close_only(
+    fake_api_key: SecretStr, audio_pcm_bytes: bytes
+) -> None:
+    """Only closeStream follows the audio; endTurn makes Inworld emit a phantom final."""
+    events = load_fixture_events("inworld", "events-success")
+    ws = FakeWebSocket(events, server_closes=False)
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=ws)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    provider = InworldSTTProvider(api_key=fake_api_key)
+
+    with patch("coval_bench.providers.stt.inworld.ws_client.connect", return_value=cm):
+        result = await provider.measure_ttft(
+            audio_data=audio_pcm_bytes,
+            channels=1,
+            sample_width=2,
+            sample_rate=16000,
+            realtime_resolution=0.5,
+        )
+
+    assert result.error is None
+    control = [json.loads(m) for m in ws._sent if "audioChunk" not in m][1:]
+    assert control == [{"closeStream": {}}]
+
+
+@pytest.mark.asyncio
 async def test_inworld_excludes_interim_segments(
     fake_api_key: SecretStr, audio_pcm_bytes: bytes
 ) -> None:
