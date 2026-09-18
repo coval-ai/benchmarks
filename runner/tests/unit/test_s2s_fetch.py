@@ -20,7 +20,7 @@ from structlog.testing import capture_logs
 
 from coval_bench.config import Settings
 from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
-from coval_bench.logging import log_run_failed, log_run_partial
+from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
 from coval_bench.runner.capture import (
@@ -1502,8 +1502,42 @@ def test_dataset_identity_skips_known_and_faults_unknown_personas() -> None:
     # Known but deliberately not ingested.
     assert fetch_v2v._dataset_identity("TS1", "PSKIP", persona_conditions=personas) is None
     # Unmapped: loud, because counting it as clean would be invisible.
-    with pytest.raises(ValueError, match="no condition mapped"):
+    with pytest.raises(fetch_v2v.UnmappedPersona, match="no condition mapped"):
         fetch_v2v._dataset_identity("TS1", "PUNKNOWN", persona_conditions=personas)
+
+
+@pytest.mark.asyncio
+async def test_unmapped_persona_skips_only_its_run() -> None:
+    """One stray persona must not fail the provider or hide the mapped runs."""
+    writer = _stub_writer()
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PC"},
+        {"run_id": "R2", "create_time": _iso(timedelta(hours=2)), "persona_id": "PUNKNOWN"},
+    )
+    values = [{"simulation_output_id": "s1", "value": 0.5}]
+    unmapped: dict[str, int] = {}
+    with capture_logs() as logs:
+        async with _fake_client(list_json, _run_json(values)) as client:
+            status, ingested = await fetch_v2v._fetch_one_provider(
+                client,
+                writer,
+                spec=SPEC,
+                agent_id="a1",
+                metric_ids=LATENCY_IDS,
+                test_set_id="TS1",
+                persona_conditions={"PC": Condition.CLEAN},
+                period_seconds=10_800,
+                stale_grace_seconds=5_400,
+                unmapped_personas=unmapped,
+            )
+    assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
+    assert unmapped == {"PUNKNOWN": 1}
+    assert [
+        (log["coval_run_id"], log["persona_id"])
+        for log in logs
+        if log["event"] == "run_persona_unmapped"
+    ] == [("R2", "PUNKNOWN")]
+    assert not any(log["event"] == "provider_fetch_failed" for log in logs)
 
 
 def test_dataset_identity_map_supersedes_the_noisy_setting() -> None:
@@ -2221,6 +2255,16 @@ def test_log_run_partial_emits_run_partial_event() -> None:
     with capture_logs() as logs:
         log_run_partial("s2s fetch has no fresh data from: openai")
     assert [entry["event"] for entry in logs] == ["RUN_PARTIAL"]
+
+
+def test_log_run_unmapped_persona_emits_its_event_with_the_fix() -> None:
+    with capture_logs() as logs:
+        log_run_unmapped_persona({"PB": 4, "PA": 1})
+    assert [entry["event"] for entry in logs] == ["RUN_UNMAPPED_PERSONA"]
+    assert logs[0]["error"] == (
+        "runs skipped for unmapped personas: PA (1), PB (4); "
+        "map or skip them in coval_s2s_condition_personas"
+    )
 
 
 def test_log_run_failed_emits_run_failed_event() -> None:

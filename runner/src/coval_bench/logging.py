@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Mapping
 from typing import Any, Literal
 
 import structlog
@@ -76,7 +77,8 @@ _run_logger = structlog.get_logger("coval_bench.run")
 def _emit_run_event(event: str, error: str, exc: BaseException | None = None) -> None:
     """Emit one structured run-status line the infra alert metrics grep for.
 
-    The literal ``event`` value (``RUN_FAILED`` / ``RUN_PARTIAL``) is the contract
+    The literal ``event`` value (``RUN_FAILED`` / ``RUN_PARTIAL`` /
+    ``RUN_UNMAPPED_PERSONA``) is the contract
     each Cloud Logging metric in benchmark-infra filters on. Centralized here so
     every entrypoint emits the identical string and they can't drift. structlog
     uses the first positional arg as the ``event`` key.
@@ -92,6 +94,20 @@ def log_run_failed(error: str, exc: BaseException | None = None) -> None:
 def log_run_partial(error: str, exc: BaseException | None = None) -> None:
     """Partial run -> ``RUN_PARTIAL`` (some providers failed; the job still exits 0)."""
     _emit_run_event("RUN_PARTIAL", error, exc)
+
+
+def log_run_unmapped_persona(personas: Mapping[str, int]) -> None:
+    """Runs skipped for personas missing from the condition map -> ``RUN_UNMAPPED_PERSONA``.
+
+    Only those runs are skipped and the job still exits 0; the event repeats every
+    tick until each persona is mapped or marked skip.
+    """
+    listing = ", ".join(f"{persona_id} ({count})" for persona_id, count in sorted(personas.items()))
+    _emit_run_event(
+        "RUN_UNMAPPED_PERSONA",
+        f"runs skipped for unmapped personas: {listing}; "
+        "map or skip them in coval_s2s_condition_personas",
+    )
 
 
 def uvicorn_log_config(level: LogLevel = "INFO") -> dict[str, Any]:
