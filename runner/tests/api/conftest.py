@@ -603,6 +603,9 @@ async def app(
     # Battle generation screens prompts through the moderation API. Without this the
     # suite would reach the network on any machine that has the key exported.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # The mock appliance posts a span to Coval for every correlated tool call when a
+    # key is present. A developer's exported key must not turn the suite into traffic.
+    monkeypatch.delenv("COVAL_API_KEY", raising=False)
 
     # Arena pairing drops providers whose key is not configured, so a service with no
     # keys has no roster and every battle is a 503. Prod mounts every provider key, so

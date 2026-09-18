@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The /mock appliance hands Coval a span per call, only when it knows which simulation."""
+"""The /mock appliance queues Coval's copy of a call, only when it knows which simulation."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from httpx import AsyncClient
 from pydantic import SecretStr
 
 import coval_bench.api.routers.mocktools as router_module
+from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
 from tests.api.test_mocktools import AUTH, PHONE, SIMULATION_ID
 from tests.api.test_mocktools import mock_app as _mock_app
 
@@ -24,33 +25,26 @@ COVAL_KEY = "test-coval-key"  # noqa: S105 — a fixture value, not a credential
 
 
 @pytest.fixture
-def exported(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
-    """Capture what the router hands to the exporter instead of posting to Coval."""
+def queued(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture what the router queues for Coval instead of posting anything."""
     seen: list[dict[str, Any]] = []
 
-    def fake_export(
-        exporter: Any,  # noqa: ANN401
-        resource: Any,  # noqa: ANN401
-        platform: str,
-        calls: Any,  # noqa: ANN401
-        outcomes: Any,  # noqa: ANN401
-        started_ns: int,
-        ended_ns: int,
-    ) -> int:
+    def fake_schedule(**kwargs: Any) -> bool:  # noqa: ANN401
         seen.append(
             {
-                "simulation_id": exporter._headers["X-Simulation-Id"],  # noqa: SLF001
-                "api_key": exporter._headers["X-API-Key"],  # noqa: SLF001
-                "service": dict(resource.attributes)["service.name"],
-                "platform": platform,
-                "tools": [call.tool for call in calls],
-                "modes": [o.resolution.mode if o.resolution else "rejected" for o in outcomes],
-                "ordered": started_ns <= ended_ns,
+                "simulation_id": kwargs["simulation_id"],
+                "api_key": kwargs["api_key"].get_secret_value() if kwargs["api_key"] else None,
+                "api_base": kwargs["api_base"],
+                "service": dict(kwargs["resource"]().attributes)["service.name"],
+                "platform": kwargs["platform"],
+                "tools": [call.tool for call in kwargs["calls"]],
+                "modes": [outcome.mode for outcome in kwargs["outcomes"]],
+                "ordered": kwargs["started_ns"] <= kwargs["ended_ns"],
             }
         )
-        return len(calls)
+        return kwargs["api_key"] is not None
 
-    monkeypatch.setattr(router_module, "export_tool_spans", fake_export)
+    monkeypatch.setattr(router_module, "schedule_export", fake_schedule)
     return seen
 
 
@@ -60,8 +54,8 @@ def _with_key(app: FastAPI) -> None:
     )
 
 
-async def test_a_correlated_call_is_handed_to_coval(
-    client: AsyncClient, mock_app: FastAPI, exported: list[dict[str, Any]]
+async def test_a_correlated_call_is_queued_for_coval(
+    client: AsyncClient, mock_app: FastAPI, queued: list[dict[str, Any]]
 ) -> None:
     _with_key(mock_app)
     response = await client.post(
@@ -70,11 +64,12 @@ async def test_a_correlated_call_is_handed_to_coval(
         headers={**AUTH, "X-Coval-Simulation-Id": SIMULATION_ID},
     )
     assert response.status_code == 200
-    assert exported == [
+    assert queued == [
         {
             "simulation_id": SIMULATION_ID,
             "api_key": COVAL_KEY,
-            "service": router_module.TRACE_SERVICE_NAME,
+            "api_base": mock_app.state.settings.coval_api_base,
+            "service": TRACE_SERVICE_NAME,
             "platform": "generic",
             "tools": ["lookup_patient"],
             "modes": ["exact"],
@@ -83,20 +78,21 @@ async def test_a_correlated_call_is_handed_to_coval(
     ]
 
 
-async def test_a_call_without_a_simulation_id_posts_nothing(
-    client: AsyncClient, mock_app: FastAPI, exported: list[dict[str, Any]]
+async def test_a_call_without_a_simulation_id_queues_nothing(
+    client: AsyncClient, mock_app: FastAPI, queued: list[dict[str, Any]]
 ) -> None:
     _with_key(mock_app)
     response = await client.post(
         "/mock/generic/lookup_patient", json={"phone": PHONE}, headers=AUTH
     )
     assert response.status_code == 200
-    assert exported == []
+    assert queued == []
 
 
-async def test_a_call_without_a_coval_key_posts_nothing(
-    client: AsyncClient, mock_app: FastAPI, exported: list[dict[str, Any]]
+async def test_the_key_decision_is_left_to_the_scheduler(
+    client: AsyncClient, mock_app: FastAPI, queued: list[dict[str, Any]]
 ) -> None:
+    """The router hands over whatever key it has; the scheduler owns the once-only warning."""
     mock_app.state.settings = mock_app.state.settings.model_copy(update={"coval_api_key": None})
     response = await client.post(
         "/mock/generic/lookup_patient",
@@ -104,11 +100,11 @@ async def test_a_call_without_a_coval_key_posts_nothing(
         headers={**AUTH, "X-Coval-Simulation-Id": SIMULATION_ID},
     )
     assert response.status_code == 200
-    assert exported == []
+    assert [entry["api_key"] for entry in queued] == [None]
 
 
-async def test_a_vapi_batch_is_one_export_with_every_call(
-    client: AsyncClient, mock_app: FastAPI, exported: list[dict[str, Any]]
+async def test_a_vapi_batch_is_queued_once_with_every_call(
+    client: AsyncClient, mock_app: FastAPI, queued: list[dict[str, Any]]
 ) -> None:
     _with_key(mock_app)
     body = {
@@ -134,6 +130,6 @@ async def test_a_vapi_batch_is_one_export_with_every_call(
         "/mock/vapi", json=body, headers={**AUTH, "X-Coval-Simulation-Id": SIMULATION_ID}
     )
     assert response.status_code == 200
-    assert len(exported) == 1
-    assert exported[0]["platform"] == "vapi"
-    assert exported[0]["tools"] == ["lookup_patient", "check_availability"]
+    assert len(queued) == 1
+    assert queued[0]["platform"] == "vapi"
+    assert queued[0]["tools"] == ["lookup_patient", "check_availability"]

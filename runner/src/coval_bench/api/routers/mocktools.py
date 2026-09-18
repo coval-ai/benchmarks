@@ -33,7 +33,8 @@ from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
-from coval_bench.mocktools.traces import coval_exporter, export_tool_spans
+from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
+from coval_bench.mocktools.traces import schedule_export
 from coval_bench.telemetry import build_resource
 
 logger = structlog.get_logger("coval_bench.mocktools")
@@ -41,7 +42,6 @@ logger = structlog.get_logger("coval_bench.mocktools")
 router = APIRouter(prefix="/mock", tags=["mock-tools"])
 
 SECRET_HEADER = "X-Mock-Tools-Key"  # noqa: S105 — a header name, not a credential
-TRACE_SERVICE_NAME = "benchmarks-mock-tools"
 
 
 def require_mock_secret(
@@ -114,7 +114,7 @@ async def _answer(
             args=call.args,
             response=outcome.response,
             latency_ms=latency_ms,
-            matched_seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            matched_seed=outcome.matched_seed,
             simulation_id=correlation.simulation_id,
             caller_number=correlation.caller_number,
         )
@@ -123,30 +123,27 @@ async def _answer(
             platform=codec.name,
             tool=call.tool,
             status=outcome.http_status,
-            mode=outcome.resolution.mode if outcome.resolution else "rejected",
-            seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            mode=outcome.mode,
+            seed=outcome.matched_seed,
             simulation_id=correlation.simulation_id,
             correlation_source=correlation.source,
         )
     if not calls:
         logger.warning("mock_tool_call_empty", platform=codec.name)
-    elif correlation.simulation_id and settings.coval_api_key:
-        background.add_task(
-            export_tool_spans,
-            coval_exporter(settings.coval_api_key.get_secret_value(), correlation.simulation_id),
-            build_resource(settings, TRACE_SERVICE_NAME),
-            codec.name,
-            calls,
-            outcomes,
-            started_ns,
-            ended_ns,
+    elif correlation.simulation_id:
+        schedule_export(
+            api_key=settings.coval_api_key,
+            api_base=settings.coval_api_base,
+            resource=lambda: build_resource(settings, TRACE_SERVICE_NAME),
+            simulation_id=correlation.simulation_id,
+            platform=codec.name,
+            calls=calls,
+            outcomes=outcomes,
+            started_ns=started_ns,
+            ended_ns=ended_ns,
         )
     else:
-        logger.warning(
-            "mock_tool_spans_skipped",
-            platform=codec.name,
-            reason="no simulation id" if not correlation.simulation_id else "no coval api key",
-        )
+        logger.debug("mock_tool_spans_skipped", platform=codec.name, reason="no simulation id")
 
     payload, status = codec.encode(calls, outcomes)
     return JSONResponse(payload, status_code=status)
