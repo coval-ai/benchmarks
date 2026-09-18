@@ -33,6 +33,9 @@ from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
+from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
+from coval_bench.mocktools.traces import schedule_export
+from coval_bench.telemetry import build_resource
 
 logger = structlog.get_logger("coval_bench.mocktools")
 
@@ -91,6 +94,7 @@ async def _answer(
     pool: AsyncConnectionPool[Any],
 ) -> JSONResponse:
     started = time.perf_counter()
+    started_ns = time.time_ns()
     calls = codec.decode(body, request.headers, tool)
     correlation = codec.correlate(body, request.headers)
     outcomes = [dispatcher.call(call.tool, call.args) for call in calls]
@@ -100,6 +104,7 @@ async def _answer(
     if remaining > 0:
         await asyncio.sleep(remaining)
     latency_ms = (time.perf_counter() - started) * 1000 / max(len(calls), 1)
+    ended_ns = time.time_ns()
 
     for call, outcome in zip(calls, outcomes, strict=True):
         background.add_task(
@@ -109,7 +114,7 @@ async def _answer(
             args=call.args,
             response=outcome.response,
             latency_ms=latency_ms,
-            matched_seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            matched_seed=outcome.matched_seed,
             simulation_id=correlation.simulation_id,
             caller_number=correlation.caller_number,
         )
@@ -118,13 +123,27 @@ async def _answer(
             platform=codec.name,
             tool=call.tool,
             status=outcome.http_status,
-            mode=outcome.resolution.mode if outcome.resolution else "rejected",
-            seed=outcome.resolution.matched_seed if outcome.resolution else None,
+            mode=outcome.mode,
+            seed=outcome.matched_seed,
             simulation_id=correlation.simulation_id,
             correlation_source=correlation.source,
         )
     if not calls:
         logger.warning("mock_tool_call_empty", platform=codec.name)
+    elif correlation.simulation_id:
+        schedule_export(
+            api_key=settings.coval_api_key,
+            api_base=settings.coval_api_base,
+            resource=lambda: build_resource(settings, TRACE_SERVICE_NAME),
+            simulation_id=correlation.simulation_id,
+            platform=codec.name,
+            calls=calls,
+            outcomes=outcomes,
+            started_ns=started_ns,
+            ended_ns=ended_ns,
+        )
+    else:
+        logger.debug("mock_tool_spans_skipped", platform=codec.name, reason="no simulation id")
 
     payload, status = codec.encode(calls, outcomes)
     return JSONResponse(payload, status_code=status)

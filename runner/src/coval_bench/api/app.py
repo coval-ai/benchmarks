@@ -67,6 +67,7 @@ from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.llm.benchmark import llm_models, make_clients
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
+from coval_bench.mocktools.traces import drain as drain_mock_tool_exports
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -154,6 +155,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             for llm_client in llm_clients.values():
                 await llm_client.aclose()
+            await drain_mock_tool_exports()
             if posthog_client is not None:
                 try:
                     posthog_client.shutdown()  # type: ignore[no-untyped-call]

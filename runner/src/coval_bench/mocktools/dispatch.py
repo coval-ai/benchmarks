@@ -73,6 +73,15 @@ class Outcome:
     http_status: int
     resolution: Resolution | None = None
 
+    @property
+    def mode(self) -> str:
+        """How the answer was reached; ``rejected`` when the call never reached a fixture."""
+        return self.resolution.mode if self.resolution else "rejected"
+
+    @property
+    def matched_seed(self) -> str | None:
+        return self.resolution.matched_seed if self.resolution else None
+
 
 def parse_tool_specs(raw: str | bytes) -> dict[str, ToolSpec]:
     """Read tool definitions into specs, keyed by tool name."""
