@@ -16,6 +16,7 @@ import pytest
 from click.testing import CliRunner
 from google.api_core.exceptions import NotFound, PreconditionFailed, ServiceUnavailable
 from google.cloud import storage
+from structlog.testing import capture_logs
 
 from coval_bench.db.models import (
     Benchmark,
@@ -388,12 +389,20 @@ async def test_envelope_upload_retries_and_exhaustion_has_no_false_ack() -> None
     )
 
     exhausted = _Storage(fail_uploads=3)
-    assert (
-        await persist_capture(
-            writer=_Writer(), storage_client=_client(exhausted), bucket="private", envelope=envelope
+    with capture_logs() as logs:
+        assert (
+            await persist_capture(
+                writer=_Writer(),
+                storage_client=_client(exhausted),
+                bucket="private",
+                envelope=envelope,
+            )
+            is CaptureOutcome.UNACKNOWLEDGED
         )
-        is CaptureOutcome.UNACKNOWLEDGED
-    )
+    assert logs[-1]["event"] == "normalized_capture_transport_failed"
+    assert logs[-1]["outcome"] == str(CaptureOutcome.UNACKNOWLEDGED)
+    assert logs[-1]["exception_type"] == "ServiceUnavailable"
+    assert logs[-1]["exc_info"] is True
     assert not exhausted.objects
 
 
@@ -411,15 +420,19 @@ async def test_conflicting_identity_is_rejected_and_both_envelopes_remain_visibl
         )
         is CaptureOutcome.COMPLETED
     )
-    assert (
-        await persist_capture(
-            writer=_Writer(),
-            storage_client=_client(storage_value),
-            bucket="private",
-            envelope=conflict,
+    with capture_logs() as logs:
+        assert (
+            await persist_capture(
+                writer=_Writer(),
+                storage_client=_client(storage_value),
+                bucket="private",
+                envelope=conflict,
+            )
+            is CaptureOutcome.CONFLICT
         )
-        is CaptureOutcome.CONFLICT
-    )
+    assert logs[-1]["event"] == "normalized_capture_conflict"
+    assert logs[-1]["exception_type"] == "ValueError"
+    assert logs[-1]["exc_info"] is True
     uris, _ = list_envelope_uris(_client(storage_value), "private", run_id=1)
     assert len(uris) == 2
 

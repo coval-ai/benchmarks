@@ -14,6 +14,7 @@ from enum import StrEnum
 from typing import Any, Self
 
 import psycopg
+import structlog
 from google.api_core.exceptions import GoogleAPIError
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -51,6 +52,8 @@ from coval_bench.runner.capture import (
     upload_legacy_result_allocation,
     upload_receipt,
 )
+
+logger = structlog.get_logger("coval_bench.runner")
 
 
 class FrozenEvaluation(BaseModel):
@@ -575,12 +578,28 @@ async def persist_capture(
                 )
         await asyncio.to_thread(upload_receipt, storage_client, bucket, envelope)
         return CaptureOutcome.COMPLETED
-    except ValueError:
+    except ValueError as exc:
+        logger.warning(
+            "normalized_capture_conflict",
+            run_id=envelope.identity.run_id,
+            capture_id=envelope.identity.capture_id,
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
         return CaptureOutcome.CONFLICT
     except asyncio.CancelledError:
         raise
-    except (GoogleAPIError, OSError, TimeoutError, psycopg.Error, PoolTimeout):
-        return CaptureOutcome.PENDING if durable else CaptureOutcome.UNACKNOWLEDGED
+    except (GoogleAPIError, OSError, TimeoutError, psycopg.Error, PoolTimeout) as exc:
+        outcome = CaptureOutcome.PENDING if durable else CaptureOutcome.UNACKNOWLEDGED
+        logger.warning(
+            "normalized_capture_transport_failed",
+            run_id=envelope.identity.run_id,
+            capture_id=envelope.identity.capture_id,
+            outcome=str(outcome),
+            exception_type=type(exc).__name__,
+            exc_info=True,
+        )
+        return outcome
 
 
 async def replay_capture(**kwargs: Any) -> CaptureOutcome:
