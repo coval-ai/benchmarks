@@ -101,6 +101,7 @@ def _row(
             "V2V": "milliseconds",
             "InstructionFollowing": "percent",
             "InterruptionRate": "per_minute",
+            "CallLength": "seconds",
         }[metric],
         sample_id,
         status,
@@ -154,6 +155,7 @@ def _insert_result(
         "V2V": "milliseconds",
         "InstructionFollowing": "percent",
         "InterruptionRate": "per_minute",
+        "CallLength": "seconds",
     }[metric]
     with conn.cursor() as cur:
         cur.execute(
@@ -228,6 +230,7 @@ def test_groups_mixed_metrics_and_preserves_exact_recoverable_payload() -> None:
             _row("V2V"),
             _row("InstructionFollowing"),
             _row("InterruptionRate", value=None, status="failed", error=" exact error "),
+            _row("CallLength", value=73.4),
         ],
         skipped,
         conflicts,
@@ -235,6 +238,7 @@ def test_groups_mixed_metrics_and_preserves_exact_recoverable_payload() -> None:
 
     assert len(plans) == 1
     assert plans[0].status == "succeeded"
+    assert ("CallLength", "succeeded", 73.4, None) in plans[0].evaluations()
     assert plans[0].error is None
     assert plans[0].dataset_sha256 == hashlib.sha256(_UNNORMALIZED_PROVENANCE.encode()).hexdigest()
     assert plans[0].evaluations()[-1] == (

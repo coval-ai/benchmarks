@@ -19,6 +19,7 @@ from coval_bench.db.dashboard_source import rebuild_source_bucket
 from coval_bench.db.models import MetricEvaluation, MetricExecutor, ProcessingStatus
 from coval_bench.db.writer import RunWriter
 from coval_bench.migrations.backfill_normalized_metric_ids import backfill
+from coval_bench.registries.metrics import Metric
 from tests.unit import test_normalized_db_writer as writer_seed
 
 pg_conn = postgresql("pg_proc")
@@ -108,9 +109,9 @@ def test_all_lifecycle_states_backfill_without_changing_payloads(historical: Any
     assert result.updated["metric_evaluations"] == 4
     assert result.updated["dashboard_metric_values"] == 1
     assert _payloads(historical) == before
-    assert (
-        historical.execute("SELECT * FROM benchmarks_v2.metrics ORDER BY id").fetchall() == catalog
-    )
+    after = historical.execute("SELECT * FROM benchmarks_v2.metrics ORDER BY id").fetchall()
+    assert after[: len(catalog)] == catalog
+    assert {row[1] for row in after} == {metric.value for metric in Metric}
     assert (
         historical.execute("SELECT * FROM benchmarks_v2.dashboard_summary_state").fetchall()
         == summary

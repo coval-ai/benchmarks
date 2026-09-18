@@ -486,12 +486,20 @@ def _interruption_value(raw: object) -> tuple[float | None, ResultStatus] | None
     return None, ResultStatus.FAILED
 
 
+def _call_length_value(raw: object) -> tuple[float | None, ResultStatus] | None:
+    """Conversation audio duration in seconds; a clip with no numeric value becomes a FAILED row."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw), ResultStatus.SUCCESS
+    return None, ResultStatus.FAILED
+
+
 # The only per-metric part: one raw Coval value -> (row value, status), or None to
 # write no row. A metric is ingestable once it appears here.
 _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus] | None]] = {
     Metric.V2V: _v2v_value,
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
     Metric.INTERRUPTION_RATE: _interruption_value,
+    Metric.CALL_LENGTH: _call_length_value,
 }
 
 
@@ -1576,6 +1584,9 @@ async def fetch_and_write_v2v(
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
+    raw_call_length = settings.coval_s2s_call_length_metric_id
+    if raw_call_length is not None and not raw_call_length.strip():
+        raise RuntimeError("coval_s2s_call_length_metric_id must not be blank")
     # Only configured metrics are ever asked for, so an unset id simply means that
     # metric is not ingested yet.
     metric_ids: dict[Metric, str] = {}
@@ -1585,6 +1596,8 @@ async def fetch_and_write_v2v(
         metric_ids[Metric.INSTRUCTION_FOLLOWING] = instruction_metric_id
     if raw_interruption:
         metric_ids[Metric.INTERRUPTION_RATE] = raw_interruption
+    if raw_call_length:
+        metric_ids[Metric.CALL_LENGTH] = raw_call_length
     unmapped = sorted(m.value for m in metric_ids.keys() - _VALUE_MAPPERS.keys())
     if unmapped:
         raise RuntimeError(f"no _VALUE_MAPPERS entry for configured metrics: {', '.join(unmapped)}")

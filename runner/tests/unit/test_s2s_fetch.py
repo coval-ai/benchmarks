@@ -32,6 +32,7 @@ from coval_bench.runner.capture import (
 from coval_bench.s2s import fetch_v2v
 from coval_bench.s2s.conditions import (
     DATASET_ID_BANK,
+    DATASET_ID_BANK_LOW,
     DATASET_ID_DENTAL,
     DATASET_ID_LLM_BANK,
     DATASET_ID_MULTITURN,
@@ -1726,6 +1727,50 @@ async def test_ingest_run_writes_interruption_rows() -> None:
         ("R1/s1", None, ResultStatus.FAILED),
     ]
     assert all(r.metric_units == "per_minute" for r in irr)
+
+
+def test_call_length_value_maps() -> None:
+    assert fetch_v2v._call_length_value(73.4) == (73.4, ResultStatus.SUCCESS)
+    assert fetch_v2v._call_length_value(0) == (0.0, ResultStatus.SUCCESS)
+    assert fetch_v2v._call_length_value(None) == (None, ResultStatus.FAILED)
+    assert fetch_v2v._call_length_value("73.4") == (None, ResultStatus.FAILED)
+    assert fetch_v2v._call_length_value(True) == (None, ResultStatus.FAILED)
+
+
+@pytest.mark.asyncio
+async def test_ingest_run_writes_call_length_rows() -> None:
+    writer = _stub_writer()
+    instruction = [{"simulation_output_id": f"s{i}", "value": "YES"} for i in range(2)]
+    call_length = [
+        {"simulation_output_id": "s0", "value": 48.9},
+        {"simulation_output_id": "s1", "value": None},
+    ]
+    run_json = {
+        "run": {
+            "error_status": "SUCCESS",
+            "results": {
+                "metrics": {"IID": {"values": instruction}, "CID": {"values": call_length}}
+            },
+        }
+    }
+    async with _fake_client({}, run_json) as client:
+        status = await fetch_v2v._ingest_run(
+            client,
+            writer,
+            spec=SPEC,
+            coval_run=CovalRun(run_id="R1", create_time=None),
+            metric_ids={Metric.INSTRUCTION_FOLLOWING: "IID", Metric.CALL_LENGTH: "CID"},
+            condition=condition_for(DATASET_ID_BANK_LOW),
+            period_seconds=10_800,
+        )
+    assert status is RunStatus.SUCCEEDED
+    rows = writer.record_results.await_args.args[0]
+    lengths = [r for r in rows if r.metric_type == Metric.CALL_LENGTH]
+    assert [(r.audio_filename, r.metric_value, r.status) for r in lengths] == [
+        ("R1/s0", 48.9, ResultStatus.SUCCESS),
+        ("R1/s1", None, ResultStatus.FAILED),
+    ]
+    assert all(r.metric_units == "seconds" for r in lengths)
 
 
 @pytest.mark.asyncio

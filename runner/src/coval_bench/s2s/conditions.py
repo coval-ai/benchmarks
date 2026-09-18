@@ -219,12 +219,14 @@ CONDITIONS: dict[str, DatasetMetrics] = {
     # the binary judges feed so the adherence chart needs no second series.
     DATASET_ID_BANK: DatasetMetrics(
         required=Metric.V2V,
-        optional=frozenset({Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE}),
+        optional=frozenset(
+            {Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
+        ),
     ),
     **{
         tier: DatasetMetrics(
             required=Metric.INSTRUCTION_FOLLOWING,
-            optional=frozenset({Metric.INTERRUPTION_RATE}),
+            optional=frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}),
         )
         for tier in (
             DATASET_ID_BANK_LOW,
