@@ -53,7 +53,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from posthog import Posthog
 from psycopg_pool import PoolTimeout
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from coval_bench import telemetry
 from coval_bench.datasets.suite import (
@@ -101,6 +101,23 @@ _MIN_DEAD_ITEMS = 3
 # ---------------------------------------------------------------------------
 
 
+class ProviderReliability(BaseModel):
+    """Item outcomes for one ``(benchmark, provider, model)`` in a run.
+
+    The three counts partition the items attempted. ``key_failures`` are failures
+    the classifier attributes to our key (auth, credit, rate limit) rather than to
+    the provider, so a provider's reliability is
+    ``succeeded / (succeeded + provider_failures)``.
+    """
+
+    benchmark: str
+    provider: str
+    model: str
+    succeeded: int
+    provider_failures: int
+    key_failures: int
+
+
 class RunSummary(BaseModel):
     """Typed return value from ``run_benchmarks``."""
 
@@ -111,6 +128,7 @@ class RunSummary(BaseModel):
     total_results: int
     success_count: int
     fail_count: int
+    reliability: list[ProviderReliability] = Field(default_factory=list)
     sigterm: bool = False
 
 
@@ -263,6 +281,57 @@ def _dead_providers(
         reason = ranked[0][0] if ranked else "no reason reported"
         dead.append(f"{benchmark}:{provider}/{model} ({_truncate(reason)})")
     return dead
+
+
+# Per benchmark, the one metric written for every item, never excluded for a
+# provider, and failed only when the provider call failed. Its rows are the
+# per-item verdict.
+_ITEM_VERDICT_METRIC: dict[str, str] = {
+    str(Benchmark.TTS): str(Metric.TTFA),
+    str(Benchmark.STT): str(Metric.AUDIO_TO_FINAL),
+}
+
+
+def _provider_reliability(
+    results: list[Any],
+    result_status: Any,  # noqa: ANN401 — ResultStatus enum, lazy-imported by callers
+) -> list[ProviderReliability]:
+    """Item outcomes per ``(benchmark, provider, model)``, from the verdict-metric rows.
+
+    A failed item counts against the provider unless its error classifies as a key
+    problem on our side (auth, credit, rate limit), in which case it is reported
+    separately so an exhausted key does not read as an unreliable provider.
+    Benchmarks without a verdict metric are skipped.
+    """
+    from coval_bench.arena.provider_health import classify_failure
+
+    rows: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for r in results:
+        if str(r.metric_type) != _ITEM_VERDICT_METRIC.get(str(r.benchmark)):
+            continue
+        rows[(str(r.benchmark), r.provider, r.model)].append(r)
+
+    out: list[ProviderReliability] = []
+    for (benchmark, provider, model), group in sorted(rows.items()):
+        succeeded = provider_failures = key_failures = 0
+        for row in group:
+            if row.status == result_status.SUCCESS:
+                succeeded += 1
+            elif classify_failure(None, row.error) is not None:
+                key_failures += 1
+            else:
+                provider_failures += 1
+        out.append(
+            ProviderReliability(
+                benchmark=benchmark,
+                provider=provider,
+                model=model,
+                succeeded=succeeded,
+                provider_failures=provider_failures,
+                key_failures=key_failures,
+            )
+        )
+    return out
 
 
 def _log_run_outcome(
@@ -1726,6 +1795,7 @@ async def run_benchmarks(
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)
+            reliability = _provider_reliability(typed_results, ResultStatus)
 
             if total_results == 0 or fail_count == total_results:
                 intended_status = RunStatus.FAILED
@@ -1852,6 +1922,7 @@ async def run_benchmarks(
                 total_results=total_results,
                 success_count=success_count,
                 fail_count=fail_count,
+                reliability=reliability,
             )
 
             duration_s = (finished_at - started_at).total_seconds()
@@ -1862,6 +1933,7 @@ async def run_benchmarks(
                 success_count=success_count,
                 fail_count=fail_count,
                 duration_s=duration_s,
+                reliability=[entry.model_dump() for entry in reliability],
             )
             telemetry.record_run(kind=benchmark_kind, status=str(final_status))
             _emit_posthog(
@@ -1892,6 +1964,7 @@ async def run_benchmarks(
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)
+            reliability = _provider_reliability(typed_results, ResultStatus)
             try:
                 await asyncio.shield(
                     writer.finish_run(
@@ -1931,6 +2004,7 @@ async def run_benchmarks(
                 success_count=success_count,
                 fail_count=fail_count,
                 duration_s=sigterm_duration_s,
+                reliability=[entry.model_dump() for entry in reliability],
             )
             telemetry.record_run(kind=benchmark_kind, status=str(RunStatus.PARTIAL))
             _emit_posthog(
@@ -1956,6 +2030,7 @@ async def run_benchmarks(
                 total_results=total_results,
                 success_count=success_count,
                 fail_count=fail_count,
+                reliability=reliability,
                 sigterm=True,
             )
 

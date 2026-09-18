@@ -54,9 +54,11 @@ from coval_bench.providers.base import TranscriptionResult, TTSResult
 from coval_bench.registries import RegisteredModel, Source
 from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
+    ProviderReliability,
     RunSummary,
     _dead_providers,
     _persist_legacy_results,
+    _provider_reliability,
     _run_stt_item,
     _run_tts_item,
     _stt_silent_failure,
@@ -457,18 +459,31 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
         run=run,
         writer=writer,
     ) as _:
-        summary = await run_benchmarks(
-            settings=settings,
-            benchmark_kind="stt",
-            smoke=True,
-            matrix_overrides=matrix,
-        )
+        with structlog.testing.capture_logs() as captured:
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind="stt",
+                smoke=True,
+                matrix_overrides=matrix,
+            )
 
     assert summary.status == str(RunStatus.FAILED)
     # Unified failure model: a raised exception fails every metric row for the item
     # (TTFT, AudioToFinal, RTF, TTFS), each carrying the real exception string.
     assert summary.fail_count == 4
     assert summary.success_count == 0
+    assert summary.reliability == [
+        ProviderReliability(
+            benchmark="STT",
+            provider="deepgram",
+            model="nova-2",
+            succeeded=0,
+            provider_failures=1,
+            key_failures=0,
+        )
+    ]
+    (finished,) = _events(captured, "benchmark_run_finished")
+    assert finished["reliability"] == [summary.reliability[0].model_dump()]
     rows = _recorded_rows(writer)
     assert {r.metric_type for r in rows} == {"TTFT", "AudioToFinal", "RTF", "TTFS"}
     assert all(r.status == ResultStatus.FAILED for r in rows)
@@ -3128,6 +3143,87 @@ def test_dead_providers_handles_missing_reason() -> None:
     results = [_result("rime", Benchmark.TTS, ResultStatus.FAILED, None) for _ in range(3)]
 
     assert _dead_providers(results, ResultStatus) == ["TTS:rime/m1 (no reason reported)"]
+
+
+def test_provider_reliability_counts_items_not_rows() -> None:
+    """Only the verdict metric is counted, so the WER and component rows of a
+    successful item do not inflate the tally."""
+    results = [
+        _result("cartesia", Benchmark.TTS, ResultStatus.SUCCESS, None, metric_type="TTFA"),
+        _result("cartesia", Benchmark.TTS, ResultStatus.SUCCESS, None, metric_type="TTFARoundtrip"),
+        _result("cartesia", Benchmark.TTS, ResultStatus.SUCCESS, None, metric_type="WER"),
+        _result(
+            "cartesia", Benchmark.TTS, ResultStatus.FAILED, "stream closed", metric_type="TTFA"
+        ),
+    ]
+
+    assert _provider_reliability(results, ResultStatus) == [
+        ProviderReliability(
+            benchmark="TTS",
+            provider="cartesia",
+            model="m1",
+            succeeded=1,
+            provider_failures=1,
+            key_failures=0,
+        )
+    ]
+
+
+def test_provider_reliability_separates_key_failures() -> None:
+    """An exhausted or rejected key is our problem, not the provider's."""
+    results = [
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "HTTP 401 Unauthorized", "TTFA"),
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "insufficient credits", "TTFA"),
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, "HTTP 500 upstream error", "TTFA"),
+        _result("hume", Benchmark.TTS, ResultStatus.FAILED, None, "TTFA"),
+    ]
+
+    assert _provider_reliability(results, ResultStatus) == [
+        ProviderReliability(
+            benchmark="TTS",
+            provider="hume",
+            model="m1",
+            succeeded=0,
+            provider_failures=2,
+            key_failures=2,
+        )
+    ]
+
+
+def test_provider_reliability_uses_audio_to_final_for_stt() -> None:
+    """STT is judged on AudioToFinal, which no model is excluded from; a TTFT
+    row that is missing because of METRIC_EXCLUSIONS must not hide the item."""
+    results = [
+        _result("zoom", Benchmark.STT, ResultStatus.SUCCESS, None, "AudioToFinal"),
+        _result("zoom", Benchmark.STT, ResultStatus.FAILED, "timeout", "AudioToFinal"),
+        _result("zoom", Benchmark.STT, ResultStatus.FAILED, "timeout", "RTF"),
+    ]
+
+    assert _provider_reliability(results, ResultStatus) == [
+        ProviderReliability(
+            benchmark="STT",
+            provider="zoom",
+            model="m1",
+            succeeded=1,
+            provider_failures=1,
+            key_failures=0,
+        )
+    ]
+
+
+def test_provider_reliability_keyed_by_benchmark() -> None:
+    """A provider registered for both modalities gets one entry per benchmark."""
+    results = [
+        _result("openai", Benchmark.TTS, ResultStatus.FAILED, "no audio", "TTFA"),
+        _result("openai", Benchmark.STT, ResultStatus.SUCCESS, None, "AudioToFinal"),
+    ]
+
+    entries = _provider_reliability(results, ResultStatus)
+
+    assert [(e.benchmark, e.succeeded, e.provider_failures) for e in entries] == [
+        ("STT", 1, 0),
+        ("TTS", 0, 1),
+    ]
 
 
 def test_dead_providers_ignores_small_shards() -> None:
