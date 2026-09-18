@@ -148,7 +148,8 @@ class InworldSTTProvider(STTProvider):
                 await ws.send(
                     json.dumps({"audioChunk": {"content": base64.b64encode(chunk).decode()}})
                 )
-            await ws.send(json.dumps({"endTurn": {}}))
+            # No endTurn: server-side turn detection is on, and endTurn + closeStream
+            # makes Inworld append a phantom final segment.
             await ws.send(json.dumps({"closeStream": {}}))
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(done_event.wait(), timeout=_CLOSE_WAIT_S)
