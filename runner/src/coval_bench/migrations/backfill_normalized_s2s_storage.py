@@ -47,6 +47,7 @@ _METRICS = {
     "V2V": "milliseconds",
     "InstructionFollowing": "percent",
     "InterruptionRate": "per_minute",
+    "CallLength": "seconds",
 }
 _MISMATCH_KEYS = {
     "payload_mismatches": "payload_mismatch_count",
