@@ -49,7 +49,7 @@ def test_binding_for_dataset_carries_the_anchor() -> None:
     assert (slug, binding.anchor) == ("clean", "latency")
     hard = binding_for_dataset(conditions.DATASET_ID_BANK_HARD)
     assert hard is not None
-    assert (hard[0], hard[1].label, hard[2].anchor) == ("hard", "Hard", "judge")
+    assert (hard[0], hard[1].label, hard[2].anchor) == ("hard", "Poor cell", "judge")
     assert binding_for_dataset(conditions.DATASET_ID_DENTAL) is None
     assert binding_for_dataset("no-such-dataset") is None
 
