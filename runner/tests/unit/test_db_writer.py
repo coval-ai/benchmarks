@@ -29,7 +29,19 @@ from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.conn import get_pool
-from coval_bench.db.models import Benchmark, Result, ResultStatus, Run, RunStatus
+from coval_bench.db.models import (
+    Benchmark,
+    MetricEvaluation,
+    MetricExecutor,
+    Observation,
+    ObservationSourceKind,
+    ObservationStatus,
+    ProcessingStatus,
+    Result,
+    ResultStatus,
+    Run,
+    RunStatus,
+)
 from coval_bench.db.writer import RunWriter
 from coval_bench.registries import Metric
 
@@ -1036,39 +1048,150 @@ def test_record_results_rejects_unknown_metric_type(pg_conn: psycopg.Connection[
     assert row[0] == 0
 
 
-def test_coval_ingestion_checks_are_scoped_by_benchmark(
+def test_coval_metric_ingestion_reads_normalized_storage(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
     _apply_migrations(pg_conn)
 
-    async def _run() -> tuple[bool, bool, bool, bool]:
+    async def _run() -> dict[str, bool]:
         pool = await _make_pool(pg_conn)
         try:
             writer = RunWriter(pool)
-            llm_run = await writer.start_run(dataset_id="llm-dental-v1", dataset_sha256="llm")
-            assert llm_run.id is not None
-            await writer.record_results(
-                [_coval_result(llm_run.id, benchmark=Benchmark.LLM, coval_run_id="RLLM")]
+
+            async def add_normalized(
+                *,
+                name: str,
+                benchmark: Benchmark = Benchmark.LLM,
+                sample_id: str,
+                metric_type: str = Metric.INSTRUCTION_FOLLOWING,
+                run_status: RunStatus = RunStatus.SUCCEEDED,
+            ) -> None:
+                run = await writer.start_run(dataset_id=f"dataset-{name}", dataset_sha256="a" * 64)
+                assert run.id is not None
+                observation = await writer.insert_observation(
+                    Observation(
+                        run_id=run.id,
+                        dataset_id=f"dataset-{name}",
+                        dataset_sha256="a" * 64,
+                        sample_id=sample_id,
+                        provider="test-provider",
+                        model="test-model",
+                        benchmark=benchmark,
+                        source_kind=ObservationSourceKind.CONVERSATION_TEXT,
+                        status=ObservationStatus.SUCCEEDED,
+                    )
+                )
+                await writer.insert_metric_evaluation(
+                    MetricEvaluation(
+                        observation_id=observation.id,
+                        metric_type=metric_type,
+                        metric_version="v1",
+                        executor=MetricExecutor.INLINE,
+                        status=ProcessingStatus.QUEUED,
+                    )
+                )
+                if run_status is not RunStatus.RUNNING:
+                    await writer.finish_run(
+                        run.id,
+                        status=run_status,
+                        error="run failed" if run_status is RunStatus.FAILED else None,
+                    )
+
+            async def add_legacy(
+                *,
+                name: str,
+                coval_run_id: str,
+                benchmark: Benchmark = Benchmark.S2S,
+                metric_type: str = Metric.INSTRUCTION_FOLLOWING,
+                run_status: RunStatus = RunStatus.SUCCEEDED,
+            ) -> None:
+                run = await writer.start_run(dataset_id=f"legacy-{name}", dataset_sha256="b" * 64)
+                assert run.id is not None
+                result = _coval_result(run.id, benchmark=benchmark, coval_run_id=coval_run_id)
+                if metric_type != result.metric_type:
+                    result = result.model_copy(
+                        update={"metric_type": metric_type, "metric_units": "seconds"}
+                    )
+                await writer.record_results([result])
+                if run_status is not RunStatus.RUNNING:
+                    await writer.finish_run(
+                        run.id,
+                        status=run_status,
+                        error="run failed" if run_status is RunStatus.FAILED else None,
+                    )
+
+            await add_normalized(name="llm", sample_id="RLLM/sim-1")
+            await add_normalized(name="s2s", benchmark=Benchmark.S2S, sample_id="RS2S/sim-1")
+            await add_legacy(name="llm", coval_run_id="RLLM-LEGACY", benchmark=Benchmark.LLM)
+            await add_legacy(name="succeeded", coval_run_id="RS2S-SUCCEEDED")
+            await add_legacy(
+                name="partial", coval_run_id="RS2S-PARTIAL", run_status=RunStatus.PARTIAL
             )
-            await writer.finish_run(llm_run.id, status=RunStatus.SUCCEEDED)
-            return (
-                await writer.coval_run_ingested(provider="test-provider", coval_run_id="RLLM"),
-                await writer.coval_run_ingested(
-                    provider="test-provider", coval_run_id="RLLM", benchmark="LLM"
-                ),
-                await writer.coval_metric_ingested(
+            await add_legacy(
+                name="wrong-metric",
+                coval_run_id="RS2S-WRONG-METRIC",
+                metric_type=Metric.CALL_LENGTH,
+            )
+            await add_legacy(name="failed", coval_run_id="RS2S-FAILED", run_status=RunStatus.FAILED)
+            await add_legacy(
+                name="running", coval_run_id="RS2S-RUNNING", run_status=RunStatus.RUNNING
+            )
+
+            return {
+                "normalized-llm": await writer.coval_metric_ingested(
                     provider="test-provider",
                     coval_run_id="RLLM",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
+                    benchmark=Benchmark.LLM,
                 ),
-                await writer.coval_metric_ingested(
+                "legacy-only-llm": await writer.coval_metric_ingested(
                     provider="test-provider",
-                    coval_run_id="RLLM",
+                    coval_run_id="RLLM-LEGACY",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
-                    benchmark="LLM",
+                    benchmark=Benchmark.LLM,
                 ),
-            )
+                "normalized-only-s2s": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "s2s-succeeded": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S-SUCCEEDED",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "s2s-partial": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S-PARTIAL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "s2s-wrong-metric": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S-WRONG-METRIC",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "s2s-failed": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S-FAILED",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "s2s-running": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RS2S-RUNNING",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+            }
         finally:
             await pool.close()
 
-    assert asyncio.run(_run()) == (False, True, False, True)
+    result = asyncio.run(_run())
+    assert result == {
+        "normalized-llm": True,
+        "legacy-only-llm": False,
+        "normalized-only-s2s": False,
+        "s2s-succeeded": True,
+        "s2s-partial": True,
+        "s2s-wrong-metric": False,
+        "s2s-failed": False,
+        "s2s-running": False,
+    }
