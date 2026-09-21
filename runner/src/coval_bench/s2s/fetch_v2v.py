@@ -1543,9 +1543,9 @@ async def fetch_and_write_v2v(
     """Ingest the selected benchmark's providers; return per-provider status.
 
     Each ingested Coval run gets its own run row slotted by its create_time,
-    and ``coval_run_ingested`` makes re-scans no-ops, so ticks are idempotent
-    and the fetch cadence only affects how soon data appears — the cron may
-    run more often than the sims.
+    and metric-aware, benchmark-specific dedup makes re-scans no-ops, so ticks
+    are idempotent and the fetch cadence only affects how soon data appears —
+    the cron may run more often than the sims.
     """
     settings = settings or get_settings()
     specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()

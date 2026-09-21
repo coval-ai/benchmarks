@@ -31,6 +31,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.llm_turns import fetch_conversation_ttft
 from coval_bench.db.models import (
+    Benchmark,
     MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
@@ -1500,26 +1501,42 @@ class RunWriter:
         metric_type: str,
         benchmark: str = "S2S",
     ) -> bool:
-        """True if a succeeded/partial run already holds this Coval run's ``metric_type`` rows.
+        """Check dedup storage for the benchmark-specific importer path.
 
-        Metric-aware counterpart of :meth:`coval_run_ingested`: lets the fetch
-        backfill one metric (e.g. instruction) onto a run whose other metric
-        (latency) already landed, instead of skipping the whole run.
+        LLM imports use normalized observations and evaluations; S2S imports
+        retain the legacy results read for compatibility with older targeted
+        imports.
         """
-        sql = """
-            SELECT 1
-            FROM benchmarks_v2.results r
-            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-            WHERE r.provider = %s
-              AND r.benchmark = %s
-              AND r.metric_type = %s
-              AND split_part(r.audio_filename, '/', 1) = %s
-              AND rn.status IN ('succeeded', 'partial')
-            LIMIT 1
-        """
+        if benchmark == Benchmark.LLM:
+            sql = """
+                SELECT 1
+                FROM benchmarks_v2.benchmark_observations o
+                JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+                JOIN benchmarks_v2.runs rn ON rn.id = o.run_id
+                WHERE o.provider = %s
+                  AND o.benchmark = %s
+                  AND split_part(o.sample_id, '/', 1) = %s
+                  AND e.metric_type = %s
+                  AND rn.status IN ('succeeded', 'partial')
+                LIMIT 1
+            """
+            params = (provider, benchmark, coval_run_id, metric_type)
+        else:
+            sql = """
+                SELECT 1
+                FROM benchmarks_v2.results r
+                JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+                WHERE r.provider = %s
+                  AND r.benchmark = %s
+                  AND r.metric_type = %s
+                  AND split_part(r.audio_filename, '/', 1) = %s
+                  AND rn.status IN ('succeeded', 'partial')
+                LIMIT 1
+            """
+            params = (provider, benchmark, metric_type, coval_run_id)
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, benchmark, metric_type, coval_run_id))
+                await cur.execute(sql, params)
                 row = await cur.fetchone()
             await conn.commit()
         return row is not None
