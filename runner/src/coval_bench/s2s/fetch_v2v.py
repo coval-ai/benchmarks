@@ -254,6 +254,10 @@ def _normalized_dataset_sha256(provenance: str) -> str:
     return hashlib.sha256(provenance.encode()).hexdigest()
 
 
+class UnmappedPersona(ValueError):
+    """A run's persona is absent from the condition map, so its rows have no home."""
+
+
 def _condition_for_persona(
     persona_id: str,
     persona_conditions: Mapping[str, Condition] | None,
@@ -270,7 +274,7 @@ def _condition_for_persona(
         try:
             return persona_conditions[persona_id]
         except KeyError:
-            raise ValueError(f"persona {persona_id!r} has no condition mapped") from None
+            raise UnmappedPersona(f"persona {persona_id!r} has no condition mapped") from None
     if noisy_persona_id and persona_id == noisy_persona_id:
         return Condition.NOISY
     return Condition.CLEAN
@@ -1296,6 +1300,7 @@ async def _fetch_one_provider(
     artifact_client: storage.Client | None = None,
     artifact_bucket: str = "",
     workspace_id: str | None = None,
+    unmapped_personas: dict[str, int] | None = None,
 ) -> tuple[RunStatus, int]:
     """Scan the window and ingest every clean, not-yet-ingested run.
 
@@ -1356,13 +1361,28 @@ async def _fetch_one_provider(
         for coval_run in runs:
             if only_run_ids is not None and coval_run.run_id not in only_run_ids:
                 continue
-            identity = _dataset_identity(
-                test_set_id,
-                coval_run.persona_id,
-                noisy_persona_id,
-                family=spec.family,
-                persona_conditions=persona_conditions,
-            )
+            # An unmapped persona skips only its own run: the provider's other runs
+            # still ingest, and the job reports the persona once at the end.
+            try:
+                identity = _dataset_identity(
+                    test_set_id,
+                    coval_run.persona_id,
+                    noisy_persona_id,
+                    family=spec.family,
+                    persona_conditions=persona_conditions,
+                )
+            except UnmappedPersona:
+                logger.warning(
+                    "run_persona_unmapped",
+                    provider=spec.provider,
+                    coval_run_id=coval_run.run_id,
+                    persona_id=coval_run.persona_id,
+                )
+                if unmapped_personas is not None:
+                    unmapped_personas[coval_run.persona_id] = (
+                        unmapped_personas.get(coval_run.persona_id, 0) + 1
+                    )
+                continue
             if identity is None:
                 continue
             dataset_id, dataset_sha256 = identity
@@ -1622,6 +1642,7 @@ async def fetch_and_write_v2v(
         statuses: dict[str, RunStatus] = {}
         total_ingested = 0
         matched_run_ids: set[str] = set()
+        unmapped_personas: dict[str, int] = {}
         sampled_runs: list[SampleRun] = []
         for spec in specs:
             agent_id = spec.agent_id
@@ -1693,8 +1714,14 @@ async def fetch_and_write_v2v(
                 artifact_client=artifact_client,
                 artifact_bucket=artifact_bucket,
                 workspace_id=spec_workspace_id,
+                unmapped_personas=unmapped_personas,
             )
             total_ingested += ingested
+
+        if unmapped_personas:
+            from coval_bench.logging import log_run_unmapped_persona
+
+            log_run_unmapped_persona(unmapped_personas)
 
         if total_ingested:
             try:
