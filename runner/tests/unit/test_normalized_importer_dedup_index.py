@@ -71,14 +71,16 @@ def _index_info(conn: Any) -> tuple[bool, bool, bool, int, str, str]:
 
 def _assert_valid_index(conn: Any) -> None:
     valid, ready, full, key_count, definition, expressions = _index_info(conn)
+    canonical_definition = definition.replace("::text", "")
     assert valid is True
     assert ready is True
     assert full is True
     assert key_count == 3
-    assert "provider, benchmark, split_part(sample_id, '/', 1)" in definition
-    assert "INCLUDE (id, run_id)" in definition
-    assert "WHERE" not in definition.upper()
+    assert "provider, benchmark, split_part(sample_id, '/', 1)" in canonical_definition
+    assert "INCLUDE (id, run_id)" in canonical_definition
+    assert "WHERE" not in canonical_definition.upper()
     assert expressions is not None
+    assert expressions.replace("::text", "") == "split_part(sample_id, '/', 1)"
 
 
 def _observation_count(conn: Any) -> tuple[int]:
