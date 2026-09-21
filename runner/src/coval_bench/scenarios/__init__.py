@@ -51,7 +51,16 @@ from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from coval_bench.scenarios.annotated import AnnotatedModel
-from coval_bench.scenarios.definitions import ACTIVE, BANK, Scenario, ScenarioIds
+from coval_bench.scenarios.definitions import (
+    ACTIVE,
+    BANK,
+    HAPPY_CUSTOMER,
+    HAPPY_SMILE,
+    SCENARIOS,
+    Scenario,
+    ScenarioIds,
+    by_slug,
+)
 from coval_bench.scenarios.personas import (
     Persona,
     PersonaBinding,
@@ -63,8 +72,12 @@ from coval_bench.scenarios.personas import (
 __all__ = [
     "ACTIVE",
     "BANK",
+    "HAPPY_CUSTOMER",
+    "HAPPY_SMILE",
+    "SCENARIOS",
     "Scenario",
     "ScenarioIds",
+    "by_slug",
     "Stack",
     "load_stack",
     "contract_sha256",

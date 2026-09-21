@@ -43,10 +43,14 @@ __all__ = [
     "FAMILY_LLM_BANK",
     "FAMILY_LLM_DENTAL",
     "FAMILY_MULTITURN",
+    "SCENARIO_SLUGS",
+    "TIERS",
     "Condition",
     "DatasetMetrics",
     "condition_for",
     "dataset_id_for",
+    "scenario_dataset_id",
+    "scenario_family",
 ]
 
 
@@ -79,11 +83,36 @@ FAMILY_HAPPYPATH = "s2s-happypath"
 # the one-dataset-id = one-condition = one-population anchor the metrics rest on.
 FAMILY_DENTAL = "s2s-dental"
 FAMILY_LLM_DENTAL = "llm-dental"
-# Ultra Bank instruction following: two scenarios, run daily by every S2S agent in
-# the default workspace, once per caller persona: the clean baseline plus four
-# difficulty tiers. Each tier is its own dataset so noise never pools into the
-# clean numbers and the board can plot adherence across tiers.
-FAMILY_BANK = "s2s-bank"
+# The instruction-following scenarios, run daily by every S2S agent in the default
+# workspace, once per caller persona: the clean baseline plus four difficulty
+# tiers. Each tier is its own dataset so noise never pools into the clean numbers
+# and the board can plot adherence across tiers. A scenario is one slug; its
+# family and every dataset id derive from it, so adding a domain is one entry
+# here plus its Coval ids in ``Settings.coval_s2s_scenarios``.
+SCENARIO_SLUGS: tuple[str, ...] = ("bank", "happy-customer", "happy-smile")
+TIERS: tuple[Condition, ...] = (
+    Condition.LOW,
+    Condition.MEDIUM,
+    Condition.HARD,
+    Condition.EXTRA_HARD,
+)
+
+
+def scenario_family(slug: str) -> str:
+    """The dataset family for the S2S scenario *slug*."""
+    return f"s2s-{slug}"
+
+
+def scenario_dataset_id(slug: str, condition: Condition) -> str | None:
+    """Where *slug*'s runs under *condition* land; None for conditions it never runs."""
+    if condition is Condition.CLEAN:
+        return f"{scenario_family(slug)}-v1"
+    if condition in TIERS:
+        return f"{scenario_family(slug)}-{condition.value.replace('_', '-')}-v1"
+    return None
+
+
+FAMILY_BANK = scenario_family("bank")
 FAMILY_LLM_BANK = "llm-bank"
 
 # Single-turn SLURP manifest (legacy, latency only) and the multi-turn Coval test
@@ -105,6 +134,7 @@ DATASET_ID_DENTAL_ACCENTED = "s2s-dental-accented-v1"
 # pooled with the voice rows.
 DATASET_ID_LLM_DENTAL = "llm-dental-v1"
 
+# The bank ids spelled out: the headline board and the text board key on them.
 DATASET_ID_BANK = "s2s-bank-v1"
 DATASET_ID_BANK_LOW = "s2s-bank-low-v1"
 DATASET_ID_BANK_MEDIUM = "s2s-bank-medium-v1"
@@ -125,16 +155,15 @@ DATASET_IDS: dict[tuple[str, Condition], str | None] = {
     (FAMILY_LLM_DENTAL, Condition.CLEAN): DATASET_ID_LLM_DENTAL,
     (FAMILY_LLM_DENTAL, Condition.NOISY): None,
     (FAMILY_LLM_DENTAL, Condition.ACCENTED): None,
-    (FAMILY_BANK, Condition.CLEAN): DATASET_ID_BANK,
-    (FAMILY_BANK, Condition.NOISY): None,
-    (FAMILY_BANK, Condition.ACCENTED): None,
-    (FAMILY_BANK, Condition.LOW): DATASET_ID_BANK_LOW,
-    (FAMILY_BANK, Condition.MEDIUM): DATASET_ID_BANK_MEDIUM,
-    (FAMILY_BANK, Condition.HARD): DATASET_ID_BANK_HARD,
-    (FAMILY_BANK, Condition.EXTRA_HARD): DATASET_ID_BANK_EXTRA_HARD,
     (FAMILY_LLM_BANK, Condition.CLEAN): DATASET_ID_LLM_BANK,
     (FAMILY_LLM_BANK, Condition.NOISY): None,
     (FAMILY_LLM_BANK, Condition.ACCENTED): None,
+    **{
+        (scenario_family(slug), condition): scenario_dataset_id(slug, condition)
+        for slug in SCENARIO_SLUGS
+        for condition in Condition
+        if condition is not Condition.SKIP
+    },
 }
 
 
@@ -164,6 +193,14 @@ class DatasetMetrics(BaseModel, frozen=True):
     def fetched(self) -> frozenset[Metric]:
         """Every metric worth asking Coval for; the rest are excluded."""
         return self.optional | {self.required}
+
+
+def _ingested_id(slug: str, condition: Condition) -> str:
+    """*slug*'s dataset id for a condition every scenario runs."""
+    dataset_id = scenario_dataset_id(slug, condition)
+    if dataset_id is None:
+        raise ValueError(f"scenario {slug!r} never runs {condition!r}")
+    return dataset_id
 
 
 # Background noise sits in the lane Silero VAD uses for turn boundaries, so V2V
@@ -212,28 +249,29 @@ CONDITIONS: dict[str, DatasetMetrics] = {
         required=Metric.INSTRUCTION_FOLLOWING,
         local=frozenset({Metric.TTFT}),
     ),
-    # The Ultra Bank instruction-following set, the daily public board. Latency is
-    # the anchor because Coval's built-in metric is on every run; "instruction
-    # following" here is the Validate Expected Behaviors judge, a fraction of the
-    # case's expected behaviors met, stored as a percentage under the same metric
-    # the binary judges feed so the adherence chart needs no second series.
-    DATASET_ID_BANK: DatasetMetrics(
-        required=Metric.V2V,
-        optional=frozenset(
-            {Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
-        ),
-    ),
+    # The instruction-following scenarios, the daily public board. Latency is the
+    # anchor on the clean caller because Coval's built-in metric is on every run;
+    # "instruction following" is the Validate Expected Behaviors judge, a fraction
+    # of the case's expected behaviors met, stored as a percentage under the same
+    # metric the binary judges feed so the adherence chart needs no second series.
+    # The tiers anchor on the judge instead: their noise sits in the lane VAD uses
+    # for turn boundaries, so latency is neither measured nor asked for.
     **{
-        tier: DatasetMetrics(
+        _ingested_id(slug, Condition.CLEAN): DatasetMetrics(
+            required=Metric.V2V,
+            optional=frozenset(
+                {Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
+            ),
+        )
+        for slug in SCENARIO_SLUGS
+    },
+    **{
+        _ingested_id(slug, tier): DatasetMetrics(
             required=Metric.INSTRUCTION_FOLLOWING,
             optional=frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}),
         )
-        for tier in (
-            DATASET_ID_BANK_LOW,
-            DATASET_ID_BANK_MEDIUM,
-            DATASET_ID_BANK_HARD,
-            DATASET_ID_BANK_EXTRA_HARD,
-        )
+        for slug in SCENARIO_SLUGS
+        for tier in TIERS
     },
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,

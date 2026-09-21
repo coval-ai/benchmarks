@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 import structlog
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
@@ -24,6 +24,15 @@ DATASET_ALL = "__all__"
 
 # Terraform's Secret Manager stub; a mount that was never rotated delivers it verbatim.
 SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
+
+
+class ScenarioCovalIds(BaseModel, frozen=True):
+    """One scenario's Coval ids: its test set, the agent under test per model, and
+    the caller persona per condition (``clean`` plus the difficulty tiers)."""
+
+    test_set_id: str
+    agents: dict[str, str] = Field(default_factory=dict)
+    personas: dict[str, str] = Field(default_factory=dict)
 
 
 class Settings(BaseSettings):
@@ -246,11 +255,14 @@ class Settings(BaseSettings):
     coval_s2s_bank_test_set_id: str | None = None
     coval_s2s_bank_instruction_metric_id: str | None = None
     coval_s2s_bank_persona_id: str | None = None
-    coval_s2s_bank_openai_agent_id: str | None = None
-    coval_s2s_bank_gpt_live_agent_id: str | None = None
-    coval_s2s_bank_gemini_agent_id: str | None = None
-    coval_s2s_bank_xai_agent_id: str | None = None
-    coval_s2s_bank_stepfun_agent_id: str | None = None
+    # Scenario slug -> its Coval test set, the agent id per model and the persona
+    # id per condition, e.g. {"bank": {"test_set_id": "…", "agents": {"gpt-realtime":
+    # "…"}, "personas": {"clean": "…", "hard": "…"}}}. The slugs are
+    # ``s2s.conditions.SCENARIO_SLUGS``; a slug absent here is skipped, a model
+    # absent from ``agents`` is skipped. The personas join the exhaustive condition
+    # map above, so a scenario's callers can never be left unmapped. Every scenario
+    # shares the bank judge above. Opaque ids, not secrets.
+    coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a

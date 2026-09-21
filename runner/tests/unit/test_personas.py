@@ -32,12 +32,14 @@ def test_every_binding_matches_the_condition_tables() -> None:
             assert contract.required is _ANCHOR_METRIC[binding.anchor], f"{family}/{slug}"
 
 
-def test_every_ingested_bank_dataset_is_bound() -> None:
-    bound = {b.dataset_id for b in load_personas().bindings[conditions.FAMILY_BANK].values()}
+@pytest.mark.parametrize("slug", conditions.SCENARIO_SLUGS)
+def test_every_ingested_scenario_dataset_is_bound(slug: str) -> None:
+    family = conditions.scenario_family(slug)
+    bound = {b.dataset_id for b in load_personas().bindings[family].values()}
     ingested = {
         dataset_id
-        for (family, _condition), dataset_id in conditions.DATASET_IDS.items()
-        if family == conditions.FAMILY_BANK and dataset_id is not None
+        for (bound_family, _condition), dataset_id in conditions.DATASET_IDS.items()
+        if bound_family == family and dataset_id is not None
     }
     assert bound == ingested
 
