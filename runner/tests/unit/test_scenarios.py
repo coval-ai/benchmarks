@@ -26,17 +26,21 @@ def test_only_text_runs_need_the_persona_setting() -> None:
     ]
 
 
-def test_the_table_lists_every_slug_once_with_bank_first() -> None:
+def test_the_table_follows_the_slug_tuple_with_bank_first() -> None:
     assert tuple(s.slug for s in scenarios.SCENARIOS) == SCENARIO_SLUGS
     assert scenarios.SCENARIOS[0] is scenarios.BANK is scenarios.ACTIVE
-    assert scenarios.by_slug("happy-smile") is scenarios.HAPPY_SMILE
-    with pytest.raises(KeyError):
-        scenarios.by_slug("no-such-scenario")
+    assert [s.label for s in scenarios.SCENARIOS] == [
+        "Ultra Bank",
+        "Happy Customer",
+        "Happy Smile Clinic",
+    ]
 
 
 def test_only_bank_runs_over_text() -> None:
-    assert scenarios.HAPPY_CUSTOMER.primary_dataset(Benchmark.S2S) == "s2s-happy-customer-v1"
+    happy_customer = scenarios.SCENARIOS[1]
+    assert happy_customer.primary_dataset(Benchmark.S2S) == "s2s-happy-customer-v1"
+    assert happy_customer.contract is None
     with pytest.raises(ValueError, match="does not run over text"):
-        scenarios.HAPPY_CUSTOMER.family(Benchmark.LLM)
+        happy_customer.family(Benchmark.LLM)
     with pytest.raises(ValueError, match="no text-board settings"):
-        scenarios.HAPPY_SMILE.ids(Settings())
+        happy_customer.ids(Settings())

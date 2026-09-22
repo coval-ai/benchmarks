@@ -14,7 +14,6 @@ from coval_bench.s2s.conditions import (
     SCENARIO_SLUGS,
     Condition,
     dataset_id_for,
-    scenario_dataset_id,
     scenario_family,
 )
 
@@ -37,7 +36,9 @@ class Scenario:
 
     slug: str
     label: str
-    contract: str
+    # The prompt package under ``scenarios/`` the text board serves; None when the
+    # scenario's prompt lives only in its Coval agents.
+    contract: str | None = None
     llm_family: str | None = None
     test_set_id_attr: str | None = None
     instruction_metric_id_attr: str | None = None
@@ -49,9 +50,6 @@ class Scenario:
         if self.llm_family is None:
             raise ValueError(f"{self.slug} does not run over text")
         return self.llm_family
-
-    def dataset_id(self, condition: Condition) -> str | None:
-        return scenario_dataset_id(self.slug, condition)
 
     def primary_dataset(self, benchmark: Benchmark) -> str:
         dataset_id = dataset_id_for(self.family(benchmark), Condition.CLEAN)
@@ -83,29 +81,25 @@ class Scenario:
         return [attr for attr, value in required if value is None]
 
 
-BANK = Scenario(
-    slug="bank",
-    label="Ultra Bank",
-    contract="bank",
-    llm_family=FAMILY_LLM_BANK,
-    test_set_id_attr="coval_s2s_bank_test_set_id",
-    instruction_metric_id_attr="coval_s2s_bank_instruction_metric_id",
-    persona_id_attr="coval_s2s_bank_persona_id",
-)
-HAPPY_CUSTOMER = Scenario(slug="happy-customer", label="Happy Customer", contract="bank")
-HAPPY_SMILE = Scenario(slug="happy-smile", label="Happy Smile Clinic", contract="bank")
+# Per-slug details; the slug tuple in ``s2s.conditions`` is the one list of scenarios.
+_DETAILS: dict[str, dict[str, str]] = {
+    "bank": {
+        "label": "Ultra Bank",
+        "contract": "bank",
+        "llm_family": FAMILY_LLM_BANK,
+        "test_set_id_attr": "coval_s2s_bank_test_set_id",
+        "instruction_metric_id_attr": "coval_s2s_bank_instruction_metric_id",
+        "persona_id_attr": "coval_s2s_bank_persona_id",
+    },
+    "happy-customer": {"label": "Happy Customer"},
+    "happy-smile": {"label": "Happy Smile Clinic"},
+}
 
 # Every voice scenario, in board order; the first is the headline.
-SCENARIOS: tuple[Scenario, ...] = (BANK, HAPPY_CUSTOMER, HAPPY_SMILE)
-if tuple(s.slug for s in SCENARIOS) != SCENARIO_SLUGS:
-    raise RuntimeError("scenarios.SCENARIOS and conditions.SCENARIO_SLUGS disagree")
+SCENARIOS: tuple[Scenario, ...] = tuple(
+    Scenario(slug=slug, **_DETAILS[slug]) for slug in SCENARIO_SLUGS
+)
+BANK = SCENARIOS[0]
 
 # The headline board and the text board.
 ACTIVE = BANK
-
-
-def by_slug(slug: str) -> Scenario:
-    for scenario in SCENARIOS:
-        if scenario.slug == slug:
-            return scenario
-    raise KeyError(slug)

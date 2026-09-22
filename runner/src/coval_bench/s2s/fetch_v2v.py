@@ -173,16 +173,25 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
     a fraction rather than a verdict, which the instruction mapper scales to a
     percentage.
     """
+    known = {model for _provider, model in SCENARIO_MODELS}
     specs: list[AgentSpec] = []
     for scenario in scenarios.SCENARIOS:
         ids = settings.coval_s2s_scenarios.get(scenario.slug)
+        if ids is None:
+            continue
+        unknown = sorted(set(ids.agents) - known)
+        if unknown:
+            raise RuntimeError(
+                f"coval_s2s_scenarios[{scenario.slug!r}].agents names unknown model(s) "
+                f"{unknown}; expected one of {sorted(known)}"
+            )
         for provider, model in SCENARIO_MODELS:
             specs.append(
                 AgentSpec(
-                    agent_id=ids.agents.get(model) if ids else None,
+                    agent_id=ids.agents.get(model),
                     provider=provider,
                     model=model,
-                    test_set_id=ids.test_set_id if ids else None,
+                    test_set_id=ids.test_set_id,
                     family=scenario.family(Benchmark.S2S),
                     instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
                 )
@@ -322,7 +331,7 @@ def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
         except ValueError:
             valid = ", ".join(c.value for c in Condition)
             raise RuntimeError(
-                f"coval_s2s_condition_personas[{persona_id!r}] is {name!r}; expected one of {valid}"
+                f"persona {persona_id!r} maps to condition {name!r}; expected one of {valid}"
             ) from None
     return parsed
 
@@ -330,19 +339,21 @@ def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
 def _all_persona_conditions(settings: Settings) -> dict[str, str]:
     """The legacy persona map plus every scenario's callers, as condition names.
 
-    A persona may be declared in one place only: the same id under two scenarios,
-    or in a scenario and the legacy map, is a configuration error, not a tie.
+    Coval personas are workspace-level, so the same id may serve several
+    scenarios; identical declarations merge. Two different conditions for one
+    persona is a configuration error, not a tie.
     """
     merged = dict(settings.coval_s2s_condition_personas)
     owner = dict.fromkeys(merged, "coval_s2s_condition_personas")
     for slug, ids in settings.coval_s2s_scenarios.items():
         for condition, persona_id in ids.personas.items():
-            if persona_id in owner:
+            previous = merged.get(persona_id)
+            if previous is not None and previous != condition:
                 raise RuntimeError(
-                    f"persona {persona_id!r} is declared by both {owner[persona_id]} and "
-                    f"coval_s2s_scenarios[{slug!r}]"
+                    f"persona {persona_id!r} is {previous!r} in {owner[persona_id]} but "
+                    f"{condition!r} in coval_s2s_scenarios[{slug!r}]"
                 )
-            owner[persona_id] = f"coval_s2s_scenarios[{slug!r}]"
+            owner.setdefault(persona_id, f"coval_s2s_scenarios[{slug!r}]")
             merged[persona_id] = condition
     return merged
 
@@ -1628,8 +1639,20 @@ async def fetch_and_write_v2v(
     # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
     # either order.
     persona_conditions = _persona_conditions(_all_persona_conditions(settings))
-    if benchmark is Benchmark.S2S and persona_conditions and not test_set_id:
+    # Scenario personas travel with their scenario's own test set, so only the
+    # legacy map needs the shared one.
+    if benchmark is Benchmark.S2S and settings.coval_s2s_condition_personas and not test_set_id:
         raise RuntimeError("coval_s2s_condition_personas requires coval_s2s_test_set_id")
+    # The text board reads bank's test set from its own setting; the two must agree
+    # or voice and text silently measure different Coval sets.
+    bank_ids = settings.coval_s2s_scenarios.get(scenarios.ACTIVE.slug)
+    text_test_set = (settings.coval_s2s_bank_test_set_id or "").strip()
+    if bank_ids and text_test_set and bank_ids.test_set_id != text_test_set:
+        raise RuntimeError(
+            f"coval_s2s_scenarios['bank'].test_set_id {bank_ids.test_set_id!r} differs from "
+            f"coval_s2s_bank_test_set_id {text_test_set!r}"
+        )
+    persona_labels = _all_persona_labels(settings)
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
@@ -1801,7 +1824,7 @@ async def fetch_and_write_v2v(
                 runs=dataset_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
-                persona_labels=_all_persona_labels(settings),
+                persona_labels=persona_labels,
             )
         logger.info(
             "s2s_fetch_done",
