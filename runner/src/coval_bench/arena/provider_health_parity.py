@@ -111,7 +111,7 @@ def audit_provider_health_parity(
     snapshot_time = as_of or datetime.now(UTC)
     with conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        conn.execute("SET LOCAL statement_timeout = '5s'")
+        conn.execute("SET LOCAL statement_timeout = '30s'")
         conn.execute("SET LOCAL lock_timeout = '1s'")
         conn.execute("SET LOCAL idle_in_transaction_session_timeout = '10s'")
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
