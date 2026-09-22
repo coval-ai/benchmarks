@@ -316,6 +316,8 @@ def stt_smoke(provider: str, model: str, wav: str) -> None:
         kwargs["domain"] = settings.guava_stt_domain
     elif provider == "azure":
         kwargs["region"] = settings.azure_region
+    elif provider == "cloudflare":
+        kwargs["account_id"] = settings.cloudflare_account_id
     try:
         instance = provider_cls(**kwargs)
     except ValueError as exc:

@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     modulate_api_key: SecretStr | None = None
     nari_api_key: SecretStr | None = None
     stepfun_api_key: SecretStr | None = None
+    cloudflare_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
     deepdub_api_key: SecretStr | None = None
@@ -159,6 +160,7 @@ class Settings(BaseSettings):
     # infra, so its base URL + routing key live in config (``.env`` locally, Secret Manager in
     # prod) rather than hardcoded in the provider module.
     guava_base_url: str | None = None
+    cloudflare_account_id: str | None = None
     guava_api_key: SecretStr | None = None
     guava_stt_domain: str | None = None
 

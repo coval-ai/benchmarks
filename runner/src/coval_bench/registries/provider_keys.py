@@ -71,4 +71,5 @@ PROVIDER_ENV: dict[str, str] = {
     "atlas": "ATLAS_API_KEY",
     "nari": "NARI_API_KEY",
     "stepfun": "STEPFUN_API_KEY",
+    "cloudflare": "CLOUDFLARE_API_KEY",
 }

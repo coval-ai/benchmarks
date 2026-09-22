@@ -19,6 +19,7 @@ from coval_bench.providers.stt.assemblyai import AssemblyAIProvider
 from coval_bench.providers.stt.azure import AzureSTTProvider
 from coval_bench.providers.stt.baseten import BasetenSTTProvider
 from coval_bench.providers.stt.cartesia import CartesiaSTTProvider
+from coval_bench.providers.stt.cloudflare import CloudflareSTTProvider
 from coval_bench.providers.stt.deepgram import DeepgramProvider
 from coval_bench.providers.stt.elevenlabs import ElevenLabsSTTProvider
 from coval_bench.providers.stt.gemini import GeminiSTTProvider
@@ -52,6 +53,7 @@ except ImportError:
 STT_PROVIDERS: dict[str, type[STTProvider]] = {
     "deepgram": DeepgramProvider,
     "cartesia": CartesiaSTTProvider,
+    "cloudflare": CloudflareSTTProvider,
     "assemblyai": AssemblyAIProvider,
     "azure": AzureSTTProvider,
     "baseten": BasetenSTTProvider,
@@ -84,6 +86,7 @@ __all__ = [
     "GOOGLE_AVAILABLE",
     "DeepgramProvider",
     "CartesiaSTTProvider",
+    "CloudflareSTTProvider",
     "AssemblyAIProvider",
     "AzureSTTProvider",
     "BasetenSTTProvider",
