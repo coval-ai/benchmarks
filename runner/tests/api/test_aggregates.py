@@ -503,8 +503,11 @@ async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
     by_dataset = await client.get("/v1/results/aggregates/by-dataset", params={"benchmark": "STT"})
     assert [block["dataset"] for block in by_dataset.json()["blocks"]] == ["stt-v2"]
 
-    raw = await client.get("/v1/results", params={"metric_type": "WER"})
-    assert [result["metric_value"] for result in raw.json()["results"]] == [99.0]
+    # The raw row reader is retired; the normalized aggregate is the oracle for
+    # the dashboard read path after the feature flag is enabled.
+    aggregate = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
+    assert aggregate.status_code == 200
+    assert aggregate.json()["model_stats"][0]["avg_value"] == pytest.approx(6.0)
 
 
 async def test_normalized_stats_expand_ttfa_and_filter_ineligible_rows(

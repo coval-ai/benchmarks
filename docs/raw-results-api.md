@@ -64,6 +64,18 @@ and deduplicate by `evaluation_id`. Historical coverage can differ from v1.
 
 ## Moving from v1
 
-`/v1/results` remains available. V2 changes the response shape and uses explicit
-run/evaluation status filters in place of `include_failed`. Update response
-parsing and follow pagination when switching to v2.
+`/v1/results` is retired and returns HTTP 410 with a link to `/v2/results`.
+It does not redirect. Legacy query strings are accepted so callers
+receive the migration response rather than a validation error. The aggregate,
+timeline, and aggregate-by-dataset routes under `/v1/results/*` remain available.
+
+V2 returns one evaluation per item. The stored value with role `primary` is
+exposed as top-level `value`/`unit`; named values with role `component` appear
+only in `components` when requested. Each item includes explicit observation
+and evaluation status, metric version and evaluation variant, stable UUID
+evaluation/observation identities, and its integer shared `run_id`.
+
+Clients must exhaust `next_cursor`; the maximum page size is 1000. `since` is
+inclusive and `until` exclusive, and exact `metric_version` and
+`evaluation_variant` filters preserve the selected version/variant. Use
+`evaluation_status` and `run_status` instead of the v1 `include_failed` flag.

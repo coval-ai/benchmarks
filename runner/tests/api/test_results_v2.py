@@ -785,6 +785,19 @@ async def test_v2_visibility_is_before_limit_and_cursor_scope_changes_are_reject
     assert public.headers.get("Cache-Control") is None
     assert partner.headers["Cache-Control"] == "private, no-store"
 
+    invalid_proof = await client.get(
+        "/v2/results",
+        params={"run_id": run_id},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert invalid_proof.status_code == 200
+    assert [row["provider"] for row in invalid_proof.json()["results"]] == ["seed"]
+    hidden_filter = await client.get(
+        "/v2/results", params={"run_id": run_id, "provider": EA_PROVIDER, "model": EA_MODEL}
+    )
+    assert hidden_filter.status_code == 200
+    assert hidden_filter.json()["results"] == []
+
     cursor = partner.json()["next_cursor"]
     assert cursor
     app.state.settings.clerk_org_exclusive = json.dumps({EA_ORG: f"{EA_PROVIDER}/{EA_MODEL}"})

@@ -53,8 +53,9 @@ retired manifests (`stt-v2.json`) stay for historical reproducibility.
 row per dataset, all on the execution's tick), and a result's dataset is
 derived from its parent run. The aggregation layer pools every result in the window regardless of
 dataset, so headline stats (e.g. pooled WER) blend all datasets that ran.
-`/v1/results` exposes each row's `dataset_id` and takes a `dataset` filter for
-per-dataset inspection. See ADR-023.
+`/v2/results` exposes each evaluation's `dataset_id` and takes a `dataset`
+filter for per-dataset inspection. It supports explicit metric version/variant
+selection and cursor pagination for complete exports. See ADR-023.
 
 The [results API v2](raw-results-api.md) exposes metric evaluations and
 their observation's dataset ID, with optional metric components and pagination.
