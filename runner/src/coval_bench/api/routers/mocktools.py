@@ -129,17 +129,23 @@ async def _answer(
     if not calls:
         logger.warning("mock_tool_call_empty", platform=codec.name)
     elif correlation.simulation_id:
-        schedule_export(
-            api_key=settings.coval_api_key,
-            api_base=settings.coval_api_base,
-            provider=request.app.state.tracer_provider,
-            simulation_id=correlation.simulation_id,
-            platform=codec.name,
-            calls=calls,
-            outcomes=outcomes,
-            started_ns=started_ns,
-            ended_ns=ended_ns,
-        )
+        provider = getattr(request.app.state, "tracer_provider", None)
+        if provider is None:
+            logger.warning(
+                "mock_tool_spans_skipped", platform=codec.name, reason="no tracer provider"
+            )
+        else:
+            schedule_export(
+                api_key=settings.coval_api_key,
+                api_base=settings.coval_api_base,
+                provider=provider,
+                simulation_id=correlation.simulation_id,
+                platform=codec.name,
+                calls=calls,
+                outcomes=outcomes,
+                started_ns=started_ns,
+                ended_ns=ended_ns,
+            )
     else:
         logger.debug("mock_tool_spans_skipped", platform=codec.name, reason="no simulation id")
 
