@@ -614,7 +614,7 @@ async def app(
     for env_var in set(PROVIDER_ENV.values()) - {"OPENAI_API_KEY"}:
         monkeypatch.setenv(env_var, "test-provider-key")
 
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     # Patch lifespan_pool in app.py to always create a fresh pool, bypassing
     # the module-level singleton which cannot be reopened once closed.

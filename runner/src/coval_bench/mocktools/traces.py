@@ -40,6 +40,7 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import Status, StatusCode
 from opentelemetry.util.types import AttributeValue
 
@@ -54,7 +55,7 @@ logger = structlog.get_logger("coval_bench.mocktools.traces")
 SERVICE_NAME = "benchmarks-mock-tools"
 REQUEST_SPAN_NAME = "mock_tool_request"
 SPAN_NAME = "llm_tool_call"
-SIMULATION_HEADER = "X-Simulation-Id"
+COVAL_SIMULATION_HEADER = "X-Simulation-Id"
 # Coval documents 30 s as the required exporter timeout. The exporter's retry
 # loop for 5xx and connection errors runs inside this budget, so it is also the
 # most one batch can hold a thread.
@@ -76,7 +77,7 @@ def new_tracer_provider(resource: Resource) -> TracerProvider:
     batch. One per process because every provider registers a fork hook and an
     atexit handler the interpreter never releases.
     """
-    return TracerProvider(resource=resource)
+    return TracerProvider(resource=resource, sampler=ALWAYS_ON)
 
 
 def _readable(span: trace.Span) -> ReadableSpan:
@@ -99,7 +100,7 @@ def coval_exporter(api_key: str, simulation_id: str, api_base: str) -> OTLPSpanE
     """
     return OTLPSpanExporter(
         endpoint=traces_endpoint(api_base),
-        headers={"X-API-Key": api_key, SIMULATION_HEADER: simulation_id},
+        headers={"X-API-Key": api_key, COVAL_SIMULATION_HEADER: simulation_id},
         timeout=EXPORT_TIMEOUT_S,
     )
 
@@ -192,11 +193,16 @@ async def _export(
     started_ns: int,
     ended_ns: int,
 ) -> None:
+    exporter: SpanExporter | None = None
     try:
         async with _exports:
             spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
             exporter = coval_exporter(api_key, simulation_id, api_base)
             result = await asyncio.to_thread(export_spans, exporter, spans)
+    except asyncio.CancelledError:
+        if exporter is not None:
+            exporter.shutdown()
+        raise
     except Exception:
         logger.warning(
             "mock_tool_spans_failed", simulation_id=simulation_id, platform=platform, exc_info=True

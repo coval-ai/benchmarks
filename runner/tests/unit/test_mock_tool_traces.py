@@ -24,8 +24,8 @@ from coval_bench.mocktools.dispatch import Outcome
 from coval_bench.mocktools.fixtures import Seed
 from coval_bench.mocktools.resolver import Resolution
 from coval_bench.mocktools.traces import (
+    COVAL_SIMULATION_HEADER,
     REQUEST_SPAN_NAME,
-    SIMULATION_HEADER,
     SPAN_NAME,
     build_spans,
     coval_exporter,
@@ -220,7 +220,7 @@ def test_the_coval_exporter_is_addressed_to_one_simulation_beside_the_api() -> N
 
     assert exporter._endpoint == "https://staging.coval.invalid/v1/traces"  # noqa: SLF001
     assert exporter._headers["X-API-Key"] == "k-test"  # noqa: SLF001
-    assert exporter._headers[SIMULATION_HEADER] == "sim_abc123"  # noqa: SLF001
+    assert exporter._headers[COVAL_SIMULATION_HEADER] == "sim_abc123"  # noqa: SLF001
     assert exporter._timeout == 30  # noqa: SLF001
 
 
@@ -248,7 +248,7 @@ async def test_with_a_key_the_batch_is_posted_off_the_request_path(
 
     def fake_export(exporter: Any, spans: Sequence[ReadableSpan]) -> SpanExportResult:  # noqa: ANN401
         posted.append(
-            (exporter._headers[SIMULATION_HEADER], exporter._endpoint, len(spans))  # noqa: SLF001
+            (exporter._headers[COVAL_SIMULATION_HEADER], exporter._endpoint, len(spans))  # noqa: SLF001
         )
         return SpanExportResult.SUCCESS
 
