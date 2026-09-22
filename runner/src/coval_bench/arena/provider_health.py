@@ -5,9 +5,10 @@
 proved the key dead.
 
 The TTS benchmark pays real credits against every provider every 30 minutes, so
-``benchmarks_v2.results`` already answers the second question. Reading it keeps the arena
-free of health state of its own, and of the races that come with sharing state across
-instances. A provider returns to pairing when a later run synthesizes for it.
+normalized observations and evaluations already answer the second question. Reading
+them keeps the arena free of health state of its own, and of the races that come with
+sharing state across instances. A provider returns to pairing when a later run
+synthesizes for it.
 """
 
 from __future__ import annotations
@@ -26,25 +27,38 @@ from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-# Every TTFA row of each provider's most recent TTS run. TTFA only: a run also writes WER
-# and latency-breakdown rows, which say nothing about whether the key works. The whole
-# run rather than its last row: a provider can field several models, they finish out of
-# order, and one arbitrary row must not decide the provider's health.
+# Every terminal TTFA evaluation of each provider's most recent TTS run. TTFA only: a
+# run also writes WER and latency-breakdown rows, which say nothing about whether the
+# key works. The whole run rather than its last row: a provider can field several models
+# and samples, they finish out of order, and one arbitrary row must not decide health.
+#
+# Keep the version/variant explicit. A later reevaluation must not change eligibility,
+# and queued/running evaluations must not look like failures. Deliberately do not join
+# metric_values, inspect observation status/error, or filter on parent-run status/model.
 _LATEST_RUN_TTFA_SQL = """
     WITH latest_run AS (
-        SELECT DISTINCT ON (r.provider) r.provider, r.run_id
-        FROM benchmarks_v2.results r
-        JOIN benchmarks_v2.runs u ON u.id = r.run_id
-        WHERE r.benchmark = 'TTS'
-          AND r.metric_type = 'TTFA'
+        SELECT DISTINCT ON (o.provider) o.provider, o.run_id
+        FROM benchmarks_v2.benchmark_observations o
+        JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+        JOIN benchmarks_v2.runs u ON u.id = o.run_id
+        WHERE o.benchmark = 'TTS'
+          AND e.metric_type = 'TTFA'
+          AND e.metric_version = 'v1'
+          AND e.evaluation_variant = 'default'
+          AND e.status IN ('succeeded', 'failed')
           AND u.started_at > now() - interval '1 day'
-        ORDER BY r.provider, u.started_at DESC, r.run_id DESC
+        ORDER BY o.provider, u.started_at DESC, o.run_id DESC
     )
-    SELECT l.provider, r.status, r.error
+    SELECT l.provider, e.status, e.error
     FROM latest_run l
-    JOIN benchmarks_v2.results r
-      ON r.run_id = l.run_id AND r.provider = l.provider
-    WHERE r.benchmark = 'TTS' AND r.metric_type = 'TTFA'
+    JOIN benchmarks_v2.benchmark_observations o
+      ON o.run_id = l.run_id AND o.provider = l.provider
+    JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+    WHERE o.benchmark = 'TTS'
+      AND e.metric_type = 'TTFA'
+      AND e.metric_version = 'v1'
+      AND e.evaluation_variant = 'default'
+      AND e.status IN ('succeeded', 'failed')
 """
 
 
@@ -168,7 +182,7 @@ async def benchmark_benched_providers(pool: AsyncConnectionPool[Any]) -> frozens
     succeeded: set[str] = set()
     failed_on_key: set[str] = set()
     for row in rows:
-        if row["status"] == "success":
+        if row["status"] == "succeeded":
             succeeded.add(row["provider"])
         elif classify_failure(None, row["error"]) in BENCHING_REASONS:
             failed_on_key.add(row["provider"])
