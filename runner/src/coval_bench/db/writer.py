@@ -31,7 +31,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.llm_turns import fetch_conversation_ttft
 from coval_bench.db.models import (
-    Benchmark,
     MetricArtifact,
     MetricEvaluation,
     MetricEvaluationInput,
@@ -1466,33 +1465,6 @@ class RunWriter:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
         return await fetch_conversation_ttft(self._pool, simulation_ids)
 
-    async def coval_run_ingested(
-        self, *, provider: str, coval_run_id: str, benchmark: str = "S2S"
-    ) -> bool:
-        """True if a succeeded or partial run already holds rows for this Coval run.
-
-        Coval rows store ``audio_filename = '<coval_run_id>/<sim_id>'``. Lets the
-        fetch job skip a re-pulled run so a retry or stale re-pull doesn't
-        double-write the day's bucket. Rows from failed runs don't count: they
-        never reach the bucket, so a retry must stay free to re-ingest the run.
-        """
-        sql = """
-            SELECT 1
-            FROM benchmarks_v2.results r
-            JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-            WHERE r.provider = %s
-              AND r.benchmark = %s
-              AND split_part(r.audio_filename, '/', 1) = %s
-              AND rn.status IN ('succeeded', 'partial')
-            LIMIT 1
-        """
-        async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, (provider, benchmark, coval_run_id))
-                row = await cur.fetchone()
-            await conn.commit()
-        return row is not None
-
     async def coval_metric_ingested(
         self,
         *,
@@ -1501,39 +1473,27 @@ class RunWriter:
         metric_type: str,
         benchmark: str = "S2S",
     ) -> bool:
-        """Check dedup storage for the benchmark-specific importer path.
+        """Check normalized observation/evaluation storage for an import key.
 
-        LLM imports use normalized observations and evaluations; S2S imports
-        retain the legacy results read for compatibility with older targeted
-        imports.
+        The parent run status is the only lifecycle filter.  In particular, a
+        failed evaluation still counts as ingested so a missing metric can be
+        imported independently without requiring a value or successful child
+        status.  ``model`` and evaluation version/variant are deliberately
+        absent: the import identity is provider/benchmark/sample prefix/metric.
         """
-        if benchmark == Benchmark.LLM:
-            sql = """
-                SELECT 1
-                FROM benchmarks_v2.benchmark_observations o
-                JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
-                JOIN benchmarks_v2.runs rn ON rn.id = o.run_id
-                WHERE o.provider = %s
-                  AND o.benchmark = %s
-                  AND split_part(o.sample_id, '/', 1) = %s
-                  AND e.metric_type = %s
-                  AND rn.status IN ('succeeded', 'partial')
-                LIMIT 1
-            """
-            params = (provider, benchmark, coval_run_id, metric_type)
-        else:
-            sql = """
-                SELECT 1
-                FROM benchmarks_v2.results r
-                JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
-                WHERE r.provider = %s
-                  AND r.benchmark = %s
-                  AND r.metric_type = %s
-                  AND split_part(r.audio_filename, '/', 1) = %s
-                  AND rn.status IN ('succeeded', 'partial')
-                LIMIT 1
-            """
-            params = (provider, benchmark, metric_type, coval_run_id)
+        sql = """
+            SELECT 1
+            FROM benchmarks_v2.benchmark_observations o
+            JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+            JOIN benchmarks_v2.runs rn ON rn.id = o.run_id
+            WHERE o.provider = %s
+              AND o.benchmark = %s
+              AND split_part(o.sample_id, '/', 1) = %s
+              AND e.metric_type = %s
+              AND rn.status IN ('succeeded', 'partial')
+            LIMIT 1
+        """
+        params = (provider, benchmark, coval_run_id, metric_type)
         async with self._pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(sql, params)

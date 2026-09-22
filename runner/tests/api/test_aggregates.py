@@ -1312,12 +1312,12 @@ async def test_by_dataset_attaches_the_bound_persona(client: AsyncClient, postgr
     assert by_dataset["s2s-dental-v1"] is None
     assert by_dataset["s2s-bank-hard-v1"] == {
         "slug": "hard",
-        "label": "Hard",
+        "label": "Poor cell",
         "description": by_dataset["s2s-bank-hard-v1"]["description"],
         "order": 3,
         "anchor": "judge",
     }
-    assert by_dataset["s2s-bank-hard-v1"]["description"].startswith("Office noise")
+    assert by_dataset["s2s-bank-hard-v1"]["description"].startswith("Noise plus")
 
 
 async def test_by_dataset_respects_window(client: AsyncClient, postgresql: Any) -> None:
