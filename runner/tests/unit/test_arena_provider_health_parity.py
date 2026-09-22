@@ -10,7 +10,9 @@ from typing import Any, cast
 
 from psycopg import Connection
 
+from coval_bench.arena.provider_health import _LATEST_RUN_TTFA_SQL
 from coval_bench.arena.provider_health_parity import (
+    _NORMALIZED_ROWS_SQL,
     _summarize,
     audit_provider_health_parity,
 )
@@ -123,3 +125,33 @@ def test_audit_marks_a_row_limit_as_incomplete() -> None:
     report = audit_provider_health_parity(_connection(rows + rows, rows), row_limit=1)
     assert report["complete"] is False
     assert report["mismatches_truncated"] is True
+
+
+def test_normalized_audit_reuses_runtime_query_and_freezes_as_of() -> None:
+    assert _NORMALIZED_ROWS_SQL.startswith(_LATEST_RUN_TTFA_SQL)
+
+    class CapturingConnection(_Connection):
+        def __init__(self) -> None:
+            super().__init__([], [])
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        def cursor(self, *, row_factory: object) -> _Cursor:
+            del row_factory
+            parent = self
+
+            class CapturingCursor(_Cursor):
+                def execute(self, statement: str, params: dict[str, Any]) -> None:
+                    parent.calls.append((statement, params))
+                    super().execute(statement, params)
+
+            return CapturingCursor(self._legacy, self._normalized)
+
+    connection = CapturingConnection()
+    audit_provider_health_parity(
+        cast(Connection[Any], connection),
+        as_of=datetime(2026, 9, 21, tzinfo=UTC),
+        row_limit=10,
+    )
+    assert len(connection.calls) == 2
+    assert all(call[1]["as_of"] == datetime(2026, 9, 21, tzinfo=UTC) for call in connection.calls)
+    assert connection.calls[1][0].startswith(_LATEST_RUN_TTFA_SQL)

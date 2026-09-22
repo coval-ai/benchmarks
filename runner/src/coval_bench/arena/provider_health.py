@@ -27,29 +27,44 @@ from coval_bench.registries.provider_keys import PROVIDER_ENV
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
-# Every terminal TTFA evaluation of each provider's most recent TTS run. TTFA only: a
-# run also writes WER and latency-breakdown rows, which say nothing about whether the
-# key works. The whole run rather than its last row: a provider can field several models
-# and samples, they finish out of order, and one arbitrary row must not decide health.
-#
-# Keep the version/variant explicit. A later reevaluation must not change eligibility,
-# and queued/running evaluations must not look like failures. Deliberately do not join
-# metric_values, inspect observation status/error, or filter on parent-run status/model.
+# Choose the newest candidate TTS run per provider, probing terminal TTFA eligibility only
+# after sorting. OFFSET 0 and the scalar boolean probe preserve that fallback shape.
 _LATEST_RUN_TTFA_SQL = """
-    WITH latest_run AS (
-        SELECT DISTINCT ON (o.provider) o.provider, o.run_id
-        FROM benchmarks_v2.benchmark_observations o
-        JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
-        JOIN benchmarks_v2.runs u ON u.id = o.run_id
-        WHERE o.benchmark = 'TTS'
-          AND e.metric_type = 'TTFA'
-          AND e.metric_version = 'v1'
-          AND e.evaluation_variant = 'default'
-          AND e.status IN ('succeeded', 'failed')
-          AND u.started_at > now() - interval '1 day'
-        ORDER BY o.provider, u.started_at DESC, o.run_id DESC
+    WITH candidate_runs AS MATERIALIZED (
+        SELECT DISTINCT o.provider, o.run_id, u.started_at
+        FROM benchmarks_v2.runs u
+        JOIN benchmarks_v2.benchmark_observations o ON o.run_id = u.id
+        WHERE u.started_at > COALESCE(%(as_of)s::timestamptz, now()) - interval '1 day'
+          AND o.benchmark = 'TTS'
+    ), latest_run AS (
+        SELECT p.provider, latest.run_id
+        FROM (SELECT DISTINCT provider FROM candidate_runs) p
+        CROSS JOIN LATERAL (
+            SELECT ordered.run_id
+            FROM (
+                SELECT c.run_id
+                FROM candidate_runs c
+                WHERE c.provider = p.provider
+                ORDER BY c.started_at DESC, c.run_id DESC
+                OFFSET 0
+            ) ordered
+            WHERE (
+                SELECT TRUE
+                FROM benchmarks_v2.benchmark_observations o
+                JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+                WHERE o.run_id = ordered.run_id
+                  AND o.provider = p.provider
+                  AND o.benchmark = 'TTS'
+                  AND e.metric_type = 'TTFA'
+                  AND e.metric_version = 'v1'
+                  AND e.evaluation_variant = 'default'
+                  AND e.status IN ('succeeded', 'failed')
+                LIMIT 1
+            )
+            LIMIT 1
+        ) latest
     )
-    SELECT l.provider, e.status, e.error
+    SELECT l.provider, l.run_id, e.status, e.error
     FROM latest_run l
     JOIN benchmarks_v2.benchmark_observations o
       ON o.run_id = l.run_id AND o.provider = l.provider
@@ -173,7 +188,7 @@ async def benchmark_benched_providers(pool: AsyncConnectionPool[Any]) -> frozens
     try:
         async with pool.connection() as conn:
             conn.row_factory = psycopg.rows.dict_row
-            cursor = await conn.execute(_LATEST_RUN_TTFA_SQL)
+            cursor = await conn.execute(_LATEST_RUN_TTFA_SQL, {"as_of": None})
             rows = await cursor.fetchall()
     except Exception:
         logger.warning("arena_provider_health_read_failed", exc_info=True)

@@ -19,7 +19,7 @@ import psycopg.rows
 from psycopg_pool import AsyncConnectionPool
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.arena.provider_health import benchmark_benched_providers
+from coval_bench.arena.provider_health import _LATEST_RUN_TTFA_SQL, benchmark_benched_providers
 
 from .conftest import apply_migrations, open_pool
 
@@ -284,6 +284,117 @@ def test_baseline_outcomes_and_run_id_ties(recovery_pg: psycopg.Connection[Any])
                 rows=[("failed", "HTTP 429 too many requests")],
             )
             assert await benchmark_benched_providers(pool) == frozenset({"p"})
+        finally:
+            await pool.close()
+
+    asyncio.run(exercise())
+
+
+def test_newer_ineligible_runs_fall_back_to_the_terminal_ttfa_run(
+    recovery_pg: psycopg.Connection[Any],
+) -> None:
+    """Newer ineligible runs cannot hide an older terminal TTFA run or its models."""
+    apply_migrations(recovery_pg)
+
+    async def exercise() -> None:
+        pool = await open_pool(recovery_pg)
+        try:
+            base = datetime.now(UTC) - timedelta(hours=2)
+            as_of = base + timedelta(hours=2)
+            expected: dict[str, int] = {}
+
+            expected["wer-fallback"] = await _record_run(
+                pool,
+                provider="wer-fallback",
+                started_at=base,
+                rows=[("failed", DEAD_KEY_ERROR)] * 3,
+            )
+            await _record_run(
+                pool,
+                provider="wer-fallback",
+                started_at=base + timedelta(minutes=30),
+                rows=[("failed", DEAD_KEY_ERROR)],
+                metric_type="WER",
+            )
+
+            expected["version-fallback"] = await _record_run(
+                pool,
+                provider="version-fallback",
+                started_at=base,
+                rows=[("failed", DEAD_KEY_ERROR)],
+            )
+            await _record_run(
+                pool,
+                provider="version-fallback",
+                started_at=base + timedelta(minutes=30),
+                rows=[("failed", DEAD_KEY_ERROR)],
+                metric_version="v2",
+            )
+
+            expected["variant-fallback"] = await _record_run(
+                pool,
+                provider="variant-fallback",
+                started_at=base,
+                rows=[("failed", DEAD_KEY_ERROR)],
+            )
+            await _record_run(
+                pool,
+                provider="variant-fallback",
+                started_at=base + timedelta(minutes=30),
+                rows=[("failed", DEAD_KEY_ERROR)],
+                variant="reevaluated",
+            )
+
+            expected["lifecycle-fallback"] = await _record_run(
+                pool,
+                provider="lifecycle-fallback",
+                started_at=base,
+                rows=[("failed", DEAD_KEY_ERROR)],
+            )
+            for offset, state in enumerate(("running", "queued"), start=1):
+                await _record_run(
+                    pool,
+                    provider="lifecycle-fallback",
+                    started_at=base + timedelta(minutes=30 * offset),
+                    rows=[(state, None)],
+                )
+
+            await _record_run(
+                pool,
+                provider="ineligible-only",
+                started_at=base + timedelta(minutes=30),
+                rows=[("failed", DEAD_KEY_ERROR)],
+                metric_type="WER",
+            )
+
+            expected["multi-model"] = await _record_run(
+                pool,
+                provider="multi-model",
+                started_at=base,
+                rows=[("failed", DEAD_KEY_ERROR), ("success", None), ("failed", DEAD_KEY_ERROR)],
+            )
+            await _record_run(
+                pool,
+                provider="multi-model",
+                started_at=base + timedelta(minutes=30),
+                rows=[("failed", DEAD_KEY_ERROR)],
+                metric_type="WER",
+            )
+
+            async with pool.connection() as conn:
+                conn.row_factory = psycopg.rows.dict_row
+                cursor = await conn.execute(_LATEST_RUN_TTFA_SQL, {"as_of": as_of})
+                rows = await cursor.fetchall()
+            selected = {
+                provider: {int(row["run_id"]) for row in rows if row["provider"] == provider}
+                for provider in expected
+            }
+            assert selected == {provider: {run_id} for provider, run_id in expected.items()}
+            assert sum(row["provider"] == "multi-model" for row in rows) == 3
+            assert all(row["provider"] != "ineligible-only" for row in rows)
+            assert await benchmark_benched_providers(pool) == frozenset(
+                {"wer-fallback", "version-fallback", "variant-fallback", "lifecycle-fallback"}
+            )
         finally:
             await pool.close()
 

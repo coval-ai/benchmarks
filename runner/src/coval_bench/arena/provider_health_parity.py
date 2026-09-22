@@ -17,7 +17,12 @@ from typing import Any
 import psycopg
 import psycopg.rows
 
-from .provider_health import BENCHING_REASONS, KeyFailure, classify_failure
+from .provider_health import (
+    _LATEST_RUN_TTFA_SQL,
+    BENCHING_REASONS,
+    KeyFailure,
+    classify_failure,
+)
 
 _DEFAULT_ROW_LIMIT = 100_000
 
@@ -37,30 +42,7 @@ _LEGACY_ROWS_SQL = """
     LIMIT %(row_limit)s
 """
 
-_NORMALIZED_ROWS_SQL = """
-    WITH latest_run AS (
-        SELECT DISTINCT ON (o.provider) o.provider, o.run_id
-        FROM benchmarks_v2.benchmark_observations o
-        JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
-        JOIN benchmarks_v2.runs u ON u.id = o.run_id
-        WHERE o.benchmark = 'TTS'
-          AND e.metric_type = 'TTFA' AND e.metric_version = 'v1'
-          AND e.evaluation_variant = 'default'
-          AND e.status IN ('succeeded', 'failed')
-          AND u.started_at > %(as_of)s - interval '1 day'
-        ORDER BY o.provider, u.started_at DESC, o.run_id DESC
-    )
-    SELECT l.provider, l.run_id, e.status, e.error
-    FROM latest_run l
-    JOIN benchmarks_v2.benchmark_observations o
-      ON o.run_id = l.run_id AND o.provider = l.provider
-    JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
-    WHERE o.benchmark = 'TTS'
-      AND e.metric_type = 'TTFA' AND e.metric_version = 'v1'
-      AND e.evaluation_variant = 'default'
-      AND e.status IN ('succeeded', 'failed')
-    LIMIT %(row_limit)s
-"""
+_NORMALIZED_ROWS_SQL = _LATEST_RUN_TTFA_SQL + "\n    LIMIT %(row_limit)s\n"
 
 
 def _summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
