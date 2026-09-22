@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import json
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
@@ -16,9 +15,14 @@ import psycopg
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import create_engine
 
+from coval_bench.api.app import create_app
+from coval_bench.api.results_cursor import decode as decode_cursor
+from coval_bench.api.results_cursor import encode as encode_cursor
+from coval_bench.config import Settings
 from coval_bench.registries import Benchmark, RegisteredModel
 from tests.api.conftest import (
     COVAL_ORG,
@@ -57,9 +61,9 @@ def _seed_completed_evaluation(
         """
         INSERT INTO benchmarks_v2.metric_evaluations
           (id, observation_id, metric_type, metric_version, evaluation_variant, status)
-        VALUES (%s, %s, 'WER', 'v1', %s, 'queued')
+        VALUES (%s, %s, 'WER', 'v1', 'default', 'queued')
         """,
-        (evaluation_id, observation_id, sample_id),
+        (evaluation_id, observation_id),
     )
     conn.execute(
         "UPDATE benchmarks_v2.metric_evaluations SET status='running' WHERE id=%s",
@@ -275,7 +279,7 @@ async def test_primary_role_and_components_preserve_stored_values(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql)
-    evaluation_id, observation_id = await _insert_evaluation(
+    evaluation_id, _observation_id = await _insert_evaluation(
         postgresql,
         run_id,
         primary_key="primary-key-without-literal-name",
@@ -286,8 +290,19 @@ async def test_primary_role_and_components_preserve_stored_values(
     )
     assert response.status_code == 200
     row = response.json()["results"][0]
-    assert row["evaluation_id"] == str(evaluation_id)
-    assert row["observation_id"] == str(observation_id)
+    assert set(row) == {
+        "captured_at",
+        "provider",
+        "model",
+        "voice",
+        "benchmark",
+        "dataset_id",
+        "metric_type",
+        "metric_version",
+        "value",
+        "unit",
+        "components",
+    }
     assert row["value"] == 120
     assert row["unit"] == "milliseconds"
     assert row["metric_type"] == "TTFA"
@@ -312,16 +327,30 @@ async def test_primary_role_and_components_preserve_stored_values(
 
 
 @pytest.mark.asyncio
-async def test_missing_primary_is_null_and_does_not_use_component(
+async def test_missing_primary_is_excluded_and_does_not_use_component(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql)
     await _insert_evaluation(postgresql, run_id, value=None, components=(("component", 3, "ms"),))
     response = await client.get("/v2/results", params={"run_id": run_id})
     assert response.status_code == 200
-    row = response.json()["results"][0]
-    assert row["value"] is None and row["unit"] is None
-    assert "components" not in row
+    assert response.json()["results"] == []
+
+    # The newest successful evaluation has no primary; it must not consume a slot.
+    now = datetime.now(UTC)
+    for minutes, value in ((1, 11), (2, 22)):
+        await _insert_evaluation(
+            postgresql, run_id, captured_at=now - timedelta(minutes=minutes), value=value
+        )
+    first = await client.get("/v2/results", params={"run_id": run_id, "limit": 1})
+    assert [row["value"] for row in first.json()["results"]] == [11]
+    assert first.json()["next_cursor"]
+    second = await client.get(
+        "/v2/results",
+        params={"run_id": run_id, "limit": 1, "cursor": first.json()["next_cursor"]},
+    )
+    assert [row["value"] for row in second.json()["results"]] == [22]
+    assert second.json()["next_cursor"] is None
 
 
 @pytest.mark.asyncio
@@ -330,10 +359,8 @@ async def test_pagination_counts_evaluations_and_preserves_order(
 ) -> None:
     run_id = await _insert_run(postgresql)
     now = datetime.now(UTC)
-    ids = [
+    for index in range(3):
         await _insert_evaluation(postgresql, run_id, captured_at=now - timedelta(minutes=index))
-        for index in range(3)
-    ]
     first = await client.get("/v2/results", params={"run_id": run_id, "limit": 2})
     assert first.status_code == 200
     body = first.json()
@@ -345,7 +372,7 @@ async def test_pagination_counts_evaluations_and_preserves_order(
     assert second.status_code == 200
     assert len(second.json()["results"]) == 1
     assert second.json()["next_cursor"] is None
-    assert [r["evaluation_id"] for r in body["results"]] == [str(ids[0][0]), str(ids[1][0])]
+    assert body["results"][0]["captured_at"] > body["results"][1]["captured_at"]
 
 
 @pytest.mark.asyncio
@@ -357,9 +384,10 @@ async def test_status_and_version_filters(client: AsyncClient, postgresql: Any) 
         "/v2/results",
         params={"run_id": run_id, "metric_version": "v2", "evaluation_variant": "alt"},
     )
-    assert response.status_code == 200
-    assert len(response.json()["results"]) == 1
-    assert response.json()["results"][0]["run_status"] == "partial"
+    assert response.status_code == 422
+    default = await client.get("/v2/results", params={"run_id": run_id})
+    assert default.status_code == 200
+    assert len(default.json()["results"]) == 1
 
 
 @pytest.mark.asyncio
@@ -384,8 +412,9 @@ async def test_components_do_not_change_page_membership(
         params={"run_id": run_id, "limit": 1, "include_components": "true"},
     )
     assert plain.status_code == detailed.status_code == 200
-    assert [row["evaluation_id"] for row in plain.json()["results"]] == [
-        row["evaluation_id"] for row in detailed.json()["results"]
+    assert plain.json()["results"] == [
+        {key: value for key, value in row.items() if key != "components"}
+        for row in detailed.json()["results"]
     ]
     assert detailed.json()["results"][0]["components"] == {}
 
@@ -431,11 +460,7 @@ async def test_evaluation_and_run_status_filters_are_independent(
     running_both = await client.get(
         "/v2/results", params={"evaluation_status": "running", "run_status": "running"}
     )
-    assert failed_eval.status_code == running_both.status_code == 200
-    assert len(failed_eval.json()["results"]) == 1
-    assert len(running_both.json()["results"]) == 1
-    assert failed_eval.json()["results"][0]["run_status"] == "succeeded"
-    assert running_both.json()["results"][0]["evaluation_status"] == "running"
+    assert failed_eval.status_code == running_both.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -443,20 +468,17 @@ async def test_failed_observation_evaluation_is_eligible(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql, status="partial")
-    evaluation_id, _ = await _insert_evaluation(
+    await _insert_evaluation(
         postgresql,
         run_id,
-        status="failed",
-        value=None,
         observation_status="failed",
     )
     response = await client.get(
         "/v2/results",
-        params={"evaluation_status": "failed", "run_status": "partial"},
+        params={"run_status": "partial"},
     )
     assert response.status_code == 200
-    assert [row["evaluation_id"] for row in response.json()["results"]] == [str(evaluation_id)]
-    assert response.json()["results"][0]["value"] is None
+    assert [row["value"] for row in response.json()["results"]] == [120]
 
 
 @pytest.mark.asyncio
@@ -464,7 +486,7 @@ async def test_newer_ineligible_evaluation_does_not_consume_page_slot(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql, status="succeeded")
-    older_id, _ = await _insert_evaluation(
+    await _insert_evaluation(
         postgresql,
         run_id,
         captured_at=datetime.now(UTC) - timedelta(minutes=1),
@@ -479,7 +501,7 @@ async def test_newer_ineligible_evaluation_does_not_consume_page_slot(
     )
     response = await client.get("/v2/results", params={"run_id": run_id, "limit": 1})
     assert response.status_code == 200
-    assert [row["evaluation_id"] for row in response.json()["results"]] == [str(older_id)]
+    assert [row["metric_type"] for row in response.json()["results"]] == ["TTFA"]
     assert response.json()["next_cursor"] is None
 
 
@@ -488,14 +510,14 @@ async def test_explicit_time_bounds_are_half_open(client: AsyncClient, postgresq
     run_id = await _insert_run(postgresql)
     since = datetime.now(UTC) - timedelta(hours=2)
     until = datetime.now(UTC) - timedelta(hours=1)
-    included = await _insert_evaluation(postgresql, run_id, captured_at=since)
+    await _insert_evaluation(postgresql, run_id, captured_at=since)
     await _insert_evaluation(postgresql, run_id, captured_at=until)
     response = await client.get(
         "/v2/results",
         params={"since": since.isoformat(), "until": until.isoformat()},
     )
     assert response.status_code == 200
-    assert [row["evaluation_id"] for row in response.json()["results"]] == [str(included[0])]
+    assert len(response.json()["results"]) == 1
 
 
 @pytest.mark.asyncio
@@ -507,11 +529,30 @@ async def test_openapi_marks_nullable_values_and_optional_components(
     response_schema = document["components"]["schemas"]["ResultsV2Response"]
     assert "value" in result_schema["required"] and "unit" in result_schema["required"]
     assert "components" not in result_schema["required"]
-    assert any(item.get("type") == "null" for item in result_schema["properties"]["value"]["anyOf"])
+    assert result_schema["properties"]["value"]["type"] == "number"
     assert result_schema["properties"]["components"]["type"] == "object"
     assert "next_cursor" in response_schema["required"]
     params = {item["name"]: item for item in document["paths"]["/v2/results"]["get"]["parameters"]}
     assert params["evaluation_status"]["schema"]["default"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_missing_or_invalid_cursor_key_fails_before_pool_dependency() -> None:
+    def unexpected_connection() -> None:
+        pytest.fail("A missing cursor key must fail before any database query")
+
+    for key in (None, SecretStr("not-a-fernet-key")):
+        settings = Settings(_env_file=None, results_cursor_key=key, posthog_disabled=True)
+        app = create_app(settings=settings)
+        app.state.settings = settings
+        app.state.posthog = None
+        app.state.pool = SimpleNamespace(connection=unexpected_connection)
+        app.state.limiter.enabled = False
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            for params in ({}, {"cursor": "v1.invalid"}):
+                response = await client.get("/v2/results", params=params)
+                assert response.status_code == 503
+                assert response.json() == {"detail": "results pagination is unavailable"}
 
 
 @pytest.mark.asyncio
@@ -520,7 +561,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
 ) -> None:
     run_id = await _insert_run(postgresql)
     captured_at = datetime.now(UTC)
-    first_id, observation_id = await _insert_evaluation(
+    _first_id, observation_id = await _insert_evaluation(
         postgresql,
         run_id,
         evaluation_id=UUID("00000000-0000-4000-8000-000000000001"),
@@ -529,7 +570,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
         metric_version="v1",
         components=(("first_component", 1, "ms"),),
     )
-    second_id, _ = await _insert_evaluation(
+    _second_id, _ = await _insert_evaluation(
         postgresql,
         run_id,
         evaluation_id=UUID("00000000-0000-4000-8000-000000000004"),
@@ -539,7 +580,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
         evaluation_variant="alt",
         components=(("second_component", 2, "ms"),),
     )
-    third_id, second_observation_id = await _insert_evaluation(
+    _third_id, second_observation_id = await _insert_evaluation(
         postgresql,
         run_id,
         evaluation_id=UUID("00000000-0000-4000-8000-000000000003"),
@@ -547,7 +588,7 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
         metric_type="WER",
         components=(("third_component", 3, "percent"),),
     )
-    fourth_id, _ = await _insert_evaluation(
+    _fourth_id, _ = await _insert_evaluation(
         postgresql,
         run_id,
         evaluation_id=UUID("00000000-0000-4000-8000-000000000002"),
@@ -556,38 +597,33 @@ async def test_same_observation_ties_and_cursor_are_stable_across_detail_and_lim
         metric_type="TTFT",
         components=(("fourth_component", 4, "seconds"),),
     )
-    expected = sorted((str(first_id), str(second_id), str(third_id), str(fourth_id)), reverse=True)
-
     plain = await client.get("/v2/results", params={"run_id": run_id, "limit": 3})
     detailed = await client.get(
         "/v2/results",
         params={"run_id": run_id, "limit": 3, "include_components": "true"},
     )
     assert plain.status_code == detailed.status_code == 200
-    assert [row["evaluation_id"] for row in plain.json()["results"]] == expected[:3]
-    assert [row["evaluation_id"] for row in detailed.json()["results"]] == expected[:3]
-    assert len({row["observation_id"] for row in plain.json()["results"]}) == 2
+    assert [row["metric_type"] for row in plain.json()["results"]] == ["WER", "TTFT", "TTFA"]
+    assert [row["metric_type"] for row in plain.json()["results"]] == [
+        row["metric_type"] for row in detailed.json()["results"]
+    ]
     assert plain.json()["next_cursor"] == detailed.json()["next_cursor"]
 
+    first_page = await client.get("/v2/results", params={"run_id": run_id, "limit": 2})
+    assert [row["metric_type"] for row in first_page.json()["results"]] == ["WER", "TTFT"]
     second_page = await client.get(
         "/v2/results",
         params={
             "run_id": run_id,
             "limit": 1,
             "include_components": "true",
-            "cursor": plain.json()["next_cursor"],
+            "cursor": first_page.json()["next_cursor"],
         },
     )
     assert second_page.status_code == 200
     second_row = second_page.json()["results"][0]
-    assert [second_row["evaluation_id"]] == expected[3:]
-    component_by_id = {
-        str(first_id): {"first_component": {"value": 1, "unit": "ms"}},
-        str(second_id): {"second_component": {"value": 2, "unit": "ms"}},
-        str(third_id): {"third_component": {"value": 3, "unit": "percent"}},
-        str(fourth_id): {"fourth_component": {"value": 4, "unit": "seconds"}},
-    }
-    assert second_row["components"] == component_by_id[second_row["evaluation_id"]]
+    assert second_row["metric_type"] == "TTFA"
+    assert second_row["components"] == {"first_component": {"value": 1, "unit": "ms"}}
     assert second_page.json()["next_cursor"] is None
 
     empty = await client.get("/v2/results", params={"run_id": 999999, "limit": 2})
@@ -605,7 +641,7 @@ async def test_backfilled_historical_and_fresh_metric_ids_are_read_by_catalog_id
         "/v2/results", params={"run_id": run_id, "metric_type": "WER", "limit": 1}
     )
     assert first.status_code == 200
-    assert [row["evaluation_id"] for row in first.json()["results"]] == [str(fresh_id)]
+    assert [row["metric_type"] for row in first.json()["results"]] == ["WER"]
     assert first.json()["next_cursor"]
     second = await client.get(
         "/v2/results",
@@ -617,15 +653,12 @@ async def test_backfilled_historical_and_fresh_metric_ids_are_read_by_catalog_id
         },
     )
     assert second.status_code == 200
-    assert [row["evaluation_id"] for row in second.json()["results"]] == [str(historical_id)]
+    assert [row["metric_type"] for row in second.json()["results"]] == ["WER"]
     assert second.json()["results"][0]["metric_type"] == "WER"
     assert second.json()["next_cursor"] is None
 
     filtered = await client.get("/v2/results", params={"run_id": run_id, "metric_type": "WER"})
-    assert {row["evaluation_id"] for row in filtered.json()["results"]} == {
-        str(historical_id),
-        str(fresh_id),
-    }
+    assert len(filtered.json()["results"]) == 2
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
@@ -669,7 +702,7 @@ async def test_composed_filters_and_omitted_versions_return_expected_rows(
     client: AsyncClient, postgresql: Any
 ) -> None:
     run_id = await _insert_run(postgresql, status="partial")
-    target_id, observation_id = await _insert_evaluation(
+    _target_id, observation_id = await _insert_evaluation(
         postgresql,
         run_id,
         provider="filter-provider",
@@ -678,7 +711,6 @@ async def test_composed_filters_and_omitted_versions_return_expected_rows(
         benchmark="TTS",
         metric_type="WER",
         metric_version="v2",
-        evaluation_variant="alt",
     )
     await _insert_evaluation(
         postgresql,
@@ -704,7 +736,7 @@ async def test_composed_filters_and_omitted_versions_return_expected_rows(
             "benchmark": "TTS",
             "metric_type": "WER",
             "metric_version": "v2",
-            "evaluation_variant": "alt",
+            "evaluation_variant": "default",
         },
     )
     all_versions = await client.get(
@@ -718,9 +750,26 @@ async def test_composed_filters_and_omitted_versions_return_expected_rows(
             "metric_type": "WER",
         },
     )
-    assert exact.status_code == all_versions.status_code == 200
-    assert [row["evaluation_id"] for row in exact.json()["results"]] == [str(target_id)]
-    assert len(all_versions.json()["results"]) == 2
+    assert exact.status_code == 200
+    assert [row["metric_version"] for row in exact.json()["results"]] == ["v2"]
+    assert all_versions.status_code == 200
+    assert {row["metric_version"] for row in all_versions.json()["results"]} == {"v1", "v2"}
+
+
+@pytest.mark.asyncio
+async def test_default_rows_and_parent_status_filters(client: AsyncClient, postgresql: Any) -> None:
+    for status, value in (("succeeded", 10), ("partial", 20), ("running", 30), ("failed", 40)):
+        run_id = await _insert_run(postgresql, status=status)
+        await _insert_evaluation(postgresql, run_id, value=value)
+        await _insert_evaluation(postgresql, run_id, status="failed", value=None)
+        await _insert_evaluation(postgresql, run_id, evaluation_variant="alternate", value=99)
+    default = await client.get("/v2/results")
+    assert default.status_code == 200
+    assert {row["value"] for row in default.json()["results"]} == {10, 20}
+    for status, value in (("succeeded", 10), ("partial", 20)):
+        filtered = await client.get("/v2/results", params={"run_status": status})
+        assert filtered.status_code == 200
+        assert [row["value"] for row in filtered.json()["results"]] == [value]
 
 
 @pytest.mark.asyncio
@@ -743,10 +792,7 @@ async def test_all_status_filters_include_every_independent_state_and_ignore_leg
     response = await client.get(
         "/v2/results", params={"evaluation_status": "all", "run_status": "all"}
     )
-    assert response.status_code == 200
-    states = {(row["evaluation_status"], row["run_status"]) for row in response.json()["results"]}
-    assert states == {(evaluation_status, run_status) for run_status, evaluation_status in cases}
-    assert all(row["provider"] != "legacy-only" for row in response.json()["results"])
+    assert response.status_code == 422
 
 
 @pytest.mark.usefixtures("early_access_registry")
@@ -854,31 +900,33 @@ async def test_cursor_validation_time_conflicts_and_frozen_bounds(
     relative_cursor = relative_first.json()["next_cursor"]
     assert relative_cursor
 
-    raw = json.loads(base64.urlsafe_b64decode(relative_cursor + "=" * (-len(relative_cursor) % 4)))
+    cursor_key = SecretStr("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    raw = decode_cursor(relative_cursor, cursor_key)
     raw.pop("until")
     changed_until = await client.get(
         "/v2/results",
         params={
             "window": "24h",
             "limit": 1,
-            "cursor": base64.urlsafe_b64encode(json.dumps(raw).encode()).decode(),
+            "cursor": encode_cursor(raw, cursor_key),
         },
     )
     malformed = await client.get("/v2/results", params={"cursor": "not-base64"})
     deep = dict(raw, extra=[[[]]])
-    deep_cursor = base64.urlsafe_b64encode(json.dumps(deep).encode()).decode()
+    deep_cursor = encode_cursor(deep, cursor_key)
     deep_response = await client.get("/v2/results", params={"cursor": deep_cursor})
     assert changed_until.status_code == malformed.status_code == deep_response.status_code == 400
+    for field, value in (("until", 1), ("anchor_id", 1), ("v", True)):
+        invalid_payload = dict(decode_cursor(relative_cursor, cursor_key))
+        invalid_payload[field] = value
+        invalid = await client.get(
+            "/v2/results", params={"cursor": encode_cursor(invalid_payload, cursor_key)}
+        )
+        assert invalid.status_code == 400
 
-    late_after = await _insert_evaluation(
-        postgresql, run_id, captured_at=now - timedelta(minutes=3)
-    )
-    late_before = await _insert_evaluation(
-        postgresql, run_id, captured_at=now + timedelta(minutes=1)
-    )
-    outside_original_window = await _insert_evaluation(
-        postgresql, run_id, captured_at=now - timedelta(hours=47)
-    )
+    await _insert_evaluation(postgresql, run_id, captured_at=now - timedelta(minutes=3))
+    await _insert_evaluation(postgresql, run_id, captured_at=now + timedelta(minutes=1))
+    await _insert_evaluation(postgresql, run_id, captured_at=now - timedelta(hours=47))
 
     class LaterDateTime(datetime):
         @classmethod
@@ -890,7 +938,6 @@ async def test_cursor_validation_time_conflicts_and_frozen_bounds(
         "/v2/results", params={"window": "24h", "limit": 100, "cursor": relative_cursor}
     )
     assert continued.status_code == 200
-    continued_ids = {row["evaluation_id"] for row in continued.json()["results"]}
-    assert str(late_after[0]) in continued_ids
-    assert str(late_before[0]) not in continued_ids
-    assert str(outside_original_window[0]) not in continued_ids
+    continued_times = [row["captured_at"] for row in continued.json()["results"]]
+    assert len(continued_times) == 2
+    assert all(time < (now + timedelta(minutes=1)).isoformat() for time in continued_times)

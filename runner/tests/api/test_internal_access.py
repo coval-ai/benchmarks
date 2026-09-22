@@ -68,6 +68,15 @@ async def _seed_ea_and_public_rows(postgresql: Any) -> None:
     await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3")
 
 
+@pytest.mark.usefixtures("early_access_registry")
+async def test_v2_does_not_read_legacy_results(client: AsyncClient, postgresql: Any) -> None:
+    await _seed_ea_and_public_rows(postgresql)
+    for headers in ({}, _internal_headers()):
+        response = await client.get("/v2/results", params={"benchmark": "STT"}, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"results": [], "next_cursor": None}
+
+
 def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
     return {(r["provider"], r["model"]) for r in results}
 

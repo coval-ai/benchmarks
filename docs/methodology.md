@@ -54,8 +54,8 @@ row per dataset, all on the execution's tick), and a result's dataset is
 derived from its parent run. The aggregation layer pools every result in the window regardless of
 dataset, so headline stats (e.g. pooled WER) blend all datasets that ran.
 `/v2/results` exposes each evaluation's `dataset_id` and takes a `dataset`
-filter for per-dataset inspection. It supports explicit metric version/variant
-selection and cursor pagination for complete exports. See ADR-023.
+filter for per-dataset inspection. It supports metric version selection and
+cursor pagination for successful default-variant evaluations. See ADR-023.
 
 The [results API v2](raw-results-api.md) exposes metric evaluations and
 their observation's dataset ID, with optional metric components and pagination.

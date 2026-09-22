@@ -589,6 +589,7 @@ async def app(
     monkeypatch.setenv("DATASET_BUCKET", "test-bucket")
     monkeypatch.setenv("DATASET_ID", "librispeech-test-clean-50")
     monkeypatch.setenv("POSTHOG_DISABLED", "true")
+    monkeypatch.setenv("RESULTS_CURSOR_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     monkeypatch.setenv("ARENA_LABELER_KEY", ARENA_LABELER_KEY)
     monkeypatch.setenv("MOCK_TOOLS_SECRET", MOCK_TOOLS_KEY)
     monkeypatch.setenv("LLM_PROXY_SECRET", LLM_PROXY_KEY)

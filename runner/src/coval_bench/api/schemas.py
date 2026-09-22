@@ -145,22 +145,15 @@ class ResultComponentOut(BaseModel):
 
 
 class ResultV2Out(BaseModel):
-    evaluation_id: uuid.UUID
-    observation_id: uuid.UUID
-    run_id: int
     metric_type: str
     metric_version: str
-    evaluation_variant: str
-    evaluation_status: Literal["queued", "running", "succeeded", "failed"]
-    run_status: Literal["running", "succeeded", "partial", "failed"]
-    value: float | None
-    unit: str | None
+    value: float
+    unit: str
     provider: str
     model: str
     voice: str | None
     benchmark: BenchmarkLiteral
     dataset_id: str
-    sample_id: str
     captured_at: datetime
     components: dict[str, ResultComponentOut] = Field(default_factory=dict)
 
