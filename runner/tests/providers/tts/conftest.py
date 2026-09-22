@@ -58,6 +58,8 @@ def fake_settings(tmp_path: Path) -> Settings:
         atlas_api_key=SecretStr("test-atlas-key"),
         nari_api_key=SecretStr("test-nari-key"),
         stepfun_api_key=SecretStr("test-stepfun-key"),
+        cloudflare_api_key=SecretStr("test-cloudflare-key"),
+        cloudflare_account_id="acct-0123",
         deepgram_api_key=SecretStr("test-deepgram-key"),
         hume_api_key=SecretStr("test-hume-key"),
         rime_api_key=SecretStr("test-rime-key"),
