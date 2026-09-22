@@ -33,9 +33,7 @@ from coval_bench.config import Settings
 from coval_bench.db.mock_tool_store import record_call
 from coval_bench.mocktools.codecs import Codec, codec_for
 from coval_bench.mocktools.dispatch import Dispatcher
-from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
 from coval_bench.mocktools.traces import schedule_export
-from coval_bench.telemetry import build_resource
 
 logger = structlog.get_logger("coval_bench.mocktools")
 
@@ -134,7 +132,7 @@ async def _answer(
         schedule_export(
             api_key=settings.coval_api_key,
             api_base=settings.coval_api_base,
-            resource=lambda: build_resource(settings, TRACE_SERVICE_NAME),
+            provider=request.app.state.tracer_provider,
             simulation_id=correlation.simulation_id,
             platform=codec.name,
             calls=calls,

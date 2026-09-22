@@ -35,7 +35,7 @@ def queued(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
                 "simulation_id": kwargs["simulation_id"],
                 "api_key": kwargs["api_key"].get_secret_value() if kwargs["api_key"] else None,
                 "api_base": kwargs["api_base"],
-                "service": dict(kwargs["resource"]().attributes)["service.name"],
+                "service": dict(kwargs["provider"].resource.attributes)["service.name"],
                 "platform": kwargs["platform"],
                 "tools": [call.tool for call in kwargs["calls"]],
                 "modes": [outcome.mode for outcome in kwargs["outcomes"]],

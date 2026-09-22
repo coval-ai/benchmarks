@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import structlog
@@ -64,21 +64,19 @@ MAX_CONCURRENT_EXPORTS = 8
 # a slow Coval drops new copies past this point instead of growing without end.
 MAX_PENDING_EXPORTS = 64
 
-# One provider for the process, with no span processor attached: spans are
-# collected by hand and posted as a batch, rather than exported one by one as
-# they end. Building a provider per request would also register a fork hook
-# the interpreter never releases.
-_provider: TracerProvider | None = None
 _exports = asyncio.Semaphore(MAX_CONCURRENT_EXPORTS)
 _tasks: set[asyncio.Task[None]] = set()
 _disabled_warned = False
 
 
-def _tracer(resource: Resource) -> trace.Tracer:
-    global _provider
-    if _provider is None:
-        _provider = TracerProvider(resource=resource)
-    return _provider.get_tracer(__name__)
+def new_tracer_provider(resource: Resource) -> TracerProvider:
+    """The one provider the API lifespan owns, built at startup and shut down after :func:`drain`.
+
+    No span processor is attached: spans are collected by hand and posted as a
+    batch. One per process because every provider registers a fork hook and an
+    atexit handler the interpreter never releases.
+    """
+    return TracerProvider(resource=resource)
 
 
 def _readable(span: trace.Span) -> ReadableSpan:
@@ -134,7 +132,7 @@ def span_attributes(
 
 
 def build_spans(
-    resource: Resource,
+    provider: TracerProvider,
     platform: str,
     calls: Sequence[ToolCall],
     outcomes: Sequence[Outcome],
@@ -142,7 +140,7 @@ def build_spans(
     ended_ns: int,
 ) -> list[ReadableSpan]:
     """One trace for the request: a parent span with one child per tool call."""
-    tracer = _tracer(resource)
+    tracer = provider.get_tracer(__name__)
     request = tracer.start_span(
         REQUEST_SPAN_NAME,
         start_time=started_ns,
@@ -186,7 +184,7 @@ def export_spans(exporter: SpanExporter, spans: Sequence[ReadableSpan]) -> SpanE
 async def _export(
     api_key: str,
     api_base: str,
-    resource: Callable[[], Resource],
+    provider: TracerProvider,
     simulation_id: str,
     platform: str,
     calls: Sequence[ToolCall],
@@ -196,7 +194,7 @@ async def _export(
 ) -> None:
     try:
         async with _exports:
-            spans = build_spans(resource(), platform, calls, outcomes, started_ns, ended_ns)
+            spans = build_spans(provider, platform, calls, outcomes, started_ns, ended_ns)
             exporter = coval_exporter(api_key, simulation_id, api_base)
             result = await asyncio.to_thread(export_spans, exporter, spans)
     except Exception:
@@ -224,7 +222,7 @@ def schedule_export(
     *,
     api_key: SecretStr | None,
     api_base: str,
-    resource: Callable[[], Resource],
+    provider: TracerProvider,
     simulation_id: str,
     platform: str,
     calls: Sequence[ToolCall],
@@ -256,7 +254,7 @@ def schedule_export(
         _export(
             api_key.get_secret_value(),
             api_base,
-            resource,
+            provider,
             simulation_id,
             platform,
             calls,

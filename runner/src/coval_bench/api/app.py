@@ -67,7 +67,10 @@ from coval_bench.fixture_sources import install_fixture_providers
 from coval_bench.llm.benchmark import llm_models, make_clients
 from coval_bench.logging import configure_logging
 from coval_bench.mocktools.dispatch import build_dispatcher
+from coval_bench.mocktools.traces import SERVICE_NAME as TRACE_SERVICE_NAME
 from coval_bench.mocktools.traces import drain as drain_mock_tool_exports
+from coval_bench.mocktools.traces import new_tracer_provider
+from coval_bench.telemetry import build_resource
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -139,6 +142,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError:
             app.state.mock_dispatcher = None
             logger.warning("mock_tools_fixtures_unusable", exc_info=True)
+        tracer_provider = new_tracer_provider(build_resource(resolved, TRACE_SERVICE_NAME))
+        app.state.tracer_provider = tracer_provider
         try:
             async with lifespan_pool(resolved) as pool:
                 app.state.pool = pool
@@ -156,6 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             for llm_client in llm_clients.values():
                 await llm_client.aclose()
             await drain_mock_tool_exports()
+            tracer_provider.shutdown()
             if posthog_client is not None:
                 try:
                     posthog_client.shutdown()  # type: ignore[no-untyped-call]

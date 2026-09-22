@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
@@ -34,7 +34,7 @@ from coval_bench.mocktools.traces import (
     span_attributes,
 )
 
-RESOURCE = Resource.create({"service.name": "test"})
+PROVIDER = TracerProvider(resource=Resource.create({"service.name": "test"}))
 STARTED_NS = 1_700_000_000_000_000_000
 ENDED_NS = STARTED_NS + 150_000_000
 LOOKUP = ToolCall("lookup_patient", {"phone": "2065550180"}, call_id="call_1")
@@ -52,7 +52,7 @@ def _seeded(seed_id: str, response: dict[str, Any], mode: str = "exact") -> Outc
 def _build(*pairs: tuple[ToolCall, Outcome], platform: str = "vapi") -> list[ReadableSpan]:
     calls = [call for call, _ in pairs]
     outcomes = [outcome for _, outcome in pairs]
-    return build_spans(RESOURCE, platform, calls, outcomes, STARTED_NS, ENDED_NS)
+    return build_spans(PROVIDER, platform, calls, outcomes, STARTED_NS, ENDED_NS)
 
 
 def _attributes(span: ReadableSpan) -> dict[str, Any]:
@@ -326,7 +326,7 @@ async def test_drain_abandons_a_stuck_export_after_the_timeout(
 def _common() -> dict[str, Any]:
     return {
         "api_base": "https://coval.invalid/v1",
-        "resource": lambda: RESOURCE,
+        "provider": PROVIDER,
         "simulation_id": "sim_abc123",
         "platform": "vapi",
         "calls": [LOOKUP],
