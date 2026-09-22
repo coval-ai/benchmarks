@@ -1065,6 +1065,9 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                 sample_id: str,
                 metric_type: str = Metric.INSTRUCTION_FOLLOWING,
                 run_status: RunStatus = RunStatus.SUCCEEDED,
+                provider: str = "test-provider",
+                model: str = "test-model",
+                evaluation_status: ProcessingStatus = ProcessingStatus.QUEUED,
             ) -> None:
                 run = await writer.start_run(dataset_id=f"dataset-{name}", dataset_sha256="a" * 64)
                 assert run.id is not None
@@ -1074,14 +1077,14 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                         dataset_id=f"dataset-{name}",
                         dataset_sha256="a" * 64,
                         sample_id=sample_id,
-                        provider="test-provider",
-                        model="test-model",
+                        provider=provider,
+                        model=model,
                         benchmark=benchmark,
                         source_kind=ObservationSourceKind.CONVERSATION_TEXT,
                         status=ObservationStatus.SUCCEEDED,
                     )
                 )
-                await writer.insert_metric_evaluation(
+                evaluation = await writer.insert_metric_evaluation(
                     MetricEvaluation(
                         observation_id=observation.id,
                         metric_type=metric_type,
@@ -1090,6 +1093,12 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                         status=ProcessingStatus.QUEUED,
                     )
                 )
+                if evaluation_status is ProcessingStatus.FAILED:
+                    await writer.fail_metric_evaluation(
+                        evaluation.id,
+                        finished_at=datetime.now(UTC),
+                        error="metric failed",
+                    )
                 if run_status is not RunStatus.RUNNING:
                     await writer.finish_run(
                         run.id,
@@ -1122,6 +1131,37 @@ def test_coval_metric_ingestion_reads_normalized_storage(
 
             await add_normalized(name="llm", sample_id="RLLM/sim-1")
             await add_normalized(name="s2s", benchmark=Benchmark.S2S, sample_id="RS2S/sim-1")
+            await add_normalized(
+                name="failed-eval-succeeded-parent",
+                benchmark=Benchmark.S2S,
+                sample_id="RFAILED-EVAL/sim-1",
+                evaluation_status=ProcessingStatus.FAILED,
+            )
+            await add_normalized(
+                name="failed-eval-partial-parent",
+                benchmark=Benchmark.S2S,
+                sample_id="RPARTIAL-EVAL/sim-1",
+                run_status=RunStatus.PARTIAL,
+                evaluation_status=ProcessingStatus.FAILED,
+            )
+            await add_normalized(
+                name="failed-parent",
+                benchmark=Benchmark.S2S,
+                sample_id="RFAILED-PARENT/sim-1",
+                run_status=RunStatus.FAILED,
+            )
+            await add_normalized(
+                name="running-parent",
+                benchmark=Benchmark.S2S,
+                sample_id="RRUNNING-PARENT/sim-1",
+                run_status=RunStatus.RUNNING,
+            )
+            await add_normalized(
+                name="different-model",
+                benchmark=Benchmark.S2S,
+                sample_id="RMODEL/sim-1",
+                model="another-model",
+            )
             await add_legacy(name="llm", coval_run_id="RLLM-LEGACY", benchmark=Benchmark.LLM)
             await add_legacy(name="succeeded", coval_run_id="RS2S-SUCCEEDED")
             await add_legacy(
@@ -1180,6 +1220,47 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                     coval_run_id="RS2S-RUNNING",
                     metric_type=Metric.INSTRUCTION_FOLLOWING,
                 ),
+                "failed-eval-succeeded-parent": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RFAILED-EVAL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "failed-eval-partial-parent": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RPARTIAL-EVAL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "failed-parent": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RFAILED-PARENT",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "running-parent": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RRUNNING-PARENT",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "wrong-provider": await writer.coval_metric_ingested(
+                    provider="other-provider",
+                    coval_run_id="RFAILED-EVAL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "wrong-benchmark": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RFAILED-EVAL",
+                    benchmark=Benchmark.LLM,
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "wrong-prefix": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="NO-RFAILED-EVAL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
+                "different-model-matches": await writer.coval_metric_ingested(
+                    provider="test-provider",
+                    coval_run_id="RMODEL",
+                    metric_type=Metric.INSTRUCTION_FOLLOWING,
+                ),
             }
         finally:
             await pool.close()
@@ -1188,10 +1269,18 @@ def test_coval_metric_ingestion_reads_normalized_storage(
     assert result == {
         "normalized-llm": True,
         "legacy-only-llm": False,
-        "normalized-only-s2s": False,
-        "s2s-succeeded": True,
-        "s2s-partial": True,
+        "normalized-only-s2s": True,
+        "s2s-succeeded": False,
+        "s2s-partial": False,
         "s2s-wrong-metric": False,
         "s2s-failed": False,
         "s2s-running": False,
+        "failed-eval-succeeded-parent": True,
+        "failed-eval-partial-parent": True,
+        "failed-parent": False,
+        "running-parent": False,
+        "wrong-provider": False,
+        "wrong-benchmark": False,
+        "wrong-prefix": False,
+        "different-model-matches": True,
     }
