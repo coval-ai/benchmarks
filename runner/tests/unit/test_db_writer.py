@@ -1094,6 +1094,7 @@ def test_coval_metric_ingestion_reads_normalized_storage(
                     )
                 )
                 if evaluation_status is ProcessingStatus.FAILED:
+                    assert evaluation.id is not None
                     await writer.fail_metric_evaluation(
                         evaluation.id,
                         finished_at=datetime.now(UTC),

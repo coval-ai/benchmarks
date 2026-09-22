@@ -47,7 +47,13 @@ def _async_dsn(conn: psycopg.Connection[Any]) -> str:
 async def _pool(
     conn: psycopg.Connection[Any],
 ) -> AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]]:
-    pool = AsyncConnectionPool(_async_dsn(conn), min_size=1, max_size=1, open=False)
+    pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = AsyncConnectionPool(
+        _async_dsn(conn),
+        min_size=1,
+        max_size=1,
+        open=False,
+        kwargs={"row_factory": psycopg.rows.dict_row},
+    )
     await pool.open()
     return pool
 
@@ -158,6 +164,7 @@ def test_audit_presence_ignores_multiplicity_and_reports_metadata(
                     status=ProcessingStatus.QUEUED,
                 )
             )
+            assert evaluation.id is not None
             await writer.fail_metric_evaluation(
                 evaluation.id, finished_at=datetime.now(UTC), error="no value"
             )
