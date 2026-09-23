@@ -103,6 +103,9 @@ class Settings(BaseSettings):
     normalized_capture_required: bool = False
     # Dashboard reads can be validated independently from additive capture.
     normalized_dashboard_reads_enabled: bool = False
+    # Fernet key shared by API instances for authenticated results cursors.
+    # Missing or malformed configuration fails closed when /v2/results is called.
+    results_cursor_key: SecretStr | None = None
 
     @field_validator("coval_s2s_scenarios")
     @classmethod
@@ -206,6 +209,7 @@ class Settings(BaseSettings):
     modulate_api_key: SecretStr | None = None
     nari_api_key: SecretStr | None = None
     stepfun_api_key: SecretStr | None = None
+    cloudflare_api_key: SecretStr | None = None
     speechify_api_key: SecretStr | None = None
     fluxions_api_key: SecretStr | None = None
     deepdub_api_key: SecretStr | None = None
@@ -229,6 +233,7 @@ class Settings(BaseSettings):
     # infra, so its base URL + routing key live in config (``.env`` locally, Secret Manager in
     # prod) rather than hardcoded in the provider module.
     guava_base_url: str | None = None
+    cloudflare_account_id: str | None = None
     guava_api_key: SecretStr | None = None
     guava_stt_domain: str | None = None
 

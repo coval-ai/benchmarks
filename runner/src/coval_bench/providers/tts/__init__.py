@@ -21,6 +21,7 @@ from coval_bench.providers.tts.atlas import AtlasTTSProvider
 from coval_bench.providers.tts.azure import AzureTTSProvider
 from coval_bench.providers.tts.baseten import BasetenTTSProvider
 from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
+from coval_bench.providers.tts.cloudflare import CloudflareTTSProvider
 from coval_bench.providers.tts.deepdub import DeepdubTTSProvider
 from coval_bench.providers.tts.deepgram import DeepgramTTSProvider
 from coval_bench.providers.tts.elevenlabs import ElevenLabsTTSProvider
@@ -63,6 +64,7 @@ TTS_PROVIDERS: dict[str, type[TTSProvider]] = {
     "openai": OpenAITTSProvider,
     "atlas": AtlasTTSProvider,
     "cartesia": CartesiaTTSProvider,
+    "cloudflare": CloudflareTTSProvider,
     "elevenlabs": ElevenLabsTTSProvider,
     "gradium": GradiumTTSProvider,
     "deepgram": DeepgramTTSProvider,
@@ -104,6 +106,7 @@ __all__ = [
     "AtlasTTSProvider",
     "AzureTTSProvider",
     "BasetenTTSProvider",
+    "CloudflareTTSProvider",
     "DeepdubTTSProvider",
     "FishAudioTTSProvider",
     "FluxionsTTSProvider",

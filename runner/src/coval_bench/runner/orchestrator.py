@@ -463,6 +463,8 @@ async def _run_stt_item(
             kwargs["region"] = settings.azure_region
         elif entry.provider == "zoom":
             kwargs["api_secret"] = settings.zoom_api_secret
+        elif entry.provider == "cloudflare":
+            kwargs["account_id"] = settings.cloudflare_account_id
 
         audio_path: Path = item.path
         transcript_ref: str = item.transcript

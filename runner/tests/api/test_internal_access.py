@@ -32,9 +32,6 @@ from tests.api.conftest import (
     bearer,
 )
 
-# A token the stubbed Clerk instance never minted: an unknown proof, not an absent one.
-_WRONG_HEADERS = {"Authorization": "Bearer not-a-real-token"}
-
 _EA_PROVIDER = EA_PROVIDER
 _EA_MODEL = EA_MODEL
 
@@ -71,49 +68,17 @@ async def _seed_ea_and_public_rows(postgresql: Any) -> None:
     await _insert_result(postgresql, run_id, provider="deepgram", model="nova-3")
 
 
+@pytest.mark.usefixtures("early_access_registry")
+async def test_v2_does_not_read_legacy_results(client: AsyncClient, postgresql: Any) -> None:
+    await _seed_ea_and_public_rows(postgresql)
+    for headers in ({}, _internal_headers()):
+        response = await client.get("/v2/results", params={"benchmark": "STT"}, headers=headers)
+        assert response.status_code == 200
+        assert response.json() == {"results": [], "next_cursor": None}
+
+
 def _models_in(results: list[dict[str, Any]]) -> set[tuple[str, str]]:
     return {(r["provider"], r["model"]) for r in results}
-
-
-@pytest.mark.usefixtures("early_access_registry")
-async def test_results_hides_early_access_from_public(client: AsyncClient, postgresql: Any) -> None:
-    """Public and bad-bearer callers never see EARLY_ACCESS rows on /v1/results."""
-    await _seed_ea_and_public_rows(postgresql)
-
-    for headers in ({}, _WRONG_HEADERS):
-        response = await client.get("/v1/results", headers=headers)
-        assert response.status_code == 200
-        models = _models_in(response.json()["results"])
-        assert ("deepgram", "nova-3") in models
-        assert (_EA_PROVIDER, _EA_MODEL) not in models
-
-
-@pytest.mark.usefixtures("early_access_registry")
-async def test_results_serves_early_access_to_internal(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    """A coval org session unlocks EARLY_ACCESS rows on /v1/results."""
-    await _seed_ea_and_public_rows(postgresql)
-
-    response = await client.get("/v1/results", headers=_internal_headers())
-    assert response.status_code == 200
-    models = _models_in(response.json()["results"])
-    assert ("deepgram", "nova-3") in models
-    assert (_EA_PROVIDER, _EA_MODEL) in models
-
-
-@pytest.mark.usefixtures("early_access_registry")
-async def test_results_explicit_model_filter_stays_hidden(
-    client: AsyncClient, postgresql: Any
-) -> None:
-    """Asking for the hidden model by name must not bypass the embargo."""
-    await _seed_ea_and_public_rows(postgresql)
-
-    response = await client.get(
-        "/v1/results", params={"provider": _EA_PROVIDER, "model": _EA_MODEL}
-    )
-    assert response.status_code == 200
-    assert response.json()["results"] == []
 
 
 @pytest.mark.usefixtures("early_access_registry")
@@ -248,7 +213,7 @@ async def test_the_retired_x_headers_prove_nothing(client: AsyncClient) -> None:
     ("path", "params"),
     [
         ("/v1/providers", None),
-        ("/v1/results", None),
+        ("/v2/results", None),
         ("/v1/leaderboard", {"metric": "WER", "benchmark": "STT"}),
         ("/v1/results/aggregates", {"benchmark": "STT"}),
         ("/v1/results/timeline", {"benchmark": "STT"}),

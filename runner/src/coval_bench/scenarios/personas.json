@@ -21,26 +21,26 @@
       "_coval": "Clean Speech Baseline"
     },
     "low": {
-      "label": "Low",
-      "description": "The same caller in a busy office, with steady background chatter and keyboard noise behind the voice.",
+      "label": "Noise",
+      "description": "Background noise: the same caller in a busy office, with steady chatter and keyboard noise behind the voice.",
       "order": 1,
       "_coval": "Low Difficulty"
     },
     "medium": {
-      "label": "Medium",
-      "description": "Office noise plus a speakerphone: the caller's voice arrives slightly hollow and distant, as from a desk phone on speaker.",
+      "label": "Speakerphone",
+      "description": "Noise plus a desk phone on speaker: the voice arrives slightly hollow and distant, with mild room echo.",
       "order": 2,
       "_coval": "Medium Difficulty"
     },
     "hard": {
-      "label": "Hard",
-      "description": "Office noise over a poor mobile connection: the voice drops in and out, with the compression artefacts of a weak cell signal.",
+      "label": "Poor cell",
+      "description": "Noise plus a weak cell signal: roughly one word in twenty drops out, with the compression artefacts of a poor mobile connection.",
       "order": 3,
       "_coval": "Hard Difficulty"
     },
     "extra_hard": {
-      "label": "Extra hard",
-      "description": "Office noise plus a bad speakerphone: heavy room echo and muffling on top of the background chatter, the hardest audio in the set.",
+      "label": "Far speakerphone",
+      "description": "Noise plus a caller far from the microphone in an echoey room: heavy reverb, a much quieter voice, and the office chatter nearly as loud as the speech.",
       "order": 4,
       "_coval": "Extra Hard Difficulty"
     }
