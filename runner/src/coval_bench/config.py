@@ -26,7 +26,7 @@ DATASET_ALL = "__all__"
 SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
 
 
-class ScenarioCovalIds(BaseModel, frozen=True):
+class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
     """One scenario's Coval ids: its test set, the agent under test per model, and
     the caller persona per condition (``clean`` plus the difficulty tiers).
 
@@ -136,6 +136,22 @@ class Settings(BaseSettings):
                 **self.coval_s2s_scenarios,
                 "bank": ScenarioCovalIds(test_set_id=test_set_id, agents=agents),
             }
+        return self
+
+    @model_validator(mode="after")
+    def _configured_scenarios_declare_their_personas(self) -> Settings:
+        missing = sorted(
+            slug
+            for slug, ids in self.coval_s2s_scenarios.items()
+            if ids.agents
+            and not ids.personas
+            and not (slug == "bank" and self.coval_s2s_condition_personas)
+        )
+        if missing:
+            raise ValueError(
+                f"coval_s2s_scenarios{missing} configure agents but no personas, "
+                "so every caller would count as clean"
+            )
         return self
 
     @field_validator("dataset_id")

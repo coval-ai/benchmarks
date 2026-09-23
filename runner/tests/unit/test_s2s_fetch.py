@@ -888,7 +888,9 @@ async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(
-                test_set_id="TSB", agents={"stepaudio-3-realtime-preview": "b5"}
+                test_set_id="TSB",
+                agents={"stepaudio-3-realtime-preview": "b5"},
+                personas={"clean": "PID"},
             )
         },
         coval_s2s_bank_test_set_id="TSB",
@@ -1189,7 +1191,9 @@ async def test_each_dataset_publishes_its_own_sample_tick(
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
         coval_s2s_scenarios={
-            "bank": ScenarioCovalIds(test_set_id="TSB", agents={"gpt-realtime": "b1"})
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime": "b1"}, personas={"clean": "PID"}
+            )
         },
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_instruction_metric_id="BIM",
@@ -1197,7 +1201,9 @@ async def test_each_dataset_publishes_its_own_sample_tick(
     )
 
     writer = _stub_writer()
-    list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
+    list_json = _list_json(
+        {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "PID"}
+    )
     run_json = {
         "run": {
             "error_status": "SUCCESS",
@@ -2802,7 +2808,7 @@ def test_scenario_personas_join_the_condition_map() -> None:
         "p-clean": "clean",
         "p-hard": "hard",
     }
-    assert fetch_v2v._all_persona_labels(settings) == {"p-clean": "Clean", "p-hard": "Hard"}
+    assert fetch_v2v._all_persona_labels(settings) == {"p-clean": "Clean", "p-hard": "Poor cell"}
 
 
 def test_the_same_persona_may_serve_several_scenarios() -> None:
@@ -2838,7 +2844,9 @@ def test_an_unknown_scenario_slug_is_rejected_at_load() -> None:
 def test_an_unknown_agent_model_key_faults() -> None:
     settings = Settings(
         coval_s2s_scenarios={
-            "bank": ScenarioCovalIds(test_set_id="TSB", agents={"gpt-realtime-1": "b1"})
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime-1": "b1"}, personas={"clean": "p"}
+            )
         }
     )
     with pytest.raises(RuntimeError, match="unknown model"):
@@ -2854,6 +2862,7 @@ def test_unconfigured_scenarios_yield_no_specs() -> None:
 
 def test_legacy_bank_agent_fields_seed_the_bank_block() -> None:
     settings = Settings(
+        coval_s2s_condition_personas={"p": "clean"},
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_openai_agent_id="b1",
         coval_s2s_bank_stepfun_agent_id=" b5 ",
@@ -2865,10 +2874,41 @@ def test_legacy_bank_agent_fields_seed_the_bank_block() -> None:
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_openai_agent_id="old",
         coval_s2s_scenarios={
-            "bank": ScenarioCovalIds(test_set_id="TSB", agents={"gpt-realtime": "new"})
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime": "new"}, personas={"clean": "p"}
+            )
         },
     )
     assert explicit.coval_s2s_scenarios["bank"].agents == {"gpt-realtime": "new"}
+
+
+def test_a_scenario_with_agents_but_no_personas_is_rejected_at_load() -> None:
+    """An empty persona map would classify every caller as clean, so the tiers
+    would pool into the clean dataset without a log line."""
+    with pytest.raises(ValueError, match=r"\['happy-smile'\] configure agents but no personas"):
+        Settings(
+            coval_s2s_scenarios={
+                "happy-smile": ScenarioCovalIds(test_set_id="TSS", agents={"gpt-realtime": "a1"})
+            }
+        )
+
+
+def test_the_legacy_bank_block_may_lean_on_the_legacy_persona_map() -> None:
+    settings = Settings(
+        coval_s2s_condition_personas={"p": "clean"},
+        coval_s2s_bank_test_set_id="TSB",
+        coval_s2s_bank_openai_agent_id="b1",
+    )
+    assert settings.coval_s2s_scenarios["bank"].personas == {}
+    with pytest.raises(ValueError, match=r"\['bank'\] configure agents but no personas"):
+        Settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_openai_agent_id="b1")
+
+
+def test_an_unknown_scenario_key_is_rejected_at_load() -> None:
+    with pytest.raises(ValueError, match="persona"):
+        ScenarioCovalIds.model_validate(
+            {"test_set_id": "TSS", "agents": {"gpt-realtime": "a1"}, "persona": {"clean": "p"}}
+        )
 
 
 @pytest.mark.asyncio
@@ -2878,7 +2918,9 @@ async def test_bank_test_set_ids_must_agree(monkeypatch: pytest.MonkeyPatch) -> 
         coval_s2s_bank_test_set_id="TEXT",
         coval_s2s_bank_instruction_metric_id="BIM",
         coval_s2s_scenarios={
-            "bank": ScenarioCovalIds(test_set_id="VOICE", agents={"gpt-realtime": "b1"})
+            "bank": ScenarioCovalIds(
+                test_set_id="VOICE", agents={"gpt-realtime": "b1"}, personas={"clean": "p"}
+            )
         },
     )
     monkeypatch.setattr(fetch_v2v, "_client", lambda _s: _fake_client({}, {}))
