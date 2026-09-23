@@ -32,6 +32,7 @@ import json
 import random
 import shutil
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -52,6 +53,7 @@ from coval_bench.datasets.loader import (
     family_rng,
     load_stt_dataset,
     load_tts_dataset,
+    packaged_manifest_sha256,
 )
 from coval_bench.datasets.manifest import Manifest, STTManifestItem, TTSManifestItem
 
@@ -531,6 +533,14 @@ def test_packaged_tts_v2_is_a_private_pointer() -> None:
     """The prompts never live in the wheel."""
     manifest = _load_manifest("tts-v2")
     assert manifest.items == [] and manifest.remote is not None
+
+
+def test_packaged_manifest_sha256_pins_the_remote_object_for_a_pointer() -> None:
+    pointer = _load_manifest("tts-v2")
+    assert pointer.remote is not None
+    assert packaged_manifest_sha256("tts-v2") == pointer.remote.sha256
+    packaged = files("coval_bench.datasets.manifests").joinpath("tts-v1.json").read_bytes()
+    assert packaged_manifest_sha256("tts-v1") == hashlib.sha256(packaged).hexdigest()
 
 
 def _remote(tmp_path: Path, body: str) -> tuple[Manifest, MagicMock]:

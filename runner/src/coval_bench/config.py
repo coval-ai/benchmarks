@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # --- Dataset ---
     dataset_bucket: str = "coval-benchmarks-datasets"
     dataset_id: str | None = None
+    tts_dataset_id: str = "tts-v1"
+    # Unset: falls back to dataset_sample_size.
+    tts_dataset_sample_size: int | None = None
     # Private bucket for additive normalized observation artifacts. The rollout
     # is deliberately fail-closed: enabling writes without a destination is an
     # invalid deployment rather than a silent partial capture.
@@ -154,7 +157,7 @@ class Settings(BaseSettings):
             )
         return self
 
-    @field_validator("dataset_id")
+    @field_validator("dataset_id", "tts_dataset_id")
     @classmethod
     def _dataset_id_not_reserved(cls, value: str | None) -> str | None:
         if value == DATASET_ALL:

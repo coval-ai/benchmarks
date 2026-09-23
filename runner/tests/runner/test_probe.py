@@ -82,7 +82,7 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
     ]
     # settings is forwarded to the patched runners (which ignore it); cast a stub.
     results = await probe_mod.run_probe(
-        settings=cast(Settings, SimpleNamespace(dataset_id="stt-v2")),
+        settings=cast(Settings, SimpleNamespace(dataset_id="stt-v2", tts_dataset_id="tts-v1")),
         models=models,
         sample_size=3,
         concurrency=1,
@@ -126,7 +126,7 @@ async def test_run_probe_closes_http_pools_even_on_failure(
     ]
     with pytest.raises(RuntimeError, match="dataset unavailable"):
         await probe_mod.run_probe(
-            settings=cast(Settings, SimpleNamespace(dataset_id="stt-v2")),
+            settings=cast(Settings, SimpleNamespace(dataset_id="stt-v2", tts_dataset_id="tts-v1")),
             models=models,
             sample_size=1,
             concurrency=1,

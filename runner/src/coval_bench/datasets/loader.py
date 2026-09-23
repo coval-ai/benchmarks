@@ -224,6 +224,17 @@ def _load_manifest(dataset_id: str) -> Manifest:
     return Manifest.model_validate_json(manifest_text)
 
 
+def packaged_manifest_sha256(dataset_id: str) -> str:
+    """Content hash pinning a run to its dataset: the remote object's sha for a pointer."""
+    manifest_bytes = (
+        files("coval_bench.datasets.manifests").joinpath(f"{dataset_id}.json").read_bytes()
+    )
+    packaged = Manifest.model_validate_json(manifest_bytes)
+    if packaged.remote is not None:
+        return packaged.remote.sha256
+    return hashlib.sha256(manifest_bytes).hexdigest()
+
+
 def _sha256_file(path: Path) -> str:
     """Return the hex SHA256 digest of the file at *path*."""
     h = hashlib.sha256()

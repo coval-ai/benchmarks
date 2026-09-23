@@ -24,13 +24,15 @@ rules, provenance, and licenses are documented in
 2026-07-08 and 2026-07-13 used `stt-v2` (WildASR `fleurs_clean_en`), and runs
 before that used `stt-v1` alone.
 
-**TTS benchmark.** A 30-prompt set of short text inputs. Source and selection
-rule are documented in `runner/src/coval_bench/datasets/manifests/tts-v1.json`.
+**TTS benchmark.** Text prompts from the manifest named by `TTS_DATASET_ID`
+(default `tts-v1`, a 30-prompt set of short inputs). Source and selection rules
+are documented in `runner/src/coval_bench/datasets/manifests/README.md`.
 
 **Per-run sampling.** Each scheduled run draws a random sample of items from
 its manifest before any provider is called. Shared executions run every 30
 minutes, one per dataset, and take `DATASET_ID` and `DATASET_SAMPLE_SIZE`
-from their scheduler trigger. The dedicated job runs once a day as a single
+from their scheduler trigger; the TTS execution reads `TTS_DATASET_ID` and
+`TTS_DATASET_SAMPLE_SIZE`, the latter falling back to `DATASET_SAMPLE_SIZE`. The dedicated job runs once a day as a single
 execution that walks the suite in `runner/src/coval_bench/datasets/suite.py`,
 which lists its datasets and the sample size for each. The sample is drawn
 once at the start of the run and shared across every model, so all models are

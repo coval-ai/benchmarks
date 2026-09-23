@@ -187,7 +187,7 @@ async def _run(
             )
     if tts_models:
         ds_tts = load_tts_dataset(
-            "tts-v1",
+            settings.tts_dataset_id,
             settings=settings,
             sample_size=sample_size,
             rng=random.Random(_SEED),  # noqa: S311
