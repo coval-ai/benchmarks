@@ -86,7 +86,7 @@ class AiryTTSProvider(TTSProvider):
         payload = {
             "model": self._model,
             "input": text,
-            "voice_id": self._voice,
+            "voice": self._voice,
             "language": "en",
             "style": "normal",
         }
