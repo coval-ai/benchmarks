@@ -48,6 +48,19 @@ class TestClassify:
     def test_no_error_at_all_is_not_a_key_failure(self) -> None:
         assert classify_failure(None, None) is None
 
+    @pytest.mark.parametrize(
+        "error",
+        [
+            "cartesia_api_key is required in Settings",
+            "nari_api_key is required for the Nari STT provider",
+        ],
+    )
+    def test_missing_local_credentials_are_auth(self, error: str) -> None:
+        assert classify_failure(None, error) is KeyFailure.AUTH
+
+    def test_missing_endpoint_is_not_a_key_failure(self) -> None:
+        assert classify_failure(None, "baseten_qwen_url is required in Settings") is None
+
 
 class TestUnconfiguredProviders:
     """A provider with no key mounted here fails every call, so it leaves the roster

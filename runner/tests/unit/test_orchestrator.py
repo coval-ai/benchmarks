@@ -33,7 +33,7 @@ from collections.abc import AsyncIterator, MutableMapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import httpx
@@ -3224,6 +3224,138 @@ def test_provider_reliability_keyed_by_benchmark() -> None:
         ("STT", 1, 0),
         ("TTS", 0, 1),
     ]
+
+
+@pytest.mark.asyncio
+async def test_missing_local_key_is_not_a_provider_failure(settings: Settings) -> None:
+    from coval_bench.providers.tts.cartesia import CartesiaTTSProvider
+
+    with patch(
+        "coval_bench.runner.orchestrator._get_tts_providers",
+        return_value={"cartesia": CartesiaTTSProvider},
+    ):
+        rows = await _run_tts_item(
+            entry=_tts_entry("cartesia", "sonic-3", "luna"),
+            item=_make_tts_item("hello world"),
+            run_id=1,
+            gate=ModelGate(1),
+            settings=settings.model_copy(update={"cartesia_api_key": None}),
+        )
+
+    assert _provider_reliability(rows, ResultStatus) == [
+        ProviderReliability(
+            benchmark="TTS",
+            provider="cartesia",
+            model="sonic-3",
+            succeeded=0,
+            provider_failures=0,
+            key_failures=1,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["stt", "tts"])
+@pytest.mark.parametrize("failed", [False, True])
+async def test_sigterm_reliability_keeps_completed_items(
+    kind: Literal["stt", "tts"],
+    failed: bool,
+    audio_file: Path,
+    settings: Settings,
+) -> None:
+    import os
+    import signal
+
+    hanging = asyncio.Event()
+    persisted = asyncio.Event()
+    calls = 0
+    completed_count = 3
+    audio_bytes = audio_file.read_bytes()
+    error = "HTTP 503: upstream unavailable" if failed else None
+
+    async def measure(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls > completed_count:
+            hanging.set()
+            await asyncio.Event().wait()
+        if kind == "stt":
+            result = _good_transcription()
+            result.error = error
+            return result
+        synthesized = audio_file.with_name(f"synth-{calls}.wav")
+        if not failed:
+            synthesized.write_bytes(audio_bytes)
+        return TTSResult(
+            provider="cartesia",
+            model="sonic-3",
+            voice="luna",
+            ttfa_ms=120.0,
+            audio_path=None if failed else synthesized,
+            error=error,
+        )
+
+    provider = MagicMock()
+    provider.measure_ttft = measure
+    provider.synthesize = measure
+    run = _make_run()
+    writer = _make_stub_writer(run)
+
+    async def record_results(*args: Any, **kwargs: Any) -> None:
+        persisted.set()
+
+    writer.record_results.side_effect = record_results
+
+    async def interrupt() -> None:
+        await asyncio.wait_for(hanging.wait(), 5)
+        await asyncio.wait_for(persisted.wait(), 5)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    interrupt_task = asyncio.create_task(interrupt())
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        stt_items=[_make_dataset_item(audio_file) for _ in range(completed_count + 1)],
+        tts_items=[_make_tts_item("hello world") for _ in range(completed_count + 1)],
+        stt_providers={"deepgram": MagicMock(return_value=provider)},
+        tts_providers={"cartesia": MagicMock(return_value=provider)},
+        run=run,
+        writer=writer,
+    ):
+        with (
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                new=AsyncMock(return_value="hello world"),
+            ),
+            structlog.testing.capture_logs() as captured,
+        ):
+            summary = await run_benchmarks(
+                settings=settings,
+                benchmark_kind=kind,
+                smoke=False,
+                matrix_overrides=[
+                    *_paused_registry(Benchmark.STT),
+                    *_paused_registry(Benchmark.TTS),
+                    _stt_entry("deepgram", "nova-2"),
+                    _tts_entry("cartesia", "sonic-3", "luna"),
+                ],
+            )
+    await interrupt_task
+    assert summary.sigterm
+    assert calls == completed_count + 1
+    assert summary.reliability == [
+        ProviderReliability(
+            benchmark=kind.upper(),
+            provider="deepgram" if kind == "stt" else "cartesia",
+            model="nova-2" if kind == "stt" else "sonic-3",
+            succeeded=0 if failed else completed_count,
+            provider_failures=completed_count if failed else 0,
+            key_failures=0,
+        )
+    ]
+    (finished,) = _events(captured, "benchmark_run_finished_early_sigterm")
+    assert finished["reliability"] == [summary.reliability[0].model_dump()]
+    assert _events(captured, "RUN_PARTIAL") == []
+    assert _events(captured, "RUN_FAILED") == []
 
 
 def test_dead_providers_ignores_small_shards() -> None:

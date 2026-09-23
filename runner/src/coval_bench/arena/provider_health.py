@@ -78,6 +78,7 @@ _AUTH_PHRASES = (
     "api key not valid",
     "forbidden",
     "authentication failed",
+    "api_key is required",
 )
 _RATE_LIMIT_PHRASES = ("rate limit", "rate_limit", "too many requests")
 

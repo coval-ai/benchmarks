@@ -1513,7 +1513,18 @@ async def run_benchmarks(
         )
 
         all_results: list[Any] = []
+        completed_item_results: list[Any] = []
         capture_outcomes: list[Any] = []
+
+        async def collect_item_results(task: Awaitable[list[Any]]) -> list[Any]:
+            """Retain completed items even when SIGTERM cancels the phase's gather.
+
+            Keep all_results phase-scoped for dead-provider alerts: an interrupted
+            sample must not be treated as a provider's entire scheduled workload.
+            """
+            results = await task
+            completed_item_results.extend(results)
+            return results
 
         stt_artifact_client = artifact_client
         if (
@@ -1710,7 +1721,9 @@ async def run_benchmarks(
                     for entry, item in stt_pairs
                 ]
 
-                stt_batch = await asyncio.gather(*stt_tasks, return_exceptions=True)
+                stt_batch = await asyncio.gather(
+                    *(collect_item_results(task) for task in stt_tasks), return_exceptions=True
+                )
                 for (entry, _item), batch_result in zip(stt_pairs, stt_batch, strict=True):
                     if isinstance(batch_result, BaseException):
                         logger.warning(
@@ -1771,7 +1784,9 @@ async def run_benchmarks(
                     for entry, item, voice in tts_pairs
                 ]
 
-                tts_batch = await asyncio.gather(*tts_tasks, return_exceptions=True)
+                tts_batch = await asyncio.gather(
+                    *(collect_item_results(task) for task in tts_tasks), return_exceptions=True
+                )
                 for (entry, _item, _voice), batch_result in zip(tts_pairs, tts_batch, strict=True):
                     if isinstance(batch_result, BaseException):
                         logger.warning(
@@ -1795,7 +1810,7 @@ async def run_benchmarks(
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)
-            reliability = _provider_reliability(typed_results, ResultStatus)
+            reliability = _provider_reliability(completed_item_results, ResultStatus)
 
             if total_results == 0 or fail_count == total_results:
                 intended_status = RunStatus.FAILED
@@ -1964,7 +1979,7 @@ async def run_benchmarks(
             success_count = sum(1 for r in typed_results if r.status == ResultStatus.SUCCESS)
             fail_count = sum(1 for r in typed_results if r.status == ResultStatus.FAILED)
             total_results = len(typed_results)
-            reliability = _provider_reliability(typed_results, ResultStatus)
+            reliability = _provider_reliability(completed_item_results, ResultStatus)
             try:
                 await asyncio.shield(
                     writer.finish_run(
