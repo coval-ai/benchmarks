@@ -32,7 +32,9 @@ are documented in `runner/src/coval_bench/datasets/manifests/README.md`.
 its manifest before any provider is called. Shared executions run every 30
 minutes, one per dataset, and take `DATASET_ID` and `DATASET_SAMPLE_SIZE`
 from their scheduler trigger; the TTS execution reads `TTS_DATASET_ID` and
-`TTS_DATASET_SAMPLE_SIZE`, the latter falling back to `DATASET_SAMPLE_SIZE`. The dedicated job runs once a day as a single
+`TTS_DATASET_SAMPLE_SIZE`, the latter falling back to `DATASET_SAMPLE_SIZE` and
+then to the per-dataset size in `suite.py` (`tts-v2` runs 2 items, other TTS
+manifests 10). The dedicated job runs once a day as a single
 execution that walks the suite in `runner/src/coval_bench/datasets/suite.py`,
 which lists its datasets and the sample size for each. The sample is drawn
 once at the start of the run and shared across every model, so all models are
