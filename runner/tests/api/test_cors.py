@@ -64,7 +64,7 @@ async def test_cors_methods_include_get_options(client: AsyncClient) -> None:
 async def test_cors_preflight_allows_the_proof_header(client: AsyncClient) -> None:
     """Preflight passes for the bearer proof; `*` never covers Authorization."""
     response = await client.options(
-        "/v1/results",
+        "/v2/results",
         headers={
             "Origin": "https://benchmarks.coval.ai",
             "Access-Control-Request-Method": "GET",

@@ -65,12 +65,6 @@ async def test_disabled_builds_no_client(
         ("/v1/providers", {}, "providers_listed", {"stt_provider_count", "tts_provider_count"}),
         ("/v1/runs", {}, "runs_listed", {"limit", "run_count"}),
         (
-            "/v1/results",
-            {"benchmark": "STT"},
-            "results_queried",
-            {"benchmark", "result_count", "limit"},
-        ),
-        (
             "/v1/leaderboard",
             {"metric": "WER", "benchmark": "STT"},
             "leaderboard_queried",

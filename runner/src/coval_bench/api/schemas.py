@@ -37,33 +37,6 @@ class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class ResultOut(BaseModel):
-    """API response schema for a single benchmark result row.
-
-    ``status`` is sourced from the *parent run*, not from the result row's own
-    ``status`` column (which is always ``'success'`` because we filter on it).
-    The parent-run status is denormalized here at the API boundary via SQL JOIN
-    so the frontend does not need a second round-trip.
-    """
-
-    id: int
-    run_id: int
-    provider: str
-    model: str
-    voice: str | None
-    benchmark: BenchmarkLiteral
-    dataset_id: str
-    metric_type: str
-    metric_value: float | None
-    metric_units: str | None
-    audio_filename: str | None
-    created_at: datetime
-    scheduled_at: datetime
-    status: Literal["RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class LeaderboardEntry(BaseModel):
     """A single entry in the leaderboard response."""
 
@@ -166,34 +139,21 @@ class PricingRegistryResponse(BaseModel):
     rates: list[PricingRateOut]
 
 
-class ResultsResponse(BaseModel):
-    """Response schema for GET /v1/results."""
-
-    results: list[ResultOut]
-
-
 class ResultComponentOut(BaseModel):
     value: float
     unit: str
 
 
 class ResultV2Out(BaseModel):
-    evaluation_id: uuid.UUID
-    observation_id: uuid.UUID
-    run_id: int
     metric_type: str
     metric_version: str
-    evaluation_variant: str
-    evaluation_status: Literal["queued", "running", "succeeded", "failed"]
-    run_status: Literal["running", "succeeded", "partial", "failed"]
-    value: float | None
-    unit: str | None
+    value: float
+    unit: str
     provider: str
     model: str
     voice: str | None
     benchmark: BenchmarkLiteral
     dataset_id: str
-    sample_id: str
     captured_at: datetime
     components: dict[str, ResultComponentOut] = Field(default_factory=dict)
 
