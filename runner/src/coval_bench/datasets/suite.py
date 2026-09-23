@@ -18,6 +18,10 @@ DEDICATED_STT_SUITE: Final[dict[str, int]] = {
 
 DEDICATED_TTS_SAMPLE_SIZE: Final = 60
 
+SHARED_TTS_SUITE: Final[dict[str, int]] = {
+    "tts-v2": 2,
+}
+
 
 def stt_sample_size(source: str, dataset_id: str, override: int | None) -> int:
     if override is not None:
@@ -27,7 +31,9 @@ def stt_sample_size(source: str, dataset_id: str, override: int | None) -> int:
     return DEFAULT_SAMPLE_SIZE
 
 
-def tts_sample_size(source: str, override: int | None) -> int:
+def tts_sample_size(source: str, dataset_id: str, override: int | None) -> int:
     if override is not None:
         return override
-    return DEDICATED_TTS_SAMPLE_SIZE if source == "dedicated" else DEFAULT_SAMPLE_SIZE
+    if source == "dedicated":
+        return DEDICATED_TTS_SAMPLE_SIZE
+    return SHARED_TTS_SUITE.get(dataset_id, DEFAULT_SAMPLE_SIZE)

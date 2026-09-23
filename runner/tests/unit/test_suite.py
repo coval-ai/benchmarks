@@ -8,7 +8,13 @@ from typing import Any
 import pytest
 
 from coval_bench.config import Settings
-from coval_bench.datasets.suite import DEDICATED_STT_SUITE
+from coval_bench.datasets.suite import (
+    DEDICATED_STT_SUITE,
+    DEDICATED_TTS_SAMPLE_SIZE,
+    DEFAULT_SAMPLE_SIZE,
+    SHARED_TTS_SUITE,
+    tts_sample_size,
+)
 from coval_bench.runner import orchestrator
 from coval_bench.runner.orchestrator import RunSummary, run_suite
 
@@ -37,6 +43,21 @@ def test_suite_sizes_fit_their_manifests() -> None:
     for dataset_id, size in DEDICATED_STT_SUITE.items():
         items = json.loads(manifests.joinpath(f"{dataset_id}.json").read_text())["items"]
         assert size <= len(items), dataset_id
+
+
+@pytest.mark.parametrize(
+    ("source", "dataset_id", "override", "expected"),
+    [
+        ("shared", "tts-v2", None, SHARED_TTS_SUITE["tts-v2"]),
+        ("shared", "tts-v1", None, DEFAULT_SAMPLE_SIZE),
+        ("dedicated", "tts-v2", None, DEDICATED_TTS_SAMPLE_SIZE),
+        ("shared", "tts-v2", 7, 7),
+    ],
+)
+def test_tts_sample_size_owned_by_suite(
+    source: str, dataset_id: str, override: int | None, expected: int
+) -> None:
+    assert tts_sample_size(source, dataset_id, override) == expected
 
 
 @pytest.mark.asyncio

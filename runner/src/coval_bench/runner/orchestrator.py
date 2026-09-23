@@ -1393,7 +1393,7 @@ async def run_benchmarks(
         if settings.tts_dataset_sample_size is not None
         else settings.dataset_sample_size
     )
-    tts_size = tts_sample_size(source, tts_override)
+    tts_size = tts_sample_size(source, tts_dataset_id, tts_override)
 
     posthog_client: Posthog | None = None
     if not settings.posthog_disabled and settings.posthog_project_token:
