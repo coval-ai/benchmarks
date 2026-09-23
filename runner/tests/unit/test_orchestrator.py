@@ -959,6 +959,63 @@ async def test_dataset_integrity_failure(settings: Settings) -> None:
     assert finish_call.kwargs["error"] is not None
 
 
+@pytest.mark.asyncio
+async def test_tts_run_reads_its_own_dataset_settings(audio_file: Path, settings: Settings) -> None:
+    """TTS_DATASET_ID names the manifest and stamps the run; TTS_DATASET_SAMPLE_SIZE wins."""
+    tts_settings = settings.model_copy(
+        update={
+            "tts_dataset_id": "tts-v2",
+            "tts_dataset_sample_size": 2,
+            "dataset_sample_size": 7,
+        }
+    )
+    provider_inst = MagicMock()
+    provider_inst.synthesize = AsyncMock(
+        return_value=TTSResult(
+            provider="elevenlabs",
+            model="eleven_flash_v2_5",
+            voice="v",
+            ttfa_ms=120.0,
+            audio_path=audio_file,
+            error=None,
+        )
+    )
+    tts_dataset = MagicMock()
+    tts_dataset.items = [_make_tts_item()]
+    loads: list[tuple[str, int | None]] = []
+
+    def _load(
+        dataset_id: str, *, settings: Any, sample_size: int | None = None, rng: Any = None
+    ) -> Any:
+        loads.append((dataset_id, sample_size))
+        return tts_dataset
+
+    run = _make_run()
+    writer = _make_stub_writer(run)
+    async with _orchestrator_env(
+        audio_path=audio_file,
+        tts_providers={"elevenlabs": MagicMock(return_value=provider_inst)},
+        run=run,
+        writer=writer,
+    ):
+        with (
+            patch("coval_bench.runner.orchestrator._get_load_dataset", return_value=_load),
+            patch(
+                "coval_bench.runner.orchestrator._transcribe_with_whisper",
+                side_effect=RuntimeError("whisper unavailable"),
+            ),
+        ):
+            await run_benchmarks(
+                settings=tts_settings,
+                benchmark_kind="tts",
+                smoke=False,
+                matrix_overrides=[_tts_entry("elevenlabs", "eleven_flash_v2_5", "v")],
+            )
+
+    assert loads == [("tts-v2", 2)]
+    assert writer.start_run.await_args.kwargs["dataset_id"] == "tts-v2"
+
+
 # ---------------------------------------------------------------------------
 # 8. test_audio_file_cleanup
 # ---------------------------------------------------------------------------
@@ -3430,7 +3487,7 @@ async def test_stt_normalized_write_fails_closed_without_manifest_sha(
         writer=writer,
     ):
         with (
-            patch("importlib.resources.files", side_effect=OSError("manifest unavailable")),
+            patch("coval_bench.datasets.loader.files", side_effect=OSError("manifest unavailable")),
             patch("google.cloud.storage.Client", return_value=object()) as storage_client,
             patch("coval_bench.runner.normalized.dual_write", new_callable=AsyncMock) as dual_write,
         ):
@@ -3482,7 +3539,7 @@ async def test_tts_manifest_sha_failure_never_breaks_legacy_writes(
         writer=writer,
     ):
         with (
-            patch("importlib.resources.files", side_effect=OSError("manifest unavailable")),
+            patch("coval_bench.datasets.loader.files", side_effect=OSError("manifest unavailable")),
             patch("google.cloud.storage.Client", return_value=object()) as storage_client,
             patch(
                 "coval_bench.runner.orchestrator._transcribe_with_whisper",

@@ -1296,8 +1296,8 @@ class RunWriter:
                          min_value, p25, p50, p75, max_value, value_sum, sample_count)
                     SELECT r.provider, r.model, r.benchmark,
                            COALESCE(
-                               CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1'
-                                    ELSE rn.dataset_id END,
+                               CASE WHEN r.benchmark = 'TTS' AND rn.dataset_id NOT LIKE 'tts-%%'
+                                    THEN 'tts-v1' ELSE rn.dataset_id END,
                                '__all__'
                            ),
                            r.metric_type, %(bucket)s,
@@ -1325,7 +1325,8 @@ class RunWriter:
                       )
                     GROUP BY GROUPING SETS (
                         (r.provider, r.model, r.benchmark, r.metric_type,
-                         CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END),
+                         CASE WHEN r.benchmark = 'TTS' AND rn.dataset_id NOT LIKE 'tts-%%'
+                              THEN 'tts-v1' ELSE rn.dataset_id END),
                         (r.provider, r.model, r.benchmark, r.metric_type)
                     )
                     """,

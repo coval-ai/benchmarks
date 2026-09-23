@@ -38,9 +38,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
-import hashlib
 import importlib
-import importlib.resources
 import random
 import signal
 import wave
@@ -354,6 +352,12 @@ def _get_load_dataset() -> Any:  # noqa: ANN401
     """Resolve ``load_dataset`` at call time (lazy import)."""
     mod = importlib.import_module("coval_bench.datasets")
     return mod.load_dataset
+
+
+def _get_manifest_sha256() -> Any:  # noqa: ANN401
+    """Resolve ``packaged_manifest_sha256`` at call time (lazy import)."""
+    mod = importlib.import_module("coval_bench.datasets.loader")
+    return mod.packaged_manifest_sha256
 
 
 def _get_family_rng() -> Any:  # noqa: ANN401
@@ -1314,7 +1318,13 @@ async def run_benchmarks(
     load_dataset = _get_load_dataset()
     stt_dataset_id = dataset_id or settings.dataset_id or DEFAULT_STT_DATASET
     stt_size = stt_sample_size(source, stt_dataset_id, settings.dataset_sample_size)
-    tts_size = tts_sample_size(source, settings.dataset_sample_size)
+    tts_dataset_id = settings.tts_dataset_id
+    tts_override = (
+        settings.tts_dataset_sample_size
+        if settings.tts_dataset_sample_size is not None
+        else settings.dataset_sample_size
+    )
+    tts_size = tts_sample_size(source, tts_override)
 
     posthog_client: Posthog | None = None
     if not settings.posthog_disabled and settings.posthog_project_token:
@@ -1375,27 +1385,18 @@ async def run_benchmarks(
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
         # run's row still records the STT id (its TTS rows are attributed to
-        # tts-v1 at the aggregation layer).
-        run_dataset_id = "tts-v1" if benchmark_kind == "tts" else stt_dataset_id
+        # the TTS dataset at the aggregation layer).
+        run_dataset_id = tts_dataset_id if benchmark_kind == "tts" else stt_dataset_id
 
-        # Dataset SHA256 for the run record (computed from the packaged manifest)
         try:
-            manifest_ref = importlib.resources.files("coval_bench.datasets.manifests").joinpath(
-                f"{run_dataset_id}.json"
-            )
-            manifest_bytes = manifest_ref.read_bytes()
-            dataset_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+            dataset_sha256 = _get_manifest_sha256()(run_dataset_id)
         except Exception:
             dataset_sha256 = "unknown"
 
         tts_manifest_sha256 = ""
         if benchmark_kind in ("tts", "both"):
             try:
-                tts_manifest_sha256 = hashlib.sha256(
-                    importlib.resources.files("coval_bench.datasets.manifests")
-                    .joinpath("tts-v1.json")
-                    .read_bytes()
-                ).hexdigest()
+                tts_manifest_sha256 = _get_manifest_sha256()(tts_dataset_id)
             except Exception:
                 tts_manifest_sha256 = ""
 
@@ -1521,7 +1522,7 @@ async def run_benchmarks(
                     )
                 if benchmark_kind in ("tts", "both") and enabled_tts:
                     prepared_tts_dataset = load_dataset(
-                        "tts-v1",
+                        tts_dataset_id,
                         settings=settings,
                         sample_size=None if smoke else tts_size,
                     )
@@ -1539,7 +1540,7 @@ async def run_benchmarks(
                             build_capture_identity(
                                 run_id=run_id,
                                 benchmark="TTS",
-                                dataset_id="tts-v1",
+                                dataset_id=tts_dataset_id,
                                 sample_id=item.testcase_id,
                                 provider=entry.provider,
                                 model=entry.model,
@@ -1563,7 +1564,7 @@ async def run_benchmarks(
                             else {}
                         ),
                         **(
-                            {"tts-v1": tts_manifest_sha256}
+                            {tts_dataset_id: tts_manifest_sha256}
                             if benchmark_kind in ("tts", "both")
                             else {}
                         ),
@@ -1660,7 +1661,7 @@ async def run_benchmarks(
             # ------------------------------------------------------------------
             if benchmark_kind in ("tts", "both") and enabled_tts:
                 tts_dataset = prepared_tts_dataset or load_dataset(
-                    "tts-v1",
+                    tts_dataset_id,
                     settings=settings,
                     sample_size=None if smoke else tts_size,
                 )
@@ -1683,7 +1684,7 @@ async def run_benchmarks(
                 if tts_artifact_client is not None and not tts_manifest_sha256:
                     logger.warning(
                         "normalized_tts_manifest_sha_unavailable",
-                        dataset_id="tts-v1",
+                        dataset_id=tts_dataset_id,
                     )
                     tts_artifact_client = None
                 tts_tasks = [
@@ -1695,7 +1696,7 @@ async def run_benchmarks(
                         settings=settings,
                         voice=voice,
                         writer=writer,
-                        dataset_id="tts-v1",
+                        dataset_id=tts_dataset_id,
                         dataset_sha256=tts_manifest_sha256,
                         artifact_client=tts_artifact_client,
                         required_capture=required_capture,
