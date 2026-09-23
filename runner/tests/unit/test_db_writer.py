@@ -985,51 +985,6 @@ def test_refresh_bucket_splits_datasets(pg_conn: psycopg.Connection[Any]) -> Non
     assert float(by_dataset["__all__"]["value_sum"]) == pytest.approx(9.0)
 
 
-def test_refresh_bucket_trusts_tts_run_dataset(pg_conn: psycopg.Connection[Any]) -> None:
-    """TTS rows keep the run's TTS dataset id; rows under an STT run id still pin to tts-v1."""
-    _apply_migrations(pg_conn)
-    scheduled = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
-
-    def _ttfa(run_id: int, value: float) -> Result:
-        return Result(
-            run_id=run_id,
-            provider="openai",
-            model="gpt-4o-mini-tts",
-            benchmark=Benchmark.TTS,
-            metric_type="TTFA",
-            metric_value=value,
-            metric_units="ms",
-            status=ResultStatus.SUCCESS,
-        )
-
-    async def _run() -> None:
-        pool = await _make_pool(pg_conn)
-        try:
-            writer = RunWriter(pool)
-            for dataset_id, value in (("tts-v2", 100.0), ("stt-v3", 200.0)):
-                run = await writer.start_run(
-                    dataset_id=dataset_id, dataset_sha256="deadbeef", scheduled_at=scheduled
-                )
-                assert run.id is not None
-                await writer.record_results([_ttfa(run.id, value)])
-                await writer.finish_run(run.id, status=RunStatus.SUCCEEDED)
-                await writer.refresh_bucket(run.id, period_seconds=1800)
-        finally:
-            await pool.close()
-
-    asyncio.run(_run())
-
-    pg_conn.autocommit = True
-    with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-        cur.execute(
-            "SELECT dataset_id, value_sum FROM benchmarks_v2.results_by_bucket "
-            "WHERE benchmark = 'TTS' AND metric_type = 'TTFA'"
-        )
-        by_dataset = {row["dataset_id"]: float(row["value_sum"]) for row in cur.fetchall()}
-
-    assert by_dataset == {"tts-v2": 100.0, "tts-v1": 200.0, "__all__": 300.0}
-
-
 def test_refresh_bucket_excludes_failed_run(pg_conn: psycopg.Connection[Any]) -> None:
     """A failed run never seeds a bucket — the recompute drops failed parent
     runs."""

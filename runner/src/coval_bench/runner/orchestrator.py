@@ -1384,8 +1384,8 @@ async def run_benchmarks(
         ]
 
         # A TTS-only run never touches the configured STT dataset; a 'both'
-        # run's row still records the STT id (its TTS rows are attributed to
-        # the TTS dataset at the aggregation layer).
+        # run's row still records the STT id. Normalized storage carries the
+        # TTS dataset id per row; the legacy rollups pin TTS to tts-v1.
         run_dataset_id = tts_dataset_id if benchmark_kind == "tts" else stt_dataset_id
 
         try:
