@@ -53,6 +53,20 @@
       "medium": {"dataset_id": "s2s-bank-medium-v1", "anchor": "judge"},
       "hard": {"dataset_id": "s2s-bank-hard-v1", "anchor": "judge"},
       "extra_hard": {"dataset_id": "s2s-bank-extra-hard-v1", "anchor": "judge"}
+    },
+    "s2s-happy-customer": {
+      "clean": {"dataset_id": "s2s-happy-customer-v1", "anchor": "latency"},
+      "low": {"dataset_id": "s2s-happy-customer-low-v1", "anchor": "judge"},
+      "medium": {"dataset_id": "s2s-happy-customer-medium-v1", "anchor": "judge"},
+      "hard": {"dataset_id": "s2s-happy-customer-hard-v1", "anchor": "judge"},
+      "extra_hard": {"dataset_id": "s2s-happy-customer-extra-hard-v1", "anchor": "judge"}
+    },
+    "s2s-happy-smile": {
+      "clean": {"dataset_id": "s2s-happy-smile-v1", "anchor": "latency"},
+      "low": {"dataset_id": "s2s-happy-smile-low-v1", "anchor": "judge"},
+      "medium": {"dataset_id": "s2s-happy-smile-medium-v1", "anchor": "judge"},
+      "hard": {"dataset_id": "s2s-happy-smile-hard-v1", "anchor": "judge"},
+      "extra_hard": {"dataset_id": "s2s-happy-smile-extra-hard-v1", "anchor": "judge"}
     }
   }
 }

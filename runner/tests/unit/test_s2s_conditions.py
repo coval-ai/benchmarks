@@ -91,3 +91,26 @@ def test_every_condition_metric_supports_its_benchmark() -> None:
     for dataset_id, condition in conditions.CONDITIONS.items():
         for metric in condition.fetched | condition.local:
             assert condition.benchmark in METRIC_SPECS[metric].benchmarks, (dataset_id, metric)
+
+
+def test_scenario_dataset_ids_derive_from_the_slug() -> None:
+    """Bank keeps the ids the board already stores; new domains follow the same shape."""
+    assert conditions.scenario_family("bank") == conditions.FAMILY_BANK
+    assert conditions.scenario_dataset_id("bank", conditions.Condition.CLEAN) == "s2s-bank-v1"
+    assert (
+        conditions.scenario_dataset_id("bank", conditions.Condition.EXTRA_HARD)
+        == conditions.DATASET_ID_BANK_EXTRA_HARD
+    )
+    assert conditions.scenario_dataset_id("happy-smile", conditions.Condition.HARD) == (
+        "s2s-happy-smile-hard-v1"
+    )
+    assert conditions.scenario_dataset_id("happy-customer", conditions.Condition.NOISY) is None
+    for slug in conditions.SCENARIO_SLUGS:
+        family = conditions.scenario_family(slug)
+        clean = conditions.dataset_id_for(family, conditions.Condition.CLEAN)
+        assert clean is not None
+        assert conditions.condition_for(clean).required is Metric.V2V
+        for tier in conditions.TIERS:
+            tier_id = conditions.dataset_id_for(family, tier)
+            assert tier_id is not None
+            assert conditions.condition_for(tier_id).required is Metric.INSTRUCTION_FOLLOWING

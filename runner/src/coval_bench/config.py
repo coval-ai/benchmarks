@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 import structlog
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Reserved: the aggregation layer materializes pooled rows under this sentinel.
@@ -24,6 +24,45 @@ DATASET_ALL = "__all__"
 
 # Terraform's Secret Manager stub; a mount that was never rotated delivers it verbatim.
 SECRET_PLACEHOLDER = "PLACEHOLDER_REPLACE_VIA_GCLOUD"  # noqa: S105 — a stub, not a credential
+
+
+class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
+    """One scenario's Coval ids: its test set, the agent under test per model, and
+    the caller persona per condition (``clean`` plus the difficulty tiers).
+
+    Blank ids and unknown condition names are rejected rather than skipped: a
+    blank test set would file the scenario's runs under the shared set, and a
+    persona under a condition the scenario never runs would drop every one of
+    its conversations without a log line.
+    """
+
+    test_set_id: str = Field(min_length=1)
+    agents: dict[str, str] = Field(default_factory=dict)
+    personas: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("test_set_id", mode="before")
+    @classmethod
+    def _strip_test_set_id(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("agents", "personas")
+    @classmethod
+    def _no_blank_ids(cls, value: dict[str, str]) -> dict[str, str]:
+        blank = sorted(key for key, ident in value.items() if not ident.strip())
+        if blank:
+            raise ValueError(f"blank Coval id for {blank}")
+        return value
+
+    @field_validator("personas")
+    @classmethod
+    def _known_conditions(cls, value: dict[str, str]) -> dict[str, str]:
+        from coval_bench.s2s.conditions import TIERS, Condition
+
+        allowed = {Condition.CLEAN.value, *(tier.value for tier in TIERS)}
+        unknown = sorted(set(value) - allowed)
+        if unknown:
+            raise ValueError(f"persona condition(s) {unknown} not in {sorted(allowed)}")
+        return value
 
 
 class Settings(BaseSettings):
@@ -67,6 +106,53 @@ class Settings(BaseSettings):
     # Fernet key shared by API instances for authenticated results cursors.
     # Missing or malformed configuration fails closed when /v2/results is called.
     results_cursor_key: SecretStr | None = None
+
+    @field_validator("coval_s2s_scenarios")
+    @classmethod
+    def _known_scenario_slugs(
+        cls, value: dict[str, ScenarioCovalIds]
+    ) -> dict[str, ScenarioCovalIds]:
+        from coval_bench.s2s.conditions import SCENARIO_SLUGS
+
+        unknown = sorted(set(value) - set(SCENARIO_SLUGS))
+        if unknown:
+            raise ValueError(f"coval_s2s_scenarios slug(s) {unknown} not in {list(SCENARIO_SLUGS)}")
+        return value
+
+    @model_validator(mode="after")
+    def _seed_bank_scenario_from_legacy_fields(self) -> Settings:
+        legacy = {
+            "gpt-realtime": self.coval_s2s_bank_openai_agent_id,
+            "gpt-live-1": self.coval_s2s_bank_gpt_live_agent_id,
+            "gemini-live": self.coval_s2s_bank_gemini_agent_id,
+            "grok-voice-think-fast-2.0": self.coval_s2s_bank_xai_agent_id,
+            "stepaudio-3-realtime-preview": self.coval_s2s_bank_stepfun_agent_id,
+        }
+        agents = {model: (ident or "").strip() for model, ident in legacy.items()}
+        agents = {model: ident for model, ident in agents.items() if ident}
+        test_set_id = (self.coval_s2s_bank_test_set_id or "").strip()
+        if agents and test_set_id and "bank" not in self.coval_s2s_scenarios:
+            self.coval_s2s_scenarios = {
+                **self.coval_s2s_scenarios,
+                "bank": ScenarioCovalIds(test_set_id=test_set_id, agents=agents),
+            }
+        return self
+
+    @model_validator(mode="after")
+    def _configured_scenarios_declare_their_personas(self) -> Settings:
+        missing = sorted(
+            slug
+            for slug, ids in self.coval_s2s_scenarios.items()
+            if ids.agents
+            and not ids.personas
+            and not (slug == "bank" and self.coval_s2s_condition_personas)
+        )
+        if missing:
+            raise ValueError(
+                f"coval_s2s_scenarios{missing} configure agents but no personas, "
+                "so every caller would count as clean"
+            )
+        return self
 
     @field_validator("dataset_id")
     @classmethod
@@ -251,11 +337,22 @@ class Settings(BaseSettings):
     coval_s2s_bank_test_set_id: str | None = None
     coval_s2s_bank_instruction_metric_id: str | None = None
     coval_s2s_bank_persona_id: str | None = None
+    # Deprecated: the bank agents before ``coval_s2s_scenarios``. Still read so the
+    # runner and infra can deploy in either order; seeded into the bank scenario
+    # block when that block is absent. Drop once infra carries the block.
     coval_s2s_bank_openai_agent_id: str | None = None
     coval_s2s_bank_gpt_live_agent_id: str | None = None
     coval_s2s_bank_gemini_agent_id: str | None = None
     coval_s2s_bank_xai_agent_id: str | None = None
     coval_s2s_bank_stepfun_agent_id: str | None = None
+    # Scenario slug -> its Coval test set, the agent id per model and the persona
+    # id per condition, e.g. {"bank": {"test_set_id": "…", "agents": {"gpt-realtime":
+    # "…"}, "personas": {"clean": "…", "hard": "…"}}}. The slugs are
+    # ``s2s.conditions.SCENARIO_SLUGS``; a slug absent here is skipped, a model
+    # absent from ``agents`` is skipped. The personas join the exhaustive condition
+    # map above, so a scenario's callers can never be left unmapped. Every scenario
+    # shares the bank judge above. Opaque ids, not secrets.
+    coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
     # A separate metric from coval_s2s_*_instruction_metric_id above, not a

@@ -73,6 +73,9 @@ class AgentSpec:
     # Settings attr holding this agent's own Coval test set id; None uses the
     # shared ``coval_s2s_test_set_id``.
     test_set_id_attr: str | None = None
+    # The test set id itself, for agents wired through ``coval_s2s_scenarios``;
+    # takes precedence over ``test_set_id_attr``.
+    test_set_id: str | None = None
     # Dataset family for this agent's rows (see ``s2s.conditions``).
     family: str = FAMILY_MULTITURN
     # Whether this agent's recordings may reach the public samples card.
@@ -147,51 +150,53 @@ def s2s_specs(settings: Settings) -> tuple[AgentSpec, ...]:
             family=FAMILY_DENTAL,
             publish_samples=False,
         ),
-        # The Ultra Bank set, the daily public board: four agents in the default
-        # workspace on one test set. Its instruction metric is the Validate
-        # Expected Behaviors judge, a fraction rather than a verdict, which the
-        # instruction mapper scales to a percentage.
-        AgentSpec(
-            agent_id=settings.coval_s2s_bank_openai_agent_id,
-            provider="openai",
-            model="gpt-realtime",
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.S2S),
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_bank_gpt_live_agent_id,
-            provider="openai",
-            model="gpt-live-1",
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.S2S),
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_bank_gemini_agent_id,
-            provider="google",
-            model="gemini-live",
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.S2S),
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_bank_xai_agent_id,
-            provider="xai",
-            model="grok-voice-think-fast-2.0",
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.S2S),
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        ),
-        AgentSpec(
-            agent_id=settings.coval_s2s_bank_stepfun_agent_id,
-            provider="stepfun",
-            model="stepaudio-3-realtime-preview",
-            test_set_id_attr=scenarios.ACTIVE.test_set_id_attr,
-            family=scenarios.ACTIVE.family(Benchmark.S2S),
-            instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
-        ),
+        *_scenario_specs(settings),
     )
+
+
+# The models every instruction-following scenario runs, keyed by the model string
+# the registry knows them as; the same key names the agent in
+# ``Settings.coval_s2s_scenarios``.
+SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
+    ("openai", "gpt-realtime"),
+    ("openai", "gpt-live-1"),
+    ("google", "gemini-live"),
+    ("xai", "grok-voice-think-fast-2.0"),
+    ("stepfun", "stepaudio-3-realtime-preview"),
+)
+
+
+def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
+    """One spec per (scenario, model); unconfigured ones carry no agent id and are skipped.
+
+    Every scenario's instruction metric is the Validate Expected Behaviors judge,
+    a fraction rather than a verdict, which the instruction mapper scales to a
+    percentage.
+    """
+    known = {model for _provider, model in SCENARIO_MODELS}
+    specs: list[AgentSpec] = []
+    for scenario in scenarios.SCENARIOS:
+        ids = settings.coval_s2s_scenarios.get(scenario.slug)
+        if ids is None:
+            continue
+        unknown = sorted(set(ids.agents) - known)
+        if unknown:
+            raise RuntimeError(
+                f"coval_s2s_scenarios[{scenario.slug!r}].agents names unknown model(s) "
+                f"{unknown}; expected one of {sorted(known)}"
+            )
+        for provider, model in SCENARIO_MODELS:
+            specs.append(
+                AgentSpec(
+                    agent_id=ids.agents.get(model),
+                    provider=provider,
+                    model=model,
+                    test_set_id=ids.test_set_id,
+                    family=scenario.family(Benchmark.S2S),
+                    instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
+                )
+            )
+    return tuple(specs)
 
 
 def llm_specs(
@@ -326,9 +331,44 @@ def _persona_conditions(raw: Mapping[str, str]) -> dict[str, Condition] | None:
         except ValueError:
             valid = ", ".join(c.value for c in Condition)
             raise RuntimeError(
-                f"coval_s2s_condition_personas[{persona_id!r}] is {name!r}; expected one of {valid}"
+                f"persona {persona_id!r} maps to condition {name!r}; expected one of {valid}"
             ) from None
     return parsed
+
+
+def _all_persona_conditions(settings: Settings) -> dict[str, str]:
+    """The legacy persona map plus every scenario's callers, as condition names.
+
+    Coval personas are workspace-level, so the same id may serve several
+    scenarios; identical declarations merge. Two different conditions for one
+    persona is a configuration error, not a tie.
+    """
+    merged = dict(settings.coval_s2s_condition_personas)
+    owner = dict.fromkeys(merged, "coval_s2s_condition_personas")
+    for slug, ids in settings.coval_s2s_scenarios.items():
+        for condition, persona_id in ids.personas.items():
+            previous = merged.get(persona_id)
+            if previous is not None and previous != condition:
+                raise RuntimeError(
+                    f"persona {persona_id!r} is {previous!r} in {owner[persona_id]} but "
+                    f"{condition!r} in coval_s2s_scenarios[{slug!r}]"
+                )
+            owner.setdefault(persona_id, f"coval_s2s_scenarios[{slug!r}]")
+            merged[persona_id] = condition
+    return merged
+
+
+def _all_persona_labels(settings: Settings) -> dict[str, str]:
+    """Labels for the samples card: the legacy map plus the registry label of each
+    scenario persona's condition."""
+    registry = scenarios.load_personas().personas
+    labels = dict(settings.s2s_persona_labels)
+    for ids in settings.coval_s2s_scenarios.values():
+        for condition, persona_id in ids.personas.items():
+            persona = registry.get(condition)
+            if persona is not None:
+                labels.setdefault(persona_id, persona.label)
+    return labels
 
 
 def _parse_time(raw: object) -> datetime | None:
@@ -1523,7 +1563,7 @@ def _require_family_test_sets(settings: Settings, specs: Sequence[AgentSpec]) ->
     never having configured it.
     """
     for spec in specs:
-        if not spec.test_set_id_attr or not spec.agent_id:
+        if spec.test_set_id or not spec.test_set_id_attr or not spec.agent_id:
             continue
         if not (getattr(settings, spec.test_set_id_attr) or "").strip():
             raise RuntimeError(
@@ -1598,9 +1638,21 @@ async def fetch_and_write_v2v(
         raise RuntimeError("coval_s2s_noisy_persona_id requires coval_s2s_test_set_id")
     # Supersedes coval_s2s_noisy_persona_id once set, so the two can deploy in
     # either order.
-    persona_conditions = _persona_conditions(settings.coval_s2s_condition_personas)
-    if benchmark is Benchmark.S2S and persona_conditions and not test_set_id:
+    persona_conditions = _persona_conditions(_all_persona_conditions(settings))
+    # Scenario personas travel with their scenario's own test set, so only the
+    # legacy map needs the shared one.
+    if benchmark is Benchmark.S2S and settings.coval_s2s_condition_personas and not test_set_id:
         raise RuntimeError("coval_s2s_condition_personas requires coval_s2s_test_set_id")
+    # The text board reads bank's test set from its own setting; the two must agree
+    # or voice and text silently measure different Coval sets.
+    bank_ids = settings.coval_s2s_scenarios.get(scenarios.ACTIVE.slug)
+    text_test_set = (settings.coval_s2s_bank_test_set_id or "").strip()
+    if bank_ids and text_test_set and bank_ids.test_set_id != text_test_set:
+        raise RuntimeError(
+            f"coval_s2s_scenarios['bank'].test_set_id {bank_ids.test_set_id!r} differs from "
+            f"coval_s2s_bank_test_set_id {text_test_set!r}"
+        )
+    persona_labels = _all_persona_labels(settings)
     raw_interruption = settings.coval_s2s_interruption_metric_id
     if raw_interruption is not None and not raw_interruption.strip():
         raise RuntimeError("coval_s2s_interruption_metric_id must not be blank")
@@ -1661,7 +1713,9 @@ async def fetch_and_write_v2v(
             # than falling back to the shared one, which would file its runs under
             # the wrong family.
             spec_test_set = (
-                getattr(settings, spec.test_set_id_attr) if spec.test_set_id_attr else test_set_id
+                spec.test_set_id
+                or (getattr(settings, spec.test_set_id_attr) if spec.test_set_id_attr else None)
+                or (None if spec.test_set_id_attr else test_set_id)
             ) or None
             if spec.test_set_id_attr and not spec_test_set:
                 logger.warning("test_set_unset", provider=spec.provider, attr=spec.test_set_id_attr)
@@ -1770,7 +1824,7 @@ async def fetch_and_write_v2v(
                 runs=dataset_runs,
                 rng=random.Random(),  # noqa: S311
                 expected_models=expected,
-                persona_labels=settings.s2s_persona_labels,
+                persona_labels=persona_labels,
             )
         logger.info(
             "s2s_fetch_done",
