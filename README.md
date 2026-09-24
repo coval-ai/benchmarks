@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🎙️ Coval Benchmarks
+# Coval Benchmarks
 
-### Voice AI benchmarks in real-world conditions.
+### Voice AI benchmarks in applied and representative use cases.
 
-**Open-source, always-on leaderboards for speech-to-text, text-to-speech, and speech-to-speech models.**
+**Open-source, continuously running benchmarks for speech-to-text, text-to-speech, and speech-to-speech models.**
 
 [**benchmarks.coval.ai →**](https://benchmarks.coval.ai)
 
@@ -21,9 +21,9 @@ Most voice AI benchmarks are a one-time snapshot on clean studio audio. We run o
 
 Every number on the site comes from this repository. You can rerun it with your own API keys.
 
-## ⚡ What's on the board
+## What we measure
 
-| | Benchmark | What we measure |
+| | Benchmark | Metric |
 |---|---|---|
 | 🗣️ | **Text-to-Speech** | **TTFA** (time to first *audible* sample, including front-loaded silence), real-time factor, end-to-end synthesis latency, and **WER** on the synthesized audio to check that the speech is intelligible and complete |
 | 👂 | **Speech-to-Text** | **WER** after Whisper's `EnglishTextNormalizer`, **TTFT** (first partial), **TTFS** (time to final segment, from a shared VAD end-of-speech anchor), audio→final latency, real-time factor |
@@ -32,7 +32,7 @@ Every number on the site comes from this repository. You can rerun it with your 
 
 Leaderboards rank by the **median** and show the spread from p25 to p99, so a model with a fast median and a slow tail can't hide it.
 
-## 🌪️ Audio that fights back
+## Challenging Audio Conditions
 
 Most STT providers train on clean studio speech, so nearly all of them look good on it. We test clean speech as a control, then test the conditions that break things in production:
 
@@ -50,7 +50,7 @@ Most STT providers train on clean studio speech, so nearly all of them look good
 
 Every clip is loudness-normalized to −20 dBFS RMS and **pinned to a SHA-256 hash**. If the audio changes, the runner refuses to score it.
 
-## 🔬 Built so you can trust it
+## Built so you can trust it
 
 - **Exact model versions.** Every entry uses the provider's versioned identifier (`nova-3`, `gpt-4o-mini-tts`, `sonic-3`), never a floating alias.
 - **Apples-to-apples runs.** Each run draws one random sample, and every model is scored on that same draw. Over time, the random draws cover the whole dataset.
@@ -61,13 +61,13 @@ Every clip is loudness-normalized to −20 dBFS RMS and **pinned to a SHA-256 ha
 
 Read the full reproducibility contract in [`docs/methodology.md`](docs/methodology.md).
 
-## 🧩 Providers
+## Providers
 
 AssemblyAI · Alibaba · Azure · Baseten · Cartesia · Deepdub · Deepgram · ElevenLabs · Fish Audio · Fluxions · Gemini · Gladia · Google · Gradium · Groq · Hume · Inworld · LMNT · MiniMax · Mistral · Modulate · Murf · Nari · OpenAI · Palabra · Rev.ai · Rime · Smallest · Soniox · Speechify · Speechmatics · Together AI · xAI · Zoom · *and more*
 
 Missing a provider? Adapters live in [`runner/src/coval_bench/providers/`](runner/src/coval_bench/providers/), one file each. [Open an issue](https://github.com/coval-ai/benchmarks/issues) and we'll talk about adding it.
 
-## 🚀 Run it yourself
+## Run it yourself
 
 Offline tests need no keys, database, or network:
 
@@ -96,7 +96,7 @@ docker compose run --rm runner tts-smoke \
 
 See [`runner/README.md`](runner/README.md) for the CLI, the API, and the other runbooks.
 
-## 🏗️ How it works
+## How it works
 
 ```
  Scheduler       ──▶ Runner (Cloud Run Job) ──▶ Provider APIs
@@ -106,11 +106,11 @@ See [`runner/README.md`](runner/README.md) for the CLI, the API, and the other r
                    Postgres ──▶ FastAPI (/v1/leaderboard, /v1/results, …) ──▶ benchmarks.coval.ai
 ```
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome. Please open an issue before making a big change. All code must pass `ruff`, `mypy --strict`, and `pytest`. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## ⚖️ Caveats and license
+## Caveats and license
 
 This is a research benchmark. Results reflect specific pinned datasets, model versions, and scoring pipelines, and may not generalize to your production traffic. Our workers run in `us-east-1`, so providers serving from other regions carry that round-trip. Latency and per-provider drift over time are the most informative signals. Full caveats are in [`docs/methodology.md`](docs/methodology.md#caveats).
 
