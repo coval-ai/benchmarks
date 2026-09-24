@@ -73,6 +73,13 @@ def _timestamp(value: str | None) -> datetime | None:
     return parsed
 
 
+def _json_default(value: object) -> str:
+    """Encode datetimes in maintenance results as JSON-safe ISO strings."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"cannot encode {type(value).__name__} as JSON")
+
+
 @click.command(name="refresh-dashboard-aggregates")
 @click.option("--as-of", type=str, help="Fixed UTC snapshot boundary for validation or replay.")
 def refresh_dashboard_aggregates(as_of: str | None) -> None:
@@ -86,7 +93,7 @@ def refresh_dashboard_aggregates(as_of: str | None) -> None:
     async def refresh() -> None:
         async with lifespan_pool(get_settings()) as pool:
             result = await reconcile_dashboard_aggregates(pool, as_of=at)
-            click.echo(json.dumps(asdict(result)))
+            click.echo(json.dumps(asdict(result), default=_json_default))
 
     asyncio.run(refresh())
 
@@ -111,6 +118,6 @@ def repair_dashboard_aggregates(bucket: tuple[str, ...], as_of: str | None) -> N
     async def refresh() -> None:
         async with lifespan_pool(get_settings()) as pool:
             result = await repair(pool, buckets=buckets, as_of=at)
-            click.echo(json.dumps(asdict(result)))
+            click.echo(json.dumps(asdict(result), default=_json_default))
 
     asyncio.run(refresh())
