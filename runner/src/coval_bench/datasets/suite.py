@@ -12,7 +12,6 @@ DEDICATED_STT_SUITE: Final[dict[str, int]] = {
     "stt-wildasr-farfield": 24,
     "stt-wildasr-noisegap": 24,
     "stt-wildasr-phonecodec": 24,
-    "stt-wildasr-reverb": 24,
     "stt-wildasr-accent": 24,
 }
 
