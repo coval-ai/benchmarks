@@ -24,6 +24,7 @@ from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
+from coval_bench.providers.stt._stream import run_stream
 
 logger = structlog.get_logger(__name__)
 
@@ -88,7 +89,8 @@ class CloudflareSTTProvider(STTProvider):
 
             final_event = asyncio.Event()
             async with ws_client.connect(url, additional_headers=headers) as ws:
-                send_task = asyncio.create_task(
+                await run_stream(
+                    result,
                     self._send_audio(
                         ws,
                         audio_data,
@@ -98,20 +100,9 @@ class CloudflareSTTProvider(STTProvider):
                         result,
                         realtime_resolution,
                         final_event,
-                    )
+                    ),
+                    self._receive(ws, result, final_event),
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result, final_event))
-                tasks = (send_task, recv_task)
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-                if any(not task.cancelled() and task.exception() is not None for task in done):
-                    for task in pending:
-                        task.cancel()
-                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                if result.error is None and result.audio_to_final_seconds is None:
-                    for outcome in outcomes:
-                        if isinstance(outcome, Exception):
-                            result.error = str(outcome)
-                            break
 
         except Exception as exc:
             logger.warning(
