@@ -28,7 +28,6 @@ tracks the emission interval rather than engine latency and is excluded in
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from typing import Any
@@ -40,6 +39,7 @@ from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
+from coval_bench.providers.stt._stream import run_stream
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -105,7 +105,8 @@ class ModulateSTTProvider(STTProvider):
         try:
             url = self._build_websocket_url(sample_rate)
             async with ws_client.connect(url) as ws:
-                send_task = asyncio.create_task(
+                await run_stream(
+                    result,
                     self._send_audio(
                         ws,
                         audio_data,
@@ -114,20 +115,9 @@ class ModulateSTTProvider(STTProvider):
                         sample_rate,
                         result,
                         realtime_resolution,
-                    )
+                    ),
+                    self._receive(ws, result),
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
-                tasks = (send_task, recv_task)
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-                if any(not task.cancelled() and task.exception() is not None for task in done):
-                    for task in pending:
-                        task.cancel()
-                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                if result.error is None and result.audio_to_final_seconds is None:
-                    for outcome in outcomes:
-                        if isinstance(outcome, Exception):
-                            result.error = str(outcome)
-                            break
 
         except Exception as exc:
             logger.warning(

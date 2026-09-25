@@ -26,6 +26,7 @@ from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
+from coval_bench.providers.stt._stream import run_stream
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -95,22 +96,11 @@ class NariSTTProvider(STTProvider):
             headers = {"Authorization": f"Bearer {self._api_key.get_secret_value()}"}
             async with ws_client.connect(_WS_URL, additional_headers=headers) as ws:
                 await self._wait_for_session_ready(ws)
-                send_task = asyncio.create_task(
-                    self._send_audio(ws, audio_data, result, realtime_resolution)
+                await run_stream(
+                    result,
+                    self._send_audio(ws, audio_data, result, realtime_resolution),
+                    self._receive(ws, result),
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result))
-                tasks = (send_task, recv_task)
-                try:
-                    done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-                    for task in done:
-                        exc = task.exception()
-                        if exc is not None:
-                            raise exc
-                    await asyncio.gather(*tasks)
-                finally:
-                    for task in tasks:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
 
         except Exception as exc:
             logger.warning(

@@ -42,6 +42,7 @@ from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
+from coval_bench.providers.stt._stream import run_stream
 
 if TYPE_CHECKING:
     from coval_bench.config import Settings
@@ -220,21 +221,12 @@ class BasetenSTTProvider(STTProvider):
                     )
                 )
 
-                send_task = asyncio.create_task(self._send_audio(ws, audio_data, result))
-                recv_task = asyncio.create_task(self._receive(ws, result))
-                tasks = (send_task, recv_task)
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-                if any(not task.cancelled() and task.exception() is not None for task in done):
-                    for task in pending:
-                        task.cancel()
-                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                if result.error is None and result.audio_to_final_seconds is None:
-                    for outcome in outcomes:
-                        if isinstance(outcome, Exception):
-                            result.error = str(outcome)
-                            break
-                    else:
-                        result.error = _NO_FINAL_ERROR
+                await run_stream(
+                    result,
+                    self._send_audio(ws, audio_data, result),
+                    self._receive(ws, result),
+                    no_final_error=_NO_FINAL_ERROR,
+                )
 
         except Exception as exc:
             logger.warning(
