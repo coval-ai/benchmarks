@@ -22,7 +22,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -74,14 +74,8 @@ class CloudflareTTSProvider(TTSProvider):
             logger.warning("cloudflare_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        first_chunk_at: float | None = None
-        status_code: int | None = None
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
+        synthesis = Synthesis("cloudflare", self._model, self._voice, SAMPLE_RATE)
         request_id: str | None = None
-        error: str | None = None
 
         payload = {
             "text": text,
@@ -90,7 +84,7 @@ class CloudflareTTSProvider(TTSProvider):
             "sample_rate": SAMPLE_RATE,
             "container": "none",
         }
-        start = time.monotonic()
+        synthesis.start = time.monotonic()
         try:
             async with self._client.stream(
                 "POST",
@@ -98,10 +92,10 @@ class CloudflareTTSProvider(TTSProvider):
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=payload,
             ) as response:
-                status_code = response.status_code
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.request)
-                reused = connection_reused(response.request)
+                synthesis.status_code = response.status_code
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(response.request)
+                synthesis.connection_reused = connection_reused(response.request)
                 request_id = response.headers.get("cf-ai-req-id")
                 if response.status_code >= 400:
                     body = (await response.aread()).decode("utf-8", errors="replace")
@@ -113,37 +107,13 @@ class CloudflareTTSProvider(TTSProvider):
                 # Workers AI labels the linear16 body audio/mpeg, so the content
                 # type is not checked.
                 async for chunk in response.aiter_bytes():
-                    if chunk:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning(
-                "cloudflare_tts_error",
-                provider="cloudflare",
-                model=self._model,
-                request_id=request_id,
-                exc_info=exc,
-            )
-            error = str(exc) or type(exc).__name__
+            synthesis.fail(exc, request_id=request_id)
             if request_id:
-                error = f"{error} (cf-ai-req-id={request_id})"
-            audio_chunks.clear()
+                synthesis.error = f"{synthesis.error} (cf-ai-req-id={request_id})"
 
-        return finalize_tts_result(
-            provider="cloudflare",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            error=error,
-            status_code=status_code,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        return synthesis.result()
 
 
 def _error_message(body: str) -> str:

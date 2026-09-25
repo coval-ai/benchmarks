@@ -24,7 +24,7 @@ import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -53,9 +53,7 @@ class GradiumTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("gradium", self._model, self._voice, _SAMPLE_RATE)
 
         try:
             headers = {"x-api-key": self._api_key}
@@ -78,7 +76,7 @@ class GradiumTTSProvider(TTSProvider):
                 if msg.get("type") != "ready":
                     logger.warning("gradium_unexpected_first_message", msg=msg)
 
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(json.dumps({"type": "text", "text": text}))
                 await ws.send(json.dumps({"type": "end_of_stream"}))
 
@@ -89,13 +87,7 @@ class GradiumTTSProvider(TTSProvider):
                     msg_type: str = msg.get("type", "")
 
                     if msg_type == "audio":
-                        audio_b64: str = msg.get("audio", "")
-                        if audio_b64:
-                            chunk = base64.b64decode(audio_b64)
-                            if chunk:
-                                if first_chunk_at is None:
-                                    first_chunk_at = time.monotonic()
-                                audio_chunks.append(chunk)
+                        synthesis.add_chunk(base64.b64decode(str(msg.get("audio", ""))))
 
                     elif msg_type == "end_of_stream":
                         break
@@ -104,24 +96,6 @@ class GradiumTTSProvider(TTSProvider):
                         raise RuntimeError(str(msg.get("message", msg)))
 
         except Exception as exc:
-            logger.warning("gradium_tts_error", provider="gradium", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="gradium",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="gradium",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

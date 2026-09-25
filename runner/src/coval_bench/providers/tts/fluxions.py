@@ -26,7 +26,7 @@ import websockets.asyncio.client as ws_client
 from coval_bench.config import Settings
 from coval_bench.providers._http_session import get_shared_client
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -103,16 +103,14 @@ class FluxionsTTSProvider(TTSProvider):
         return resolved
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("fluxions", self._model, self._voice, _SAMPLE_RATE)
 
         try:
             voice_id = await self._resolve_voice()
             async with ws_client.connect(
                 _WS_URL, additional_headers={"Authorization": f"Bearer {self._api_key}"}
             ) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(
                     json.dumps(
                         {
@@ -126,10 +124,7 @@ class FluxionsTTSProvider(TTSProvider):
 
                 async for message in ws:
                     if isinstance(message, (bytes, bytearray)):
-                        if message:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(bytes(message))
+                        synthesis.add_chunk(bytes(message))
                         continue
 
                     event = json.loads(message)
@@ -139,26 +134,6 @@ class FluxionsTTSProvider(TTSProvider):
                         break
 
         except Exception as exc:
-            logger.warning(
-                "fluxions_tts_error", provider="fluxions", model=self._model, exc_info=exc
-            )
-            return finalize_tts_result(
-                provider="fluxions",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="fluxions",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
