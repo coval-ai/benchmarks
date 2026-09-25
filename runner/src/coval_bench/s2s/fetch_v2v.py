@@ -163,6 +163,7 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
     ("google", "gemini-live"),
     ("xai", "grok-voice-think-fast-2.0"),
     ("stepfun", "stepaudio-3-realtime-preview"),
+    ("alibaba", "qwen3.8-omni-flash-realtime"),
 )
 
 
