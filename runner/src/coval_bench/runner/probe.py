@@ -24,6 +24,7 @@ from coval_bench.datasets.suite import DEFAULT_STT_DATASET
 from coval_bench.db.models import ResultStatus
 from coval_bench.providers._http_session import close_all as _close_http_clients
 from coval_bench.registries import METRIC_SPECS, Benchmark, Metric
+from coval_bench.runner.gate import ModelGate
 from coval_bench.runner.orchestrator import (
     _get_stt_providers,
     _get_tts_providers,
@@ -80,11 +81,11 @@ async def _run_model(
     items: list[Any],
     runner: Callable[..., Awaitable[list[Any]]],
     metrics: tuple[Metric, ...],
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     settings: Settings,
 ) -> dict[str, Any]:
     tasks = [
-        runner(entry=entry, item=item, run_id=0, sem=sem, settings=settings, writer=None)
+        runner(entry=entry, item=item, run_id=0, gate=gate, settings=settings, writer=None)
         for item in items
     ]
     rows: list[Any] = []
@@ -139,7 +140,7 @@ async def run_probe(
     Concurrency defaults to 1; keep it there for a single pinned replica so the
     latency numbers are not inflated by self-contention.
     """
-    sem = asyncio.Semaphore(concurrency)
+    gate = ModelGate(concurrency)
     results: dict[str, dict[str, Any]] = {}
 
     try:
@@ -147,7 +148,7 @@ async def run_probe(
             models=models,
             settings=settings,
             sample_size=sample_size,
-            sem=sem,
+            gate=gate,
             results=results,
         )
     finally:
@@ -161,7 +162,7 @@ async def _run(
     models: list[RegisteredModel],
     settings: Settings,
     sample_size: int,
-    sem: asyncio.Semaphore,
+    gate: ModelGate,
     results: dict[str, dict[str, Any]],
 ) -> None:
     await _warmup(models, settings)
@@ -182,7 +183,7 @@ async def _run(
                 items=list(ds.items),
                 runner=_run_stt_item,
                 metrics=_STT_METRICS,
-                sem=sem,
+                gate=gate,
                 settings=settings,
             )
     if tts_models:
@@ -198,6 +199,6 @@ async def _run(
                 items=list(ds_tts.items),
                 runner=_run_tts_item,
                 metrics=_TTS_METRICS,
-                sem=sem,
+                gate=gate,
                 settings=settings,
             )
