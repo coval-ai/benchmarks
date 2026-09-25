@@ -407,6 +407,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
                     "gemini-live": "b3",
                     "grok-voice-think-fast-2.0": "b4",
                     "stepaudio-3-realtime-preview": "b5",
+                    "qwen3.8-omni-flash-realtime": "b6",
                 },
             )
         },
@@ -421,6 +422,7 @@ def test_expected_sample_models_are_scoped_to_the_dataset_partition() -> None:
         ("google", "gemini-live"),
         ("xai", "grok-voice-think-fast-2.0"),
         ("stepfun", "stepaudio-3-realtime-preview"),
+        ("alibaba", "qwen3.8-omni-flash-realtime"),
     }
 
 
