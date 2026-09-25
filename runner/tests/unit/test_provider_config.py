@@ -44,7 +44,11 @@ def test_the_runner_image_installs_every_provider_extra() -> None:
     """The API accepts any provider with a module, so the runner must load them all."""
     runner_root = Path(__file__).parents[2]
     pyproject = tomllib.loads((runner_root / "pyproject.toml").read_text())
-    extras = set(pyproject["project"]["optional-dependencies"]) - {"hf-parquet", "livekit"}
+    extras = set(pyproject["project"]["optional-dependencies"]) - {
+        "hf-parquet",
+        "livekit",
+        "s2s-agent",
+    }
     dockerfile = (runner_root / "Dockerfile").read_text()
     missing = sorted(extra for extra in extras if f"--extra {extra}" not in dockerfile)
     assert not missing, f"provider extras absent from the runner image: {missing}"
