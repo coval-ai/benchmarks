@@ -39,25 +39,8 @@ logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
 HTTP_MODELS = {"atlas-tts"}
 
-# From GET /v1/models. All report owned_by "sabi"; none are per-account clones,
-# so the benchmarked voice is the same class of object as every other provider's
-# stock voice rather than something tuned for this key.
-VALID_VOICES = [
-    "capella",
-    "dax",
-    "enzo",
-    "sena",
-    "marlow",
-    "elin",
-    "corin",
-    "orin",
-    "isla",
-    "talia",
-    "serin",
-    "reeve",
-    "ember",
-    "maitri",
-]
+# The us-east gateway serves exactly one voice; the original host still lists the full set.
+VALID_VOICES = ["capella"]
 
 # Pinned per provider, as everywhere else in this package. Atlas declares a rate
 # on ``ready`` and ``audio.start``; that value is checked against this constant
@@ -66,7 +49,7 @@ VALID_VOICES = [
 # leading-silence offset we publish.
 SAMPLE_RATE = 24000
 
-_WS_URL = "wss://api.tts.runatlas.com/v1/audio/speech/stream"
+_WS_URL = "wss://api-useast.tts.runatlas.com/v1/audio/speech/stream"
 _MAX_WS_SIZE = 16 * 1024 * 1024
 _LAST_FRAMES_KEPT = 3
 
@@ -79,8 +62,8 @@ class AtlasTTSProvider(TTSProvider):
         self._voice = voice
 
         if self._voice not in VALID_VOICES:
-            logger.warning("unknown_atlas_voice", voice=self._voice, fallback="dax")
-            self._voice = "dax"
+            logger.warning("unknown_atlas_voice", voice=self._voice, fallback="capella")
+            self._voice = "capella"
 
         api_key_secret = settings.atlas_api_key
         if api_key_secret is None or not api_key_secret.get_secret_value():

@@ -24,7 +24,7 @@ from coval_bench.providers.tts.atlas import SAMPLE_RATE, VALID_VOICES, AtlasTTSP
 from .conftest import FakeWebSocket, make_pcm_bytes
 
 _MODEL = "atlas-tts"
-_VOICE = "dax"
+_VOICE = "capella"
 
 
 # ---------------------------------------------------------------------------
@@ -281,19 +281,14 @@ async def test_unknown_frames_are_ignored(fake_settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dax_is_a_listed_voice() -> None:
-    """``dax`` is a stock voice from /v1/models, not a per-account clone."""
-    assert "dax" in VALID_VOICES
-
-
-def test_valid_voices_match_the_published_list() -> None:
-    assert VALID_VOICES[:3] == ["capella", "dax", "enzo"]
-    assert len(VALID_VOICES) == 14
+def test_capella_is_the_only_served_voice() -> None:
+    """The us-east gateway lists exactly one voice on /v1/models."""
+    assert VALID_VOICES == ["capella"]
 
 
 @pytest.mark.asyncio
-async def test_unknown_voice_falls_back_to_dax(fake_settings: Settings) -> None:
-    assert _provider(fake_settings, voice="not-a-voice")._voice == "dax"
+async def test_unknown_voice_falls_back_to_capella(fake_settings: Settings) -> None:
+    assert _provider(fake_settings, voice="dax")._voice == "capella"
 
 
 def test_missing_key_is_rejected() -> None:
