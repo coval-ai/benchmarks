@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import wave
 from collections.abc import AsyncIterator
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -77,7 +76,7 @@ async def test_stream_request_and_first_chunk_timing_produce_24khz_wav(
         base_url="https://api.airy.so", transport=httpx.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(airy, "get_shared_client", lambda *args: client)
-        monkeypatch.setattr(airy, "time", SimpleNamespace(monotonic=lambda: stream.now))
+        monkeypatch.setattr("time.monotonic", lambda: stream.now)
         provider = airy.AiryTTSProvider(airy_settings, model="airy-tts-v1", voice=voice)
         result = await provider.synthesize("Hello from Airy.")
 

@@ -24,7 +24,7 @@ import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -73,9 +73,7 @@ class DeepgramTTSProvider(TTSProvider):
                     "Expected an 'aura-' or 'flux-' model."
                 ),
             )
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("deepgram", self._model, self._voice, SAMPLE_RATE)
 
         is_flux = speaker.startswith("flux-")
         base = _DEEPGRAM_FLUX_TTS_WS_BASE if is_flux else _DEEPGRAM_TTS_WS_BASE
@@ -98,15 +96,13 @@ class DeepgramTTSProvider(TTSProvider):
 
                 # t0 — synthesis trigger (equivalent to the HTTP POST in the old path).
                 # Matches Cartesia's convention: t0 after connect, before text dispatch.
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 await ws.send(json.dumps({"type": "Speak", "text": text}))
                 await ws.send(json.dumps({"type": "Flush"}))
 
                 async for raw in ws:
                     if isinstance(raw, bytes):
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(raw)
+                        synthesis.add_chunk(raw)
                         continue
 
                     msg = json.loads(raw)
@@ -121,24 +117,6 @@ class DeepgramTTSProvider(TTSProvider):
                         logger.warning("deepgram_ws_warning", description=msg.get("description"))
 
         except Exception as exc:
-            logger.warning("deepgram_error", provider="deepgram", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="deepgram",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="deepgram",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

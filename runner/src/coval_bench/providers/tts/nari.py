@@ -21,7 +21,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -70,14 +70,8 @@ class NariTTSProvider(TTSProvider):
             logger.warning("nari_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        first_chunk_at: float | None = None
-        status_code: int | None = None
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
+        synthesis = Synthesis("nari", self._model, self._voice, SAMPLE_RATE)
         request_id: str | None = None
-        error: str | None = None
 
         payload = {
             "model": self._model,
@@ -87,7 +81,7 @@ class NariTTSProvider(TTSProvider):
             "stream": True,
             "response_format": "pcm",
         }
-        start = time.monotonic()
+        synthesis.start = time.monotonic()
         try:
             async with self._client.stream(
                 "POST",
@@ -95,10 +89,10 @@ class NariTTSProvider(TTSProvider):
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=payload,
             ) as response:
-                status_code = response.status_code
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.request)
-                reused = connection_reused(response.request)
+                synthesis.status_code = response.status_code
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(response.request)
+                synthesis.connection_reused = connection_reused(response.request)
                 request_id = response.headers.get("x-request-id")
                 if response.status_code >= 400:
                     body = (await response.aread()).decode("utf-8", errors="replace")
@@ -110,38 +104,13 @@ class NariTTSProvider(TTSProvider):
                 _validate_content_type(response.headers)
                 # No chunk_size: buffering to a fixed byte count would inflate TTFA.
                 async for chunk in response.aiter_bytes():
-                    if chunk:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning(
-                "nari_tts_error",
-                provider="nari",
-                model=self._model,
-                request_id=request_id,
-                exc_info=exc,
-            )
-            error = str(exc) or type(exc).__name__
+            synthesis.fail(exc, request_id=request_id)
             if request_id:
-                error = f"{error} (x-request-id={request_id})"
-            # A partial stream must not be saved/scored as complete synthesis.
-            audio_chunks.clear()
+                synthesis.error = f"{synthesis.error} (x-request-id={request_id})"
 
-        return finalize_tts_result(
-            provider="nari",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            error=error,
-            status_code=status_code,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        return synthesis.result()
 
 
 def _validate_content_type(headers: httpx.Headers) -> None:

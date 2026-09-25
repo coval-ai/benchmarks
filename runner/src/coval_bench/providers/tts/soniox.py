@@ -11,14 +11,11 @@ import time
 from typing import Any
 from uuid import uuid4
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _VALID_VOICES = (
     "Maya",
@@ -77,14 +74,12 @@ class SonioxTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("soniox", self._model, self._voice, _SAMPLE_RATE)
         stream_id = str(uuid4())
 
         try:
             async with ws_client.connect(_WS_URL) as ws:
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 # Soniox authenticates in-band: the api_key rides the opening config
                 # frame rather than an Authorization header.
                 await ws.send(
@@ -113,36 +108,12 @@ class SonioxTTSProvider(TTSProvider):
                         )
                         raise RuntimeError(str(message))
 
-                    audio_b64 = event.get("audio")
-                    if audio_b64:
-                        chunk = base64.b64decode(audio_b64)
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                    synthesis.add_chunk(base64.b64decode(event.get("audio") or ""))
 
                     if event.get("terminated"):
                         break
 
         except Exception as exc:
-            logger.warning("soniox_tts_error", provider="soniox", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="soniox",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="soniox",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

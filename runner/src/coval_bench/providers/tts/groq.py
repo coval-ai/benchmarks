@@ -24,7 +24,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -81,30 +81,16 @@ class GroqTTSProvider(TTSProvider):
             logger.warning("groq_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
+        synthesis = Synthesis("groq", self._model, self._voice, _SAMPLE_RATE)
         if len(text) > _MAX_INPUT_CHARS:
-            return finalize_tts_result(
-                provider="groq",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=None,
-                first_audio_chunk_at=None,
-                error=(
-                    f"input is {len(text)} chars; Orpheus caps input at "
-                    f"{_MAX_INPUT_CHARS} and would truncate the audio"
-                ),
+            synthesis.error = (
+                f"input is {len(text)} chars; Orpheus caps input at "
+                f"{_MAX_INPUT_CHARS} and would truncate the audio"
             )
-
-        audio_chunks: list[bytes] = []
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
-        start: float | None = None
-        first_chunk_at: float | None = None
+            return synthesis.result()
 
         try:
-            start = time.monotonic()
+            synthesis.start = time.monotonic()
             async with self._client.audio.speech.with_streaming_response.create(
                 model=self._model,
                 voice=self._voice,
@@ -113,44 +99,21 @@ class GroqTTSProvider(TTSProvider):
                 # Groq extension; the WAV header stays authoritative at decode.
                 extra_body={"sample_rate": _SAMPLE_RATE},
             ) as response:
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.http_response.request)
-                reused = connection_reused(response.http_response.request)
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(
+                    response.http_response.request
+                )
+                synthesis.connection_reused = connection_reused(response.http_response.request)
                 async for chunk in response.iter_bytes():
-                    if isinstance(chunk, bytes) and len(chunk) > 0:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    if isinstance(chunk, bytes):
+                        synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning("groq_http_error", provider="groq", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="groq",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-                http_version=http_version,
-                submit_to_headers_ms=setup_ms,
-                connection_reused=reused,
-            )
+            synthesis.fail(exc)
+            return synthesis.result()
 
-        pcm, sample_rate, decode_error = _wav_to_pcm(b"".join(audio_chunks))
-        return finalize_tts_result(
-            provider="groq",
-            model=self._model,
-            voice=self._voice,
-            pcm=pcm,
-            sample_rate=sample_rate,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            error=decode_error,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        pcm, synthesis.sample_rate, synthesis.error = _wav_to_pcm(b"".join(synthesis.chunks))
+        synthesis.chunks = [pcm]
+        return synthesis.result()
 
 
 def _wav_to_pcm(data: bytes) -> tuple[bytes, int, str | None]:

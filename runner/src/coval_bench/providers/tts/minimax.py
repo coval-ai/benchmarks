@@ -19,14 +19,11 @@ import json
 import time
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_URL = "wss://api.minimax.io/ws/v1/t2a_v2"
 _SAMPLE_RATE = 24000
@@ -56,9 +53,7 @@ class MinimaxTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("minimax", self._model, self._voice, _SAMPLE_RATE)
         headers = {"Authorization": f"Bearer {self._api_key}"}
 
         try:
@@ -93,39 +88,18 @@ class MinimaxTTSProvider(TTSProvider):
                             )
                         )
                     elif event == "task_started":
-                        start = time.monotonic()
+                        synthesis.start = time.monotonic()
                         await ws.send(json.dumps({"event": "task_continue", "text": text}))
                         await ws.send(json.dumps({"event": "task_finish"}))
                     elif event == "task_continued":
-                        chunk = (data.get("data") or {}).get("audio")
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(bytes.fromhex(chunk))
+                        chunk = (data.get("data") or {}).get("audio") or ""
+                        synthesis.add_chunk(bytes.fromhex(chunk))
                         if data.get("is_final"):
                             break
                     elif event == "task_finished":
                         break
 
         except Exception as exc:
-            logger.warning("minimax_tts_error", provider="minimax", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="minimax",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="minimax",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
