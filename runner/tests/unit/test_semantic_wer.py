@@ -115,6 +115,66 @@ def test_accepted_forms_role_reversal_and_component_polarity() -> None:
     placement = unit("placement", "sauce on side", 5, 3, components=components)
     polarity = compute_semantic_wer(ref, "keep sauce not on side", [placement])
     assert polarity.unit_scores[0].outcome == "substituted"
+    dropped_components = (
+        SemanticComponent(id="a", text="sauce", start_char=5, end_char=10),
+        SemanticComponent(id="b", text="on", start_char=15, end_char=17),
+        SemanticComponent(id="c", text="side", start_char=18, end_char=22),
+    )
+    dropped_placement = unit("placement", "sauce not on side", 5, 3, components=dropped_components)
+    dropped_polarity = compute_semantic_wer(
+        "keep sauce not on side", "keep sauce on side", [dropped_placement]
+    )
+    assert dropped_polarity.unit_scores[0].outcome == "substituted"
+
+
+def test_identifier_units_reject_components() -> None:
+    component = SemanticComponent(id="value", text="A-7", start_char=5, end_char=8)
+    with pytest.raises(ValueError, match="identifier units cannot define components"):
+        unit("code", "A-7", 5, 3, kind="identifier", components=(component,))
+    with pytest.raises(ValueError, match="identifier units cannot define components"):
+        unit(
+            "code",
+            "A-7",
+            5,
+            3,
+            kind="identifier",
+            accepted=("A seven",),
+            components=(component,),
+        )
+
+
+@pytest.mark.parametrize(
+    ("text", "accepted", "hypothesis", "expected"),
+    [
+        ("A seven", (), "A seven", "correct"),
+        ("A dash 7", ("A seven",), "A seven", "correct"),
+        ("A dash 7", (), "A eight", "substituted"),
+    ],
+)
+def test_identifier_matching_uses_reviewed_forms(
+    text: str, accepted: tuple[str, ...], hypothesis: str, expected: str
+) -> None:
+    identifier = unit("code", text, 5, 3, kind="identifier", accepted=accepted)
+    identifier = identifier.model_copy(update={"canonical_value": "A-7"})
+    result = compute_semantic_wer("code " + text, "code " + hypothesis, [identifier])
+    assert result.unit_scores[0].outcome == expected
+
+
+@pytest.mark.parametrize("extra", ["9", "B"])
+def test_accepted_identifier_form_rejects_adjacent_identifier_extra(extra: str) -> None:
+    identifier = unit("code", "A dash 7", 5, 3, kind="identifier", accepted=("A seven",))
+    identifier = identifier.model_copy(update={"canonical_value": "A-7"})
+    result = compute_semantic_wer("code A dash 7", f"code A seven {extra}", [identifier])
+    assert result.unit_scores[0].outcome == "substituted"
+
+
+def test_accepted_identifier_form_elsewhere_cannot_rescue_annotated_span() -> None:
+    reference = "first A dash 7 then B dash 8"
+    identifier = unit(
+        "first", "A dash 7", 6, 3, kind="identifier", accepted=("A seven",)
+    ).model_copy(update={"canonical_value": "A-7"})
+    result = compute_semantic_wer(reference, "first A 8 then A seven", [identifier])
+    assert result.unit_scores[0].outcome == "substituted"
 
 
 def test_identifier_forms_are_exact_and_reject_extra_characters() -> None:

@@ -69,11 +69,12 @@ Each unit has one deterministic outcome: `correct`, `substituted`, or
 `deleted`. The scorer maps raw character spans to tokens produced by the pinned
 WER normalizer, aligns the normalized reference and hypothesis, and compares
 the aligned hypothesis span with the normalized reference or an explicit
-accepted form. Componentized units require all components and reject an added
-polarity token. Identifiers use symbol-preserving canonicalization for spoken
-letter names and spoken or literal dashes and stars, then require the exact
-canonical identifier. General synonym matching and embedding similarity are
-not used.
+accepted form. Componentized units require all components and reject any added
+or dropped polarity token; identifier units are binary and cannot be
+componentized. Identifiers use symbol-preserving canonicalization for spoken
+letter names and spoken or literal dashes and stars, then require an exact
+match to the canonical value, reviewed reference text, or an explicit reviewed
+accepted form. General synonym matching and embedding similarity are not used.
 
 `SemanticWERResult.normalized_value_rows()` emits one observation's values;
 `SemanticWERAggregate.normalized_value_rows()` emits the same keys after raw
@@ -91,11 +92,12 @@ The scorer is deterministic but depends on the pinned WER normalizer and word
 alignment. It does not infer hypothesis-only semantic insertions, and
 componentized annotations must have non-overlapping spans. Identifier matching
 canonicalizes spoken punctuation and letter names, then requires an exact
-span-aligned value. Attached characters and adjacent numeric, symbol, or
-single-letter identifier tokens remain errors. Other adjacent inserted words
-stay outside the semantic span and are measured by standard WER; the draft
-does not infer whether an arbitrary multi-letter word was intended as another
-identifier segment.
+span-aligned reviewed value. Attached characters and adjacent numeric, symbol,
+or single-letter identifier tokens remain errors. Insertions are not scored as
+independent units and cannot rescue a misrecognized unit; a trailing insertion
+adjacent to a reviewed span can be absorbed into that span's aligned text and
+penalize it. The draft does not infer whether an arbitrary multi-letter word
+was intended as another identifier segment.
 
 Library availability is not metric activation. This draft does not register a
 Metric enum, runner/orchestrator job, scheduler, database writer or migration,

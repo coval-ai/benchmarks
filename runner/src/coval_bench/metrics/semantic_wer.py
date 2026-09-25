@@ -96,6 +96,8 @@ class SemanticUnit(BaseModel):
             raise ValueError("accepted_forms must not contain blank values")
         if len(self.accepted_forms) != len(set(self.accepted_forms)):
             raise ValueError("accepted_forms must be unique")
+        if self.kind == "identifier" and self.components:
+            raise ValueError("identifier units cannot define components")
         if self.components and self.accepted_forms:
             raise ValueError("componentized units cannot also define unit-level accepted_forms")
 
@@ -567,6 +569,11 @@ def _score_unit(
         canonical_target = canonicalize_identifier_text(unit.canonical_value)
         if not canonical_target:
             raise ValueError(f"identifier unit {unit.id!r} requires a non-empty canonical_value")
+        allowed_targets = {
+            canonicalize_identifier_text(form)
+            for form in (unit.canonical_value, unit.text, *unit.accepted_forms)
+        }
+        allowed_targets.discard("")
         reference_start, reference_end = _normalized_reference_span(reference, unit)
         raw_candidates = _aligned_raw_identifier_candidates(
             hypothesis,
@@ -580,7 +587,7 @@ def _score_unit(
             (
                 candidate
                 for candidate in expanded_candidates
-                if canonicalize_identifier_text(candidate) == canonical_target
+                if canonicalize_identifier_text(candidate) in allowed_targets
             ),
             None,
         )
@@ -594,7 +601,7 @@ def _score_unit(
                     extras.extend(candidate_tokens[len(base_tokens) :])
                 elif candidate_tokens[-len(base_tokens) :] == base_tokens:
                     extras.extend(candidate_tokens[: -len(base_tokens)])
-            if canonicalize_identifier_text(base) == canonical_target and not any(
+            if canonicalize_identifier_text(base) in allowed_targets and not any(
                 any(char.isdigit() for char in canonicalize_identifier_text(token))
                 or "-" in canonicalize_identifier_text(token)
                 or "*" in canonicalize_identifier_text(token)
@@ -633,7 +640,7 @@ def _score_unit(
         )[0]
         reference_polarity = _POLARITY_TOKENS.intersection(normalize_text(unit.text).split())
         hypothesis_polarity = _POLARITY_TOKENS.intersection(envelope)
-        if hypothesis_polarity - reference_polarity:
+        if hypothesis_polarity != reference_polarity:
             outcome = "substituted"
 
         recognized = [text for _, text in component_scores if text]
@@ -665,9 +672,10 @@ def compute_semantic_wer(
 ) -> SemanticWERResult:
     """Preview or test reference units against a hypothesis deterministically.
 
-    Version ``0.1-draft`` intentionally leaves hypothesis-only semantic
-    insertions to standard WER because no reference span can type or weight
-    them without another semantic inference step.
+    Version ``0.1-draft`` does not score insertions as independent semantic
+    units because no reference span can type or weight them without another
+    semantic inference step. Alignment can still absorb an adjacent insertion
+    into a reviewed unit and penalize that unit.
     """
     unit_list = list(units)
     _validate_units(reference, unit_list)
