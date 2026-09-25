@@ -26,6 +26,7 @@ from coval_bench.s2s_agent.coval import (
     authorized,
     simulation_id,
 )
+from coval_bench.s2s_agent.pipeline import native_processors
 from coval_bench.s2s_agent.services.openai import ON_SESSION_READY, RealtimeService, build_service
 from coval_bench.s2s_agent.stack import LoadedStack, load_stack
 
@@ -85,7 +86,7 @@ async def run_call(websocket: WebSocket, loaded: LoadedStack, sim: str | None) -
     )
     llm = build_service(loaded, api_key.get_secret_value())
     worker = PipelineWorker(
-        Pipeline([transport.input(), llm, transport.output()]),
+        Pipeline([transport.input(), *native_processors(llm), transport.output()]),
         params=PipelineParams(
             audio_in_sample_rate=loaded.stack.audio.sample_rate_hz,
             audio_out_sample_rate=loaded.stack.audio.sample_rate_hz,
