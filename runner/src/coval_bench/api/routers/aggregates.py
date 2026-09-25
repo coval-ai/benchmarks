@@ -47,7 +47,6 @@ from coval_bench.api.common import (
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
-    reads_normalized,
 )
 from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
 from coval_bench.api.deps import (
@@ -182,98 +181,21 @@ _STATS_BY_DATASET_SQL_TEMPLATE = (
     " AND dataset_id <> %(sentinel)s"
     " ORDER BY dataset_id, provider, model, metric_type"
 )
-_SAVED_STATS_BY_DATASET_SQL_TEMPLATE = _STATS_BY_DATASET_SQL_TEMPLATE.replace(
-    "SELECT dataset_id, provider, model, metric_type,",
-    "SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,",
-).replace(
-    " FROM {view}",
-    " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
-)
-
-_WER_SPLIT_COMPLETE = (
-    "COUNT(wer_insertions_pct) = COUNT(*) AND COUNT(wer_deletions_pct) = COUNT(*)"
-    " AND COUNT(wer_substitutions_pct) = COUNT(*)"
-)
-_WER_COUNTS_COMPLETE = (
-    "COUNT(reference_words) = COUNT(*) AND COUNT(substitution_count) = COUNT(*)"
-    " AND COUNT(deletion_count) = COUNT(*) AND COUNT(insertion_count) = COUNT(*)"
-)
-
-
-def _pooled(counts: str) -> str:
-    return (
-        f"CASE WHEN {_WER_COUNTS_COMPLETE}"
-        f" THEN (100 * SUM({counts}) / NULLIF(SUM(reference_words), 0))::float8 END"
+_SAVED_STATS_BY_DATASET_SQL_TEMPLATE = (
+    _STATS_BY_DATASET_SQL_TEMPLATE.replace(
+        "SELECT dataset_id, provider, model, metric_type,",
+        "SELECT v.dataset_id, v.provider, v.model, m.code AS metric_type,",
     )
-
-
-def _mean_split(column: str) -> str:
-    return f"CASE WHEN {_WER_SPLIT_COMPLETE} THEN AVG({column})::float8 END"
-
-
-_POOLED_TOTAL = _pooled("substitution_count + deletion_count + insertion_count")
-
-# Successful evaluations project their immutable values in the completion
-# transaction. Observation/run metadata and time boundaries remain live. TTFA
-# components expand once here, including evaluations without a literal primary key.
-_NORMALIZED_STATS_SQL = f"""
-WITH evaluations AS (
- SELECT o.provider, o.model, o.dataset_id, m.id AS metric_id, m.code AS metric_type,
-        e.value, e.roundtrip, e.leading_silence,
-        e.wer_insertions_pct, e.wer_deletions_pct, e.wer_substitutions_pct,
-        e.substitution_count, e.deletion_count, e.insertion_count, e.reference_words
- FROM benchmarks_v2.dashboard_metric_values e
- JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
- JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
- JOIN benchmarks_v2.runs r ON r.id = o.run_id
- WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
-   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
-   AND o.benchmark = %(benchmark)s
-   AND o.captured_at >= NOW() - %(interval)s::interval
-   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)
-), public_values AS (
- SELECT e.provider, e.model, e.dataset_id, p.metric_id, public_metric.code AS metric_type, p.value,
-        p.wer_insertions_pct, p.wer_deletions_pct, p.wer_substitutions_pct,
-        p.substitution_count, p.deletion_count, p.insertion_count, p.reference_words
- FROM evaluations e
- CROSS JOIN LATERAL (VALUES
-   (e.metric_id, e.metric_type, e.value, e.wer_insertions_pct, e.wer_deletions_pct,
-    e.wer_substitutions_pct, e.substitution_count, e.deletion_count,
-    e.insertion_count, e.reference_words),
-   (benchmarks_v2.metric_id_for_code('TTFARoundtrip'), 'TTFARoundtrip',
-    CASE WHEN e.metric_type = 'TTFA' THEN e.roundtrip END,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL),
-   (benchmarks_v2.metric_id_for_code('TTFALeadingSilence'), 'TTFALeadingSilence',
-    CASE WHEN e.metric_type = 'TTFA' THEN e.leading_silence END,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL)
- ) AS p(metric_id, metric_type, value, wer_insertions_pct, wer_deletions_pct,
-        wer_substitutions_pct, substitution_count, deletion_count,
-        insertion_count, reference_words)
- JOIN benchmarks_v2.metrics public_metric ON public_metric.id = p.metric_id
- WHERE p.value IS NOT NULL
+    .replace(
+        " FROM {view}",
+        " FROM {view} v JOIN benchmarks_v2.metrics m ON m.id = v.metric_id",
+    )
+    .replace(
+        " avg_value,",
+        " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
+        " pooled_substitutions_pct, avg_value,",
+    )
 )
-SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value,
- COALESCE({_POOLED_TOTAL}, AVG(value))::float8 AS avg_value,
- COALESCE(STDDEV_SAMP(value), 0)::float8 AS stddev_value,
- PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value)::float8 AS p25,
- PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value)::float8 AS p50,
- PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY value)::float8 AS p75,
- PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY value)::float8 AS p90,
- PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY value)::float8 AS p95,
- PERCENTILE_CONT(.99) WITHIN GROUP (ORDER BY value)::float8 AS p99,
- MIN(value)::float8 AS min_value, MAX(value)::float8 AS max_value, COUNT(*)::int AS sample_count,
- COALESCE({_pooled("insertion_count")}, {_mean_split("wer_insertions_pct")}) AS wer_insertions_pct,
- COALESCE({_pooled("deletion_count")}, {_mean_split("wer_deletions_pct")}) AS wer_deletions_pct,
- COALESCE({_pooled("substitution_count")}, {_mean_split("wer_substitutions_pct")})
-   AS wer_substitutions_pct,
- {_POOLED_TOTAL} AS pooled_value,
- {_pooled("insertion_count")} AS pooled_insertions_pct,
- {_pooled("deletion_count")} AS pooled_deletions_pct,
- {_pooled("substitution_count")} AS pooled_substitutions_pct
-FROM public_values
-GROUP BY provider, model, metric_id, metric_type ORDER BY provider, model, metric_type
-"""  # noqa: S608
 
 _NORMALIZED_DATASETS_SQL = """
 SELECT DISTINCT dataset_id
@@ -283,21 +205,6 @@ WHERE benchmark = %(benchmark)s
   AND primary_sample_count > 0
 ORDER BY dataset_id
 """
-
-_NORMALIZED_STATS_BY_DATASET_SQL = (
-    _NORMALIZED_STATS_SQL.replace(
-        "   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)\n", ""
-    )
-    .replace(
-        "GROUP BY provider, model, metric_id, metric_type ORDER BY provider, model, metric_type",
-        "GROUP BY dataset_id, provider, model, metric_id, metric_type "
-        "ORDER BY dataset_id, provider, model, metric_type",
-    )
-    .replace(
-        "SELECT provider, model, metric_type, AVG(value)::float8 AS mean_value",
-        "SELECT dataset_id, provider, model, metric_type, AVG(value)::float8 AS mean_value",
-    )
-)
 
 # Pooled WER needs all four count rows covering the same clips as the primary row.
 _BUCKET_COUNTS_COMPLETE = "COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)"
@@ -369,31 +276,6 @@ WITH rules AS (
    denominator_key text, scale float8, fallback text, units jsonb
  )
 ), source AS (
-"""
-_NORMALIZED_AVERAGE_SOURCE_SQL = """
- SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS source_at,
-        r.method, r.fallback, r.scale,
-        MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary') AS primary_sum,
-        MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary') AS sample_count,
-        SUM(b.value_sum) FILTER (WHERE b.value_key = ANY(r.numerator_keys)) AS numerator,
-        SUM(b.value_sum) FILTER (WHERE b.value_key = r.denominator_key) AS denominator,
-        (COUNT(*) = cardinality(r.numerator_keys) + 2
-         AND MIN(b.sample_count) = MAX(b.sample_count)
-         AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
- FROM benchmarks_v2.metric_values_by_bucket b
- JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type))
- JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
- WHERE b.evaluation_variant = 'default'
-   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-   AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
-   AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
-        OR b.value_key = r.denominator_key)
- GROUP BY b.provider, b.model, m.code, b.bucket_at,
-          r.method, r.fallback, r.scale, r.numerator_keys
- HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
-    AND COUNT(*) FILTER (WHERE b.value_key = 'primary'
-                         AND b.unit = r.units ->> 'primary') = 1
 """
 
 # Full UTC hours use the writer-maintained sufficient statistics.  The two raw
@@ -604,7 +486,7 @@ async def get_results_aggregates(
     dataset_key = dataset or DATASET_ALL
 
     async def fill() -> AggregatesResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        normalized = settings.normalized_dashboard_reads_enabled
         stats_sql = (
             _SAVED_STATS_SQL_TEMPLATE.format(view=SUMMARY_VIEWS[window])
             if normalized
@@ -680,7 +562,7 @@ async def get_results_aggregates(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
+    if settings.normalized_dashboard_reads_enabled:
         response, cache_status = await fill(), "bypass"
     else:
         response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
@@ -754,7 +636,7 @@ async def get_results_timeline(
         aggregation = "run" if response_window == "24h" else "average"
 
     async def fill() -> TimelineResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        normalized = settings.normalized_dashboard_reads_enabled
         materialization = None
         rule_params: dict[str, Any] = {}
         if aggregation == "run":
@@ -785,19 +667,7 @@ async def get_results_timeline(
             benchmark=benchmark,
             window=response_window,
             dataset=dataset_key,
-            points=[
-                TimelinePoint.model_validate(
-                    row
-                    if "value" in row
-                    else {
-                        **row,
-                        "value": row["value_sum"] / row["sample_count"]
-                        if row["metric_type"] == "WER"
-                        else row["p50"],
-                    }
-                )
-                for row in visible_rows
-            ],
+            points=[TimelinePoint.model_validate(row) for row in visible_rows],
             aggregation=aggregation,
             bucket_seconds=bucket_seconds,
             range_start=since,
@@ -821,9 +691,7 @@ async def get_results_timeline(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    if aggregation == "average" and reads_normalized(
-        settings.normalized_dashboard_reads_enabled, benchmark
-    ):
+    if aggregation == "average" and settings.normalized_dashboard_reads_enabled:
         response, cache_status = await fill(), "bypass"
     else:
         response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
@@ -866,13 +734,9 @@ async def get_results_aggregates_by_dataset(
     """
 
     async def fill() -> AggregatesByDatasetResponse:
-        normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+        normalized = settings.normalized_dashboard_reads_enabled
         stats_sql = (
-            _SAVED_STATS_BY_DATASET_SQL_TEMPLATE.replace(
-                " avg_value,",
-                " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
-                " pooled_substitutions_pct, avg_value,",
-            ).format(view=SUMMARY_VIEWS[window])
+            _SAVED_STATS_BY_DATASET_SQL_TEMPLATE.format(view=SUMMARY_VIEWS[window])
             if normalized
             else _STATS_BY_DATASET_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
         )
@@ -916,7 +780,7 @@ async def get_results_aggregates_by_dataset(
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    if reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark):
+    if settings.normalized_dashboard_reads_enabled:
         response, cache_status = await fill(), "bypass"
     else:
         response, cache_status = await get_or_fill(cache, cache_locks, cache_key, fill)
