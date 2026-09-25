@@ -9,7 +9,8 @@ its complete result set, which makes retries safe.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,6 +24,33 @@ from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries.metrics import TIMELINE_AGGREGATION_RULES
 
 HOURLY_DEFINITION_REVISION = DEFINITION_REVISION
+
+
+@dataclass(frozen=True)
+class PendingHourlyStatus:
+    """Summary of the complete hourly backlog predicate."""
+
+    count: int
+    oldest: datetime | None
+
+    @property
+    def backlog_count(self) -> int:
+        """Compatibility name for callers that describe this as a backlog."""
+        return self.count
+
+    @property
+    def total(self) -> int:
+        return self.count
+
+    @property
+    def oldest_pending_hour(self) -> datetime | None:
+        """Compatibility name for structured maintenance reporting."""
+        return self.oldest
+
+    @property
+    def oldest_hour(self) -> datetime | None:
+        return self.oldest
+
 
 HOUR_LOCK_SQL = """
 SELECT pg_advisory_xact_lock(
@@ -139,124 +167,213 @@ async def refresh_hourly_aggregates(
     async with pool.connection() as conn:
         async with conn.transaction(), conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
             await cur.execute("SET LOCAL statement_timeout = '30s'")
-            # Lock every target in deterministic order before reading source
-            # buckets. Writers use the same hour-first order, so this snapshot
-            # cannot race a source replacement and its dirty marker.
+            # Keep the public multi-hour contract's lock-all-hours-first
+            # behavior so its source snapshot remains atomic.
             for hour in normalized:
                 await cur.execute(HOUR_LOCK_SQL, {"hour": hour})
             metric_ids = await register_metric_definitions(conn)
-            await cur.execute(
-                """SELECT DISTINCT b.metric_type
-                   FROM benchmarks_v2.metric_values_by_bucket b
-                   JOIN unnest(%(hours)s::timestamptz[]) requested(hour_at)
-                     ON b.bucket_at >= requested.hour_at
-                    AND b.bucket_at < requested.hour_at + interval '1 hour'
-                   WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'""",
-                {"hours": normalized},
+            await _refresh_hours_in_transaction(
+                cur,
+                normalized,
+                metric_ids=metric_ids,
+                fingerprint=fingerprint,
+                acquire_locks=False,
             )
-            source_codes = {str(row["metric_type"]) for row in await cur.fetchall()}
-            unknown = sorted(source_codes - set(metric_ids))
-            unsupported = sorted(source_codes - set(TIMELINE_AGGREGATION_RULES))
-            if unknown or unsupported:
-                details = []
-                if unknown:
-                    details.append("unknown definitions: " + ", ".join(unknown))
-                if unsupported:
-                    details.append("unsupported contracts: " + ", ".join(unsupported))
-                raise ValueError("invalid metrics in requested hours: " + "; ".join(details))
-            await cur.execute(
-                _SOURCE_SQL,
-                {"aggregation_rules": Jsonb(_rules()), "hours": normalized},
-            )
-            rows = await cur.fetchall()
-            by_hour: dict[datetime, list[dict[str, Any]]] = {hour: [] for hour in normalized}
-            for row in rows:
-                by_hour[floor_hour(row["hour_at"])].append(row)
-            for hour in normalized:
-                params = {
-                    "hour": hour,
-                    "definition_revision": HOURLY_DEFINITION_REVISION,
-                    "definition_fingerprint": fingerprint,
-                }
-                await cur.execute(
-                    "DELETE FROM benchmarks_v2.dashboard_hourly_aggregates "
-                    "WHERE hour_at = %(hour)s",
-                    {"hour": hour},
-                )
-                insert_sql = """INSERT INTO benchmarks_v2.dashboard_hourly_aggregates
-                            (provider, model, benchmark, dataset_id, metric_id, metric_version,
-                             evaluation_variant, hour_at, primary_sum, sample_count, numerator_sum,
-                             denominator_sum, coverage_complete, source_count, latest_source_at,
-                             definition_revision, metadata)
-                            VALUES (%(provider)s, %(model)s, %(benchmark)s, %(dataset_id)s,
-                                    %(metric_id)s, %(metric_version)s, %(evaluation_variant)s,
-                                    %(hour_at)s, %(primary_sum)s, %(sample_count)s,
-                                    %(numerator_sum)s,
-                                    %(denominator_sum)s, %(coverage_complete)s, %(source_count)s,
-                                    %(latest_source_at)s, %(definition_revision)s,
-                                    '{"schema_version": 1}'::jsonb)"""
-                if any(
-                    row["metric_id"] != metric_ids[str(row["metric_type"])] for row in by_hour[hour]
-                ):
-                    raise ValueError("source bucket metric identity disagrees with catalog")
-                await cur.executemany(
-                    insert_sql,
-                    [
-                        {
-                            **row,
-                            "definition_revision": HOURLY_DEFINITION_REVISION,
-                        }
-                        for row in by_hour[hour]
-                    ],
-                )
-                await cur.execute(
-                    """INSERT INTO benchmarks_v2.dashboard_hourly_state
-                        (hour_at, dirty, refreshed_at, definition_revision,
-                         definition_fingerprint, metadata)
-                        VALUES (%(hour)s, false, now(), %(definition_revision)s,
-                                %(definition_fingerprint)s, '{"schema_version": 1}'::jsonb)
-                        ON CONFLICT (hour_at) DO UPDATE SET dirty = false, refreshed_at = now(),
-                          definition_revision = EXCLUDED.definition_revision,
-                          definition_fingerprint = EXCLUDED.definition_fingerprint""",
-                    params,
-                )
         return len(normalized)
 
 
-async def pending_hourly_aggregates(
-    pool: AsyncConnectionPool[Any], *, since: datetime, until: datetime
-) -> list[datetime]:
-    """List absent, dirty, or definition-stale hours in a bounded interval."""
+async def prepare_hourly_aggregate_catalog(
+    pool: AsyncConnectionPool[Any],
+) -> dict[str, int]:
+    """Register and resolve metric definitions in a short committed transaction."""
+    async with pool.connection() as conn, conn.transaction():
+        return await register_metric_definitions(conn)
+
+
+async def _refresh_hourly_aggregate(
+    pool: AsyncConnectionPool[Any],
+    hour: datetime,
+    *,
+    metric_ids: Mapping[str, int],
+    fingerprint: str | None = None,
+) -> None:
+    """Replace one hour in its own transaction using a prepared metric catalog."""
+    normalized = floor_hour(hour)
+    async with (
+        pool.connection() as conn,
+        conn.transaction(),
+        conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+    ):
+        await cur.execute("SET LOCAL statement_timeout = '30s'")
+        await _refresh_hours_in_transaction(
+            cur,
+            [normalized],
+            metric_ids=metric_ids,
+            fingerprint=fingerprint or aggregation_fingerprint(),
+        )
+
+
+async def _refresh_hours_in_transaction(
+    cur: psycopg.AsyncCursor[Any],
+    hours: Sequence[datetime],
+    *,
+    metric_ids: Mapping[str, int],
+    fingerprint: str,
+    acquire_locks: bool = True,
+) -> None:
+    """Refresh normalized hours; the caller owns the transaction boundary."""
+    normalized = sorted({floor_hour(hour) for hour in hours})
+    if not normalized:
+        return
+    # Lock every target in deterministic order before reading source buckets.
+    # Writers use the same hour-first order, so this snapshot cannot race a
+    # source replacement and its dirty marker.
+    if acquire_locks:
+        for hour in normalized:
+            await cur.execute(HOUR_LOCK_SQL, {"hour": hour})
+    await cur.execute(
+        """SELECT DISTINCT b.metric_type
+           FROM benchmarks_v2.metric_values_by_bucket b
+           JOIN unnest(%(hours)s::timestamptz[]) requested(hour_at)
+             ON b.bucket_at >= requested.hour_at
+            AND b.bucket_at < requested.hour_at + interval '1 hour'
+           WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'""",
+        {"hours": normalized},
+    )
+    source_codes = {str(row["metric_type"]) for row in await cur.fetchall()}
+    unknown = sorted(source_codes - set(metric_ids))
+    unsupported = sorted(source_codes - set(TIMELINE_AGGREGATION_RULES))
+    if unknown or unsupported:
+        details = []
+        if unknown:
+            details.append("unknown definitions: " + ", ".join(unknown))
+        if unsupported:
+            details.append("unsupported contracts: " + ", ".join(unsupported))
+        raise ValueError("invalid metrics in requested hours: " + "; ".join(details))
+    await cur.execute(
+        _SOURCE_SQL,
+        {"aggregation_rules": Jsonb(_rules()), "hours": normalized},
+    )
+    rows = await cur.fetchall()
+    by_hour: dict[datetime, list[dict[str, Any]]] = {hour: [] for hour in normalized}
+    for row in rows:
+        by_hour[floor_hour(row["hour_at"])].append(row)
+    for hour in normalized:
+        params = {
+            "hour": hour,
+            "definition_revision": HOURLY_DEFINITION_REVISION,
+            "definition_fingerprint": fingerprint,
+        }
+        await cur.execute(
+            "DELETE FROM benchmarks_v2.dashboard_hourly_aggregates WHERE hour_at = %(hour)s",
+            {"hour": hour},
+        )
+        insert_sql = """INSERT INTO benchmarks_v2.dashboard_hourly_aggregates
+                    (provider, model, benchmark, dataset_id, metric_id, metric_version,
+                     evaluation_variant, hour_at, primary_sum, sample_count, numerator_sum,
+                     denominator_sum, coverage_complete, source_count, latest_source_at,
+                     definition_revision, metadata)
+                    VALUES (%(provider)s, %(model)s, %(benchmark)s, %(dataset_id)s,
+                            %(metric_id)s, %(metric_version)s, %(evaluation_variant)s,
+                            %(hour_at)s, %(primary_sum)s, %(sample_count)s,
+                            %(numerator_sum)s, %(denominator_sum)s, %(coverage_complete)s,
+                            %(source_count)s, %(latest_source_at)s, %(definition_revision)s,
+                            '{"schema_version": 1}'::jsonb)"""
+        if any(row["metric_id"] != metric_ids[str(row["metric_type"])] for row in by_hour[hour]):
+            raise ValueError("source bucket metric identity disagrees with catalog")
+        await cur.executemany(
+            insert_sql,
+            [
+                {
+                    **row,
+                    "definition_revision": HOURLY_DEFINITION_REVISION,
+                }
+                for row in by_hour[hour]
+            ],
+        )
+        await cur.execute(
+            """INSERT INTO benchmarks_v2.dashboard_hourly_state
+                (hour_at, dirty, refreshed_at, definition_revision,
+                 definition_fingerprint, metadata)
+                VALUES (%(hour)s, false, now(), %(definition_revision)s,
+                        %(definition_fingerprint)s, '{"schema_version": 1}'::jsonb)
+                ON CONFLICT (hour_at) DO UPDATE SET dirty = false, refreshed_at = now(),
+                  definition_revision = EXCLUDED.definition_revision,
+                  definition_fingerprint = EXCLUDED.definition_fingerprint""",
+            params,
+        )
+
+
+def _pending_parameters(*, since: datetime, until: datetime) -> dict[str, Any]:
     if since >= until:
         raise ValueError("since must be earlier than until")
     start = floor_hour(since)
     end = floor_hour(until)
     if until > end:
         end += timedelta(hours=1)
-    fingerprint = aggregation_fingerprint()
-    sql = """
-    WITH requested AS (
-      SELECT generate_series(%(since)s::timestamptz, %(until)s::timestamptz - interval '1 hour',
-                              interval '1 hour') AS hour_at
-    )
-    SELECT hour_at FROM requested r
-    LEFT JOIN benchmarks_v2.dashboard_hourly_state s USING (hour_at)
-    WHERE s.hour_at IS NULL OR s.dirty
-       OR s.definition_revision IS DISTINCT FROM %(definition_revision)s
-       OR s.definition_fingerprint IS DISTINCT FROM %(definition_fingerprint)s
-    UNION
-    SELECT s.hour_at FROM benchmarks_v2.dashboard_hourly_state s
-    WHERE s.dirty OR s.refreshed_at IS NULL
-    ORDER BY hour_at
-    """
+    return {
+        "since": start,
+        "until": end,
+        "definition_revision": HOURLY_DEFINITION_REVISION,
+        "definition_fingerprint": aggregation_fingerprint(),
+    }
+
+
+_PENDING_CTE = """
+WITH requested AS (
+  SELECT generate_series(%(since)s::timestamptz, %(until)s::timestamptz - interval '1 hour',
+                          interval '1 hour') AS hour_at
+), pending AS (
+  SELECT r.hour_at
+  FROM requested r
+  LEFT JOIN benchmarks_v2.dashboard_hourly_state s USING (hour_at)
+  WHERE s.hour_at IS NULL OR s.dirty
+     OR s.definition_revision IS DISTINCT FROM %(definition_revision)s
+     OR s.definition_fingerprint IS DISTINCT FROM %(definition_fingerprint)s
+  UNION
+  SELECT s.hour_at
+  FROM benchmarks_v2.dashboard_hourly_state s
+  WHERE s.dirty OR s.refreshed_at IS NULL
+)
+"""
+_PENDING_SELECT_SQL = _PENDING_CTE + "SELECT hour_at FROM pending ORDER BY hour_at"  # noqa: S608
+_PENDING_SELECT_LIMIT_SQL = _PENDING_SELECT_SQL + " LIMIT %(limit)s"  # noqa: S608
+_PENDING_STATUS_SQL = (
+    _PENDING_CTE + "SELECT count(*)::bigint AS count, min(hour_at) AS oldest FROM pending"  # noqa: S608
+)
+
+
+async def pending_hourly_aggregates(
+    pool: AsyncConnectionPool[Any],
+    *,
+    since: datetime,
+    until: datetime,
+    limit: int | None = None,
+) -> list[datetime]:
+    """List pending hours oldest-first, optionally bounded by a positive limit."""
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive")
+    parameters = _pending_parameters(since=since, until=until)
+    sql = _PENDING_SELECT_LIMIT_SQL if limit is not None else _PENDING_SELECT_SQL
+    if limit is not None:
+        parameters["limit"] = limit
     async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-        await cur.execute(
-            sql,
-            {
-                "since": start,
-                "until": end,
-                "definition_revision": HOURLY_DEFINITION_REVISION,
-                "definition_fingerprint": fingerprint,
-            },
-        )
+        await cur.execute(sql, parameters)
         return [row["hour_at"] for row in await cur.fetchall()]
+
+
+async def pending_hourly_status(
+    pool: AsyncConnectionPool[Any], *, since: datetime, until: datetime
+) -> PendingHourlyStatus:
+    """Return count and oldest hour using the same pending predicate."""
+    parameters = _pending_parameters(since=since, until=until)
+    async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        await cur.execute(_PENDING_STATUS_SQL, parameters)
+        row = await cur.fetchone()
+    if row is None:  # pragma: no cover - aggregate queries always return one row
+        return PendingHourlyStatus(0, None)
+    return PendingHourlyStatus(int(row["count"]), row["oldest"])
+
+
+# Keep a descriptive alias for callers that use "aggregate" in the helper name.
+pending_hourly_aggregate_status = pending_hourly_status

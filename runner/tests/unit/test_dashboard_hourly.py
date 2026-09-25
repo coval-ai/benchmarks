@@ -7,10 +7,14 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
+from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.dashboard_hourly import (
     HOUR_LOCK_SQL,
     MARK_HOUR_DIRTY_SQL,
+    PendingHourlyStatus,
     floor_hour,
+    pending_hourly_aggregates,
+    pending_hourly_status,
 )
 from tests.unit.conftest import apply_migrations, open_pool
 
@@ -52,6 +56,61 @@ def test_lock_and_dirty_sql_keep_named_hour_and_definition_identity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_batch_limit_must_be_positive() -> None:
+    with pytest.raises(ValueError, match="limit must be positive"):
+        await pending_hourly_aggregates(
+            None,  # type: ignore[arg-type]
+            since=datetime(2026, 9, 14, 12, tzinfo=UTC),
+            until=datetime(2026, 9, 14, 13, tzinfo=UTC),
+            limit=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_pending_limit_order_dedup_and_status_use_the_same_predicate(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    start = datetime(2026, 9, 14, 12, tzinfo=UTC)
+    current_fingerprint = aggregation_fingerprint()
+    fresh = [start, start + timedelta(hours=2), start + timedelta(hours=3)]
+    with pg_conn.cursor() as cur:
+        cur.executemany(
+            """INSERT INTO benchmarks_v2.dashboard_hourly_state
+            (hour_at, dirty, refreshed_at, definition_revision, definition_fingerprint)
+            VALUES (%s, false, now(), %s, %s)""",
+            [(hour, DEFINITION_REVISION, current_fingerprint) for hour in fresh],
+        )
+        cur.executemany(
+            """INSERT INTO benchmarks_v2.dashboard_hourly_state
+            (hour_at, dirty, refreshed_at, definition_revision, definition_fingerprint)
+            VALUES (%s, %s, NULL, %s, %s)""",
+            [
+                (start + timedelta(hours=1), True, DEFINITION_REVISION, current_fingerprint),
+                (start - timedelta(hours=2), True, DEFINITION_REVISION, current_fingerprint),
+            ],
+        )
+    pool = await open_pool(pg_conn)
+    try:
+        selected = await pending_hourly_aggregates(
+            pool,
+            since=start,
+            until=start + timedelta(hours=4),
+            limit=2,
+        )
+        status = await pending_hourly_status(
+            pool,
+            since=start,
+            until=start + timedelta(hours=4),
+        )
+        assert selected == [start - timedelta(hours=2), start + timedelta(hours=1)]
+        assert status == PendingHourlyStatus(2, start - timedelta(hours=2))
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
 async def test_refresh_combines_half_hour_source_buckets(pg_conn: psycopg.Connection[Any]) -> None:
     """The actual migrated tables preserve weighted means across source buckets."""
     apply_migrations(pg_conn)
@@ -84,6 +143,46 @@ async def test_refresh_combines_half_hour_source_buckets(pg_conn: psycopg.Connec
                 )
             ).fetchone()
         assert row == {"primary_sum": 40.0, "sample_count": 4, "coverage_complete": True}
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_public_multi_hour_refresh_rolls_back_after_later_validation_failure(
+    pg_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    first = datetime(2026, 9, 14, 12, tzinfo=UTC)
+    second = first + timedelta(hours=1)
+    _bucket(pg_conn, first, [("TTFT", "primary", "seconds", 10.0, 1)])
+    _bucket(pg_conn, second, [("TTFT", "primary", "seconds", 20.0, 1)])
+    pool = await open_pool(pg_conn)
+    try:
+        from coval_bench.db import dashboard_hourly
+
+        real_writer = dashboard_hourly._refresh_hours_in_transaction
+
+        async def fail_after_validation(cur: Any, hours: list[datetime], **kwargs: Any) -> None:
+            await real_writer(cur, [hours[0]], **kwargs)
+            raise ValueError("later validation failure")
+
+        monkeypatch.setattr(
+            dashboard_hourly, "_refresh_hours_in_transaction", fail_after_validation
+        )
+        with pytest.raises(ValueError, match="later validation"):
+            await dashboard_hourly.refresh_hourly_aggregates(pool, hours=[first, second])
+        async with pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM benchmarks_v2.dashboard_hourly_aggregates"
+                )
+            ).fetchone()
+            states = await (
+                await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_hourly_state")
+            ).fetchone()
+        assert rows == {"n": 0}
+        assert states == {"n": 0}
     finally:
         await pool.close()
 
