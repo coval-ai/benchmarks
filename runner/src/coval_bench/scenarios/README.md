@@ -28,6 +28,8 @@ scenarios/
   bank/
     system-prompt.txt      the Ultra Bank agent, authored here and served by the
     tool-definitions.json  LLM proxy; the test set and judge stay in Coval
+    system-prompt.<stack>.txt  a per-model prompt the S2S Pipecat agent prefers
+                           over the default when present; hashed with the stack
   platforms/
     <platform>-agent.json  the only permitted difference, published for audit
 ```

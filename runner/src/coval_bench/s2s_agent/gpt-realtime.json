@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "One S2S stack: what the Pipecat agent runs for this board row. Copied from",
+    "the Coval-native agent it replaces, so the harness changes nothing but who",
+    "hosts the pipeline. The prompt comes from the scenario: its own",
+    "system-prompt.<stack>.txt when one exists, else system-prompt.txt. The hash",
+    "over this file and that prompt goes on every span the agent emits."
+  ],
+
+  "provider": "openai",
+  "model": "gpt-realtime-2",
+  "voice": "alloy",
+  "reasoning_effort": "low",
+
+  "turn_detection": {
+    "type": "server_vad",
+    "threshold": 0.5,
+    "prefix_padding_ms": 300,
+    "silence_duration_ms": 500,
+    "_why": "The provider's own endpointing decides when the caller stopped, as the Coval-native agent ran it. No local VAD, so turn-taking is the model's, not the harness's."
+  },
+
+  "audio": {
+    "sample_rate_hz": 24000,
+    "_why": "The rate this provider takes in and emits. Coval sends 16 kHz and the serializer resamples once on the way in; output is passed through at this rate."
+  }
+}

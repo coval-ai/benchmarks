@@ -33,6 +33,22 @@ uv run pytest -q
 
 VCR cassettes + fakes — never hit the network.
 
+### S2S Pipecat agent (real provider API)
+
+The agent Coval's WebSocket simulator calls for the S2S board. One settings
+file per stack in `src/coval_bench/s2s_agent/`; `S2S_STACK` picks it and
+`S2S_SCENARIO` picks the prompt (`scenarios/<scenario>/system-prompt.<stack>.txt`
+when present, else `system-prompt.txt`).
+
+```bash
+OPENAI_API_KEY=... uv run --extra s2s-agent python -m coval_bench.s2s_agent.app
+```
+
+Connect a client to `ws://localhost:8080/ws` with an `X-Coval-Simulation-Id`
+header, wait for `{"type": "session_ready"}`, then stream 16 kHz mono PCM as
+binary frames; audio comes back as 24 kHz binary frames. Set `S2S_AGENT_TOKEN`
+to require `Authorization: Bearer`. `Dockerfile.s2s-agent` builds the image.
+
 ### Full stack (Postgres + API + runner image, real provider APIs)
 
 From the repo root:
