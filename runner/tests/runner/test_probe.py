@@ -9,6 +9,7 @@ is touched — the focus is the aggregation and that ``writer=None`` is propagat
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -17,7 +18,9 @@ import pytest
 from coval_bench.config import Settings
 from coval_bench.db.models import ResultStatus
 from coval_bench.registries import Benchmark, Metric, RegisteredModel
+from coval_bench.runner import orchestrator
 from coval_bench.runner import probe as probe_mod
+from coval_bench.runner.gate import ModelGate
 
 
 def _row(metric: Metric, value: float | None, status: ResultStatus = ResultStatus.SUCCESS) -> Any:
@@ -97,6 +100,14 @@ async def test_run_probe_no_persist(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stt["metrics"]["TTFS"]["median"] == pytest.approx(0.5)
     tts = results["baseten/qwen3-tts-1.7b"]
     assert tts["metrics"]["TTFA"]["mean"] == pytest.approx(300.0)
+
+
+@pytest.mark.parametrize("runner", [orchestrator._run_stt_item, orchestrator._run_tts_item])
+def test_probe_kwargs_bind_to_the_real_runners(runner: Any) -> None:
+    """The fakes above accept **kwargs; this pins the names the probe actually passes."""
+    inspect.signature(runner).bind(
+        entry=object(), item=object(), run_id=0, gate=ModelGate(1), settings=object(), writer=None
+    )
 
 
 @pytest.mark.asyncio
