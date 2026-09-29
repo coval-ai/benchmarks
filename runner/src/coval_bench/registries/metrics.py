@@ -35,6 +35,7 @@ class Metric(StrEnum):
     INTERRUPTION_RATE = "InterruptionRate"
     CALL_LENGTH = "CallLength"
     EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
+    WORKFLOW_ADHERENCE = "WorkflowAdherence"
 
 
 class MetricDirection(StrEnum):
@@ -221,6 +222,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    Metric.WORKFLOW_ADHERENCE: MetricSpec(
+        display_name="Workflow Adherence",
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
 }
 
 if METRIC_SPECS.keys() != set(Metric):
@@ -262,6 +270,7 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.INTERRUPTION_RATE,
         Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
+        Metric.WORKFLOW_ADHERENCE,
     )
 }
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(

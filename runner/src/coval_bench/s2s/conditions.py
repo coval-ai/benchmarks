@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from coval_bench.registries import Benchmark, Metric
 
 __all__ = [
+    "ADHERENCE_SLUGS",
     "DATASET_ID",
     "DATASET_ID_BANK",
     "DATASET_ID_BANK_EXTRA_HARD",
@@ -89,7 +90,12 @@ FAMILY_LLM_DENTAL = "llm-dental"
 # and the board can plot adherence across tiers. A scenario is one slug; its
 # family and every dataset id derive from it, so adding a domain is one entry
 # here plus its Coval ids in ``Settings.coval_s2s_scenarios``.
-SCENARIO_SLUGS: tuple[str, ...] = ("bank", "happy-customer", "happy-smile")
+ADHERENCE_SLUGS: dict[str, Metric] = {
+    "instruction-bank": Metric.INSTRUCTION_FOLLOWING,
+    "workflow-bank": Metric.WORKFLOW_ADHERENCE,
+}
+_DOMAIN_SLUGS: tuple[str, ...] = ("bank", "happy-customer", "happy-smile")
+SCENARIO_SLUGS: tuple[str, ...] = (*_DOMAIN_SLUGS, *ADHERENCE_SLUGS)
 TIERS: tuple[Condition, ...] = (
     Condition.LOW,
     Condition.MEDIUM,
@@ -263,15 +269,20 @@ CONDITIONS: dict[str, DatasetMetrics] = {
                 {Metric.INSTRUCTION_FOLLOWING, Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}
             ),
         )
-        for slug in SCENARIO_SLUGS
+        for slug in _DOMAIN_SLUGS
     },
     **{
         _ingested_id(slug, tier): DatasetMetrics(
             required=Metric.INSTRUCTION_FOLLOWING,
             optional=frozenset({Metric.INTERRUPTION_RATE, Metric.CALL_LENGTH}),
         )
-        for slug in SCENARIO_SLUGS
+        for slug in _DOMAIN_SLUGS
         for tier in TIERS
+    },
+    **{
+        _ingested_id(slug, condition): DatasetMetrics(required=metric)
+        for slug, metric in ADHERENCE_SLUGS.items()
+        for condition in (Condition.CLEAN, *TIERS)
     },
     DATASET_ID_LLM_BANK: DatasetMetrics(
         benchmark=Benchmark.LLM,

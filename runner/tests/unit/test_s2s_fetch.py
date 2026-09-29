@@ -2978,3 +2978,97 @@ async def test_scenario_personas_do_not_need_the_shared_test_set(
     kwargs = fetch_one.await_args_list[0].kwargs
     assert kwargs["test_set_id"] == "TSB"
     assert kwargs["persona_conditions"] == {"p-clean": Condition.CLEAN}
+
+
+def _adherence_settings() -> Settings:
+    return Settings(
+        coval_s2s_latency_metric_id="MID",
+        coval_s2s_bank_instruction_metric_id="BIM",
+        coval_s2s_scenarios={
+            "instruction-bank": ScenarioCovalIds(
+                test_set_id="TSI",
+                agents={"gpt-realtime": "b1"},
+                personas={"clean": "p-clean", "hard": "p-hard"},
+                instruction_metric_id="IAM",
+            ),
+            "workflow-bank": ScenarioCovalIds(
+                test_set_id="TSW",
+                agents={"gpt-realtime": "b1"},
+                personas={"clean": "p-clean"},
+                workflow_metric_id="WAM",
+            ),
+        },
+    )
+
+
+def test_adherence_scenarios_carry_their_own_judge_and_publish_no_samples() -> None:
+    specs = {
+        spec.family: spec
+        for spec in fetch_v2v.s2s_specs(_adherence_settings())
+        if spec.model == "gpt-realtime"
+    }
+    instruction = specs["s2s-instruction-bank"]
+    assert instruction.metric_ids == {Metric.INSTRUCTION_FOLLOWING: "IAM"}
+    assert instruction.instruction_metric_id_attr is None
+    assert instruction.publish_samples is False
+    workflow = specs["s2s-workflow-bank"]
+    assert workflow.metric_ids == {Metric.WORKFLOW_ADHERENCE: "WAM"}
+    assert workflow.instruction_metric_id_attr is None
+    assert workflow.publish_samples is False
+
+
+def test_an_adherence_scenario_without_its_judge_is_skipped() -> None:
+    settings = Settings(
+        coval_s2s_scenarios={
+            "workflow-bank": ScenarioCovalIds(
+                test_set_id="TSW", agents={"gpt-realtime": "b1"}, personas={"clean": "p"}
+            )
+        }
+    )
+    with capture_logs() as logs:
+        families = {spec.family for spec in fetch_v2v.s2s_specs(settings)}
+    assert "s2s-workflow-bank" not in families
+    assert any(log["event"] == "scenario_metric_id_unset" for log in logs)
+
+
+def test_a_blank_scenario_judge_id_is_rejected() -> None:
+    with pytest.raises(ValueError, match="workflow_metric_id"):
+        ScenarioCovalIds(test_set_id="TS", workflow_metric_id="  ")
+
+
+def test_workflow_adherence_is_stored_as_a_percentage() -> None:
+    mapper = fetch_v2v._VALUE_MAPPERS[Metric.WORKFLOW_ADHERENCE]
+    assert mapper(0.75) == (75.0, ResultStatus.SUCCESS)
+    assert mapper(1) == (100.0, ResultStatus.SUCCESS)
+
+
+@pytest.mark.asyncio
+async def test_adherence_scenarios_fetch_with_their_own_judge_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _adherence_settings()
+    writer = _stub_writer()
+    client = _fake_client(_list_json(), {})
+    fetch_one = AsyncMock(return_value=(RunStatus.SUCCEEDED, 0))
+
+    @contextlib.asynccontextmanager
+    async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
+        yield MagicMock()
+
+    monkeypatch.setattr(fetch_v2v, "_client", lambda _s: client)
+    monkeypatch.setattr(fetch_v2v, "lifespan_pool", _fake_pool)
+    monkeypatch.setattr(fetch_v2v, "RunWriter", lambda _pool: writer)
+    monkeypatch.setattr(fetch_v2v, "_fetch_one_provider", fetch_one)
+
+    statuses = await fetch_v2v.fetch_and_write_v2v(settings)
+
+    assert statuses == {
+        "s2s-instruction-bank:openai:gpt-realtime": RunStatus.SUCCEEDED,
+        "s2s-workflow-bank:openai:gpt-realtime": RunStatus.SUCCEEDED,
+    }
+    by_test_set = {
+        call.kwargs["test_set_id"]: call.kwargs["metric_ids"] for call in fetch_one.await_args_list
+    }
+    assert by_test_set["TSI"][Metric.INSTRUCTION_FOLLOWING] == "IAM"
+    assert by_test_set["TSW"][Metric.WORKFLOW_ADHERENCE] == "WAM"
+    assert Metric.INSTRUCTION_FOLLOWING not in by_test_set["TSW"]
