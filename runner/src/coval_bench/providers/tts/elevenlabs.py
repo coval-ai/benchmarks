@@ -3,7 +3,7 @@
 
 """ElevenLabs TTS provider — WebSocket streaming.
 
-eleven_v3_conversational speaks the Text to Dialogue WebSocket; the other
+eleven_v3_conversational and eleven_v4_turbo speak the Text to Dialogue WebSocket; the other
 models speak the per-voice stream-input WebSocket. TTFA is measured from the
 text submit to the first PCM frame; session setup (connect plus the setup
 frame) stays out of the measurement.
@@ -36,7 +36,7 @@ _LAST_FRAMES_KEPT = 3
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over per-model WebSocket endpoints."""
 
-    _DIALOGUE_MODELS = frozenset({"eleven_v3_conversational"})
+    _DIALOGUE_MODELS = frozenset({"eleven_v3_conversational", "eleven_v4_turbo"})
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
