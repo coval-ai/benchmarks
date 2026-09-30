@@ -3011,10 +3011,12 @@ def test_adherence_scenarios_carry_their_own_judge_and_publish_no_samples() -> N
     assert instruction.metric_ids == {Metric.INSTRUCTION_FOLLOWING: "IAM"}
     assert instruction.instruction_metric_id_attr is None
     assert instruction.publish_samples is False
+    assert instruction.expects_daily_runs is False
     workflow = specs["s2s-workflow-bank"]
     assert workflow.metric_ids == {Metric.WORKFLOW_ADHERENCE: "WAM"}
     assert workflow.instruction_metric_id_attr is None
     assert workflow.publish_samples is False
+    assert workflow.expects_daily_runs is False
 
 
 def test_an_adherence_scenario_without_its_judge_is_skipped() -> None:
@@ -3072,3 +3074,38 @@ async def test_adherence_scenarios_fetch_with_their_own_judge_ids(
     assert by_test_set["TSI"][Metric.INSTRUCTION_FOLLOWING] == "IAM"
     assert by_test_set["TSW"][Metric.WORKFLOW_ADHERENCE] == "WAM"
     assert Metric.INSTRUCTION_FOLLOWING not in by_test_set["TSW"]
+
+
+def test_domain_scenarios_still_expect_daily_runs() -> None:
+    settings = Settings(
+        coval_s2s_scenarios={
+            "bank": ScenarioCovalIds(
+                test_set_id="TSB", agents={"gpt-realtime": "b1"}, personas={"clean": "p"}
+            )
+        }
+    )
+    specs = [s for s in fetch_v2v.s2s_specs(settings) if s.family == "s2s-bank" and s.agent_id]
+    assert specs and all(spec.expects_daily_runs for spec in specs)
+
+
+@pytest.mark.asyncio
+async def test_a_one_off_set_without_a_fresh_run_is_not_stale() -> None:
+    spec = replace(SPEC, expects_daily_runs=False)
+    no_runs: dict[str, Any] = {"runs": []}
+    old_run = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=6))})
+    for list_json in (no_runs, old_run):
+        writer = _stub_writer()
+        writer.coval_metric_ingested = AsyncMock(return_value=True)
+        async with _fake_client(list_json, {}) as client:
+            with capture_logs() as logs:
+                status, _ = await fetch_v2v._fetch_one_provider(
+                    client,
+                    writer,
+                    spec=spec,
+                    agent_id="a1",
+                    metric_ids=LATENCY_IDS,
+                    period_seconds=10_800,
+                    stale_grace_seconds=5_400,
+                )
+        assert status is RunStatus.SUCCEEDED
+        assert not any(log["event"] == "provider_stale" for log in logs)
