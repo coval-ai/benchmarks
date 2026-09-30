@@ -90,8 +90,6 @@ class AgentSpec:
     # global one.
     instruction_metric_id_attr: str | None = None
     metric_ids: Mapping[Metric, str] = field(default_factory=dict)
-    # False for one-off test sets: no fresh run is then silent rather than stale.
-    expects_daily_runs: bool = True
 
 
 @dataclass(frozen=True)
@@ -213,7 +211,6 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                     test_set_id=ids.test_set_id,
                     family=scenario.family(Benchmark.S2S),
                     publish_samples=adherence_metric is None,
-                    expects_daily_runs=adherence_metric is None,
                     instruction_metric_id_attr=(
                         None
                         if adherence_metric is not None
@@ -1559,7 +1556,7 @@ async def _fetch_one_provider(
             else (datetime.now(tz=UTC) - newest_data_at).total_seconds()
         )
         stale = not data_seen or age is None or age > threshold
-        if stale and spec.expects_daily_runs:
+        if stale:
             logger.warning(
                 "provider_stale",
                 provider=spec.provider,
