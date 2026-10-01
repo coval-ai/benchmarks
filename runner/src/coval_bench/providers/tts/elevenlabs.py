@@ -3,10 +3,10 @@
 
 """ElevenLabs TTS provider — WebSocket streaming.
 
-eleven_v3_conversational speaks the Text to Dialogue WebSocket; the other
-models speak the per-voice stream-input WebSocket. TTFA is measured from the
-text submit to the first PCM frame; session setup (connect plus the setup
-frame) stays out of the measurement.
+eleven_v3_conversational and the eleven_v4 family speak the Text to Dialogue
+WebSocket; the other models speak the per-voice stream-input WebSocket. TTFA
+is measured from the text submit to the first PCM frame; session setup
+(connect plus the setup frame) stays out of the measurement.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ _LAST_FRAMES_KEPT = 3
 class ElevenLabsTTSProvider(TTSProvider):
     """ElevenLabs TTS provider over per-model WebSocket endpoints."""
 
-    _DIALOGUE_MODELS = frozenset({"eleven_v3_conversational"})
+    _DIALOGUE_PREFIXES = ("eleven_v3_conversational", "eleven_v4")
 
     def __init__(self, settings: Settings, model: str, voice: str) -> None:
         self._model = model
@@ -57,7 +57,7 @@ class ElevenLabsTTSProvider(TTSProvider):
 
     def _session_frames(self, text: str) -> tuple[str, list[str], list[str]]:
         """URL, pre-clock setup frames, and timed text frames for this model."""
-        if self._model in self._DIALOGUE_MODELS:
+        if self._model.startswith(self._DIALOGUE_PREFIXES):
             url = f"{_DIALOGUE_WS_URL}?model_id={self._model}&output_format={_OUTPUT_FORMAT}"
             setup = [json.dumps({"voices": [self._voice]})]
             inputs = [

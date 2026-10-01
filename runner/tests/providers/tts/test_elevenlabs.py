@@ -19,6 +19,7 @@ from .conftest import FakeWebSocket, make_pcm_bytes
 
 _MODEL = "eleven_v3_conversational"
 _FLASH_MODEL = "eleven_flash_v2_5"
+_V4_TURBO_MODEL = "eleven_v4_turbo"
 _VOICE = "IKne3meq5aSn9XLyUdCD"
 
 
@@ -141,6 +142,33 @@ async def test_elevenlabs_ttfa_on_first_chunk(fake_settings: Settings) -> None:
     assert result.ttfa_ms == pytest.approx(100.0)
     assert result.audio_path is not None
     result.audio_path.unlink()
+
+
+@pytest.mark.asyncio
+async def test_elevenlabs_v4_turbo_uses_dialogue_socket(fake_settings: Settings) -> None:
+    ws = FakeWebSocket(_dialogue_events([make_pcm_bytes(240)]))
+    captured: dict[str, object] = {}
+
+    def connect_side_effect(url: str, **kwargs: object) -> FakeWebSocket:
+        captured["url"] = url
+        return ws
+
+    provider = ElevenLabsTTSProvider(fake_settings, model=_V4_TURBO_MODEL, voice=_VOICE)
+
+    with patch(
+        "coval_bench.providers.tts.elevenlabs.ws_client.connect",
+        side_effect=connect_side_effect,
+    ):
+        result = await provider.synthesize("Hello world")
+
+    assert result.error is None
+    parts = urlsplit(str(captured["url"]))
+    assert parts.path == "/v1/text-to-dialogue/stream-input"
+    assert parse_qs(parts.query)["model_id"] == [_V4_TURBO_MODEL]
+    sent = [json.loads(m) for m in ws.sent if isinstance(m, str)]
+    assert sent[0] == {"voices": [_VOICE]}
+    if result.audio_path is not None:
+        result.audio_path.unlink()
 
 
 # ---------------------------------------------------------------------------
