@@ -33,21 +33,23 @@ uv run pytest -q
 
 VCR cassettes + fakes — never hit the network.
 
-### S2S Pipecat agent (real provider API)
+### S2S Pipecat agent (real provider APIs)
 
-The agent Coval's WebSocket simulator calls for the S2S board. One settings
-file per stack in `src/coval_bench/s2s_agent/`; `S2S_STACK` picks it and
-`S2S_SCENARIO` picks the prompt (`scenarios/<scenario>/system-prompt.<stack>.txt`
-when present, else `system-prompt.txt`).
+The agent for the S2S board, as far as it goes today: a cascade of Deepgram,
+OpenAI and ElevenLabs as pinned in `scenarios/stack.json`, with Silero and
+smart-turn deciding the caller's turn, running on this machine's microphone and
+speakers. `--stack` picks the settings file in `src/coval_bench/s2s_agent/`
+(default `cascade`) and `--scenario` the prompt (default `bank`).
 
 ```bash
-OPENAI_API_KEY=... uv run --extra s2s-agent python -m coval_bench.s2s_agent.app
+brew install portaudio                                  # once; pyaudio builds against it
+uv sync --extra s2s-agent --extra s2s-agent-local       # once per checkout
+uv run --no-sync coval-s2s-agent
 ```
 
-Connect a client to `ws://localhost:8080/ws` with an `X-Coval-Simulation-Id`
-header, wait for `{"type": "session_ready"}`, then stream 16 kHz mono PCM as
-binary frames; audio comes back as 24 kHz binary frames. Set `S2S_AGENT_TOKEN`
-to require `Authorization: Bearer`. `Dockerfile.s2s-agent` builds the image.
+Keys come from the repo root's `.env` (`cp .env.example .env`). The agent speaks
+first. Ctrl-C hangs up. `coval.py` holds the wire contract
+Coval's WebSocket simulator will use once the agent is served; nothing runs it yet.
 
 ### Full stack (Postgres + API + runner image, real provider APIs)
 

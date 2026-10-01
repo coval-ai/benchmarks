@@ -48,6 +48,7 @@ def test_the_runner_image_installs_every_provider_extra() -> None:
         "hf-parquet",
         "livekit",
         "s2s-agent",
+        "s2s-agent-local",
     }
     dockerfile = (runner_root / "Dockerfile").read_text()
     missing = sorted(extra for extra in extras if f"--extra {extra}" not in dockerfile)

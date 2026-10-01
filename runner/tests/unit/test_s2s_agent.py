@@ -13,7 +13,6 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
-from pipecat.services.openai.realtime import events
 
 from coval_bench.s2s_agent import stack as stacks
 from coval_bench.s2s_agent.coval import (
@@ -22,7 +21,6 @@ from coval_bench.s2s_agent.coval import (
     authorized,
     simulation_id,
 )
-from coval_bench.s2s_agent.services.openai import session_properties
 
 SILENCE_16K_100MS = bytes(2 * 1600)
 
@@ -99,35 +97,36 @@ def test_bearer_token_is_required_only_when_configured() -> None:
     assert not authorized({}, "s3cret")
 
 
-def test_stack_loads_with_the_scenario_override_prompt_and_hash() -> None:
-    loaded = stacks.load_stack("bank", "gpt-realtime")
-    assert loaded.stack.model == "gpt-realtime-2"
-    assert loaded.stack.turn_detection is not None
-    assert loaded.stack.turn_detection.silence_duration_ms == 500
-    assert loaded.prompt_file == "system-prompt.gpt-realtime.txt"
+def test_stack_loads_the_pinned_components_the_default_prompt_and_the_hash() -> None:
+    loaded = stacks.load_stack("bank", "cascade")
+    assert loaded.stack.architecture == "cascade"
+    assert loaded.components.stt.model == "nova-3"
+    assert loaded.components.llm.model == "gpt-4.1"
+    assert loaded.components.tts.model == "eleven_flash_v2"
+    assert loaded.stack.turn_taking.vad_stop_secs == 0.2
+    assert loaded.prompt_file == "system-prompt.txt"
     assert loaded.system_prompt.startswith("# Role & Objective")
     assert len(loaded.digest) == 64
-    assert loaded.digest == stacks.stack_sha256("bank", "gpt-realtime")
+    assert loaded.digest == stacks.stack_sha256("bank", "cascade")
 
 
 def test_a_stack_without_an_override_falls_back_to_the_scenario_default() -> None:
-    assert stacks.prompt_file("bank", "gpt-realtime") == "system-prompt.gpt-realtime.txt"
+    assert stacks.prompt_file("bank", "cascade") == "system-prompt.txt"
     assert stacks.prompt_file("bank", "some-other-stack") == "system-prompt.txt"
 
 
+def test_the_hash_covers_the_pinned_components_too() -> None:
+    import hashlib
+
+    expected = hashlib.sha256()
+    expected.update(stacks._stack_bytes("cascade"))
+    expected.update(stacks._components_bytes())
+    expected.update(stacks._prompt_bytes("bank", "system-prompt.txt"))
+    assert stacks.stack_sha256("bank", "cascade") == expected.hexdigest()
+
+
 def test_stack_rejects_unknown_keys_but_keeps_rationale() -> None:
-    data = json.loads(stacks._stack_bytes("gpt-realtime"))
+    data = json.loads(stacks._stack_bytes("cascade"))
     assert stacks.S2SStack.model_validate({**data, "_note": "fine"})
     with pytest.raises(ValueError, match="unknown key"):
-        stacks.S2SStack.model_validate({**data, "voise": "alloy"})
-
-
-def test_session_properties_carry_the_stack_pins() -> None:
-    properties = session_properties(stacks.load_stack("bank", "gpt-realtime"))
-    assert properties.output_modalities == ["audio"]
-    assert properties.audio is not None
-    assert properties.audio.input is not None and properties.audio.output is not None
-    assert isinstance(properties.audio.input.turn_detection, events.TurnDetection)
-    assert properties.audio.input.turn_detection.silence_duration_ms == 500
-    assert properties.audio.output.voice == "alloy"
-    assert properties.reasoning is not None and properties.reasoning.effort == "low"
+        stacks.S2SStack.model_validate({**data, "voice": "alloy"})
