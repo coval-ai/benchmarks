@@ -1,5 +1,8 @@
 # Methodology
 
+See [Semantic WER](semantic-wer.md) for the draft library scorer and its
+explicit non-activation boundary.
+
 A leaderboard number on [benchmarks.coval.ai](https://benchmarks.coval.ai) is a
 function of four pinned inputs. Reproducing a number requires reproducing all
 four. This document describes each one and where it lives.
