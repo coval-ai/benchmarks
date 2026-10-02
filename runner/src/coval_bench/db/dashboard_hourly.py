@@ -106,7 +106,7 @@ WITH rules AS (
   SELECT unnest(%(hours)s::timestamptz[]) AS hour_at
 ), source AS (
   SELECT b.provider, b.model, b.benchmark, b.dataset_id,
-         COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type)) AS metric_id,
+         b.metric_id,
          b.metric_type,
          b.metric_version, b.evaluation_variant, b.bucket_at AS source_at,
          h.hour_at,
@@ -127,7 +127,7 @@ WITH rules AS (
     AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
          OR b.value_key = r.denominator_key)
   GROUP BY b.provider, b.model, b.benchmark, b.dataset_id,
-           COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type)), b.metric_type,
+           b.metric_id, b.metric_type,
            b.metric_version, b.evaluation_variant, b.bucket_at,
            r.method, r.fallback, r.scale, r.numerator_keys, r.denominator_key, h.hour_at
   HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1

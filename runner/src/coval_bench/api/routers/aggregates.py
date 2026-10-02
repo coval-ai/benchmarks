@@ -223,8 +223,8 @@ WITH evaluations AS (
         e.wer_insertions_pct, e.wer_deletions_pct, e.wer_substitutions_pct,
         e.substitution_count, e.deletion_count, e.insertion_count, e.reference_words
  FROM benchmarks_v2.dashboard_metric_values e
- JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
+JOIN benchmarks_v2.metrics m
+   ON m.id = e.metric_id
  JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
  JOIN benchmarks_v2.runs r ON r.id = o.run_id
  WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
@@ -322,7 +322,7 @@ SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
       THEN 100 * {_BUCKET_ERROR_SUM} / NULLIF({_BUCKET_REFERENCE_SUM}, 0) END AS pooled_value
 FROM benchmarks_v2.metric_values_by_bucket b
 JOIN benchmarks_v2.metrics m
-  ON m.id = COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type))
+  ON m.id = b.metric_id
 WHERE metric_version = 'v1' AND evaluation_variant = 'default'
  AND value_key IN ('primary', 'substitution_count', 'deletion_count',
                    'insertion_count', 'reference_words')
@@ -382,7 +382,7 @@ _NORMALIZED_AVERAGE_SOURCE_SQL = """
          AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
  FROM benchmarks_v2.metric_values_by_bucket b
  JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type))
+   ON m.id = b.metric_id
  JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
  WHERE b.evaluation_variant = 'default'
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
@@ -425,7 +425,7 @@ _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
          AND BOOL_AND(b.unit = r.units ->> b.value_key))
  FROM benchmarks_v2.metric_values_by_bucket b
  JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(b.metric_id, benchmarks_v2.metric_id_for_code(b.metric_type))
+   ON m.id = b.metric_id
  JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
  WHERE b.evaluation_variant = 'default' AND b.benchmark = %(benchmark)s
    AND b.dataset_id = %(dataset)s AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s

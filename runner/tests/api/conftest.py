@@ -306,6 +306,11 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
             normalized_metric_ids.upgrade()
+        for table in ("metric_evaluations", "dashboard_metric_values", "metric_values_by_bucket"):
+            conn.execute(f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_id SET NOT NULL")  # noqa: S608 — fixed fixture table names.
+            conn.execute(
+                f"ALTER TABLE benchmarks_v2.{table} VALIDATE CONSTRAINT {table}_metric_id_fkey"
+            )  # noqa: S608 — fixed fixture table names.
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
