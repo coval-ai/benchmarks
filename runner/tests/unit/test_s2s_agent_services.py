@@ -10,6 +10,7 @@ pytest.importorskip("pipecat")
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.soniox.stt import SonioxSTTService
 from pipecat.services.soniox.tts import SonioxTTSService
@@ -68,3 +69,10 @@ def test_a_missing_key_names_the_env_var() -> None:
         services.resolve(
             load_stack("bank", "cascade-soniox-gemini"), Settings(_env_file=None, **keys)
         )
+
+
+def test_the_system_prompt_rides_on_the_llm_service() -> None:
+    loaded = load_stack("bank", "cascade-nova3-gpt41-flash")
+    built = services.resolve(loaded, Settings(_env_file=None, **KEYS))
+    assert isinstance(built.llm, LLMService)
+    assert built.llm._settings.system_instruction == loaded.system_prompt

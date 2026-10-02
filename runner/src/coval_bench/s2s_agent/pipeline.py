@@ -25,12 +25,14 @@ from coval_bench.s2s_agent.stack import LoadedStack
 def context_aggregators(loaded: LoadedStack) -> LLMContextAggregatorPair:
     """The conversation context and the turn-taking the stack pins around it.
 
-    Silero decides when the caller is speaking; smart-turn decides when a pause
-    is the end of the turn rather than a breath. Both are local models shipped
-    with Pipecat, so the cascade's endpointing is the same on every machine.
+    The system prompt is not here; it rides on the LLM service's Settings so
+    Pipecat composes it with its own instructions. Silero decides when the
+    caller is speaking; smart-turn decides when a pause is the end of the turn
+    rather than a breath. Both are local models shipped with Pipecat, so the
+    cascade's endpointing is the same on every machine.
     """
     turn_taking = loaded.stack.turn_taking
-    context = LLMContext([{"role": "system", "content": loaded.system_prompt}])
+    context = LLMContext()
     return LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(

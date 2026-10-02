@@ -100,7 +100,12 @@ def resolve(loaded: LoadedStack, settings: Settings) -> Services:
         llm=_build(
             llm_path,
             llm_key,
-            {"model": stack.llm.model, "temperature": stack.llm.temperature, **stack.llm.options},
+            {
+                "model": stack.llm.model,
+                "temperature": stack.llm.temperature,
+                "system_instruction": loaded.system_prompt,
+                **stack.llm.options,
+            },
             None,
         ),
         tts=_build(
