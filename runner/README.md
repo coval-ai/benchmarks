@@ -45,7 +45,7 @@ provider and model per role; `--stack` picks it (default
 ```bash
 brew install portaudio                                  # once; pyaudio builds against it
 uv sync --extra s2s-agent --extra s2s-agent-local       # once per checkout
-uv run --no-sync coval-s2s-agent
+uv run coval-s2s-agent
 ```
 
 Keys come from the repo root's `.env` (`cp .env.example .env`). The agent speaks
