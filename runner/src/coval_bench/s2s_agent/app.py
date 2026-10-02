@@ -1,13 +1,14 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Talk to the cascade on this machine's microphone and speakers. Ctrl-C hangs up."""
+"""Talk to a stack on this machine's microphone and speakers. Ctrl-C hangs up."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import os
+from collections.abc import Callable
 
 from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -19,7 +20,7 @@ from coval_bench.config import get_settings
 from coval_bench.logging import configure_logging
 from coval_bench.s2s_agent.pipeline import cascade_processors, context_aggregators
 from coval_bench.s2s_agent.services import resolve
-from coval_bench.s2s_agent.stack import LoadedStack, load_stack
+from coval_bench.s2s_agent.stack import LoadedStack, load_stack, stack_slugs
 
 
 async def run(loaded: LoadedStack) -> None:
@@ -54,13 +55,34 @@ async def run(loaded: LoadedStack) -> None:
     await runner.run()
 
 
+def choose_stack(scenario: str, read: Callable[[str], str] = input) -> LoadedStack:
+    """Print every stack's STT, LLM and TTS and take a number."""
+    stacks = [load_stack(scenario, slug) for slug in stack_slugs()]
+    width = max(len(loaded.slug) for loaded in stacks)
+    for index, loaded in enumerate(stacks, start=1):
+        pins = loaded.stack
+        print(
+            f"{index}. {loaded.slug:<{width}}  "
+            f"stt {pins.stt.provider}/{pins.stt.model}  "
+            f"llm {pins.llm.provider}/{pins.llm.model}  "
+            f"tts {pins.tts.provider}/{pins.tts.model}"
+        )
+    while True:
+        answer = read(f"Stack [1-{len(stacks)}]: ").strip()
+        if answer.isdigit() and 1 <= int(answer) <= len(stacks):
+            return stacks[int(answer) - 1]
+        print(f"pick a number from 1 to {len(stacks)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stack", default=os.environ.get("S2S_STACK", "cascade-nova3-gpt41-flash"))
     parser.add_argument("--scenario", default=os.environ.get("S2S_SCENARIO", "bank"))
+    parser.add_argument("--tui", action="store_true", help="pick the stack from a list instead")
     args = parser.parse_args()
+    loaded = choose_stack(args.scenario) if args.tui else load_stack(args.scenario, args.stack)
     configure_logging()
-    asyncio.run(run(load_stack(args.scenario, args.stack)))
+    asyncio.run(run(loaded))
 
 
 if __name__ == "__main__":
