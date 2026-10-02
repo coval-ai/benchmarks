@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import wave
 from collections.abc import AsyncIterator
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -64,7 +63,7 @@ async def test_request_shape_and_first_chunk_timing(
         base_url="https://api.cloudflare.com", transport=httpx.MockTransport(handle)
     ) as client:
         monkeypatch.setattr(cloudflare, "get_shared_client", lambda *args: client)
-        monkeypatch.setattr(cloudflare, "time", SimpleNamespace(monotonic=lambda: stream.now))
+        monkeypatch.setattr("time.monotonic", lambda: stream.now)
         provider = cloudflare.CloudflareTTSProvider(fake_settings, model=_MODEL, voice=_VOICE)
         result = await provider.synthesize("Hello from the edge.")
 

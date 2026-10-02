@@ -11,7 +11,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis, finalize_tts_result
 
 
 def _silence_pcm(duration_ms: float, sample_rate: int) -> bytes:
@@ -293,3 +293,16 @@ def test_finalize_offset_detection_crash_does_not_condemn_the_audio() -> None:
     assert result.audio_path is not None
     assert result.audio_path.exists()
     result.audio_path.unlink()
+
+
+def test_synthesis_ignores_empty_chunks_and_names_blank_errors() -> None:
+    synthesis = Synthesis("test", "m", "v", 24000)
+    synthesis.add_chunk(b"")
+    assert synthesis.first_chunk_at is None
+
+    synthesis.add_chunk(b"\x01\x00")
+    assert synthesis.first_chunk_at is not None
+
+    synthesis.fail(ValueError())
+    assert synthesis.error == "ValueError"
+    assert synthesis.chunks == []

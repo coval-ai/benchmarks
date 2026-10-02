@@ -22,7 +22,7 @@ from coval_bench.providers._http_session import (
     submit_to_headers_ms,
 )
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
+from coval_bench.providers.tts._common import Synthesis
 
 logger: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -75,13 +75,7 @@ class AiryTTSProvider(TTSProvider):
             logger.warning("airy_prewarm_no_http2", http_version=response.http_version)
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        first_chunk_at: float | None = None
-        status_code: int | None = None
-        http_version: str | None = None
-        setup_ms: float | None = None
-        reused: bool | None = None
-        error: str | None = None
+        synthesis = Synthesis("airy", self._model, self._voice, SAMPLE_RATE)
 
         payload = {
             "model": self._model,
@@ -90,7 +84,7 @@ class AiryTTSProvider(TTSProvider):
             "language": "en",
             "style": "normal",
         }
-        start = time.monotonic()
+        synthesis.start = time.monotonic()
         try:
             async with self._client.stream(
                 "POST",
@@ -98,38 +92,19 @@ class AiryTTSProvider(TTSProvider):
                 headers={"Authorization": f"Bearer {self._api_key}"},
                 json=payload,
             ) as response:
-                status_code = response.status_code
-                http_version = response.http_version
-                setup_ms = submit_to_headers_ms(response.request)
-                reused = connection_reused(response.request)
+                synthesis.status_code = response.status_code
+                synthesis.http_version = response.http_version
+                synthesis.submit_to_headers_ms = submit_to_headers_ms(response.request)
+                synthesis.connection_reused = connection_reused(response.request)
                 response.raise_for_status()
                 _validate_audio_headers(response.headers)
                 # No chunk_size: buffering to a fixed byte count would inflate TTFA.
                 async for chunk in response.aiter_bytes():
-                    if chunk:
-                        if first_chunk_at is None:
-                            first_chunk_at = time.monotonic()
-                        audio_chunks.append(chunk)
+                    synthesis.add_chunk(chunk)
         except Exception as exc:
-            logger.warning("airy_tts_error", provider="airy", model=self._model, exc_info=exc)
-            error = str(exc) or type(exc).__name__
-            # A partial stream must not be saved/scored as complete synthesis.
-            audio_chunks.clear()
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="airy",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-            error=error,
-            status_code=status_code,
-            http_version=http_version,
-            submit_to_headers_ms=setup_ms,
-            connection_reused=reused,
-        )
+        return synthesis.result()
 
 
 def _validate_audio_headers(headers: httpx.Headers) -> None:

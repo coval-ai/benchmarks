@@ -8,15 +8,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-import structlog
 from cartesia import AsyncCartesia
 from cartesia.types import VoiceSpecifierParam
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 SAMPLE_RATE = 24000
 OUTPUT_FORMAT: dict[str, Any] = {
@@ -48,9 +45,7 @@ class CartesiaTTSProvider(TTSProvider):
 
     async def synthesize(self, text: str) -> TTSResult:
         """Synthesize speech via Cartesia WebSocket and return a TTSResult."""
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("cartesia", self._model, self._voice, SAMPLE_RATE)
         voice_spec: VoiceSpecifierParam = {"id": self._voice, "mode": "id"}
 
         try:
@@ -64,7 +59,7 @@ class CartesiaTTSProvider(TTSProvider):
                     language="en",
                 )
 
-                start = time.monotonic()
+                synthesis.start = time.monotonic()
                 # Both `output_format` and `language` MUST be passed on every
                 # send() — ctx.send() does NOT inherit them from conn.context().
                 # Omitting output_format causes the SDK to substitute its own
@@ -85,33 +80,11 @@ class CartesiaTTSProvider(TTSProvider):
                 async for event in ctx.receive():
                     event_type: str = getattr(event, "type", "")
                     if event_type == "chunk":
-                        audio: bytes | None = getattr(event, "audio", None)
-                        if audio and len(audio) > 0:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(audio)
+                        synthesis.add_chunk(getattr(event, "audio", None) or b"")
                     elif event_type == "done":
                         break
 
         except Exception as exc:
-            logger.warning("cartesia_error", provider="cartesia", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="cartesia",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc),
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="cartesia",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()

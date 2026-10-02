@@ -17,14 +17,11 @@ import json
 import time
 from typing import Any
 
-import structlog
 import websockets.asyncio.client as ws_client
 
 from coval_bench.config import Settings
 from coval_bench.providers.base import TTSProvider, TTSResult
-from coval_bench.providers.tts._common import finalize_tts_result
-
-logger: structlog.BoundLogger = structlog.get_logger(__name__)
+from coval_bench.providers.tts._common import Synthesis
 
 _WS_URL = "wss://api.stepfun.ai/v1/realtime/audio"
 _SAMPLE_RATE = 24000
@@ -53,9 +50,7 @@ class StepfunTTSProvider(TTSProvider):
         return self._model
 
     async def synthesize(self, text: str) -> TTSResult:
-        audio_chunks: list[bytes] = []
-        start: float | None = None
-        first_chunk_at: float | None = None
+        synthesis = Synthesis("stepfun", self._model, self._voice, _SAMPLE_RATE)
 
         try:
             headers = {"Authorization": f"Bearer {self._api_key}"}
@@ -89,7 +84,7 @@ class StepfunTTSProvider(TTSProvider):
                         )
                     elif event_type == "tts.response.created":
                         session_id = data["session_id"]
-                        start = time.monotonic()
+                        synthesis.start = time.monotonic()
                         await ws.send(
                             json.dumps(
                                 {
@@ -104,11 +99,7 @@ class StepfunTTSProvider(TTSProvider):
                             )
                         )
                     elif event_type == "tts.response.audio.delta":
-                        chunk = base64.b64decode(data.get("audio") or "")
-                        if chunk:
-                            if first_chunk_at is None:
-                                first_chunk_at = time.monotonic()
-                            audio_chunks.append(chunk)
+                        synthesis.add_chunk(base64.b64decode(data.get("audio") or ""))
                     elif event_type == "tts.response.audio.done":
                         break
                     elif event_type == "tts.response.error":
@@ -117,24 +108,6 @@ class StepfunTTSProvider(TTSProvider):
                         raise RuntimeError(f"{message} (code={code})" if code else str(message))
 
         except Exception as exc:
-            logger.warning("stepfun_tts_error", provider="stepfun", model=self._model, exc_info=exc)
-            return finalize_tts_result(
-                provider="stepfun",
-                model=self._model,
-                voice=self._voice,
-                pcm=b"",
-                sample_rate=_SAMPLE_RATE,
-                audio_synthesis_start=start,
-                first_audio_chunk_at=first_chunk_at,
-                error=str(exc) or type(exc).__name__,
-            )
+            synthesis.fail(exc)
 
-        return finalize_tts_result(
-            provider="stepfun",
-            model=self._model,
-            voice=self._voice,
-            pcm=b"".join(audio_chunks),
-            sample_rate=_SAMPLE_RATE,
-            audio_synthesis_start=start,
-            first_audio_chunk_at=first_chunk_at,
-        )
+        return synthesis.result()
