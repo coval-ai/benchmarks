@@ -13,7 +13,6 @@ from collections.abc import Callable
 from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.workers.runner import WorkerRunner
 
 from coval_bench.config import get_settings
@@ -24,6 +23,9 @@ from coval_bench.s2s_agent.stack import LoadedStack, load_stack, stack_slugs
 
 
 async def run(loaded: LoadedStack) -> None:
+    # pyaudio comes with the s2s-agent-local extra only; nothing else needs it.
+    from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
+
     services = resolve(loaded, get_settings())
     audio = loaded.stack.audio
     transport = LocalAudioTransport(
