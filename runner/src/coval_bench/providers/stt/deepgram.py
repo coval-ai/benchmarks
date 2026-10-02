@@ -128,6 +128,8 @@ class DeepgramProvider(STTProvider):
                     for task in pending:
                         task.cancel()
                 outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+                if result.error is None and isinstance(outcomes[0], Exception):
+                    result.error = str(outcomes[0])
                 if result.error is None and result.audio_to_final_seconds is None:
                     for outcome in outcomes:
                         if isinstance(outcome, Exception):
