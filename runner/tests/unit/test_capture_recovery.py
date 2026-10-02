@@ -42,6 +42,7 @@ from coval_bench.runner.capture import (
     read_receipt,
     upload_envelope,
     upload_import_run_claim,
+    upload_legacy_result_allocation,
     upload_run_state,
 )
 from coval_bench.runner.normalized import (
@@ -135,42 +136,18 @@ class _Storage:
 
 class _Writer:
     def __init__(self) -> None:
-        self.legacy: dict[int, Result] = {}
         self.observation: Observation | None = None
         self.evaluations: dict[str, MetricEvaluation] = {}
         self.values: dict[str, list[MetricValue]] = {}
-        self.fail_after_legacy_once = False
-        self.cancel_after_legacy_once = False
-        self.next_result_id = 1
+        self.fail_after_observation_once = False
+        self.cancel_after_observation_once = False
 
-    async def reserve_result_ids(self, count: int) -> list[int]:
-        result = list(range(self.next_result_id, self.next_result_id + count))
-        self.next_result_id += count
-        return result
-
-    async def record_results_exact(
-        self,
-        results: Sequence[Result],
-        *,
-        created_at: datetime,
-        capture_identity: str,
-        result_ids: Sequence[int],
-    ) -> None:
-        del created_at, capture_identity
-        results = [
-            row.model_copy(update={"id": result_ids[index]}) for index, row in enumerate(results)
-        ]
-        for row in results:
-            assert row.id is not None
-            existing = self.legacy.get(row.id)
-            if existing is not None and existing.model_dump() != row.model_dump():
-                raise ValueError("legacy conflict")
-            self.legacy[row.id] = row
-        if self.cancel_after_legacy_once:
-            self.cancel_after_legacy_once = False
+    async def _after_observation(self) -> None:
+        if self.cancel_after_observation_once:
+            self.cancel_after_observation_once = False
             raise asyncio.CancelledError
-        if self.fail_after_legacy_once:
-            self.fail_after_legacy_once = False
+        if self.fail_after_observation_once:
+            self.fail_after_observation_once = False
             raise psycopg.OperationalError("ambiguous commit")
 
     async def insert_observation(self, observation: Observation) -> Observation:
@@ -183,6 +160,7 @@ class _Writer:
             self.observation = observation.model_copy(
                 update={"id": observation_id, "artifacts": artifacts}
             )
+        await self._after_observation()
         return self.observation
 
     async def insert_metric_evaluation(
@@ -304,10 +282,10 @@ def _envelope(
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_database_commit_is_discoverable_and_replays_once() -> None:
+async def test_ambiguous_normalized_commit_is_discoverable_and_replays_once() -> None:
     storage_value = _Storage()
     writer = _Writer()
-    writer.fail_after_legacy_once = True
+    writer.fail_after_observation_once = True
     envelope = _envelope()
 
     assert (
@@ -342,14 +320,13 @@ async def test_ambiguous_database_commit_is_discoverable_and_replays_once() -> N
         )
         is CaptureOutcome.COMPLETED
     )
-    assert len(writer.legacy) == 1
     assert len(writer.evaluations) == 1
     assert len(writer.values[str(Metric.WER)]) == 1
     assert read_receipt(_client(storage_value), "private", envelope) is not None
 
 
 @pytest.mark.asyncio
-async def test_distinct_same_timestamp_captures_get_distinct_legacy_ids() -> None:
+async def test_distinct_same_timestamp_captures_replay_without_legacy_ids() -> None:
     storage_value = _Storage()
     writer = _Writer()
 
@@ -374,7 +351,33 @@ async def test_distinct_same_timestamp_captures_get_distinct_legacy_ids() -> Non
         is CaptureOutcome.COMPLETED
     )
 
-    assert set(writer.legacy) == {1, 2}
+    assert not any(name.endswith("legacy-allocation.json") for name in storage_value.objects)
+
+
+@pytest.mark.asyncio
+async def test_old_envelope_and_legacy_allocation_replay_without_legacy_writer() -> None:
+    storage_value = _Storage()
+    client = _client(storage_value)
+    envelope = _envelope()
+    upload_envelope(client, "private", envelope)
+    upload_legacy_result_allocation(client, "private", envelope, [918273])
+    preserved = {name: record.payload for name, record in storage_value.objects.items()}
+    writer = _Writer()  # Deliberately exposes only normalized persistence methods.
+
+    for _ in range(2):
+        assert (
+            await persist_capture(
+                writer=writer, storage_client=client, bucket="private", envelope=envelope
+            )
+            is CaptureOutcome.COMPLETED
+        )
+
+    assert all(
+        storage_value.objects[name].payload == payload for name, payload in preserved.items()
+    )
+    assert len(writer.evaluations) == 1
+    assert len(writer.values[str(Metric.WER)]) == 1
+    assert read_receipt(client, "private", envelope) is not None
 
 
 @pytest.mark.asyncio
@@ -441,7 +444,7 @@ async def test_conflicting_identity_is_rejected_and_both_envelopes_remain_visibl
 async def test_cancellation_propagates_after_durable_capture() -> None:
     storage_value = _Storage()
     writer = _Writer()
-    writer.cancel_after_legacy_once = True
+    writer.cancel_after_observation_once = True
     envelope = _envelope()
     with pytest.raises(asyncio.CancelledError):
         await persist_capture(
@@ -575,14 +578,22 @@ def test_concurrent_import_claim_adopts_the_first_run_allocation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_required_database_preflight_rejects_missing_write_privilege() -> None:
+@pytest.mark.parametrize("denied_table", [None, "metric_values"])
+async def test_required_database_preflight_checks_normalized_privileges(
+    denied_table: str | None,
+) -> None:
     pool = MagicMock()
     schema_cursor = MagicMock()
     schema_cursor.execute = AsyncMock()
     schema_cursor.fetchall = AsyncMock(return_value=[])
     privilege_cursor = MagicMock()
     privilege_cursor.execute = AsyncMock()
-    privilege_cursor.fetchall = AsyncMock(return_value=[("results",)])
+    privilege_cursor.fetchall = AsyncMock(
+        return_value=[] if denied_table is None else [(denied_table,)]
+    )
+    sequence_cursor = MagicMock()
+    sequence_cursor.execute = AsyncMock()
+    sequence_cursor.fetchall = AsyncMock(return_value=[])
 
     def connection(cursor: MagicMock) -> MagicMock:
         cursor_context = MagicMock()
@@ -595,8 +606,18 @@ async def test_required_database_preflight_rejects_missing_write_privilege() -> 
         conn_context.__aexit__ = AsyncMock(return_value=None)
         return conn_context
 
-    pool.connection.side_effect = [connection(schema_cursor), connection(privilege_cursor)]
+    pool.connection.side_effect = [
+        connection(schema_cursor),
+        connection(privilege_cursor),
+        connection(sequence_cursor),
+    ]
     writer = RunWriter(pool)
 
-    with pytest.raises(RuntimeError, match="privileges unavailable: results"):
+    if denied_table is None:
         await writer.preflight_required_capture_schema()
+        assert "results" not in sequence_cursor.execute.call_args.args[1][0]
+    else:
+        with pytest.raises(RuntimeError, match="privileges unavailable: metric_values"):
+            await writer.preflight_required_capture_schema()
+    assert "results" not in schema_cursor.execute.call_args.args[1][0]
+    assert "results" not in privilege_cursor.execute.call_args.args[1][0]

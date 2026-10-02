@@ -50,7 +50,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from posthog import Posthog
-from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, Field
 
 from coval_bench import telemetry
@@ -454,25 +453,6 @@ def _get_metrics() -> tuple[Any, Any]:
     return mod.compute_wer, mod.compute_rtf
 
 
-async def _persist_legacy_results(
-    writer: Any,
-    results: list[Any],
-    captured_at: datetime,
-    event_prefix: str,
-) -> None:
-    async def attempt() -> None:
-        await writer.record_results(results, created_at=captured_at)
-
-    await with_retry(
-        attempt,
-        max_attempts=3,
-        retry_on=(PoolTimeout,),
-        retry_event=f"{event_prefix}_persistence_retry",
-        exhaustion_event=f"{event_prefix}_persistence_exhausted",
-        retry_state=writer.pool_diagnostics,
-    )
-
-
 # ---------------------------------------------------------------------------
 # STT coroutine builder
 # ---------------------------------------------------------------------------
@@ -853,17 +833,6 @@ async def _run_stt_item(
         if capture_outcomes is not None:
             capture_outcomes.append(outcome)
         return results
-    if writer is not None and results:
-        try:
-            await _persist_legacy_results(writer, results, captured_at, "stt")
-        except Exception as exc:
-            logger.warning(
-                "stt_result_persist_failed",
-                provider=entry.provider,
-                model=entry.model,
-                exc_info=exc,
-            )
-
     if writer is not None and artifact_client is not None:
         async with gate.shared():
             try:
@@ -1147,8 +1116,6 @@ async def _run_tts_item(
                                 error=_truncate(str(exc)),
                             )
                         )
-            # The legacy rows remain the source of truth. Persist them before the optional
-            # normalized path so cancellation during artifact upload cannot drop completed work.
             captured_at = datetime.now(UTC)
             if required_capture and writer is not None and artifact_client is not None:
                 from coval_bench.observation_artifacts import snapshot_generated_audio
@@ -1180,17 +1147,6 @@ async def _run_tts_item(
                 if capture_outcomes is not None:
                     capture_outcomes.append(required_capture_outcome)
                 return results
-            if writer is not None and results:
-                try:
-                    await _persist_legacy_results(writer, results, captured_at, "tts")
-                except Exception as exc:
-                    logger.warning(
-                        "tts_result_persist_failed",
-                        provider=entry.provider,
-                        model=entry.model,
-                        exc_info=exc,
-                    )
-
             if writer is not None and artifact_client is not None:
                 try:
                     from coval_bench.runner.normalized import dual_write
@@ -1275,17 +1231,8 @@ _BUCKET_REFRESH_RETRY_DELAY_S = 0.5
 
 
 async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -> None:  # noqa: ANN401 — RunWriter, lazy-imported by the caller
-    """Best-effort refresh of the run's legacy and normalized rollup bucket.
-
-    Each rollup is retried independently so one stale table cannot suppress the
-    other. A run sharing the slot recomputes both tables; the migration backfill
-    is the manual repair after a final failure. Maintenance never fails the run.
-    """
+    """Best-effort refresh of the normalized rollup bucket."""
     refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
-        (
-            "series_bucket",
-            lambda: writer.refresh_bucket(run_id, period_seconds=settings.schedule_period_seconds),
-        ),
         (
             "normalized_series_bucket",
             lambda: writer.refresh_metric_values_bucket(run_id),
@@ -1380,6 +1327,10 @@ async def run_benchmarks(
             Run Job exits non-zero and the log-based metric fires.
     """
     structlog.contextvars.clear_contextvars()
+
+    from coval_bench.config import require_normalized_persisted_capture
+
+    require_normalized_persisted_capture(settings)
 
     lifespan_pool, RunWriter, RunStatus, models_mod = _get_db_symbols()
     Result = models_mod.Result
@@ -1908,19 +1859,6 @@ async def run_benchmarks(
                 result_status=ResultStatus,
                 run_status=RunStatus,
             )
-
-            # Refresh after finish_run: the view query only counts runs already
-            # marked succeeded/partial. A failed refresh must not fail the run.
-            try:
-                refreshed = await writer.refresh_stats_matviews(run_id)
-            except Exception as refresh_exc:
-                logger.error(
-                    "stats_matviews_refresh_failed",
-                    exc_info=refresh_exc,
-                )
-            else:
-                if not refreshed:
-                    logger.info("stats_matviews_refresh_skipped")
 
             if final_status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
                 await _refresh_series_bucket(writer, run_id, settings)

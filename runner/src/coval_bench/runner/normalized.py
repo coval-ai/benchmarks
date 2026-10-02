@@ -46,10 +46,8 @@ from coval_bench.registries import Metric
 from coval_bench.runner.capture import (
     CaptureEnvelope,
     build_capture_identity,
-    read_legacy_result_allocation,
     upload_claim,
     upload_envelope,
-    upload_legacy_result_allocation,
     upload_receipt,
 )
 
@@ -464,19 +462,6 @@ async def persist_capture(
         durable = True
         await asyncio.to_thread(upload_claim, storage_client, bucket, envelope)
         payload = FrozenCapture.model_validate(envelope.payload)
-        results = [Result.model_validate(row) for row in payload.legacy_rows]
-        allocation = await asyncio.to_thread(
-            read_legacy_result_allocation, storage_client, bucket, envelope
-        )
-        if allocation is None:
-            reserved_ids = await writer.reserve_result_ids(len(results))
-            allocation = await asyncio.to_thread(
-                upload_legacy_result_allocation,
-                storage_client,
-                bucket,
-                envelope,
-                reserved_ids,
-            )
         uploaded: dict[str, ObservationArtifact] = {}
         for artifact in payload.artifacts:
             encoded = envelope.artifact_bytes.get(artifact.name)
@@ -489,12 +474,6 @@ async def persist_capture(
                 artifact,
                 encoded,
             )
-        await writer.record_results_exact(
-            results,
-            created_at=payload.captured_at,
-            capture_identity=envelope.envelope_digest(),
-            result_ids=allocation.result_ids,
-        )
         observation = await writer.insert_observation(
             Observation(
                 run_id=payload.run_id,
