@@ -10,7 +10,9 @@
     "bindings: per family, which personas run and which dataset id each encodes.",
     "anchor names the metric every optional metric's population must match:",
     "latency (V2V) when the audio is clean, judge (instruction following) when it",
-    "is not, because noise sits in the lane VAD uses for turn boundaries."
+    "is not, because noise sits in the lane VAD uses for turn boundaries.",
+    "The adherence families have no latency, so they anchor clean on judge too;",
+    "their judge is instruction following or workflow adherence."
   ],
 
   "personas": {
@@ -67,6 +69,20 @@
       "medium": {"dataset_id": "s2s-happy-smile-medium-v1", "anchor": "judge"},
       "hard": {"dataset_id": "s2s-happy-smile-hard-v1", "anchor": "judge"},
       "extra_hard": {"dataset_id": "s2s-happy-smile-extra-hard-v1", "anchor": "judge"}
+    },
+    "s2s-instruction-bank": {
+      "clean": {"dataset_id": "s2s-instruction-bank-v1", "anchor": "judge"},
+      "low": {"dataset_id": "s2s-instruction-bank-low-v1", "anchor": "judge"},
+      "medium": {"dataset_id": "s2s-instruction-bank-medium-v1", "anchor": "judge"},
+      "hard": {"dataset_id": "s2s-instruction-bank-hard-v1", "anchor": "judge"},
+      "extra_hard": {"dataset_id": "s2s-instruction-bank-extra-hard-v1", "anchor": "judge"}
+    },
+    "s2s-workflow-bank": {
+      "clean": {"dataset_id": "s2s-workflow-bank-v1", "anchor": "judge"},
+      "low": {"dataset_id": "s2s-workflow-bank-low-v1", "anchor": "judge"},
+      "medium": {"dataset_id": "s2s-workflow-bank-medium-v1", "anchor": "judge"},
+      "hard": {"dataset_id": "s2s-workflow-bank-hard-v1", "anchor": "judge"},
+      "extra_hard": {"dataset_id": "s2s-workflow-bank-extra-hard-v1", "anchor": "judge"}
     }
   }
 }
