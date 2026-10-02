@@ -12,9 +12,10 @@ from coval_bench.registries import Metric
 from coval_bench.s2s import conditions
 from coval_bench.scenarios import PersonaRegistry, binding_for_dataset, load_personas
 
-_ANCHOR_METRICS = {
-    "latency": {Metric.V2V},
-    "judge": {Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE},
+_ANCHOR_METRIC = {"latency": Metric.V2V, "judge": Metric.INSTRUCTION_FOLLOWING}
+_FAMILY_JUDGE = {
+    "s2s-instruction-bank": Metric.INSTRUCTION_FOLLOWING,
+    "s2s-workflow-bank": Metric.WORKFLOW_ADHERENCE,
 }
 
 
@@ -32,7 +33,10 @@ def test_every_binding_matches_the_condition_tables() -> None:
             condition = conditions.Condition(slug)
             assert conditions.dataset_id_for(family, condition) == binding.dataset_id
             contract = conditions.condition_for(binding.dataset_id)
-            assert contract.required in _ANCHOR_METRICS[binding.anchor], f"{family}/{slug}"
+            expected = _ANCHOR_METRIC[binding.anchor]
+            if binding.anchor == "judge":
+                expected = _FAMILY_JUDGE.get(family, expected)
+            assert contract.required is expected, f"{family}/{slug}"
 
 
 @pytest.mark.parametrize("slug", conditions.SCENARIO_SLUGS)

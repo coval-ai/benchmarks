@@ -90,11 +90,13 @@ FAMILY_LLM_DENTAL = "llm-dental"
 # and the board can plot adherence across tiers. A scenario is one slug; its
 # family and every dataset id derive from it, so adding a domain is one entry
 # here plus its Coval ids in ``Settings.coval_s2s_scenarios``.
+_DOMAIN_SLUGS: tuple[str, ...] = ("bank", "happy-customer", "happy-smile")
+# Extra test sets over a domain's agents, each graded only by its own judge. Slugs
+# must not start with a domain name, or the web's prefix filter would pool them.
 ADHERENCE_SLUGS: dict[str, Metric] = {
     "instruction-bank": Metric.INSTRUCTION_FOLLOWING,
     "workflow-bank": Metric.WORKFLOW_ADHERENCE,
 }
-_DOMAIN_SLUGS: tuple[str, ...] = ("bank", "happy-customer", "happy-smile")
 SCENARIO_SLUGS: tuple[str, ...] = (*_DOMAIN_SLUGS, *ADHERENCE_SLUGS)
 TIERS: tuple[Condition, ...] = (
     Condition.LOW,

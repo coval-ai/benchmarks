@@ -57,6 +57,12 @@ ALL_IDS = {**IDS, Metric.INTERRUPTION_RATE: "RID"}
 SPEC = AgentSpec(agent_id="a1", provider="openai", model="gpt-realtime")
 
 
+_JUDGE_FIELDS: dict[str, dict[str, str]] = {
+    "instruction-bank": {"instruction_metric_id": "x"},
+    "workflow-bank": {"workflow_metric_id": "x"},
+}
+
+
 def _every_s2s_row() -> list[RegisteredModel]:
     """One unpublished registry row per S2S spec, as production has."""
     agent_fields: dict[str, Any] = {
@@ -66,7 +72,9 @@ def _every_s2s_row() -> list[RegisteredModel]:
     }
     agent_fields["coval_s2s_scenarios"] = {
         slug: ScenarioCovalIds(
-            test_set_id="x", agents={model: "x" for _provider, model in fetch_v2v.SCENARIO_MODELS}
+            test_set_id="x",
+            agents={model: "x" for _provider, model in fetch_v2v.SCENARIO_MODELS},
+            **_JUDGE_FIELDS.get(slug, {}),
         )
         for slug in SCENARIO_SLUGS
     }

@@ -172,9 +172,10 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
 def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
     """One spec per (scenario, model); unconfigured ones carry no agent id and are skipped.
 
-    Every scenario's instruction metric is the Validate Expected Behaviors judge,
-    a fraction rather than a verdict, which the instruction mapper scales to a
-    percentage.
+    Domain scenarios share the bank Validate Expected Behaviors judge; an
+    adherence scenario carries its own judge id and is skipped (with a warning)
+    until it names one. Both judges return a fraction rather than a verdict,
+    which the instruction mapper scales to a percentage.
     """
     known = {model for _provider, model in SCENARIO_MODELS}
     specs: list[AgentSpec] = []
@@ -1148,6 +1149,7 @@ async def _ingest_run(
             slot=str(scheduled_at),
             clips=len(rows),
             instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
+            workflow=len(by_metric.get(Metric.WORKFLOW_ADHERENCE, [])),
             ttft=len(by_metric.get(Metric.TTFT, [])),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )

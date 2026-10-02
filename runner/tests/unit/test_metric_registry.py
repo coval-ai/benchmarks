@@ -115,3 +115,9 @@ def test_invalid_aggregation_contracts_fail_on_construction(changes: dict[str, o
     data = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")].model_dump()
     with pytest.raises(ValueError):
         MetricValueContract.model_validate({**data, **changes})
+
+
+def test_adherence_rates_are_capped_at_100_percent() -> None:
+    for metric in (Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE):
+        (primary,) = METRIC_VALUE_CONTRACTS[(metric, "v1")].values
+        assert (primary.minimum, primary.maximum) == (0.0, 100.0)

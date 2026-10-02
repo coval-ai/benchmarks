@@ -239,8 +239,9 @@ if METRIC_SPECS.keys() != set(Metric):
 def _primary(metric: Metric) -> MetricValueDefinition:
     spec = METRIC_SPECS[metric]
     # WER can legitimately exceed 100% when insertions outnumber reference
-    # words. Only the binary instruction-following rate is intrinsically bounded.
-    maximum = 100.0 if metric is Metric.INSTRUCTION_FOLLOWING else None
+    # words. Only the instruction and workflow adherence rates are intrinsically
+    # bounded.
+    maximum = 100.0 if metric in {Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE} else None
     return MetricValueDefinition(
         key="primary",
         unit=spec.units,

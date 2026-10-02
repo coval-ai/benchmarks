@@ -10,7 +10,9 @@
     "bindings: per family, which personas run and which dataset id each encodes.",
     "anchor names the metric every optional metric's population must match:",
     "latency (V2V) when the audio is clean, judge (instruction following) when it",
-    "is not, because noise sits in the lane VAD uses for turn boundaries."
+    "is not, because noise sits in the lane VAD uses for turn boundaries.",
+    "The adherence families have no latency, so they anchor clean on judge too;",
+    "their judge is instruction following or workflow adherence."
   ],
 
   "personas": {
