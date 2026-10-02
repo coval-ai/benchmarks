@@ -52,7 +52,7 @@ from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
 
 
 def _settings(**kwargs: Any) -> Settings:
-    defaults = {
+    defaults: dict[str, Any] = {
         "normalized_dual_write_enabled": True,
         "normalized_capture_required": True,
         "benchmark_artifact_bucket": "test-artifacts",
@@ -1966,7 +1966,7 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
     # s1 is unscored and s2 unmeasured, so only s0 is covered by both.
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 1
-    assert instruction_rows[0].audio_filename.endswith("s0")
+    assert instruction_rows[0].audio_filename == "R1/s0"
 
 
 @pytest.mark.asyncio
@@ -1996,7 +1996,7 @@ async def test_ingest_run_extra_ids_are_trimmed_not_dropped() -> None:
     rows = _captured_rows(writer)
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 2
-    assert not any(r.audio_filename.endswith("s2") for r in instruction_rows)
+    assert {r.audio_filename for r in instruction_rows} == {"R1/s0", "R1/s1"}
 
 
 @pytest.mark.asyncio
@@ -2025,7 +2025,7 @@ async def test_ingest_run_drops_id_less_values_before_trimming() -> None:
     rows = _captured_rows(writer)
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 1
-    assert instruction_rows[0].audio_filename.endswith("s0")
+    assert instruction_rows[0].audio_filename == "R1/s0"
 
 
 @pytest.mark.asyncio

@@ -3792,6 +3792,7 @@ async def test_tts_normalized_failure_preserves_audio_without_legacy_fallback(
     writer.record_results.assert_not_awaited()
     writer.capture_results.assert_not_awaited()
     assert results
+    assert dual_write.await_args is not None
     assert dual_write.await_args.kwargs["db_retry_attempts"] == 3
 
 
