@@ -28,8 +28,6 @@ from coval_bench.api.common import (
 from coval_bench.api.routers.aggregates import (
     _NORMALIZED_DATASETS_SQL,
     _NORMALIZED_SERIES_SQL,
-    _NORMALIZED_STATS_BY_DATASET_SQL,
-    _NORMALIZED_STATS_SQL,
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
@@ -189,8 +187,6 @@ def test_normalized_query_constants_start_with_sql() -> None:
     """Comments beside triple-quote openers must not become literal SQL."""
     for query in (
         _NORMALIZED_DATASETS_SQL,
-        _NORMALIZED_STATS_SQL,
-        _NORMALIZED_STATS_BY_DATASET_SQL,
         _NORMALIZED_SERIES_SQL,
         _NORMALIZED_TIMELINE_SQL,
     ):
@@ -442,27 +438,6 @@ async def test_dataset_filter_splits_and_default_pools(
     ).json()
     assert missing["model_stats"] == []
     assert missing["datasets"] == ["stt-v1", "stt-v3"]
-
-
-async def test_normalized_raw_dataset_query_resolves_metric_ids(postgresql: Any) -> None:
-    from coval_bench.api.routers.aggregates import _NORMALIZED_STATS_BY_DATASET_SQL
-    from tests.api.conftest import _make_db_url
-
-    run_id = await _insert_run(postgresql, dataset_id="stt-v2")
-    await _insert_normalized_wer(postgresql, run_id, dataset_id="stt-v2", value=6.0)
-    async with (
-        await psycopg.AsyncConnection.connect(_make_db_url(postgresql)) as conn,
-        conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
-    ):
-        await cur.execute(
-            _NORMALIZED_STATS_BY_DATASET_SQL,
-            {"benchmark": "STT", "interval": "7 days"},
-        )
-        rows = await cur.fetchall()
-    assert len(rows) == 1
-    assert rows[0]["dataset_id"] == "stt-v2"
-    assert rows[0]["metric_type"] == "WER"
-    assert rows[0]["avg_value"] == pytest.approx(6.0)
 
 
 async def test_normalized_dashboard_reads_are_flagged_and_pool_datasets(
