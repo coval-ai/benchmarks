@@ -38,6 +38,7 @@ jobs:
       deploy_sha: ${{ steps.context.outputs.deploy_sha }}
       runner_image: ${{ steps.context.outputs.runner_image }}
       api_image: ${{ steps.context.outputs.api_image }}
+      s2s_agent_image: ${{ steps.context.outputs.s2s_agent_image }}
       skip: ${{ steps.context.outputs.skip }}
     steps:
       - name: Resolve deploy ref
@@ -62,6 +63,7 @@ jobs:
           deploy_sha="$(git rev-parse HEAD)"
           runner_image="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-runner:${deploy_sha}"
           api_image="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-api:${deploy_sha}"
+          s2s_agent_image="us-east1-docker.pkg.dev/coval-benchmarks-prod/runner/coval-bench-s2s-agent:${deploy_sha}"
 
           git fetch origin production-runner:refs/remotes/origin/production-runner 2>/dev/null || true
           skip=false
@@ -74,6 +76,7 @@ jobs:
             echo "deploy_sha=${deploy_sha}"
             echo "runner_image=${runner_image}"
             echo "api_image=${api_image}"
+            echo "s2s_agent_image=${s2s_agent_image}"
             echo "skip=${skip}"
           } >> "$GITHUB_OUTPUT"
 
@@ -84,6 +87,7 @@ jobs:
             echo "- Deploy SHA: \`${deploy_sha}\`"
             echo "- Runner image: \`${runner_image}\`"
             echo "- API image: \`${api_image}\`"
+            echo "- S2S agent image: \`${s2s_agent_image}\`"
             echo "- Correlation: \`${{ github.event.client_payload.switchboard_correlation_id || 'manual' }}\`"
             echo "- Already promoted: \`${skip}\`"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -105,6 +109,8 @@ jobs:
             dockerfile: Dockerfile
           - image: api
             dockerfile: Dockerfile.api
+          - image: s2s-agent
+            dockerfile: Dockerfile.s2s-agent
 
     steps:
       - name: Checkout repository
@@ -154,6 +160,7 @@ jobs:
         id: dispatch
         env:
           API_IMAGE: ${{ needs.context.outputs.api_image }}
+          S2S_AGENT_IMAGE: ${{ needs.context.outputs.s2s_agent_image }}
           DEPLOY_REF: ${{ needs.context.outputs.deploy_ref }}
           DEPLOY_SHA: ${{ needs.context.outputs.deploy_sha }}
           GH_TOKEN: ${{ secrets.INFRA_DISPATCH_TOKEN }}
@@ -168,6 +175,7 @@ jobs:
             --arg ref "$DEPLOY_REF" \
             --arg runner_image "$RUNNER_IMAGE" \
             --arg api_image "$API_IMAGE" \
+            --arg s2s_agent_image "$S2S_AGENT_IMAGE" \
             --arg source_repo "$GITHUB_REPOSITORY" \
             --arg switchboard_correlation_id "$correlation_id" \
             --arg compare_url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/production-runner...${DEPLOY_SHA}" \
@@ -178,6 +186,7 @@ jobs:
                 ref: $ref,
                 runner_image: $runner_image,
                 api_image: $api_image,
+                s2s_agent_image: $s2s_agent_image,
                 source_repo: $source_repo,
                 switchboard_correlation_id: $switchboard_correlation_id,
                 compare_url: $compare_url

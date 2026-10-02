@@ -68,8 +68,11 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
 class Settings(BaseSettings):
     """Application settings, populated from environment variables or a .env file."""
 
+    # The repo root's .env (``cp .env.example .env``, per the README) from any
+    # working directory; one in the current directory overrides it. In the
+    # images neither exists and Cloud Run supplies the environment.
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(str(Path(__file__).resolve().parents[3] / ".env"), ".env"),
         env_file_encoding="utf-8",
         env_ignore_empty=True,
         extra="ignore",

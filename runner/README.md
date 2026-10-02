@@ -33,6 +33,27 @@ uv run pytest -q
 
 VCR cassettes + fakes — never hit the network.
 
+### S2S Pipecat agent (real provider APIs)
+
+The agent for the S2S board, as far as it goes today: a cascade running on this
+machine's microphone and speakers, with Silero and smart-turn deciding the
+caller's turn. A stack file under `src/coval_bench/s2s_agent/stacks/` names one
+provider and model per role; `--stack` picks it (default
+`cascade-nova3-gpt41-flash`, which mirrors `scenarios/stack.json`; also
+`cascade-soniox-gemini`) and `--scenario` the prompt (default `bank`). Vendors
+are a table in `s2s_agent/services/`: a Pipecat class per role and the key it
+uses. Adding one is a line there and its Pipecat extra.
+
+```bash
+brew install portaudio                                  # once; pyaudio builds against it
+uv sync --extra s2s-agent --extra s2s-agent-local       # once per checkout
+uv run coval-s2s-agent
+```
+
+Keys come from the repo root's `.env` (`cp .env.example .env`). The agent speaks
+first. Ctrl-C hangs up. `coval.py` holds the wire contract
+Coval's WebSocket simulator will use once the agent is served; nothing runs it yet.
+
 ### Full stack (Postgres + API + runner image, real provider APIs)
 
 From the repo root:

@@ -60,10 +60,13 @@ google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS stream
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
 livekit = ["livekit-agents[deepgram,openai,elevenlabs,silero]~=1.6"]  # the LiveKit agent image only
+s2s-agent = ["pipecat-ai[deepgram,elevenlabs,google,openai,silero,soniox,websocket]~=1.12"]  # the S2S agent image only
+s2s-agent-local = ["pipecat-ai[local]~=1.12"]  # mic and speakers; needs portaudio
 
 [project.scripts]
 coval-bench = "coval_bench.__main__:cli"
 coval-build-dataset = "coval_bench.datasets.scripts.build:build"
+coval-s2s-agent = "coval_bench.s2s_agent.app:main"  # needs the s2s-agent extras
 
 [dependency-groups]
 dev = [
@@ -166,6 +169,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["opentelemetry.exporter.cloud_monitoring.*", "opentelemetry.resourcedetector.gcp_resource_detector.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pipecat.*"
 ignore_missing_imports = true
 
 [tool.coverage.run]
