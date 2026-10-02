@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""One S2S stack: its settings file here, the pinned components, and the prompt it runs."""
+"""One S2S stack: its settings file, the components it names, and the prompt it runs."""
 
 from __future__ import annotations
 
@@ -9,15 +9,36 @@ import hashlib
 import importlib.resources
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
-from coval_bench import scenarios
+from pydantic import Field
+
 from coval_bench.scenarios.annotated import AnnotatedModel
 
 STACKS_PACKAGE = "coval_bench.s2s_agent"
+STACKS_DIR = "stacks"
 SCENARIOS_PACKAGE = "coval_bench.scenarios"
-COMPONENTS_FILE = "stack.json"
 DEFAULT_PROMPT_FILE = "system-prompt.txt"
+
+
+class ComponentPin(AnnotatedModel):
+    """One role's vendor and model. ``options`` is for knobs only that vendor understands."""
+
+    provider: str
+    model: str
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class SttPin(ComponentPin):
+    pass
+
+
+class LlmPin(ComponentPin):
+    temperature: float
+
+
+class TtsPin(ComponentPin):
+    voice: str
 
 
 class TurnTakingPin(AnnotatedModel):
@@ -32,8 +53,9 @@ class AudioPin(AnnotatedModel):
 
 class S2SStack(AnnotatedModel):
     architecture: Literal["cascade"]
-    # A cascade never names its own models; it points at the pinned layer.
-    components: Literal["scenarios/stack.json"]
+    stt: SttPin
+    llm: LlmPin
+    tts: TtsPin
     turn_taking: TurnTakingPin
     audio: AudioPin
 
@@ -43,18 +65,25 @@ class LoadedStack:
     scenario: str
     slug: str
     stack: S2SStack
-    components: scenarios.Stack
     system_prompt: str
     prompt_file: str
     digest: str
 
 
+def stack_slugs() -> list[str]:
+    stacks = importlib.resources.files(STACKS_PACKAGE).joinpath(STACKS_DIR)
+    return sorted(
+        entry.name.removesuffix(".json")
+        for entry in stacks.iterdir()
+        if entry.name.endswith(".json")
+    )
+
+
 def _stack_bytes(slug: str) -> bytes:
-    return importlib.resources.files(STACKS_PACKAGE).joinpath(f"{slug}.json").read_bytes()
-
-
-def _components_bytes() -> bytes:
-    return importlib.resources.files(SCENARIOS_PACKAGE).joinpath(COMPONENTS_FILE).read_bytes()
+    path = importlib.resources.files(STACKS_PACKAGE).joinpath(STACKS_DIR, f"{slug}.json")
+    if not path.is_file():
+        raise ValueError(f"no stack {slug!r}; have {', '.join(stack_slugs())}")
+    return path.read_bytes()
 
 
 def prompt_file(scenario: str, slug: str) -> str:
@@ -69,10 +98,9 @@ def _prompt_bytes(scenario: str, filename: str) -> bytes:
 
 
 def stack_sha256(scenario: str, slug: str) -> str:
-    """One SHA-256 over the stack file, the pinned components and the prompt, in that order."""
+    """One SHA-256 over the stack file and the prompt actually used, in that order."""
     digest = hashlib.sha256()
     digest.update(_stack_bytes(slug))
-    digest.update(_components_bytes())
     digest.update(_prompt_bytes(scenario, prompt_file(scenario, slug)))
     return digest.hexdigest()
 
@@ -83,12 +111,4 @@ def load_stack(scenario: str, slug: str) -> LoadedStack:
     system_prompt = _prompt_bytes(scenario, filename).decode().strip()
     if not system_prompt:
         raise ValueError(f"{scenario}/{filename} is empty")
-    return LoadedStack(
-        scenario=scenario,
-        slug=slug,
-        stack=stack,
-        components=scenarios.load_stack(),
-        system_prompt=system_prompt,
-        prompt_file=filename,
-        digest=stack_sha256(scenario, slug),
-    )
+    return LoadedStack(scenario, slug, stack, system_prompt, filename, stack_sha256(scenario, slug))

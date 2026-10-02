@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""The pinned cascade components as Pipecat's stock services: Deepgram, OpenAI, ElevenLabs."""
+"""The stack's components as Pipecat's stock services: Deepgram, OpenAI, ElevenLabs."""
 
 from __future__ import annotations
 
@@ -49,22 +49,22 @@ def build_stt(loaded: LoadedStack, keys: Keys) -> DeepgramSTTService:
     return DeepgramSTTService(
         api_key=keys.deepgram,
         sample_rate=loaded.stack.audio.in_sample_rate_hz,
-        live_options=LiveOptions(model=loaded.components.stt.model, language=LANGUAGE),
+        live_options=LiveOptions(model=loaded.stack.stt.model, language=LANGUAGE),
     )
 
 
 def build_llm(loaded: LoadedStack, keys: Keys) -> OpenAILLMService:
     return OpenAILLMService(
         api_key=keys.openai,
-        model=loaded.components.llm.model,
-        params=OpenAILLMService.InputParams(temperature=loaded.components.llm.temperature),
+        model=loaded.stack.llm.model,
+        params=OpenAILLMService.InputParams(temperature=loaded.stack.llm.temperature),
     )
 
 
 def build_tts(loaded: LoadedStack, keys: Keys) -> ElevenLabsTTSService:
     return ElevenLabsTTSService(
         api_key=keys.elevenlabs,
-        voice_id=loaded.components.tts.voice_id,
-        model=loaded.components.tts.model,
+        voice_id=loaded.stack.tts.voice,
+        model=loaded.stack.tts.model,
         sample_rate=loaded.stack.audio.out_sample_rate_hz,
     )

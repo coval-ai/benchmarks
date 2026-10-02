@@ -35,11 +35,12 @@ VCR cassettes + fakes — never hit the network.
 
 ### S2S Pipecat agent (real provider APIs)
 
-The agent for the S2S board, as far as it goes today: a cascade of Deepgram,
-OpenAI and ElevenLabs as pinned in `scenarios/stack.json`, with Silero and
-smart-turn deciding the caller's turn, running on this machine's microphone and
-speakers. `--stack` picks the settings file in `src/coval_bench/s2s_agent/`
-(default `cascade`) and `--scenario` the prompt (default `bank`).
+The agent for the S2S board, as far as it goes today: a cascade running on this
+machine's microphone and speakers, with Silero and smart-turn deciding the
+caller's turn. A stack file under `src/coval_bench/s2s_agent/stacks/` names one
+provider and model per role; `--stack` picks it (default
+`cascade-nova3-gpt41-flash`, which mirrors `scenarios/stack.json`) and
+`--scenario` the prompt (default `bank`).
 
 ```bash
 brew install portaudio                                  # once; pyaudio builds against it

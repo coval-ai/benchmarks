@@ -97,36 +97,65 @@ def test_bearer_token_is_required_only_when_configured() -> None:
     assert not authorized({}, "s3cret")
 
 
-def test_stack_loads_the_pinned_components_the_default_prompt_and_the_hash() -> None:
-    loaded = stacks.load_stack("bank", "cascade")
+REFERENCE = "cascade-nova3-gpt41-flash"
+
+
+def test_stack_names_its_components_and_loads_the_default_prompt_and_hash() -> None:
+    loaded = stacks.load_stack("bank", REFERENCE)
     assert loaded.stack.architecture == "cascade"
-    assert loaded.components.stt.model == "nova-3"
-    assert loaded.components.llm.model == "gpt-4.1"
-    assert loaded.components.tts.model == "eleven_flash_v2"
+    assert (loaded.stack.stt.provider, loaded.stack.stt.model) == ("deepgram", "nova-3")
+    assert (loaded.stack.llm.provider, loaded.stack.llm.model) == ("openai", "gpt-4.1")
+    assert loaded.stack.tts.provider == "elevenlabs"
     assert loaded.stack.turn_taking.vad_stop_secs == 0.2
     assert loaded.prompt_file == "system-prompt.txt"
     assert loaded.system_prompt.startswith("# Role & Objective")
     assert len(loaded.digest) == 64
-    assert loaded.digest == stacks.stack_sha256("bank", "cascade")
+    assert loaded.digest == stacks.stack_sha256("bank", REFERENCE)
+
+
+def test_the_reference_stack_mirrors_the_orchestration_benchmarks_pinned_layer() -> None:
+    """Same STT, LLM and TTS as every platform variant, so the boards can be compared."""
+    from coval_bench import scenarios
+
+    pinned = scenarios.load_stack()
+    stack = stacks.load_stack("bank", REFERENCE).stack
+    assert (stack.stt.provider, stack.stt.model) == (pinned.stt.provider, pinned.stt.model)
+    assert (stack.llm.provider, stack.llm.model, stack.llm.temperature) == (
+        pinned.llm.provider,
+        pinned.llm.model,
+        pinned.llm.temperature,
+    )
+    assert (stack.tts.provider, stack.tts.model, stack.tts.voice) == (
+        pinned.tts.provider,
+        pinned.tts.model,
+        pinned.tts.voice_id,
+    )
 
 
 def test_a_stack_without_an_override_falls_back_to_the_scenario_default() -> None:
-    assert stacks.prompt_file("bank", "cascade") == "system-prompt.txt"
+    assert stacks.prompt_file("bank", REFERENCE) == "system-prompt.txt"
     assert stacks.prompt_file("bank", "some-other-stack") == "system-prompt.txt"
 
 
-def test_the_hash_covers_the_pinned_components_too() -> None:
+def test_the_hash_covers_the_stack_file_and_the_prompt() -> None:
     import hashlib
 
     expected = hashlib.sha256()
-    expected.update(stacks._stack_bytes("cascade"))
-    expected.update(stacks._components_bytes())
+    expected.update(stacks._stack_bytes(REFERENCE))
     expected.update(stacks._prompt_bytes("bank", "system-prompt.txt"))
-    assert stacks.stack_sha256("bank", "cascade") == expected.hexdigest()
+    assert stacks.stack_sha256("bank", REFERENCE) == expected.hexdigest()
+
+
+def test_an_unknown_stack_names_the_ones_that_exist() -> None:
+    assert stacks.stack_slugs() == [REFERENCE]
+    with pytest.raises(ValueError, match=REFERENCE):
+        stacks.load_stack("bank", "nope")
 
 
 def test_stack_rejects_unknown_keys_but_keeps_rationale() -> None:
-    data = json.loads(stacks._stack_bytes("cascade"))
+    data = json.loads(stacks._stack_bytes(REFERENCE))
     assert stacks.S2SStack.model_validate({**data, "_note": "fine"})
     with pytest.raises(ValueError, match="unknown key"):
         stacks.S2SStack.model_validate({**data, "voice": "alloy"})
+    with pytest.raises(ValueError, match="unknown key"):
+        stacks.S2SStack.model_validate({**data, "tts": {**data["tts"], "voise": "x"}})

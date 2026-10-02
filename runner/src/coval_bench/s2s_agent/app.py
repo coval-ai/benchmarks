@@ -58,7 +58,7 @@ async def run(loaded: LoadedStack) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stack", default=os.environ.get("S2S_STACK", "cascade"))
+    parser.add_argument("--stack", default=os.environ.get("S2S_STACK", "cascade-nova3-gpt41-flash"))
     parser.add_argument("--scenario", default=os.environ.get("S2S_SCENARIO", "bank"))
     args = parser.parse_args()
     configure_logging()

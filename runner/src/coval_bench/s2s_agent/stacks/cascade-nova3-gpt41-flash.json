@@ -1,0 +1,31 @@
+{
+  "architecture": "cascade",
+
+  "stt": {
+    "provider": "deepgram",
+    "model": "nova-3"
+  },
+
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1",
+    "temperature": 0
+  },
+
+  "tts": {
+    "provider": "elevenlabs",
+    "model": "eleven_flash_v2",
+    "voice": "EXAVITQu4vr4xnSDxMaL",
+    "_voice": "Sarah"
+  },
+
+  "turn_taking": {
+    "vad_stop_secs": 0.2,
+    "turn_analyzer": "smart-turn-v3"
+  },
+
+  "audio": {
+    "in_sample_rate_hz": 16000,
+    "out_sample_rate_hz": 24000
+  }
+}
