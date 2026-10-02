@@ -489,3 +489,18 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a process-cached Settings instance."""
     return Settings()
+
+
+def require_normalized_persisted_capture(settings: Settings) -> None:
+    """Require normalized capture before an entrypoint can persist benchmark data."""
+    missing: list[str] = []
+    if not settings.normalized_dual_write_enabled:
+        missing.append("normalized_dual_write_enabled")
+    if not settings.normalized_capture_required:
+        missing.append("normalized_capture_required")
+    if not settings.benchmark_artifact_bucket:
+        missing.append("benchmark_artifact_bucket")
+    if missing:
+        raise RuntimeError(
+            "normalized persisted capture is required for benchmark writes: " + ", ".join(missing)
+        )

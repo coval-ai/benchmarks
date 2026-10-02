@@ -19,7 +19,7 @@ from click.testing import CliRunner
 from structlog.testing import capture_logs
 
 from coval_bench.config import ScenarioCovalIds, Settings
-from coval_bench.db.models import MetricExecutor, ResultStatus, Run, RunStatus
+from coval_bench.db.models import MetricExecutor, Result, ResultStatus, Run, RunStatus
 from coval_bench.logging import log_run_failed, log_run_partial, log_run_unmapped_persona
 from coval_bench.registries import Benchmark, Metric
 from coval_bench.registries.models import RegisteredModel
@@ -49,6 +49,46 @@ from coval_bench.s2s.conditions import (
     condition_for,
 )
 from coval_bench.s2s.fetch_v2v import AgentSpec, CovalRun
+
+
+def _settings(**kwargs: Any) -> Settings:
+    defaults: dict[str, Any] = {
+        "normalized_dual_write_enabled": True,
+        "normalized_capture_required": True,
+        "benchmark_artifact_bucket": "test-artifacts",
+    }
+    defaults.update(kwargs)
+    return Settings(**defaults)
+
+
+@pytest.fixture(autouse=True)
+def _local_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mock external storage while keeping required importer dispatch under test."""
+    monkeypatch.setattr("google.cloud.storage.Client", MagicMock(return_value=object()))
+    monkeypatch.setattr("coval_bench.runner.capture.preflight_capture_storage", MagicMock())
+    monkeypatch.setattr(
+        "coval_bench.runner.capture.upload_run_state", MagicMock(return_value=(None, "a" * 64))
+    )
+    monkeypatch.setattr(fetch_v2v, "read_import_run_claim", lambda *_args: None)
+    monkeypatch.setattr(fetch_v2v, "read_run_state", lambda *_args: None)
+    monkeypatch.setattr(fetch_v2v, "upload_import_run_claim", lambda _client, _bucket, claim: claim)
+
+    async def persist(**kwargs: Any) -> str:
+        rows = [Result.model_validate(row) for row in kwargs["envelope"].payload["legacy_rows"]]
+        await kwargs["writer"].capture_results(
+            rows, created_at=kwargs["envelope"].payload["captured_at"]
+        )
+        return "completed"
+
+    monkeypatch.setattr(
+        "coval_bench.runner.normalized.persist_capture", AsyncMock(side_effect=persist)
+    )
+
+    async def submit(**kwargs: Any) -> None:
+        await kwargs["writer"].capture_results(kwargs["results"], created_at=kwargs["captured_at"])
+
+    monkeypatch.setattr("coval_bench.runner.normalized.dual_write", AsyncMock(side_effect=submit))
+
 
 IDS = {Metric.V2V: "MID", Metric.INSTRUCTION_FOLLOWING: "IID"}
 LATENCY_IDS = {Metric.V2V: "MID"}
@@ -184,7 +224,11 @@ def _stub_writer() -> MagicMock:
     writer.ensure_capture_run = AsyncMock(return_value=writer.start_run.return_value)
     writer.conversation_ttft = AsyncMock(return_value={})
     writer.record_results = AsyncMock()
+    writer.capture_results = AsyncMock()
     writer.finish_run = AsyncMock()
+    writer.finish_run_exact = AsyncMock()
+    writer.mark_run_capture_pending = AsyncMock()
+    writer.preflight_required_capture_schema = AsyncMock()
     writer.refresh_bucket = AsyncMock()
     writer.refresh_metric_values_bucket = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
@@ -193,7 +237,7 @@ def _stub_writer() -> MagicMock:
 
 
 async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatus, int]:
-    return await fetch_v2v._fetch_one_provider(
+    return await _fetch_one_provider(
         client,
         writer,
         spec=SPEC,
@@ -202,6 +246,21 @@ async def _fetch(client: httpx.AsyncClient, writer: MagicMock) -> tuple[RunStatu
         period_seconds=10_800,
         stale_grace_seconds=5_400,
     )
+
+
+async def _ingest_run(*args: Any, **kwargs: Any) -> RunStatus | None:
+    """Exercise transformations through the private normalized submission path."""
+    kwargs.setdefault("normalized_dual_write_enabled", True)
+    return await fetch_v2v._ingest_run(*args, **kwargs)
+
+
+async def _fetch_one_provider(*args: Any, **kwargs: Any) -> tuple[RunStatus, int]:
+    kwargs.setdefault("normalized_dual_write_enabled", True)
+    return await fetch_v2v._fetch_one_provider(*args, **kwargs)
+
+
+def _captured_rows(writer: MagicMock) -> list[Result]:
+    return [row for call in writer.capture_results.await_args_list for row in call.args[0]]
 
 
 @pytest.mark.asyncio
@@ -272,7 +331,7 @@ async def test_backfill_ingests_only_named_runs() -> None:
     )
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     async with _fake_client(list_json, _run_json(values)) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -284,7 +343,7 @@ async def test_backfill_ingests_only_named_runs() -> None:
         )
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
-    written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
+    written = [c.args[0][0].audio_filename for c in writer.capture_results.await_args_list]
     assert written == ["R1/s1"]
 
 
@@ -295,7 +354,7 @@ async def test_backfill_reports_matches_and_ignores_staleness() -> None:
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(days=20))})
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     async with _fake_client(list_json, _run_json(values)) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -324,7 +383,7 @@ async def test_backfill_matches_errored_run() -> None:
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     errored = _run_json(values, error_status="EXECUTION_FAILURE", output_ids=["s1", "s2"])
     async with _fake_client(list_json, errored) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -347,7 +406,7 @@ async def test_backfill_does_not_match_failed_ingest() -> None:
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     values = [{"simulation_output_id": "s1", "value": "not-a-number"}]
     async with _fake_client(list_json, _run_json(values)) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -372,7 +431,7 @@ async def test_backfill_publishes_no_samples() -> None:
     list_json = _list_json({"run_id": "R1", "create_time": _iso(timedelta(hours=1))})
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     async with _fake_client(list_json, _run_json(values)) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -490,7 +549,7 @@ async def test_ingest_run_slots_by_create_time() -> None:
     created = datetime(2026, 7, 7, 1, 15, tzinfo=UTC)
     values = [{"simulation_output_id": f"s{i}", "value": 0.5} for i in range(3)]
     async with _fake_client({}, _run_json(values)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -500,8 +559,8 @@ async def test_ingest_run_slots_by_create_time() -> None:
         )
     assert status is RunStatus.SUCCEEDED
     assert writer.start_run.await_args.kwargs["scheduled_at"] == datetime(2026, 7, 7, 0, tzinfo=UTC)
-    writer.record_results.assert_awaited_once()
-    writer.refresh_bucket.assert_awaited_once()
+    writer.record_results.assert_not_awaited()
+    writer.refresh_bucket.assert_not_awaited()
     writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
 
@@ -515,7 +574,7 @@ async def test_ingest_run_partial_and_failed() -> None:
     ]
     run = CovalRun(run_id="R1", create_time=None)
     async with _fake_client({}, _run_json(mixed)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -524,13 +583,13 @@ async def test_ingest_run_partial_and_failed() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
-    writer.refresh_bucket.assert_awaited_once()
+    writer.refresh_bucket.assert_not_awaited()
     writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
     writer = _stub_writer()
     all_null: list[dict[str, Any]] = [{"simulation_output_id": "s1", "value": None}]
     async with _fake_client({}, _run_json(all_null)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -544,7 +603,7 @@ async def test_ingest_run_partial_and_failed() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failing_refresh", ["refresh_bucket", "refresh_metric_values_bucket"])
+@pytest.mark.parametrize("failing_refresh", ["refresh_metric_values_bucket"])
 async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
     failing_refresh: str,
 ) -> None:
@@ -554,7 +613,7 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
     values = [{"simulation_output_id": "s1", "value": 0.5}]
 
     async with _fake_client({}, _run_json(values)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -565,7 +624,7 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
 
     assert status is RunStatus.SUCCEEDED
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED)
-    writer.refresh_bucket.assert_awaited_once()
+    writer.refresh_bucket.assert_not_awaited()
     writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
 
 
@@ -576,7 +635,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
     run = CovalRun(run_id="R1", create_time=None)
     async with _fake_client({}, _run_json([], metric_id="OTHER")) as client:
         assert (
-            await fetch_v2v._ingest_run(
+            await _ingest_run(
                 client,
                 writer,
                 spec=SPEC,
@@ -592,7 +651,7 @@ async def test_ingest_run_skips_before_any_write() -> None:
     writer = _stub_writer()
     async with _fake_client({}, _run_json([], output_ids=["s1", "s2"])) as client:
         assert (
-            await fetch_v2v._ingest_run(
+            await _ingest_run(
                 client,
                 writer,
                 spec=SPEC,
@@ -612,7 +671,7 @@ async def test_ingest_run_ignores_error_status() -> None:
     writer = _stub_writer()
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     async with _fake_client({}, _run_json(values, error_status="EXECUTION_FAILURE")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -621,7 +680,7 @@ async def test_ingest_run_ignores_error_status() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_awaited_once()
+    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -635,7 +694,7 @@ async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
     ]
     fixture = _run_json(values, output_ids=["s1", "s2", "s3"])
     async with _fake_client({}, fixture) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -644,7 +703,7 @@ async def test_ingest_run_failed_conversations_become_failed_rows() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.PARTIAL
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert [(r.audio_filename, r.status) for r in rows] == [
         ("R1/s1", ResultStatus.SUCCESS),
         ("R1/s2", ResultStatus.SUCCESS),
@@ -665,7 +724,7 @@ async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
     ]
     fixture = _run_json(values, output_ids=["s1", "s2"])
     async with _fake_client({}, fixture) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -674,7 +733,7 @@ async def test_ingest_run_anchor_without_id_synthesizes_no_failures() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert [(r.audio_filename, r.status) for r in rows] == [
         ("R1/s1", ResultStatus.SUCCESS),
         ("R1/1", ResultStatus.SUCCESS),
@@ -705,7 +764,7 @@ async def test_fetch_one_provider_ingests_every_new_run() -> None:
 
     assert (status, ingested) == (RunStatus.SUCCEEDED, 2)
     assert writer.start_run.await_count == 2
-    written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
+    written = [c.args[0][0].audio_filename for c in writer.capture_results.await_args_list]
     assert written == ["R2/s1", "R1/s1"]
 
 
@@ -776,7 +835,7 @@ async def test_fetch_one_provider_stale_wins_over_backfill() -> None:
     async with _fake_client(list_json, _run_json(values)) as client:
         status, ingested = await _fetch(client, writer)
     assert (status, ingested) == (RunStatus.FAILED, 1)
-    writer.record_results.assert_awaited_once()
+    writer.record_results.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -800,7 +859,7 @@ async def test_optional_metric_alone_does_not_prove_freshness() -> None:
         }
     }
     async with _fake_client(list_json, run_json) as client:
-        status, _ = await fetch_v2v._fetch_one_provider(
+        status, _ = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -854,8 +913,8 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
         status, ingested = await _fetch(client, writer)
 
     assert (status, ingested) == (RunStatus.PARTIAL, 2)
-    written = [c.args[0][0].audio_filename for c in writer.record_results.await_args_list]
-    assert written == ["R2/s1", "R1/s1"]
+    written = [c.args[0][0].audio_filename for c in writer.capture_results.await_args_list]
+    assert written == ["R2/s1", "R2/s2", "R1/s1"]
     partial = writer.finish_run.await_args_list[0].kwargs["status"]
     assert partial is RunStatus.PARTIAL
 
@@ -864,7 +923,7 @@ async def test_fetch_one_provider_ingests_errored_run() -> None:
 async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     # gemini agent id left unset (None) -> that provider is skipped.
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
@@ -887,14 +946,14 @@ async def test_fetch_and_write_v2v_per_provider(monkeypatch: pytest.MonkeyPatch)
 
     # only openai runs (gemini unset), and it fully succeeds.
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
-    writer.refresh_stats_matviews.assert_awaited_once()
+    writer.refresh_stats_matviews.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(
@@ -932,7 +991,7 @@ async def test_fetch_and_write_skips_an_arm_with_no_registry_row(
 async def test_fetch_and_write_filters_agents_and_allows_llm_without_v2v(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_openai_agent_id="s2s-agent",
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_instruction_metric_id="IID",
@@ -1003,7 +1062,7 @@ async def _fetch_llm(
         {"run_id": "R1", "create_time": _iso(timedelta(hours=1)), "persona_id": "P1"}
     )
     async with _fake_client(list_json, _run_json(values, metric_id="IID")) as client:
-        return await fetch_v2v._fetch_one_provider(
+        return await _fetch_one_provider(
             client,
             writer,
             spec=LLM_SPEC,
@@ -1031,7 +1090,7 @@ async def test_text_agent_uses_instruction_as_the_clean_bank_anchor() -> None:
     assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
     assert writer.start_run.await_args.kwargs["dataset_id"] == DATASET_ID_LLM_BANK
     writer.conversation_ttft.assert_awaited_once_with(["s1", "s2"])
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert {(r.metric_type, r.audio_filename, r.metric_value, r.metric_units) for r in rows} == {
         (Metric.INSTRUCTION_FOLLOWING, "R1/s1", 100.0, "percent"),
         (Metric.INSTRUCTION_FOLLOWING, "R1/s2", 0.0, "percent"),
@@ -1058,7 +1117,7 @@ async def test_ingest_run_defaults_to_writing_local_metrics() -> None:
     writer.conversation_ttft = AsyncMock(return_value={"s1": 0.25})
     values = [{"simulation_output_id": "s1", "value": "YES"}]
     async with _fake_client({}, _run_json(values, metric_id="IID")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=LLM_SPEC,
@@ -1068,7 +1127,7 @@ async def test_ingest_run_defaults_to_writing_local_metrics() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert {r.metric_type for r in rows} == {Metric.INSTRUCTION_FOLLOWING, Metric.TTFT}
 
 
@@ -1087,7 +1146,7 @@ async def test_ttft_backfills_onto_an_ingested_run_once_turns_exist() -> None:
     writer.conversation_ttft = AsyncMock(return_value={"s1": 0.2})
     status, ingested = await _fetch_llm(writer, values)
     assert (status, ingested) == (RunStatus.SUCCEEDED, 1)
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert [(r.metric_type, r.metric_value) for r in rows] == [(Metric.TTFT, 0.2)]
 
 
@@ -1107,7 +1166,7 @@ async def test_non_clean_text_personas_are_not_ingested() -> None:
 async def test_fetch_and_write_llm_names_the_missing_suite_setting() -> None:
     with pytest.raises(RuntimeError, match="coval_s2s_bank_persona_id"):
         await fetch_v2v.fetch_and_write_v2v(
-            Settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_instruction_metric_id="IID"),
+            _settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_instruction_metric_id="IID"),
             benchmark=Benchmark.LLM,
             llm_agent_ids={"phonely": "a1"},
         )
@@ -1115,7 +1174,7 @@ async def test_fetch_and_write_llm_names_the_missing_suite_setting() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_and_write_v2v_still_requires_the_latency_metric_for_legacy_agents() -> None:
-    settings = Settings(coval_s2s_openai_agent_id="a1", coval_s2s_dental_test_set_id="TSD")
+    settings = _settings(coval_s2s_openai_agent_id="a1", coval_s2s_dental_test_set_id="TSD")
 
     with pytest.raises(RuntimeError, match="coval_s2s_latency_metric_id is not set"):
         await fetch_v2v.fetch_and_write_v2v(settings)
@@ -1128,7 +1187,7 @@ async def test_fetch_one_provider_rejects_a_dataset_from_another_benchmark() -> 
 
     with capture_logs() as logs:
         async with _fake_client(list_json, {}) as client:
-            status, ingested = await fetch_v2v._fetch_one_provider(
+            status, ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=replace(LLM_SPEC, family=FAMILY_MULTITURN),
@@ -1158,7 +1217,7 @@ async def test_samples_publish_without_the_shared_test_set(
     public sample card frozen while ingestion looked healthy.
     """
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
@@ -1196,7 +1255,7 @@ async def test_each_dataset_publishes_its_own_sample_tick(
     """Dental and the bank set never share a tick: each partition gets its own
     publish with only its own runs and only its own expected models."""
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
@@ -1249,7 +1308,7 @@ async def test_each_dataset_publishes_its_own_sample_tick(
     assert all(r.dataset_id == DATASET_ID_BANK for r in bank["runs"])
     assert bank["expected_models"] == {("openai", "gpt-realtime")}
     # The bank run's judge fraction landed as a percentage under the instruction metric.
-    rows = [r for call in writer.record_results.await_args_list for r in call.args[0]]
+    rows = [r for call in writer.capture_results.await_args_list for r in call.args[0]]
     assert [r.metric_value for r in rows if r.metric_type == "InstructionFollowing"] == [75.0]
 
 
@@ -1258,7 +1317,7 @@ async def test_fetch_and_write_v2v_noop_skips_matview_refresh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
@@ -1294,7 +1353,7 @@ async def test_already_ingested_run_still_becomes_sample_candidate() -> None:
     )
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, {}) as client:
-        _status, ingested = await fetch_v2v._fetch_one_provider(
+        _status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1326,7 +1385,7 @@ async def test_embargoed_agent_never_becomes_a_sample_candidate() -> None:
     )
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, {}) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=embargoed,
@@ -1353,7 +1412,7 @@ async def test_each_bucket_contributes_its_own_sample_candidate() -> None:
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, _run_json(values)) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1382,7 +1441,7 @@ async def test_one_bucket_keeps_only_its_newest_candidate() -> None:
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, _run_json(values)) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1406,7 +1465,7 @@ async def test_stale_provider_lends_no_sample_candidate() -> None:
     )
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, {}) as client:
-        status, _ingested = await fetch_v2v._fetch_one_provider(
+        status, _ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1553,7 +1612,7 @@ async def test_unmapped_persona_skips_only_its_run() -> None:
     unmapped: dict[str, int] = {}
     with capture_logs() as logs:
         async with _fake_client(list_json, _run_json(values)) as client:
-            status, ingested = await fetch_v2v._fetch_one_provider(
+            status, ingested = await _fetch_one_provider(
                 client,
                 writer,
                 spec=SPEC,
@@ -1601,7 +1660,7 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
     latency = [{"simulation_output_id": "s1", "value": 0.5}]
     instruction = [{"simulation_output_id": "s1", "value": "YES"}]
     async with _fake_client(list_json, _multi_metric_run(latency, instruction)) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1616,7 +1675,7 @@ async def test_noisy_and_clean_runs_land_in_different_datasets() -> None:
     assert datasets == ["s2s-multiturn-noisy-v1", "s2s-multiturn-v1"]
     # Both runs carry latency, but the noise dataset excludes it: only the clean
     # run writes V2V rows, and neither warns about the omission.
-    written = [c.args[0] for c in writer.record_results.await_args_list]
+    written = [c.args[0] for c in writer.capture_results.await_args_list]
     assert [{r.metric_type for r in rows} for rows in written] == [
         {Metric.INSTRUCTION_FOLLOWING},
         {Metric.V2V, Metric.INSTRUCTION_FOLLOWING},
@@ -1639,7 +1698,7 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
     values = [{"simulation_output_id": "s1", "value": 0.5}]
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, _run_json(values)) as client:
-        await fetch_v2v._fetch_one_provider(
+        await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -1657,7 +1716,7 @@ async def test_noisy_caller_never_becomes_a_sample_candidate() -> None:
 @pytest.mark.asyncio
 async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> None:
     # Without a test set the persona split can never fire, so fail loudly.
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
@@ -1670,7 +1729,7 @@ async def test_fetch_and_write_rejects_noisy_persona_without_a_test_set() -> Non
 @pytest.mark.asyncio
 async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
     # Blank would skip its agents with only a warning, indistinguishable from unset.
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_happypath_test_set_id="   ",
@@ -1682,7 +1741,7 @@ async def test_fetch_and_write_rejects_a_blank_happypath_test_set() -> None:
 @pytest.mark.asyncio
 async def test_fetch_and_write_rejects_a_blank_dental_test_set() -> None:
     # gray/red read this one, so blank would strand both with only a warning.
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="   ",
@@ -1695,7 +1754,7 @@ async def test_fetch_and_write_rejects_a_blank_dental_test_set() -> None:
 async def test_fetch_and_write_requires_a_dental_test_set_for_a_dental_agent() -> None:
     # Unset skipped the agent with only a warning, which is how gray and red
     # went five days without ingesting a row.
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_gray_agent_id="a2",
     )
@@ -1711,7 +1770,7 @@ async def test_fetch_and_write_rejects_a_metric_with_no_row_builder(
     mappers = dict(fetch_v2v._VALUE_MAPPERS)
     del mappers[Metric.INTERRUPTION_RATE]
     monkeypatch.setattr(fetch_v2v, "_VALUE_MAPPERS", mappers)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_test_set_id="TS1",
@@ -1779,7 +1838,7 @@ async def test_ingest_run_writes_interruption_rows() -> None:
         }
     }
     async with _fake_client({}, run_json) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1789,7 +1848,7 @@ async def test_ingest_run_writes_interruption_rows() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     irr = [r for r in rows if r.metric_type == Metric.INTERRUPTION_RATE]
     assert [(r.audio_filename, r.metric_value, r.status) for r in irr] == [
         ("R1/s0", 1.25, ResultStatus.SUCCESS),
@@ -1823,7 +1882,7 @@ async def test_ingest_run_writes_call_length_rows() -> None:
         }
     }
     async with _fake_client({}, run_json) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1833,7 +1892,7 @@ async def test_ingest_run_writes_call_length_rows() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     lengths = [r for r in rows if r.metric_type == Metric.CALL_LENGTH]
     assert [(r.audio_filename, r.metric_value, r.status) for r in lengths] == [
         ("R1/s0", 48.9, ResultStatus.SUCCESS),
@@ -1858,7 +1917,7 @@ async def test_ingest_run_writes_instruction_rows() -> None:
         }
     }
     async with _fake_client({}, run_json) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1868,7 +1927,7 @@ async def test_ingest_run_writes_instruction_rows() -> None:
         )
     # Run status reflects latency (all numeric) -> SUCCEEDED.
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     latency_rows = [r for r in rows if r.metric_type == Metric.V2V]
     instr_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(latency_rows) == 3
@@ -1902,7 +1961,7 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
         {"simulation_output_id": "s2", "value": "YES"},  # s2 not in latency -> mismatch
     ]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1911,11 +1970,11 @@ async def test_ingest_run_id_mismatch_keeps_latency() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED  # latency intact
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     # s1 is unscored and s2 unmeasured, so only s0 is covered by both.
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 1
-    assert instruction_rows[0].audio_filename.endswith("s0")
+    assert instruction_rows[0].audio_filename == "R1/s0"
 
 
 @pytest.mark.asyncio
@@ -1933,7 +1992,7 @@ async def test_ingest_run_extra_ids_are_trimmed_not_dropped() -> None:
         {"simulation_output_id": "s2", "value": "YES"},  # unmeasured by the anchor
     ]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1942,10 +2001,10 @@ async def test_ingest_run_extra_ids_are_trimmed_not_dropped() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 2
-    assert not any(r.audio_filename.endswith("s2") for r in instruction_rows)
+    assert {r.audio_filename for r in instruction_rows} == {"R1/s0", "R1/s1"}
 
 
 @pytest.mark.asyncio
@@ -1962,7 +2021,7 @@ async def test_ingest_run_drops_id_less_values_before_trimming() -> None:
         {"value": "NO"},
     ]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1971,10 +2030,10 @@ async def test_ingest_run_drops_id_less_values_before_trimming() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     instruction_rows = [r for r in rows if r.metric_type == Metric.INSTRUCTION_FOLLOWING]
     assert len(instruction_rows) == 1
-    assert instruction_rows[0].audio_filename.endswith("s0")
+    assert instruction_rows[0].audio_filename == "R1/s0"
 
 
 @pytest.mark.asyncio
@@ -1990,7 +2049,7 @@ async def test_ingest_run_duplicate_ids_still_drop_the_metric() -> None:
         {"simulation_output_id": "s1", "value": "YES"},
     ]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -1999,7 +2058,7 @@ async def test_ingest_run_duplicate_ids_still_drop_the_metric() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert all(r.metric_type == Metric.V2V for r in rows)
 
 
@@ -2009,7 +2068,7 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
     latency = [{"simulation_output_id": "s0", "value": 0.5}]
     instruction = [{"simulation_output_id": "s0", "value": "GARBAGE"}]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2018,14 +2077,14 @@ async def test_ingest_run_invalid_verdict_discards_instruction() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED  # latency kept
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert all(r.metric_type == Metric.V2V for r in rows)  # instruction discarded
 
 
 @pytest.mark.asyncio
 async def test_fetch_and_write_requires_id_pair(monkeypatch: pytest.MonkeyPatch) -> None:
     # instruction id set but test-set id missing -> startup failure (must be paired).
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_instruction_metric_id="IID",
@@ -2041,7 +2100,7 @@ async def test_ingest_run_backfill_instruction_only() -> None:
     latency = [{"simulation_output_id": "s0", "value": 0.5}]
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client({}, _multi_metric_run(latency, instruction)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2051,7 +2110,7 @@ async def test_ingest_run_backfill_instruction_only() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert len(rows) == 1
     assert all(r.metric_type == Metric.INSTRUCTION_FOLLOWING for r in rows)  # no latency rewrite
 
@@ -2062,7 +2121,7 @@ async def test_ingest_run_backfill_instruction_absent_is_noop() -> None:
     writer = _stub_writer()
     latency = [{"simulation_output_id": "s0", "value": 0.5}]
     async with _fake_client({}, _run_json(latency)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2083,7 +2142,7 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
     writer = _stub_writer()
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2094,7 +2153,7 @@ async def test_ingest_run_latency_absent_writes_instruction() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert len(rows) == 1
     assert all(r.metric_type == Metric.INSTRUCTION_FOLLOWING for r in rows)
 
@@ -2106,7 +2165,7 @@ async def test_ingest_run_latency_required_on_the_standard_caller() -> None:
     writer = _stub_writer()
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2131,7 +2190,7 @@ async def test_ingest_run_rejects_duplicate_ids_in_the_anchor() -> None:
         {"simulation_output_id": "s0", "value": "NO"},
     ]
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2159,7 +2218,7 @@ async def test_ingest_run_latency_absent_instruction_without_rows_is_noop(
     # must not leave an empty run row behind.
     writer = _stub_writer()
     async with _fake_client({}, _run_json(instruction, metric_id="IID")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2189,7 +2248,7 @@ async def test_already_ingested_instruction_only_run_is_fresh() -> None:
     )
     instruction = [{"simulation_output_id": "s0", "value": "YES"}]
     async with _fake_client(list_json, _run_json(instruction, metric_id="IID")) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -2217,7 +2276,7 @@ async def test_run_skipped_when_the_required_metric_is_unconfigured() -> None:
     )
     sampled: list[SampleRun] = []
     async with _fake_client(list_json, _run_json([{"simulation_output_id": "s1"}])) as client:
-        status, ingested = await fetch_v2v._fetch_one_provider(
+        status, ingested = await _fetch_one_provider(
             client,
             writer,
             spec=SPEC,
@@ -2240,7 +2299,7 @@ async def test_ingest_run_no_metrics_present_is_noop() -> None:
     # Neither metric on the run -> no run row, stays retryable.
     writer = _stub_writer()
     async with _fake_client({}, _run_json([], metric_id="OTHER")) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2259,7 +2318,7 @@ async def test_ingest_run_without_instruction_metric_id() -> None:
     writer = _stub_writer()
     latency = [{"simulation_output_id": "s0", "value": 0.5}]
     async with _fake_client({}, _run_json(latency)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2268,7 +2327,7 @@ async def test_ingest_run_without_instruction_metric_id() -> None:
             period_seconds=10_800,
         )
     assert status is RunStatus.SUCCEEDED
-    rows = writer.record_results.await_args.args[0]
+    rows = _captured_rows(writer)
     assert all(r.metric_type == Metric.V2V for r in rows)
 
 
@@ -2372,7 +2431,7 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     }
 
     async with _fake_client({}, fixture) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2395,7 +2454,8 @@ async def test_ingest_run_dual_writes_one_observation_per_conversation(
     }
     assert calls["R1/s1"]["dataset_sha256"] == hashlib.sha256(b"test-set:persona").hexdigest()
     assert calls["R1/s1"]["executor"] is MetricExecutor.COVAL_API
-    assert calls["R1/s1"]["captured_at"] == writer.record_results.await_args.kwargs["created_at"]
+    assert calls["R1/s1"]["captured_at"] == calls["R1/s2"]["captured_at"]
+    writer.record_results.assert_not_awaited()
     for kwargs in calls.values():
         assert kwargs["db_retry_attempts"] == 3
         assert not any("semaphore" in key for key in kwargs)
@@ -2416,7 +2476,7 @@ async def test_ingest_run_dual_writes_llm_rows(
     async with _fake_client(
         {}, _run_json([{"simulation_output_id": "s1", "value": "YES"}], metric_id="IID")
     ) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=LLM_SPEC,
@@ -2429,17 +2489,15 @@ async def test_ingest_run_dual_writes_llm_rows(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_awaited_once()
-    rows = writer.record_results.await_args.args[0]
-    assert len(rows) == 1
-    assert rows[0].benchmark is Benchmark.LLM
     dual_write.assert_awaited_once()
     kwargs = dual_write.await_args_list[0].kwargs
     assert (kwargs["benchmark"], kwargs["sample_id"]) == (Benchmark.LLM, "R1/s1")
+    assert len(kwargs["results"]) == 1
+    assert kwargs["results"][0].benchmark is Benchmark.LLM
 
 
 @pytest.mark.asyncio
-async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
+async def test_ingest_run_normalized_failure_does_not_fallback_to_legacy_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writer = _stub_writer()
@@ -2448,7 +2506,7 @@ async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
     values = [{"simulation_output_id": "s1", "value": 0.5}]
 
     async with _fake_client({}, _run_json(values)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2460,7 +2518,7 @@ async def test_ingest_run_normalized_failure_does_not_lose_legacy_rows(
         )
 
     assert status is RunStatus.SUCCEEDED
-    writer.record_results.assert_awaited_once()
+    writer.record_results.assert_not_awaited()
     writer.finish_run.assert_awaited_once()
     dual_write.assert_awaited_once()
 
@@ -2507,7 +2565,7 @@ async def test_required_s2s_and_llm_capture_precedes_legacy_and_marks_backlog_pa
     async with _fake_client(
         {}, _run_json([{"simulation_output_id": "s1", "value": metric_value}], metric_id)
     ) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=spec,
@@ -2568,7 +2626,7 @@ async def test_required_import_restart_reuses_durable_claim_run(
     values = [{"simulation_output_id": "s1", "value": 0.5}]
 
     async with _fake_client({}, _run_json(values)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2663,7 +2721,7 @@ async def test_required_import_adopts_concurrent_seal_without_failing_run(
     values = [{"simulation_output_id": "s1", "value": 0.5}]
 
     async with _fake_client({}, _run_json(values)) as client:
-        status = await fetch_v2v._ingest_run(
+        status = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2719,7 +2777,7 @@ async def test_required_import_manifest_failure_remains_resumable(
     values = [{"simulation_output_id": "s1", "value": 0.5}]
 
     async with _fake_client({}, _run_json(values)) as client:
-        first = await fetch_v2v._ingest_run(
+        first = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2743,7 +2801,7 @@ async def test_required_import_manifest_failure_remains_resumable(
     upload_state.return_value = ("gs://private/state", "a" * 64)
 
     async with _fake_client({}, _run_json(values)) as client:
-        second = await fetch_v2v._ingest_run(
+        second = await _ingest_run(
             client,
             writer,
             spec=SPEC,
@@ -2774,11 +2832,12 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
     snapshot_failure: bool,
 ) -> None:
     monkeypatch.delenv("COVAL_S2S_GEMINI_AGENT_ID", raising=False)
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_openai_agent_id="a1",
         coval_s2s_dental_test_set_id="TSD",
         normalized_dual_write_enabled=True,
+        normalized_capture_required=True,
         benchmark_artifact_bucket="private-artifacts",
     )
     client = _fake_client({}, {})
@@ -2805,7 +2864,7 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
 
 
 def test_scenario_personas_join_the_condition_map() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_condition_personas={"legacy": "noisy"},
         coval_s2s_scenarios={
             "happy-smile": ScenarioCovalIds(
@@ -2822,7 +2881,7 @@ def test_scenario_personas_join_the_condition_map() -> None:
 
 
 def test_the_same_persona_may_serve_several_scenarios() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_condition_personas={"p1": "clean"},
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(test_set_id="TSB", personas={"clean": "p1"}),
@@ -2833,7 +2892,7 @@ def test_the_same_persona_may_serve_several_scenarios() -> None:
 
 
 def test_a_persona_with_two_conditions_is_a_configuration_error() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_condition_personas={"p1": "clean"},
         coval_s2s_scenarios={"bank": ScenarioCovalIds(test_set_id="TSB", personas={"low": "p1"})},
     )
@@ -2848,11 +2907,11 @@ def test_a_scenario_persona_with_an_unknown_condition_is_rejected_at_load() -> N
 
 def test_an_unknown_scenario_slug_is_rejected_at_load() -> None:
     with pytest.raises(ValueError, match="happy_smile"):
-        Settings(coval_s2s_scenarios={"happy_smile": ScenarioCovalIds(test_set_id="TSS")})
+        _settings(coval_s2s_scenarios={"happy_smile": ScenarioCovalIds(test_set_id="TSS")})
 
 
 def test_an_unknown_agent_model_key_faults() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_scenarios={
             "bank": ScenarioCovalIds(
                 test_set_id="TSB", agents={"gpt-realtime-1": "b1"}, personas={"clean": "p"}
@@ -2864,14 +2923,14 @@ def test_an_unknown_agent_model_key_faults() -> None:
 
 
 def test_unconfigured_scenarios_yield_no_specs() -> None:
-    settings = Settings(coval_s2s_scenarios={"happy-smile": ScenarioCovalIds(test_set_id="TSS")})
+    settings = _settings(coval_s2s_scenarios={"happy-smile": ScenarioCovalIds(test_set_id="TSS")})
     families = {spec.family for spec in fetch_v2v.s2s_specs(settings)}
     assert "s2s-happy-smile" in families
     assert "s2s-bank" not in families and "s2s-happy-customer" not in families
 
 
 def test_legacy_bank_agent_fields_seed_the_bank_block() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_condition_personas={"p": "clean"},
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_openai_agent_id="b1",
@@ -2880,7 +2939,7 @@ def test_legacy_bank_agent_fields_seed_the_bank_block() -> None:
     assert settings.coval_s2s_scenarios["bank"] == ScenarioCovalIds(
         test_set_id="TSB", agents={"gpt-realtime": "b1", "stepaudio-3-realtime-preview": "b5"}
     )
-    explicit = Settings(
+    explicit = _settings(
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_openai_agent_id="old",
         coval_s2s_scenarios={
@@ -2896,7 +2955,7 @@ def test_a_scenario_with_agents_but_no_personas_is_rejected_at_load() -> None:
     """An empty persona map would classify every caller as clean, so the tiers
     would pool into the clean dataset without a log line."""
     with pytest.raises(ValueError, match=r"\['happy-smile'\] configure agents but no personas"):
-        Settings(
+        _settings(
             coval_s2s_scenarios={
                 "happy-smile": ScenarioCovalIds(test_set_id="TSS", agents={"gpt-realtime": "a1"})
             }
@@ -2904,14 +2963,14 @@ def test_a_scenario_with_agents_but_no_personas_is_rejected_at_load() -> None:
 
 
 def test_the_legacy_bank_block_may_lean_on_the_legacy_persona_map() -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_condition_personas={"p": "clean"},
         coval_s2s_bank_test_set_id="TSB",
         coval_s2s_bank_openai_agent_id="b1",
     )
     assert settings.coval_s2s_scenarios["bank"].personas == {}
     with pytest.raises(ValueError, match=r"\['bank'\] configure agents but no personas"):
-        Settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_openai_agent_id="b1")
+        _settings(coval_s2s_bank_test_set_id="TSB", coval_s2s_bank_openai_agent_id="b1")
 
 
 def test_an_unknown_scenario_key_is_rejected_at_load() -> None:
@@ -2923,7 +2982,7 @@ def test_an_unknown_scenario_key_is_rejected_at_load() -> None:
 
 @pytest.mark.asyncio
 async def test_bank_test_set_ids_must_agree(monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_bank_test_set_id="TEXT",
         coval_s2s_bank_instruction_metric_id="BIM",
@@ -2956,7 +3015,7 @@ async def test_scenario_personas_do_not_need_the_shared_test_set(
 ) -> None:
     """A scenario-only deployment has no coval_s2s_test_set_id; its personas must
     not trip the legacy guard because every spec carries its own test set."""
-    settings = Settings(
+    settings = _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_bank_instruction_metric_id="BIM",
         coval_s2s_scenarios={
@@ -2989,7 +3048,7 @@ async def test_scenario_personas_do_not_need_the_shared_test_set(
 
 
 def _adherence_settings() -> Settings:
-    return Settings(
+    return _settings(
         coval_s2s_latency_metric_id="MID",
         coval_s2s_bank_instruction_metric_id="BIM",
         coval_s2s_scenarios={
@@ -3080,3 +3139,16 @@ async def test_adherence_scenarios_fetch_with_their_own_judge_ids(
     assert by_test_set["TSI"][Metric.INSTRUCTION_FOLLOWING] == "IAM"
     assert by_test_set["TSW"][Metric.WORKFLOW_ADHERENCE] == "WAM"
     assert Metric.INSTRUCTION_FOLLOWING not in by_test_set["TSW"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("benchmark", [Benchmark.S2S, Benchmark.LLM])
+async def test_persisted_import_rejects_disabled_capture_before_client(
+    benchmark: Benchmark, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = MagicMock()
+    monkeypatch.setattr(fetch_v2v, "_client", client)
+    configured = Settings(normalized_dual_write_enabled=False, normalized_capture_required=False)
+    with pytest.raises(RuntimeError, match="normalized persisted capture"):
+        await fetch_v2v.fetch_and_write_v2v(configured, benchmark=benchmark)
+    client.assert_not_called()

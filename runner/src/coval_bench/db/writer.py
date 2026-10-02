@@ -243,7 +243,6 @@ class RunWriter:
         """Fail before provider work when normalized capture/publication is unavailable."""
         required = (
             "runs",
-            "results",
             "metrics",
             "benchmark_observations",
             "observation_artifacts",
@@ -278,7 +277,6 @@ class RunWriter:
             "metric_evaluations",
             "metric_evaluation_inputs",
             "metric_values",
-            "results",
             "runs",
             "dashboard_source_refreshes",
         )
@@ -310,7 +308,7 @@ class RunWriter:
                        pg_get_serial_sequence('benchmarks_v2.' || table_name, 'id'),
                        'USAGE'
                    )""",
-                (["runs", "results", "metrics"],),
+                (["runs", "metrics"],),
             )
             denied_sequences = [
                 str(row[0] if not isinstance(row, dict) else row["table_name"])

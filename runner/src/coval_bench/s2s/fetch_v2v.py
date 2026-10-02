@@ -25,7 +25,7 @@ import structlog
 from google.cloud import storage
 
 from coval_bench import scenarios
-from coval_bench.config import Settings, get_settings
+from coval_bench.config import Settings, get_settings, require_normalized_persisted_capture
 from coval_bench.db.conn import lifespan_pool
 from coval_bench.db.models import MetricExecutor, Result, ResultStatus, RunStatus
 from coval_bench.db.registry_store import fetch_models
@@ -1103,7 +1103,6 @@ async def _ingest_run(
                         )
                     )
             else:
-                await writer.record_results(all_rows, created_at=captured_at)
                 if normalized_dual_write_enabled and spec.benchmark in (
                     Benchmark.S2S,
                     Benchmark.LLM,
@@ -1275,10 +1274,6 @@ async def _ingest_run(
         else:
             await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
-            try:
-                await writer.refresh_bucket(run_pk, period_seconds=period_seconds)
-            except Exception:
-                logger.warning("refresh_bucket_failed", provider=spec.provider, exc_info=True)
             try:
                 await writer.refresh_metric_values_bucket(run_pk)
             except Exception:
@@ -1614,6 +1609,7 @@ async def fetch_and_write_v2v(
     the cron may run more often than the sims.
     """
     settings = settings or get_settings()
+    require_normalized_persisted_capture(settings)
     specs = s2s_specs(settings) if benchmark is Benchmark.S2S else ()
 
     metric_id = settings.coval_s2s_latency_metric_id
@@ -1803,12 +1799,6 @@ async def fetch_and_write_v2v(
             from coval_bench.logging import log_run_unmapped_persona
 
             log_run_unmapped_persona(unmapped_personas)
-
-        if total_ingested:
-            try:
-                await writer.refresh_stats_matviews()
-            except Exception:
-                logger.warning("refresh_stats_matviews_failed", exc_info=True)
 
         try:
             await writer.refresh_dashboard_summaries()
