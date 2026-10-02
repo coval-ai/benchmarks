@@ -18,6 +18,7 @@ from pydantic import SecretStr
 
 from coval_bench.providers.base import STTProvider, TranscriptionResult
 from coval_bench.providers.stt._pacing import paced_chunks
+from coval_bench.providers.stt._stream import run_stream
 from coval_bench.providers.stt._transcript_utils import (
     add_partial_transcript,
     finalize_transcript,
@@ -121,27 +122,14 @@ class Reson8STTProvider(STTProvider):
             async with ws_client.connect(
                 self._build_websocket_url(sample_rate), additional_headers=headers
             ) as ws:
-                send_task = asyncio.create_task(
+                await run_stream(
+                    result,
                     self._send_audio(
                         ws, audio_data, sample_rate, result, realtime_resolution, flushed_event
-                    )
+                    ),
+                    self._receive(ws, result, flushed_event),
+                    no_final_error="ws_closed_without_final_transcript",
                 )
-                recv_task = asyncio.create_task(self._receive(ws, result, flushed_event))
-                tasks = (send_task, recv_task)
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-                if any(not task.cancelled() and task.exception() is not None for task in done):
-                    for task in pending:
-                        task.cancel()
-                outcomes = await asyncio.gather(*tasks, return_exceptions=True)
-                if result.error is None and result.audio_to_final_seconds is None:
-                    for outcome in outcomes:
-                        if isinstance(outcome, Exception):
-                            result.error = str(outcome)
-                            break
-                    else:
-                        # Stamped here, not in _receive: a close-gate message set
-                        # mid-stream would stop the sender and mask a real exception.
-                        result.error = "ws_closed_without_final_transcript"
 
         except Exception as exc:
             logger.warning(
