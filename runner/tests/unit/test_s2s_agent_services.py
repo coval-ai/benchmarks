@@ -1,6 +1,8 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Any
+
 import pytest
 
 pytest.importorskip("pipecat")
@@ -16,7 +18,7 @@ from coval_bench.config import Settings
 from coval_bench.s2s_agent import services
 from coval_bench.s2s_agent.stack import load_stack
 
-KEYS = {
+KEYS: dict[str, Any] = {
     "deepgram_api_key": "dg",
     "openai_api_key": "oa",
     "elevenlabs_api_key": "el",
