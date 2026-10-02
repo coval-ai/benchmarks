@@ -1,0 +1,30 @@
+{
+  "architecture": "cascade",
+
+  "stt": {
+    "provider": "soniox",
+    "model": "stt-rt-v5"
+  },
+
+  "llm": {
+    "provider": "google",
+    "model": "gemini-2.5-flash",
+    "temperature": 0
+  },
+
+  "tts": {
+    "provider": "soniox",
+    "model": "tts-rt-v2",
+    "voice": "Emma"
+  },
+
+  "turn_taking": {
+    "vad_stop_secs": 0.2,
+    "turn_analyzer": "smart-turn-v3"
+  },
+
+  "audio": {
+    "in_sample_rate_hz": 16000,
+    "out_sample_rate_hz": 24000
+  }
+}

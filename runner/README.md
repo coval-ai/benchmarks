@@ -39,8 +39,10 @@ The agent for the S2S board, as far as it goes today: a cascade running on this
 machine's microphone and speakers, with Silero and smart-turn deciding the
 caller's turn. A stack file under `src/coval_bench/s2s_agent/stacks/` names one
 provider and model per role; `--stack` picks it (default
-`cascade-nova3-gpt41-flash`, which mirrors `scenarios/stack.json`) and
-`--scenario` the prompt (default `bank`).
+`cascade-nova3-gpt41-flash`, which mirrors `scenarios/stack.json`; also
+`cascade-soniox-gemini`) and `--scenario` the prompt (default `bank`). Vendors
+are a table in `s2s_agent/services/`: a Pipecat class per role and the key it
+uses. Adding one is a line there and its Pipecat extra.
 
 ```bash
 brew install portaudio                                  # once; pyaudio builds against it

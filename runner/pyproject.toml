@@ -60,7 +60,7 @@ google-tts = ["google-cloud-texttospeech>=2.29"]  # >=2.29 for Gemini-TTS stream
 hume-tts = ["hume>=0.7"]
 hf-parquet = ["pyarrow>=17"]  # build-time only: parquet fallback for unconverted HF datasets
 livekit = ["livekit-agents[deepgram,openai,elevenlabs,silero]~=1.6"]  # the LiveKit agent image only
-s2s-agent = ["pipecat-ai[deepgram,elevenlabs,openai,silero,websocket]~=1.12"]  # the S2S agent image only
+s2s-agent = ["pipecat-ai[deepgram,elevenlabs,google,openai,silero,soniox,websocket]~=1.12"]  # the S2S agent image only
 s2s-agent-local = ["pipecat-ai[local]~=1.12"]  # mic and speakers for `--local-audio`; needs portaudio
 
 [project.scripts]

@@ -18,12 +18,12 @@ from pipecat.workers.runner import WorkerRunner
 from coval_bench.config import get_settings
 from coval_bench.logging import configure_logging
 from coval_bench.s2s_agent.pipeline import cascade_processors, context_aggregators
-from coval_bench.s2s_agent.services.cascade import Keys, build_llm, build_stt, build_tts
+from coval_bench.s2s_agent.services import resolve
 from coval_bench.s2s_agent.stack import LoadedStack, load_stack
 
 
 async def run(loaded: LoadedStack) -> None:
-    keys = Keys.from_settings(get_settings())
+    services = resolve(loaded, get_settings())
     audio = loaded.stack.audio
     transport = LocalAudioTransport(
         LocalAudioTransportParams(
@@ -34,9 +34,7 @@ async def run(loaded: LoadedStack) -> None:
         )
     )
     aggregators = context_aggregators(loaded)
-    middle = cascade_processors(
-        build_stt(loaded, keys), build_llm(loaded, keys), build_tts(loaded, keys), aggregators
-    )
+    middle = cascade_processors(services.stt, services.llm, services.tts, aggregators)
     worker = PipelineWorker(
         Pipeline([transport.input(), *middle, transport.output(), aggregators.assistant()]),
         params=PipelineParams(

@@ -147,7 +147,7 @@ def test_the_hash_covers_the_stack_file_and_the_prompt() -> None:
 
 
 def test_an_unknown_stack_names_the_ones_that_exist() -> None:
-    assert stacks.stack_slugs() == [REFERENCE]
+    assert stacks.stack_slugs() == [REFERENCE, "cascade-soniox-gemini"]
     with pytest.raises(ValueError, match=REFERENCE):
         stacks.load_stack("bank", "nope")
 
