@@ -706,7 +706,7 @@ class RunWriter:
             (observation_id, metric_id, metric_type, metric_version, evaluation_variant, executor,
              external_request_id, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (observation_id, metric_type, metric_version, evaluation_variant)
+            ON CONFLICT (observation_id, metric_id, metric_version, evaluation_variant)
             DO NOTHING
             RETURNING id, observation_id, metric_id, metric_type, metric_version,
                       evaluation_variant, executor,
@@ -749,20 +749,29 @@ class RunWriter:
                 metric_id = int(metric_row["id"])
                 if evaluation.metric_id is not None and evaluation.metric_id != metric_id:
                     raise ValueError("metric code and id must refer to the same definition")
-                await cur.execute(
-                    sql,
-                    (
-                        evaluation.observation_id,
-                        metric_id,
-                        evaluation.metric_type,
-                        evaluation.metric_version,
-                        evaluation.evaluation_variant,
-                        evaluation.executor,
-                        evaluation.external_request_id,
-                        evaluation.status,
-                    ),
-                )
-                row = await cur.fetchone()
+                try:
+                    async with conn.transaction():
+                        await cur.execute(
+                            sql,
+                            (
+                                evaluation.observation_id,
+                                metric_id,
+                                evaluation.metric_type,
+                                evaluation.metric_version,
+                                evaluation.evaluation_variant,
+                                evaluation.executor,
+                                evaluation.external_request_id,
+                                evaluation.status,
+                            ),
+                        )
+                        row = await cur.fetchone()
+                except psycopg.errors.UniqueViolation as exc:
+                    if exc.diag.constraint_name != (
+                        "metric_evaluations_observation_id_metric_type_metric_versio_key"
+                    ):
+                        raise
+                    # Concurrent inserts may hit the retained code key before the ID arbiter.
+                    row = None
                 created = row is not None
                 if row is None:
                     await cur.execute(
@@ -772,40 +781,16 @@ class RunWriter:
                                   created_at, updated_at
                            FROM benchmarks_v2.metric_evaluations
                            WHERE observation_id = %s
-                             AND metric_type = %s AND metric_version = %s
+                             AND metric_id = %s AND metric_version = %s
                              AND evaluation_variant = %s""",
                         (
                             evaluation.observation_id,
-                            evaluation.metric_type,
+                            metric_id,
                             evaluation.metric_version,
                             evaluation.evaluation_variant,
                         ),
                     )
                     row = await cur.fetchone()
-                    if row is not None and row["metric_id"] is None:
-                        evaluation_id = row["id"]
-                        await cur.execute(
-                            """UPDATE benchmarks_v2.metric_evaluations
-                               SET metric_id = %s WHERE id = %s AND metric_id IS NULL
-                               RETURNING id, observation_id, metric_id, metric_type, metric_version,
-                                         evaluation_variant, executor, external_request_id, status,
-                                         started_at, finished_at, error, created_at, updated_at""",
-                            (metric_id, evaluation_id),
-                        )
-                        row = await cur.fetchone()
-                        if row is None:
-                            await cur.execute(
-                                """SELECT id, observation_id, metric_id, metric_type,
-                                          metric_version,
-                                          evaluation_variant, executor,
-                                          external_request_id, status, started_at,
-                                          finished_at, error,
-                                          created_at, updated_at
-                                   FROM benchmarks_v2.metric_evaluations
-                                   WHERE id = %s""",
-                                (evaluation_id,),
-                            )
-                            row = await cur.fetchone()
                 if row is not None:
                     await cur.execute(
                         """SELECT observation_artifact_id, preprocessing_artifact_id,
