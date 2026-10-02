@@ -10,7 +10,11 @@ from typing import Any
 import pytest
 import structlog
 
-from coval_bench.config import SECRET_PLACEHOLDER, Settings
+from coval_bench.config import (
+    SECRET_PLACEHOLDER,
+    Settings,
+    require_normalized_persisted_capture,
+)
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -64,3 +68,14 @@ def test_required_normalized_capture_requires_explicit_dual_write_and_bucket() -
         benchmark_artifact_bucket="private",
     )
     assert settings.normalized_capture_required is True
+
+
+def test_persisted_entrypoint_guard_requires_all_capture_settings() -> None:
+    with pytest.raises(RuntimeError, match="normalized_dual_write_enabled"):
+        require_normalized_persisted_capture(_settings())
+    settings = _settings(
+        normalized_dual_write_enabled=True,
+        normalized_capture_required=True,
+        benchmark_artifact_bucket="private",
+    )
+    require_normalized_persisted_capture(settings)
