@@ -113,8 +113,7 @@ def _ensure_index(bind: Connection, name: str, table: str, columns: str) -> None
     exact, ready = _index_state(bind, name, table, columns)
     if exact and ready:
         return
-    if exact or ready is False:
-        bind.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.{name}")
+    bind.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS benchmarks_v2.{name}")
     bind.exec_driver_sql(
         f"CREATE UNIQUE INDEX CONCURRENTLY {name} ON benchmarks_v2.{table} ({columns})"
     )

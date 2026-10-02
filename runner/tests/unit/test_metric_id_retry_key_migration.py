@@ -287,6 +287,60 @@ def test_stale_named_indexes_are_recovered(seeded: Any) -> None:
     assert row == (True, True, True, True, True)
 
 
+def test_same_name_nonunique_index_is_rebuilt(seeded: Any) -> None:
+    before = _payloads(seeded)
+    seeded.execute(
+        """CREATE INDEX metric_evaluations_metric_identity_key
+           ON benchmarks_v2.metric_evaluations
+           (observation_id, metric_id, metric_version, evaluation_variant)"""
+    )
+    old_oid = seeded.execute(
+        "SELECT 'benchmarks_v2.metric_evaluations_metric_identity_key'::regclass::oid"
+    ).fetchone()[0]
+    _migrate(seeded, "20261002_0042")
+    assert _payloads(seeded) == before
+    assert _index_definition(seeded, "metric_evaluations_metric_identity_key")[1:] == (
+        True,
+        True,
+        True,
+        True,
+        True,
+        ["observation_id", "metric_id", "metric_version", "evaluation_variant"],
+    )
+    new_oid = seeded.execute(
+        "SELECT 'benchmarks_v2.metric_evaluations_metric_identity_key'::regclass::oid"
+    ).fetchone()[0]
+    assert new_oid != old_oid
+    duplicate_sql = """INSERT INTO benchmarks_v2.metric_evaluations
+                       (observation_id, metric_id, metric_type, metric_version,
+                        evaluation_variant, executor, status)
+                       SELECT observation_id, metric_id, metric_type, metric_version,
+                              evaluation_variant, executor, 'queued'
+                       FROM benchmarks_v2.metric_evaluations LIMIT 1"""
+    assert (
+        seeded.execute(
+            duplicate_sql
+            + " ON CONFLICT (observation_id, metric_id, metric_version, evaluation_variant)"
+            + " DO NOTHING RETURNING id"
+        ).fetchone()
+        is None
+    )
+    assert _payloads(seeded) == before
+    with pytest.raises(psycopg.errors.UniqueViolation) as error, seeded.transaction():
+        seeded.execute(
+            """ALTER TABLE benchmarks_v2.metric_evaluations DROP CONSTRAINT
+               metric_evaluations_observation_id_metric_type_metric_versio_key"""
+        )
+        seeded.execute(duplicate_sql)
+    assert error.value.diag.constraint_name == "metric_evaluations_metric_identity_key"
+    assert _payloads(seeded) == before
+    assert seeded.execute(
+        """SELECT count(*) FROM pg_constraint
+           WHERE conrelid='benchmarks_v2.metric_evaluations'::regclass
+             AND conname='metric_evaluations_observation_id_metric_type_metric_versio_key'"""
+    ).fetchone() == (1,)
+
+
 def test_partial_index_migration_retries_and_preserves_first_oid(seeded: Any) -> None:
     seen = False
 
