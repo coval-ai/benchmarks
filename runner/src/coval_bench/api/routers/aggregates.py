@@ -518,13 +518,14 @@ WITH source AS (
  FROM source
 ), grouped AS (
  SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
+        MAX(source_at) AS latest_source_at,
         percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
  FROM observation_values
  WHERE value IS NOT NULL AND value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
  GROUP BY provider, model, {bucket_expr}
 )
 SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
-       value, sample_count, 'percentile' AS aggregation_method
+       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
 FROM grouped ORDER BY scheduled_at, provider, model
 """
 
@@ -545,6 +546,7 @@ WITH source AS (
    )
 ), grouped AS (
  SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
+        MAX(source_at) AS latest_source_at,
         percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
  FROM source
  WHERE value IS NOT NULL
@@ -552,7 +554,7 @@ WITH source AS (
  GROUP BY provider, model, {bucket_expr}
 )
 SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
-       value, sample_count, 'percentile' AS aggregation_method
+       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
 FROM grouped ORDER BY scheduled_at, provider, model
 """
 

@@ -2107,6 +2107,46 @@ async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
         assert body["points"][0]["insufficient_samples"] is True
 
 
+@pytest.mark.parametrize("normalized", [False, True])
+@pytest.mark.parametrize("window,bucket_seconds", [("7d", 3600), ("30d", 14400)])
+async def test_exact_percentile_preserves_latest_source_timestamp(
+    client: AsyncClient, postgresql: Any, normalized: bool, window: str, bucket_seconds: int
+) -> None:
+    now = datetime.now(dt.UTC)
+    bucket_start = now.replace(
+        hour=now.hour // 4 * 4, minute=0, second=0, microsecond=0
+    ) - timedelta(days=1)
+    for offset, value in ((5, 1.0), (45, 9.0)):
+        run_id = await _insert_run(
+            postgresql, scheduled_at=bucket_start + timedelta(minutes=offset)
+        )
+        if normalized:
+            await _insert_normalized_metric(
+                postgresql,
+                run_id,
+                dataset_id="stt-v1",
+                metric_type="TTFT",
+                values={"primary": value},
+            )
+        else:
+            await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=value)
+    client._transport.app.state.settings.normalized_dashboard_reads_enabled = normalized  # type: ignore[attr-defined]
+
+    response = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "window": window, "statistic": "p95", "metric_type": "TTFT"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bucket_seconds"] == bucket_seconds
+    assert len(body["points"]) == 1
+    point = body["points"][0]
+    assert datetime.fromisoformat(point["scheduled_at"]) == bucket_start
+    assert point["sample_count"] == 2
+    assert point["value"] == pytest.approx(8.6)
+    assert datetime.fromisoformat(body["latest_source_at"]) == bucket_start + timedelta(minutes=45)
+
+
 async def test_exact_percentile_requires_supported_metric_and_preserves_default(
     client: AsyncClient, postgresql: Any
 ) -> None:
