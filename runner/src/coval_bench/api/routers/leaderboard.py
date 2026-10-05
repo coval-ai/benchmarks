@@ -34,7 +34,6 @@ from coval_bench.api.common import (
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
-    reads_normalized,
 )
 from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
@@ -127,7 +126,7 @@ async def get_leaderboard(
         "dataset": _PRIMARY_DATASET_BY_BENCHMARK.get(benchmark, DATASET_ALL),
         "interval": WINDOW_INTERVALS[window],
     }
-    normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
+    normalized = settings.normalized_dashboard_reads_enabled
     sql = (_SAVED_MV_SQL_TEMPLATE if normalized else _MV_SQL_TEMPLATE).format(
         view=SUMMARY_VIEWS[window] if normalized else WINDOW_VIEWS[window]
     )
