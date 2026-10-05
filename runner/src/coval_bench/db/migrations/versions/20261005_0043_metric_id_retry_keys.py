@@ -8,8 +8,8 @@ from __future__ import annotations
 from alembic import op
 from sqlalchemy.engine import Connection
 
-revision = "20261002_0042"
-down_revision = "20260921_0041"
+revision = "20261005_0043"
+down_revision = "20260929_0042"
 branch_labels = None
 depends_on = None
 

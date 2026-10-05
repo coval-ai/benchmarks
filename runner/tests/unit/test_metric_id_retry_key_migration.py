@@ -40,7 +40,7 @@ def _migrate(conn: Any, revision: str, *, down: bool = False) -> None:
 
 @pytest.fixture
 def seeded(pg_conn: Any) -> Any:
-    _migrate(pg_conn, "20260921_0041")
+    _migrate(pg_conn, "20260929_0042")
     pg_conn.autocommit = True
     with pg_conn.transaction():
         run_id = pg_conn.execute(
@@ -123,6 +123,7 @@ def _payloads(conn: Any) -> dict[str, list[Any]]:
             "metric_values_by_bucket",
             "dashboard_hourly_aggregates",
             "dashboard_summary_state",
+            "metrics",
         )
     }
 
@@ -157,7 +158,7 @@ def _index_definition(conn: Any, name: str) -> tuple[Any, ...]:
 
 
 def test_upgrade_keys_all_dimensions_and_variations(seeded: Any) -> None:
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "head")
     assert len(_index_names(seeded)) == 3
     sync_definition = seeded.execute(
         "SELECT pg_get_functiondef('benchmarks_v2.sync_metric_evaluation_identity()'::regprocedure)"
@@ -248,13 +249,18 @@ def test_upgrade_keys_all_dimensions_and_variations(seeded: Any) -> None:
 
 
 def test_downgrade_reupgrade_preserves_payloads_and_old_keys(seeded: Any) -> None:
-    _migrate(seeded, "20261002_0042")
     before = _payloads(seeded)
+    workflow_metric = seeded.execute(
+        "SELECT id FROM benchmarks_v2.metrics WHERE code='WorkflowAdherence'"
+    ).fetchone()
+    assert workflow_metric is not None
+    _migrate(seeded, "20261005_0043")
+    assert _payloads(seeded) == before
     assert seeded.execute(
         """SELECT pg_get_triggerdef(oid) NOT LIKE '%WHEN (%'
            FROM pg_trigger WHERE tgname='metric_evaluations_validate_update'"""
     ).fetchone() == (True,)
-    _migrate(seeded, "20260921_0041", down=True)
+    _migrate(seeded, "20260929_0042", down=True)
     assert _index_names(seeded) == set()
     assert _payloads(seeded) == before
     assert seeded.execute(
@@ -265,13 +271,19 @@ def test_downgrade_reupgrade_preserves_payloads_and_old_keys(seeded: Any) -> Non
         "SELECT pg_get_functiondef('benchmarks_v2.sync_metric_evaluation_identity()'::regprocedure)"
     ).fetchone()[0]
     assert "pg_advisory_xact_lock" not in sync_definition
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "20261005_0043")
     assert _index_names(seeded) == {
         "metric_evaluations_metric_identity_key",
         "metric_values_by_bucket_metric_identity_key",
         "dashboard_hourly_aggregates_metric_identity_key",
     }
     assert _payloads(seeded) == before
+    assert (
+        seeded.execute(
+            "SELECT id FROM benchmarks_v2.metrics WHERE code='WorkflowAdherence'"
+        ).fetchone()
+        == workflow_metric
+    )
 
 
 def test_stale_named_indexes_are_recovered(seeded: Any) -> None:
@@ -279,7 +291,7 @@ def test_stale_named_indexes_are_recovered(seeded: Any) -> None:
         """CREATE UNIQUE INDEX metric_evaluations_metric_identity_key
            ON benchmarks_v2.metric_evaluations (observation_id) WHERE status='queued'"""
     )
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "20261005_0043")
     row = seeded.execute(
         """SELECT indisunique, indisvalid, indisready, indpred IS NULL, indexprs IS NULL
            FROM pg_index WHERE indexrelid='benchmarks_v2.metric_evaluations_metric_identity_key'::regclass"""
@@ -297,7 +309,7 @@ def test_same_name_nonunique_index_is_rebuilt(seeded: Any) -> None:
     old_oid = seeded.execute(
         "SELECT 'benchmarks_v2.metric_evaluations_metric_identity_key'::regclass::oid"
     ).fetchone()[0]
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "20261005_0043")
     assert _payloads(seeded) == before
     assert _index_definition(seeded, "metric_evaluations_metric_identity_key")[1:] == (
         True,
@@ -359,16 +371,16 @@ def test_partial_index_migration_retries_and_preserves_first_oid(seeded: Any) ->
     event.listen(Engine, "after_cursor_execute", interrupt_after_first_index)
     try:
         with pytest.raises(RuntimeError, match="simulated migration interruption"):
-            _migrate(seeded, "20261002_0042")
+            _migrate(seeded, "20261005_0043")
     finally:
         event.remove(Engine, "after_cursor_execute", interrupt_after_first_index)
     first_oid = seeded.execute(
         "SELECT 'benchmarks_v2.metric_evaluations_metric_identity_key'::regclass::oid"
     ).fetchone()[0]
     assert seeded.execute("SELECT version_num FROM alembic_version").fetchone() == (
-        "20260921_0041",
+        "20260929_0042",
     )
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "20261005_0043")
     assert seeded.execute(
         "SELECT 'benchmarks_v2.metric_evaluations_metric_identity_key'::regclass::oid"
     ).fetchone() == (first_oid,)
@@ -382,7 +394,7 @@ def test_identity_preflight_rejects_null_or_mismatch(seeded: Any) -> None:
     )
     seeded.execute("SET session_replication_role='origin'")
     with pytest.raises(RuntimeError, match="mismatched metric identities"):
-        _migrate(seeded, "20261002_0042")
+        _migrate(seeded, "20261005_0043")
 
 
 def test_identity_preflight_rejects_nullable_column_before_indexes(seeded: Any) -> None:
@@ -390,7 +402,7 @@ def test_identity_preflight_rejects_nullable_column_before_indexes(seeded: Any) 
         "ALTER TABLE benchmarks_v2.metric_values_by_bucket ALTER COLUMN metric_id DROP NOT NULL"
     )
     with pytest.raises(RuntimeError, match="must be NOT NULL"):
-        _migrate(seeded, "20261002_0042")
+        _migrate(seeded, "20261005_0043")
     assert _index_names(seeded) == set()
 
 
@@ -433,6 +445,6 @@ def test_canceled_concurrent_build_is_recovered(seeded: Any) -> None:
                 builder.cancel()
             blocker.rollback()
     assert _index_definition(seeded, name)[2] is False
-    _migrate(seeded, "20261002_0042")
+    _migrate(seeded, "20261005_0043")
     assert _index_definition(seeded, name)[1:6] == (True, True, True, True, True)
     assert _payloads(seeded) == before
