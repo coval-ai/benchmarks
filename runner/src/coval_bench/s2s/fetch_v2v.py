@@ -15,7 +15,7 @@ import hashlib
 import importlib.resources
 import random
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -41,6 +41,7 @@ from coval_bench.runner.capture import (
     upload_import_run_claim,
 )
 from coval_bench.s2s.conditions import (
+    ADHERENCE_SLUGS,
     DATASET_ID,
     DEFAULT_CONDITION,
     FAMILY_DENTAL,
@@ -88,6 +89,7 @@ class AgentSpec:
     # overriding the global coval_s2s_instruction_metric_id. None uses the
     # global one.
     instruction_metric_id_attr: str | None = None
+    metric_ids: Mapping[Metric, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -170,9 +172,10 @@ SCENARIO_MODELS: tuple[tuple[str, str], ...] = (
 def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
     """One spec per (scenario, model); unconfigured ones carry no agent id and are skipped.
 
-    Every scenario's instruction metric is the Validate Expected Behaviors judge,
-    a fraction rather than a verdict, which the instruction mapper scales to a
-    percentage.
+    Domain scenarios share the bank Validate Expected Behaviors judge; an
+    adherence scenario carries its own judge id and is skipped (with a warning)
+    until it names one. Both judges return a fraction rather than a verdict,
+    which the instruction mapper scales to a percentage.
     """
     known = {model for _provider, model in SCENARIO_MODELS}
     specs: list[AgentSpec] = []
@@ -186,6 +189,20 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                 f"coval_s2s_scenarios[{scenario.slug!r}].agents names unknown model(s) "
                 f"{unknown}; expected one of {sorted(known)}"
             )
+        metric_ids = {
+            metric: ident
+            for metric, ident in (
+                (Metric.INSTRUCTION_FOLLOWING, ids.instruction_metric_id),
+                (Metric.WORKFLOW_ADHERENCE, ids.workflow_metric_id),
+            )
+            if ident
+        }
+        adherence_metric = ADHERENCE_SLUGS.get(scenario.slug)
+        if adherence_metric is not None and adherence_metric not in metric_ids:
+            logger.warning(
+                "scenario_metric_id_unset", scenario=scenario.slug, metric=adherence_metric.value
+            )
+            continue
         for provider, model in SCENARIO_MODELS:
             specs.append(
                 AgentSpec(
@@ -194,7 +211,13 @@ def _scenario_specs(settings: Settings) -> tuple[AgentSpec, ...]:
                     model=model,
                     test_set_id=ids.test_set_id,
                     family=scenario.family(Benchmark.S2S),
-                    instruction_metric_id_attr=scenarios.ACTIVE.instruction_metric_id_attr,
+                    publish_samples=adherence_metric is None,
+                    instruction_metric_id_attr=(
+                        None
+                        if adherence_metric is not None
+                        else scenarios.ACTIVE.instruction_metric_id_attr
+                    ),
+                    metric_ids=metric_ids,
                 )
             )
     return tuple(specs)
@@ -545,6 +568,7 @@ _VALUE_MAPPERS: dict[Metric, Callable[[object], tuple[float | None, ResultStatus
     Metric.INSTRUCTION_FOLLOWING: _instruction_value,
     Metric.INTERRUPTION_RATE: _interruption_value,
     Metric.CALL_LENGTH: _call_length_value,
+    Metric.WORKFLOW_ADHERENCE: _instruction_value,
 }
 
 
@@ -1124,6 +1148,7 @@ async def _ingest_run(
             slot=str(scheduled_at),
             clips=len(rows),
             instruction=len(by_metric.get(Metric.INSTRUCTION_FOLLOWING, [])),
+            workflow=len(by_metric.get(Metric.WORKFLOW_ADHERENCE, [])),
             ttft=len(by_metric.get(Metric.TTFT, [])),
             success=sum(1 for r in rows if r.status is ResultStatus.SUCCESS),
         )
@@ -1743,6 +1768,7 @@ async def fetch_and_write_v2v(
                     **metric_ids,
                     Metric.INSTRUCTION_FOLLOWING: spec_instruction_metric_id,
                 }
+            spec_metric_ids = {**spec_metric_ids, **spec.metric_ids}
             status_key = f"{spec.family}:{spec.provider}:{spec.model}"
             statuses[status_key], ingested = await _fetch_one_provider(
                 client,

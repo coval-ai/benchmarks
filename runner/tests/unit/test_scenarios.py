@@ -33,6 +33,8 @@ def test_the_table_follows_the_slug_tuple_with_bank_first() -> None:
         "Ultra Bank",
         "Happy Customer",
         "Happy Smile Clinic",
+        "Ultra Bank · Instruction Adherence",
+        "Ultra Bank · Workflow Adherence",
     ]
 
 
