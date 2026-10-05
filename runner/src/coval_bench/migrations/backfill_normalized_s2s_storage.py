@@ -48,6 +48,7 @@ _METRICS = {
     "InstructionFollowing": "percent",
     "InterruptionRate": "per_minute",
     "CallLength": "seconds",
+    "WorkflowAdherence": "percent",
 }
 _MISMATCH_KEYS = {
     "payload_mismatches": "payload_mismatch_count",

@@ -107,10 +107,23 @@ def test_scenario_dataset_ids_derive_from_the_slug() -> None:
     assert conditions.scenario_dataset_id("happy-customer", conditions.Condition.NOISY) is None
     for slug in conditions.SCENARIO_SLUGS:
         family = conditions.scenario_family(slug)
+        adherence = conditions.ADHERENCE_SLUGS.get(slug)
         clean = conditions.dataset_id_for(family, conditions.Condition.CLEAN)
         assert clean is not None
-        assert conditions.condition_for(clean).required is Metric.V2V
+        assert conditions.condition_for(clean).required is (adherence or Metric.V2V)
         for tier in conditions.TIERS:
             tier_id = conditions.dataset_id_for(family, tier)
             assert tier_id is not None
-            assert conditions.condition_for(tier_id).required is Metric.INSTRUCTION_FOLLOWING
+            assert conditions.condition_for(tier_id).required is (
+                adherence or Metric.INSTRUCTION_FOLLOWING
+            )
+
+
+def test_adherence_scenarios_fetch_only_their_judge() -> None:
+    for slug, metric in conditions.ADHERENCE_SLUGS.items():
+        assert not slug.startswith("bank")
+        family = conditions.scenario_family(slug)
+        for condition in (conditions.Condition.CLEAN, *conditions.TIERS):
+            dataset_id = conditions.dataset_id_for(family, condition)
+            assert dataset_id is not None
+            assert conditions.condition_for(dataset_id).fetched == {metric}
