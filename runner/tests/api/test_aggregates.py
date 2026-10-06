@@ -2069,3 +2069,362 @@ async def _publish_timeline_test_hours(postgresql: Any) -> None:
             for i in range(int((last - first).total_seconds() / 3600) + 1)
         ]
         await refresh_hourly_aggregates(pool, hours=hours)
+
+
+async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Percentiles use every eligible legacy observation, rather than run medians."""
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    # Two distinct source slots fall in one hourly output interval, with
+    # unequal sample counts. Averaging their medians would incorrectly give 5.
+    for offset, values in ((5, (1.0,)), (35, (9.0, 9.0, 9.0))):
+        run_id = await _insert_run(
+            postgresql, scheduled_at=scheduled - timedelta(hours=1) + timedelta(minutes=offset)
+        )
+        for value in values:
+            await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=value)
+
+    for statistic, expected in (("p50", 9.0), ("p90", 9.0), ("p95", 9.0)):
+        response = await client.get(
+            "/v1/results/timeline",
+            params={
+                "benchmark": "STT",
+                "window": "7d",
+                "statistic": statistic,
+                "metric_type": "TTFT",
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["statistic"] == statistic
+        assert body["metric_type"] == "TTFT"
+        assert body["precision"] == "exact"
+        assert body["percentile_method"] == "continuous"
+        assert body["weighting"] == "observation"
+        assert body["points"][0]["value"] == pytest.approx(expected)
+        assert body["points"][0]["aggregation_method"] == "percentile"
+        assert body["points"][0]["sample_count"] == 4
+        assert body["points"][0]["insufficient_samples"] is True
+
+
+@pytest.mark.parametrize("normalized", [False, True])
+@pytest.mark.parametrize("window,bucket_seconds", [("7d", 3600), ("30d", 14400)])
+async def test_exact_percentile_preserves_latest_source_timestamp(
+    client: AsyncClient, postgresql: Any, normalized: bool, window: str, bucket_seconds: int
+) -> None:
+    now = datetime.now(dt.UTC)
+    bucket_start = now.replace(
+        hour=now.hour // 4 * 4, minute=0, second=0, microsecond=0
+    ) - timedelta(days=1)
+    for offset, value in ((5, 1.0), (45, 9.0)):
+        run_id = await _insert_run(
+            postgresql, scheduled_at=bucket_start + timedelta(minutes=offset)
+        )
+        if normalized:
+            await _insert_normalized_metric(
+                postgresql,
+                run_id,
+                dataset_id="stt-v1",
+                metric_type="TTFT",
+                values={"primary": value},
+            )
+        else:
+            await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=value)
+    client._transport.app.state.settings.normalized_dashboard_reads_enabled = normalized  # type: ignore[attr-defined]
+
+    response = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "window": window, "statistic": "p95", "metric_type": "TTFT"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metric_type"] == "TTFT"
+    assert body["bucket_seconds"] == bucket_seconds
+    assert len(body["points"]) == 1
+    point = body["points"][0]
+    assert datetime.fromisoformat(point["scheduled_at"]) == bucket_start
+    assert point["sample_count"] == 2
+    assert point["value"] == pytest.approx(8.6)
+    assert datetime.fromisoformat(body["latest_source_at"]) == bucket_start + timedelta(minutes=45)
+
+
+async def test_exact_percentile_requires_supported_metric_and_preserves_default(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    response = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "statistic": "p95"},
+    )
+    assert response.status_code == 422
+
+    run_id = await _insert_run(postgresql, scheduled_at=datetime.now(dt.UTC))
+    await _insert_result(postgresql, run_id, metric_type="TTFT", metric_value=0.0)
+    default = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
+    assert default.status_code == 200
+    assert default.json()["statistic"] == "default"
+    assert default.json()["metric_type"] is None
+    assert default.json()["precision"] is None
+
+
+@pytest.mark.parametrize(
+    ("statistic", "metric_type"),
+    [("default", None), ("default", "TTFT"), ("p95", "TTFT")],
+)
+async def test_timeline_echoes_metric_type_for_empty_results_and_cached_repeats(
+    client: AsyncClient, statistic: str, metric_type: str | None
+) -> None:
+    params: dict[str, str] = {"benchmark": "STT", "window": "7d", "statistic": statistic}
+    if metric_type is not None:
+        params["metric_type"] = metric_type
+
+    for _ in range(2):
+        response = await client.get("/v1/results/timeline", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["statistic"] == statistic
+        assert body["metric_type"] == metric_type
+        assert body["points"] == []
+
+
+async def test_exact_percentile_reads_normalized_observations_and_excludes_null_schedule(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    included = await _insert_run(postgresql, scheduled_at=scheduled)
+    await _insert_normalized_metric(
+        postgresql,
+        included,
+        dataset_id="stt-v1",
+        metric_type="TTFT",
+        values={"primary": 12.0},
+    )
+    excluded = await _insert_run(postgresql, scheduled_at=None)
+    await _insert_normalized_metric(
+        postgresql,
+        excluded,
+        dataset_id="stt-v1",
+        metric_type="TTFT",
+        values={"primary": 999.0},
+    )
+    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    response = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "window": "7d", "statistic": "p95", "metric_type": "TTFT"},
+    )
+    assert response.status_code == 200
+    points = response.json()["points"]
+    assert len(points) == 1
+    assert points[0]["value"] == pytest.approx(12.0)
+    assert points[0]["sample_count"] == 1
+
+
+async def test_exact_wer_percentile_does_not_pool_reference_words(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    for value, substitutions, references in ((10.0, 1.0, 10.0), (90.0, 90.0, 100.0)):
+        run_id = await _insert_run(postgresql, scheduled_at=scheduled)
+        await _insert_normalized_metric(
+            postgresql,
+            run_id,
+            dataset_id="stt-v1",
+            metric_type="WER",
+            values={
+                "primary": value,
+                "substitution_count": substitutions,
+                "deletion_count": 0.0,
+                "insertion_count": 0.0,
+                "reference_words": references,
+            },
+        )
+    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    response = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "window": "7d", "statistic": "p50", "metric_type": "WER"},
+    )
+    assert response.status_code == 200
+    point = response.json()["points"][0]
+    assert point["value"] == pytest.approx(50.0)
+    assert point["pooled_value"] is None
+    assert point["value"] != pytest.approx((1.0 + 90.0) / 110.0 * 100.0)
+
+
+async def test_exact_normalized_ttfa_components_use_parent_observations(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    scheduled = datetime.now(dt.UTC) - timedelta(hours=1)
+    run_id = await _insert_run(postgresql, dataset_id="tts-v1", scheduled_at=scheduled)
+    for roundtrip, silence in ((0.0, 2.0), (10.0, 6.0)):
+        await _insert_normalized_metric(
+            postgresql,
+            run_id,
+            dataset_id="tts-v1",
+            benchmark="TTS",
+            metric_type="TTFA",
+            values={
+                "primary": roundtrip + silence,
+                "roundtrip": roundtrip,
+                "leading_silence": silence,
+            },
+        )
+    client._transport.app.state.settings.normalized_dashboard_reads_enabled = True  # type: ignore[attr-defined]
+    for metric_type, expected in (("TTFARoundtrip", 5.0), ("TTFALeadingSilence", 4.0)):
+        response = await client.get(
+            "/v1/results/timeline",
+            params={
+                "benchmark": "TTS",
+                "dataset": "tts-v1",
+                "window": "7d",
+                "statistic": "p50",
+                "metric_type": metric_type,
+            },
+        )
+        assert response.status_code == 200
+        point = response.json()["points"][0]
+        assert response.json()["metric_type"] == metric_type
+        assert point["metric_type"] == metric_type
+        assert point["value"] == pytest.approx(expected)
+        assert point["sample_count"] == 2
+
+
+async def test_exact_percentile_runtime_matrix_and_cache_identity(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    """Exercise latency/WER responses, a clipped bound, and statistic cache separation."""
+    now = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    inside = await _insert_run(postgresql, scheduled_at=now - timedelta(hours=1))
+    outside = await _insert_run(postgresql, scheduled_at=now - timedelta(days=2))
+    await _insert_result(postgresql, inside, metric_type="TTFT", metric_value=0.0)
+    await _insert_result(postgresql, inside, metric_type="TTFT", metric_value=10.0)
+    await _insert_result(postgresql, inside, metric_type="WER", metric_value=40.0)
+    await _insert_result(postgresql, outside, metric_type="TTFT", metric_value=999.0)
+
+    responses = {}
+    for statistic, expected in (("p50", 5.0), ("p95", 9.5)):
+        latency = await client.get(
+            "/v1/results/timeline",
+            params={
+                "benchmark": "STT",
+                "window": "7d",
+                "statistic": statistic,
+                "metric_type": "TTFT",
+            },
+        )
+        assert latency.status_code == 200
+        assert latency.json()["metric_type"] == "TTFT"
+        latest_latency = max(latency.json()["points"], key=lambda point: point["scheduled_at"])
+        assert latest_latency["value"] == pytest.approx(expected)
+        responses[statistic] = latency.json()
+
+    wer = await client.get(
+        "/v1/results/timeline",
+        params={"benchmark": "STT", "window": "7d", "statistic": "p95", "metric_type": "WER"},
+    )
+    clipped = await client.get(
+        "/v1/results/timeline",
+        params={
+            "benchmark": "STT",
+            "since": (now - timedelta(hours=2)).isoformat(),
+            "until": now.isoformat(),
+            "statistic": "p95",
+            "metric_type": "TTFT",
+        },
+    )
+    assert wer.status_code == clipped.status_code == 200
+    assert wer.json()["metric_type"] == "WER"
+    assert clipped.json()["metric_type"] == "TTFT"
+    assert wer.json()["points"][0]["value"] == pytest.approx(40.0)
+    assert clipped.json()["points"][0]["sample_count"] == 2
+    assert responses["p50"]["points"] != responses["p95"]["points"]
+    # The bucket label is floored to the one-hour interval; membership is
+    # bounded before grouping, which the two-sample count proves here.
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    assert len(app.state.response_cache) >= 3
+
+
+async def test_exact_percentile_ttfa_component_and_hidden_model_filter(
+    client: AsyncClient, postgresql: Any
+) -> None:
+    scheduled = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
+    run_id = await _insert_run(postgresql, scheduled_at=scheduled)
+    await _insert_result(postgresql, run_id, benchmark="TTS", metric_type="TTFA", metric_value=30.0)
+    await _insert_result(
+        postgresql,
+        run_id,
+        benchmark="TTS",
+        metric_type="TTFARoundtrip",
+        metric_value=12.0,
+    )
+    component = await client.get(
+        "/v1/results/timeline",
+        params={
+            "benchmark": "TTS",
+            "window": "7d",
+            "statistic": "p95",
+            "metric_type": "TTFARoundtrip",
+        },
+    )
+    assert component.status_code == 200
+    assert component.json()["points"][0]["value"] == pytest.approx(12.0)
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    from coval_bench.api.internal import hidden_early_access
+
+    app.dependency_overrides[hidden_early_access] = lambda: frozenset({("deepgram", "nova-3")})
+    try:
+        hidden = await client.get(
+            "/v1/results/timeline",
+            params={
+                "benchmark": "TTS",
+                "window": "7d",
+                "statistic": "p95",
+                "metric_type": "TTFARoundtrip",
+            },
+        )
+        assert hidden.status_code == 200
+        assert hidden.json()["points"] == []
+    finally:
+        app.dependency_overrides.pop(hidden_early_access, None)
+
+
+async def test_exact_percentile_timeout_never_falls_back_to_default(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_execute = psycopg.AsyncConnection.execute
+
+    async def cancel_percentile(
+        conn: psycopg.AsyncConnection[Any], query: Any, *args: Any, **kwargs: Any
+    ) -> Any:
+        if isinstance(query, str) and "percentile_cont(%(percentile)s)" in query:
+            raise psycopg.errors.QueryCanceled("synthetic timeout")
+        return await original_execute(conn, query, *args, **kwargs)
+
+    params = {"benchmark": "STT", "statistic": "p95", "metric_type": "TTFT"}
+    with monkeypatch.context() as patch:
+        patch.setattr(psycopg.AsyncConnection, "execute", cancel_percentile)
+        response = await client.get("/v1/results/timeline", params=params)
+    assert response.status_code == 503
+    assert response.json() == {"detail": "timeline_percentile_unavailable"}
+    app = client._transport.app  # type: ignore[attr-defined]
+    # The shared cache briefly coalesces failures; clear it to retry the query.
+    app.state.response_cache.clear()
+    recovered = await client.get("/v1/results/timeline", params=params)
+    assert recovered.status_code == 200
+    assert recovered.json()["statistic"] == "p95"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"statistic": "p99", "metric_type": "TTFT"},
+        {"statistic": "p95", "metric_type": "InstructionFollowing"},
+        {"statistic": "p95", "metric_type": "TTFA"},
+    ],
+)
+async def test_exact_percentile_rejects_unsupported_selection(
+    client: AsyncClient, extra: dict[str, str]
+) -> None:
+    response = await client.get("/v1/results/timeline", params={"benchmark": "STT", **extra})
+    assert response.status_code == 422

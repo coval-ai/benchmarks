@@ -260,8 +260,11 @@ class TimelinePoint(BaseModel):
     scheduled_at: datetime
     value: float | None
     pooled_value: float | None = None
-    aggregation_method: Literal["mean", "ratio", "mean_fallback", "unavailable"] | None = None
+    aggregation_method: (
+        Literal["mean", "ratio", "mean_fallback", "unavailable", "percentile"] | None
+    ) = None
     sample_count: int | None = None
+    insufficient_samples: bool = False
 
 
 class DashboardMaterialization(BaseModel):
@@ -273,6 +276,11 @@ class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
+    statistic: Literal["default", "p50", "p90", "p95"] = "default"
+    metric_type: str | None = None
+    precision: Literal["exact"] | None = None
+    percentile_method: Literal["continuous"] | None = None
+    weighting: Literal["observation"] | None = None
     window: WindowLiteral | None
     dataset: str
     points: list[TimelinePoint]

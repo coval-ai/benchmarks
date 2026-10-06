@@ -36,6 +36,7 @@ from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
 from psycopg import AsyncConnection
+from psycopg import errors as psycopg_errors
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
@@ -45,6 +46,7 @@ from coval_bench.api.common import (
     WINDOW_INTERVALS,
     WINDOW_VIEWS,
     BenchmarkLiteral,
+    StatisticLiteral,
     WindowLiteral,
     has_enough_samples,
     reads_normalized,
@@ -74,7 +76,12 @@ from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.dashboard_hourly import floor_hour
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
-from coval_bench.registries import TIMELINE_AGGREGATION_RULES, is_metric_excluded
+from coval_bench.registries import (
+    METRIC_SPECS,
+    TIMELINE_AGGREGATION_RULES,
+    Metric,
+    is_metric_excluded,
+)
 
 logger = structlog.get_logger("coval_bench.api")
 
@@ -477,6 +484,80 @@ FROM grouped ORDER BY scheduled_at, provider, model, metric_type
 
 _TIMELINE_ALLOWED_BUCKETS = (3600, 7200, 14400, 21600, 43200)
 
+_PERCENTILE_METRICS = frozenset(
+    {"WER", "TTFT", "TTFS", "AudioToFinal", "TTFA", "TTFARoundtrip", "TTFALeadingSilence", "V2V"}
+)
+_LEGACY_BUCKET_SQL = (
+    "COALESCE(rn.scheduled_at, to_timestamp(floor(extract(epoch FROM r.created_at) / 1800) * 1800))"
+)
+
+# Exact normalized values are read from observations and grouped by a run's
+# schedule slot. Legacy rows retain the existing 30-minute created_at fallback.
+_NORMALIZED_PERCENTILE_SQL = """
+WITH source AS (
+ SELECT o.provider, o.model, o.dataset_id, o.benchmark,
+        r.scheduled_at AS source_at,
+        m.code AS metric_type, e.value, e.roundtrip, e.leading_silence
+ FROM benchmarks_v2.dashboard_metric_values e
+ JOIN benchmarks_v2.metrics m
+   ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
+ JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
+ JOIN benchmarks_v2.runs r ON r.id = o.run_id
+ WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
+   AND e.metric_version = 'v1' AND e.evaluation_variant = 'default'
+   AND o.benchmark = %(benchmark)s
+   AND m.code = CASE WHEN %(metric_type)s IN ('TTFARoundtrip', 'TTFALeadingSilence')
+                     THEN 'TTFA' ELSE %(metric_type)s END
+   AND r.scheduled_at IS NOT NULL AND r.scheduled_at >= %(since)s AND r.scheduled_at < %(until)s
+   AND (%(dataset)s = '__all__' OR o.dataset_id = %(dataset)s)
+), observation_values AS (
+ SELECT provider, model, source_at,
+        CASE WHEN %(metric_type)s = 'TTFARoundtrip' THEN roundtrip
+             WHEN %(metric_type)s = 'TTFALeadingSilence' THEN leading_silence
+             ELSE value END AS value
+ FROM source
+), grouped AS (
+ SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
+        MAX(source_at) AS latest_source_at,
+        percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
+ FROM observation_values
+ WHERE value IS NOT NULL AND value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+ GROUP BY provider, model, {bucket_expr}
+)
+SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
+       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
+FROM grouped ORDER BY scheduled_at, provider, model
+"""
+
+_LEGACY_PERCENTILE_SQL = """
+WITH source AS (
+ SELECT r.provider, r.model, r.metric_type,
+        __LEGACY_BUCKET__ AS source_at,
+        r.metric_value AS value
+ FROM benchmarks_v2.results r
+ JOIN benchmarks_v2.runs rn ON rn.id = r.run_id
+ WHERE r.status = 'success' AND rn.status IN ('succeeded', 'partial')
+   AND r.benchmark = %(benchmark)s AND r.metric_type = %(metric_type)s
+   AND __LEGACY_BUCKET__ >= %(since)s
+   AND __LEGACY_BUCKET__ < %(until)s
+   AND (
+     %(dataset)s = '__all__'
+     OR (CASE WHEN r.benchmark = 'TTS' THEN 'tts-v1' ELSE rn.dataset_id END) = %(dataset)s
+   )
+), grouped AS (
+ SELECT provider, model, {bucket_expr} AS bucket_at, COUNT(value)::int AS sample_count,
+        MAX(source_at) AS latest_source_at,
+        percentile_cont(%(percentile)s) WITHIN GROUP (ORDER BY value)::float8 AS value
+ FROM source
+ WHERE value IS NOT NULL
+   AND value NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)
+ GROUP BY provider, model, {bucket_expr}
+)
+SELECT provider, model, %(metric_type)s AS metric_type, bucket_at AS scheduled_at,
+       value, sample_count, latest_source_at, 'percentile' AS aggregation_method
+FROM grouped ORDER BY scheduled_at, provider, model
+"""
+
 
 def _timeline_bucket_seconds(duration_seconds: float) -> int:
     """Choose roughly 200 points with one hour as the finest average interval."""
@@ -486,6 +567,35 @@ def _timeline_bucket_seconds(duration_seconds: float) -> int:
             return seconds
     days = (int(target) + 86399) // 86400
     return days * 86400
+
+
+def _exact_percentile_sql(normalized: bool, aggregation: str) -> str:
+    """Render the exact query with a safe, server-selected bucket expression."""
+    bucket_expr = (
+        "source_at"
+        if aggregation == "run"
+        else (
+            "to_timestamp(floor(extract(epoch FROM source_at) / "
+            "%(bucket_seconds)s) * %(bucket_seconds)s)"
+        )
+    )
+    query = _NORMALIZED_PERCENTILE_SQL if normalized else _LEGACY_PERCENTILE_SQL
+    return query.replace("__LEGACY_BUCKET__", _LEGACY_BUCKET_SQL).format(bucket_expr=bucket_expr)
+
+
+def _validate_percentile_request(
+    benchmark: str, statistic: StatisticLiteral, metric_type: str | None
+) -> None:
+    if statistic == "default":
+        return
+    if metric_type is None:
+        raise HTTPException(
+            status_code=422, detail="metric_type is required for percentile timelines"
+        )
+    if metric_type not in _PERCENTILE_METRICS or metric_type not in METRIC_SPECS:
+        raise HTTPException(status_code=422, detail="unsupported percentile metric")
+    if benchmark not in {item.value for item in METRIC_SPECS[Metric(metric_type)].benchmarks}:
+        raise HTTPException(status_code=422, detail="metric is not supported for benchmark")
 
 
 def _timeline_average_sql(normalized: bool) -> tuple[str, dict[str, Any]]:
@@ -709,6 +819,8 @@ async def get_results_timeline(
     request: Request,
     benchmark: BenchmarkLiteral = Query(...),
     window: WindowLiteral | None = Query(default=None),
+    statistic: StatisticLiteral = Query(default="default"),
+    metric_type: str | None = Query(default=None),
     dataset: str | None = Query(
         default=None,
         description="Dataset id to aggregate over; omit for pooled all-dataset buckets.",
@@ -723,6 +835,7 @@ async def get_results_timeline(
     settings: Settings = Depends(get_settings),
 ) -> TimelineResponse:
     """Return run points or intervals using each metric's aggregation rule."""
+    _validate_percentile_request(benchmark, statistic, metric_type)
     dataset_key = dataset or DATASET_ALL
     bucket_seconds: int | None
     if (since is None) != (until is None):
@@ -757,7 +870,10 @@ async def get_results_timeline(
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         materialization = None
         rule_params: dict[str, Any] = {}
-        if aggregation == "run":
+        if statistic != "default":
+            sql = _exact_percentile_sql(normalized, aggregation)
+            rule_params = {"percentile": {"p50": 0.5, "p90": 0.9, "p95": 0.95}[statistic]}
+        elif aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
         else:
             sql, rule_params = _timeline_average_sql(normalized)
@@ -774,26 +890,51 @@ async def get_results_timeline(
             "since": since,
             "until": until,
             "bucket_seconds": bucket_seconds,
+            "metric_type": metric_type,
         }
         params.update(rule_params)
         async with dashboard_read(pool, saved=normalized) as conn:
-            if normalized and aggregation == "average":
+            if normalized and aggregation == "average" and statistic == "default":
                 materialization = await _hourly_materialization(conn, since, until)
-            rows = await (await conn.execute(sql, params)).fetchall()
-        visible_rows = [row for row in rows if _visible(row, hidden)]
+            try:
+                if statistic != "default":
+                    await conn.execute("SET LOCAL statement_timeout = '5s'")
+                rows = await (await conn.execute(sql, params)).fetchall()
+            except psycopg_errors.QueryCanceled as exc:
+                if statistic == "default":
+                    raise
+                raise HTTPException(
+                    status_code=503, detail="timeline_percentile_unavailable"
+                ) from exc
+        visible_rows = [
+            row
+            for row in rows
+            if _visible(row, hidden) and (metric_type is None or row["metric_type"] == metric_type)
+        ]
         return TimelineResponse(
             benchmark=benchmark,
+            statistic=statistic,
+            metric_type=metric_type,
+            precision="exact" if statistic != "default" else None,
+            percentile_method="continuous" if statistic != "default" else None,
+            weighting="observation" if statistic != "default" else None,
             window=response_window,
             dataset=dataset_key,
             points=[
                 TimelinePoint.model_validate(
-                    row
-                    if "value" in row
-                    else {
-                        **row,
-                        "value": row["value_sum"] / row["sample_count"]
-                        if row["metric_type"] == "WER"
-                        else row["p50"],
+                    {
+                        **(
+                            row
+                            if "value" in row
+                            else {
+                                **row,
+                                "value": row["value_sum"] / row["sample_count"]
+                                if row["metric_type"] == "WER"
+                                else row["p50"],
+                            }
+                        ),
+                        "insufficient_samples": statistic != "default"
+                        and not has_enough_samples(benchmark, row.get("sample_count") or 0),
                     }
                 )
                 for row in visible_rows
@@ -815,14 +956,18 @@ async def get_results_timeline(
         response_window,
         dataset_key,
         aggregation,
+        statistic,
+        metric_type,
         bucket_seconds,
         # Preset keys intentionally omit request time; custom bounds are isolated.
         None if response_window is not None else (since, until),
         settings.normalized_dashboard_reads_enabled,
         tuple(sorted(hidden)),
     )
-    if aggregation == "average" and reads_normalized(
-        settings.normalized_dashboard_reads_enabled, benchmark
+    if (
+        statistic == "default"
+        and aggregation == "average"
+        and reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
     ):
         response, cache_status = await fill(), "bypass"
     else:
