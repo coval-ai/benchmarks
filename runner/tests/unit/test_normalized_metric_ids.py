@@ -91,6 +91,13 @@ def historical(pg_conn: Any) -> Any:
     return pg_conn
 
 
+@pytest.fixture
+def current_identity(historical: Any) -> Any:
+    backfill(historical, apply=True)
+    _migrate(historical, "head")
+    return historical
+
+
 def _payloads(conn: Any) -> dict[str, Any]:
     return {
         table: conn.execute(
@@ -179,9 +186,11 @@ def test_downgrade_restores_validator_and_retains_rows(historical: Any, hydrate:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
-async def test_writer_retry_hydrates_existing_identity(historical: Any, status: str) -> None:
-    before = _payloads(historical)
-    stored = historical.execute(
+async def test_writer_retry_preserves_backfilled_identity(
+    current_identity: Any, status: str
+) -> None:
+    before = _payloads(current_identity)
+    stored = current_identity.execute(
         "SELECT id, observation_id FROM benchmarks_v2.metric_evaluations WHERE status=%s",
         (status,),
     ).fetchone()
@@ -193,7 +202,7 @@ async def test_writer_retry_hydrates_existing_identity(historical: Any, status: 
         executor=MetricExecutor.INLINE,
         status=ProcessingStatus.QUEUED,
     )
-    pool = await writer_seed._pool(historical)
+    pool = await writer_seed._pool(current_identity)
     try:
         writer = RunWriter(pool)
         first = await writer.insert_metric_evaluation(request)
@@ -204,16 +213,16 @@ async def test_writer_retry_hydrates_existing_identity(historical: Any, status: 
         assert first.status.value == status
     finally:
         await pool.close()
-    assert _payloads(historical) == before
+    assert _payloads(current_identity) == before
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["queued", "running", "succeeded", "failed"])
 async def test_concurrent_historical_retries_preserve_identity_and_payload(
-    historical: Any, status: str, monkeypatch: pytest.MonkeyPatch
+    current_identity: Any, status: str
 ) -> None:
-    before = _payloads(historical)
-    stored = historical.execute(
+    before = _payloads(current_identity)
+    stored = current_identity.execute(
         "SELECT id, observation_id FROM benchmarks_v2.metric_evaluations WHERE status=%s",
         (status,),
     ).fetchone()
@@ -226,19 +235,7 @@ async def test_concurrent_historical_retries_preserve_identity_and_payload(
         status=ProcessingStatus.QUEUED,
     )
     target_id = stored[0]
-    barrier = asyncio.Barrier(2)
-    connections: set[int] = set()
-    original_fetchone = psycopg.AsyncCursor.fetchone
-
-    async def fetchone(cursor: Any) -> Any:
-        row = await original_fetchone(cursor)
-        if isinstance(row, dict) and row.get("id") == target_id and row.get("metric_id") is None:
-            connections.add(id(cursor.connection))
-            await barrier.wait()
-        return row
-
-    monkeypatch.setattr(psycopg.AsyncCursor, "fetchone", fetchone)
-    pool = await writer_seed._pool(historical)
+    pool = await writer_seed._pool(current_identity)
     try:
         writer = RunWriter(pool)
         results = await asyncio.wait_for(
@@ -256,20 +253,21 @@ async def test_concurrent_historical_retries_preserve_identity_and_payload(
         assert first.metric_id == second.metric_id
         assert (
             first.metric_id
-            == historical.execute(
+            == current_identity.execute(
                 "SELECT id FROM benchmarks_v2.metrics WHERE code='WER'"
             ).fetchone()[0]
         )
         assert first.status.value == second.status.value == status
-        assert len(connections) == 2
     finally:
         await pool.close()
-    assert _payloads(historical) == before
+    assert _payloads(current_identity) == before
 
 
 @pytest.mark.asyncio
-async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(historical: Any) -> None:
-    observation_id = historical.execute(
+async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(
+    current_identity: Any,
+) -> None:
+    observation_id = current_identity.execute(
         "SELECT observation_id FROM benchmarks_v2.metric_evaluations LIMIT 1"
     ).fetchone()[0]
     request = MetricEvaluation(
@@ -280,7 +278,7 @@ async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(histor
         executor=MetricExecutor.INLINE,
         status=ProcessingStatus.QUEUED,
     )
-    pool = await writer_seed._pool(historical)
+    pool = await writer_seed._pool(current_identity)
     try:
         writer = RunWriter(pool)
         stored, retried = await asyncio.wait_for(
@@ -294,11 +292,11 @@ async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(histor
         assert stored.metric_id == retried.metric_id
         assert (
             stored.metric_id
-            == historical.execute(
+            == current_identity.execute(
                 "SELECT id FROM benchmarks_v2.metrics WHERE code='WER'"
             ).fetchone()[0]
         )
-        wrong_id = historical.execute(
+        wrong_id = current_identity.execute(
             "SELECT id FROM benchmarks_v2.metrics WHERE code='TTFA'"
         ).fetchone()[0]
         with pytest.raises(ValueError, match="same definition"):
@@ -311,47 +309,245 @@ async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(histor
 
 
 @pytest.mark.asyncio
-async def test_mixed_historical_and_new_ids_share_one_source_group(historical: Any) -> None:
-    with historical.transaction():
-        observation_id = historical.execute(
+@pytest.mark.parametrize("order", ["legacy_first", "id_first", "concurrent"])
+async def test_legacy_and_id_writers_share_one_evaluation(
+    current_identity: Any, order: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observation_id = current_identity.execute(
+        "SELECT observation_id FROM benchmarks_v2.metric_evaluations LIMIT 1"
+    ).fetchone()[0]
+    request = MetricEvaluation(
+        observation_id=observation_id,
+        metric_type="WER",
+        metric_version="v1",
+        evaluation_variant="mixed-writers",
+        executor=MetricExecutor.INLINE,
+        status=ProcessingStatus.QUEUED,
+    )
+    barrier = asyncio.Barrier(2)
+    arrivals = 0
+    original_execute = psycopg.AsyncCursor.execute
+
+    async def execute(cursor: Any, query: Any, params: Any = None, **kwargs: Any) -> Any:
+        nonlocal arrivals
+        if (
+            order == "concurrent"
+            and arrivals < 2
+            and isinstance(query, str)
+            and "INSERT INTO benchmarks_v2.metric_evaluations" in query
+        ):
+            arrivals += 1
+            await barrier.wait()
+        return await original_execute(cursor, query, params, **kwargs)
+
+    monkeypatch.setattr(psycopg.AsyncCursor, "execute", execute)
+    pool = await writer_seed._pool(current_identity)
+    try:
+        writer = RunWriter(pool)
+
+        async def legacy_create() -> Any:
+            async with pool.connection() as conn:
+                row = await (
+                    await conn.execute(
+                        """INSERT INTO benchmarks_v2.metric_evaluations
+                           (observation_id,metric_type,metric_version,evaluation_variant,executor,status)
+                           VALUES (%s,'WER','v1','mixed-writers','inline','queued')
+                           ON CONFLICT (observation_id,metric_type,metric_version,evaluation_variant)
+                           DO NOTHING RETURNING id""",
+                        (observation_id,),
+                    )
+                ).fetchone()
+                if row is None:
+                    row = await (
+                        await conn.execute(
+                            """SELECT id FROM benchmarks_v2.metric_evaluations
+                               WHERE observation_id=%s AND metric_type='WER'
+                                 AND metric_version='v1' AND evaluation_variant='mixed-writers'""",
+                            (observation_id,),
+                        )
+                    ).fetchone()
+                assert row is not None
+                return row["id"]
+
+        if order == "legacy_first":
+            legacy_id = await legacy_create()
+            stored = await writer.insert_metric_evaluation(request)
+        elif order == "id_first":
+            stored = await writer.insert_metric_evaluation(request)
+            legacy_id = await legacy_create()
+        else:
+            legacy_id, stored = await asyncio.wait_for(
+                asyncio.gather(legacy_create(), writer.insert_metric_evaluation(request)), timeout=5
+            )
+            assert arrivals == 2
+        assert stored.id == legacy_id
+        assert (await writer.insert_metric_evaluation(request)).id == legacy_id
+        assert current_identity.execute(
+            """SELECT count(*) FROM benchmarks_v2.metric_evaluations
+               WHERE observation_id=%s AND metric_id=%s
+                 AND metric_version='v1' AND evaluation_variant='mixed-writers'""",
+            (observation_id, stored.metric_id),
+        ).fetchone() == (1,)
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_writer", ["code", "id"])
+async def test_mixed_writer_waits_for_identity_transaction(
+    current_identity: Any, first_writer: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observation_id, metric_id = current_identity.execute(
+        "SELECT observation_id,metric_id FROM benchmarks_v2.metric_evaluations LIMIT 1"
+    ).fetchone()
+    variant = f"held-{first_writer}"
+    request = MetricEvaluation(
+        observation_id=observation_id,
+        metric_type="WER",
+        metric_version="v1",
+        evaluation_variant=variant,
+        executor=MetricExecutor.INLINE,
+        status=ProcessingStatus.QUEUED,
+    )
+    code_sql = """INSERT INTO benchmarks_v2.metric_evaluations
+                  (observation_id,metric_type,metric_version,evaluation_variant,executor,status)
+                  VALUES (%s,'WER','v1',%s,'inline','queued')
+                  ON CONFLICT (observation_id,metric_type,metric_version,evaluation_variant)
+                  DO NOTHING RETURNING id"""
+    id_sql = """INSERT INTO benchmarks_v2.metric_evaluations
+                (observation_id,metric_id,metric_type,metric_version,evaluation_variant,executor,status)
+                VALUES (%s,%s,'WER','v1',%s,'inline','queued')
+                ON CONFLICT (observation_id,metric_id,metric_version,evaluation_variant)
+                DO NOTHING RETURNING id"""
+    pool = await writer_seed._pool(current_identity)
+    second_task: asyncio.Task[Any] | None = None
+    try:
+        writer = RunWriter(pool)
+        async with pool.connection() as first:
+            params = (
+                (observation_id, variant)
+                if first_writer == "code"
+                else (observation_id, metric_id, variant)
+            )
+            stored = await (
+                await first.execute(code_sql if first_writer == "code" else id_sql, params)
+            ).fetchone()
+            assert stored is not None
+            first_pid = first.info.backend_pid
+            second_pid: int | None = None
+            entered = asyncio.Event()
+            original_execute = psycopg.AsyncCursor.execute
+
+            async def execute(cursor: Any, query: Any, params: Any = None, **kwargs: Any) -> Any:
+                nonlocal second_pid
+                if (
+                    isinstance(query, str)
+                    and "INSERT INTO benchmarks_v2.metric_evaluations" in query
+                    and cursor.connection.info.backend_pid != first_pid
+                ):
+                    second_pid = cursor.connection.info.backend_pid
+                    entered.set()
+                return await original_execute(cursor, query, params, **kwargs)
+
+            monkeypatch.setattr(psycopg.AsyncCursor, "execute", execute)
+
+            async def legacy_create() -> Any:
+                async with pool.connection() as conn:
+                    row = await (await conn.execute(code_sql, (observation_id, variant))).fetchone()
+                    if row is None:
+                        row = await (
+                            await conn.execute(
+                                """SELECT id FROM benchmarks_v2.metric_evaluations
+                               WHERE observation_id=%s AND metric_type='WER'
+                                 AND metric_version='v1' AND evaluation_variant=%s""",
+                                (observation_id, variant),
+                            )
+                        ).fetchone()
+                    assert row is not None
+                    return row["id"]
+
+            second_task = asyncio.create_task(
+                writer.insert_metric_evaluation(request)
+                if first_writer == "code"
+                else legacy_create()
+            )
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=5)
+                for _ in range(200):
+                    state = current_identity.execute(
+                        "SELECT wait_event_type,wait_event FROM pg_stat_activity WHERE pid=%s",
+                        (second_pid,),
+                    ).fetchone()
+                    if state == ("Lock", "advisory"):
+                        break
+                    await asyncio.sleep(0.01)
+                else:
+                    pytest.fail("the opposite writer did not wait on the shared identity lock")
+                assert not second_task.done()
+                await first.commit()
+                second = await asyncio.wait_for(second_task, timeout=5)
+                assert (second.id if isinstance(second, MetricEvaluation) else second) == stored[
+                    "id"
+                ]
+                assert current_identity.execute(
+                    """SELECT count(*) FROM benchmarks_v2.metric_evaluations
+                       WHERE observation_id=%s AND metric_id=%s
+                         AND metric_version='v1' AND evaluation_variant=%s""",
+                    (observation_id, metric_id, variant),
+                ).fetchone() == (1,)
+            finally:
+                await first.rollback()
+    finally:
+        if second_task is not None and not second_task.done():
+            second_task.cancel()
+            await asyncio.gather(second_task, return_exceptions=True)
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_mixed_historical_and_new_ids_share_one_source_group(current_identity: Any) -> None:
+    with current_identity.transaction():
+        observation_id = current_identity.execute(
             """INSERT INTO benchmarks_v2.benchmark_observations
                (run_id,dataset_id,dataset_sha256,sample_id,provider,model,benchmark,source_kind,status)
                SELECT run_id,dataset_id,dataset_sha256,'second',provider,model,benchmark,source_kind,status
                FROM benchmarks_v2.benchmark_observations LIMIT 1 RETURNING id"""
         ).fetchone()[0]
-        evaluation_id = historical.execute(
+        evaluation_id = current_identity.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
                (observation_id,metric_type,metric_version,evaluation_variant,executor,status)
                VALUES (%s,'WER','v1','succeeded','inline','queued') RETURNING id""",
             (observation_id,),
         ).fetchone()[0]
-        historical.execute(
+        current_identity.execute(
             "UPDATE benchmarks_v2.metric_evaluations SET status='running',started_at=now() WHERE id=%s",
             (evaluation_id,),
         )
-        historical.execute(
+        current_identity.execute(
             """INSERT INTO benchmarks_v2.metric_values
                (metric_evaluation_id,value_key,unit,value,value_role)
                VALUES (%s,'primary','percent',3,'primary')""",
             (evaluation_id,),
         )
-        historical.execute(
+        current_identity.execute(
             "UPDATE benchmarks_v2.metric_evaluations SET status='succeeded',finished_at=now() WHERE id=%s",
             (evaluation_id,),
         )
-    bucket = historical.execute("SELECT scheduled_at FROM benchmarks_v2.runs LIMIT 1").fetchone()[0]
-    pool = await writer_seed._pool(historical)
+    bucket = current_identity.execute(
+        "SELECT scheduled_at FROM benchmarks_v2.runs LIMIT 1"
+    ).fetchone()[0]
+    pool = await writer_seed._pool(current_identity)
     try:
         await rebuild_source_bucket(pool, bucket)
     finally:
         await pool.close()
-    assert historical.execute(
+    assert current_identity.execute(
         """SELECT dataset_id,sample_count,value_sum,metric_id IS NOT NULL
            FROM benchmarks_v2.metric_values_by_bucket ORDER BY dataset_id"""
     ).fetchall() == [("__all__", 2, 12, True), ("d", 2, 12, True)]
-    assert historical.execute(
+    assert current_identity.execute(
         "SELECT count(*) FROM benchmarks_v2.metric_evaluations WHERE metric_id IS NULL"
-    ).fetchone() == (4,)
+    ).fetchone() == (0,)
 
 
 def test_0036_adds_compatible_normalized_id_columns(pg_conn: psycopg.Connection[Any]) -> None:
