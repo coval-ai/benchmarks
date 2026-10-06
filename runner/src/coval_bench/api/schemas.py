@@ -277,6 +277,7 @@ class TimelineResponse(BaseModel):
 
     benchmark: BenchmarkLiteral
     statistic: Literal["default", "p50", "p90", "p95"] = "default"
+    metric_type: str | None = None
     precision: Literal["exact"] | None = None
     percentile_method: Literal["continuous"] | None = None
     weighting: Literal["observation"] | None = None

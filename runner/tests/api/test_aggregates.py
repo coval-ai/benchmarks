@@ -2098,6 +2098,7 @@ async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
         assert response.status_code == 200
         body = response.json()
         assert body["statistic"] == statistic
+        assert body["metric_type"] == "TTFT"
         assert body["precision"] == "exact"
         assert body["percentile_method"] == "continuous"
         assert body["weighting"] == "observation"
@@ -2138,6 +2139,7 @@ async def test_exact_percentile_preserves_latest_source_timestamp(
     )
     assert response.status_code == 200
     body = response.json()
+    assert body["metric_type"] == "TTFT"
     assert body["bucket_seconds"] == bucket_seconds
     assert len(body["points"]) == 1
     point = body["points"][0]
@@ -2161,7 +2163,28 @@ async def test_exact_percentile_requires_supported_metric_and_preserves_default(
     default = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert default.status_code == 200
     assert default.json()["statistic"] == "default"
+    assert default.json()["metric_type"] is None
     assert default.json()["precision"] is None
+
+
+@pytest.mark.parametrize(
+    ("statistic", "metric_type"),
+    [("default", None), ("default", "TTFT"), ("p95", "TTFT")],
+)
+async def test_timeline_echoes_metric_type_for_empty_results_and_cached_repeats(
+    client: AsyncClient, statistic: str, metric_type: str | None
+) -> None:
+    params: dict[str, str] = {"benchmark": "STT", "window": "7d", "statistic": statistic}
+    if metric_type is not None:
+        params["metric_type"] = metric_type
+
+    for _ in range(2):
+        response = await client.get("/v1/results/timeline", params=params)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["statistic"] == statistic
+        assert body["metric_type"] == metric_type
+        assert body["points"] == []
 
 
 async def test_exact_percentile_reads_normalized_observations_and_excludes_null_schedule(
@@ -2259,6 +2282,7 @@ async def test_exact_normalized_ttfa_components_use_parent_observations(
         )
         assert response.status_code == 200
         point = response.json()["points"][0]
+        assert response.json()["metric_type"] == metric_type
         assert point["metric_type"] == metric_type
         assert point["value"] == pytest.approx(expected)
         assert point["sample_count"] == 2
@@ -2288,6 +2312,7 @@ async def test_exact_percentile_runtime_matrix_and_cache_identity(
             },
         )
         assert latency.status_code == 200
+        assert latency.json()["metric_type"] == "TTFT"
         latest_latency = max(latency.json()["points"], key=lambda point: point["scheduled_at"])
         assert latest_latency["value"] == pytest.approx(expected)
         responses[statistic] = latency.json()
@@ -2307,6 +2332,8 @@ async def test_exact_percentile_runtime_matrix_and_cache_identity(
         },
     )
     assert wer.status_code == clipped.status_code == 200
+    assert wer.json()["metric_type"] == "WER"
+    assert clipped.json()["metric_type"] == "TTFT"
     assert wer.json()["points"][0]["value"] == pytest.approx(40.0)
     assert clipped.json()["points"][0]["sample_count"] == 2
     assert responses["p50"]["points"] != responses["p95"]["points"]

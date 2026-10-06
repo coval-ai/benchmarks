@@ -914,6 +914,7 @@ async def get_results_timeline(
         return TimelineResponse(
             benchmark=benchmark,
             statistic=statistic,
+            metric_type=metric_type,
             precision="exact" if statistic != "default" else None,
             percentile_method="continuous" if statistic != "default" else None,
             weighting="observation" if statistic != "default" else None,
