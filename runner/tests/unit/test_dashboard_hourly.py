@@ -5,13 +5,16 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.dashboard_hourly import (
+    _SOURCE_SQL,
     HOUR_LOCK_SQL,
     MARK_HOUR_DIRTY_SQL,
     PendingHourlyStatus,
+    _rules,
     floor_hour,
     pending_hourly_aggregates,
     pending_hourly_status,
@@ -147,6 +150,148 @@ async def test_refresh_combines_half_hour_source_buckets(pg_conn: psycopg.Connec
                 )
             ).fetchone()
         assert row == {"primary_sum": 40.0, "sample_count": 4, "coverage_complete": True}
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_refresh_multiple_nonadjacent_hours_bounds_source_and_preserves_stats(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    """Only requested hours and default/v1 rows contribute to exact aggregates."""
+    apply_migrations(pg_conn)
+    pg_conn.autocommit = True
+    first = datetime(2026, 9, 14, 12, tzinfo=UTC)
+    second = first + timedelta(hours=3)
+
+    def insert(
+        metric: str, key: str, unit: str, at: datetime, value: float, dataset: str = "d"
+    ) -> None:
+        pg_conn.execute(
+            """INSERT INTO benchmarks_v2.metric_values_by_bucket
+            (provider, model, benchmark, dataset_id, metric_id, metric_version,
+             evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
+             p75, max_value, value_sum, sample_count)
+            VALUES ('p','m','STT',%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),
+                    %s,'default',%s,%s,%s,%s,%s,%s,%s,%s,%s,2)""",
+            (dataset, metric, "v1", key, unit, at, value, value, value, value, value, value),
+        )
+
+    for hour in (first, second):
+        for dataset in ("d1", "d2"):
+            for minute, value in ((0, 10.0), (30, 30.0)):
+                at = hour + timedelta(minutes=minute)
+                insert("TTFT", "primary", "seconds", at, value, dataset)
+                insert("WER", "primary", "percent", at, value, dataset)
+                for key, operand in (
+                    ("substitution_count", 1.0),
+                    ("deletion_count", 1.0),
+                    ("insertion_count", 0.0),
+                    ("reference_words", 10.0),
+                ):
+                    insert("WER", key, "count", at, operand, dataset)
+
+    # Rows outside the exact requested hours, plus the two source identity
+    # exclusions, must not reach the published aggregates.
+    insert("TTFT", "primary", "seconds", first - timedelta(minutes=1), 100.0)
+    insert("TTFT", "primary", "seconds", first + timedelta(hours=1), 200.0)
+    insert("TTFT", "primary", "seconds", second + timedelta(hours=1), 300.0)
+    pg_conn.execute(
+        """INSERT INTO benchmarks_v2.metric_values_by_bucket
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
+         evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
+         p75, max_value, value_sum, sample_count)
+        SELECT 'p','m','STT','history',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+               'v1','default','primary','seconds',at,
+               1,1,1,1,1,1,1
+        FROM generate_series(%s::timestamptz - interval '10000 hours',
+                             %s::timestamptz - interval '1 hour', interval '1 hour') at""",
+        (first, first),
+    )
+    pg_conn.execute(
+        """INSERT INTO benchmarks_v2.metric_values_by_bucket
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
+         evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
+         p75, max_value, value_sum, sample_count)
+        VALUES ('p','m','STT','d1',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                'v2','default','primary','seconds',%s,
+                500,500,500,500,500,500,2),
+               ('p','m','STT','d1',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                'v1','experiment','primary','seconds',%s,
+                600,600,600,600,600,600,2)""",
+        (first, first),
+    )
+
+    pool = await open_pool(pg_conn)
+    try:
+        from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
+
+        await refresh_hourly_aggregates(pool, hours=[first, second])
+        async with pool.connection() as conn:
+            rows = await (
+                await conn.execute(
+                    """SELECT m.code, h.dataset_id, h.hour_at, h.primary_sum,
+                              h.sample_count, h.numerator_sum, h.denominator_sum,
+                              h.coverage_complete, h.source_count, h.latest_source_at
+                    FROM benchmarks_v2.dashboard_hourly_aggregates h
+                    JOIN benchmarks_v2.metrics m ON m.id = h.metric_id
+                    ORDER BY h.hour_at, h.dataset_id, m.code"""
+                )
+            ).fetchall()
+
+            plan_row = await (
+                await conn.execute(
+                    "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + _SOURCE_SQL,
+                    {"aggregation_rules": Jsonb(_rules()), "hours": [first, second]},
+                )
+            ).fetchone()
+        assert len(rows) == 8
+        assert [
+            (
+                r["code"],
+                r["dataset_id"],
+                r["hour_at"],
+                r["primary_sum"],
+                r["sample_count"],
+                r["numerator_sum"],
+                r["denominator_sum"],
+                r["coverage_complete"],
+                r["source_count"],
+                r["latest_source_at"],
+            )
+            for r in rows
+        ] == [
+            (
+                metric,
+                dataset,
+                hour,
+                total,
+                4,
+                numerator,
+                denominator,
+                True,
+                2,
+                hour + timedelta(minutes=30),
+            )
+            for hour in (first, second)
+            for dataset in ("d1", "d2")
+            for metric, total, numerator, denominator in (
+                ("TTFT", 40.0, None, None),
+                ("WER", 40.0, 4.0, 20.0),
+            )
+        ]
+
+        def walk(node: dict[str, Any]) -> list[dict[str, Any]]:
+            return [node, *(child for item in node.get("Plans", []) for child in walk(item))]
+
+        plan = plan_row["QUERY PLAN"][0]["Plan"]
+        nodes = walk(plan)
+        buckets = next(node for node in nodes if node.get("CTE Name") == "requested_buckets")
+        access = next(
+            node for node in nodes if node.get("Index Name") == "metric_values_by_bucket_bucket_at"
+        )
+        assert buckets["Actual Rows"] == 48
+        assert "bucket_at" in access["Index Cond"]
     finally:
         await pool.close()
 
