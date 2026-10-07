@@ -242,6 +242,14 @@ def test_reson8_url_config(fake_api_key: SecretStr) -> None:
     assert "include_interim=true" in url
 
 
+def test_reson8_global_model_routes_to_global_host(fake_api_key: SecretStr) -> None:
+    url = Reson8STTProvider(api_key=fake_api_key, model="realtime-global")._build_websocket_url(
+        16000
+    )
+
+    assert url.startswith("wss://api.global.reson8.dev/v1/speech-to-text/realtime?")
+
+
 def test_reson8_url_omits_credentials(fake_api_key: SecretStr) -> None:
     url = Reson8STTProvider(api_key=fake_api_key)._build_websocket_url(16000)
 
