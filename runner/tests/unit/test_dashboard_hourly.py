@@ -28,10 +28,12 @@ def _bucket(
     with conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d',%s,'v1','default',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code=%s),
+                    'v1','default',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             [
                 (metric, key, unit, hour, val, val, val, val, val, val, count)
                 for metric, key, unit, val, count in values
@@ -120,10 +122,12 @@ async def test_refresh_combines_half_hour_source_buckets(pg_conn: psycopg.Connec
     with pg_conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d','TTFT','v1','default','primary','seconds',
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                    'v1','default','primary','seconds',
                     %s,%s,%s,%s,%s,%s,%s,%s)""",
             [(at, val, val, val, val, val, val, count) for at, val, count in values],
         )
@@ -282,7 +286,8 @@ async def test_retry_replaces_previous_hour_rows_without_double_counting(
         await refresh_hourly_aggregates(pool, hours=[hour])
         pg_conn.execute(
             "UPDATE benchmarks_v2.metric_values_by_bucket SET value_sum=30, min_value=30, "
-            "p25=30, p50=30, p75=30, max_value=30 WHERE metric_type='TTFT' AND bucket_at=%s",
+            "p25=30, p50=30, p75=30, max_value=30 "
+            "WHERE metric_id=benchmarks_v2.metric_id_for_code('TTFT') AND bucket_at=%s",
             (hour,),
         )
         await refresh_hourly_aggregates(pool, hours=[hour])
@@ -322,10 +327,12 @@ async def test_unknown_metric_rolls_back_previous_hour_and_state(
             )
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                (provider, model, benchmark, dataset_id, metric_id, metric_version,
                  evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
                  p75, max_value, value_sum, sample_count)
-                VALUES ('p','m','STT','d','UnknownMetric','v1','default','primary','seconds',
+                VALUES ('p','m','STT','d',
+                        (SELECT id FROM benchmarks_v2.metrics WHERE code='UnknownMetric'),
+                        'v1','default','primary','seconds',
                         %s,20,20,20,20,20,20,1)""",
                 (hour,),
             )
@@ -358,10 +365,12 @@ async def test_non_default_or_non_v1_source_rows_do_not_publish(
     with pg_conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-            (provider, model, benchmark, dataset_id, metric_type, metric_version,
+            (provider, model, benchmark, dataset_id, metric_id, metric_version,
              evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
              p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d','TTFT',%s,%s,'primary','seconds',
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                    %s,%s,'primary','seconds',
                     %s,10,10,10,10,10,10,1)""",
             [("v2", "default", hour), ("v1", "experiment", hour)],
         )

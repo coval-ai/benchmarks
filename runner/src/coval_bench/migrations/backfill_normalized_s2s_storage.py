@@ -584,10 +584,11 @@ def _match_reason(
     if not _no_lineage(cur, observation_id):
         return "unexpected_artifact_lineage"
     cur.execute(
-        """SELECT id,metric_type,metric_version,evaluation_variant,executor,
+        """SELECT e.id,m.code,e.metric_version,e.evaluation_variant,e.executor,
                   external_request_id,status,started_at,finished_at,error
-           FROM benchmarks_v2.metric_evaluations
-           WHERE observation_id=%s ORDER BY metric_type""",
+           FROM benchmarks_v2.metric_evaluations e
+           JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
+           WHERE observation_id=%s ORDER BY m.code""",
         (observation_id,),
     )
     actual_evaluations = cur.fetchall()
@@ -675,9 +676,9 @@ def _insert_plan(cur: psycopg.Cursor[Any], plan: Plan) -> tuple[int, int]:
         evaluation_id = plan.evaluation_id(metric)
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (id,observation_id,metric_id,metric_type,metric_version,evaluation_variant,executor,status)
-               VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),%s,'v1','default','coval_api','queued')""",
-            (evaluation_id, plan.id, metric, metric),
+               (id,observation_id,metric_id,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),'v1','default','coval_api','queued')""",
+            (evaluation_id, plan.id, metric),
         )
         cur.execute(
             "UPDATE benchmarks_v2.metric_evaluations SET status='running',started_at=%s WHERE id=%s",
@@ -743,7 +744,7 @@ def _merge_verification_delta(report: dict[str, Any], delta: PageDelta) -> None:
 
 _ROLLUP_PAYLOAD_SQL = """
 SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
-       COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
+       e.metric_id,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
        MIN(v.value)::float8,
        PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY v.value)::float8,
        PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY v.value)::float8,
@@ -751,20 +752,21 @@ SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
        MAX(v.value)::float8,SUM(v.value)::float8,COUNT(*)::int
 FROM benchmarks_v2.metric_values v
 JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
+JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
 JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
 JOIN benchmarks_v2.runs r ON r.id=o.run_id
 WHERE o.benchmark='S2S' AND o.status='succeeded' AND e.status='succeeded'
   AND r.status IN ('succeeded','partial') AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
-  (o.provider,o.model,o.benchmark,o.dataset_id,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_id,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit),
-  (o.provider,o.model,o.benchmark,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,e.metric_id,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit)
 )
 """
 _STORED_ROLLUP_SQL = """
 SELECT provider,model,benchmark,dataset_id,
-       COALESCE(metric_id,benchmarks_v2.metric_id_for_code(metric_type)),metric_type,metric_version,
+       metric_id,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
 FROM benchmarks_v2.metric_values_by_bucket
@@ -786,7 +788,7 @@ def _refresh(cur: psycopg.Cursor[Any], bucket: datetime) -> None:
     )
     cur.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-           (provider,model,benchmark,dataset_id,metric_id,metric_type,metric_version,evaluation_variant,
+           (provider,model,benchmark,dataset_id,metric_id,metric_version,evaluation_variant,
             value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
         """
         + _ROLLUP_PAYLOAD_SQL,
@@ -879,11 +881,12 @@ WITH legacy AS (
            r.metric_type,r.metric_units,r.metric_value
 ), normalized AS (
   SELECT jsonb_build_array(o.run_id,o.sample_id,o.provider,o.model,o.voice,o.dataset_id,
-                           e.metric_type,v.unit,v.value) AS identity,
+                           m.code,v.unit,v.value) AS identity,
          count(*)::int AS row_count
   FROM benchmarks_v2.benchmark_observations o
   JOIN benchmarks_v2.runs n ON n.id=o.run_id
   JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id
+  JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
   JOIN benchmarks_v2.metric_values v ON v.metric_evaluation_id=e.id
   WHERE o.run_id=ANY(%(run_ids)s) AND o.benchmark='S2S'
     AND o.status='succeeded' AND e.status='succeeded'
@@ -891,7 +894,7 @@ WITH legacy AS (
     AND v.value_key='primary' AND v.value_role='primary'
     AND n.status IN ('succeeded','partial')
   GROUP BY o.run_id,o.sample_id,o.provider,o.model,o.voice,o.dataset_id,
-           e.metric_type,v.unit,v.value
+           m.code,v.unit,v.value
 )
 SELECT COALESCE(l.identity,n.identity),COALESCE(l.row_count,0),COALESCE(n.row_count,0)
 FROM legacy l FULL OUTER JOIN normalized n ON l.identity=n.identity

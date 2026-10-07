@@ -7,8 +7,7 @@ Registered on the ``db`` group in ``coval_bench.__main__``.
 
 Commands
 --------
-migrate   Run ``alembic upgrade head``. Idempotent. Executed at Cloud Run
-          Job boot before the benchmark run starts.
+migrate   Apply the compatibility revision at boot, or an explicitly selected target.
 db-check  Open a connection, run ``SELECT 1``, print OK and exit 0.
           Used as a liveness probe in CI and Cloud Run health checks.
 """
@@ -22,14 +21,57 @@ from datetime import datetime
 from pathlib import Path
 
 import click
+from alembic import command
+from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
+from alembic.util.exc import CommandError
+from sqlalchemy import create_engine
+
+_COMPATIBILITY_REVISION = "20261005_0043"
+
+
+def _default_migration_target(cfg: Config, database_url: str) -> str | None:
+    """Resolve the compatibility target from the installed Alembic graph."""
+    script = ScriptDirectory.from_config(cfg)
+    cap = script.get_revision(_COMPATIBILITY_REVISION)
+    if cap is None:
+        raise click.ClickException(f"compatibility revision not found: {_COMPATIBILITY_REVISION}")
+    url = database_url.replace("postgresql+psycopg2://", "postgresql+psycopg://")
+    url = url.replace("postgresql://", "postgresql+psycopg://")
+    engine = create_engine(url)
+    try:
+        with engine.connect() as connection:
+            heads = tuple(MigrationContext.configure(connection).get_current_heads())
+    finally:
+        engine.dispose()
+    if len(heads) > 1:
+        raise click.ClickException("database has multiple or divergent Alembic revisions")
+    if not heads:
+        return _COMPATIBILITY_REVISION
+    try:
+        current = script.get_revision(heads[0])
+    except CommandError as exc:
+        raise click.ClickException(f"unknown Alembic revision: {heads[0]}") from exc
+    if current is None:
+        raise click.ClickException(f"unknown Alembic revision: {heads[0]}")
+    current_ancestors = {
+        node.revision for node in script.iterate_revisions(current.revision, "base")
+    }
+    if cap.revision in current_ancestors:
+        return None
+    cap_ancestors = {node.revision for node in script.iterate_revisions(cap.revision, "base")}
+    if current.revision in cap_ancestors:
+        return _COMPATIBILITY_REVISION
+    raise click.ClickException(
+        f"database revision {heads[0]} is not the compatibility revision or its descendant"
+    )
 
 
 @click.command(name="migrate")
-def db_migrate() -> None:
-    """Run ``alembic upgrade head``. Idempotent."""
-    from alembic import command
-    from alembic.config import Config
-
+@click.option("--revision", type=str, help="Explicit Alembic target for staged cleanup.")
+def db_migrate(revision: str | None) -> None:
+    """Apply the compatibility cap or an explicitly requested target."""
     from coval_bench.config import get_settings
 
     # alembic.ini lives at the same level as pyproject.toml (runner root):
@@ -37,8 +79,17 @@ def db_migrate() -> None:
     ini_path = Path(__file__).parents[3] / "alembic.ini"
     cfg = Config(str(ini_path))
     cfg.set_main_option("sqlalchemy.url", str(get_settings().database_url))
-    command.upgrade(cfg, "head")
-    click.echo("alembic upgrade head: done")
+    if revision is not None:
+        cfg.attributes["allow_metric_code_cleanup"] = True
+        command.upgrade(cfg, revision)
+        click.echo(f"alembic upgrade {revision}: done")
+        return
+    target = _default_migration_target(cfg, str(get_settings().database_url))
+    if target is None:
+        click.echo(f"alembic upgrade {_COMPATIBILITY_REVISION}: already applied")
+        return
+    command.upgrade(cfg, target)
+    click.echo(f"alembic upgrade {target}: done")
 
 
 @click.command(name="db-check")

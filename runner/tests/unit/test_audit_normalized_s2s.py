@@ -36,6 +36,7 @@ def _apply_migrations(conn: psycopg.Connection[Any]) -> None:
     dsn = f"postgresql://{info.user}@{info.host}:{info.port}/{info.dbname}"
     cfg = AlembicConfig(str(Path(__file__).parents[2] / "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", dsn.replace("postgresql://", "postgresql+psycopg://"))
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
 
 

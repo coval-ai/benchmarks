@@ -160,14 +160,19 @@ def _create_schema(conn: psycopg.Connection[Any], schema: str) -> None:
                 UNIQUE NULLS NOT DISTINCT (run_id, sample_id, provider, model, voice)
             );
 
+            CREATE UNLOGGED TABLE metrics (
+                id BIGSERIAL PRIMARY KEY,
+                code TEXT NOT NULL UNIQUE
+            );
+
             CREATE UNLOGGED TABLE metric_evaluations (
                 id UUID PRIMARY KEY,
                 observation_id UUID NOT NULL REFERENCES benchmark_observations(id),
-                metric_type TEXT NOT NULL,
+                metric_id BIGINT NOT NULL REFERENCES metrics(id),
                 metric_version TEXT NOT NULL,
                 evaluation_variant TEXT NOT NULL,
                 status TEXT NOT NULL,
-                UNIQUE (observation_id, metric_type, metric_version, evaluation_variant)
+                UNIQUE (observation_id, metric_id, metric_version, evaluation_variant)
             );
 
             CREATE UNLOGGED TABLE metric_values (
@@ -205,7 +210,7 @@ def _create_schema(conn: psycopg.Connection[Any], schema: str) -> None:
                 model TEXT NOT NULL,
                 benchmark TEXT NOT NULL,
                 dataset_id TEXT NOT NULL,
-                metric_type TEXT NOT NULL,
+                metric_id BIGINT NOT NULL REFERENCES metrics(id),
                 metric_version TEXT NOT NULL,
                 evaluation_variant TEXT NOT NULL,
                 value_key TEXT NOT NULL,
@@ -219,7 +224,7 @@ def _create_schema(conn: psycopg.Connection[Any], schema: str) -> None:
                 value_sum DOUBLE PRECISION NOT NULL,
                 sample_count INTEGER NOT NULL,
                 PRIMARY KEY (
-                    provider, model, benchmark, dataset_id, metric_type, metric_version,
+                    provider, model, benchmark, dataset_id, metric_id, metric_version,
                     evaluation_variant, value_key, bucket_at
                 )
             );
@@ -298,15 +303,20 @@ def _seed(conn: psycopg.Connection[Any], rows: int, models: int, buckets: int) -
             {"models": models, "observations": observation_count, "runs": run_count},
         )
         cur.execute(
+            "INSERT INTO metrics (code) VALUES ('WER'), ('TTFT'), ('TTFS') "
+            "ON CONFLICT (code) DO NOTHING"
+        )
+        cur.execute(
             f"""
             INSERT INTO metric_evaluations
-                (id, observation_id, metric_type, metric_version, evaluation_variant, status)
+                (id, observation_id, metric_id, metric_version, evaluation_variant, status)
             SELECT md5('evaluation-'
                        || ((metric.observation_number - 1) * {_METRICS_PER_OBSERVATION}
                            + metric.slot)::text)::uuid,
                    md5('observation-' || metric.observation_number::text)::uuid,
-                   metric.metric_type, 'v1', 'default', 'succeeded'
+                   metrics.id, 'v1', 'default', 'succeeded'
             FROM ({metric_rows}) AS metric
+            JOIN metrics ON metrics.code = metric.metric_type
             """,  # noqa: S608 -- metric_rows is a module-owned SQL fragment.
             {"observations": observation_count},
         )
@@ -380,11 +390,11 @@ def _legacy_rollup_insert() -> str:
 def _normalized_rollup_insert() -> str:
     return """
         INSERT INTO metric_values_by_bucket
-            (provider, model, benchmark, dataset_id, metric_type, metric_version,
+            (provider, model, benchmark, dataset_id, metric_id, metric_version,
              evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
              p75, max_value, value_sum, sample_count)
         SELECT observation.provider, observation.model, observation.benchmark,
-               COALESCE(observation.dataset_id, '__all__'), evaluation.metric_type,
+               COALESCE(observation.dataset_id, '__all__'), evaluation.metric_id,
                evaluation.metric_version, evaluation.evaluation_variant, value.value_key,
                value.unit, run.scheduled_at,
                MIN(value.value)::float8,
@@ -395,16 +405,17 @@ def _normalized_rollup_insert() -> str:
         FROM metric_values value
         JOIN metric_evaluations evaluation
           ON evaluation.id = value.metric_evaluation_id
+        JOIN metrics metric ON metric.id = evaluation.metric_id
         JOIN benchmark_observations observation
           ON observation.id = evaluation.observation_id
         JOIN runs run ON run.id = observation.run_id
         WHERE evaluation.status = 'succeeded' AND run.status IN ('succeeded', 'partial')
         GROUP BY GROUPING SETS (
             (observation.provider, observation.model, observation.benchmark,
-             observation.dataset_id, evaluation.metric_type, evaluation.metric_version,
+             observation.dataset_id, evaluation.metric_id, evaluation.metric_version,
              evaluation.evaluation_variant, value.value_key, value.unit, run.scheduled_at),
             (observation.provider, observation.model, observation.benchmark,
-             evaluation.metric_type, evaluation.metric_version,
+             evaluation.metric_id, evaluation.metric_version,
              evaluation.evaluation_variant, value.value_key, value.unit, run.scheduled_at)
         )
     """
@@ -429,20 +440,21 @@ def _workloads(result_limit: int) -> tuple[Workload, ...]:
     """
     recent_normalized = """
         SELECT observation.run_id, observation.provider, observation.model, observation.voice,
-               observation.benchmark, observation.dataset_id, evaluation.metric_type,
+               observation.benchmark, observation.dataset_id, metric.code,
                value.value, value.unit, observation.sample_id, observation.captured_at,
                UPPER(run.status) AS run_status
         FROM benchmark_observations observation
         JOIN runs run ON run.id = observation.run_id
         JOIN metric_evaluations evaluation
           ON evaluation.observation_id = observation.id
+        JOIN metrics metric ON metric.id = evaluation.metric_id
         JOIN metric_values value
           ON value.metric_evaluation_id = evaluation.id AND value.value_role = 'primary'
         WHERE observation.status = 'succeeded'
           AND evaluation.status = 'succeeded'
           AND run.status IN ('succeeded', 'partial')
           AND observation.benchmark = %(benchmark)s
-          AND evaluation.metric_type = %(metric_type)s
+          AND metric.code = %(metric_type)s
           AND evaluation.metric_version = 'v1'
           AND evaluation.evaluation_variant = 'default'
           AND observation.dataset_id = %(dataset_id)s
@@ -460,16 +472,17 @@ def _workloads(result_limit: int) -> tuple[Workload, ...]:
         ORDER BY bucket_at, provider, model, metric_type
     """
     series_normalized = """
-        SELECT provider, model, metric_type, bucket_at,
+        SELECT bucket.provider, bucket.model, metric.code, bucket.bucket_at,
                min_value, p25, p50, p75, max_value, value_sum, sample_count
-        FROM metric_values_by_bucket
-        WHERE benchmark = %(benchmark)s
-          AND dataset_id = %(dataset_id)s
-          AND metric_version = 'v1'
-          AND evaluation_variant = 'default'
-          AND value_key = 'primary'
-          AND bucket_at >= NOW() - INTERVAL '7 days'
-        ORDER BY bucket_at, provider, model, metric_type
+        FROM metric_values_by_bucket bucket
+        JOIN metrics metric ON metric.id = bucket.metric_id
+        WHERE bucket.benchmark = %(benchmark)s
+          AND bucket.dataset_id = %(dataset_id)s
+          AND bucket.metric_version = 'v1'
+          AND bucket.evaluation_variant = 'default'
+          AND bucket.value_key = 'primary'
+          AND bucket.bucket_at >= NOW() - INTERVAL '7 days'
+        ORDER BY bucket.bucket_at, bucket.provider, bucket.model, metric.code
     """
     common = {"benchmark": "STT", "metric_type": "WER", "dataset_id": "stt-v2"}
     return (

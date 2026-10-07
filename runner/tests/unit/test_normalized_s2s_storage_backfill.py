@@ -572,18 +572,18 @@ def test_s2s_refresh_preserves_and_ignores_same_bucket_non_s2s_rollups(
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                (provider,model,benchmark,dataset_id,metric_type,metric_version,
+                (provider,model,benchmark,dataset_id,metric_id,metric_version,
                  evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
                  max_value,value_sum,sample_count)
                 VALUES
-                ('stt-provider','stt-model','STT','stt-dataset','WER','v7','custom',
+                ('stt-provider','stt-model','STT','stt-dataset',benchmarks_v2.metric_id_for_code('WER'),'v7','custom',
                  'primary','percent',%s,11,12,13,14,15,123,7),
-                ('tts-provider','tts-model','TTS','__all__','MOS','v9','custom',
+                ('tts-provider','tts-model','TTS','__all__',benchmarks_v2.metric_id_for_code('MOS'),'v9','custom',
                  'primary','score',%s,21,22,23,24,25,456,8)""",
             (_NOW, _NOW),
         )
         cur.execute(
-            """SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+            """SELECT provider,model,benchmark,dataset_id,metric_id,metric_version,
                        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
                        max_value,value_sum,sample_count
                 FROM benchmarks_v2.metric_values_by_bucket
@@ -603,7 +603,7 @@ def test_s2s_refresh_preserves_and_ignores_same_bucket_non_s2s_rollups(
     assert applied["rollup_mismatch_count"] == 0
     with s2s_db.cursor() as cur:
         cur.execute(
-            """SELECT provider,model,benchmark,dataset_id,metric_type,metric_version,
+            """SELECT provider,model,benchmark,dataset_id,metric_id,metric_version,
                        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
                        max_value,value_sum,sample_count
                 FROM benchmarks_v2.metric_values_by_bucket
@@ -671,8 +671,9 @@ def _insert_live_owned(
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status)
-               VALUES (%s,%s,'V2V','v1','default','coval_api','queued')""",
+               (id,observation_id,metric_id,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,benchmarks_v2.metric_id_for_code('V2V'),
+               'v1','default','coval_api','queued')""",
             (evaluation_id, observation_id),
         )
         cur.execute(
