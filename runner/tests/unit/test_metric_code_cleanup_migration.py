@@ -124,7 +124,7 @@ def _publish(conn: Any) -> None:
             conn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.normalized_results_{window}")
 
 
-def _rows(conn: Any, table: str) -> list[Any]:
+def _rows(conn: psycopg.Connection[Any], table: str) -> list[Any]:
     return conn.execute(
         f"SELECT to_jsonb(t)-'metric_type' FROM benchmarks_v2.{table} t ORDER BY 1"
     ).fetchall()
@@ -142,7 +142,7 @@ def _payloads(conn: Any) -> dict[str, list[Any]]:
     return {table: _rows(conn, table) for table in tables}
 
 
-def _view_acl(conn: Any) -> list[Any]:
+def _view_acl(conn: psycopg.Connection[Any]) -> list[Any]:
     return conn.execute("""SELECT c.relname,pg_get_userbyid(c.relowner),a.grantee,a.privilege_type,a.is_grantable
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))) a
