@@ -11,6 +11,7 @@ import pytest
 from alembic import command as alembic_command
 from alembic.config import Config
 from alembic.util.exc import CommandError
+from click import ClickException
 from click.testing import CliRunner
 
 from coval_bench.db import cli
@@ -72,7 +73,7 @@ def test_default_target_uses_graph_ancestry(
     context.get_current_heads.return_value = heads
     cfg = Config()
     if expected == "error":
-        with pytest.raises(cli.click.ClickException):
+        with pytest.raises(ClickException):
             cli._default_migration_target(cfg, "postgresql://fixture")
     else:
         assert cli._default_migration_target(cfg, "postgresql://fixture") == expected
