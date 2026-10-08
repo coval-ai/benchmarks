@@ -86,6 +86,7 @@ def _async_dsn(conn: psycopg.Connection[Any]) -> str:
 def _apply_migrations(conn: psycopg.Connection[Any]) -> None:
     """Run ``alembic upgrade head`` against the test database."""
     cfg = _alembic_cfg(_async_dsn(conn))
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
 
 
@@ -262,6 +263,7 @@ def test_migration_backfills_existing_results(pg_conn: psycopg.Connection[Any]) 
             )
 
     # Same as `coval-bench db migrate`.
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
 
     with pg_conn.cursor(row_factory=psycopg.rows.dict_row) as cur:

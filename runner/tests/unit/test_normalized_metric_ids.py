@@ -18,9 +18,9 @@ from pytest_postgresql.factories import postgresql
 from coval_bench.db.dashboard_source import rebuild_source_bucket
 from coval_bench.db.models import MetricEvaluation, MetricExecutor, ProcessingStatus
 from coval_bench.db.writer import RunWriter
-from coval_bench.migrations.backfill_normalized_metric_ids import backfill
 from coval_bench.registries.metrics import Metric
 from tests.unit import test_normalized_db_writer as writer_seed
+from tests.unit._historical_metric_id_backfill import backfill
 
 pg_conn = postgresql("pg_proc")
 
@@ -39,6 +39,8 @@ def _migrate(conn: psycopg.Connection[Any], revision: str, *, down: bool = False
     config.set_main_option(
         "sqlalchemy.url", _dsn(conn).replace("postgresql://", "postgresql+psycopg://")
     )
+    if revision == "head":
+        config.attributes["allow_metric_code_cleanup"] = True
     (command.downgrade if down else command.upgrade)(config, revision)
 
 
@@ -94,7 +96,7 @@ def historical(pg_conn: Any) -> Any:
 @pytest.fixture
 def current_identity(historical: Any) -> Any:
     backfill(historical, apply=True)
-    _migrate(historical, "head")
+    _migrate(historical, "20261005_0043")
     return historical
 
 
@@ -264,9 +266,12 @@ async def test_concurrent_historical_retries_preserve_identity_and_payload(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["20261005_0043", "head"])
 async def test_writer_resolves_new_identity_and_rejects_supplied_mismatch(
     current_identity: Any,
+    target: str,
 ) -> None:
+    _migrate(current_identity, target)
     observation_id = current_identity.execute(
         "SELECT observation_id FROM benchmarks_v2.metric_evaluations LIMIT 1"
     ).fetchone()[0]

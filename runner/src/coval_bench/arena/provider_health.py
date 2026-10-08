@@ -52,10 +52,11 @@ _LATEST_RUN_TTFA_SQL = """
                 SELECT TRUE
                 FROM benchmarks_v2.benchmark_observations o
                 JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+                JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
                 WHERE o.run_id = ordered.run_id
                   AND o.provider = p.provider
                   AND o.benchmark = 'TTS'
-                  AND e.metric_type = 'TTFA'
+                  AND m.code = 'TTFA'
                   AND e.metric_version = 'v1'
                   AND e.evaluation_variant = 'default'
                   AND e.status IN ('succeeded', 'failed')
@@ -69,8 +70,9 @@ _LATEST_RUN_TTFA_SQL = """
     JOIN benchmarks_v2.benchmark_observations o
       ON o.run_id = l.run_id AND o.provider = l.provider
     JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+    JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
     WHERE o.benchmark = 'TTS'
-      AND e.metric_type = 'TTFA'
+      AND m.code = 'TTFA'
       AND e.metric_version = 'v1'
       AND e.evaluation_variant = 'default'
       AND e.status IN ('succeeded', 'failed')

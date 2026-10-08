@@ -106,7 +106,7 @@ WITH rules AS (
   SELECT unnest(%(hours)s::timestamptz[]) AS hour_at
 ), requested_buckets AS MATERIALIZED (
   SELECT b.provider, b.model, b.benchmark, b.dataset_id, b.metric_id,
-         b.metric_type, b.metric_version, b.evaluation_variant, b.value_key,
+         b.metric_version, b.evaluation_variant, b.value_key,
          b.unit, b.bucket_at, b.value_sum, b.sample_count, h.hour_at
   FROM benchmarks_v2.metric_values_by_bucket b
   JOIN requested_hours h ON b.bucket_at >= h.hour_at
@@ -118,7 +118,7 @@ WITH rules AS (
 ), source AS (
   SELECT b.provider, b.model, b.benchmark, b.dataset_id,
          b.metric_id,
-         b.metric_type,
+         m.code AS metric_type,
          b.metric_version, b.evaluation_variant, b.bucket_at AS source_at,
          b.hour_at,
          r.method, r.fallback, r.scale, r.numerator_keys, r.denominator_key,
@@ -131,11 +131,12 @@ WITH rules AS (
           AND MIN(b.sample_count) = MAX(b.sample_count)
           AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
   FROM requested_buckets b
-  JOIN rules r USING (metric_type, metric_version)
+  JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+  JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
   WHERE (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
          OR b.value_key = r.denominator_key)
   GROUP BY b.provider, b.model, b.benchmark, b.dataset_id,
-           b.metric_id, b.metric_type,
+           b.metric_id, m.code,
            b.metric_version, b.evaluation_variant, b.bucket_at,
            r.method, r.fallback, r.scale, r.numerator_keys, r.denominator_key, b.hour_at
   HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
@@ -240,8 +241,9 @@ async def _refresh_hours_in_transaction(
         for hour in normalized:
             await cur.execute(HOUR_LOCK_SQL, {"hour": hour})
     await cur.execute(
-        """SELECT DISTINCT b.metric_type
+        """SELECT DISTINCT m.code AS metric_type
            FROM benchmarks_v2.metric_values_by_bucket b
+           JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
            JOIN unnest(%(hours)s::timestamptz[]) requested(hour_at)
              ON b.bucket_at >= requested.hour_at
             AND b.bucket_at < requested.hour_at + interval '1 hour'

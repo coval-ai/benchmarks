@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501, S608
-"""Resumable, identity-only backfill for normalized metric storage.
+"""Historical metric-ID hydration helper retained only for migration tests.
 
 The command is intentionally separate from Alembic.  It is safe to stop and
 rerun: every phase selects only rows whose identity is still null, and each
@@ -11,17 +11,12 @@ because of contention; an exhausted runtime explicitly defers verification.
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import click
 import psycopg
-
-from coval_bench.config import get_settings
 
 _ADVISORY_LOCK = "normalized_metric_ids_backfill"
 _TABLES = ("metric_evaluations", "dashboard_metric_values", "metric_values_by_bucket")
@@ -314,52 +309,3 @@ def backfill(
                 report.errors.append("could not release advisory lock cleanly")
         report.elapsed_seconds = clock() - started
     return report
-
-
-@click.command()
-@click.option("--apply", is_flag=True, help="Commit metric ID updates; default is read-only.")
-@click.option("--batch-size", type=click.IntRange(min=1), default=1000, show_default=True)
-@click.option("--max-batches", type=click.IntRange(min=1), default=None)
-@click.option(
-    "--max-runtime-seconds", type=click.FloatRange(min=0.1), default=600.0, show_default=True
-)
-@click.option("--lock-timeout-ms", type=click.IntRange(min=1), default=1000, show_default=True)
-@click.option(
-    "--create-pending-indexes",
-    is_flag=True,
-    help="Create/recover temporary concurrent indexes before the run.",
-)
-def backfill_normalized_metric_ids_cli(
-    apply: bool,
-    batch_size: int,
-    max_batches: int | None,
-    max_runtime_seconds: float,
-    lock_timeout_ms: int,
-    create_pending_indexes: bool,
-) -> None:
-    """Backfill normalized metric IDs (read-only unless --apply is supplied)."""
-    if create_pending_indexes and not apply:
-        raise click.UsageError("--create-pending-indexes requires --apply")
-    url = str(get_settings().database_url or os.environ.get("DATABASE_URL", ""))
-    if not url:
-        raise click.ClickException("DATABASE_URL is required")
-    try:
-        # Every apply batch owns a real transaction.  Autocommit keeps the
-        # advisory lock and preflight reads from wrapping later batches in an
-        # outer transaction/savepoint.
-        with psycopg.connect(url, autocommit=True) as conn:
-            if create_pending_indexes:
-                ensure_pending_indexes(conn)
-            report = backfill(
-                conn,
-                apply=apply,
-                batch_size=batch_size,
-                max_batches=max_batches,
-                max_runtime_seconds=max_runtime_seconds,
-                lock_timeout_ms=lock_timeout_ms,
-            )
-    except psycopg.Error as error:
-        raise click.ClickException(f"backfill failed: {error}") from error
-    click.echo(json.dumps(report.as_dict(), sort_keys=True))
-    if report.status in {"busy", "needs_reconciliation"}:
-        raise click.exceptions.Exit(2)
