@@ -63,7 +63,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
                WHERE attrelid=%s::regclass AND attnum>0 AND NOT attisdropped""",
             (f"benchmarks_v2.{table}",),
         ).fetchall()
-        assert ("metric_id",) in columns and ("metric_type",) in columns
+        assert ("metric_id",) in columns
 
 
 @pytest.mark.parametrize(
@@ -180,7 +180,9 @@ async def test_future_metric_is_registered_before_hourly_publication(
         ).fetchall()
         assert rows == [(future.value, first[0], 12.0, 3)]
         assert metric_pg.execute(
-            "SELECT DISTINCT metric_type FROM benchmarks_v2.metric_values_by_bucket"
+            """SELECT DISTINCT m.code
+               FROM benchmarks_v2.metric_values_by_bucket b
+               JOIN benchmarks_v2.metrics m ON m.id=b.metric_id"""
         ).fetchall() == [(future.value,)]
     finally:
         await pool.close()

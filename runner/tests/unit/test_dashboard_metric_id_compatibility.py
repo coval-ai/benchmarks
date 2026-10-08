@@ -22,7 +22,7 @@ from pytest_postgresql.factories import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from coval_bench.api.dashboard_snapshots import require_snapshot
-from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+from coval_bench.db.dashboard_contracts import aggregation_fingerprint
 from coval_bench.db.models import (
     Benchmark,
     Observation,
@@ -34,7 +34,6 @@ from coval_bench.db.writer import RunWriter
 
 from . import test_normalized_db_writer as writer_seed
 from .conftest import async_dsn, open_pool
-from .test_dashboard_hourly import _bucket
 
 metric_ids_pg = postgresql("pg_proc")
 _HOUR = datetime(2026, 9, 14, 12, tzinfo=UTC)
@@ -106,6 +105,27 @@ def _populated(conn: psycopg.Connection[Any]) -> list[bool]:
     ]
 
 
+async def _publish_0035_snapshots(pool: AsyncConnectionPool[Any]) -> int:
+    """Publish the frozen 0035 views before evaluation metric IDs exist."""
+    async with pool.connection() as conn, conn.transaction():
+        await conn.execute(
+            "UPDATE benchmarks_v2.dashboard_summary_state SET as_of=%s WHERE id=true",
+            (_AS_OF,),
+        )
+        for view in _VIEWS:
+            await conn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{view}")
+        cursor = await conn.execute(
+            """UPDATE benchmarks_v2.dashboard_summary_state
+            SET generation=generation+1,published_at=clock_timestamp(),
+                definition_revision=2,definition_fingerprint=%s
+            WHERE id=true RETURNING generation""",
+            (aggregation_fingerprint(),),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        return int(row["generation"])
+
+
 def _seed_0034(conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -> None:
     _migrate(conn, "20260914_0034")
     conn.autocommit = True
@@ -143,8 +163,9 @@ def _seed_0034(conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -
                 )
             )
             evaluation_id = await writer_seed._historical_evaluation(pool, observation)
-            await writer.complete_metric_evaluation(
+            await writer_seed._complete_historical_evaluation(
                 evaluation_id,
+                pool=pool,
                 values=writer_seed._wer_values(evaluation_id),
                 finished_at=_AS_OF,
             )
@@ -173,7 +194,15 @@ def _seed_0034(conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch) -
         VALUES (%s,false,%s,1,'old')""",
         (_HOUR, _HOUR),
     )
-    _bucket(conn, _HOUR, [("WER", "primary", "percent", 10.0, 2)])
+    # Freeze the pre-catalog schema here; the current bucket helper uses metric IDs.
+    conn.execute(
+        """INSERT INTO benchmarks_v2.metric_values_by_bucket
+        (provider,model,benchmark,dataset_id,metric_type,metric_version,evaluation_variant,
+         value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
+        VALUES ('p','m','STT','d','WER','v1','default','primary','percent',%s,
+                10,10,10,10,10,10,2)""",
+        (_HOUR,),
+    )
     conn.execute(
         """UPDATE benchmarks_v2.dashboard_summary_state SET generation=7,
         as_of=%s,published_at=%s,definition_fingerprint='old'""",
@@ -214,8 +243,7 @@ def test_populated_upgrade_preserves_data_and_requires_republication(
                     await require_snapshot(reader)
                 assert failure.value.status_code == 503
                 assert failure.value.detail == "dashboard_snapshot_not_ready"
-            result = await refresh_summary_snapshots(pool, as_of=_AS_OF)
-            assert result.status == "published" and result.generation == 8
+            assert await _publish_0035_snapshots(pool) == 8
             async with pool.connection() as reader:
                 snapshot = await require_snapshot(reader)
                 assert snapshot.generation == 8 and snapshot.definition_revision == 2
@@ -239,8 +267,7 @@ def test_populated_upgrade_preserves_data_and_requires_republication(
     async def republish() -> None:
         pool = await open_pool(conn)
         try:
-            result = await refresh_summary_snapshots(pool, as_of=_AS_OF)
-            assert result.status == "published" and result.generation == 9
+            assert await _publish_0035_snapshots(pool) == 9
         finally:
             await pool.close()
 

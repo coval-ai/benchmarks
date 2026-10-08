@@ -52,7 +52,9 @@ def _async_dsn(conn: psycopg.Connection[Any]) -> str:
 
 
 def _apply_migrations(conn: psycopg.Connection[Any]) -> None:
-    alembic_command.upgrade(_alembic_cfg(_async_dsn(conn)), "head")
+    cfg = _alembic_cfg(_async_dsn(conn))
+    cfg.attributes["allow_metric_code_cleanup"] = True
+    alembic_command.upgrade(cfg, "head")
 
 
 async def _make_pool(
@@ -410,6 +412,7 @@ def test_battle_voice_migration_reverses(snap_pg: psycopg.Connection[Any]) -> No
     assert added.isdisjoint(after_downgrade)
     assert after_downgrade == after_upgrade - added
 
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
     assert _battle_columns(snap_pg) == after_upgrade
 
@@ -462,6 +465,7 @@ def test_migration_preserves_existing_rows(snap_pg: psycopg.Connection[Any]) -> 
         )
     snap_pg.commit()
 
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
     snap_pg.rollback()
 

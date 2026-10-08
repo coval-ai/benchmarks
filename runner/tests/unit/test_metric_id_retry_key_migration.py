@@ -158,7 +158,7 @@ def _index_definition(conn: Any, name: str) -> tuple[Any, ...]:
 
 
 def test_upgrade_keys_all_dimensions_and_variations(seeded: Any) -> None:
-    _migrate(seeded, "head")
+    _migrate(seeded, "20261005_0043")
     assert len(_index_names(seeded)) == 3
     sync_definition = seeded.execute(
         "SELECT pg_get_functiondef('benchmarks_v2.sync_metric_evaluation_identity()'::regprocedure)"

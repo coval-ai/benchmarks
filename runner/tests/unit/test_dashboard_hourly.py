@@ -31,10 +31,12 @@ def _bucket(
     with conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d',%s,'v1','default',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code=%s),
+                    'v1','default',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             [
                 (metric, key, unit, hour, val, val, val, val, val, val, count)
                 for metric, key, unit, val, count in values
@@ -123,10 +125,12 @@ async def test_refresh_combines_half_hour_source_buckets(pg_conn: psycopg.Connec
     with pg_conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d','TTFT','v1','default','primary','seconds',
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                    'v1','default','primary','seconds',
                     %s,%s,%s,%s,%s,%s,%s,%s)""",
             [(at, val, val, val, val, val, val, count) for at, val, count in values],
         )
@@ -165,10 +169,11 @@ async def test_refresh_multiple_nonadjacent_hours_bounds_source_and_preserves_st
     ) -> None:
         pg_conn.execute(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-            (provider, model, benchmark, dataset_id, metric_type, metric_version,
+            (provider, model, benchmark, dataset_id, metric_id, metric_version,
              evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
              p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT',%s,%s,%s,'default',%s,%s,%s,%s,%s,%s,%s,%s,%s,2)""",
+            VALUES ('p','m','STT',%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),
+                    %s,'default',%s,%s,%s,%s,%s,%s,%s,%s,%s,2)""",
             (dataset, metric, "v1", key, unit, at, value, value, value, value, value, value),
         )
 
@@ -193,10 +198,11 @@ async def test_refresh_multiple_nonadjacent_hours_bounds_source_and_preserves_st
     insert("TTFT", "primary", "seconds", second + timedelta(hours=1), 300.0)
     pg_conn.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-        SELECT 'p','m','STT','history','TTFT','v1','default','primary','seconds',at,
+        SELECT 'p','m','STT','history',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+               'v1','default','primary','seconds',at,
                1,1,1,1,1,1,1
         FROM generate_series(%s::timestamptz - interval '10000 hours',
                              %s::timestamptz - interval '1 hour', interval '1 hour') at""",
@@ -204,12 +210,14 @@ async def test_refresh_multiple_nonadjacent_hours_bounds_source_and_preserves_st
     )
     pg_conn.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
+        (provider, model, benchmark, dataset_id, metric_id, metric_version,
          evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
          p75, max_value, value_sum, sample_count)
-        VALUES ('p','m','STT','d1','TTFT','v2','default','primary','seconds',%s,
+        VALUES ('p','m','STT','d1',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                'v2','default','primary','seconds',%s,
                 500,500,500,500,500,500,2),
-               ('p','m','STT','d1','TTFT','v1','experiment','primary','seconds',%s,
+               ('p','m','STT','d1',(SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                'v1','experiment','primary','seconds',%s,
                 600,600,600,600,600,600,2)""",
         (first, first),
     )
@@ -423,7 +431,8 @@ async def test_retry_replaces_previous_hour_rows_without_double_counting(
         await refresh_hourly_aggregates(pool, hours=[hour])
         pg_conn.execute(
             "UPDATE benchmarks_v2.metric_values_by_bucket SET value_sum=30, min_value=30, "
-            "p25=30, p50=30, p75=30, max_value=30 WHERE metric_type='TTFT' AND bucket_at=%s",
+            "p25=30, p50=30, p75=30, max_value=30 "
+            "WHERE metric_id=benchmarks_v2.metric_id_for_code('TTFT') AND bucket_at=%s",
             (hour,),
         )
         await refresh_hourly_aggregates(pool, hours=[hour])
@@ -463,10 +472,12 @@ async def test_unknown_metric_rolls_back_previous_hour_and_state(
             )
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                (provider, model, benchmark, dataset_id, metric_id, metric_version,
                  evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
                  p75, max_value, value_sum, sample_count)
-                VALUES ('p','m','STT','d','UnknownMetric','v1','default','primary','seconds',
+                VALUES ('p','m','STT','d',
+                        (SELECT id FROM benchmarks_v2.metrics WHERE code='UnknownMetric'),
+                        'v1','default','primary','seconds',
                         %s,20,20,20,20,20,20,1)""",
                 (hour,),
             )
@@ -499,10 +510,12 @@ async def test_non_default_or_non_v1_source_rows_do_not_publish(
     with pg_conn.cursor() as cur:
         cur.executemany(
             """INSERT INTO benchmarks_v2.metric_values_by_bucket
-            (provider, model, benchmark, dataset_id, metric_type, metric_version,
+            (provider, model, benchmark, dataset_id, metric_id, metric_version,
              evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
              p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d','TTFT',%s,%s,'primary','seconds',
+            VALUES ('p','m','STT','d',
+                    (SELECT id FROM benchmarks_v2.metrics WHERE code='TTFT'),
+                    %s,%s,'primary','seconds',
                     %s,10,10,10,10,10,10,1)""",
             [("v2", "default", hour), ("v1", "experiment", hour)],
         )

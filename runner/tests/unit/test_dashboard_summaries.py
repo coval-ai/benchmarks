@@ -128,8 +128,8 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
             )
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
-                (id,observation_id,metric_type,metric_version,executor,status,started_at,created_at,updated_at)
-                VALUES (%s,%s,'WER','v1','test','queued',NULL,%s,%s)""",
+                (id,observation_id,metric_id,metric_version,executor,status,started_at,created_at,updated_at)
+                VALUES (%s,%s,benchmarks_v2.metric_id_for_code('WER'),'v1','test','queued',NULL,%s,%s)""",
                 (eid, oid, captured, captured),
             )
             cur.execute(
@@ -222,9 +222,9 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                 )
                 cur.execute(
                     """INSERT INTO benchmarks_v2.metric_evaluations
-                    (id,observation_id,metric_type,metric_version,executor,status,
+                    (id,observation_id,metric_id,metric_version,executor,status,
                      started_at,created_at,updated_at)
-                    VALUES (%s,%s,'UnknownSummaryMetric','v1','test','queued',NULL,%s,%s)""",
+                    VALUES (%s,%s,benchmarks_v2.metric_id_for_code('UnknownSummaryMetric'),'v1','test','queued',NULL,%s,%s)""",
                     (evaluation_id, observation_id, as_of, as_of),
                 )
                 cur.execute(
