@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,11 +19,7 @@ type DashboardPool = AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.Di
 RUN_SLOT = "run"
 GRAINS: dict[str, int] = {"1h": 3600, "4h": 14400}
 _GRAIN_BY_SECONDS = {seconds: grain for grain, seconds in GRAINS.items()}
-RETENTION: dict[str, timedelta] = {
-    RUN_SLOT: timedelta(days=30),
-    "1h": timedelta(days=7),
-    "4h": timedelta(days=30),
-}
+RETENTION = timedelta(days=30)
 _REBUILD_STATEMENT_TIMEOUT = "300s"
 
 
@@ -108,10 +105,19 @@ GROUP BY GROUPING SETS (
 )
 """
 
-PRUNE_ROLLUPS_SQL = """
-DELETE FROM benchmarks_v2.dashboard_rollups WHERE grain = %(grain)s AND bucket_at < %(before)s
+CLAIM_SLOTS_SQL = """
+DELETE FROM benchmarks_v2.dashboard_rollup_queue
+WHERE slot_at IN (
+  SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue ORDER BY slot_at LIMIT 50)
+RETURNING slot_at
 """
-PRUNE_QUEUE_SQL = "DELETE FROM benchmarks_v2.dashboard_rollup_queue WHERE slot_at < %(before)s"
+PRUNE_SQL = {
+    table: f"DELETE FROM benchmarks_v2.{table} WHERE {column} < %(before)s"  # noqa: S608
+    for table, column in (
+        ("dashboard_rollups", "bucket_at"),
+        ("dashboard_rollup_queue", "slot_at"),
+    )
+}
 
 
 async def fill_rollup(
@@ -130,36 +136,38 @@ async def fill_rollup(
     await conn.execute(FILL_ROLLUP_SQL.format(slot_filter=slot_filter), params)
 
 
-async def rebuild_slot(conn: psycopg.AsyncConnection[Any], slot_at: datetime) -> None:
-    """Claim a queued slot, then rebuild it and the 1h and 4h buckets containing it."""
+async def rebuild_slots(conn: psycopg.AsyncConnection[Any], slots: Sequence[datetime]) -> None:
+    """Rebuild the given run slots and, once each, every 1h and 4h bucket containing them."""
     await conn.execute(f"SET LOCAL statement_timeout = '{_REBUILD_STATEMENT_TIMEOUT}'")
-    await conn.execute(
-        "DELETE FROM benchmarks_v2.dashboard_rollup_queue WHERE slot_at = %(slot)s",
-        {"slot": slot_at},
-    )
-    for grain in (RUN_SLOT, *GRAINS):
-        await fill_rollup(conn, grain=grain, bucket_at=slot_at)
+    targets = {
+        (grain, floor_rollup(slot, grain)) for slot in slots for grain in (RUN_SLOT, *GRAINS)
+    }
+    for grain, bucket_at in sorted(targets):
+        await fill_rollup(conn, grain=grain, bucket_at=bucket_at)
 
 
 async def drain_rollup_queue(
     pool: AsyncConnectionPool[Any], *, as_of: datetime, deadline: float | None = None
 ) -> DrainResult:
-    """Rebuild queued slots oldest-first, one commit each, then drop rows past retention."""
-    async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
-        await cur.execute(
-            "SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue ORDER BY slot_at"
-        )
-        queued = [row["slot_at"] for row in await cur.fetchall()]
+    """Claim queued slots fifty at a time, rebuild each batch in one commit, then prune."""
     loop = asyncio.get_running_loop()
     rebuilt = 0
-    for slot_at in queued:
-        if deadline is not None and loop.time() >= deadline:
-            break
-        async with pool.connection() as conn, conn.transaction():
-            await rebuild_slot(conn, slot_at)
-        rebuilt += 1
-    async with pool.connection() as conn, conn.transaction():
-        for grain, keep in RETENTION.items():
-            await conn.execute(PRUNE_ROLLUPS_SQL, {"grain": grain, "before": as_of - keep})
-        await conn.execute(PRUNE_QUEUE_SQL, {"before": as_of - max(RETENTION.values())})
-    return DrainResult(rebuilt, len(queued) - rebuilt)
+    while deadline is None or loop.time() < deadline:
+        async with (
+            pool.connection() as conn,
+            conn.transaction(),
+            conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
+        ):
+            await cur.execute(CLAIM_SLOTS_SQL)
+            claimed = [row["slot_at"] for row in await cur.fetchall()]
+            if not claimed:
+                break
+            await rebuild_slots(conn, claimed)
+        rebuilt += len(claimed)
+    async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        async with conn.transaction():
+            for sql in PRUNE_SQL.values():
+                await cur.execute(sql, {"before": as_of - RETENTION})
+        await cur.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollup_queue")
+        row = await cur.fetchone()
+    return DrainResult(rebuilt, int(row["n"]) if row else 0)

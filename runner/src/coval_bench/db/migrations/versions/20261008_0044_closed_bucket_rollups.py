@@ -52,6 +52,7 @@ def upgrade() -> None:
       ON benchmarks_v2.dashboard_rollups (benchmark, dataset_id, grain, bucket_at);
     CREATE INDEX dashboard_rollups_slot
       ON benchmarks_v2.dashboard_rollups (grain, bucket_at);
+    CREATE INDEX runs_scheduled_at_idx ON benchmarks_v2.runs (scheduled_at);
 
     CREATE TABLE benchmarks_v2.dashboard_rollup_queue (
       slot_at TIMESTAMPTZ PRIMARY KEY,
@@ -76,6 +77,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("""
+    DROP INDEX benchmarks_v2.runs_scheduled_at_idx;
     ALTER TABLE benchmarks_v2.dashboard_window_state RENAME TO dashboard_summary_state;
     DROP TABLE benchmarks_v2.dashboard_rollup_queue;
     DROP TABLE benchmarks_v2.dashboard_rollups;

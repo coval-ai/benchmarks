@@ -100,7 +100,7 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
 
 
 @pytest.mark.asyncio
-async def test_saved_buckets_serve_only_closed_intervals(
+async def test_saved_buckets_overlapping_the_range_are_served(
     client: AsyncClient,
     app: FastAPI,
     postgresql: Any,
@@ -134,16 +134,16 @@ async def test_saved_buckets_serve_only_closed_intervals(
     response = await client.get("/v1/results/timeline", params=params)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert [p["value"] for p in body["points"]] == [16]
-    assert [p["sample_count"] for p in body["points"]] == [5]
-    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(minutes=90)
+    assert [p["value"] for p in body["points"]] == [504.5, 16, 514.5]
+    assert [p["sample_count"] for p in body["points"]] == [2, 5, 2]
+    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(minutes=150)
     assert "materialization" not in body
     narrow = await client.get(
         "/v1/results/timeline",
         params={**params, "until": (start + dt.timedelta(minutes=105)).isoformat()},
     )
     assert narrow.status_code == 200, narrow.text
-    assert narrow.json()["points"] == []
+    assert [p["value"] for p in narrow.json()["points"]] == [504.5, 16]
 
 
 @pytest.mark.asyncio

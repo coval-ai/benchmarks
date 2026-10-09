@@ -13,7 +13,7 @@ from typing import Literal
 
 BenchmarkLiteral = Literal["STT", "TTS", "S2S", "LLM"]
 WindowLiteral = Literal["24h", "7d", "30d"]
-StatisticLiteral = Literal["default", "p50", "p90", "p95"]
+StatisticLiteral = Literal["default", "p50", "p90", "p95", "p100"]
 
 NORMALIZED_BENCHMARKS: frozenset[str] = frozenset({"STT", "TTS", "S2S", "LLM"})
 

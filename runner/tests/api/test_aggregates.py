@@ -30,7 +30,7 @@ from coval_bench.api.routers.aggregates import (
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
-from coval_bench.db.dashboard_rollups import GRAINS, rebuild_slot
+from coval_bench.db.dashboard_rollups import GRAINS, rebuild_slots
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, Metric
@@ -244,7 +244,6 @@ async def test_model_stats_math(client: AsyncClient, postgresql: Any) -> None:
     assert s["p75"] == pytest.approx(3.25)
     assert s["p90"] == pytest.approx(3.7)
     assert s["p95"] == pytest.approx(3.85)
-    assert s["p99"] == pytest.approx(3.97)
     # sample stddev of 1..4 = sqrt(5/3)
     assert s["stddev_value"] == pytest.approx(1.2909944, rel=1e-6)
     assert s["min_value"] == pytest.approx(1.0)
@@ -635,7 +634,6 @@ async def test_normalized_stats_pool_scope_and_group_exact_distribution(
     assert pooled["p75"] == pytest.approx(3.25)
     assert pooled["p90"] == pytest.approx(3.7)
     assert pooled["p95"] == pytest.approx(3.85)
-    assert pooled["p99"] == pytest.approx(3.97)
     assert pooled["min_value"] == pytest.approx(1.0)
     assert pooled["max_value"] == pytest.approx(4.0)
 
@@ -1897,9 +1895,8 @@ async def _fill_timeline_buckets(postgresql: Any) -> None:
                 " WHERE scheduled_at IS NOT NULL"
             )
         ).fetchall()
-        for row in rows:
-            async with conn.transaction():
-                await rebuild_slot(conn, row["scheduled_at"])
+        async with conn.transaction():
+            await rebuild_slots(conn, [row["scheduled_at"] for row in rows])
 
 
 async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
@@ -1923,7 +1920,7 @@ async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(
             )
     await _fill_timeline_buckets(postgresql)
 
-    for statistic, expected in (("p50", 9.0), ("p90", 9.0), ("p95", 9.0)):
+    for statistic, expected in (("p50", 9.0), ("p90", 9.0), ("p95", 9.0), ("p100", 9.0)):
         response = await client.get(
             "/v1/results/timeline",
             params={

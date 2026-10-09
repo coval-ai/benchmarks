@@ -153,7 +153,7 @@ async def test_drain_stops_at_the_deadline_and_keeps_failed_slots_queued(
 
 
 @pytest.mark.asyncio
-async def test_drain_prunes_each_grain_at_its_own_retention(
+async def test_drain_batches_slots_and_prunes_past_retention(
     pg_conn: psycopg.Connection[Any],
 ) -> None:
     apply_migrations(pg_conn)
@@ -161,13 +161,22 @@ async def test_drain_prunes_each_grain_at_its_own_retention(
     try:
         run_id = await _seed_two_runs(pool)
         await RunWriter(pool).rebuild_run_rollup(run_id)
-        eight_days_on = storage._NOW + timedelta(days=8)
-        assert await drain_rollup_queue(pool, as_of=eight_days_on) == DrainResult(1, 0)
-        grains = await _rows(
-            pool, "SELECT DISTINCT grain FROM benchmarks_v2.dashboard_rollups ORDER BY grain"
+        async with pool.connection() as conn:
+            await conn.execute(
+                "INSERT INTO benchmarks_v2.dashboard_rollup_queue (slot_at) VALUES (%s), (%s)",
+                (storage._NOW + timedelta(minutes=30), storage._NOW - timedelta(days=31)),
+            )
+        assert await drain_rollup_queue(pool, as_of=storage._NOW) == DrainResult(3, 0)
+        hour_rows = await _rows(
+            pool,
+            "SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollups"
+            " WHERE grain = '1h' AND bucket_at = %s AND dataset_id = '__all__'",
+            storage._NOW,
         )
-        assert [g["grain"] for g in grains] == ["4h", "run"]
-        await drain_rollup_queue(pool, as_of=storage._NOW + timedelta(days=31))
+        assert hour_rows == [{"n": 1}]
+        assert await drain_rollup_queue(pool, as_of=storage._NOW + timedelta(days=31)) == (
+            DrainResult(0, 0)
+        )
         assert await _rows(pool, "SELECT 1 FROM benchmarks_v2.dashboard_rollups") == []
     finally:
         await pool.close()

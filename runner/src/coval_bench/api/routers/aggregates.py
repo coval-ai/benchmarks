@@ -6,7 +6,7 @@
 Serves the dashboard's chart data as pre-computed aggregates. Two blocks:
 
 * ``model_stats`` — per (provider, model, metric_type): avg, sample stddev
-  (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75/p90/p95/p99
+  (n-1 denominator, coalesced to 0 for n=1), p25/p50/p75/p90/p95
   (percentile_cont), min, max, count. Read from the per-window materialized
   views (``results_24h``/``results_7d``/``results_30d``), refreshed by the
   runner at the end of each benchmark run — read-only here. Normalized reads
@@ -84,7 +84,7 @@ router = APIRouter(tags=["results"])
 
 _STATS_SQL_TEMPLATE = (
     "SELECT provider, model, metric_type,"
-    " avg_value, stddev_value, p25, p50, p75, p90, p95, p99,"
+    " avg_value, stddev_value, p25, p50, p75, p90, p95,"
     " min_value, max_value, sample_count,"
     " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
     " FROM {view}"
@@ -176,7 +176,7 @@ _DATASETS_SQL_TEMPLATE = (
 
 _STATS_BY_DATASET_SQL_TEMPLATE = (
     "SELECT dataset_id, provider, model, metric_type,"
-    " avg_value, stddev_value, p25, p50, p75, p90, p95, p99,"
+    " avg_value, stddev_value, p25, p50, p75, p90, p95,"
     " min_value, max_value, sample_count,"
     " wer_insertions_pct, wer_deletions_pct, wer_substitutions_pct"
     " FROM {view}"
@@ -253,7 +253,7 @@ SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_a
             ELSE 'mean_fallback' END AS aggregation_method
 """
 
-# Only closed buckets exist, so the newest interval always lags by one bucket.
+# A bucket is served when any part of it lies inside the requested range.
 _ROLLUP_AVERAGE_SQL = f"""
 {_AVERAGE_HEAD_SQL}
 FROM (
@@ -266,7 +266,7 @@ FROM (
    AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
    AND b.grain = %(grain)s
-   AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
+   AND b.bucket_at < %(until)s AND b.bucket_at + %(step)s > %(since)s
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
 """  # noqa: S608
 
@@ -293,7 +293,7 @@ _PERCENTILE_VALUE_KEYS: dict[str, tuple[str, str]] = {
     "TTFARoundtrip": ("TTFA", "roundtrip"),
     "TTFALeadingSilence": ("TTFA", "leading_silence"),
 }
-_PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95"}
+_PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95", "p100": "b.max_value"}
 
 _PERCENTILE_SQL = """
 SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
@@ -305,7 +305,7 @@ WHERE b.grain = %(grain)s
   AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
   AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
-  AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
+  AND b.bucket_at < %(until)s AND b.bucket_at + %(step)s > %(since)s
 ORDER BY scheduled_at, provider, model
 """
 
