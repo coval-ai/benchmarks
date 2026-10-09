@@ -25,14 +25,20 @@ async def run_stream(
     clip, since a socket that drops mid-clip leaves the transcript cut off even
     after an earlier final. A receiver failure is only stamped when no final
     landed. ``no_final_error`` is stamped when both tasks finish cleanly without
-    a final.
+    a final. Cancelling the caller cancels both tasks.
     """
     tasks = (asyncio.create_task(send), asyncio.create_task(recv))
-    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
-    if any(not task.cancelled() and task.exception() is not None for task in done):
-        for task in pending:
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        if any(not task.cancelled() and task.exception() is not None for task in done):
+            for task in pending:
+                task.cancel()
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    except asyncio.CancelledError:
+        for task in tasks:
             task.cancel()
-    outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     if result.error is None and isinstance(outcomes[0], Exception):
         result.error = str(outcomes[0])
     if result.error is None and result.audio_to_final_seconds is None:
