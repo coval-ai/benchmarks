@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+from coval_bench.db.dashboard_windows import refresh_window_views
 from tests.api.conftest import _insert_run, _make_db_url
 from tests.api.test_aggregates import (
     _insert_normalized_bucket,
@@ -34,7 +34,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     await _insert_normalized_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     response = await client.get("/v1/results/aggregates", params=params)
     assert response.status_code == 200, response.text
     first = response.json()
@@ -52,12 +52,12 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 30}
     )
     assert (await client.get("/v1/results/aggregates", params=params)).json() == first
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     updated = (await client.get("/v1/results/aggregates", params=params)).json()
     assert updated["model_stats"][0]["avg_value"] == 20
     assert updated["snapshot"]["generation"] == 2
     # Expiration works even when no ingestion occurs.
-    await refresh_summary_snapshots(
+    await refresh_window_views(
         app.state.pool, as_of=dt.datetime.now(dt.UTC) + dt.timedelta(days=31)
     )
     expired = (await client.get("/v1/results/aggregates", params=params)).json()
@@ -65,7 +65,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     assert expired["snapshot"]["generation"] == 3
     async with app.state.pool.connection() as conn:
         await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_summary_state SET definition_fingerprint='old'"
+            "UPDATE benchmarks_v2.dashboard_window_state SET definition_fingerprint='old'"
         )
     assert (await client.get("/v1/results/aggregates", params=params)).status_code == 503
 
@@ -84,10 +84,10 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
     await _insert_normalized_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     async with app.state.pool.connection() as conn:
         await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_summary_state SET published_at=%s",
+            "UPDATE benchmarks_v2.dashboard_window_state SET published_at=%s",
             (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes),),
         )
     response = await client.get(
@@ -154,7 +154,7 @@ async def test_absent_saved_storage_returns_503_but_24h_timeline_still_works(
 ) -> None:
     app.state.settings.normalized_dashboard_reads_enabled = True
     with psycopg.connect(_make_db_url(postgresql)) as conn:
-        conn.execute("DROP TABLE benchmarks_v2.dashboard_summary_state CASCADE")
+        conn.execute("DROP TABLE benchmarks_v2.dashboard_window_state CASCADE")
     assert (
         await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     ).status_code == 503

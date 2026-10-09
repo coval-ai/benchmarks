@@ -223,7 +223,6 @@ class _Connection:
                 [
                     ("dashboard_metric_values", 0, 0),
                     ("metric_evaluations", 0, 0),
-                    ("metric_values_by_bucket", 0, 0),
                 ]
             )
         if query == readiness._LATEST_ELIGIBLE_BUCKET_SQL:

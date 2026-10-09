@@ -11,9 +11,8 @@ from datetime import UTC, datetime
 
 import structlog
 
-from coval_bench.db.dashboard_buckets import fill_closed_buckets
-from coval_bench.db.dashboard_source import DashboardPool
-from coval_bench.db.dashboard_summaries import RefreshResult, refresh_summary_snapshots
+from coval_bench.db.dashboard_rollups import DashboardPool, fill_closed_rollups
+from coval_bench.db.dashboard_windows import RefreshResult, refresh_window_views
 
 logger = structlog.get_logger(__name__)
 
@@ -29,7 +28,7 @@ class MaintenanceResult:
     elapsed: float = 0.0
 
 
-async def reconcile_dashboard_aggregates(
+async def refresh_dashboard_aggregates(
     pool: DashboardPool, *, as_of: datetime | None = None
 ) -> MaintenanceResult:
     """Fill every missing closed bucket the budget allows, then refresh summaries."""
@@ -44,23 +43,23 @@ async def reconcile_dashboard_aggregates(
     remaining = 0
     try:
         async with asyncio.timeout_at(deadline - _SUMMARY_RESERVE_SECONDS):
-            result = await fill_closed_buckets(
+            result = await fill_closed_rollups(
                 pool, as_of=at, deadline=deadline - _SUMMARY_RESERVE_SECONDS
             )
         filled, remaining = result.filled, result.remaining
     except Exception as exc:
         failures.append(exc)
-        logger.error("dashboard_bucket_fill_failed", exc_info=True)
+        logger.error("dashboard_rollup_fill_failed", exc_info=True)
     summary = RefreshResult("skipped_lock")
     try:
         async with asyncio.timeout_at(deadline):
-            summary = await refresh_summary_snapshots(pool, as_of=at)
+            summary = await refresh_window_views(pool, as_of=at)
     except Exception as exc:
         failures.append(exc)
-        logger.error("dashboard_summary_reconciliation_failed", exc_info=True)
+        logger.error("dashboard_window_refresh_failed", exc_info=True)
     elapsed = loop.time() - started
     logger.info(
-        "dashboard_bucket_fill_completed",
+        "dashboard_rollup_fill_completed",
         filled=filled,
         remaining=remaining,
         elapsed=elapsed,

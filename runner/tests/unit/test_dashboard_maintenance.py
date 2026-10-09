@@ -10,8 +10,8 @@ import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db import dashboard_aggregates
-from coval_bench.db.dashboard_buckets import FillResult
-from coval_bench.db.dashboard_summaries import RefreshResult
+from coval_bench.db.dashboard_rollups import FillResult
+from coval_bench.db.dashboard_windows import RefreshResult
 
 pg_conn = postgresql("pg_proc")
 
@@ -21,11 +21,11 @@ async def test_reconciliation_fills_then_publishes(monkeypatch: pytest.MonkeyPat
     pool = MagicMock()
     fill = AsyncMock(return_value=FillResult(3, 1))
     refresh = AsyncMock(return_value=RefreshResult("published", 7))
-    monkeypatch.setattr(dashboard_aggregates, "fill_closed_buckets", fill)
-    monkeypatch.setattr(dashboard_aggregates, "refresh_summary_snapshots", refresh)
+    monkeypatch.setattr(dashboard_aggregates, "fill_closed_rollups", fill)
+    monkeypatch.setattr(dashboard_aggregates, "refresh_window_views", refresh)
     at = datetime(2026, 9, 16, tzinfo=UTC)
 
-    result = await dashboard_aggregates.reconcile_dashboard_aggregates(pool, as_of=at)
+    result = await dashboard_aggregates.refresh_dashboard_aggregates(pool, as_of=at)
 
     assert (result.filled, result.remaining, result.summary) == (
         3,
@@ -40,13 +40,13 @@ async def test_reconciliation_fills_then_publishes(monkeypatch: pytest.MonkeyPat
 async def test_fill_failure_still_publishes_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     pool = MagicMock()
     monkeypatch.setattr(
-        dashboard_aggregates, "fill_closed_buckets", AsyncMock(side_effect=RuntimeError("boom"))
+        dashboard_aggregates, "fill_closed_rollups", AsyncMock(side_effect=RuntimeError("boom"))
     )
     refresh = AsyncMock(return_value=RefreshResult("published", 1))
-    monkeypatch.setattr(dashboard_aggregates, "refresh_summary_snapshots", refresh)
+    monkeypatch.setattr(dashboard_aggregates, "refresh_window_views", refresh)
 
     with pytest.raises(RuntimeError, match="missing buckets are retained"):
-        await dashboard_aggregates.reconcile_dashboard_aggregates(
+        await dashboard_aggregates.refresh_dashboard_aggregates(
             pool, as_of=datetime(2026, 9, 16, tzinfo=UTC)
         )
     refresh.assert_awaited_once()
@@ -55,7 +55,7 @@ async def test_fill_failure_still_publishes_then_raises(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_reconciliation_requires_timezone() -> None:
     with pytest.raises(ValueError, match="timezone"):
-        await dashboard_aggregates.reconcile_dashboard_aggregates(
+        await dashboard_aggregates.refresh_dashboard_aggregates(
             MagicMock(), as_of=datetime(2026, 9, 16)
         )
 

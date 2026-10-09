@@ -233,14 +233,15 @@ def _insert_matching_rows(conn: psycopg.Connection[Any]) -> None:
         )
         cursor.execute(
             """
-            INSERT INTO benchmarks_v2.metric_values_by_bucket
+            INSERT INTO benchmarks_v2.dashboard_rollups
               (provider, model, benchmark, dataset_id, metric_id,
-               metric_version, evaluation_variant, value_key, unit, bucket_at,
-               min_value, p25, p50, p75, max_value, value_sum, sample_count)
+               metric_version, evaluation_variant, value_key, grain, bucket_at,
+               min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count,
+               latest_run_at)
             VALUES
               ('provider', 'model', 'STT', 'stt-v1', benchmarks_v2.metric_id_for_code('WER'),
-               'v1', 'default', 'primary', 'percent', %(bucket_at)s,
-               6, 6, 6, 6, 6, 12, 2)
+               'v1', 'default', 'primary', 'run', %(bucket_at)s,
+               6, 6, 6, 6, 6, 6, 6, 12, 2, %(bucket_at)s)
             """,
             {"bucket_at": bucket_at},
         )

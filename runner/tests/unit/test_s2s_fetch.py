@@ -230,9 +230,9 @@ def _stub_writer() -> MagicMock:
     writer.mark_run_capture_pending = AsyncMock()
     writer.preflight_required_capture_schema = AsyncMock()
     writer.refresh_bucket = AsyncMock()
-    writer.refresh_metric_values_bucket = AsyncMock()
+    writer.rebuild_run_rollup = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
-    writer.refresh_dashboard_summaries = AsyncMock(return_value="published")
+    writer.refresh_window_views = AsyncMock(return_value="published")
     return writer
 
 
@@ -561,7 +561,7 @@ async def test_ingest_run_slots_by_create_time() -> None:
     assert writer.start_run.await_args.kwargs["scheduled_at"] == datetime(2026, 7, 7, 0, tzinfo=UTC)
     writer.record_results.assert_not_awaited()
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
 
 
@@ -584,7 +584,7 @@ async def test_ingest_run_partial_and_failed() -> None:
         )
     assert status is RunStatus.PARTIAL
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
     writer = _stub_writer()
     all_null: list[dict[str, Any]] = [{"simulation_output_id": "s1", "value": None}]
@@ -599,11 +599,11 @@ async def test_ingest_run_partial_and_failed() -> None:
         )
     assert status is RunStatus.FAILED
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_not_awaited()
+    writer.rebuild_run_rollup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failing_refresh", ["refresh_metric_values_bucket"])
+@pytest.mark.parametrize("failing_refresh", ["rebuild_run_rollup"])
 async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
     failing_refresh: str,
 ) -> None:
@@ -625,7 +625,7 @@ async def test_ingest_run_rollup_refresh_failure_does_not_change_status(
     assert status is RunStatus.SUCCEEDED
     writer.finish_run.assert_awaited_once_with(1, status=RunStatus.SUCCEEDED)
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
@@ -2843,7 +2843,7 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
     client = _fake_client({}, {})
     writer = _stub_writer()
     if snapshot_failure:
-        writer.refresh_dashboard_summaries.side_effect = RuntimeError("snapshot unavailable")
+        writer.refresh_window_views.side_effect = RuntimeError("snapshot unavailable")
 
     @contextlib.asynccontextmanager
     async def _fake_pool(_settings: Any) -> AsyncIterator[MagicMock]:
@@ -2857,7 +2857,7 @@ async def test_fetch_and_write_v2v_propagates_normalized_gate(
 
     statuses = await fetch_v2v.fetch_and_write_v2v(settings)
 
-    writer.refresh_dashboard_summaries.assert_awaited_once_with()
+    writer.refresh_window_views.assert_awaited_once_with()
     assert statuses == {"s2s-dental:openai:gpt-realtime": RunStatus.SUCCEEDED}
     assert fetch_one.await_args is not None
     assert fetch_one.await_args.kwargs["normalized_dual_write_enabled"] is True

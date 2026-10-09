@@ -205,7 +205,7 @@ class ModelStatEntry(BaseModel):
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50. WER renders error_sum / reference_word_sum when
+    Latency timelines render p50. WER renders error_sum / wer_reference_words when
     present, else value_sum / sample_count; both pairs sum across buckets.
     """
 

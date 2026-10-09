@@ -793,7 +793,7 @@ async def _refresh_mv(postgresql: Any) -> None:
         for name in _MV_WINDOWS:
             await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
         # The normalized API path reads only the atomically published snapshot.
-        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+        from coval_bench.db.dashboard_windows import refresh_window_views
 
         pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = (
             AsyncConnectionPool(
@@ -806,7 +806,7 @@ async def _refresh_mv(postgresql: Any) -> None:
         )
         await pool.open()
         try:
-            await refresh_summary_snapshots(pool)
+            await refresh_window_views(pool)
         finally:
             await pool.close()
     finally:

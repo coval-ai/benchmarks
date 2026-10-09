@@ -32,7 +32,7 @@ WINDOW_INTERVALS: dict[str, str] = {
 
 # Per-window stats materialized views (schema-qualified). Looked up by Python
 # from the validated WindowLiteral, never user-interpolated into SQL.
-WINDOW_VIEWS: dict[str, str] = {
+LEGACY_WINDOW_VIEWS: dict[str, str] = {
     "24h": "benchmarks_v2.results_24h",
     "7d": "benchmarks_v2.results_7d",
     "30d": "benchmarks_v2.results_30d",

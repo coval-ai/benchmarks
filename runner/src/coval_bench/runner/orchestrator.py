@@ -1235,7 +1235,7 @@ async def _refresh_series_bucket(writer: Any, run_id: int, settings: Settings) -
     refreshes: tuple[tuple[str, Callable[[], Awaitable[None]]], ...] = (
         (
             "normalized_series_bucket",
-            lambda: writer.refresh_metric_values_bucket(run_id),
+            lambda: writer.rebuild_run_rollup(run_id),
         ),
     )
     for event_prefix, refresh in refreshes:
@@ -1865,10 +1865,10 @@ async def run_benchmarks(
 
                 # Failed runs retain their queued repairs for hourly maintenance.
                 try:
-                    snapshot_status = await writer.refresh_dashboard_summaries(run_id)
-                    logger.info("dashboard_summaries_refresh", status=snapshot_status)
+                    snapshot_status = await writer.refresh_window_views(run_id)
+                    logger.info("dashboard_windows_refresh", status=snapshot_status)
                 except Exception:
-                    logger.warning("dashboard_summaries_refresh_failed", exc_info=True)
+                    logger.warning("dashboard_windows_refresh_failed", exc_info=True)
 
             summary = RunSummary(
                 run_id=run_id,

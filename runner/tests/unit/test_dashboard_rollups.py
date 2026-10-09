@@ -8,12 +8,13 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db.dashboard_buckets import (
-    BUCKET_INTERVALS,
-    fill_bucket,
-    fill_closed_buckets,
-    floor_bucket,
-    missing_buckets,
+from coval_bench.db.dashboard_rollups import (
+    GRAINS,
+    RUN_SLOT,
+    fill_closed_rollups,
+    fill_rollup,
+    floor_rollup,
+    missing_rollups,
 )
 from coval_bench.db.models import RunStatus
 from coval_bench.db.writer import RunWriter
@@ -23,29 +24,11 @@ from tests.unit.conftest import apply_migrations
 pg_conn = postgresql("pg_proc")
 
 
-def _bucket(
-    conn: psycopg.Connection[Any], hour: datetime, values: list[tuple[str, str, str, float, int]]
-) -> None:
-    """Insert compact normalized per-run source rows for one slot."""
-    with conn.cursor() as cur:
-        cur.executemany(
-            """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider, model, benchmark, dataset_id, metric_type, metric_version,
-         evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
-         p75, max_value, value_sum, sample_count)
-            VALUES ('p','m','STT','d',%s,'v1','default',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            [
-                (metric, key, unit, hour, val, val, val, val, val, val, count)
-                for metric, key, unit, val, count in values
-            ],
-        )
-
-
 def test_floor_follows_the_interval() -> None:
     at = datetime(2026, 9, 14, 13, 59, 41, tzinfo=UTC)
-    assert floor_bucket(at, 3600) == datetime(2026, 9, 14, 13, tzinfo=UTC)
-    assert floor_bucket(at, 14400) == datetime(2026, 9, 14, 12, tzinfo=UTC)
-    assert floor_bucket(at.replace(tzinfo=None), 3600) == datetime(2026, 9, 14, 13, tzinfo=UTC)
+    assert floor_rollup(at, "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
+    assert floor_rollup(at, "4h") == datetime(2026, 9, 14, 12, tzinfo=UTC)
+    assert floor_rollup(at.replace(tzinfo=None), "1h") == datetime(2026, 9, 14, 13, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -72,20 +55,20 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
         await writer.finish_run(second_run_id, status=RunStatus.PARTIAL)
 
-        await fill_bucket(pool, interval_seconds=3600, bucket_at=storage._NOW)
+        await fill_rollup(pool, grain="1h", bucket_at=storage._NOW)
         async with pool.connection() as conn:
             rows = await (
                 await conn.execute(
                     """SELECT dataset_id, value_key, value_sum, sample_count, p50, p95,
-                              max_value, error_word_sum, latest_source_at
-                       FROM benchmarks_v2.dashboard_bucket_aggregates
-                       WHERE interval_seconds = 3600 AND bucket_at = %s
+                              max_value, wer_error_words, latest_run_at
+                       FROM benchmarks_v2.dashboard_rollups
+                       WHERE grain = '1h' AND bucket_at = %s
                        ORDER BY dataset_id, value_key""",
                     (storage._NOW,),
                 )
             ).fetchall()
             fills = await (
-                await conn.execute("SELECT * FROM benchmarks_v2.dashboard_bucket_fills")
+                await conn.execute("SELECT * FROM benchmarks_v2.dashboard_rollup_fills")
             ).fetchall()
         assert [(r["dataset_id"], r["value_key"]) for r in rows] == [
             ("__all__", "primary"),
@@ -94,18 +77,34 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
         primary = rows[0]
         assert (primary["value_sum"], primary["sample_count"]) == (40.0, 2)
         assert (primary["p50"], primary["p95"], primary["max_value"]) == (20.0, 29.0, 30.0)
-        assert primary["latest_source_at"] == storage._NOW
-        assert primary["error_word_sum"] is None  # no word counts were stored
-        assert [(f["interval_seconds"], f["bucket_at"]) for f in fills] == [(3600, storage._NOW)]
+        assert primary["latest_run_at"] == storage._NOW
+        assert primary["wer_error_words"] is None  # no word counts were stored
+        assert [(f["grain"], f["bucket_at"]) for f in fills] == [("1h", storage._NOW)]
 
-        await fill_bucket(pool, interval_seconds=3600, bucket_at=storage._NOW)
+        await fill_rollup(pool, grain="1h", bucket_at=storage._NOW)
         async with pool.connection() as conn:
             count = await (
-                await conn.execute(
-                    "SELECT count(*) AS n FROM benchmarks_v2.dashboard_bucket_aggregates"
-                )
+                await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollups")
             ).fetchone()
         assert count == {"n": 2}
+
+        await fill_rollup(pool, grain=RUN_SLOT, bucket_at=storage._NOW)
+        async with pool.connection() as conn:
+            slots = await (
+                await conn.execute(
+                    """SELECT dataset_id, p95
+                       FROM benchmarks_v2.dashboard_rollups
+                       WHERE grain = 'run' ORDER BY dataset_id"""
+                )
+            ).fetchall()
+            ledger = await (
+                await conn.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollup_fills")
+            ).fetchone()
+        assert [(r["dataset_id"], r["p95"]) for r in slots] == [
+            ("__all__", 29.0),
+            ("observation-dataset", 29.0),
+        ]
+        assert ledger == {"n": 1}  # run slots are rebuilt, never ledgered
     finally:
         await pool.close()
 
@@ -119,18 +118,18 @@ async def test_missing_buckets_skip_open_filled_and_in_progress_intervals(
     try:
         hour = storage._NOW
         as_of = hour + timedelta(hours=2)
-        pending = await missing_buckets(pool, interval_seconds=3600, as_of=as_of)
+        pending = await missing_rollups(pool, grain="1h", as_of=as_of)
         assert pending[-1] == hour  # hour + 1 is not closed yet
-        assert pending[0] == floor_bucket(as_of - timedelta(days=30), 3600)
+        assert pending[0] == floor_rollup(as_of - timedelta(days=30), "1h")
 
-        await fill_bucket(pool, interval_seconds=3600, bucket_at=hour)
-        assert hour not in await missing_buckets(pool, interval_seconds=3600, as_of=as_of)
+        await fill_rollup(pool, grain="1h", bucket_at=hour)
+        assert hour not in await missing_rollups(pool, grain="1h", as_of=as_of)
 
         writer = RunWriter(pool)
         await writer.start_run(
             dataset_id="d", dataset_sha256=storage._SHA, scheduled_at=hour - timedelta(minutes=30)
         )
-        pending = await missing_buckets(pool, interval_seconds=3600, as_of=as_of)
+        pending = await missing_rollups(pool, grain="1h", as_of=as_of)
         assert hour - timedelta(hours=1) not in pending
         assert hour - timedelta(hours=2) in pending
     finally:
@@ -145,22 +144,22 @@ async def test_fill_closed_buckets_commits_one_at_a_time_until_the_deadline(
     pool = await storage._pool(pg_conn)
     try:
         as_of = storage._NOW + timedelta(hours=2)
-        expired = await fill_closed_buckets(
+        expired = await fill_closed_rollups(
             pool, as_of=as_of, deadline=asyncio.get_running_loop().time() - 1
         )
         assert expired.filled == 0 and expired.remaining > 0
-        full = await fill_closed_buckets(pool, as_of=as_of)
+        full = await fill_closed_rollups(pool, as_of=as_of)
         assert full.remaining == 0 and full.filled == expired.remaining
-        again = await fill_closed_buckets(pool, as_of=as_of)
+        again = await fill_closed_rollups(pool, as_of=as_of)
         assert again == type(again)(0, 0)
         async with pool.connection() as conn:
             fills = await (
                 await conn.execute(
-                    "SELECT interval_seconds, count(*) AS n"
-                    " FROM benchmarks_v2.dashboard_bucket_fills"
-                    " GROUP BY interval_seconds ORDER BY interval_seconds"
+                    "SELECT grain, count(*) AS n"
+                    " FROM benchmarks_v2.dashboard_rollup_fills"
+                    " GROUP BY grain ORDER BY grain"
                 )
             ).fetchall()
-        assert [f["interval_seconds"] for f in fills] == list(BUCKET_INTERVALS)
+        assert [f["grain"] for f in fills] == list(GRAINS)
     finally:
         await pool.close()

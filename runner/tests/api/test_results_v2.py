@@ -107,6 +107,13 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
         "coval_bench.db.migrations.versions.20260915_0036_normalized_metric_ids"
     )
     with psycopg.connect(dsn, autocommit=True) as conn:
+        # 0036 and 0039 still alter the retired per-run table; give them a stand-in.
+        conn.execute(
+            """CREATE TABLE benchmarks_v2.metric_values_by_bucket (
+                 metric_type TEXT, metric_id BIGINT
+                   CONSTRAINT metric_values_by_bucket_metric_id_fkey
+                   REFERENCES benchmarks_v2.metrics(id))"""
+        )
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute))
             normalized_metric_ids.downgrade()
@@ -133,7 +140,6 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
         for table in (
             "metric_evaluations",
             "dashboard_metric_values",
-            "metric_values_by_bucket",
         ):
             conn.execute(
                 f"UPDATE benchmarks_v2.{table} "  # noqa: S608
@@ -142,6 +148,7 @@ def mixed_metric_id_rows(postgresql: Any) -> tuple[int, UUID, UUID]:
             )
     _apply_metric_id_enforcement(dsn)
     with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("DROP TABLE benchmarks_v2.metric_values_by_bucket")
         fresh_id = _seed_completed_evaluation(
             conn,
             run_id,
@@ -687,7 +694,6 @@ async def test_backfilled_historical_and_fresh_metric_ids_are_read_by_catalog_id
         for table in (
             "metric_evaluations",
             "dashboard_metric_values",
-            "metric_values_by_bucket",
         ):
             row = await (
                 await conn.execute(

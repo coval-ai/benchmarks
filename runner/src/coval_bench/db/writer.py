@@ -1209,9 +1209,9 @@ class RunWriter:
                 )
             await conn.commit()
 
-    async def refresh_metric_values_bucket(self, run_id: int) -> None:
-        """Recompute the run's source bucket and its saved UTC-hour statistics."""
-        from coval_bench.db.dashboard_source import rebuild_source_bucket
+    async def rebuild_run_rollup(self, run_id: int) -> None:
+        """Rebuild the run slot's rollup rows from its observations."""
+        from coval_bench.db.dashboard_rollups import RUN_SLOT, fill_rollup
 
         async with (
             self._pool.connection() as conn,
@@ -1223,13 +1223,13 @@ class RunWriter:
             row = await cur.fetchone()
         bucket_at = row["scheduled_at"] if row is not None else None
         if bucket_at is not None:
-            await rebuild_source_bucket(self._pool, bucket_at)
+            await fill_rollup(self._pool, grain=RUN_SLOT, bucket_at=bucket_at)
 
-    async def refresh_dashboard_summaries(self, run_id: int | None = None) -> str:
+    async def refresh_window_views(self, run_id: int | None = None) -> str:
         """Publish normalized summaries independently of legacy maintenance."""
-        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+        from coval_bench.db.dashboard_windows import refresh_window_views
 
-        result = await refresh_summary_snapshots(self._pool, run_id=run_id)
+        result = await refresh_window_views(self._pool, run_id=run_id)
         return result.status
 
     async def refresh_bucket(self, run_id: int, *, period_seconds: int) -> None:

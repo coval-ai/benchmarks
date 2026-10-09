@@ -20,9 +20,9 @@ from httpx import AsyncClient
 from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api.common import (
+    LEGACY_WINDOW_VIEWS,
     MIN_SCORED_SAMPLES,
     WINDOW_INTERVALS,
-    WINDOW_VIEWS,
     WindowLiteral,
 )
 from coval_bench.api.routers.aggregates import (
@@ -31,8 +31,8 @@ from coval_bench.api.routers.aggregates import (
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
-from coval_bench.db.dashboard_buckets import BUCKET_INTERVALS, fill_bucket
-from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
+from coval_bench.db.dashboard_rollups import GRAINS, RUN_SLOT, fill_rollup
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, Metric
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
@@ -152,23 +152,36 @@ async def _insert_normalized_bucket(
     value_sum: float = 6.0,
     sample_count: int = 2,
     bucket_at: datetime | None = None,
+    wer_error_words: float | None = None,
+    wer_reference_words: float | None = None,
 ) -> None:
+    """Seed one per-run WER rollup row."""
 
     from tests.api.conftest import _make_db_url
 
     bucket = bucket_at or datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
-    unit = "count" if value_key in _WER_COUNT_KEYS else "percent"
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
         await conn.execute(
-            """INSERT INTO benchmarks_v2.metric_values_by_bucket
-               (provider, model, benchmark, dataset_id, metric_type, metric_version,
-                evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
-                p75, max_value, value_sum, sample_count)
-               VALUES ('deepgram', 'nova-3', 'STT', %s, 'WER', %s, 'default', %s,
-                       %s, %s, 1, 2, 3, 4, 5, %s, %s)""",
-            (dataset_id, metric_version, value_key, unit, bucket, value_sum, sample_count),
+            """INSERT INTO benchmarks_v2.dashboard_rollups
+               (provider, model, benchmark, dataset_id, metric_id, metric_version,
+                evaluation_variant, value_key, grain, bucket_at,
+                min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count,
+                wer_error_words, wer_reference_words, latest_run_at)
+               VALUES ('deepgram', 'nova-3', 'STT', %s, benchmarks_v2.metric_id_for_code('WER'),
+                       %s, 'default', %s, 'run', %s, 1, 2, 3, 4, 4, 5, 5, %s, %s, %s, %s, %s)""",
+            (
+                dataset_id,
+                metric_version,
+                value_key,
+                bucket,
+                value_sum,
+                sample_count,
+                wer_error_words,
+                wer_reference_words,
+                bucket,
+            ),
         )
 
 
@@ -176,7 +189,7 @@ def test_intervals_cover_every_window() -> None:
     """Every WindowLiteral value must have an interval and a view — a window
     added to the literal but not the dicts 500s after validation."""
     assert set(WINDOW_INTERVALS) == set(get_args(WindowLiteral))
-    assert set(WINDOW_VIEWS) == set(get_args(WindowLiteral))
+    assert set(LEGACY_WINDOW_VIEWS) == set(get_args(WindowLiteral))
 
 
 def test_normalized_query_constants_start_with_sql() -> None:
@@ -191,7 +204,7 @@ def test_normalized_query_constants_start_with_sql() -> None:
 
 def test_normalized_dataset_listing_excludes_pooled_sentinel() -> None:
     assert all(
-        view.startswith("benchmarks_v2.normalized_results_") for view in SUMMARY_VIEWS.values()
+        view.startswith("benchmarks_v2.normalized_results_") for view in WINDOW_VIEWS.values()
     )
 
 
@@ -861,23 +874,17 @@ async def test_normalized_pooled_wer_is_a_ratio_of_sums(
     assert s["avg_value"] == pytest.approx(s["mean_value"]) == pytest.approx(31 / 3)
 
 
-async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
+async def test_normalized_bucket_pooled_wer_uses_word_totals(
     client: AsyncClient, postgresql: Any
 ) -> None:
-    for key, value_sum in (
-        ("substitution_count", 1.0),
-        ("deletion_count", 0.0),
-        ("insertion_count", 1.0),
-        ("reference_words", 40.0),
-    ):
+    for dataset_id, sample_count in (("__all__", 2), ("stt-v2", 1)):
         await _insert_normalized_bucket(
-            postgresql, dataset_id="__all__", value_key=key, value_sum=value_sum
+            postgresql,
+            dataset_id=dataset_id,
+            sample_count=sample_count,
+            wer_error_words=2.0,
+            wer_reference_words=40.0,
         )
-        await _insert_normalized_bucket(
-            postgresql, dataset_id="stt-v2", value_key=key, value_sum=value_sum, sample_count=1
-        )
-    await _insert_normalized_bucket(postgresql, dataset_id="__all__")
-    await _insert_normalized_bucket(postgresql, dataset_id="stt-v2")
 
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
@@ -886,10 +893,8 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     pooled = await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     [point] = pooled.json()["series"]
     assert (point["pooled_value"], point["error_sum"], point["reference_word_sum"]) == (5.0, 2, 40)
-    await _publish_timeline_test_hours(postgresql)
     timeline = await client.get("/v1/results/timeline", params={"benchmark": "STT"})
     assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
-    await _refresh_mv(postgresql)
     compact = await client.get(
         "/v1/results/aggregates", params={"benchmark": "STT", "window": "30d"}
     )
@@ -900,7 +905,7 @@ async def test_normalized_bucket_pooled_wer_requires_complete_count_rows(
     timeline = await client.get(
         "/v1/results/timeline", params={"benchmark": "STT", "dataset": "stt-v2"}
     )
-    assert timeline.json()["points"][0]["value"] == pytest.approx(3.0)
+    assert timeline.json()["points"][0]["value"] == pytest.approx(5.0)
 
 
 async def test_timeline_averages_wer_while_legacy_series_keeps_extrema(
@@ -912,30 +917,23 @@ async def test_timeline_averages_wer_while_legacy_series_keeps_extrema(
 
     now = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
     spike_at = now - timedelta(hours=2 * 200)
-    rows = []
-    for step in range(360):
-        bucket = now - timedelta(hours=2 * step)
-        reference_words = 10.0 if bucket == spike_at else 90.0
-        for key, value_sum in (
-            ("primary", 20.0),
-            ("substitution_count", 9.0),
-            ("deletion_count", 0.0),
-            ("insertion_count", 0.0),
-            ("reference_words", reference_words),
-        ):
-            rows.append((key, "count" if key in _WER_COUNT_KEYS else "percent", bucket, value_sum))
     async with (
         await psycopg.AsyncConnection.connect(_make_db_url(postgresql), autocommit=True) as conn,
         conn.cursor() as cur,
     ):
         await cur.executemany(
-            """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                   (provider, model, benchmark, dataset_id, metric_type, metric_version,
-                    evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
-                    p75, max_value, value_sum, sample_count)
-                   VALUES ('deepgram', 'nova-3', 'STT', '__all__', 'WER', 'v1', 'default',
-                           %s, %s, %s, 1, 2, 3, 4, 5, %s, 2)""",
-            rows,
+            """INSERT INTO benchmarks_v2.dashboard_rollups
+                   (provider, model, benchmark, dataset_id, metric_id, metric_version,
+                    evaluation_variant, value_key, grain, bucket_at,
+                    min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count,
+                    wer_error_words, wer_reference_words, latest_run_at)
+                   VALUES ('deepgram', 'nova-3', 'STT', '__all__',
+                           benchmarks_v2.metric_id_for_code('WER'), 'v1', 'default', 'primary',
+                           'run', %s, 1, 2, 3, 4, 4, 5, 5, 20, 2, 9, %s, %s)""",
+            [
+                (bucket, 10.0 if bucket == spike_at else 90.0, bucket)
+                for bucket in (now - timedelta(hours=2 * step) for step in range(360))
+            ],
         )
 
     app = client._transport.app  # type: ignore[attr-defined]
@@ -959,7 +957,7 @@ async def test_normalized_series_and_timeline_use_primary_v1_default_buckets(
 ) -> None:
     await _insert_normalized_bucket(postgresql, dataset_id="__all__")
     await _insert_normalized_bucket(postgresql, dataset_id="stt-v2", value_sum=4.0, sample_count=1)
-    await _insert_normalized_bucket(postgresql, dataset_id="__all__", value_key="insertions")
+    await _insert_normalized_bucket(postgresql, dataset_id="__all__", value_key="roundtrip")
     await _insert_normalized_bucket(postgresql, dataset_id="__all__", metric_version="v2")
 
     app = client._transport.app  # type: ignore[attr-defined]
@@ -1605,12 +1603,15 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
             source_params = (model, metric, dataset, source_at, total, count)
             if normalized:
                 await conn.execute(
-                    """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                    (provider,model,metric_type,dataset_id,bucket_at,value_sum,sample_count,
-                     benchmark,metric_version,evaluation_variant,value_key,unit,min_value,p25,p50,p75,max_value)
-                    VALUES ('deepgram',%s,%s,%s,%s,%s,%s,'STT','v1','default',
-                            'primary','seconds',1,2,999,1000,1001)""",
-                    source_params,
+                    """INSERT INTO benchmarks_v2.dashboard_rollups
+                    (provider, model, benchmark, dataset_id, metric_id, metric_version,
+                     evaluation_variant, value_key, grain, bucket_at,
+                     min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count,
+                     latest_run_at)
+                    VALUES ('deepgram', %s, 'STT', %s, benchmarks_v2.metric_id_for_code(%s),
+                            'v1', 'default', 'primary', 'run', %s,
+                            1, 2, 999, 1000, 1000, 1001, 1001, %s, %s, %s)""",
+                    (model, dataset, metric, source_at, total, count, source_at),
                 )
             else:
                 await conn.execute(
@@ -1705,7 +1706,6 @@ async def test_timeline_custom_average_weights_source_counts(
     [
         ("complete", 10, 30, 2.5, True),
         ("partial", 10, 30, 4.75, False),
-        ("mismatched", 10, 30, 4.75, False),
         ("complete", 0, 30, 100 / 30, True),
         ("complete", 0, 0, 4.75, False),
     ],
@@ -1719,7 +1719,7 @@ async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
     expected: float,
     pooled: bool,
 ) -> None:
-    """Every included source must cover the primary clips before pooling counts."""
+    """A bucket pools WER only when every run slot in it carried word totals."""
     bucket = datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0) - timedelta(hours=2)
     app = client._transport.app  # type: ignore[attr-defined]
     app.state.settings.normalized_dashboard_reads_enabled = True
@@ -1727,26 +1727,16 @@ async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
         (0, 10, 1, 1, first_refs),
         (15, 9, 3, 0, second_refs),
     ]:
-        for key, value in [
-            ("primary", total),
-            ("substitution_count", errors),
-            ("deletion_count", 0),
-            ("insertion_count", 0),
-            ("reference_words", refs),
-        ]:
-            if offset and key == "reference_words" and coverage == "partial":
-                continue
-            source_count = (
-                2 if offset and key == "reference_words" and coverage == "mismatched" else count
-            )
-            await _insert_normalized_bucket(
-                postgresql,
-                dataset_id="stt-v2",
-                value_key=key,
-                value_sum=value,
-                sample_count=source_count,
-                bucket_at=bucket + timedelta(minutes=offset),
-            )
+        complete = coverage == "complete" or offset == 0
+        await _insert_normalized_bucket(
+            postgresql,
+            dataset_id="stt-v2",
+            value_sum=total,
+            sample_count=count,
+            bucket_at=bucket + timedelta(minutes=offset),
+            wer_error_words=errors if complete else None,
+            wer_reference_words=refs if complete else None,
+        )
     await _publish_timeline_test_hours(postgresql)
     response = await client.get(
         "/v1/results/timeline",
@@ -1864,62 +1854,35 @@ async def test_timeline_30d_averages_each_group_and_preserves_legacy_series(
 
 
 _MERGE_SOURCE_ROWS_SQL = """
-INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
+INSERT INTO benchmarks_v2.dashboard_rollups
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- value_key, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
- value_sum, sample_count, error_word_sum, reference_word_sum, latest_source_at)
-WITH slots AS (
-  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
-         to_timestamp(floor(extract(epoch FROM bucket_at) / %(interval)s) * %(interval)s)
-           AS bucket_at,
-         value_key, min_value, p25, p50, p75, max_value, value_sum, sample_count,
-         bucket_at AS source_at
-  FROM benchmarks_v2.metric_values_by_bucket
-), keyed AS (
-  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
-         bucket_at, value_key, SUM(value_sum) AS value_sum, SUM(sample_count) AS sample_count
-  FROM slots
-  WHERE value_key IN ('primary', 'substitution_count', 'deletion_count',
-                      'insertion_count', 'reference_words')
-  GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version,
-           evaluation_variant, bucket_at, value_key
-), counts AS (
-  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
-         bucket_at,
-         SUM(value_sum) FILTER (WHERE value_key IN
-           ('substitution_count', 'deletion_count', 'insertion_count')) AS error_word_sum,
-         SUM(value_sum) FILTER (WHERE value_key = 'reference_words') AS reference_word_sum
-  FROM keyed
-  GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version,
-           evaluation_variant, bucket_at
-  HAVING COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)
-)
-SELECT s.provider, s.model, s.benchmark, s.dataset_id, s.metric_id, s.metric_version,
-       s.evaluation_variant, s.value_key, %(interval)s, s.bucket_at,
-       MIN(s.min_value), MIN(s.p25), MIN(s.p50), MAX(s.p75), MAX(s.p75), MAX(s.p75),
-       MAX(s.max_value), SUM(s.value_sum), SUM(s.sample_count)::int,
-       CASE WHEN s.value_key = 'primary' THEN MAX(c.error_word_sum) END,
-       CASE WHEN s.value_key = 'primary' THEN MAX(c.reference_word_sum) END,
-       MAX(s.source_at)
-FROM slots s
-LEFT JOIN counts c USING (provider, model, benchmark, dataset_id, metric_id, metric_version,
-                          evaluation_variant, bucket_at)
-WHERE s.value_key IN ('primary', 'roundtrip', 'leading_silence')
-GROUP BY s.provider, s.model, s.benchmark, s.dataset_id, s.metric_id, s.metric_version,
-         s.evaluation_variant, s.value_key, s.bucket_at
+ value_key, grain, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
+ value_sum, sample_count, wer_error_words, wer_reference_words, latest_run_at)
+SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+       value_key, %(grain)s,
+       to_timestamp(floor(extract(epoch FROM bucket_at) / %(seconds)s) * %(seconds)s),
+       MIN(min_value), MIN(p25), MIN(p50), MAX(p75), MAX(p90), MAX(p95), MAX(max_value),
+       SUM(value_sum), SUM(sample_count)::int,
+       CASE WHEN COUNT(wer_error_words) = COUNT(*) THEN SUM(wer_error_words) END,
+       CASE WHEN COUNT(wer_reference_words) = COUNT(*) THEN SUM(wer_reference_words) END,
+       MAX(bucket_at)
+FROM benchmarks_v2.dashboard_rollups
+WHERE grain = 'run'
+GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+         value_key, to_timestamp(floor(extract(epoch FROM bucket_at) / %(seconds)s) * %(seconds)s)
 """
 
 
 async def _publish_timeline_test_hours(postgresql: Any) -> None:
-    """Roll seeded per-run source rows into every 1h/4h bucket, closed or not."""
+    """Roll seeded run-slot rows into every 1h/4h bucket, closed or not."""
     from tests.api.conftest import _make_db_url
 
     async with await psycopg.AsyncConnection.connect(
         _make_db_url(postgresql), autocommit=True
     ) as conn:
-        await conn.execute("TRUNCATE benchmarks_v2.dashboard_bucket_aggregates")
-        for interval in BUCKET_INTERVALS:
-            await conn.execute(_MERGE_SOURCE_ROWS_SQL, {"interval": interval})
+        await conn.execute("DELETE FROM benchmarks_v2.dashboard_rollups WHERE grain <> 'run'")
+        for grain, seconds in GRAINS.items():
+            await conn.execute(_MERGE_SOURCE_ROWS_SQL, {"grain": grain, "seconds": seconds})
 
 
 async def _fill_timeline_buckets(postgresql: Any) -> None:
@@ -1941,8 +1904,8 @@ async def _fill_timeline_buckets(postgresql: Any) -> None:
                 )
             ).fetchall()
         for row in rows:
-            for interval in BUCKET_INTERVALS:
-                await fill_bucket(pool, interval_seconds=interval, bucket_at=row["scheduled_at"])
+            for grain in (RUN_SLOT, *GRAINS):
+                await fill_rollup(pool, grain=grain, bucket_at=row["scheduled_at"])
 
 
 async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(

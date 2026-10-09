@@ -20,8 +20,8 @@ from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 logger = structlog.get_logger(__name__)
 
-SUMMARY_DEFINITION_REVISION = DEFINITION_REVISION
-SUMMARY_VIEWS = {
+DEFINITION_REVISION = DEFINITION_REVISION
+WINDOW_VIEWS = {
     "24h": "benchmarks_v2.normalized_results_24h",
     "7d": "benchmarks_v2.normalized_results_7d",
     "30d": "benchmarks_v2.normalized_results_30d",
@@ -35,7 +35,7 @@ class RefreshResult:
     generation: int | None = None
 
 
-def validate_summary_rules() -> None:
+def validate_window_rules() -> None:
     """Ensure the WER contract still carries the keys the frozen projection pools."""
     contract = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
     units = {definition.key: definition.unit for definition in contract.values}
@@ -53,14 +53,14 @@ def validate_summary_rules() -> None:
         raise ValueError("unsupported summary WER contract")
 
 
-async def refresh_summary_snapshots(
+async def refresh_window_views(
     pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]],
     *,
     as_of: dt.datetime | None = None,
     run_id: int | None = None,
 ) -> RefreshResult:
     """Refresh all three views and publish one generation atomically."""
-    validate_summary_rules()
+    validate_window_rules()
     captured = as_of or dt.datetime.now(dt.UTC)
     if captured.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
@@ -82,7 +82,7 @@ async def refresh_summary_snapshots(
             if sibling_row is not None and sibling_row["siblings_running"]:
                 return RefreshResult("skipped_siblings")
         lock = await conn.execute(
-            "SELECT pg_try_advisory_xact_lock(hashtextextended('dashboard_summary', 0)) AS locked"
+            "SELECT pg_try_advisory_xact_lock(hashtextextended('dashboard_windows', 0)) AS locked"
         )
         lock_row = await lock.fetchone()
         if lock_row is None or not lock_row["locked"]:
@@ -109,22 +109,21 @@ async def refresh_summary_snapshots(
         # The defining SQL reads this transaction-local snapshot boundary.  A
         # failed refresh rolls this provisional update back with the views.
         await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_summary_state SET as_of=%(as_of)s WHERE id=true",
+            "UPDATE benchmarks_v2.dashboard_window_state SET as_of=%(as_of)s WHERE id=true",
             {"as_of": captured},
         )
         state = await conn.execute(
-            "SELECT generation FROM benchmarks_v2.dashboard_summary_state "
-            "WHERE id = true FOR UPDATE"
+            "SELECT generation FROM benchmarks_v2.dashboard_window_state WHERE id = true FOR UPDATE"
         )
         row = await state.fetchone()
         if row is None:
             raise RuntimeError("dashboard summary state is missing")
         generation = int(row["generation"]) + 1
-        for window, view in SUMMARY_VIEWS.items():
+        for window, view in WINDOW_VIEWS.items():
             started_at = time.monotonic()
             concurrent: bool | None = None
             logger.info(
-                "dashboard_summary_view_refresh_started",
+                "dashboard_window_refresh_started",
                 window=window,
                 view=view,
                 generation=generation,
@@ -142,7 +141,7 @@ async def refresh_summary_snapshots(
                 await conn.execute(f"REFRESH MATERIALIZED VIEW {mode}{view}")  # noqa: S608
             except BaseException:
                 logger.error(
-                    "dashboard_summary_view_refresh_failed",
+                    "dashboard_window_refresh_failed",
                     window=window,
                     view=view,
                     generation=generation,
@@ -152,7 +151,7 @@ async def refresh_summary_snapshots(
                 )
                 raise
             logger.info(
-                "dashboard_summary_view_refresh_completed",
+                "dashboard_window_refresh_completed",
                 window=window,
                 view=view,
                 generation=generation,
@@ -160,14 +159,14 @@ async def refresh_summary_snapshots(
                 elapsed_seconds=round(time.monotonic() - started_at, 3),
             )
         await conn.execute(
-            """UPDATE benchmarks_v2.dashboard_summary_state
+            """UPDATE benchmarks_v2.dashboard_window_state
                    SET generation=%(generation)s, as_of=%(as_of)s, published_at=clock_timestamp(),
                        definition_revision=%(revision)s, definition_fingerprint=%(fingerprint)s,
                        metadata='{"schema_version":1}'::jsonb WHERE id=true""",
             {
                 "generation": generation,
                 "as_of": captured,
-                "revision": SUMMARY_DEFINITION_REVISION,
+                "revision": DEFINITION_REVISION,
                 "fingerprint": fingerprint,
             },
         )

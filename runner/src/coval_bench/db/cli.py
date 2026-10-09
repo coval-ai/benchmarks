@@ -137,13 +137,13 @@ def refresh_dashboard_aggregates(as_of: str | None) -> None:
     """Reconcile source/hour repairs and publish rolling summary snapshots."""
     from coval_bench.config import get_settings
     from coval_bench.db.conn import lifespan_pool
-    from coval_bench.db.dashboard_aggregates import reconcile_dashboard_aggregates
+    from coval_bench.db.dashboard_aggregates import refresh_dashboard_aggregates as maintain
 
     at = _timestamp(as_of)
 
     async def refresh() -> None:
         async with lifespan_pool(get_settings()) as pool:
-            result = await reconcile_dashboard_aggregates(pool, as_of=at)
+            result = await maintain(pool, as_of=at)
             click.echo(json.dumps(asdict(result), default=_json_default))
 
     asyncio.run(refresh())

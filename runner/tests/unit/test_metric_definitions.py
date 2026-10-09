@@ -23,11 +23,11 @@ from .conftest import apply_migrations, open_pool
 metric_pg = postgresql("pg_proc")
 
 _INSERT_BUCKET = """
-INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
+INSERT INTO benchmarks_v2.dashboard_rollups
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- value_key, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
- value_sum, sample_count, latest_source_at)
-VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, 'primary', 3600, '2026-09-14 12:00:00+00',
+ value_key, grain, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
+ value_sum, sample_count, latest_run_at)
+VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, 'primary', '1h', '2026-09-14 12:00:00+00',
         10, 10, 10, 10, 10, 10, 10, 10, 1, '2026-09-14 12:00:00+00')
 """
 
@@ -49,7 +49,7 @@ def test_frozen_seeds_have_generated_ids_and_current_display_names(
     ).fetchone()
     assert identity == ("bigint", "ALWAYS")
     for table in (
-        "dashboard_bucket_aggregates",
+        "dashboard_rollups",
         "normalized_results_24h",
         "normalized_results_7d",
         "normalized_results_30d",
@@ -96,9 +96,9 @@ def test_bucket_foreign_key_and_version_variant_identity(
     metric_id = row[0]
     for version, variant in (("v1", "default"), ("v2", "default"), ("v1", "candidate")):
         metric_pg.execute(_INSERT_BUCKET, (metric_id, version, variant))
-    assert metric_pg.execute(
-        "SELECT count(*) FROM benchmarks_v2.dashboard_bucket_aggregates"
-    ).fetchone() == (3,)
+    assert metric_pg.execute("SELECT count(*) FROM benchmarks_v2.dashboard_rollups").fetchone() == (
+        3,
+    )
     with pytest.raises(psycopg.errors.ForeignKeyViolation), metric_pg.transaction():
         metric_pg.execute(_INSERT_BUCKET, (-1, "v1", "default"))
     with pytest.raises(psycopg.errors.UniqueViolation), metric_pg.transaction():

@@ -40,15 +40,15 @@ from starlette.requests import Request
 
 from coval_bench.api.cache import get_or_fill
 from coval_bench.api.common import (
+    LEGACY_WINDOW_VIEWS,
     WINDOW_INTERVALS,
-    WINDOW_VIEWS,
     BenchmarkLiteral,
     StatisticLiteral,
     WindowLiteral,
     has_enough_samples,
     reads_normalized,
 )
-from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
+from coval_bench.api.dashboard_windows import dashboard_read, require_window_state
 from coval_bench.api.deps import (
     capture_api_event,
     get_cache,
@@ -70,7 +70,8 @@ from coval_bench.api.schemas import (
     TimelineResponse,
 )
 from coval_bench.config import DATASET_ALL, Settings
-from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
+from coval_bench.db.dashboard_rollups import grain_for_seconds
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.registries import (
     METRIC_SPECS,
     Metric,
@@ -200,38 +201,18 @@ WHERE benchmark = %(benchmark)s
 ORDER BY dataset_id
 """
 
-# Pooled WER needs all four count rows covering the same clips as the primary row.
-_BUCKET_COUNTS_COMPLETE = "COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)"
-_BUCKET_ERROR_SUM = (
-    "SUM(value_sum) FILTER (WHERE value_key IN"
-    " ('substitution_count', 'deletion_count', 'insertion_count'))"
-)
-_BUCKET_REFERENCE_SUM = "SUM(value_sum) FILTER (WHERE value_key = 'reference_words')"
-
-_NORMALIZED_BUCKETS_SQL = f"""
+_RUN_SLOT_SQL = """
 SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
- MAX(min_value) FILTER (WHERE value_key = 'primary') AS min_value,
- MAX(p25) FILTER (WHERE value_key = 'primary') AS p25,
- MAX(p50) FILTER (WHERE value_key = 'primary') AS p50,
- MAX(p75) FILTER (WHERE value_key = 'primary') AS p75,
- MAX(max_value) FILTER (WHERE value_key = 'primary') AS max_value,
- MAX(value_sum) FILTER (WHERE value_key = 'primary') AS value_sum,
- MAX(sample_count) FILTER (WHERE value_key = 'primary') AS sample_count,
- CASE WHEN {_BUCKET_COUNTS_COMPLETE} THEN {_BUCKET_ERROR_SUM} END AS error_sum,
- CASE WHEN {_BUCKET_COUNTS_COMPLETE} THEN {_BUCKET_REFERENCE_SUM} END AS reference_word_sum,
- CASE WHEN {_BUCKET_COUNTS_COMPLETE}
-      THEN 100 * {_BUCKET_ERROR_SUM} / NULLIF({_BUCKET_REFERENCE_SUM}, 0) END AS pooled_value
-FROM benchmarks_v2.metric_values_by_bucket b
-JOIN benchmarks_v2.metrics m
-  ON m.id = b.metric_id
-WHERE metric_version = 'v1' AND evaluation_variant = 'default'
- AND value_key IN ('primary', 'substitution_count', 'deletion_count',
-                   'insertion_count', 'reference_words')
- AND benchmark = %(benchmark)s AND dataset_id = %(dataset)s
- AND bucket_at >= NOW() - %(interval)s::interval
-GROUP BY b.provider, b.model, m.code, b.bucket_at
-HAVING COUNT(*) FILTER (WHERE value_key = 'primary') = 1
-"""  # noqa: S608
+       b.min_value, b.p25, b.p50, b.p75, b.max_value, b.value_sum, b.sample_count,
+       b.wer_error_words AS error_sum, b.wer_reference_words AS reference_word_sum,
+       100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value
+FROM benchmarks_v2.dashboard_rollups b
+JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
+WHERE b.grain = 'run' AND b.value_key = 'primary'
+  AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+  AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+  AND b.bucket_at >= NOW() - %(interval)s::interval
+"""
 
 _BUCKET_VALUE = (
     " CASE WHEN metric_type = 'WER'"
@@ -239,7 +220,7 @@ _BUCKET_VALUE = (
 )
 
 _NORMALIZED_SERIES_SQL = (
-    "SELECT * FROM (" + _NORMALIZED_BUCKETS_SQL + ") b"  # noqa: S608
+    "SELECT * FROM (" + _RUN_SLOT_SQL + ") b"  # noqa: S608
     " ORDER BY scheduled_at, provider, model, metric_type"
 )
 
@@ -247,7 +228,7 @@ _NORMALIZED_TIMELINE_SQL = (
     "SELECT provider, model, metric_type, scheduled_at, pooled_value,"  # noqa: S608
     + _BUCKET_VALUE
     + " FROM ("
-    + _NORMALIZED_BUCKETS_SQL
+    + _RUN_SLOT_SQL
     + ") b"
     " ORDER BY scheduled_at, provider, model, metric_type"
 )
@@ -256,14 +237,14 @@ _NORMALIZED_COMPACT_SERIES_SQL = (
     "WITH base AS (SELECT *,"  # noqa: S608
     + _BUCKET_VALUE
     + " FROM ("
-    + _NORMALIZED_BUCKETS_SQL
+    + _RUN_SLOT_SQL
     + ") b"
     + _COMPACT_SERIES_TAIL
 )
 
 # Rules are data bound through psycopg, including metric and component names.
 # Source buckets retain sums/counts, so larger intervals never average averages.
-_AVERAGE_SELECT_SQL = """
+_AVERAGE_HEAD_SQL = """
 SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
        COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) AS value,
        pooled_value,
@@ -273,24 +254,24 @@ SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_a
 """
 
 # Only closed buckets exist, so the newest interval always lags by one bucket.
-_BUCKET_AVERAGE_SQL = f"""
-{_AVERAGE_SELECT_SQL}
+_ROLLUP_AVERAGE_SQL = f"""
+{_AVERAGE_HEAD_SQL}
 FROM (
  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
-        b.value_sum, b.sample_count, b.latest_source_at,
-        100 * b.error_word_sum / NULLIF(b.reference_word_sum, 0) AS pooled_value
- FROM benchmarks_v2.dashboard_bucket_aggregates b
+        b.value_sum, b.sample_count, b.latest_run_at AS latest_source_at,
+        100 * b.wer_error_words / NULLIF(b.wer_reference_words, 0) AS pooled_value
+ FROM benchmarks_v2.dashboard_rollups b
  JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
  WHERE b.value_key = 'primary'
    AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-   AND b.interval_seconds = %(bucket_seconds)s
+   AND b.grain = %(grain)s
    AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
 """  # noqa: S608
 
 _LEGACY_AVERAGE_SQL = f"""
-{_AVERAGE_SELECT_SQL}
+{_AVERAGE_HEAD_SQL}
 FROM (
  SELECT provider, model, metric_type,
         to_timestamp(floor(extract(epoch FROM bucket_at) / %(bucket_seconds)s)
@@ -318,24 +299,17 @@ _PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95"}
 
 _PERCENTILE_SQL = """
 SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
-       {column} AS value, b.sample_count, {latest} AS latest_source_at,
+       {column} AS value, b.sample_count, b.latest_run_at AS latest_source_at,
        'percentile' AS aggregation_method
-FROM {table} b
+FROM benchmarks_v2.dashboard_rollups b
 JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
-WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+WHERE b.grain = %(grain)s
+  AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
   AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
-  AND b.bucket_at >= %(since)s AND {upper_bound}
+  AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
 ORDER BY scheduled_at, provider, model
 """
-_PERCENTILE_SOURCES = {
-    "run": ("benchmarks_v2.metric_values_by_bucket", "b.bucket_at", "b.bucket_at < %(until)s"),
-    "average": (
-        "benchmarks_v2.dashboard_bucket_aggregates",
-        "b.latest_source_at",
-        "b.interval_seconds = %(bucket_seconds)s AND b.bucket_at + %(step)s <= %(until)s",
-    ),
-}
 
 
 def _timeline_bucket_seconds(duration_seconds: float) -> int:
@@ -343,11 +317,8 @@ def _timeline_bucket_seconds(duration_seconds: float) -> int:
     return 3600 if duration_seconds / 200.0 <= 3600 else 14400
 
 
-def _percentile_sql(aggregation: str, statistic: str) -> str:
-    table, latest, upper_bound = _PERCENTILE_SOURCES[aggregation]
-    return _PERCENTILE_SQL.format(
-        column=_PERCENTILE_COLUMNS[statistic], table=table, latest=latest, upper_bound=upper_bound
-    )
+def _percentile_sql(statistic: str) -> str:
+    return _PERCENTILE_SQL.format(column=_PERCENTILE_COLUMNS[statistic])
 
 
 def _validate_percentile_request(
@@ -418,14 +389,14 @@ async def get_results_aggregates(
     async def fill() -> AggregatesResponse:
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         stats_sql = (
-            _SAVED_STATS_SQL_TEMPLATE.format(view=SUMMARY_VIEWS[window])
+            _SAVED_STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
             if normalized
-            else _STATS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+            else _STATS_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
         )
         datasets_sql = (
-            _NORMALIZED_DATASETS_SQL.format(view=SUMMARY_VIEWS[window])
+            _NORMALIZED_DATASETS_SQL.format(view=WINDOW_VIEWS[window])
             if normalized
-            else _DATASETS_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+            else _DATASETS_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
         )
         stats_params: dict[str, Any] = {
             "benchmark": benchmark,
@@ -433,7 +404,7 @@ async def get_results_aggregates(
             "interval": WINDOW_INTERVALS[window],
         }
         async with dashboard_read(pool, saved=normalized) as conn:
-            snapshot = await require_snapshot(conn) if normalized else None
+            snapshot = await require_window_state(conn) if normalized else None
             stat_rows = await (await conn.execute(stats_sql, stats_params)).fetchall()
             if include_series:
                 series_rows = await (
@@ -572,7 +543,7 @@ async def get_results_timeline(
         normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
         rule_params: dict[str, Any] = {}
         if statistic != "default":
-            sql = _percentile_sql(aggregation, statistic)
+            sql = _percentile_sql(statistic)
             base_metric, value_key = _PERCENTILE_VALUE_KEYS.get(
                 metric_type or "", (metric_type, "primary")
             )
@@ -580,7 +551,7 @@ async def get_results_timeline(
         elif aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
         else:
-            sql = _BUCKET_AVERAGE_SQL if normalized else _LEGACY_AVERAGE_SQL
+            sql = _ROLLUP_AVERAGE_SQL if normalized else _LEGACY_AVERAGE_SQL
         params = {
             "benchmark": benchmark,
             "dataset": dataset_key,
@@ -594,7 +565,8 @@ async def get_results_timeline(
             "since": since,
             "until": until,
             "bucket_seconds": bucket_seconds,
-            "step": None if bucket_seconds is None else dt.timedelta(seconds=bucket_seconds),
+            "grain": grain_for_seconds(bucket_seconds),
+            "step": dt.timedelta(seconds=bucket_seconds or 0),
             "metric_type": metric_type,
         }
         params.update(rule_params)
@@ -704,9 +676,9 @@ async def get_results_aggregates_by_dataset(
                 " avg_value,",
                 " mean_value, pooled_value, pooled_insertions_pct, pooled_deletions_pct,"
                 " pooled_substitutions_pct, avg_value,",
-            ).format(view=SUMMARY_VIEWS[window])
+            ).format(view=WINDOW_VIEWS[window])
             if normalized
-            else _STATS_BY_DATASET_SQL_TEMPLATE.format(view=WINDOW_VIEWS[window])
+            else _STATS_BY_DATASET_SQL_TEMPLATE.format(view=LEGACY_WINDOW_VIEWS[window])
         )
         params = {
             "benchmark": benchmark,
@@ -715,7 +687,7 @@ async def get_results_aggregates_by_dataset(
         }
 
         async with dashboard_read(pool, saved=normalized) as conn:
-            snapshot = await require_snapshot(conn) if normalized else None
+            snapshot = await require_window_state(conn) if normalized else None
             rows = await (await conn.execute(stats_sql, params)).fetchall()
 
         grouped: dict[str, list[ModelStatEntry]] = {}

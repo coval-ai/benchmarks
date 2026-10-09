@@ -17,13 +17,7 @@ _FINITE = "NOT IN ('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8)"
 
 def upgrade() -> None:
     op.execute(f"""
-    ALTER TABLE benchmarks_v2.metric_values_by_bucket
-      ADD COLUMN p90 DOUBLE PRECISION CHECK (p90 {_FINITE}),
-      ADD COLUMN p95 DOUBLE PRECISION CHECK (p95 {_FINITE}),
-      ADD CHECK ((p90 IS NULL) = (p95 IS NULL)),
-      ADD CHECK (p90 IS NULL OR (p75 <= p90 AND p90 <= p95 AND p95 <= max_value));
-
-    CREATE TABLE benchmarks_v2.dashboard_bucket_aggregates (
+    CREATE TABLE benchmarks_v2.dashboard_rollups (
       provider TEXT NOT NULL CHECK (provider <> ''),
       model TEXT NOT NULL CHECK (model <> ''),
       benchmark TEXT NOT NULL CHECK (benchmark IN ('STT', 'TTS', 'S2S', 'LLM')),
@@ -32,7 +26,7 @@ def upgrade() -> None:
       metric_version TEXT NOT NULL CHECK (metric_version <> ''),
       evaluation_variant TEXT NOT NULL CHECK (evaluation_variant <> ''),
       value_key TEXT NOT NULL CHECK (value_key IN ('primary', 'roundtrip', 'leading_silence')),
-      interval_seconds INTEGER NOT NULL CHECK (interval_seconds IN (3600, 14400)),
+      grain TEXT NOT NULL CHECK (grain IN ('run', '1h', '4h')),
       bucket_at TIMESTAMPTZ NOT NULL,
       min_value DOUBLE PRECISION NOT NULL CHECK (min_value {_FINITE}),
       p25 DOUBLE PRECISION NOT NULL CHECK (p25 {_FINITE}),
@@ -43,42 +37,74 @@ def upgrade() -> None:
       max_value DOUBLE PRECISION NOT NULL CHECK (max_value {_FINITE}),
       value_sum DOUBLE PRECISION NOT NULL CHECK (value_sum {_FINITE}),
       sample_count INTEGER NOT NULL CHECK (sample_count > 0),
-      error_word_sum DOUBLE PRECISION CHECK (error_word_sum {_FINITE}),
-      reference_word_sum DOUBLE PRECISION CHECK (reference_word_sum {_FINITE}),
-      latest_source_at TIMESTAMPTZ NOT NULL,
-      CHECK ((error_word_sum IS NULL) = (reference_word_sum IS NULL)),
+      wer_error_words DOUBLE PRECISION CHECK (wer_error_words {_FINITE}),
+      wer_reference_words DOUBLE PRECISION CHECK (wer_reference_words {_FINITE}),
+      latest_run_at TIMESTAMPTZ NOT NULL,
+      CHECK ((wer_error_words IS NULL) = (wer_reference_words IS NULL)),
       CHECK (min_value <= p25 AND p25 <= p50 AND p50 <= p75 AND p75 <= p90
              AND p90 <= p95 AND p95 <= max_value),
-      CHECK (mod(extract(epoch FROM bucket_at)::bigint, interval_seconds) = 0),
+      CHECK (grain = 'run' OR mod(extract(epoch FROM bucket_at)::bigint,
+                                    CASE grain WHEN '1h' THEN 3600 ELSE 14400 END) = 0),
       PRIMARY KEY (provider, model, benchmark, dataset_id, metric_id, metric_version,
-                   evaluation_variant, value_key, interval_seconds, bucket_at)
+                   evaluation_variant, value_key, grain, bucket_at)
     );
-    CREATE INDEX dashboard_bucket_aggregates_lookup
-      ON benchmarks_v2.dashboard_bucket_aggregates (benchmark, dataset_id, interval_seconds, bucket_at);
+    CREATE INDEX dashboard_rollups_lookup
+      ON benchmarks_v2.dashboard_rollups (benchmark, dataset_id, grain, bucket_at);
+    CREATE INDEX dashboard_rollups_slot
+      ON benchmarks_v2.dashboard_rollups (grain, bucket_at);
 
-    CREATE TABLE benchmarks_v2.dashboard_bucket_fills (
-      interval_seconds INTEGER NOT NULL CHECK (interval_seconds IN (3600, 14400)),
+    CREATE TABLE benchmarks_v2.dashboard_rollup_fills (
+      grain TEXT NOT NULL CHECK (grain IN ('1h', '4h')),
       bucket_at TIMESTAMPTZ NOT NULL,
       filled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (interval_seconds, bucket_at)
+      PRIMARY KEY (grain, bucket_at)
     );
 
     DROP TABLE benchmarks_v2.dashboard_hourly_state;
     DROP TABLE benchmarks_v2.dashboard_source_refreshes;
     DROP TABLE benchmarks_v2.dashboard_hourly_aggregates;
+    DROP TABLE benchmarks_v2.metric_values_by_bucket;
+    ALTER TABLE benchmarks_v2.dashboard_summary_state RENAME TO dashboard_window_state;
 
     DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN
-      GRANT SELECT ON benchmarks_v2.dashboard_bucket_aggregates,
-                      benchmarks_v2.dashboard_bucket_fills TO api;
+      GRANT SELECT ON benchmarks_v2.dashboard_rollups,
+                      benchmarks_v2.dashboard_rollup_fills TO api;
     END IF; END $$;
     """)
 
 
 def downgrade() -> None:
     op.execute("""
-    DROP TABLE benchmarks_v2.dashboard_bucket_fills;
-    DROP TABLE benchmarks_v2.dashboard_bucket_aggregates;
-    ALTER TABLE benchmarks_v2.metric_values_by_bucket DROP COLUMN p90, DROP COLUMN p95;
+    ALTER TABLE benchmarks_v2.dashboard_window_state RENAME TO dashboard_summary_state;
+    DROP TABLE benchmarks_v2.dashboard_rollup_fills;
+    DROP TABLE benchmarks_v2.dashboard_rollups;
+
+    CREATE TABLE benchmarks_v2.metric_values_by_bucket (
+      provider TEXT NOT NULL CHECK (provider <> ''), model TEXT NOT NULL CHECK (model <> ''),
+      benchmark TEXT NOT NULL CHECK (benchmark IN ('STT', 'TTS', 'S2S', 'LLM')),
+      dataset_id TEXT NOT NULL CHECK (dataset_id <> ''),
+      metric_id BIGINT NOT NULL REFERENCES benchmarks_v2.metrics(id) ON DELETE RESTRICT,
+      metric_type TEXT NOT NULL CHECK (metric_type <> ''),
+      metric_version TEXT NOT NULL CHECK (metric_version <> ''),
+      evaluation_variant TEXT NOT NULL CHECK (evaluation_variant <> ''),
+      value_key TEXT NOT NULL CHECK (value_key <> ''), unit TEXT NOT NULL CHECK (unit <> ''),
+      bucket_at TIMESTAMPTZ NOT NULL,
+      min_value DOUBLE PRECISION NOT NULL, p25 DOUBLE PRECISION NOT NULL,
+      p50 DOUBLE PRECISION NOT NULL, p75 DOUBLE PRECISION NOT NULL,
+      max_value DOUBLE PRECISION NOT NULL, value_sum DOUBLE PRECISION NOT NULL,
+      sample_count INTEGER NOT NULL CHECK (sample_count > 0),
+      CHECK (min_value <= p25 AND p25 <= p50 AND p50 <= p75 AND p75 <= max_value),
+      PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version,
+                   evaluation_variant, value_key, bucket_at)
+    );
+    CREATE INDEX metric_values_by_bucket_bucket_at ON benchmarks_v2.metric_values_by_bucket (bucket_at);
+    CREATE INDEX metric_values_by_bucket_series_idx ON benchmarks_v2.metric_values_by_bucket
+      (benchmark, dataset_id, metric_version, evaluation_variant, value_key, bucket_at);
+    CREATE UNIQUE INDEX metric_values_by_bucket_metric_identity_key ON benchmarks_v2.metric_values_by_bucket
+      (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant, value_key, bucket_at);
+    CREATE TRIGGER metric_values_by_bucket_sync_metric_identity
+      BEFORE INSERT OR UPDATE ON benchmarks_v2.metric_values_by_bucket FOR EACH ROW
+      EXECUTE FUNCTION benchmarks_v2.sync_normalized_metric_identity();
 
     CREATE TABLE benchmarks_v2.dashboard_hourly_aggregates (
       provider TEXT NOT NULL, model TEXT NOT NULL, benchmark TEXT NOT NULL, dataset_id TEXT NOT NULL,
@@ -87,7 +113,7 @@ def downgrade() -> None:
       hour_at TIMESTAMPTZ NOT NULL CHECK (hour_at = date_trunc('hour', hour_at, 'UTC')),
       primary_sum DOUBLE PRECISION NOT NULL, sample_count BIGINT NOT NULL CHECK (sample_count > 0),
       numerator_sum DOUBLE PRECISION, denominator_sum DOUBLE PRECISION, coverage_complete BOOLEAN NOT NULL,
-      source_count BIGINT NOT NULL CHECK (source_count > 0), latest_source_at TIMESTAMPTZ,
+      source_count BIGINT NOT NULL CHECK (source_count > 0), latest_run_at TIMESTAMPTZ,
       definition_revision INTEGER NOT NULL,
       metadata JSONB NOT NULL DEFAULT '{"schema_version" : 1}'::jsonb CHECK (jsonb_typeof(metadata) = 'object'),
       PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version, evaluation_variant, hour_at)

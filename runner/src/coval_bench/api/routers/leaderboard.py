@@ -29,20 +29,20 @@ from starlette.requests import Request
 
 from coval_bench import scenarios
 from coval_bench.api.common import (
+    LEGACY_WINDOW_VIEWS,
     WINDOW_INTERVALS,
-    WINDOW_VIEWS,
     BenchmarkLiteral,
     WindowLiteral,
     has_enough_samples,
     reads_normalized,
 )
-from coval_bench.api.dashboard_snapshots import dashboard_read, require_snapshot
+from coval_bench.api.dashboard_windows import dashboard_read, require_window_state
 from coval_bench.api.deps import capture_api_event, get_pool, get_posthog, get_settings
 from coval_bench.api.internal import hidden_early_access
 from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import LeaderboardEntry, LeaderboardResponse
 from coval_bench.config import DATASET_ALL, Settings
-from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.registries import is_metric_excluded
 from coval_bench.registries.benchmarks import Benchmark
 
@@ -129,11 +129,11 @@ async def get_leaderboard(
     }
     normalized = reads_normalized(settings.normalized_dashboard_reads_enabled, benchmark)
     sql = (_SAVED_MV_SQL_TEMPLATE if normalized else _MV_SQL_TEMPLATE).format(
-        view=SUMMARY_VIEWS[window] if normalized else WINDOW_VIEWS[window]
+        view=WINDOW_VIEWS[window] if normalized else LEGACY_WINDOW_VIEWS[window]
     )
 
     async with dashboard_read(pool, saved=normalized) as conn:
-        snapshot = await require_snapshot(conn) if normalized else None
+        snapshot = await require_window_state(conn) if normalized else None
         rows = await conn.execute(sql, params)
         entry_rows = await rows.fetchall()
     if normalized:
