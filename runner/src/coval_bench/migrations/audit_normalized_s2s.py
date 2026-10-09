@@ -160,9 +160,10 @@ def audit_s2s(
                 ), normalized AS (
                   SELECT DISTINCT o.provider, o.benchmark,
                          NULLIF(split_part(o.sample_id, '/', 1), '') AS external_run_id,
-                         e.metric_type
+                         m.code AS metric_type
                   FROM benchmarks_v2.benchmark_observations o
                   JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
+                  JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
                   JOIN benchmarks_v2.runs rn ON rn.id = o.run_id
                   WHERE o.benchmark = 'S2S' AND rn.status IN ('succeeded', 'partial')
                     AND NULLIF(BTRIM(o.sample_id), '') IS NOT NULL
@@ -188,9 +189,10 @@ def audit_s2s(
                   GROUP BY 1,2,3,4
                 ), normalized AS (
                   SELECT o.provider, o.benchmark, split_part(o.sample_id, '/', 1) AS external_run_id,
-                         e.metric_type, count(*)::bigint AS n
+                         m.code AS metric_type, count(*)::bigint AS n
                   FROM benchmarks_v2.benchmark_observations o
                   JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id
+                  JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
                   JOIN benchmarks_v2.runs rn ON rn.id=o.run_id
                   WHERE o.benchmark='S2S' AND rn.status IN ('succeeded','partial')
                     AND NULLIF(BTRIM(o.sample_id),'') IS NOT NULL AND strpos(o.sample_id,'/') > 0
@@ -227,8 +229,8 @@ def audit_s2s(
                   WHERE r.benchmark='S2S' AND rn.status IN ('succeeded','partial') AND NULLIF(BTRIM(r.audio_filename),'') IS NOT NULL AND strpos(r.audio_filename,'/')>0
                   GROUP BY 1,2,3,4
                 ), normalized AS (
-                  SELECT o.provider,o.benchmark,split_part(o.sample_id,'/',1) external_run_id,e.metric_type,count(*)::bigint n
-                  FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id JOIN benchmarks_v2.runs rn ON rn.id=o.run_id
+                  SELECT o.provider,o.benchmark,split_part(o.sample_id,'/',1) external_run_id,m.code AS metric_type,count(*)::bigint n
+                  FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id JOIN benchmarks_v2.metrics m ON m.id=e.metric_id JOIN benchmarks_v2.runs rn ON rn.id=o.run_id
                   WHERE o.benchmark='S2S' AND rn.status IN ('succeeded','partial') AND NULLIF(BTRIM(o.sample_id),'') IS NOT NULL AND strpos(o.sample_id,'/')>0
                   GROUP BY 1,2,3,4
                 )
@@ -299,12 +301,12 @@ def audit_s2s(
 
             if include_explain:
                 cur.execute(
-                    "SELECT o.provider, o.benchmark, split_part(o.sample_id,'/',1), e.metric_type FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id WHERE o.benchmark='S2S' ORDER BY o.id LIMIT 1"
+                    "SELECT o.provider, o.benchmark, split_part(o.sample_id,'/',1), m.code FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id JOIN benchmarks_v2.metrics m ON m.id=e.metric_id WHERE o.benchmark='S2S' ORDER BY o.id LIMIT 1"
                 )
                 example = cur.fetchone()
                 if example:
                     cur.execute(
-                        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT 1 FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id JOIN benchmarks_v2.runs rn ON rn.id=o.run_id WHERE o.provider=%s AND o.benchmark=%s AND split_part(o.sample_id,'/',1)=%s AND e.metric_type=%s AND rn.status IN ('succeeded','partial') LIMIT 1",
+                        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT 1 FROM benchmarks_v2.benchmark_observations o JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id JOIN benchmarks_v2.metrics m ON m.id=e.metric_id JOIN benchmarks_v2.runs rn ON rn.id=o.run_id WHERE o.provider=%s AND o.benchmark=%s AND split_part(o.sample_id,'/',1)=%s AND m.code=%s AND rn.status IN ('succeeded','partial') LIMIT 1",
                         example,
                     )
                     state.explain = _required(cur.fetchone())[0]

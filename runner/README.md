@@ -142,3 +142,29 @@ for a future normalized paginated-results cutover; the series index maps to the
 current dashboard request shape.
 
 Apache-2.0.
+
+### Metric catalog cutover runbook
+
+The application rollout precedes the destructive schema cleanup. Deploy the
+ID-only writer and catalog-join readers, then verify deployed consumers and the
+normalized readiness report for the agreed rollback period. Preserve the
+current normalized dashboard read configuration during this verification. The legacy
+`results` and `results_by_bucket` paths remain available during rollback.
+
+The default database boot migration is capped at revision `20261005_0043`.
+The cleanup revision is applied separately after the deployed-consumer and
+rollback-period gates pass:
+
+```bash
+uv run coval-bench db migrate --revision 20261007_0044
+uv run alembic -x allow_metric_code_cleanup=true upgrade 20261007_0044
+```
+
+Deploy the artifact containing revision `20261007_0044` to every consumer
+before applying it, so later restarts recognize the installed Alembic revision.
+Never use an implicit head upgrade for this cutover. To roll back the
+application, restore the previous interface first, then run
+`uv run alembic downgrade 20261005_0043` before deploying an older application
+binary.
+Record the deployed runner, API,
+dashboard, and maintenance-job versions with the readiness report.

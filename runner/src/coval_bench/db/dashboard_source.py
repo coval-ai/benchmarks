@@ -32,13 +32,12 @@ ON CONFLICT (bucket_at) DO UPDATE SET requested_at = EXCLUDED.requested_at
 
 SOURCE_BUCKET_INSERT_SQL = """
 INSERT INTO benchmarks_v2.metric_values_by_bucket
-(provider, model, benchmark, dataset_id, metric_id, metric_type, metric_version,
+(provider, model, benchmark, dataset_id, metric_id, metric_version,
  evaluation_variant, value_key,
  unit, bucket_at, min_value, p25, p50, p75, max_value, value_sum, sample_count)
 SELECT observation.provider, observation.model, observation.benchmark,
        COALESCE(observation.dataset_id, '__all__'),
        evaluation.metric_id,
-       evaluation.metric_type,
        evaluation.metric_version, evaluation.evaluation_variant,
        value.value_key, value.unit, %(bucket)s,
        MIN(value.value)::float8,
@@ -52,6 +51,7 @@ JOIN benchmarks_v2.metric_evaluations evaluation
 JOIN benchmarks_v2.benchmark_observations observation
   ON observation.id = evaluation.observation_id
 JOIN benchmarks_v2.runs run ON run.id = observation.run_id
+JOIN benchmarks_v2.metrics metric ON metric.id = evaluation.metric_id
 WHERE observation.status = 'succeeded'
   AND evaluation.status = 'succeeded'
   AND run.status IN ('succeeded', 'partial')
@@ -60,12 +60,11 @@ GROUP BY GROUPING SETS (
   (observation.provider, observation.model, observation.benchmark,
    observation.dataset_id,
    evaluation.metric_id,
-   evaluation.metric_type,
    evaluation.metric_version, evaluation.evaluation_variant,
    value.value_key, value.unit),
   (observation.provider, observation.model, observation.benchmark,
    evaluation.metric_id,
-   evaluation.metric_type, evaluation.metric_version,
+   evaluation.metric_version,
    evaluation.evaluation_variant,
    value.value_key, value.unit)
 )

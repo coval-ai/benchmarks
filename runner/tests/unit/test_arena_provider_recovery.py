@@ -78,11 +78,11 @@ async def _record_run(
             evaluation = await conn.execute(
                 """
                 INSERT INTO benchmarks_v2.metric_evaluations
-                    (observation_id, metric_id, metric_type, metric_version,
+                    (observation_id, metric_id, metric_version,
                      evaluation_variant, executor, status)
                 VALUES (%(observation_id)s,
                         (SELECT id FROM benchmarks_v2.metrics WHERE code = %(metric)s),
-                        %(metric)s, %(version)s, %(variant)s, 'test', 'queued')
+                        %(version)s, %(variant)s, 'test', 'queued')
                 RETURNING id
                 """,
                 {
@@ -431,11 +431,12 @@ def test_parity_sql_covers_failures_and_detects_newer_normalized_run(
     recovery_pg.execute("""
         INSERT INTO benchmarks_v2.results
           (run_id, provider, model, benchmark, metric_type, status, error, audio_filename)
-        SELECT o.run_id, o.provider, o.model, o.benchmark, e.metric_type,
+        SELECT o.run_id, o.provider, o.model, o.benchmark, m.code,
                CASE WHEN e.status='succeeded' THEN 'success' ELSE 'failed' END,
                e.error, o.sample_id
         FROM benchmarks_v2.benchmark_observations o
         JOIN benchmarks_v2.metric_evaluations e ON e.observation_id=o.id
+        JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
     """)
     recovery_pg.commit()
     report = audit_provider_health_parity(recovery_pg)

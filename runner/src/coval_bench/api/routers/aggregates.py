@@ -499,8 +499,8 @@ WITH source AS (
         r.scheduled_at AS source_at,
         m.code AS metric_type, e.value, e.roundtrip, e.leading_silence
  FROM benchmarks_v2.dashboard_metric_values e
- JOIN benchmarks_v2.metrics m
-   ON m.id = COALESCE(e.metric_id, benchmarks_v2.metric_id_for_code(e.metric_type))
+JOIN benchmarks_v2.metrics m
+   ON m.id = e.metric_id
  JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
  JOIN benchmarks_v2.runs r ON r.id = o.run_id
  WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')

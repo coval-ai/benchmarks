@@ -100,8 +100,9 @@ async def refresh_summary_snapshots(
         await conn.execute("SET LOCAL statement_timeout = '550s'")
         metric_ids = await register_metric_definitions(conn)
         source_result = await conn.execute(
-            """SELECT DISTINCT e.metric_type
+            """SELECT DISTINCT m.code AS metric_type
                FROM benchmarks_v2.dashboard_metric_values e
+               JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
                JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
                JOIN benchmarks_v2.runs r ON r.id = o.run_id
                WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
