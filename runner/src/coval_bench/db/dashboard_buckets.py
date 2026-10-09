@@ -34,20 +34,17 @@ def floor_bucket(value: datetime, interval_seconds: int) -> datetime:
 
 
 BUCKET_LOCK_SQL = """
-SELECT pg_advisory_xact_lock(hashtextextended(
-  'dashboard_bucket_aggregates:' || %(interval)s::text,
-  extract(epoch FROM %(bucket)s::timestamptz)::bigint))
+SELECT pg_advisory_xact_lock(%(interval)s::int,
+                             (extract(epoch FROM %(bucket)s::timestamptz) / 3600)::int)
 """
 
 MISSING_BUCKETS_SQL = """
 WITH candidates AS (
-  SELECT generate_series(%(first)s::timestamptz, %(last)s::timestamptz,
-                         %(interval)s::int * interval '1 second') AS bucket_at
+  SELECT generate_series(%(first)s::timestamptz, %(last)s::timestamptz, %(step)s) AS bucket_at
 )
 SELECT c.bucket_at
 FROM candidates c
-WHERE c.bucket_at + %(interval)s::int * interval '1 second' + %(grace)s::interval
-        <= %(as_of)s::timestamptz
+WHERE c.bucket_at + %(step)s + %(grace)s <= %(as_of)s::timestamptz
   AND NOT EXISTS (
     SELECT 1 FROM benchmarks_v2.dashboard_bucket_fills f
     WHERE f.interval_seconds = %(interval)s AND f.bucket_at = c.bucket_at)
@@ -55,45 +52,54 @@ WHERE c.bucket_at + %(interval)s::int * interval '1 second' + %(grace)s::interva
     SELECT 1 FROM benchmarks_v2.runs r
     WHERE r.status = 'running'
       AND r.scheduled_at >= c.bucket_at
-      AND r.scheduled_at < c.bucket_at + %(interval)s::int * interval '1 second')
+      AND r.scheduled_at < c.bucket_at + %(step)s)
 ORDER BY c.bucket_at
 """
 
 FILL_BUCKET_SQL = """
 INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- value_key, unit, interval_seconds, bucket_at,
- min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count, latest_source_at)
-SELECT observation.provider, observation.model, observation.benchmark,
-       COALESCE(observation.dataset_id, '__all__'),
-       evaluation.metric_id, evaluation.metric_version, evaluation.evaluation_variant,
-       value.value_key, value.unit, %(interval)s, %(bucket)s,
-       MIN(value.value)::float8,
-       PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY value.value)::float8,
-       PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY value.value)::float8,
-       PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY value.value)::float8,
-       PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY value.value)::float8,
-       PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY value.value)::float8,
-       MAX(value.value)::float8, SUM(value.value)::float8, COUNT(*)::int,
-       MAX(run.scheduled_at)
-FROM benchmarks_v2.metric_values value
-JOIN benchmarks_v2.metric_evaluations evaluation
-  ON evaluation.id = value.metric_evaluation_id
-JOIN benchmarks_v2.benchmark_observations observation
-  ON observation.id = evaluation.observation_id
-JOIN benchmarks_v2.runs run ON run.id = observation.run_id
-WHERE observation.status = 'succeeded'
-  AND evaluation.status = 'succeeded'
-  AND run.status IN ('succeeded', 'partial')
-  AND run.scheduled_at >= %(bucket)s
-  AND run.scheduled_at < %(bucket)s + %(interval)s::int * interval '1 second'
+ value_key, interval_seconds, bucket_at,
+ min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count,
+ error_word_sum, reference_word_sum, latest_source_at)
+WITH evaluations AS (
+  SELECT o.provider, o.model, o.benchmark, o.dataset_id,
+         e.metric_id, e.metric_version, e.evaluation_variant,
+         e.value, e.roundtrip, e.leading_silence,
+         e.substitution_count + e.deletion_count + e.insertion_count AS error_words,
+         e.reference_words, r.scheduled_at
+  FROM benchmarks_v2.dashboard_metric_values e
+  JOIN benchmarks_v2.benchmark_observations o ON o.id = e.observation_id
+  JOIN benchmarks_v2.runs r ON r.id = o.run_id
+  WHERE o.status = 'succeeded' AND r.status IN ('succeeded', 'partial')
+    AND r.scheduled_at >= %(bucket)s AND r.scheduled_at < %(bucket)s + %(step)s
+), measurements AS (
+  SELECT e.*, part.value_key, part.measured
+  FROM evaluations e
+  CROSS JOIN LATERAL (VALUES
+    ('primary', e.value), ('roundtrip', e.roundtrip), ('leading_silence', e.leading_silence)
+  ) AS part(value_key, measured)
+  WHERE part.measured IS NOT NULL
+)
+SELECT provider, model, benchmark, COALESCE(dataset_id, '__all__'),
+       metric_id, metric_version, evaluation_variant, value_key, %(interval)s, %(bucket)s,
+       MIN(measured)::float8,
+       PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.75) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.9) WITHIN GROUP (ORDER BY measured)::float8,
+       PERCENTILE_CONT(.95) WITHIN GROUP (ORDER BY measured)::float8,
+       MAX(measured)::float8, SUM(measured)::float8, COUNT(*)::int,
+       CASE WHEN value_key = 'primary' AND COUNT(error_words) = COUNT(*)
+             AND COUNT(reference_words) = COUNT(*) THEN SUM(error_words)::float8 END,
+       CASE WHEN value_key = 'primary' AND COUNT(error_words) = COUNT(*)
+             AND COUNT(reference_words) = COUNT(*) THEN SUM(reference_words)::float8 END,
+       MAX(scheduled_at)
+FROM measurements
 GROUP BY GROUPING SETS (
-  (observation.provider, observation.model, observation.benchmark, observation.dataset_id,
-   evaluation.metric_id, evaluation.metric_version, evaluation.evaluation_variant,
-   value.value_key, value.unit),
-  (observation.provider, observation.model, observation.benchmark,
-   evaluation.metric_id, evaluation.metric_version, evaluation.evaluation_variant,
-   value.value_key, value.unit)
+  (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+   value_key),
+  (provider, model, benchmark, metric_id, metric_version, evaluation_variant, value_key)
 )
 """
 
@@ -104,6 +110,7 @@ async def missing_buckets(
     """Closed buckets inside the retention window that have never been filled."""
     params = {
         "interval": interval_seconds,
+        "step": timedelta(seconds=interval_seconds),
         "first": floor_bucket(as_of - RETENTION, interval_seconds),
         "last": floor_bucket(as_of, interval_seconds),
         "grace": CLOSE_GRACE,
@@ -119,7 +126,11 @@ async def fill_bucket(
 ) -> None:
     """Replace one bucket from raw observations and record it as filled."""
     bucket = floor_bucket(bucket_at, interval_seconds)
-    params = {"interval": interval_seconds, "bucket": bucket}
+    params = {
+        "interval": interval_seconds,
+        "step": timedelta(seconds=interval_seconds),
+        "bucket": bucket,
+    }
     async with pool.connection() as conn, conn.transaction():
         await conn.execute(f"SET LOCAL statement_timeout = '{_FILL_STATEMENT_TIMEOUT}'")
         await conn.execute(BUCKET_LOCK_SQL, params)

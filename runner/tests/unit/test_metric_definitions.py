@@ -25,9 +25,9 @@ metric_pg = postgresql("pg_proc")
 _INSERT_BUCKET = """
 INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- value_key, unit, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
+ value_key, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
  value_sum, sample_count, latest_source_at)
-VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, 'primary', 'percent', 3600, '2026-09-14 12:00:00+00',
+VALUES ('p', 'm', 'STT', 'd', %s, %s, %s, 'primary', 3600, '2026-09-14 12:00:00+00',
         10, 10, 10, 10, 10, 10, 10, 10, 1, '2026-09-14 12:00:00+00')
 """
 

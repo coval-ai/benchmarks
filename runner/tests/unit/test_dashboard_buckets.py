@@ -77,7 +77,7 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
             rows = await (
                 await conn.execute(
                     """SELECT dataset_id, value_key, value_sum, sample_count, p50, p95,
-                              max_value, latest_source_at
+                              max_value, error_word_sum, latest_source_at
                        FROM benchmarks_v2.dashboard_bucket_aggregates
                        WHERE interval_seconds = 3600 AND bucket_at = %s
                        ORDER BY dataset_id, value_key""",
@@ -88,19 +88,14 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
                 await conn.execute("SELECT * FROM benchmarks_v2.dashboard_bucket_fills")
             ).fetchall()
         assert [(r["dataset_id"], r["value_key"]) for r in rows] == [
-            ("__all__", "deletions"),
-            ("__all__", "insertions"),
             ("__all__", "primary"),
-            ("__all__", "substitutions"),
-            ("observation-dataset", "deletions"),
-            ("observation-dataset", "insertions"),
             ("observation-dataset", "primary"),
-            ("observation-dataset", "substitutions"),
         ]
-        primary = rows[2]
+        primary = rows[0]
         assert (primary["value_sum"], primary["sample_count"]) == (40.0, 2)
         assert (primary["p50"], primary["p95"], primary["max_value"]) == (20.0, 29.0, 30.0)
         assert primary["latest_source_at"] == storage._NOW
+        assert primary["error_word_sum"] is None  # no word counts were stored
         assert [(f["interval_seconds"], f["bucket_at"]) for f in fills] == [(3600, storage._NOW)]
 
         await fill_bucket(pool, interval_seconds=3600, bucket_at=storage._NOW)
@@ -110,7 +105,7 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
                     "SELECT count(*) AS n FROM benchmarks_v2.dashboard_bucket_aggregates"
                 )
             ).fetchone()
-        assert count == {"n": 8}
+        assert count == {"n": 2}
     finally:
         await pool.close()
 

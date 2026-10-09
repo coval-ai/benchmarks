@@ -265,8 +265,7 @@ _NORMALIZED_COMPACT_SERIES_SQL = (
 # Source buckets retain sums/counts, so larger intervals never average averages.
 _AVERAGE_SELECT_SQL = """
 SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
-       CASE WHEN metric_type = 'WER' THEN COALESCE(pooled_value, mean_value)
-            ELSE mean_value END AS value,
+       COALESCE(pooled_value, value_sum / NULLIF(sample_count, 0)) AS value,
        pooled_value,
        CASE WHEN metric_type <> 'WER' THEN 'mean'
             WHEN pooled_value IS NOT NULL THEN 'ratio'
@@ -278,23 +277,15 @@ _BUCKET_AVERAGE_SQL = f"""
 {_AVERAGE_SELECT_SQL}
 FROM (
  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
-        MAX(b.latest_source_at) AS latest_source_at,
-        MAX(sample_count) FILTER (WHERE value_key = 'primary') AS sample_count,
-        MAX(value_sum) FILTER (WHERE value_key = 'primary')
-          / NULLIF(MAX(sample_count) FILTER (WHERE value_key = 'primary'), 0) AS mean_value,
-        CASE WHEN {_BUCKET_COUNTS_COMPLETE}
-             THEN 100 * {_BUCKET_ERROR_SUM} / NULLIF({_BUCKET_REFERENCE_SUM}, 0) END AS pooled_value
+        b.value_sum, b.sample_count, b.latest_source_at,
+        100 * b.error_word_sum / NULLIF(b.reference_word_sum, 0) AS pooled_value
  FROM benchmarks_v2.dashboard_bucket_aggregates b
  JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
- WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
-   AND b.value_key IN ('primary', 'substitution_count', 'deletion_count',
-                       'insertion_count', 'reference_words')
+ WHERE b.value_key = 'primary'
+   AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
    AND b.interval_seconds = %(bucket_seconds)s
-   AND b.bucket_at >= %(since)s
-   AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s
- GROUP BY b.provider, b.model, m.code, b.bucket_at
- HAVING COUNT(*) FILTER (WHERE value_key = 'primary') = 1
+   AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
 """  # noqa: S608
 
@@ -304,9 +295,8 @@ FROM (
  SELECT provider, model, metric_type,
         to_timestamp(floor(extract(epoch FROM bucket_at) / %(bucket_seconds)s)
                      * %(bucket_seconds)s) AS scheduled_at,
-        SUM(sample_count) AS sample_count, MAX(bucket_at) AS latest_source_at,
-        SUM(value_sum)::float8 / NULLIF(SUM(sample_count), 0) AS mean_value,
-        NULL::float8 AS pooled_value
+        SUM(value_sum)::float8 AS value_sum, SUM(sample_count) AS sample_count,
+        MAX(bucket_at) AS latest_source_at, NULL::float8 AS pooled_value
  FROM benchmarks_v2.results_by_bucket
  WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s
    AND bucket_at >= %(since)s AND bucket_at < %(until)s
@@ -343,8 +333,7 @@ _PERCENTILE_SOURCES = {
     "average": (
         "benchmarks_v2.dashboard_bucket_aggregates",
         "b.latest_source_at",
-        "b.interval_seconds = %(bucket_seconds)s"
-        " AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s",
+        "b.interval_seconds = %(bucket_seconds)s AND b.bucket_at + %(step)s <= %(until)s",
     ),
 }
 
@@ -605,6 +594,7 @@ async def get_results_timeline(
             "since": since,
             "until": until,
             "bucket_seconds": bucket_seconds,
+            "step": None if bucket_seconds is None else dt.timedelta(seconds=bucket_seconds),
             "metric_type": metric_type,
         }
         params.update(rule_params)

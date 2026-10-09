@@ -1866,17 +1866,47 @@ async def test_timeline_30d_averages_each_group_and_preserves_legacy_series(
 _MERGE_SOURCE_ROWS_SQL = """
 INSERT INTO benchmarks_v2.dashboard_bucket_aggregates
 (provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
- value_key, unit, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95,
- max_value, value_sum, sample_count, latest_source_at)
-SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
-       value_key, MAX(unit), %(interval)s,
-       to_timestamp(floor(extract(epoch FROM bucket_at) / %(interval)s) * %(interval)s),
-       MIN(min_value), MIN(p25), MIN(p50), MAX(p75), MAX(p75), MAX(p75), MAX(max_value),
-       SUM(value_sum), SUM(sample_count)::int, MAX(bucket_at)
-FROM benchmarks_v2.metric_values_by_bucket
-GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
-         value_key,
+ value_key, interval_seconds, bucket_at, min_value, p25, p50, p75, p90, p95, max_value,
+ value_sum, sample_count, error_word_sum, reference_word_sum, latest_source_at)
+WITH slots AS (
+  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
          to_timestamp(floor(extract(epoch FROM bucket_at) / %(interval)s) * %(interval)s)
+           AS bucket_at,
+         value_key, min_value, p25, p50, p75, max_value, value_sum, sample_count,
+         bucket_at AS source_at
+  FROM benchmarks_v2.metric_values_by_bucket
+), keyed AS (
+  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+         bucket_at, value_key, SUM(value_sum) AS value_sum, SUM(sample_count) AS sample_count
+  FROM slots
+  WHERE value_key IN ('primary', 'substitution_count', 'deletion_count',
+                      'insertion_count', 'reference_words')
+  GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version,
+           evaluation_variant, bucket_at, value_key
+), counts AS (
+  SELECT provider, model, benchmark, dataset_id, metric_id, metric_version, evaluation_variant,
+         bucket_at,
+         SUM(value_sum) FILTER (WHERE value_key IN
+           ('substitution_count', 'deletion_count', 'insertion_count')) AS error_word_sum,
+         SUM(value_sum) FILTER (WHERE value_key = 'reference_words') AS reference_word_sum
+  FROM keyed
+  GROUP BY provider, model, benchmark, dataset_id, metric_id, metric_version,
+           evaluation_variant, bucket_at
+  HAVING COUNT(*) = 5 AND MIN(sample_count) = MAX(sample_count)
+)
+SELECT s.provider, s.model, s.benchmark, s.dataset_id, s.metric_id, s.metric_version,
+       s.evaluation_variant, s.value_key, %(interval)s, s.bucket_at,
+       MIN(s.min_value), MIN(s.p25), MIN(s.p50), MAX(s.p75), MAX(s.p75), MAX(s.p75),
+       MAX(s.max_value), SUM(s.value_sum), SUM(s.sample_count)::int,
+       CASE WHEN s.value_key = 'primary' THEN MAX(c.error_word_sum) END,
+       CASE WHEN s.value_key = 'primary' THEN MAX(c.reference_word_sum) END,
+       MAX(s.source_at)
+FROM slots s
+LEFT JOIN counts c USING (provider, model, benchmark, dataset_id, metric_id, metric_version,
+                          evaluation_variant, bucket_at)
+WHERE s.value_key IN ('primary', 'roundtrip', 'leading_silence')
+GROUP BY s.provider, s.model, s.benchmark, s.dataset_id, s.metric_id, s.metric_version,
+         s.evaluation_variant, s.value_key, s.bucket_at
 """
 
 
