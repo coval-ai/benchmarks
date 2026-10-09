@@ -56,13 +56,20 @@ async def _rows(pool: Any, sql: str, *params: Any) -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_finished_run_rebuilds_its_slot_and_queues_the_buckets(
-    pg_conn: psycopg.Connection[Any],
+async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
+    pg_conn: psycopg.Connection[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     apply_migrations(pg_conn)
     pool = await storage._pool(pg_conn)
     try:
         run_id = await _seed_two_runs(pool)
+        with monkeypatch.context() as patch:
+            patch.setattr(dashboard_rollups, "FILL_ROLLUP_SQL", "SELECT nope")
+            with pytest.raises(psycopg.Error):
+                await RunWriter(pool).rebuild_run_rollup(run_id)
+        queued = await _rows(pool, "SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue")
+        assert [q["slot_at"] for q in queued] == [storage._NOW]
+
         await RunWriter(pool).rebuild_run_rollup(run_id)
 
         rows = await _rows(
@@ -81,8 +88,6 @@ async def test_finished_run_rebuilds_its_slot_and_queues_the_buckets(
         assert (primary["p50"], primary["p95"], primary["max_value"]) == (20.0, 29.0, 30.0)
         assert primary["wer_error_words"] is None
         assert primary["latest_run_at"] == storage._NOW
-        queued = await _rows(pool, "SELECT slot_at FROM benchmarks_v2.dashboard_rollup_queue")
-        assert [q["slot_at"] for q in queued] == [storage._NOW]
         buckets = await _rows(
             pool, "SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollups WHERE grain <> 'run'"
         )

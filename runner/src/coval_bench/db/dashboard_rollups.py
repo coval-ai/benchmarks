@@ -131,14 +131,14 @@ async def fill_rollup(
 
 
 async def rebuild_slot(conn: psycopg.AsyncConnection[Any], slot_at: datetime) -> None:
-    """Rebuild a run slot and the 1h and 4h buckets containing it, then dequeue it."""
+    """Claim a queued slot, then rebuild it and the 1h and 4h buckets containing it."""
     await conn.execute(f"SET LOCAL statement_timeout = '{_REBUILD_STATEMENT_TIMEOUT}'")
-    for grain in (RUN_SLOT, *GRAINS):
-        await fill_rollup(conn, grain=grain, bucket_at=slot_at)
     await conn.execute(
         "DELETE FROM benchmarks_v2.dashboard_rollup_queue WHERE slot_at = %(slot)s",
         {"slot": slot_at},
     )
+    for grain in (RUN_SLOT, *GRAINS):
+        await fill_rollup(conn, grain=grain, bucket_at=slot_at)
 
 
 async def drain_rollup_queue(

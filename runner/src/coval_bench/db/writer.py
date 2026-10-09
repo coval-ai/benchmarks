@@ -1210,15 +1210,14 @@ class RunWriter:
             await conn.commit()
 
     async def rebuild_run_rollup(self, run_id: int) -> None:
-        """Queue the run's slot for the hourly job and rebuild its run-grain rows now."""
-        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL, RUN_SLOT, fill_rollup
+        """Rebuild the run's run-grain rows now; its slot is already queued for the job."""
+        from coval_bench.db.dashboard_rollups import RUN_SLOT, fill_rollup
 
         async with (
             self._pool.connection() as conn,
             conn.transaction(),
             conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
         ):
-            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
             await cur.execute(
                 "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s", (run_id,)
             )
@@ -1331,7 +1330,9 @@ class RunWriter:
         status: RunStatus,
         error: str | None = None,
     ) -> None:
-        """Commit the run's terminal status."""
+        """Commit the run's terminal status and queue its slot for the rollup job."""
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
+
         sql = """
             UPDATE benchmarks_v2.runs
             SET finished_at = now(),
@@ -1341,6 +1342,7 @@ class RunWriter:
         """
         async with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             await cur.execute(sql, (status, error, run_id))
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def finish_run_exact(
         self,
@@ -1352,6 +1354,8 @@ class RunWriter:
         allow_capture_recovery: bool = False,
     ) -> None:
         """Replay run completion while preserving the original finish time."""
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
+
         async with (
             self._pool.connection() as conn,
             conn.transaction(),
@@ -1390,9 +1394,12 @@ class RunWriter:
                                   error = %s WHERE id = %s""",
                     (finished_at, status, error, run_id),
                 )
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def mark_run_capture_pending(self, run_id: int, *, finished_at: datetime) -> None:
         """Downgrade a finalized non-failed run when its final receipt is missing."""
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
+
         async with (
             self._pool.connection() as conn,
             conn.transaction(),
@@ -1416,6 +1423,7 @@ class RunWriter:
                    WHERE id = %s""",
                 (RunStatus.PARTIAL, run_id),
             )
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""
