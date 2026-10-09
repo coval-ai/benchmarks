@@ -35,12 +35,12 @@ class Snapshot:
         }
 
 
-async def require_snapshot(conn: AsyncConnection[Any]) -> Snapshot:
+async def require_window_state(conn: AsyncConnection[Any]) -> Snapshot:
     """Validate state and definition identity inside the caller's transaction."""
     try:
         result = await conn.execute(
             """SELECT generation,as_of,published_at,definition_revision,definition_fingerprint
-               FROM benchmarks_v2.dashboard_summary_state WHERE id=true"""
+               FROM benchmarks_v2.dashboard_window_state WHERE id=true"""
         )
     except UndefinedTable as exc:
         raise HTTPException(status_code=503, detail="dashboard_snapshot_not_ready") from exc

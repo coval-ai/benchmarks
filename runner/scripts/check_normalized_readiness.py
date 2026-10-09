@@ -47,11 +47,8 @@ FROM (
   FROM benchmarks_v2.dashboard_metric_values p
   LEFT JOIN benchmarks_v2.metric_evaluations e ON e.id = p.evaluation_id
   UNION ALL
-  SELECT 'metric_values_by_bucket', metric_id, NULL::bigint
-  FROM benchmarks_v2.metric_values_by_bucket
-  UNION ALL
-  SELECT 'dashboard_hourly_aggregates', metric_id, NULL::bigint
-  FROM benchmarks_v2.dashboard_hourly_aggregates
+  SELECT 'dashboard_rollups', metric_id, NULL::bigint
+  FROM benchmarks_v2.dashboard_rollups
 ) rows
 LEFT JOIN benchmarks_v2.metrics ON metrics.id = rows.metric_id
 GROUP BY table_name ORDER BY table_name
@@ -123,8 +120,9 @@ WHERE benchmark = %(benchmark)s
 GROUP BY dataset_id
 UNION
 SELECT dataset_id
-FROM benchmarks_v2.metric_values_by_bucket
+FROM benchmarks_v2.dashboard_rollups
 WHERE benchmark = %(benchmark)s
+  AND grain = 'run'
   AND metric_version = 'v1'
   AND evaluation_variant = 'default'
   AND value_key = 'primary'
@@ -289,9 +287,10 @@ SELECT bucket.provider,
        bucket.value_sum,
        bucket.sample_count,
        COUNT(*) AS multiplicity
-FROM benchmarks_v2.metric_values_by_bucket bucket
+FROM benchmarks_v2.dashboard_rollups bucket
 JOIN benchmarks_v2.metrics metric ON metric.id = bucket.metric_id
 WHERE bucket.benchmark = %(benchmark)s
+  AND bucket.grain = 'run'
   AND bucket.dataset_id = %(dataset_id)s
   AND bucket.metric_version = 'v1'
   AND bucket.evaluation_variant = 'default'

@@ -199,9 +199,9 @@ def _make_stub_writer(run: Run) -> MagicMock:
     writer.mark_run_capture_pending = AsyncMock()
     writer.preflight_required_capture_schema = AsyncMock()
     writer.refresh_stats_matviews = AsyncMock()
-    writer.refresh_dashboard_summaries = AsyncMock(return_value="published")
+    writer.refresh_window_views = AsyncMock(return_value="published")
     writer.refresh_bucket = AsyncMock()
-    writer.refresh_metric_values_bucket = AsyncMock()
+    writer.rebuild_run_rollup = AsyncMock()
     writer.pool_diagnostics = MagicMock(return_value={"pool_size": 0})
     return writer
 
@@ -410,7 +410,7 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_fail
     run = _make_run()
     writer = _make_stub_writer(run)
     if snapshot_failure:
-        writer.refresh_dashboard_summaries.side_effect = RuntimeError("snapshot unavailable")
+        writer.refresh_window_views.side_effect = RuntimeError("snapshot unavailable")
 
     async with _orchestrator_env(
         audio_path=audio_file,
@@ -440,8 +440,8 @@ async def test_smoke_run_stt(audio_file: Path, settings: Settings, snapshot_fail
     assert writer.finish_run.await_args.args == (1,)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.SUCCEEDED
     assert writer.finish_run.await_args.kwargs["error"] is None
-    writer.refresh_dashboard_summaries.assert_awaited_once_with(1)
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.refresh_window_views.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
     writer.refresh_stats_matviews.assert_not_awaited()
     writer.refresh_bucket.assert_not_awaited()
 
@@ -494,9 +494,9 @@ async def test_partial_run(audio_file: Path, settings: Settings) -> None:
     assert writer.finish_run.await_args.args == (1,)
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.PARTIAL
     assert writer.finish_run.await_args.kwargs["error"] is None
-    writer.refresh_dashboard_summaries.assert_awaited_once_with(1)
+    writer.refresh_window_views.assert_awaited_once_with(1)
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
 # ---------------------------------------------------------------------------
@@ -560,9 +560,9 @@ async def test_full_failure(audio_file: Path, settings: Settings) -> None:
     writer.finish_run.assert_awaited_once()
     assert writer.finish_run.await_args.kwargs["status"] is RunStatus.FAILED
     assert writer.finish_run.await_args.kwargs["error"] is None
-    writer.refresh_dashboard_summaries.assert_not_awaited()
+    writer.refresh_window_views.assert_not_awaited()
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_not_awaited()
+    writer.rebuild_run_rollup.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -574,11 +574,11 @@ async def test_refresh_series_bucket_retries_transient_failure(
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
     writer = MagicMock()
-    writer.refresh_metric_values_bucket = AsyncMock(side_effect=[RuntimeError("blip"), None])
+    writer.rebuild_run_rollup = AsyncMock(side_effect=[RuntimeError("blip"), None])
 
     await orchestrator._refresh_series_bucket(writer, 1, settings)
 
-    assert writer.refresh_metric_values_bucket.await_count == 2
+    assert writer.rebuild_run_rollup.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -590,11 +590,11 @@ async def test_refresh_series_bucket_refreshes_normalized_only(
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
     writer = MagicMock()
-    writer.refresh_metric_values_bucket = AsyncMock()
+    writer.rebuild_run_rollup = AsyncMock()
 
     await orchestrator._refresh_series_bucket(writer, 1, settings)
 
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(1)
+    writer.rebuild_run_rollup.assert_awaited_once_with(1)
 
 
 @pytest.mark.asyncio
@@ -606,11 +606,11 @@ async def test_refresh_series_bucket_never_raises(
 
     monkeypatch.setattr(orchestrator, "_BUCKET_REFRESH_RETRY_DELAY_S", 0.0)
     writer = MagicMock()
-    writer.refresh_metric_values_bucket = AsyncMock(side_effect=RuntimeError("db down"))
+    writer.rebuild_run_rollup = AsyncMock(side_effect=RuntimeError("db down"))
 
     await orchestrator._refresh_series_bucket(writer, 1, settings)
 
-    assert writer.refresh_metric_values_bucket.await_count == 3
+    assert writer.rebuild_run_rollup.await_count == 3
 
 
 @pytest.mark.asyncio
@@ -2027,7 +2027,7 @@ async def test_sigterm_finalizes_run_as_partial(audio_file: Path, settings: Sett
     assert finish_kwargs["status"] == RunStatus.PARTIAL
     assert "sigterm" in (finish_kwargs.get("error") or "").lower()
     writer.refresh_bucket.assert_not_awaited()
-    writer.refresh_metric_values_bucket.assert_awaited_once_with(run.id)
+    writer.rebuild_run_rollup.assert_awaited_once_with(run.id)
 
 
 # ---------------------------------------------------------------------------

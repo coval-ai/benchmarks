@@ -11,8 +11,8 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db import dashboard_summaries
-from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
+from coval_bench.db import dashboard_windows
+from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 
 from .conftest import apply_migrations, open_pool
 
@@ -30,39 +30,39 @@ def test_failed_view_refresh_rolls_back_state_and_prior_views(
     async def scenario() -> None:
         pool = await open_pool(summary_publication_pg)
         try:
-            first = await dashboard_summaries.refresh_summary_snapshots(pool, as_of=first_as_of)
+            first = await dashboard_windows.refresh_window_views(pool, as_of=first_as_of)
             assert first.status == "published"
             async with pool.connection() as conn:
                 before = await (
                     await conn.execute(
-                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_summary_state"
+                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
                 ).fetchone()
-            broken = dict(SUMMARY_VIEWS)
+            broken = dict(WINDOW_VIEWS)
             broken["30d"] = "benchmarks_v2.missing_summary_view"
-            monkeypatch.setattr(dashboard_summaries, "SUMMARY_VIEWS", broken)
+            monkeypatch.setattr(dashboard_windows, "WINDOW_VIEWS", broken)
             logger = MagicMock()
-            monkeypatch.setattr(dashboard_summaries, "logger", logger)
+            monkeypatch.setattr(dashboard_windows, "logger", logger)
             with pytest.raises(psycopg.errors.UndefinedTable):
-                await dashboard_summaries.refresh_summary_snapshots(pool, as_of=second_as_of)
+                await dashboard_windows.refresh_window_views(pool, as_of=second_as_of)
             failed = [
                 call.kwargs
                 for call in logger.error.call_args_list
-                if call.args[0] == "dashboard_summary_view_refresh_failed"
+                if call.args[0] == "dashboard_window_refresh_failed"
             ]
             assert len(failed) == 1
             assert failed[0]["window"] == "30d"
             assert failed[0]["view"] == "benchmarks_v2.missing_summary_view"
             assert failed[0]["elapsed_seconds"] >= 0
-            monkeypatch.setattr(dashboard_summaries, "SUMMARY_VIEWS", SUMMARY_VIEWS)
+            monkeypatch.setattr(dashboard_windows, "WINDOW_VIEWS", WINDOW_VIEWS)
             async with pool.connection() as conn:
                 after = await (
                     await conn.execute(
-                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_summary_state"
+                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
                 ).fetchone()
                 assert after == before
-                for view in SUMMARY_VIEWS.values():
+                for view in WINDOW_VIEWS.values():
                     assert (
                         await (
                             await conn.execute(  # noqa: S608
@@ -86,9 +86,9 @@ def test_summary_refresh_reports_skipped_lock(
         try:
             async with pool.connection() as held, held.transaction():
                 await held.execute(
-                    "SELECT pg_advisory_xact_lock(hashtextextended('dashboard_summary', 0))"
+                    "SELECT pg_advisory_xact_lock(hashtextextended('dashboard_windows', 0))"
                 )
-                result = await dashboard_summaries.refresh_summary_snapshots(pool)
+                result = await dashboard_windows.refresh_window_views(pool)
                 assert result.status == "skipped_lock"
         finally:
             await pool.close()

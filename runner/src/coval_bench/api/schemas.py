@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
 from coval_bench.scenarios import binding_for_dataset
@@ -181,7 +181,6 @@ class ModelStatEntry(BaseModel):
     p75: float
     p90: float
     p95: float
-    p99: float
     min_value: float
     max_value: float
     sample_count: int
@@ -205,7 +204,7 @@ class ModelStatEntry(BaseModel):
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50. WER renders error_sum / reference_word_sum when
+    Latency timelines render p50. WER renders error_sum / wer_reference_words when
     present, else value_sum / sample_count; both pairs sum across buckets.
     """
 
@@ -276,7 +275,7 @@ class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
-    statistic: Literal["default", "p50", "p90", "p95"] = "default"
+    statistic: StatisticLiteral = "default"
     metric_type: str | None = None
     precision: Literal["exact"] | None = None
     percentile_method: Literal["continuous"] | None = None

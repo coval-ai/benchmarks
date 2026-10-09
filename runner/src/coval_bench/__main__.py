@@ -23,7 +23,6 @@ from coval_bench.db.cli import (
     db_check,
     db_migrate,
     refresh_dashboard_aggregates,
-    repair_dashboard_aggregates,
 )
 from coval_bench.llm.coval_agent import sync_llm
 from coval_bench.platform_assets import platform_assets
@@ -107,7 +106,6 @@ def db() -> None:
 db.add_command(db_migrate, name="migrate")
 db.add_command(db_check, name="db-check")
 db.add_command(refresh_dashboard_aggregates)
-db.add_command(repair_dashboard_aggregates)
 db.add_command(capture)
 
 

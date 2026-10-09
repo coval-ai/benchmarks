@@ -697,12 +697,12 @@ def test_widened_checks_are_validated_and_enforced(pg_conn: psycopg.Connection[A
         cur.execute(
             "SELECT conname, convalidated FROM pg_constraint "
             "WHERE conname IN ('results_benchmark_check', 'results_by_bucket_benchmark_check', "
-            " 'benchmark_observations_benchmark_check', 'metric_values_by_bucket_benchmark_check', "
+            " 'benchmark_observations_benchmark_check', "
             " 'models_modality_check', 'model_history_modality_check') "
             "ORDER BY conname"
         )
         rows = cur.fetchall()
-    assert len(rows) == 6
+    assert len(rows) == 5
     assert all(validated for _, validated in rows), rows
 
     pg_conn.autocommit = False

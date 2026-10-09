@@ -249,7 +249,8 @@ class RunWriter:
             "metric_evaluations",
             "metric_evaluation_inputs",
             "metric_values",
-            "dashboard_source_refreshes",
+            "dashboard_rollups",
+            "dashboard_rollup_queue",
         )
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
@@ -278,7 +279,8 @@ class RunWriter:
             "metric_evaluation_inputs",
             "metric_values",
             "runs",
-            "dashboard_source_refreshes",
+            "dashboard_rollups",
+            "dashboard_rollup_queue",
         )
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
@@ -1211,29 +1213,27 @@ class RunWriter:
                 )
             await conn.commit()
 
-    async def refresh_metric_values_bucket(self, run_id: int) -> None:
-        """Recompute the run's source bucket and its saved UTC-hour statistics."""
-        from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
-        from coval_bench.db.dashboard_source import rebuild_source_bucket
+    async def rebuild_run_rollup(self, run_id: int) -> None:
+        """Rebuild the run's run-grain rows now; its slot is already queued for the job."""
+        from coval_bench.db.dashboard_rollups import RUN_SLOT, fill_rollup
 
         async with (
             self._pool.connection() as conn,
+            conn.transaction(),
             conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
         ):
             await cur.execute(
                 "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s", (run_id,)
             )
             row = await cur.fetchone()
-        bucket_at = row["scheduled_at"] if row is not None else None
-        if bucket_at is not None:
-            await rebuild_source_bucket(self._pool, bucket_at)
-            await refresh_hourly_aggregates(self._pool, hours=[bucket_at])
+            if row is not None and row["scheduled_at"] is not None:
+                await fill_rollup(conn, grain=RUN_SLOT, bucket_at=row["scheduled_at"])
 
-    async def refresh_dashboard_summaries(self, run_id: int | None = None) -> str:
+    async def refresh_window_views(self, run_id: int | None = None) -> str:
         """Publish normalized summaries independently of legacy maintenance."""
-        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+        from coval_bench.db.dashboard_windows import refresh_window_views
 
-        result = await refresh_summary_snapshots(self._pool, run_id=run_id)
+        result = await refresh_window_views(self._pool, run_id=run_id)
         return result.status
 
     async def refresh_bucket(self, run_id: int, *, period_seconds: int) -> None:
@@ -1334,12 +1334,8 @@ class RunWriter:
         status: RunStatus,
         error: str | None = None,
     ) -> None:
-        """Commit completion and enqueue dashboard maintenance together.
-
-        Before migration 0034, missing dashboard storage skips only the enqueue
-        with a warning. Other enqueue errors still roll back the completion.
-        """
-        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+        """Commit the run's terminal status and queue its slot for the rollup job."""
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
 
         sql = """
             UPDATE benchmarks_v2.runs
@@ -1350,19 +1346,7 @@ class RunWriter:
         """
         async with self._pool.connection() as conn, conn.transaction(), conn.cursor() as cur:
             await cur.execute(sql, (status, error, run_id))
-            try:
-                # A runner image can arrive before migration 0034. Roll back
-                # only the missing-table enqueue, preserving the run outcome.
-                async with conn.transaction():
-                    await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
-            except psycopg.errors.UndefinedTable:
-                logger.warning(
-                    "dashboard_source_refresh_enqueue_skipped",
-                    run_id=run_id,
-                    status=str(status),
-                    reason="dashboard_storage_unavailable",
-                    required_migration="20260914_0034",
-                )
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def finish_run_exact(
         self,
@@ -1374,7 +1358,7 @@ class RunWriter:
         allow_capture_recovery: bool = False,
     ) -> None:
         """Replay run completion while preserving the original finish time."""
-        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
 
         async with (
             self._pool.connection() as conn,
@@ -1414,21 +1398,11 @@ class RunWriter:
                                   error = %s WHERE id = %s""",
                     (finished_at, status, error, run_id),
                 )
-            try:
-                async with conn.transaction():
-                    await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
-            except psycopg.errors.UndefinedTable:
-                logger.warning(
-                    "dashboard_source_refresh_enqueue_skipped",
-                    run_id=run_id,
-                    status=str(status),
-                    reason="dashboard_storage_unavailable",
-                    required_migration="20260914_0034",
-                )
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def mark_run_capture_pending(self, run_id: int, *, finished_at: datetime) -> None:
         """Downgrade a finalized non-failed run when its final receipt is missing."""
-        from coval_bench.db.dashboard_source import ENQUEUE_RUN_BUCKET_SQL
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL
 
         async with (
             self._pool.connection() as conn,
@@ -1453,7 +1427,7 @@ class RunWriter:
                    WHERE id = %s""",
                 (RunStatus.PARTIAL, run_id),
             )
-            await cur.execute(ENQUEUE_RUN_BUCKET_SQL, {"run_id": run_id})
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
 
     async def conversation_ttft(self, simulation_ids: Sequence[str]) -> dict[str, float]:
         """Mean proxy-measured TTFT in seconds per Coval conversation that has turns."""

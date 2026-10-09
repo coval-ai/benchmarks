@@ -1275,7 +1275,7 @@ async def _ingest_run(
             await writer.finish_run(run_pk, status=status)
         if status in (RunStatus.SUCCEEDED, RunStatus.PARTIAL):
             try:
-                await writer.refresh_metric_values_bucket(run_pk)
+                await writer.rebuild_run_rollup(run_pk)
             except Exception:
                 logger.warning(
                     "normalized_bucket_refresh_failed", provider=spec.provider, exc_info=True
@@ -1801,9 +1801,9 @@ async def fetch_and_write_v2v(
             log_run_unmapped_persona(unmapped_personas)
 
         try:
-            await writer.refresh_dashboard_summaries()
+            await writer.refresh_window_views()
         except Exception:
-            logger.warning("dashboard_summaries_refresh_failed", exc_info=True)
+            logger.warning("dashboard_windows_refresh_failed", exc_info=True)
 
         if only_run_ids is not None and (unmatched := only_run_ids - matched_run_ids):
             logger.error("backfill_runs_not_found", coval_run_ids=sorted(unmatched))
