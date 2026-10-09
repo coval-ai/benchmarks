@@ -167,7 +167,9 @@ async def drain_rollup_queue(
     async with pool.connection() as conn, conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
         async with conn.transaction():
             for sql in PRUNE_SQL.values():
-                await cur.execute(sql, {"before": as_of - RETENTION})
+                await cur.execute(
+                    sql, {"before": as_of - RETENTION - max(GRAINS.values()) * timedelta(seconds=1)}
+                )
         await cur.execute("SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollup_queue")
         row = await cur.fetchone()
     return DrainResult(rebuilt, int(row["n"]) if row else 0)

@@ -266,6 +266,11 @@ class TimelinePoint(BaseModel):
     insufficient_samples: bool = False
 
 
+class DashboardMaterialization(BaseModel):
+    refreshed_at: datetime | None = None
+    stale: bool = False
+
+
 class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
@@ -284,6 +289,7 @@ class TimelineResponse(BaseModel):
     range_end: datetime | None = None
     latest_source_at: datetime | None = None
     snapshot: DashboardSnapshot | None = None
+    materialization: DashboardMaterialization | None = None
 
 
 class DatasetPersona(BaseModel):

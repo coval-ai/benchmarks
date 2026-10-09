@@ -249,6 +249,8 @@ class RunWriter:
             "metric_evaluations",
             "metric_evaluation_inputs",
             "metric_values",
+            "dashboard_rollups",
+            "dashboard_rollup_queue",
         )
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
@@ -277,6 +279,8 @@ class RunWriter:
             "metric_evaluation_inputs",
             "metric_values",
             "runs",
+            "dashboard_rollups",
+            "dashboard_rollup_queue",
         )
         async with self._pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(

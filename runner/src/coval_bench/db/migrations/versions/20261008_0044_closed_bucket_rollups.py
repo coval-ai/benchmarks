@@ -116,7 +116,7 @@ def downgrade() -> None:
       hour_at TIMESTAMPTZ NOT NULL CHECK (hour_at = date_trunc('hour', hour_at, 'UTC')),
       primary_sum DOUBLE PRECISION NOT NULL, sample_count BIGINT NOT NULL CHECK (sample_count > 0),
       numerator_sum DOUBLE PRECISION, denominator_sum DOUBLE PRECISION, coverage_complete BOOLEAN NOT NULL,
-      source_count BIGINT NOT NULL CHECK (source_count > 0), latest_run_at TIMESTAMPTZ,
+      source_count BIGINT NOT NULL CHECK (source_count > 0), latest_source_at TIMESTAMPTZ,
       definition_revision INTEGER NOT NULL,
       metadata JSONB NOT NULL DEFAULT '{"schema_version" : 1}'::jsonb CHECK (jsonb_typeof(metadata) = 'object'),
       PRIMARY KEY (provider, model, benchmark, dataset_id, metric_type, metric_version, evaluation_variant, hour_at)

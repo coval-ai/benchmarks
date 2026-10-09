@@ -14,7 +14,7 @@ from coval_bench.db.dashboard_rollups import (
     drain_rollup_queue,
     floor_rollup,
 )
-from coval_bench.db.models import RunStatus
+from coval_bench.db.models import MetricValue, RunStatus
 from coval_bench.db.writer import RunWriter
 from tests.unit import test_normalized_db_writer as storage
 from tests.unit.conftest import apply_migrations
@@ -92,6 +92,48 @@ async def test_finished_run_queues_its_slot_even_when_the_inline_rebuild_fails(
             pool, "SELECT count(*) AS n FROM benchmarks_v2.dashboard_rollups WHERE grain <> 'run'"
         )
         assert buckets == [{"n": 0}]
+    finally:
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_fill_sums_wer_word_counts_only_when_every_clip_has_them(
+    pg_conn: psycopg.Connection[Any],
+) -> None:
+    apply_migrations(pg_conn)
+    pool = await storage._pool(pg_conn)
+    try:
+        writer = RunWriter(pool)
+        run_id, first = await storage._observation(writer, sample="a")
+        _, second = await storage._observation(writer, sample="b")
+        counts = {"a": (1, 1, 1, 20), "b": (0, 0, 2, 30)}
+        for observation in (first, second):
+            evaluation = await storage._evaluation(writer, observation)
+            evaluation_id = storage._required(evaluation.id)
+            subs, dels, ins, refs = counts[observation.sample_id]
+            values = storage._wer_values(evaluation_id) + [
+                MetricValue(
+                    metric_evaluation_id=evaluation_id, value_key=key, unit="count", value=v
+                )
+                for key, v in (
+                    ("substitution_count", subs),
+                    ("deletion_count", dels),
+                    ("insertion_count", ins),
+                    ("reference_words", refs),
+                )
+            ]
+            await writer.complete_metric_evaluation(
+                evaluation_id, values=values, finished_at=storage._NOW
+            )
+        await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
+        await writer.finish_run(storage._required(second.run_id), status=RunStatus.SUCCEEDED)
+        await writer.rebuild_run_rollup(run_id)
+        [row] = await _rows(
+            pool,
+            """SELECT wer_error_words, wer_reference_words FROM benchmarks_v2.dashboard_rollups
+               WHERE grain = 'run' AND dataset_id = '__all__'""",
+        )
+        assert (row["wer_error_words"], row["wer_reference_words"]) == (5.0, 50.0)
     finally:
         await pool.close()
 

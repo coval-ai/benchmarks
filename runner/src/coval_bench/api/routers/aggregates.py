@@ -62,6 +62,7 @@ from coval_bench.api.ratelimit import limiter
 from coval_bench.api.schemas import (
     AggregatesByDatasetResponse,
     AggregatesResponse,
+    DashboardMaterialization,
     DatasetAggregates,
     DatasetPersona,
     ModelStatEntry,
@@ -253,7 +254,6 @@ SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_a
             ELSE 'mean_fallback' END AS aggregation_method
 """
 
-# A bucket is served when any part of it lies inside the requested range.
 _ROLLUP_AVERAGE_SQL = f"""
 {_AVERAGE_HEAD_SQL}
 FROM (
@@ -266,7 +266,7 @@ FROM (
    AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
    AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
    AND b.grain = %(grain)s
-   AND b.bucket_at < %(until)s AND b.bucket_at + %(step)s > %(since)s
+   AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
 ) buckets ORDER BY scheduled_at, provider, model, metric_type
 """  # noqa: S608
 
@@ -295,6 +295,11 @@ _PERCENTILE_VALUE_KEYS: dict[str, tuple[str, str]] = {
 }
 _PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95", "p100": "b.max_value"}
 
+_STALE_QUEUE_SQL = """
+SELECT EXISTS (SELECT 1 FROM benchmarks_v2.dashboard_rollup_queue
+               WHERE queued_at < now() - interval '2 hours') AS stale
+"""
+
 _PERCENTILE_SQL = """
 SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
        {column} AS value, b.sample_count, b.latest_run_at AS latest_source_at,
@@ -305,7 +310,7 @@ WHERE b.grain = %(grain)s
   AND b.metric_version = 'v1' AND b.evaluation_variant = 'default'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
   AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
-  AND b.bucket_at < %(until)s AND b.bucket_at + %(step)s > %(since)s
+  AND b.bucket_at >= %(since)s AND b.bucket_at + %(step)s <= %(until)s
 ORDER BY scheduled_at, provider, model
 """
 
@@ -569,8 +574,13 @@ async def get_results_timeline(
         }
         params.update(rule_params)
         # Percentiles only exist in normalized storage, whatever the read flag says.
-        async with dashboard_read(pool, saved=normalized or statistic != "default") as conn:
+        saved = normalized or statistic != "default"
+        materialization = None
+        async with dashboard_read(pool, saved=saved) as conn:
             rows = await (await conn.execute(sql, params)).fetchall()
+            if saved:
+                pending = await (await conn.execute(_STALE_QUEUE_SQL)).fetchone()
+                materialization = DashboardMaterialization(stale=bool(pending and pending["stale"]))
         visible_rows = [
             row
             for row in rows
@@ -603,6 +613,7 @@ async def get_results_timeline(
                 (row.get("latest_source_at", row.get("scheduled_at")) for row in visible_rows),
                 default=None,
             ),
+            materialization=materialization,
         )
 
     cache_key = (
