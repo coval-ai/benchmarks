@@ -1210,20 +1210,21 @@ class RunWriter:
             await conn.commit()
 
     async def rebuild_run_rollup(self, run_id: int) -> None:
-        """Rebuild the run slot's rollup rows from its observations."""
-        from coval_bench.db.dashboard_rollups import RUN_SLOT, fill_rollup
+        """Queue the run's slot for the hourly job and rebuild its run-grain rows now."""
+        from coval_bench.db.dashboard_rollups import ENQUEUE_SLOT_SQL, RUN_SLOT, fill_rollup
 
         async with (
             self._pool.connection() as conn,
+            conn.transaction(),
             conn.cursor(row_factory=psycopg.rows.dict_row) as cur,
         ):
+            await cur.execute(ENQUEUE_SLOT_SQL, {"run_id": run_id})
             await cur.execute(
                 "SELECT scheduled_at FROM benchmarks_v2.runs WHERE id = %s", (run_id,)
             )
             row = await cur.fetchone()
-        bucket_at = row["scheduled_at"] if row is not None else None
-        if bucket_at is not None:
-            await fill_rollup(self._pool, grain=RUN_SLOT, bucket_at=bucket_at)
+            if row is not None and row["scheduled_at"] is not None:
+                await fill_rollup(conn, grain=RUN_SLOT, bucket_at=row["scheduled_at"])
 
     async def refresh_window_views(self, run_id: int | None = None) -> str:
         """Publish normalized summaries independently of legacy maintenance."""

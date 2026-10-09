@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 # ruff: noqa: E501, S608
-"""Serve timeline percentiles from closed 1h/4h rollups; drop dirty-hour tracking."""
+"""One rollups table at run, 1h and 4h grains, fed by a queue of changed run slots."""
 
 from __future__ import annotations
 
@@ -53,12 +53,13 @@ def upgrade() -> None:
     CREATE INDEX dashboard_rollups_slot
       ON benchmarks_v2.dashboard_rollups (grain, bucket_at);
 
-    CREATE TABLE benchmarks_v2.dashboard_rollup_fills (
-      grain TEXT NOT NULL CHECK (grain IN ('run', '1h', '4h')),
-      bucket_at TIMESTAMPTZ NOT NULL,
-      filled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (grain, bucket_at)
+    CREATE TABLE benchmarks_v2.dashboard_rollup_queue (
+      slot_at TIMESTAMPTZ PRIMARY KEY,
+      queued_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    INSERT INTO benchmarks_v2.dashboard_rollup_queue (slot_at)
+    SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs
+    WHERE scheduled_at >= now() - interval '30 days' AND status IN ('succeeded', 'partial');
 
     DROP TABLE benchmarks_v2.dashboard_hourly_state;
     DROP TABLE benchmarks_v2.dashboard_source_refreshes;
@@ -68,7 +69,7 @@ def upgrade() -> None:
 
     DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api') THEN
       GRANT SELECT ON benchmarks_v2.dashboard_rollups,
-                      benchmarks_v2.dashboard_rollup_fills TO api;
+                      benchmarks_v2.dashboard_rollup_queue TO api;
     END IF; END $$;
     """)
 
@@ -76,7 +77,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("""
     ALTER TABLE benchmarks_v2.dashboard_window_state RENAME TO dashboard_summary_state;
-    DROP TABLE benchmarks_v2.dashboard_rollup_fills;
+    DROP TABLE benchmarks_v2.dashboard_rollup_queue;
     DROP TABLE benchmarks_v2.dashboard_rollups;
 
     CREATE TABLE benchmarks_v2.metric_values_by_bucket (

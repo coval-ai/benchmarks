@@ -17,7 +17,6 @@ import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
-from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.api.common import (
     LEGACY_WINDOW_VIEWS,
@@ -31,7 +30,7 @@ from coval_bench.api.routers.aggregates import (
     _NORMALIZED_TIMELINE_SQL,
     _timeline_bucket_seconds,
 )
-from coval_bench.db.dashboard_rollups import GRAINS, RUN_SLOT, fill_rollup
+from coval_bench.db.dashboard_rollups import GRAINS, rebuild_slot
 from coval_bench.db.dashboard_windows import WINDOW_VIEWS
 from coval_bench.db.metric_definitions import register_metric_definitions
 from coval_bench.registries import METRIC_SPECS, Metric
@@ -1886,26 +1885,21 @@ async def _publish_timeline_test_hours(postgresql: Any) -> None:
 
 
 async def _fill_timeline_buckets(postgresql: Any) -> None:
-    """Fill every 1h/4h bucket containing a scheduled run from its raw observations."""
+    """Rebuild every run slot and the 1h/4h buckets containing it from raw observations."""
     from tests.api.conftest import _make_db_url
 
-    async with AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]](
-        _make_db_url(postgresql),
-        min_size=1,
-        max_size=2,
-        open=False,
-        kwargs={"row_factory": psycopg.rows.dict_row},
-    ) as pool:
-        async with pool.connection() as conn:
-            rows = await (
-                await conn.execute(
-                    "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
-                    " WHERE scheduled_at IS NOT NULL"
-                )
-            ).fetchall()
+    async with await psycopg.AsyncConnection.connect(
+        _make_db_url(postgresql), row_factory=psycopg.rows.dict_row
+    ) as conn:
+        rows = await (
+            await conn.execute(
+                "SELECT DISTINCT scheduled_at FROM benchmarks_v2.runs"
+                " WHERE scheduled_at IS NOT NULL"
+            )
+        ).fetchall()
         for row in rows:
-            for grain in (RUN_SLOT, *GRAINS):
-                await fill_rollup(pool, grain=grain, bucket_at=row["scheduled_at"])
+            async with conn.transaction():
+                await rebuild_slot(conn, row["scheduled_at"])
 
 
 async def test_exact_percentiles_are_observation_weighted_and_metadata_rich(

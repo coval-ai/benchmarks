@@ -1,7 +1,7 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
 
-"""Hourly dashboard maintenance: fill closed rollup buckets, then publish summaries."""
+"""Hourly dashboard maintenance: drain the rollup queue, then refresh the window views."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 import structlog
 
-from coval_bench.db.dashboard_rollups import DashboardPool, fill_closed_rollups
+from coval_bench.db.dashboard_rollups import DashboardPool, drain_rollup_queue
 from coval_bench.db.dashboard_windows import RefreshResult, refresh_window_views
 
 logger = structlog.get_logger(__name__)
@@ -32,7 +32,7 @@ class MaintenanceResult:
 async def refresh_dashboard_aggregates(
     pool: DashboardPool, *, as_of: datetime | None = None
 ) -> MaintenanceResult:
-    """Fill every missing closed bucket the budget allows, then refresh summaries."""
+    """Rebuild every queued run slot the budget allows, then refresh the window views."""
     at = as_of or datetime.now(UTC)
     if at.tzinfo is None:
         raise ValueError("as_of must include a timezone")
@@ -44,10 +44,9 @@ async def refresh_dashboard_aggregates(
     remaining = 0
     fill_deadline = deadline - _SUMMARY_RESERVE_SECONDS
     try:
-        # The loop stops starting fills at fill_deadline; the slack lets the last one finish.
         async with asyncio.timeout_at(fill_deadline + _FILL_SLACK_SECONDS):
-            result = await fill_closed_rollups(pool, as_of=at, deadline=fill_deadline)
-        filled, remaining = result.filled, result.remaining
+            result = await drain_rollup_queue(pool, as_of=at, deadline=fill_deadline)
+        filled, remaining = result.rebuilt, result.remaining
     except Exception as exc:
         failures.append(exc)
         logger.error("dashboard_rollup_fill_failed", exc_info=True)
