@@ -2030,7 +2030,6 @@ def test_apply_replans_for_fresh_verification_without_retaining_pages(
 
     monkeypatch.setattr(migration, "_insert_plan", insert)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
-    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_stored_plan_matches", lambda *_: False)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
     report = migration.backfill(
@@ -2119,7 +2118,6 @@ def test_apply_verification_skips_are_reported_and_block_readiness(
     monkeypatch.setattr(migration, "_preflight_artifact_bucket", lambda *_: None)
     monkeypatch.setattr(migration, "_insert_plan", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_refresh_bucket", lambda *_: None)
-    monkeypatch.setattr(migration, "refresh_backfilled_dashboard", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(migration, "_scheduled_buckets", lambda *_: iter(()))
 
     report = migration.backfill(

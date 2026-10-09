@@ -11,10 +11,8 @@ from pytest_postgresql.factories import postgresql
 from coval_bench.db.dashboard_buckets import (
     BUCKET_INTERVALS,
     fill_bucket,
-    fill_buckets_covering,
     fill_closed_buckets,
     floor_bucket,
-    is_closed,
     missing_buckets,
 )
 from coval_bench.db.models import RunStatus
@@ -43,14 +41,11 @@ def _bucket(
         )
 
 
-def test_floor_and_closure_follow_the_interval() -> None:
+def test_floor_follows_the_interval() -> None:
     at = datetime(2026, 9, 14, 13, 59, 41, tzinfo=UTC)
     assert floor_bucket(at, 3600) == datetime(2026, 9, 14, 13, tzinfo=UTC)
     assert floor_bucket(at, 14400) == datetime(2026, 9, 14, 12, tzinfo=UTC)
     assert floor_bucket(at.replace(tzinfo=None), 3600) == datetime(2026, 9, 14, 13, tzinfo=UTC)
-    hour = datetime(2026, 9, 14, 13, tzinfo=UTC)
-    assert not is_closed(hour, 3600, as_of=hour + timedelta(hours=1, minutes=4))
-    assert is_closed(hour, 3600, as_of=hour + timedelta(hours=1, minutes=5))
 
 
 @pytest.mark.asyncio
@@ -61,7 +56,6 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
     pool = await storage._pool(pg_conn)
     try:
         writer = RunWriter(pool)
-        # Two runs share the slot; both land in the same bucket once finished.
         run_id, first = await storage._observation(writer, sample="a")
         second_run_id, second = await storage._observation(writer, sample="b")
         for observation, value in ((first, 10.0), (second, 30.0)):
@@ -109,7 +103,6 @@ async def test_fill_groups_observations_per_dataset_and_pooled(
         assert primary["latest_source_at"] == storage._NOW
         assert [(f["interval_seconds"], f["bucket_at"]) for f in fills] == [(3600, storage._NOW)]
 
-        # Refilling replaces rather than duplicates, and the ledger row survives.
         await fill_bucket(pool, interval_seconds=3600, bucket_at=storage._NOW)
         async with pool.connection() as conn:
             count = await (
@@ -174,20 +167,5 @@ async def test_fill_closed_buckets_commits_one_at_a_time_until_the_deadline(
                 )
             ).fetchall()
         assert [f["interval_seconds"] for f in fills] == list(BUCKET_INTERVALS)
-    finally:
-        await pool.close()
-
-
-@pytest.mark.asyncio
-async def test_fill_buckets_covering_only_touches_closed_buckets(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    apply_migrations(pg_conn)
-    pool = await storage._pool(pg_conn)
-    try:
-        slot = storage._NOW + timedelta(minutes=30)
-        assert await fill_buckets_covering(pool, [slot], as_of=slot) == 0
-        assert await fill_buckets_covering(pool, [slot], as_of=slot + timedelta(hours=1)) == 1
-        assert await fill_buckets_covering(pool, [slot], as_of=slot + timedelta(hours=4)) == 2
     finally:
         await pool.close()

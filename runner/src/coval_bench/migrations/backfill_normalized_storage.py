@@ -33,7 +33,6 @@ from google.api_core.exceptions import GoogleAPIError
 from google.cloud import storage
 
 from coval_bench.config import get_settings
-from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
 from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.observation_artifacts import (
     prepare_provider_transcript,
@@ -1925,7 +1924,6 @@ def backfill(
         reporter.phase_completed(phase, report)
         if apply and affected_buckets:
             conn.commit()
-            refresh_backfilled_dashboard(conn, buckets=sorted(affected_buckets))
         _set_ready(report, dry_run=False)
         reporter.phase_completed("operation", report)
         return report

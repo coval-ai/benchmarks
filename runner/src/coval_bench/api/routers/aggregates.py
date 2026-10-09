@@ -273,8 +273,7 @@ WITH rules AS (
  )
 ), source AS (
 """
-# Full 1h/4h buckets are read exactly as the hourly fill wrote them. A bucket
-# that has not closed yet is simply absent, so the newest interval lags by one.
+# Only closed buckets exist, so the newest interval always lags by one bucket.
 _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
  SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS source_at,
         MAX(b.latest_source_at) AS latest_source_at,
@@ -340,41 +339,34 @@ _TIMELINE_ALLOWED_BUCKETS = (3600, 14400)
 _PERCENTILE_METRICS = frozenset(
     {"WER", "TTFT", "TTFS", "AudioToFinal", "TTFA", "TTFARoundtrip", "TTFALeadingSilence", "V2V"}
 )
-# The dashboard names TTFA's roundtrip and leading-silence parts as if they were
-# metrics; in storage they are value keys on the single TTFA evaluation.
+# TTFA's components are value keys on the TTFA row, not metrics of their own.
 _PERCENTILE_VALUE_KEYS: dict[str, tuple[str, str]] = {
     "TTFARoundtrip": ("TTFA", "roundtrip"),
     "TTFALeadingSilence": ("TTFA", "leading_silence"),
 }
 _PERCENTILE_COLUMNS = {"p50": "b.p50", "p90": "b.p90", "p95": "b.p95"}
 
-_RUN_PERCENTILE_SQL = """
+_PERCENTILE_SQL = """
 SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
-       {column} AS value, b.sample_count, b.bucket_at AS latest_source_at,
+       {column} AS value, b.sample_count, {latest} AS latest_source_at,
        'percentile' AS aggregation_method
-FROM benchmarks_v2.metric_values_by_bucket b
+FROM {table} b
 JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
 WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
   AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
-  AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
+  AND b.bucket_at >= %(since)s AND {upper_bound}
 ORDER BY scheduled_at, provider, model
 """
-
-_BUCKET_PERCENTILE_SQL = """
-SELECT b.provider, b.model, %(metric_type)s AS metric_type, b.bucket_at AS scheduled_at,
-       {column} AS value, b.sample_count, b.latest_source_at,
-       'percentile' AS aggregation_method
-FROM benchmarks_v2.dashboard_bucket_aggregates b
-JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
-WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
-  AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-  AND b.interval_seconds = %(bucket_seconds)s
-  AND m.code = %(base_metric)s AND b.value_key = %(value_key)s
-  AND b.bucket_at >= %(since)s
-  AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s
-ORDER BY scheduled_at, provider, model
-"""
+_PERCENTILE_SOURCES = {
+    "run": ("benchmarks_v2.metric_values_by_bucket", "b.bucket_at", "b.bucket_at < %(until)s"),
+    "average": (
+        "benchmarks_v2.dashboard_bucket_aggregates",
+        "b.latest_source_at",
+        "b.interval_seconds = %(bucket_seconds)s"
+        " AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s",
+    ),
+}
 
 
 def _timeline_bucket_seconds(duration_seconds: float) -> int:
@@ -383,8 +375,10 @@ def _timeline_bucket_seconds(duration_seconds: float) -> int:
 
 
 def _percentile_sql(aggregation: str, statistic: str) -> str:
-    query = _RUN_PERCENTILE_SQL if aggregation == "run" else _BUCKET_PERCENTILE_SQL
-    return query.format(column=_PERCENTILE_COLUMNS[statistic])
+    table, latest, upper_bound = _PERCENTILE_SOURCES[aggregation]
+    return _PERCENTILE_SQL.format(
+        column=_PERCENTILE_COLUMNS[statistic], table=table, latest=latest, upper_bound=upper_bound
+    )
 
 
 def _validate_percentile_request(

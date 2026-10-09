@@ -147,28 +147,3 @@ def refresh_dashboard_aggregates(as_of: str | None) -> None:
             click.echo(json.dumps(asdict(result), default=_json_default))
 
     asyncio.run(refresh())
-
-
-@click.command(name="repair-dashboard-aggregates")
-@click.option(
-    "--bucket",
-    multiple=True,
-    required=True,
-    help="Source bucket timestamp; include old and new timestamps for corrections.",
-)
-@click.option("--as-of", type=str, help="Fixed summary snapshot boundary.")
-def repair_dashboard_aggregates(bucket: tuple[str, ...], as_of: str | None) -> None:
-    """Rebuild explicit source buckets, their hours, and all summary windows."""
-    from coval_bench.config import get_settings
-    from coval_bench.db.conn import lifespan_pool
-    from coval_bench.db.dashboard_aggregates import repair_dashboard_aggregates as repair
-
-    buckets = [parsed for value in bucket if (parsed := _timestamp(value)) is not None]
-    at = _timestamp(as_of)
-
-    async def refresh() -> None:
-        async with lifespan_pool(get_settings()) as pool:
-            result = await repair(pool, buckets=buckets, as_of=at)
-            click.echo(json.dumps(asdict(result), default=_json_default))
-
-    asyncio.run(refresh())

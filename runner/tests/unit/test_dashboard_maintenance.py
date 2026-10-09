@@ -3,22 +3,15 @@
 import os
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
 from coval_bench.db import dashboard_aggregates
-from coval_bench.db.dashboard_aggregates import MaintenanceResult, repair_dashboard_aggregates
 from coval_bench.db.dashboard_buckets import FillResult
 from coval_bench.db.dashboard_summaries import RefreshResult
-from coval_bench.db.models import RunStatus
-from coval_bench.db.writer import RunWriter
-from tests.unit import test_normalized_db_writer as storage
-from tests.unit.conftest import apply_migrations
 
 pg_conn = postgresql("pg_proc")
 
@@ -81,72 +74,3 @@ def test_aggregation_fingerprint_is_hash_seed_independent() -> None:
             ).strip()
         )
     assert outputs[0] == outputs[1]
-
-
-@pytest.mark.asyncio
-async def test_repair_timestamp_move_rebuilds_old_and_new_buckets(
-    pg_conn: psycopg.Connection[Any],
-) -> None:
-    apply_migrations(pg_conn)
-    pool = await storage._pool(pg_conn)
-    try:
-        writer = RunWriter(pool)
-        run_id, observation = await storage._observation(writer)
-        evaluation = await storage._evaluation(writer, observation)
-        evaluation_id = storage._required(evaluation.id)
-        await writer.complete_metric_evaluation(
-            evaluation_id, values=storage._wer_values(evaluation_id), finished_at=storage._NOW
-        )
-        await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
-        await writer.refresh_metric_values_bucket(run_id)
-        old = storage._NOW
-        new = old + timedelta(hours=2)
-        async with pool.connection() as conn:
-            await conn.execute(
-                "UPDATE benchmarks_v2.runs SET scheduled_at=%s WHERE id=%s", (new, run_id)
-            )
-            await conn.commit()
-        result = await repair_dashboard_aggregates(
-            pool, buckets=[old, new], as_of=new + timedelta(hours=5)
-        )
-        assert isinstance(result, MaintenanceResult) and result.filled == 3
-        async with pool.connection() as conn:
-            source = await (
-                await conn.execute(
-                    """SELECT bucket_at, dataset_id, count(*) AS n
-                FROM benchmarks_v2.metric_values_by_bucket
-                WHERE bucket_at IN (%s, %s)
-                GROUP BY bucket_at, dataset_id ORDER BY bucket_at, dataset_id""",
-                    (old, new),
-                )
-            ).fetchall()
-            buckets = await (
-                await conn.execute(
-                    """SELECT interval_seconds, bucket_at, dataset_id, count(*) AS n
-                FROM benchmarks_v2.dashboard_bucket_aggregates
-                GROUP BY interval_seconds, bucket_at, dataset_id
-                ORDER BY interval_seconds, bucket_at, dataset_id""",
-                )
-            ).fetchall()
-        assert source == [
-            {"bucket_at": new, "dataset_id": "__all__", "n": 4},
-            {"bucket_at": new, "dataset_id": "observation-dataset", "n": 4},
-        ]
-        assert buckets == [
-            {"interval_seconds": 3600, "bucket_at": new, "dataset_id": "__all__", "n": 4},
-            {
-                "interval_seconds": 3600,
-                "bucket_at": new,
-                "dataset_id": "observation-dataset",
-                "n": 4,
-            },
-            {"interval_seconds": 14400, "bucket_at": old, "dataset_id": "__all__", "n": 4},
-            {
-                "interval_seconds": 14400,
-                "bucket_at": old,
-                "dataset_id": "observation-dataset",
-                "n": 4,
-            },
-        ]
-    finally:
-        await pool.close()

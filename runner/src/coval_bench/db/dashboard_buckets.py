@@ -1,17 +1,10 @@
 # Copyright 2026 The Coval Benchmarks Authors
 # SPDX-License-Identifier: Apache-2.0
-"""Closed 1h/4h dashboard rollups computed once from raw observations.
-
-A bucket is filled exactly once, after it closes: its end has passed and no run
-scheduled inside it is still running.  Nothing is recomputed automatically; to
-rebuild a range, delete its ``dashboard_bucket_fills`` rows and the next job run
-fills it again.
-"""
+"""Closed 1h/4h dashboard rollups, each filled once; delete its fill row to refill."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -22,8 +15,6 @@ from psycopg_pool import AsyncConnectionPool
 
 BUCKET_INTERVALS: tuple[int, ...] = (3600, 14400)
 RETENTION = timedelta(days=30)
-# Runs are created at their schedule slot, so a short grace only covers the
-# scheduler firing a little late at a bucket boundary.
 CLOSE_GRACE = timedelta(minutes=5)
 _FILL_STATEMENT_TIMEOUT = "300s"
 
@@ -40,10 +31,6 @@ def floor_bucket(value: datetime, interval_seconds: int) -> datetime:
         value = value.replace(tzinfo=UTC)
     epoch = int(value.timestamp())
     return datetime.fromtimestamp(epoch - epoch % interval_seconds, tz=UTC)
-
-
-def is_closed(bucket_at: datetime, interval_seconds: int, *, as_of: datetime) -> bool:
-    return bucket_at + timedelta(seconds=interval_seconds) + CLOSE_GRACE <= as_of
 
 
 BUCKET_LOCK_SQL = """
@@ -166,19 +153,3 @@ async def fill_closed_buckets(
             await fill_bucket(pool, interval_seconds=interval_seconds, bucket_at=bucket_at)
             filled += 1
     return FillResult(filled, remaining)
-
-
-async def fill_buckets_covering(
-    pool: AsyncConnectionPool[Any], slots: Iterable[datetime], *, as_of: datetime | None = None
-) -> int:
-    """Refill every closed bucket that contains one of the given run slots."""
-    at = as_of or datetime.now(UTC)
-    targets: set[tuple[int, datetime]] = set()
-    for slot in slots:
-        for interval_seconds in BUCKET_INTERVALS:
-            bucket = floor_bucket(slot, interval_seconds)
-            if is_closed(bucket, interval_seconds, as_of=at):
-                targets.add((interval_seconds, bucket))
-    for interval_seconds, bucket in sorted(targets):
-        await fill_bucket(pool, interval_seconds=interval_seconds, bucket_at=bucket)
-    return len(targets)

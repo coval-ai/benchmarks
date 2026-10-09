@@ -29,7 +29,6 @@ import click
 import psycopg
 
 from coval_bench.config import get_settings
-from coval_bench.db.dashboard_aggregates import refresh_backfilled_dashboard
 from coval_bench.db.metric_definitions import register_metric_definitions_sync
 from coval_bench.s2s.fetch_v2v import _normalized_dataset_sha256
 
@@ -1139,7 +1138,6 @@ def backfill(
 
         if apply and affected_buckets:
             conn.commit()
-            refresh_backfilled_dashboard(conn, buckets=sorted(affected_buckets))
         _finalize_report(report, apply=apply)
         progress.phase_completed("operation", report)
         return report

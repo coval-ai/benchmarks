@@ -134,7 +134,6 @@ async def test_saved_buckets_serve_only_closed_intervals(
     response = await client.get("/v1/results/timeline", params=params)
     assert response.status_code == 200, response.text
     body = response.json()
-    # Only the hour that lies wholly inside the bounds is served; no partial reads.
     assert [p["value"] for p in body["points"]] == [16]
     assert [p["sample_count"] for p in body["points"]] == [5]
     assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(minutes=90)
