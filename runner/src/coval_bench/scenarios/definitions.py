@@ -93,6 +93,8 @@ _DETAILS: dict[str, dict[str, str]] = {
     },
     "happy-customer": {"label": "Happy Customer"},
     "happy-smile": {"label": "Happy Smile Clinic"},
+    "instruction-bank": {"label": "Ultra Bank · Instruction Adherence"},
+    "workflow-bank": {"label": "Ultra Bank · Workflow Adherence"},
 }
 
 # Every voice scenario, in board order; the first is the headline.

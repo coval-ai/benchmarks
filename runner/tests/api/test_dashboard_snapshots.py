@@ -10,10 +10,13 @@ import pytest
 from fastapi import FastAPI
 from httpx import AsyncClient
 
-from coval_bench.db.dashboard_hourly import refresh_hourly_aggregates
-from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+from coval_bench.db.dashboard_windows import refresh_window_views
 from tests.api.conftest import _insert_run, _make_db_url
-from tests.api.test_aggregates import _insert_normalized_bucket, _insert_normalized_metric
+from tests.api.test_aggregates import (
+    _insert_normalized_bucket,
+    _insert_normalized_metric,
+    _publish_timeline_test_hours,
+)
 
 
 @pytest.mark.asyncio
@@ -31,7 +34,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     await _insert_normalized_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     response = await client.get("/v1/results/aggregates", params=params)
     assert response.status_code == 200, response.text
     first = response.json()
@@ -49,12 +52,12 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 30}
     )
     assert (await client.get("/v1/results/aggregates", params=params)).json() == first
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     updated = (await client.get("/v1/results/aggregates", params=params)).json()
     assert updated["model_stats"][0]["avg_value"] == 20
     assert updated["snapshot"]["generation"] == 2
     # Expiration works even when no ingestion occurs.
-    await refresh_summary_snapshots(
+    await refresh_window_views(
         app.state.pool, as_of=dt.datetime.now(dt.UTC) + dt.timedelta(days=31)
     )
     expired = (await client.get("/v1/results/aggregates", params=params)).json()
@@ -62,7 +65,7 @@ async def test_saved_summary_publication_readiness_cache_and_expiry(
     assert expired["snapshot"]["generation"] == 3
     async with app.state.pool.connection() as conn:
         await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_summary_state SET definition_fingerprint='old'"
+            "UPDATE benchmarks_v2.dashboard_window_state SET definition_fingerprint='old'"
         )
     assert (await client.get("/v1/results/aggregates", params=params)).status_code == 503
 
@@ -81,10 +84,10 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
     await _insert_normalized_metric(
         postgresql, run, dataset_id="stt-v2", metric_type="WER", values={"primary": 10}
     )
-    await refresh_summary_snapshots(app.state.pool)
+    await refresh_window_views(app.state.pool)
     async with app.state.pool.connection() as conn:
         await conn.execute(
-            "UPDATE benchmarks_v2.dashboard_summary_state SET published_at=%s",
+            "UPDATE benchmarks_v2.dashboard_window_state SET published_at=%s",
             (dt.datetime.now(dt.UTC) - dt.timedelta(minutes=age_minutes),),
         )
     response = await client.get(
@@ -97,7 +100,7 @@ async def test_saved_summary_freshness_allows_hourly_maintenance(
 
 
 @pytest.mark.asyncio
-async def test_saved_hours_partial_boundaries_and_stale_queue(
+async def test_saved_buckets_serve_only_whole_intervals_and_flag_a_stuck_queue(
     client: AsyncClient,
     app: FastAPI,
     postgresql: Any,
@@ -121,40 +124,34 @@ async def test_saved_hours_partial_boundaries_and_stale_queue(
             value_sum=value,
             sample_count=count,
         )
+    await _publish_timeline_test_hours(postgresql)
     params = {
         "benchmark": "STT",
         "dataset": "stt-v2",
         "since": (start + dt.timedelta(minutes=15)).isoformat(),
         "until": (start + dt.timedelta(minutes=135)).isoformat(),
     }
-    assert (await client.get("/v1/results/timeline", params=params)).status_code == 503
-    # Only the complete middle hour needs a saved state; no summary is required.
-    await refresh_hourly_aggregates(app.state.pool, hours=[start + dt.timedelta(hours=1)])
     response = await client.get("/v1/results/timeline", params=params)
     assert response.status_code == 200, response.text
     body = response.json()
-    assert [p["value"] for p in body["points"]] == [10, 16, 30]
-    assert [p["sample_count"] for p in body["points"]] == [1, 5, 1]
-    assert body["materialization"]["stale"] is False
-    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(hours=2)
-    async with app.state.pool.connection() as conn:
-        await conn.execute(
-            "INSERT INTO benchmarks_v2.dashboard_source_refreshes(bucket_at) VALUES (%s)",
-            (start + dt.timedelta(minutes=30),),
-        )
-    stale = (await client.get("/v1/results/timeline", params=params)).json()
-    assert stale["materialization"]["stale"] is True
-    # Both partial boundaries inside one hour must read each source once.
+    assert [p["value"] for p in body["points"]] == [16]
+    assert [p["sample_count"] for p in body["points"]] == [5]
+    assert dt.datetime.fromisoformat(body["latest_source_at"]) == start + dt.timedelta(minutes=90)
+    assert body["materialization"] == {"refreshed_at": None, "stale": False}
     narrow = await client.get(
         "/v1/results/timeline",
-        params={**params, "until": (start + dt.timedelta(minutes=45)).isoformat()},
+        params={**params, "until": (start + dt.timedelta(minutes=105)).isoformat()},
     )
     assert narrow.status_code == 200, narrow.text
-    assert [p["value"] for p in narrow.json()["points"]] == [10]
-    assert narrow.json()["materialization"] == {"refreshed_at": None, "stale": True}
+    assert narrow.json()["points"] == []
     async with app.state.pool.connection() as conn:
-        await conn.execute("UPDATE benchmarks_v2.dashboard_hourly_state SET refreshed_at=NULL")
-    assert (await client.get("/v1/results/timeline", params=params)).status_code == 503
+        await conn.execute(
+            "INSERT INTO benchmarks_v2.dashboard_rollup_queue (slot_at, queued_at)"
+            " VALUES (%s, now() - interval '3 hours')",
+            (start,),
+        )
+    stuck = await client.get("/v1/results/timeline", params={**params, "dataset": "stt-v1"})
+    assert stuck.json()["materialization"]["stale"] is True
 
 
 @pytest.mark.asyncio
@@ -165,7 +162,7 @@ async def test_absent_saved_storage_returns_503_but_24h_timeline_still_works(
 ) -> None:
     app.state.settings.normalized_dashboard_reads_enabled = True
     with psycopg.connect(_make_db_url(postgresql)) as conn:
-        conn.execute("DROP TABLE benchmarks_v2.dashboard_summary_state CASCADE")
+        conn.execute("DROP TABLE benchmarks_v2.dashboard_window_state CASCADE")
     assert (
         await client.get("/v1/results/aggregates", params={"benchmark": "STT"})
     ).status_code == 503

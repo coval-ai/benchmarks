@@ -43,6 +43,7 @@ def apply_migrations(conn: psycopg.Connection[Any]) -> None:
     cfg.set_main_option(
         "sqlalchemy.url", async_dsn(conn).replace("postgresql://", "postgresql+psycopg://")
     )
+    cfg.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(cfg, "head")
 
 

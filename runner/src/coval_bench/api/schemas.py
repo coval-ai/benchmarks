@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from coval_bench.api.common import BenchmarkLiteral, WindowLiteral
+from coval_bench.api.common import BenchmarkLiteral, StatisticLiteral, WindowLiteral
 from coval_bench.arena.domains import ArenaDomain
 from coval_bench.registries import Benchmark, HexColor, Licensing, Source, TagCategory, Voice
 from coval_bench.scenarios import binding_for_dataset
@@ -181,7 +181,6 @@ class ModelStatEntry(BaseModel):
     p75: float
     p90: float
     p95: float
-    p99: float
     min_value: float
     max_value: float
     sample_count: int
@@ -205,7 +204,7 @@ class ModelStatEntry(BaseModel):
 class SeriesPoint(BaseModel):
     """Per-(provider, model, metric_type) distribution for one scheduled_at bucket.
 
-    Latency timelines render p50. WER renders error_sum / reference_word_sum when
+    Latency timelines render p50. WER renders error_sum / wer_reference_words when
     present, else value_sum / sample_count; both pairs sum across buckets.
     """
 
@@ -260,8 +259,11 @@ class TimelinePoint(BaseModel):
     scheduled_at: datetime
     value: float | None
     pooled_value: float | None = None
-    aggregation_method: Literal["mean", "ratio", "mean_fallback", "unavailable"] | None = None
+    aggregation_method: (
+        Literal["mean", "ratio", "mean_fallback", "unavailable", "percentile"] | None
+    ) = None
     sample_count: int | None = None
+    insufficient_samples: bool = False
 
 
 class DashboardMaterialization(BaseModel):
@@ -273,6 +275,11 @@ class TimelineResponse(BaseModel):
     """Response schema for GET /v1/results/timeline."""
 
     benchmark: BenchmarkLiteral
+    statistic: StatisticLiteral = "default"
+    metric_type: str | None = None
+    precision: Literal["exact"] | None = None
+    percentile_method: Literal["continuous"] | None = None
+    weighting: Literal["observation"] | None = None
     window: WindowLiteral | None
     dataset: str
     points: list[TimelinePoint]

@@ -27,7 +27,11 @@ from coval_bench.providers.stt._transcript_utils import (
 
 logger = structlog.get_logger(__name__)
 
-_WS_URL = "wss://api.reson8.dev/v1/speech-to-text/realtime"
+_WS_PATH = "/v1/speech-to-text/realtime"
+_WS_HOST = "wss://api.reson8.dev"
+# Same model behind a US East edge; the row id carries the routing.
+_GLOBAL_WS_HOST = "wss://api.global.reson8.dev"
+_GLOBAL_SUFFIX = "-global"
 
 # Pinned rather than auto-detected: the docs note detection is weaker on short
 # utterances, and the STT corpus is English.
@@ -76,6 +80,8 @@ class Reson8STTProvider(STTProvider):
             raise ValueError("reson8_api_key is required for the Reson8 STT provider")
         self._api_key = api_key
         self._model = model
+        host = _GLOBAL_WS_HOST if model.endswith(_GLOBAL_SUFFIX) else _WS_HOST
+        self._ws_url = host + _WS_PATH
 
     @property
     def name(self) -> str:
@@ -96,7 +102,7 @@ class Reson8STTProvider(STTProvider):
             # Without this the server returns finals only, and no ``is_final`` flag.
             "include_interim": "true",
         }
-        return f"{_WS_URL}?{urlencode(params)}"
+        return f"{self._ws_url}?{urlencode(params)}"
 
     async def measure_ttft(
         self,

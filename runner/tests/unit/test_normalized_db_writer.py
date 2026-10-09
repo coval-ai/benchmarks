@@ -10,7 +10,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, call
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
 import psycopg.errors
@@ -67,6 +67,8 @@ def _migrate(conn: psycopg.Connection[Any], target: str = "head") -> None:
     config.set_main_option(
         "sqlalchemy.url", _dsn(conn).replace("postgresql://", "postgresql+psycopg://")
     )
+    if target == "head":
+        config.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(config, target)
 
 
@@ -128,7 +130,8 @@ async def _historical_evaluation(pool: AsyncConnectionPool[Any], observation: Ob
             await conn.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
                (observation_id,metric_type,metric_version,executor,status)
-               VALUES (%s,'WER','v1','inline','queued') RETURNING id""",
+               VALUES (%s,'WER','v1','inline','queued')
+               RETURNING id""",
                 (_required(observation.id),),
             )
         ).fetchone()
@@ -140,6 +143,28 @@ async def _historical_evaluation(pool: AsyncConnectionPool[Any], observation: Ob
         )
         await conn.commit()
     return evaluation_id
+
+
+async def _complete_historical_evaluation(
+    evaluation_id: UUID,
+    *,
+    pool: AsyncConnectionPool[Any],
+    values: list[MetricValue],
+    finished_at: datetime,
+) -> None:
+    """Finish frozen pre-catalog seeds for migration tests through their DB guards."""
+    async with pool.connection() as conn, conn.transaction():
+        async with conn.cursor() as cur:
+            await cur.executemany(
+                "INSERT INTO benchmarks_v2.metric_values "
+                "(metric_evaluation_id,value_key,unit,value,value_role) VALUES (%s,%s,%s,%s,%s)",
+                [(evaluation_id, v.value_key, v.unit, v.value, v.value_role) for v in values],
+            )
+        await conn.execute(
+            "UPDATE benchmarks_v2.metric_evaluations "
+            "SET status='succeeded',finished_at=%s WHERE id=%s",
+            (finished_at, evaluation_id),
+        )
 
 
 def _word_artifact(observation_id: Any, *, sha: str = _SHA) -> PreprocessingArtifact:
@@ -416,17 +441,6 @@ async def test_exact_capture_replay_serializes_and_promotes_pending_run(
             finished_at=finished_at,
             allow_capture_recovery=True,
         )
-
-        async with pool.connection() as conn:
-            refresh_count = await (
-                await conn.execute(
-                    """SELECT count(*) FROM benchmarks_v2.dashboard_source_refreshes
-                       WHERE bucket_at = %s""",
-                    (_NOW,),
-                )
-            ).fetchone()
-        assert refresh_count is not None
-        assert refresh_count["count"] == 1
     finally:
         await pool.close()
 
@@ -463,7 +477,7 @@ def _wer_values(evaluation_id: Any) -> list[MetricValue]:
 
 
 def test_migration_is_additive_and_reversible(pg_conn: psycopg.Connection[Any]) -> None:
-    _migrate(pg_conn)
+    _migrate(pg_conn, "20261005_0043")
     pg_conn.autocommit = True
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -763,8 +777,9 @@ def test_database_uri_checks_require_bucket_and_object(pg_conn: psycopg.Connecti
         assert future_artifact.schema_version == "v2"
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id, metric_type, metric_version, executor, status)
-               VALUES (%s, 'TTFT', 'v1', 'inline', 'queued') RETURNING id""",
+               (observation_id, metric_id, metric_version, executor, status)
+               VALUES (%s, benchmarks_v2.metric_id_for_code('TTFT'), 'v1', 'inline', 'queued')
+               RETURNING id""",
             (observation_id,),
         )
         evaluation_id = _required(cur.fetchone())[0]
@@ -1276,12 +1291,13 @@ async def test_ensemble_variants_and_frozen_inputs(pg_conn: psycopg.Connection[A
                 finished_at=finished,
             )
         await writer.finish_run(_required(observation.run_id), status=RunStatus.SUCCEEDED)
-        await writer.refresh_metric_values_bucket(_required(observation.run_id))
-        await writer.refresh_metric_values_bucket(_required(observation.run_id))
+        await writer.rebuild_run_rollup(_required(observation.run_id))
+        await writer.rebuild_run_rollup(_required(observation.run_id))
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT dataset_id, evaluation_variant, sample_count
-                   FROM benchmarks_v2.metric_values_by_bucket WHERE value_key = 'primary'"""
+                   FROM benchmarks_v2.dashboard_rollups
+                   WHERE grain = 'run' AND value_key = 'primary'"""
             )
             assert {
                 (row["dataset_id"], row["evaluation_variant"], row["sample_count"])
@@ -1744,21 +1760,24 @@ def test_database_enforces_queued_creation_and_success_outputs(
         with pytest.raises(psycopg.errors.RaiseException, match="work rows must be created queued"):
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_type, metric_version, executor, status)
-                   VALUES (%s, 'WER', 'v1', 'inline', 'partial')""",
+                   (observation_id, metric_id, metric_version, executor, status)
+                   VALUES (%s, benchmarks_v2.metric_id_for_code('WER'),
+                    'v1', 'inline', 'partial')""",
                 (observation_id,),
             )
         with pytest.raises(psycopg.errors.RaiseException, match="created queued"):
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_type, metric_version, executor, status, started_at)
-                   VALUES (%s, 'WER', 'v1', 'inline', 'running', now())""",
+                   (observation_id, metric_id, metric_version, executor, status, started_at)
+                   VALUES (%s, benchmarks_v2.metric_id_for_code('WER'),
+                    'v1', 'inline', 'running', now())""",
                 (observation_id,),
             )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id, metric_type, metric_version, executor, status)
-               VALUES (%s, 'WER', 'v1', 'inline', 'queued') RETURNING id""",
+               (observation_id, metric_id, metric_version, executor, status)
+               VALUES (%s, benchmarks_v2.metric_id_for_code('WER'), 'v1', 'inline', 'queued')
+               RETURNING id""",
             (observation_id,),
         )
         evaluation_id = _required(cur.fetchone())[0]
@@ -1798,8 +1817,10 @@ def test_database_enforces_queued_creation_and_success_outputs(
         cur.execute("ROLLBACK")
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (observation_id, metric_type, metric_version, evaluation_variant, executor, status)
-               VALUES (%s, 'WER', 'v1', 'constraint-checks', 'inline', 'queued') RETURNING id""",
+               (observation_id, metric_id, metric_version, evaluation_variant, executor, status)
+               VALUES (%s, benchmarks_v2.metric_id_for_code('WER'),
+                       'v1', 'constraint-checks', 'inline', 'queued')
+               RETURNING id""",
             (observation_id,),
         )
         constraint_evaluation_id = _required(cur.fetchone())[0]
@@ -1864,8 +1885,9 @@ def test_database_success_validation_is_metric_agnostic(
             observation_id = new_observation_id()
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
-                   (observation_id, metric_type, metric_version, executor, status)
-                   VALUES (%s, %s, %s, 'inline', 'queued') RETURNING id""",
+                   (observation_id, metric_id, metric_version, executor, status)
+                   VALUES (%s, benchmarks_v2.metric_id_for_code(%s), %s, 'inline', 'queued')
+                   RETURNING id""",
                 (observation_id, metric, version),
             )
             evaluation_id = _required(cur.fetchone())[0]
@@ -1934,16 +1956,17 @@ async def test_rollup_is_idempotent_and_cascades(pg_conn: psycopg.Connection[Any
             await conn.commit()
         await writer.finish_run(run_id, status=RunStatus.SUCCEEDED)
         await writer.finish_run(failed_run_id, status=RunStatus.SUCCEEDED)
-        await writer.refresh_metric_values_bucket(run_id)
-        await writer.refresh_metric_values_bucket(run_id)
+        await writer.rebuild_run_rollup(run_id)
+        await writer.rebuild_run_rollup(run_id)
         async with pool.connection() as conn, conn.cursor() as cur:
             await cur.execute(
                 """SELECT dataset_id, sample_count
-                   FROM benchmarks_v2.metric_values_by_bucket ORDER BY dataset_id"""
+                   FROM benchmarks_v2.dashboard_rollups
+                   WHERE grain = 'run' ORDER BY dataset_id"""
             )
             rows = await cur.fetchall()
             datasets = [row["dataset_id"] for row in rows]
-            assert datasets.count("__all__") == datasets.count("observation-dataset") == 4
+            assert datasets.count("__all__") == datasets.count("observation-dataset") == 1
             assert {row["sample_count"] for row in rows} == {1}
             await cur.execute(
                 "DELETE FROM benchmarks_v2.benchmark_observations WHERE id = %s",

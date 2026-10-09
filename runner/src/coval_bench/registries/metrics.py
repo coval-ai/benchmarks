@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 from enum import StrEnum
-from typing import Literal, Self
+from typing import Self
 
 from pydantic import BaseModel, model_validator
 
@@ -35,6 +35,7 @@ class Metric(StrEnum):
     INTERRUPTION_RATE = "InterruptionRate"
     CALL_LENGTH = "CallLength"
     EXPECTED_BEHAVIOR_ADHERENCE = "ExpectedBehaviorAdherence"
+    WORKFLOW_ADHERENCE = "WorkflowAdherence"
 
 
 class MetricDirection(StrEnum):
@@ -80,43 +81,11 @@ class MetricValueContract(BaseModel, frozen=True):
     values: tuple[MetricValueDefinition, ...]
     component_sum_tolerance: float | None = None
     optional_all_or_none: tuple[frozenset[str], ...] = ()
-    aggregation_method: Literal["mean", "ratio"]
-    numerator_keys: tuple[str, ...] = ()
-    denominator_key: str | None = None
-    ratio_scale: float = 1.0
-    ratio_fallback: Literal["mean"] | None = None
 
     @model_validator(mode="after")
-    def validate_aggregation(self) -> Self:
-        """Reject invalid aggregation rules before a contract can be registered."""
-        definitions = {value.key: value for value in self.values}
-        if len(definitions) != len(self.values):
+    def validate_unique_keys(self) -> Self:
+        if len({value.key for value in self.values}) != len(self.values):
             raise ValueError("metric value keys must be unique")
-        if self.aggregation_method == "mean":
-            if (
-                self.numerator_keys
-                or self.denominator_key is not None
-                or self.ratio_scale != 1
-                or self.ratio_fallback is not None
-            ):
-                raise ValueError("mean aggregation cannot declare ratio options")
-            return self
-        if not self.numerator_keys or not self.denominator_key:
-            raise ValueError("ratio aggregation requires numerator and denominator keys")
-        if len(set(self.numerator_keys)) != len(self.numerator_keys):
-            raise ValueError("ratio numerator keys must be unique")
-        if self.denominator_key in self.numerator_keys:
-            raise ValueError("ratio numerator and denominator keys must be disjoint")
-        operands = (*self.numerator_keys, self.denominator_key)
-        for key in operands:
-            if key not in definitions:
-                raise ValueError(f"ratio references unknown value key: {key}")
-            if key == "primary" or definitions[key].value_role != MetricValueRole.COMPONENT:
-                raise ValueError("ratio operands must be component values")
-        if len({definitions[key].unit for key in self.numerator_keys}) != 1:
-            raise ValueError("ratio numerator components must use the same unit")
-        if not math.isfinite(self.ratio_scale) or self.ratio_scale <= 0:
-            raise ValueError("ratio scale must be finite and positive")
         return self
 
 
@@ -221,6 +190,13 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
         decimals=1,
         benchmarks=frozenset({Benchmark.S2S}),
     ),
+    Metric.WORKFLOW_ADHERENCE: MetricSpec(
+        display_name="Workflow Adherence",
+        units="percent",
+        direction=MetricDirection.HIGHER_IS_BETTER,
+        decimals=1,
+        benchmarks=frozenset({Benchmark.S2S}),
+    ),
 }
 
 if METRIC_SPECS.keys() != set(Metric):
@@ -231,8 +207,9 @@ if METRIC_SPECS.keys() != set(Metric):
 def _primary(metric: Metric) -> MetricValueDefinition:
     spec = METRIC_SPECS[metric]
     # WER can legitimately exceed 100% when insertions outnumber reference
-    # words. Only the binary instruction-following rate is intrinsically bounded.
-    maximum = 100.0 if metric is Metric.INSTRUCTION_FOLLOWING else None
+    # words. Only the instruction and workflow adherence rates are intrinsically
+    # bounded.
+    maximum = 100.0 if metric in {Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE} else None
     return MetricValueDefinition(
         key="primary",
         unit=spec.units,
@@ -246,7 +223,9 @@ def _primary(metric: Metric) -> MetricValueDefinition:
 # metric implementation can add a new version without changing public rows.
 METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
     (metric, "v1"): MetricValueContract(
-        metric=metric, version="v1", values=(_primary(metric),), aggregation_method="mean"
+        metric=metric,
+        version="v1",
+        values=(_primary(metric),),
     )
     # List these explicitly: a new enum entry must choose an aggregation rule.
     for metric in (
@@ -262,6 +241,7 @@ METRIC_VALUE_CONTRACTS: dict[tuple[Metric, str], MetricValueContract] = {
         Metric.INTERRUPTION_RATE,
         Metric.CALL_LENGTH,
         Metric.EXPECTED_BEHAVIOR_ADHERENCE,
+        Metric.WORKFLOW_ADHERENCE,
     )
 }
 METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
@@ -281,15 +261,9 @@ METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")] = MetricValueContract(
     optional_all_or_none=(
         frozenset({"substitution_count", "deletion_count", "insertion_count", "reference_words"}),
     ),
-    aggregation_method="ratio",
-    numerator_keys=("substitution_count", "deletion_count", "insertion_count"),
-    denominator_key="reference_words",
-    ratio_scale=100.0,
-    ratio_fallback="mean",
 )
 METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
     metric=Metric.TTFA,
-    aggregation_method="mean",
     version="v1",
     values=(
         _primary(Metric.TTFA),
@@ -305,15 +279,6 @@ METRIC_VALUE_CONTRACTS[(Metric.TTFA, "v1")] = MetricValueContract(
 
 if {metric for metric, version in METRIC_VALUE_CONTRACTS if version == "v1"} != set(Metric):
     raise RuntimeError("Every metric must explicitly declare its v1 value and aggregation contract")
-
-
-# Dashboard reads currently select v1/default. Keep rules versioned in the source
-# registry; this string-keyed view is the adapter for the database's metric names.
-TIMELINE_AGGREGATION_RULES = {
-    metric.value: contract
-    for (metric, version), contract in METRIC_VALUE_CONTRACTS.items()
-    if version == "v1"
-}
 
 
 def validate_metric_contract(metric: Metric | str, version: str) -> MetricValueContract:

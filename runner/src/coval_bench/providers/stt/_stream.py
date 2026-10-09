@@ -21,10 +21,11 @@ async def run_stream(
 ) -> None:
     """Run the sender and receiver together, recording the first failure on *result*.
 
-    A raised exception cancels the other task. The error is only stamped when the
-    receiver did not already land a final, so a late sender failure never masks a
-    successful transcript. ``no_final_error`` is stamped when both tasks finish
-    cleanly without a final.
+    A raised exception cancels the other task. A sender failure always fails the
+    clip, since a socket that drops mid-clip leaves the transcript cut off even
+    after an earlier final. A receiver failure is only stamped when no final
+    landed. ``no_final_error`` is stamped when both tasks finish cleanly without
+    a final.
     """
     tasks = (asyncio.create_task(send), asyncio.create_task(recv))
     done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
@@ -32,6 +33,8 @@ async def run_stream(
         for task in pending:
             task.cancel()
     outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+    if result.error is None and isinstance(outcomes[0], Exception):
+        result.error = str(outcomes[0])
     if result.error is None and result.audio_to_final_seconds is None:
         for outcome in outcomes:
             if isinstance(outcome, Exception):

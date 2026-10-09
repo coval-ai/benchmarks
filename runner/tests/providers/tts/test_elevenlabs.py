@@ -19,6 +19,7 @@ from .conftest import FakeWebSocket, make_pcm_bytes
 
 _MODEL = "eleven_v3_conversational"
 _FLASH_MODEL = "eleven_flash_v2_5"
+_V4_TURBO_MODEL = "eleven_v4_turbo"
 _VOICE = "IKne3meq5aSn9XLyUdCD"
 
 
@@ -62,7 +63,8 @@ async def test_elevenlabs_happy_path(fake_settings: Settings) -> None:
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_url_and_frames(fake_settings: Settings) -> None:
+@pytest.mark.parametrize("model", [_MODEL, _V4_TURBO_MODEL])
+async def test_elevenlabs_url_and_frames(fake_settings: Settings, model: str) -> None:
     ws = FakeWebSocket(_dialogue_events([make_pcm_bytes(240)]))
     captured: dict[str, object] = {}
 
@@ -71,7 +73,7 @@ async def test_elevenlabs_url_and_frames(fake_settings: Settings) -> None:
         captured["headers"] = kwargs.get("additional_headers")
         return ws
 
-    provider = ElevenLabsTTSProvider(fake_settings, model=_MODEL, voice=_VOICE)
+    provider = ElevenLabsTTSProvider(fake_settings, model=model, voice=_VOICE)
 
     with patch(
         "coval_bench.providers.tts.elevenlabs.ws_client.connect",
@@ -85,7 +87,7 @@ async def test_elevenlabs_url_and_frames(fake_settings: Settings) -> None:
     assert parts.netloc == "api.elevenlabs.io"
     assert parts.path == "/v1/text-to-dialogue/stream-input"
     assert parse_qs(parts.query) == {
-        "model_id": [_MODEL],
+        "model_id": [model],
         "output_format": ["pcm_24000"],
     }
     assert captured["headers"] == {"xi-api-key": "test-elevenlabs-key"}

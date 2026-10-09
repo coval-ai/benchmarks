@@ -39,10 +39,12 @@ class ScenarioCovalIds(BaseModel, frozen=True, extra="forbid"):
     test_set_id: str = Field(min_length=1)
     agents: dict[str, str] = Field(default_factory=dict)
     personas: dict[str, str] = Field(default_factory=dict)
+    instruction_metric_id: str | None = Field(default=None, min_length=1)
+    workflow_metric_id: str | None = Field(default=None, min_length=1)
 
-    @field_validator("test_set_id", mode="before")
+    @field_validator("test_set_id", "instruction_metric_id", "workflow_metric_id", mode="before")
     @classmethod
-    def _strip_test_set_id(cls, value: object) -> object:
+    def _strip_ids(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
 
     @field_validator("agents", "personas")
@@ -353,8 +355,9 @@ class Settings(BaseSettings):
     # "…"}, "personas": {"clean": "…", "hard": "…"}}}. The slugs are
     # ``s2s.conditions.SCENARIO_SLUGS``; a slug absent here is skipped, a model
     # absent from ``agents`` is skipped. The personas join the exhaustive condition
-    # map above, so a scenario's callers can never be left unmapped. Every scenario
-    # shares the bank judge above. Opaque ids, not secrets.
+    # map above, so a scenario's callers can never be left unmapped. Every domain
+    # scenario shares the bank judge above; instruction-bank and workflow-bank each
+    # name their own. Opaque ids, not secrets.
     coval_s2s_scenarios: dict[str, ScenarioCovalIds] = Field(default_factory=dict)
     # Shared across all three industries (it reads test_case.expected_behaviors
     # generically, unlike the domain judges), so one field rather than three.
@@ -486,3 +489,18 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return a process-cached Settings instance."""
     return Settings()
+
+
+def require_normalized_persisted_capture(settings: Settings) -> None:
+    """Require normalized capture before an entrypoint can persist benchmark data."""
+    missing: list[str] = []
+    if not settings.normalized_dual_write_enabled:
+        missing.append("normalized_dual_write_enabled")
+    if not settings.normalized_capture_required:
+        missing.append("normalized_capture_required")
+    if not settings.benchmark_artifact_bucket:
+        missing.append("benchmark_artifact_bucket")
+    if missing:
+        raise RuntimeError(
+            "normalized persisted capture is required for benchmark writes: " + ", ".join(missing)
+        )

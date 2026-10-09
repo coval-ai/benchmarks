@@ -306,6 +306,16 @@ def _load_schema(**connect_kwargs: Any) -> None:
         )
         with patch.object(normalized_metric_ids, "op", SimpleNamespace(execute=conn.execute)):
             normalized_metric_ids.upgrade()
+        for table in ("metric_evaluations", "dashboard_metric_values", "metric_values_by_bucket"):
+            conn.execute(f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_id SET NOT NULL")  # noqa: S608 — fixed fixture table names.
+            conn.execute(
+                f"ALTER TABLE benchmarks_v2.{table} VALIDATE CONSTRAINT {table}_metric_id_fkey"
+            )  # noqa: S608 — fixed fixture table names.
+        closed_buckets = import_module(
+            "coval_bench.db.migrations.versions.20261008_0044_closed_bucket_rollups"
+        )
+        with patch.object(closed_buckets, "op", SimpleNamespace(execute=conn.execute)):
+            closed_buckets.upgrade()
         # Per-window stats materialized views (model_stats + leaderboard).
         # Mirrors migration 20260715_0010: per-dataset rows plus pooled rows
         # under the '__all__' sentinel, and 20260804_0014's WER breakdown.
@@ -783,7 +793,7 @@ async def _refresh_mv(postgresql: Any) -> None:
         for name in _MV_WINDOWS:
             await aconn.execute(f"REFRESH MATERIALIZED VIEW benchmarks_v2.{name}")
         # The normalized API path reads only the atomically published snapshot.
-        from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+        from coval_bench.db.dashboard_windows import refresh_window_views
 
         pool: AsyncConnectionPool[psycopg.AsyncConnection[psycopg.rows.DictRow]] = (
             AsyncConnectionPool(
@@ -796,7 +806,7 @@ async def _refresh_mv(postgresql: Any) -> None:
         )
         await pool.open()
         try:
-            await refresh_summary_snapshots(pool)
+            await refresh_window_views(pool)
         finally:
             await pool.close()
     finally:

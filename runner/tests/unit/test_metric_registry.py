@@ -4,11 +4,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from coval_bench.db.models import Benchmark
 from coval_bench.registries import METRIC_SPECS, Metric, MetricDirection
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, MetricValueContract
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
 
 
 def test_every_metric_has_a_spec() -> None:
@@ -31,6 +29,7 @@ def test_metric_values_match_stored_strings() -> None:
         "InterruptionRate",
         "CallLength",
         "ExpectedBehaviorAdherence",
+        "WorkflowAdherence",
     }
 
 
@@ -50,6 +49,7 @@ def test_units_match_stored_strings() -> None:
         Metric.INTERRUPTION_RATE: "per_minute",
         Metric.CALL_LENGTH: "seconds",
         Metric.EXPECTED_BEHAVIOR_ADHERENCE: "percent",
+        Metric.WORKFLOW_ADHERENCE: "percent",
     }
     assert {m: spec.units for m, spec in METRIC_SPECS.items()} == expected
 
@@ -64,13 +64,17 @@ def test_benchmark_coverage() -> None:
     assert METRIC_SPECS[Metric.V2V].benchmarks == {Benchmark.S2S}
     assert METRIC_SPECS[Metric.INSTRUCTION_FOLLOWING].benchmarks == {Benchmark.S2S, Benchmark.LLM}
     assert METRIC_SPECS[Metric.EXPECTED_BEHAVIOR_ADHERENCE].benchmarks == {Benchmark.S2S}
+    assert METRIC_SPECS[Metric.WORKFLOW_ADHERENCE].benchmarks == {Benchmark.S2S}
 
 
 def test_metric_directions() -> None:
-    # Instruction adherence and expected behavior adherence are both pass
-    # rates: higher is better. Every other metric is a latency/error measure:
-    # lower is better.
-    higher_is_better = {Metric.INSTRUCTION_FOLLOWING, Metric.EXPECTED_BEHAVIOR_ADHERENCE}
+    # The adherence metrics are pass rates: higher is better. Every other metric
+    # is a latency/error measure: lower is better.
+    higher_is_better = {
+        Metric.INSTRUCTION_FOLLOWING,
+        Metric.EXPECTED_BEHAVIOR_ADHERENCE,
+        Metric.WORKFLOW_ADHERENCE,
+    }
     assert all(
         METRIC_SPECS[m].direction is MetricDirection.HIGHER_IS_BETTER for m in higher_is_better
     )
@@ -81,31 +85,7 @@ def test_metric_directions() -> None:
     )
 
 
-def test_aggregation_declarations_are_explicit_and_versioned() -> None:
-    assert MetricValueContract.model_fields["aggregation_method"].is_required()
-    for (metric, version), rule in METRIC_VALUE_CONTRACTS.items():
-        assert rule.metric == metric and rule.version == version
-        assert rule.aggregation_method == ("ratio" if metric == Metric.WER else "mean")
-    assert METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")].ratio_fallback == "mean"
-
-
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"aggregation_method": "mean"},
-        {"numerator_keys": ()},
-        {"denominator_key": None},
-        {"numerator_keys": ("unknown",)},
-        {"numerator_keys": ("primary",)},
-        {"numerator_keys": ("insertion_count", "insertion_count")},
-        {"denominator_key": "insertion_count"},
-        {"ratio_scale": 0},
-        {"ratio_scale": -1},
-        {"ratio_scale": float("inf")},
-        {"ratio_scale": float("nan")},
-    ],
-)
-def test_invalid_aggregation_contracts_fail_on_construction(changes: dict[str, object]) -> None:
-    data = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")].model_dump()
-    with pytest.raises(ValueError):
-        MetricValueContract.model_validate({**data, **changes})
+def test_adherence_rates_are_capped_at_100_percent() -> None:
+    for metric in (Metric.INSTRUCTION_FOLLOWING, Metric.WORKFLOW_ADHERENCE):
+        (primary,) = METRIC_VALUE_CONTRACTS[(metric, "v1")].values
+        assert (primary.minimum, primary.maximum) == (0.0, 100.0)

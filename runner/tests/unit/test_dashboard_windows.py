@@ -13,13 +13,12 @@ import psycopg
 import pytest
 from pytest_postgresql.factories import postgresql
 
-from coval_bench.db import dashboard_summaries
-from coval_bench.db.dashboard_summaries import (
-    SUMMARY_VIEWS,
+from coval_bench.db import dashboard_windows
+from coval_bench.db.dashboard_windows import (
+    WINDOW_VIEWS,
     RefreshResult,
-    validate_summary_rules,
+    validate_window_rules,
 )
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 from .conftest import apply_migrations, open_pool
 
@@ -27,7 +26,7 @@ summary_pg = postgresql("pg_proc")
 
 
 def test_summary_views_cover_every_saved_window() -> None:
-    assert SUMMARY_VIEWS == {
+    assert WINDOW_VIEWS == {
         "24h": "benchmarks_v2.normalized_results_24h",
         "7d": "benchmarks_v2.normalized_results_7d",
         "30d": "benchmarks_v2.normalized_results_30d",
@@ -35,18 +34,7 @@ def test_summary_views_cover_every_saved_window() -> None:
 
 
 def test_registered_contracts_are_supported() -> None:
-    validate_summary_rules()
-
-
-def test_changed_wer_ratio_contract_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
-    monkeypatch.setitem(
-        METRIC_VALUE_CONTRACTS,
-        (Metric.WER, "v1"),
-        original.model_copy(update={"ratio_scale": 1}),
-    )
-    with pytest.raises(ValueError, match="ratio contract"):
-        validate_summary_rules()
+    validate_window_rules()
 
 
 def test_naive_as_of_is_rejected() -> None:
@@ -55,10 +43,10 @@ def test_naive_as_of_is_rejected() -> None:
     from datetime import datetime
     from unittest.mock import AsyncMock
 
-    from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+    from coval_bench.db.dashboard_windows import refresh_window_views
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        asyncio.run(refresh_summary_snapshots(AsyncMock(), as_of=datetime(2026, 9, 14, 12)))
+        asyncio.run(refresh_window_views(AsyncMock(), as_of=datetime(2026, 9, 14, 12)))
 
 
 def test_empty_snapshot_publishes_state_and_all_views(
@@ -71,25 +59,24 @@ def test_empty_snapshot_publishes_state_and_all_views(
         pool = await open_pool(summary_pg)
         try:
             logger = MagicMock()
-            monkeypatch.setattr(dashboard_summaries, "logger", logger)
-            result = await dashboard_summaries.refresh_summary_snapshots(pool)
+            monkeypatch.setattr(dashboard_windows, "logger", logger)
+            result = await dashboard_windows.refresh_window_views(pool)
             assert result.status == "published"
             assert result.generation == 1
             completed = [
                 call.kwargs
                 for call in logger.info.call_args_list
-                if call.args[0] == "dashboard_summary_view_refresh_completed"
+                if call.args[0] == "dashboard_window_refresh_completed"
             ]
             assert [event["window"] for event in completed] == ["24h", "7d", "30d"]
             assert all(event["elapsed_seconds"] >= 0 for event in completed)
             async with pool.connection() as conn:
                 state = await conn.execute(
-                    "SELECT generation,as_of,published_at "
-                    "FROM benchmarks_v2.dashboard_summary_state"
+                    "SELECT generation,as_of,published_at FROM benchmarks_v2.dashboard_window_state"
                 )
                 row = await state.fetchone()
                 assert row is not None and row["as_of"] is not None
-                for view in SUMMARY_VIEWS.values():
+                for view in WINDOW_VIEWS.values():
                     count = await conn.execute(f"SELECT count(*) AS n FROM {view}")  # noqa: S608
                     assert (await count.fetchone())["n"] == 0
         finally:
@@ -128,8 +115,8 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
             )
             cur.execute(
                 """INSERT INTO benchmarks_v2.metric_evaluations
-                (id,observation_id,metric_type,metric_version,executor,status,started_at,created_at,updated_at)
-                VALUES (%s,%s,'WER','v1','test','queued',NULL,%s,%s)""",
+                (id,observation_id,metric_id,metric_version,executor,status,started_at,created_at,updated_at)
+                VALUES (%s,%s,benchmarks_v2.metric_id_for_code('WER'),'v1','test','queued',NULL,%s,%s)""",
                 (eid, oid, captured, captured),
             )
             cur.execute(
@@ -159,9 +146,9 @@ def test_refresh_materializes_wer_percentiles_and_pooled_values(
     async def scenario() -> None:
         pool = await open_pool(summary_pg)
         try:
-            from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+            from coval_bench.db.dashboard_windows import refresh_window_views
 
-            result = await refresh_summary_snapshots(pool, as_of=as_of)
+            result = await refresh_window_views(pool, as_of=as_of)
             assert result.status == "published"
             async with pool.connection() as conn:
                 cur = await conn.execute(
@@ -191,13 +178,13 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
     async def scenario() -> None:
         pool = await open_pool(summary_pg)
         try:
-            from coval_bench.db.dashboard_summaries import refresh_summary_snapshots
+            from coval_bench.db.dashboard_windows import refresh_window_views
 
-            await refresh_summary_snapshots(pool, as_of=as_of)
+            await refresh_window_views(pool, as_of=as_of)
             async with pool.connection() as conn:
                 before = await (
                     await conn.execute(
-                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_summary_state"
+                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
                 ).fetchone()
                 before_view = await (
@@ -222,9 +209,9 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                 )
                 cur.execute(
                     """INSERT INTO benchmarks_v2.metric_evaluations
-                    (id,observation_id,metric_type,metric_version,executor,status,
+                    (id,observation_id,metric_id,metric_version,executor,status,
                      started_at,created_at,updated_at)
-                    VALUES (%s,%s,'UnknownSummaryMetric','v1','test','queued',NULL,%s,%s)""",
+                    VALUES (%s,%s,benchmarks_v2.metric_id_for_code('UnknownSummaryMetric'),'v1','test','queued',NULL,%s,%s)""",
                     (evaluation_id, observation_id, as_of, as_of),
                 )
                 cur.execute(
@@ -243,11 +230,11 @@ def test_unknown_summary_metric_rolls_back_state_and_views(
                 )
             summary_pg.commit()
             with pytest.raises(ValueError, match="UnknownSummaryMetric"):
-                await refresh_summary_snapshots(pool, as_of=as_of)
+                await refresh_window_views(pool, as_of=as_of)
             async with pool.connection() as conn:
                 after = await (
                     await conn.execute(
-                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_summary_state"
+                        "SELECT generation, as_of FROM benchmarks_v2.dashboard_window_state"
                     )
                 ).fetchone()
                 after_view = await (

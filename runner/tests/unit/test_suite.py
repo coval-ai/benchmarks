@@ -11,6 +11,7 @@ from coval_bench.config import Settings
 from coval_bench.datasets.suite import (
     DEDICATED_STT_SUITE,
     DEDICATED_TTS_SAMPLE_SIZE,
+    DEDICATED_TTS_SUITE,
     DEFAULT_SAMPLE_SIZE,
     SHARED_TTS_SUITE,
     tts_sample_size,
@@ -50,7 +51,9 @@ def test_suite_sizes_fit_their_manifests() -> None:
     [
         ("shared", "tts-v2", None, SHARED_TTS_SUITE["tts-v2"]),
         ("shared", "tts-v1", None, DEFAULT_SAMPLE_SIZE),
-        ("dedicated", "tts-v2", None, DEDICATED_TTS_SAMPLE_SIZE),
+        ("dedicated", "tts-v2", None, DEDICATED_TTS_SUITE["tts-v2"]),
+        ("dedicated", "tts-v1", None, DEDICATED_TTS_SAMPLE_SIZE),
+        ("dedicated", "tts-v2", 7, 7),
         ("shared", "tts-v2", 7, 7),
     ],
 )

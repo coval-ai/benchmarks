@@ -40,17 +40,17 @@ SELECT table_name,
                 AND (parent_metric_id IS NULL OR metric_id <> parent_metric_id))
        ) AS mismatched_ids
 FROM (
-  SELECT 'metric_evaluations' AS table_name, metric_id, metric_type, NULL::bigint AS parent_metric_id
+  SELECT 'metric_evaluations' AS table_name, metric_id, NULL::bigint AS parent_metric_id
   FROM benchmarks_v2.metric_evaluations
   UNION ALL
-  SELECT 'dashboard_metric_values', p.metric_id, p.metric_type, e.metric_id
+  SELECT 'dashboard_metric_values', p.metric_id, e.metric_id
   FROM benchmarks_v2.dashboard_metric_values p
   LEFT JOIN benchmarks_v2.metric_evaluations e ON e.id = p.evaluation_id
   UNION ALL
-  SELECT 'metric_values_by_bucket', metric_id, metric_type, NULL::bigint
-  FROM benchmarks_v2.metric_values_by_bucket
+  SELECT 'dashboard_rollups', metric_id, NULL::bigint
+  FROM benchmarks_v2.dashboard_rollups
 ) rows
-LEFT JOIN benchmarks_v2.metrics ON metrics.code = rows.metric_type
+LEFT JOIN benchmarks_v2.metrics ON metrics.id = rows.metric_id
 GROUP BY table_name ORDER BY table_name
 """
 
@@ -120,8 +120,9 @@ WHERE benchmark = %(benchmark)s
 GROUP BY dataset_id
 UNION
 SELECT dataset_id
-FROM benchmarks_v2.metric_values_by_bucket
+FROM benchmarks_v2.dashboard_rollups
 WHERE benchmark = %(benchmark)s
+  AND grain = 'run'
   AND metric_version = 'v1'
   AND evaluation_variant = 'default'
   AND value_key = 'primary'
@@ -170,12 +171,12 @@ SELECT observation.provider,
        observation.benchmark,
        observation.dataset_id,
        CASE
-         WHEN evaluation.metric_type = 'TTFA' AND value.value_key = 'roundtrip'
+         WHEN metric.code = 'TTFA' AND value.value_key = 'roundtrip'
            THEN 'TTFARoundtrip'
-         WHEN evaluation.metric_type = 'TTFA' AND value.value_key = 'leading_silence'
+         WHEN metric.code = 'TTFA' AND value.value_key = 'leading_silence'
            THEN 'TTFALeadingSilence'
          WHEN value.value_role = 'primary'
-           THEN evaluation.metric_type
+           THEN metric.code
        END AS metric_type,
        value.value,
        components.wer_insertions_pct,
@@ -186,6 +187,7 @@ FROM benchmarks_v2.benchmark_observations observation
 JOIN benchmarks_v2.runs run ON run.id = observation.run_id
 JOIN benchmarks_v2.metric_evaluations evaluation
   ON evaluation.observation_id = observation.id
+JOIN benchmarks_v2.metrics metric ON metric.id = evaluation.metric_id
 JOIN benchmarks_v2.metric_values value
   ON value.metric_evaluation_id = evaluation.id
 LEFT JOIN LATERAL (
@@ -213,7 +215,7 @@ WHERE observation.status = 'succeeded'
   AND (
     value.value_role = 'primary'
     OR (
-      evaluation.metric_type = 'TTFA'
+      metric.code = 'TTFA'
       AND value.value_key IN ('roundtrip', 'leading_silence')
     )
   )
@@ -222,12 +224,12 @@ GROUP BY observation.provider,
          observation.benchmark,
          observation.dataset_id,
          CASE
-           WHEN evaluation.metric_type = 'TTFA' AND value.value_key = 'roundtrip'
+           WHEN metric.code = 'TTFA' AND value.value_key = 'roundtrip'
              THEN 'TTFARoundtrip'
-           WHEN evaluation.metric_type = 'TTFA' AND value.value_key = 'leading_silence'
+           WHEN metric.code = 'TTFA' AND value.value_key = 'leading_silence'
              THEN 'TTFALeadingSilence'
            WHEN value.value_role = 'primary'
-             THEN evaluation.metric_type
+             THEN metric.code
          END,
          value.value,
          components.wer_insertions_pct,
@@ -271,41 +273,43 @@ GROUP BY provider,
 """
 
 _NORMALIZED_ROLLUP_COUNTS_SQL = """
-SELECT provider,
-       model,
-       benchmark,
-       dataset_id,
-       metric_type,
-       bucket_at,
-       min_value,
-       p25,
-       p50,
-       p75,
-       max_value,
-       value_sum,
-       sample_count,
+SELECT bucket.provider,
+       bucket.model,
+       bucket.benchmark,
+       bucket.dataset_id,
+       metric.code AS metric_type,
+       bucket.bucket_at,
+       bucket.min_value,
+       bucket.p25,
+       bucket.p50,
+       bucket.p75,
+       bucket.max_value,
+       bucket.value_sum,
+       bucket.sample_count,
        COUNT(*) AS multiplicity
-FROM benchmarks_v2.metric_values_by_bucket
-WHERE benchmark = %(benchmark)s
-  AND dataset_id = %(dataset_id)s
-  AND metric_version = 'v1'
-  AND evaluation_variant = 'default'
-  AND value_key = 'primary'
-  AND bucket_at >= %(start)s
-  AND bucket_at < %(end)s
-GROUP BY provider,
-         model,
-         benchmark,
-         dataset_id,
-         metric_type,
-         bucket_at,
-         min_value,
-         p25,
-         p50,
-         p75,
-         max_value,
-         value_sum,
-         sample_count
+FROM benchmarks_v2.dashboard_rollups bucket
+JOIN benchmarks_v2.metrics metric ON metric.id = bucket.metric_id
+WHERE bucket.benchmark = %(benchmark)s
+  AND bucket.grain = 'run'
+  AND bucket.dataset_id = %(dataset_id)s
+  AND bucket.metric_version = 'v1'
+  AND bucket.evaluation_variant = 'default'
+  AND bucket.value_key = 'primary'
+  AND bucket.bucket_at >= %(start)s
+  AND bucket.bucket_at < %(end)s
+GROUP BY bucket.provider,
+         bucket.model,
+         bucket.benchmark,
+         bucket.dataset_id,
+         metric.code,
+         bucket.bucket_at,
+         bucket.min_value,
+         bucket.p25,
+         bucket.p50,
+         bucket.p75,
+         bucket.max_value,
+         bucket.value_sum,
+         bucket.sample_count
 """
 
 
