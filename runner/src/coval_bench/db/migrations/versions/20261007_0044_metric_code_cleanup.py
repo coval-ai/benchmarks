@@ -536,6 +536,7 @@ def downgrade() -> None:
         bind.exec_driver_sql(
             f"ALTER TABLE benchmarks_v2.{table} ALTER COLUMN metric_type SET NOT NULL"
         )
+    for table in ("metric_evaluations", "metric_values_by_bucket"):
         bind.exec_driver_sql(f"ALTER TABLE benchmarks_v2.{table} ADD CHECK (metric_type <> '')")
     _frozen_sql(bind, _LIFECYCLE_SQL)
     _frozen_sql(bind, _PROJECTION_SQL)

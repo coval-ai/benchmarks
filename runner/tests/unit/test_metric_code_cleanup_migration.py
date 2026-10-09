@@ -150,6 +150,19 @@ def _view_acl(conn: psycopg.Connection[Any]) -> list[Any]:
       ORDER BY 1,2,3,4,5""").fetchall()
 
 
+def _metric_type_checks(conn: psycopg.Connection[Any]) -> list[tuple[str, str]]:
+    return conn.execute(
+        """SELECT t.relname, pg_get_constraintdef(c.oid)
+           FROM pg_constraint c
+           JOIN pg_class t ON t.oid=c.conrelid
+           JOIN pg_namespace n ON n.oid=t.relnamespace
+           WHERE n.nspname='benchmarks_v2' AND c.contype='c'
+             AND t.relname=ANY(%s) AND pg_get_constraintdef(c.oid) LIKE '%%metric_type%%'
+           ORDER BY t.relname, pg_get_constraintdef(c.oid)""",
+        (list(TABLES),),
+    ).fetchall()
+
+
 @pytest.fixture
 def populated(compat: Any) -> Any:
     _seed(compat)
@@ -215,6 +228,11 @@ def test_preflight_refuses_incomplete_identity_invariants(compat: Any, damage: s
 def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populated: Any) -> None:
     before = _payloads(populated)
     acl = _view_acl(populated)
+    checks = _metric_type_checks(populated)
+    assert {table for table, _definition in checks} == {
+        "metric_evaluations",
+        "metric_values_by_bucket",
+    }
     _migrate(populated, CLEANUP, opt_in=True)
     assert _payloads(populated) == before
     assert _view_acl(populated) == acl
@@ -236,6 +254,7 @@ def test_populated_cleanup_and_rollback_preserve_payloads_and_privileges(populat
     _migrate(populated, COMPAT, down=True)
     assert _payloads(populated) == before
     assert _view_acl(populated) == acl
+    assert _metric_type_checks(populated) == checks
     assert populated.execute(
         "SELECT count(*) FROM pg_indexes WHERE schemaname='benchmarks_v2' AND indexname IN ('metric_evaluations_metric_identity_key','metric_values_by_bucket_metric_identity_key','dashboard_hourly_aggregates_metric_identity_key')"
     ).fetchone() == (3,)
