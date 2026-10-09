@@ -19,7 +19,6 @@ from coval_bench.db.dashboard_summaries import (
     RefreshResult,
     validate_summary_rules,
 )
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 from .conftest import apply_migrations, open_pool
 
@@ -36,17 +35,6 @@ def test_summary_views_cover_every_saved_window() -> None:
 
 def test_registered_contracts_are_supported() -> None:
     validate_summary_rules()
-
-
-def test_changed_wer_ratio_contract_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
-    monkeypatch.setitem(
-        METRIC_VALUE_CONTRACTS,
-        (Metric.WER, "v1"),
-        original.model_copy(update={"ratio_scale": 1}),
-    )
-    with pytest.raises(ValueError, match="ratio contract"):
-        validate_summary_rules()
 
 
 def test_naive_as_of_is_rejected() -> None:

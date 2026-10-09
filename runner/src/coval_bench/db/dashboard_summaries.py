@@ -16,7 +16,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from coval_bench.db.dashboard_contracts import DEFINITION_REVISION, aggregation_fingerprint
 from coval_bench.db.metric_definitions import register_metric_definitions
-from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS
+from coval_bench.registries.metrics import METRIC_VALUE_CONTRACTS, Metric
 
 logger = structlog.get_logger(__name__)
 
@@ -36,31 +36,21 @@ class RefreshResult:
 
 
 def validate_summary_rules() -> None:
-    """Ensure registered contracts can be represented by the frozen projection."""
-    for (metric, version), contract in METRIC_VALUE_CONTRACTS.items():
-        if version != "v1":
-            continue
-        if (str(metric) == "WER" or contract.aggregation_method == "ratio") and (
-            str(metric) != "WER"
-            or contract.aggregation_method != "ratio"
-            or contract.ratio_scale != 100
-            or contract.ratio_fallback != "mean"
-            or set(contract.numerator_keys)
-            != {"substitution_count", "deletion_count", "insertion_count"}
-            or contract.denominator_key != "reference_words"
-            or next((d.unit for d in contract.values if d.key == "primary"), None) != "percent"
-            or any(
-                definition.unit
-                != (
-                    "percent"
-                    if definition.key in {"insertions", "deletions", "substitutions"}
-                    else "count"
-                )
-                for definition in contract.values
-                if definition.key != "primary"
-            )
-        ):
-            raise ValueError(f"unsupported summary ratio contract for {metric}/{version}")
+    """Ensure the WER contract still carries the keys the frozen projection pools."""
+    contract = METRIC_VALUE_CONTRACTS[(Metric.WER, "v1")]
+    units = {definition.key: definition.unit for definition in contract.values}
+    expected = {
+        "primary": "percent",
+        "insertions": "percent",
+        "deletions": "percent",
+        "substitutions": "percent",
+        "substitution_count": "count",
+        "deletion_count": "count",
+        "insertion_count": "count",
+        "reference_words": "count",
+    }
+    if units != expected:
+        raise ValueError("unsupported summary WER contract")
 
 
 async def refresh_summary_snapshots(

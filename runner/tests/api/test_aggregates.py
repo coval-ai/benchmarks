@@ -34,12 +34,7 @@ from coval_bench.api.routers.aggregates import (
 from coval_bench.db.dashboard_buckets import BUCKET_INTERVALS, fill_bucket
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.db.metric_definitions import register_metric_definitions
-from coval_bench.registries import METRIC_SPECS, TIMELINE_AGGREGATION_RULES, Metric
-from coval_bench.registries.metrics import (
-    MetricValueContract,
-    MetricValueDefinition,
-    MetricValueRole,
-)
+from coval_bench.registries import METRIC_SPECS, Metric
 from tests.api.conftest import _fill_buckets, _insert_result, _insert_run, _refresh_mv
 
 
@@ -1582,10 +1577,6 @@ async def test_timeline_historical_bounds_groups_cache_and_visibility(
     from coval_bench.api.internal import hidden_early_access
     from tests.api.conftest import _make_db_url
 
-    monkeypatch.setitem(
-        TIMELINE_AGGREGATION_RULES, "FutureMetric", TIMELINE_AGGREGATION_RULES["TTFS"]
-    )
-
     class FutureMetric(StrEnum):
         VALUE = "FutureMetric"
 
@@ -1774,123 +1765,6 @@ async def test_normalized_timeline_average_uses_complete_wer_pool_or_fallback(
     assert point["sample_count"] == 4
 
 
-async def test_normalized_timeline_uses_registered_phonetic_ratio(
-    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Timeline ratio rules use pooled operands and preserve incomplete sources as unavailable."""
-
-    from tests.api.conftest import _make_db_url
-
-    rule = MetricValueContract(
-        metric=Metric.RTF,
-        version="v1",
-        values=(
-            MetricValueDefinition(
-                key="primary", unit="percent", value_role=MetricValueRole.PRIMARY
-            ),
-            MetricValueDefinition(key="correct", unit="count", required=False),
-            MetricValueDefinition(key="reference", unit="count", required=False),
-        ),
-        aggregation_method="ratio",
-        numerator_keys=("correct",),
-        denominator_key="reference",
-        ratio_scale=100.0,
-    )
-    monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, "PhoneticAccuracy", rule)
-
-    class PhoneticMetric(StrEnum):
-        VALUE = "PhoneticAccuracy"
-
-    monkeypatch.setitem(
-        METRIC_SPECS,
-        cast(Metric, PhoneticMetric.VALUE),
-        METRIC_SPECS[Metric.RTF].model_copy(update={"display_name": "Phonetic accuracy"}),
-    )
-    app = client._transport.app  # type: ignore[attr-defined]
-    app.state.settings.normalized_dashboard_reads_enabled = True
-    start = datetime(2026, 8, 1, tzinfo=dt.UTC)
-    rows = [
-        (start, [("primary", 90, 1), ("correct", 9, 1), ("reference", 10, 1)]),
-        (
-            start + timedelta(minutes=15),
-            [("primary", 50, 1), ("correct", 50, 1), ("reference", 100, 1)],
-        ),
-        (start + timedelta(hours=1), [("primary", 80, 1)]),
-        (start + timedelta(hours=2), [("primary", 0, 1), ("correct", 0, 1), ("reference", 0, 1)]),
-        (
-            start + timedelta(hours=2, minutes=15),
-            [("primary", 50, 1), ("correct", 5, 1), ("reference", 10, 1)],
-        ),
-        (start + timedelta(hours=3), [("primary", 0, 1), ("correct", 0, 1), ("reference", 0, 1)]),
-        (start + timedelta(hours=4), [("primary", 80, 1), ("correct", 8, 1), ("reference", 10, 1)]),
-        (start + timedelta(hours=5), [("primary", 80, 1), ("correct", 8, 2), ("reference", 10, 1)]),
-        (
-            start + timedelta(hours=5, minutes=15),
-            [("primary", 160, 2), ("correct", 16, 2), ("reference", 20, 2)],
-        ),
-    ]
-    async with await psycopg.AsyncConnection.connect(
-        _make_db_url(postgresql), autocommit=True
-    ) as conn:
-        await register_metric_definitions(conn)
-        for bucket, values in rows:
-            for key, value_sum, sample_count in values:
-                await conn.execute(
-                    """INSERT INTO benchmarks_v2.metric_values_by_bucket
-                       (provider, model, benchmark, dataset_id, metric_type, metric_version,
-                        evaluation_variant, value_key, unit, bucket_at, min_value, p25, p50,
-                        p75, max_value, value_sum, sample_count)
-                       VALUES ('phonetic', 'accuracy-v1', 'STT', 'phonetic-v1',
-                               'PhoneticAccuracy', 'v1', 'default', %s, %s, %s,
-                               %s, %s, %s, %s, %s, %s, %s)""",
-                    (
-                        key,
-                        "invalid-unit"
-                        if bucket == start + timedelta(hours=4) and key == "reference"
-                        else ("count" if key != "primary" else "percent"),
-                        bucket,
-                        value_sum,
-                        value_sum,
-                        value_sum,
-                        value_sum,
-                        value_sum,
-                        value_sum,
-                        sample_count,
-                    ),
-                )
-    await _publish_timeline_test_hours(postgresql)
-    response = await client.get(
-        "/v1/results/timeline",
-        params={
-            "benchmark": "STT",
-            "since": start.isoformat(),
-            "until": (start + timedelta(hours=6)).isoformat(),
-            "dataset": "phonetic-v1",
-        },
-    )
-    assert response.status_code == 200
-    points = [
-        point for point in response.json()["points"] if point["metric_type"] == "PhoneticAccuracy"
-    ]
-    assert [point["value"] for point in points] == [
-        pytest.approx(5900 / 110),
-        None,
-        pytest.approx(50),
-        None,
-        None,
-        None,
-    ]
-    assert [point["aggregation_method"] for point in points] == [
-        "ratio",
-        "unavailable",
-        "ratio",
-        "unavailable",
-        "unavailable",
-        "unavailable",
-    ]
-    assert [point["sample_count"] for point in points] == [2, 1, 2, 1, 1, 3]
-
-
 async def test_timeline_uses_weighted_wer_and_latency_p50(
     client: AsyncClient, postgresql: Any
 ) -> None:
@@ -1987,39 +1861,6 @@ async def test_timeline_30d_averages_each_group_and_preserves_legacy_series(
     assert {"min_value", "p25", "p50", "p75", "max_value", "value_sum", "sample_count"} <= set(
         legacy.json()["series"][0]
     )
-
-
-@pytest.mark.parametrize("normalized", [False, True])
-async def test_timeline_ratio_without_fallback_is_unavailable_on_either_storage_path(
-    client: AsyncClient, postgresql: Any, monkeypatch: pytest.MonkeyPatch, normalized: bool
-) -> None:
-    rule = MetricValueContract.model_validate(
-        {
-            **TIMELINE_AGGREGATION_RULES["WER"].model_dump(),
-            "ratio_fallback": None,
-        }
-    )
-    monkeypatch.setitem(TIMELINE_AGGREGATION_RULES, "WER", rule)
-    app = client._transport.app  # type: ignore[attr-defined]
-    app.state.settings.normalized_dashboard_reads_enabled = normalized
-    if normalized:
-        await _insert_normalized_bucket(
-            postgresql,
-            dataset_id="__all__",
-            bucket_at=datetime.now(dt.UTC).replace(minute=0, second=0, microsecond=0)
-            - timedelta(hours=2),
-        )
-    else:
-        run_id = await _insert_run(postgresql, scheduled_at=datetime.now(dt.UTC))
-        await _insert_result(postgresql, run_id, metric_value=3)
-        await _fill_buckets(postgresql)
-    await _publish_timeline_test_hours(postgresql)
-    response = await client.get("/v1/results/timeline", params={"benchmark": "STT", "window": "7d"})
-    assert response.status_code == 200
-    [point] = response.json()["points"]
-    assert point["value"] is None
-    assert point["aggregation_method"] == "unavailable"
-    assert point["sample_count"] > 0
 
 
 _MERGE_SOURCE_ROWS_SQL = """

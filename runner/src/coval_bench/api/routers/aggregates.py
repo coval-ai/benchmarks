@@ -35,7 +35,6 @@ import structlog
 from cachetools import TTLCache
 from fastapi import APIRouter, Depends, HTTPException, Query
 from posthog import Posthog
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 from starlette.requests import Request
 
@@ -74,7 +73,6 @@ from coval_bench.config import DATASET_ALL, Settings
 from coval_bench.db.dashboard_summaries import SUMMARY_VIEWS
 from coval_bench.registries import (
     METRIC_SPECS,
-    TIMELINE_AGGREGATION_RULES,
     Metric,
     is_metric_excluded,
 )
@@ -265,74 +263,56 @@ _NORMALIZED_COMPACT_SERIES_SQL = (
 
 # Rules are data bound through psycopg, including metric and component names.
 # Source buckets retain sums/counts, so larger intervals never average averages.
-_TIMELINE_RULES_SQL = """
-WITH rules AS (
- SELECT * FROM jsonb_to_recordset(%(aggregation_rules)s::jsonb) AS r(
-   metric_type text, metric_version text, method text, numerator_keys text[],
-   denominator_key text, scale float8, fallback text, units jsonb
- )
-), source AS (
+_AVERAGE_SELECT_SQL = """
+SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
+       CASE WHEN metric_type = 'WER' THEN COALESCE(pooled_value, mean_value)
+            ELSE mean_value END AS value,
+       pooled_value,
+       CASE WHEN metric_type <> 'WER' THEN 'mean'
+            WHEN pooled_value IS NOT NULL THEN 'ratio'
+            ELSE 'mean_fallback' END AS aggregation_method
 """
+
 # Only closed buckets exist, so the newest interval always lags by one bucket.
-_NORMALIZED_SAVED_AVERAGE_SOURCE_SQL = """
- SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS source_at,
+_BUCKET_AVERAGE_SQL = f"""
+{_AVERAGE_SELECT_SQL}
+FROM (
+ SELECT b.provider, b.model, m.code AS metric_type, b.bucket_at AS scheduled_at,
         MAX(b.latest_source_at) AS latest_source_at,
-        r.method, r.fallback, r.scale,
-        MAX(b.value_sum) FILTER (WHERE b.value_key = 'primary') AS primary_sum,
-        MAX(b.sample_count) FILTER (WHERE b.value_key = 'primary') AS sample_count,
-        SUM(b.value_sum) FILTER (WHERE b.value_key = ANY(r.numerator_keys)) AS numerator,
-        SUM(b.value_sum) FILTER (WHERE b.value_key = r.denominator_key) AS denominator,
-        (COUNT(*) = cardinality(r.numerator_keys) + 2
-         AND MIN(b.sample_count) = MAX(b.sample_count)
-         AND BOOL_AND(b.unit = r.units ->> b.value_key)) AS complete
+        MAX(sample_count) FILTER (WHERE value_key = 'primary') AS sample_count,
+        MAX(value_sum) FILTER (WHERE value_key = 'primary')
+          / NULLIF(MAX(sample_count) FILTER (WHERE value_key = 'primary'), 0) AS mean_value,
+        CASE WHEN {_BUCKET_COUNTS_COMPLETE}
+             THEN 100 * {_BUCKET_ERROR_SUM} / NULLIF({_BUCKET_REFERENCE_SUM}, 0) END AS pooled_value
  FROM benchmarks_v2.dashboard_bucket_aggregates b
  JOIN benchmarks_v2.metrics m ON m.id = b.metric_id
- JOIN rules r ON r.metric_type = m.code AND r.metric_version = b.metric_version
- WHERE b.evaluation_variant = 'default' AND b.benchmark = %(benchmark)s
-   AND b.dataset_id = %(dataset)s AND b.interval_seconds = %(bucket_seconds)s
+ WHERE b.metric_version = 'v1' AND b.evaluation_variant = 'default'
+   AND b.value_key IN ('primary', 'substitution_count', 'deletion_count',
+                       'insertion_count', 'reference_words')
+   AND b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
+   AND b.interval_seconds = %(bucket_seconds)s
    AND b.bucket_at >= %(since)s
    AND b.bucket_at + b.interval_seconds * interval '1 second' <= %(until)s
-   AND (b.value_key = 'primary' OR b.value_key = ANY(r.numerator_keys)
-        OR b.value_key = r.denominator_key)
- GROUP BY b.provider, b.model, m.code, b.bucket_at,
-          r.method, r.fallback, r.scale, r.numerator_keys
- HAVING COUNT(*) FILTER (WHERE b.value_key = 'primary') = 1
-    AND COUNT(*) FILTER (WHERE b.value_key = 'primary' AND b.unit = r.units ->> 'primary') = 1
-"""
-_LEGACY_AVERAGE_SOURCE_SQL = """
- SELECT b.provider, b.model, b.metric_type, b.bucket_at AS source_at,
-        b.bucket_at AS latest_source_at, r.method, r.fallback, r.scale,
-        b.value_sum AS primary_sum, b.sample_count,
-        NULL::float8 AS numerator, NULL::float8 AS denominator, FALSE AS complete
- FROM benchmarks_v2.results_by_bucket b
- JOIN rules r USING (metric_type)
- WHERE b.benchmark = %(benchmark)s AND b.dataset_id = %(dataset)s
-   AND b.bucket_at >= %(since)s AND b.bucket_at < %(until)s
-"""
-_TIMELINE_AVERAGE_TAIL_SQL = """
-), grouped AS (
- SELECT provider, model, metric_type, method, fallback, scale,
-        to_timestamp(floor(extract(epoch FROM source_at) / %(bucket_seconds)s)
+ GROUP BY b.provider, b.model, m.code, b.bucket_at
+ HAVING COUNT(*) FILTER (WHERE value_key = 'primary') = 1
+) buckets ORDER BY scheduled_at, provider, model, metric_type
+"""  # noqa: S608
+
+_LEGACY_AVERAGE_SQL = f"""
+{_AVERAGE_SELECT_SQL}
+FROM (
+ SELECT provider, model, metric_type,
+        to_timestamp(floor(extract(epoch FROM bucket_at) / %(bucket_seconds)s)
                      * %(bucket_seconds)s) AS scheduled_at,
-        SUM(primary_sum)::float8 / NULLIF(SUM(sample_count), 0) AS mean_value,
-        SUM(sample_count) AS sample_count, MAX(latest_source_at) AS latest_source_at,
-        CASE WHEN BOOL_AND(complete) AND SUM(denominator) > 0
-             THEN scale * SUM(numerator)::float8 / NULLIF(SUM(denominator), 0)
-        END AS ratio_value
- FROM source
- GROUP BY provider, model, metric_type, method, fallback, scale, scheduled_at
-)
-SELECT provider, model, metric_type, scheduled_at, sample_count, latest_source_at,
-       CASE WHEN method = 'mean' THEN mean_value
-            WHEN ratio_value IS NOT NULL THEN ratio_value
-            WHEN fallback = 'mean' THEN mean_value END AS value,
-       ratio_value AS pooled_value,
-       CASE WHEN method = 'mean' THEN 'mean'
-            WHEN ratio_value IS NOT NULL THEN 'ratio'
-            WHEN fallback = 'mean' THEN 'mean_fallback'
-            ELSE 'unavailable' END AS aggregation_method
-FROM grouped ORDER BY scheduled_at, provider, model, metric_type
-"""
+        SUM(sample_count) AS sample_count, MAX(bucket_at) AS latest_source_at,
+        SUM(value_sum)::float8 / NULLIF(SUM(sample_count), 0) AS mean_value,
+        NULL::float8 AS pooled_value
+ FROM benchmarks_v2.results_by_bucket
+ WHERE benchmark = %(benchmark)s AND dataset_id = %(dataset)s
+   AND bucket_at >= %(since)s AND bucket_at < %(until)s
+ GROUP BY provider, model, metric_type, scheduled_at
+) buckets ORDER BY scheduled_at, provider, model, metric_type
+"""  # noqa: S608
 
 _TIMELINE_ALLOWED_BUCKETS = (3600, 14400)
 
@@ -394,29 +374,6 @@ def _validate_percentile_request(
         raise HTTPException(status_code=422, detail="unsupported percentile metric")
     if benchmark not in {item.value for item in METRIC_SPECS[Metric(metric_type)].benchmarks}:
         raise HTTPException(status_code=422, detail="metric is not supported for benchmark")
-
-
-def _timeline_average_sql(normalized: bool) -> tuple[str, dict[str, Any]]:
-    """Bind the current versioned metric definitions for either storage path."""
-    rules = [
-        {
-            "metric_type": name,
-            "metric_version": rule.version,
-            "method": rule.aggregation_method,
-            "numerator_keys": list(rule.numerator_keys),
-            "denominator_key": rule.denominator_key,
-            "scale": rule.ratio_scale,
-            "fallback": rule.ratio_fallback,
-            "units": {value.key: value.unit for value in rule.values},
-        }
-        for name, rule in TIMELINE_AGGREGATION_RULES.items()
-        if rule.version == "v1"
-    ]
-    source = _NORMALIZED_SAVED_AVERAGE_SOURCE_SQL if normalized else _LEGACY_AVERAGE_SOURCE_SQL
-    return (
-        _TIMELINE_RULES_SQL + source + _TIMELINE_AVERAGE_TAIL_SQL,
-        {"aggregation_rules": Jsonb(rules)},
-    )
 
 
 def _visible(row: dict[str, Any], hidden: frozenset[tuple[str, str]]) -> bool:
@@ -634,7 +591,7 @@ async def get_results_timeline(
         elif aggregation == "run":
             sql = _NORMALIZED_TIMELINE_SQL if normalized else _TIMELINE_SQL
         else:
-            sql, rule_params = _timeline_average_sql(normalized)
+            sql = _BUCKET_AVERAGE_SQL if normalized else _LEGACY_AVERAGE_SQL
         params = {
             "benchmark": benchmark,
             "dataset": dataset_key,
