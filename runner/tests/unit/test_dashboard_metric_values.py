@@ -31,8 +31,9 @@ async def test_projection_seeds_existing_values_and_downgrades(
         writer = RunWriter(pool)
         _, observation = await storage._observation(writer)
         evaluation_id = await storage._historical_evaluation(pool, observation)
-        await writer.complete_metric_evaluation(
+        await storage._complete_historical_evaluation(
             evaluation_id,
+            pool=pool,
             values=storage._wer_values(evaluation_id),
             finished_at=storage._NOW + timedelta(seconds=1),
         )
@@ -98,8 +99,9 @@ async def test_projection_cascades_and_evaluation_uuid_can_be_reused(
         async with pool.connection() as conn:
             await conn.execute(
                 "INSERT INTO benchmarks_v2.metric_evaluations "
-                "(id, observation_id, metric_type, metric_version, evaluation_variant, "
-                "executor, status) VALUES (%s, %s, 'WER', 'v1', 'default', 'inline', 'queued')",
+                "(id, observation_id, metric_id, metric_version, evaluation_variant, "
+                "executor, status) VALUES (%s, %s, "
+                "benchmarks_v2.metric_id_for_code('WER'), 'v1', 'default', 'inline', 'queued')",
                 (evaluation_id, replacement.id),
             )
         await writer.start_metric_evaluation(evaluation_id, started_at=storage._NOW)

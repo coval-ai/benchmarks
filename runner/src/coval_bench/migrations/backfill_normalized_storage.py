@@ -849,11 +849,12 @@ def _strict_stored_plan_matches(
     if actual != expected:
         return False
     cur.execute(
-        """SELECT e.metric_type,e.metric_version,e.evaluation_variant,e.executor,e.status,
+        """SELECT m.code,e.metric_version,e.evaluation_variant,e.executor,e.status,
                   e.started_at,e.finished_at,e.error,v.value_key,v.unit,v.value,v.value_role
            FROM benchmarks_v2.metric_evaluations e LEFT JOIN benchmarks_v2.metric_values v
-             ON v.metric_evaluation_id=e.id WHERE e.observation_id=%s
-           ORDER BY e.metric_type,v.value_key""",
+             ON v.metric_evaluation_id=e.id JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
+             WHERE e.observation_id=%s
+           ORDER BY m.code,v.value_key""",
         (observation_id,),
     )
     actual_values = [tuple(item) for item in cur.fetchall()]
@@ -968,13 +969,14 @@ def _strict_stored_plan_matches(
                 )
             )
     cur.execute(
-        """SELECT e.metric_type,i.input_role,i.input_order,a.artifact_type,a.content_sha256
+        """SELECT m.code,i.input_role,i.input_order,a.artifact_type,a.content_sha256
            FROM benchmarks_v2.metric_evaluation_inputs i
            JOIN benchmarks_v2.metric_evaluations e ON e.id=i.metric_evaluation_id
+           JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
            LEFT JOIN benchmarks_v2.observation_artifacts a
              ON a.id=i.observation_artifact_id
            WHERE e.observation_id=%s
-           ORDER BY e.metric_type,i.input_role,i.input_order""",
+           ORDER BY m.code,i.input_role,i.input_order""",
         (observation_id,),
     )
     return [tuple(item) for item in cur.fetchall()] == sorted(expected_inputs, key=repr)
@@ -1199,8 +1201,10 @@ def _live_validation_result(
             expected_tts_timing = (hashlib.sha256(payload).hexdigest(), len(payload))
 
     cur.execute(
-        """SELECT id,metric_type,metric_version,evaluation_variant,executor,external_request_id,status,started_at,finished_at,error
-           FROM benchmarks_v2.metric_evaluations WHERE observation_id=%s""",
+        """SELECT e.id,m.code,e.metric_version,e.evaluation_variant,e.executor,e.external_request_id,e.status,e.started_at,e.finished_at,e.error
+           FROM benchmarks_v2.metric_evaluations e
+           JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
+           WHERE e.observation_id=%s""",
         (observation_id,),
     )
     evaluations = cur.fetchall()
@@ -1245,8 +1249,9 @@ def _live_validation_result(
         evaluation_ids[metric] = eid
 
     cur.execute(
-        """SELECT e.metric_type,v.value_key,v.unit,v.value,v.value_role
+        """SELECT m.code,v.value_key,v.unit,v.value,v.value_role
            FROM benchmarks_v2.metric_values v JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
+           JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
            WHERE e.observation_id=%s""",
         (observation_id,),
     )
@@ -1334,8 +1339,9 @@ def _live_validation_result(
                 return LiveValidationResult(False, "artifact")
             expected_inputs.append((metric, role, 0, aid))
     cur.execute(
-        """SELECT e.metric_type,i.input_role,i.input_order,i.observation_artifact_id
+        """SELECT m.code,i.input_role,i.input_order,i.observation_artifact_id
            FROM benchmarks_v2.metric_evaluation_inputs i JOIN benchmarks_v2.metric_evaluations e ON e.id=i.metric_evaluation_id
+           JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
            WHERE e.observation_id=%s""",
         (observation_id,),
     )
@@ -1500,8 +1506,8 @@ def _insert_plan(
         for metric, values in grouped.items():
             eid = uuid.uuid5(_EVAL_NAMESPACE, f"{plan.id}|{metric}|v1|default")
             cur.execute(
-                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_id,metric_type,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),%s,'v1','default','inline','queued')",
-                (eid, plan.id, metric, metric),
+                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_id,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),'v1','default','inline','queued')",
+                (eid, plan.id, metric),
             )
             input_id = artifact_ids.get(
                 "provider_transcript"
@@ -1535,7 +1541,7 @@ def _insert_plan(
             error = next(row.error for row in rows if row.error)
             eid = uuid.uuid5(_EVAL_NAMESPACE, f"{plan.id}|{metric}|v1|default")
             cur.execute(
-                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,%s,'v1','default','inline','queued')",
+                "INSERT INTO benchmarks_v2.metric_evaluations (id,observation_id,metric_id,metric_version,evaluation_variant,executor,status) VALUES (%s,%s,(SELECT id FROM benchmarks_v2.metrics WHERE code=%s),'v1','default','inline','queued')",
                 (eid, plan.id, metric),
             )
             input_id = artifact_ids.get(
@@ -1570,7 +1576,7 @@ def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -
     )
     cur.execute(
         """INSERT INTO benchmarks_v2.metric_values_by_bucket
-        (provider,model,benchmark,dataset_id,metric_id,metric_type,metric_version,evaluation_variant,
+        (provider,model,benchmark,dataset_id,metric_id,metric_version,evaluation_variant,
          value_key,unit,bucket_at,min_value,p25,p50,p75,max_value,value_sum,sample_count)
         """
         + _ROLLUP_PAYLOAD_SQL,
@@ -1580,7 +1586,7 @@ def _refresh_bucket(cur: psycopg.Cursor[tuple[Any, ...]], bucket_at: datetime) -
 
 _ROLLUP_PAYLOAD_SQL = """
 SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
-       COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
+       e.metric_id,e.metric_version,e.evaluation_variant,v.value_key,v.unit,%(bucket)s,
        MIN(v.value)::float8,
        PERCENTILE_CONT(.25) WITHIN GROUP (ORDER BY v.value)::float8,
        PERCENTILE_CONT(.5) WITHIN GROUP (ORDER BY v.value)::float8,
@@ -1588,6 +1594,7 @@ SELECT o.provider,o.model,o.benchmark,COALESCE(o.dataset_id,'__all__'),
        MAX(v.value)::float8,SUM(v.value)::float8,COUNT(*)::int
 FROM benchmarks_v2.metric_values v
 JOIN benchmarks_v2.metric_evaluations e ON e.id=v.metric_evaluation_id
+JOIN benchmarks_v2.metrics m ON m.id=e.metric_id
 JOIN benchmarks_v2.benchmark_observations o ON o.id=e.observation_id
 JOIN benchmarks_v2.runs r ON r.id=o.run_id
 WHERE o.status='succeeded' AND e.status='succeeded'
@@ -1595,16 +1602,16 @@ WHERE o.status='succeeded' AND e.status='succeeded'
   AND r.status IN ('succeeded','partial')
   AND r.scheduled_at=%(bucket)s
 GROUP BY GROUPING SETS (
-  (o.provider,o.model,o.benchmark,o.dataset_id,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,o.dataset_id,e.metric_id,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit),
-  (o.provider,o.model,o.benchmark,COALESCE(e.metric_id,benchmarks_v2.metric_id_for_code(e.metric_type)),e.metric_type,e.metric_version,
+  (o.provider,o.model,o.benchmark,e.metric_id,e.metric_version,
    e.evaluation_variant,v.value_key,v.unit)
 )
 """
 
 _STORED_ROLLUP_SQL = """
 SELECT provider,model,benchmark,dataset_id,
-       COALESCE(metric_id,benchmarks_v2.metric_id_for_code(metric_type)),metric_type,metric_version,
+       metric_id,metric_version,
        evaluation_variant,value_key,unit,bucket_at,min_value,p25,p50,p75,
        max_value,value_sum,sample_count
 FROM benchmarks_v2.metric_values_by_bucket

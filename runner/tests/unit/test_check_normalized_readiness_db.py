@@ -68,9 +68,9 @@ def _insert_evaluation(
     cursor.execute(
         """
         INSERT INTO benchmarks_v2.metric_evaluations
-          (observation_id, metric_type, metric_version, evaluation_variant,
+          (observation_id, metric_id, metric_version, evaluation_variant,
            executor, status)
-        VALUES (%s, %s, 'v1', 'default', 'test', 'queued')
+        VALUES (%s, benchmarks_v2.metric_id_for_code(%s), 'v1', 'default', 'test', 'queued')
         RETURNING id
         """,
         (observation_id, metric_type),
@@ -234,11 +234,11 @@ def _insert_matching_rows(conn: psycopg.Connection[Any]) -> None:
         cursor.execute(
             """
             INSERT INTO benchmarks_v2.metric_values_by_bucket
-              (provider, model, benchmark, dataset_id, metric_type,
+              (provider, model, benchmark, dataset_id, metric_id,
                metric_version, evaluation_variant, value_key, unit, bucket_at,
                min_value, p25, p50, p75, max_value, value_sum, sample_count)
             VALUES
-              ('provider', 'model', 'STT', 'stt-v1', 'WER',
+              ('provider', 'model', 'STT', 'stt-v1', benchmarks_v2.metric_id_for_code('WER'),
                'v1', 'default', 'primary', 'percent', %(bucket_at)s,
                6, 6, 6, 6, 6, 12, 2)
             """,

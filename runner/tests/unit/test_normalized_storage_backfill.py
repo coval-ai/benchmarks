@@ -72,6 +72,7 @@ def _migrate(conn: psycopg.Connection[Any]) -> None:
     config.set_main_option(
         "sqlalchemy.url", _dsn(conn).replace("postgresql://", "postgresql+psycopg://")
     )
+    config.attributes["allow_metric_code_cleanup"] = True
     alembic_command.upgrade(config, "head")
 
 
@@ -912,7 +913,10 @@ class _LiveCursor:
     def execute(self, statement: str, *_: Any) -> None:
         if "FROM benchmarks_v2.benchmark_observations WHERE id" in statement:
             self._result = self.parent
-        elif "FROM benchmarks_v2.metric_evaluations WHERE observation_id" in statement:
+        elif (
+            "FROM benchmarks_v2.metric_evaluations WHERE observation_id" in statement
+            or "SELECT e.id,m.code,e.metric_version" in statement
+        ):
             self._result = self.evaluations
         elif "FROM benchmarks_v2.metric_values v JOIN" in statement:
             self._result = self.values
@@ -2358,7 +2362,10 @@ def test_distinct_failed_stt_metrics_backfill_exactly_and_idempotently(
     with backfill_pg.cursor() as cur:
         cur.execute("SELECT status,error,failure_origin FROM benchmarks_v2.benchmark_observations")
         assert cur.fetchall() == [("succeeded", None, None)]
-        cur.execute("SELECT metric_type,status,error FROM benchmarks_v2.metric_evaluations")
+        cur.execute(
+            "SELECT benchmarks_v2.metric_code_for_id(metric_id) AS metric_type,status,error "
+            "FROM benchmarks_v2.metric_evaluations"
+        )
         assert sorted(cur.fetchall()) == sorted((m, "failed", f"{m} failed") for m in metrics)
         cur.execute("SELECT count(*) FROM benchmarks_v2.metric_values")
         assert cur.fetchone() == (0,)
@@ -2424,8 +2431,9 @@ def test_live_timing_only_failed_tts_is_read_only_and_idempotent(
         )
         cur.execute(
             """INSERT INTO benchmarks_v2.metric_evaluations
-               (id,observation_id,metric_type,metric_version,evaluation_variant,executor,status)
-               VALUES (%s,%s,'TTFA','v1','default','inline','queued')""",
+               (id,observation_id,metric_id,metric_version,evaluation_variant,executor,status)
+               VALUES (%s,%s,benchmarks_v2.metric_id_for_code('TTFA'),
+               'v1','default','inline','queued')""",
             (evaluation_id, observation_id),
         )
         cur.execute(

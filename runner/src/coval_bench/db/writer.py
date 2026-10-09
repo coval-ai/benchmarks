@@ -701,12 +701,15 @@ class RunWriter:
             raise ValueError("metric evaluation inputs must not repeat an artifact")
         sql = """
             INSERT INTO benchmarks_v2.metric_evaluations
-            (observation_id, metric_id, metric_type, metric_version, evaluation_variant, executor,
+            (observation_id, metric_id, metric_version, evaluation_variant, executor,
              external_request_id, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (observation_id, metric_id, metric_version, evaluation_variant)
             DO NOTHING
-            RETURNING id, observation_id, metric_id, metric_type, metric_version,
+            RETURNING id, observation_id, metric_id,
+                      (SELECT m.code FROM benchmarks_v2.metrics m
+                       WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                      metric_version,
                       evaluation_variant, executor,
                       external_request_id,
                       status, started_at, finished_at, error, created_at, updated_at
@@ -747,33 +750,27 @@ class RunWriter:
                 metric_id = int(metric_row["id"])
                 if evaluation.metric_id is not None and evaluation.metric_id != metric_id:
                     raise ValueError("metric code and id must refer to the same definition")
-                try:
-                    async with conn.transaction():
-                        await cur.execute(
-                            sql,
-                            (
-                                evaluation.observation_id,
-                                metric_id,
-                                evaluation.metric_type,
-                                evaluation.metric_version,
-                                evaluation.evaluation_variant,
-                                evaluation.executor,
-                                evaluation.external_request_id,
-                                evaluation.status,
-                            ),
-                        )
-                        row = await cur.fetchone()
-                except psycopg.errors.UniqueViolation as exc:
-                    if exc.diag.constraint_name != (
-                        "metric_evaluations_observation_id_metric_type_metric_versio_key"
-                    ):
-                        raise
-                    # Concurrent inserts may hit the retained code key before the ID arbiter.
-                    row = None
+                async with conn.transaction():
+                    await cur.execute(
+                        sql,
+                        (
+                            evaluation.observation_id,
+                            metric_id,
+                            evaluation.metric_version,
+                            evaluation.evaluation_variant,
+                            evaluation.executor,
+                            evaluation.external_request_id,
+                            evaluation.status,
+                        ),
+                    )
+                    row = await cur.fetchone()
                 created = row is not None
                 if row is None:
                     await cur.execute(
-                        """SELECT id, observation_id, metric_id, metric_type, metric_version,
+                        """SELECT id, observation_id, metric_id,
+                                  (SELECT m.code FROM benchmarks_v2.metrics m
+                                   WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                                  metric_version,
                                   evaluation_variant, executor,
                                   external_request_id, status, started_at, finished_at, error,
                                   created_at, updated_at
@@ -877,7 +874,10 @@ class RunWriter:
                     """UPDATE benchmarks_v2.metric_evaluations
                        SET status = %s, started_at = %s, updated_at = now()
                        WHERE id = %s AND status = %s
-                       RETURNING id, observation_id, metric_id, metric_type, metric_version,
+                       RETURNING id, observation_id, metric_id,
+                                 (SELECT m.code FROM benchmarks_v2.metrics m
+                                  WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                                 metric_version,
                                  evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",
@@ -896,7 +896,10 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
-                    """SELECT id, observation_id, metric_id, metric_type, metric_version,
+                    """SELECT id, observation_id, metric_id,
+                              (SELECT m.code FROM benchmarks_v2.metrics m
+                               WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                              metric_version,
                               evaluation_variant, executor, external_request_id, status,
                               started_at, finished_at, error, created_at, updated_at
                        FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE""",
@@ -932,7 +935,10 @@ class RunWriter:
                        SET status = %s, started_at = COALESCE(started_at, %s), finished_at = %s,
                            error = %s, updated_at = now()
                        WHERE id = %s AND status IN (%s, %s)
-                       RETURNING id, observation_id, metric_id, metric_type, metric_version,
+                       RETURNING id, observation_id, metric_id,
+                                 (SELECT m.code FROM benchmarks_v2.metrics m
+                                  WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                                 metric_version,
                                  evaluation_variant, executor,
                                  external_request_id, status, started_at, finished_at, error,
                                  created_at, updated_at""",
@@ -961,7 +967,10 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
-                    """SELECT id, observation_id, metric_id, metric_type, metric_version,
+                    """SELECT id, observation_id, metric_id,
+                              (SELECT m.code FROM benchmarks_v2.metrics m
+                               WHERE m.id = metric_evaluations.metric_id) AS metric_type,
+                              metric_version,
                               evaluation_variant, executor, external_request_id, status,
                               started_at, finished_at, error, created_at, updated_at
                        FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE""",
@@ -1095,8 +1104,10 @@ class RunWriter:
         async with self._pool.connection() as conn:
             async with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                 await cur.execute(
-                    """SELECT metric_type, metric_version, status, finished_at
-                       FROM benchmarks_v2.metric_evaluations WHERE id = %s FOR UPDATE""",
+                    """SELECT m.code AS metric_type, e.metric_version, e.status, e.finished_at
+                       FROM benchmarks_v2.metric_evaluations e
+                       JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
+                       WHERE e.id = %s FOR UPDATE OF e""",
                     (evaluation_id,),
                 )
                 evaluation = await cur.fetchone()
@@ -1430,10 +1441,11 @@ class RunWriter:
             FROM benchmarks_v2.benchmark_observations o
             JOIN benchmarks_v2.metric_evaluations e ON e.observation_id = o.id
             JOIN benchmarks_v2.runs rn ON rn.id = o.run_id
+            JOIN benchmarks_v2.metrics m ON m.id = e.metric_id
             WHERE o.provider = %s
               AND o.benchmark = %s
               AND split_part(o.sample_id, '/', 1) = %s
-              AND e.metric_type = %s
+              AND m.code = %s
               AND rn.status IN ('succeeded', 'partial')
             LIMIT 1
         """

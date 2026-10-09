@@ -27,12 +27,12 @@ BEGIN
   LOOP
     DELETE FROM benchmarks_v2.metric_values_by_bucket WHERE bucket_at = slot;
     INSERT INTO benchmarks_v2.metric_values_by_bucket
-    (provider, model, benchmark, dataset_id, metric_id, metric_type, metric_version,
+    (provider, model, benchmark, dataset_id, metric_id, metric_version,
      evaluation_variant, value_key, unit, bucket_at,
      min_value, p25, p50, p75, p90, p95, max_value, value_sum, sample_count)
     SELECT observation.provider, observation.model, observation.benchmark,
            COALESCE(observation.dataset_id, '__all__'),
-           evaluation.metric_id, evaluation.metric_type,
+           evaluation.metric_id,
            evaluation.metric_version, evaluation.evaluation_variant,
            value.value_key, value.unit, slot,
            MIN(value.value)::float8,
@@ -50,10 +50,10 @@ BEGIN
       AND run.status IN ('succeeded', 'partial') AND run.scheduled_at = slot
     GROUP BY GROUPING SETS (
       (observation.provider, observation.model, observation.benchmark, observation.dataset_id,
-       evaluation.metric_id, evaluation.metric_type, evaluation.metric_version,
+       evaluation.metric_id, evaluation.metric_version,
        evaluation.evaluation_variant, value.value_key, value.unit),
       (observation.provider, observation.model, observation.benchmark,
-       evaluation.metric_id, evaluation.metric_type, evaluation.metric_version,
+       evaluation.metric_id, evaluation.metric_version,
        evaluation.evaluation_variant, value.value_key, value.unit)
     );
   END LOOP;
