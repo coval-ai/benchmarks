@@ -50,8 +50,8 @@ FROM (
   SELECT 'metric_values_by_bucket', metric_id, NULL::bigint
   FROM benchmarks_v2.metric_values_by_bucket
   UNION ALL
-  SELECT 'dashboard_hourly_aggregates', metric_id, NULL::bigint
-  FROM benchmarks_v2.dashboard_hourly_aggregates
+  SELECT 'dashboard_bucket_aggregates', metric_id, NULL::bigint
+  FROM benchmarks_v2.dashboard_bucket_aggregates
 ) rows
 LEFT JOIN benchmarks_v2.metrics ON metrics.id = rows.metric_id
 GROUP BY table_name ORDER BY table_name
