@@ -26,12 +26,6 @@ from coval_bench.db.cli import (
     repair_dashboard_aggregates,
 )
 from coval_bench.llm.coval_agent import sync_llm
-from coval_bench.migrations.backfill_normalized_s2s_storage import (
-    backfill_normalized_s2s_storage_cli,
-)
-from coval_bench.migrations.backfill_normalized_storage import backfill_normalized_storage_cli
-from coval_bench.migrations.backfill_wer_breakdown import backfill_wer_breakdown_cli
-from coval_bench.migrations.import_legacy import import_legacy_cli
 from coval_bench.platform_assets import platform_assets
 from coval_bench.runner.capture_cli import capture
 from coval_bench.s2s.fetch_v2v import fetch_s2s
@@ -116,16 +110,6 @@ db.add_command(refresh_dashboard_aggregates)
 db.add_command(repair_dashboard_aggregates)
 db.add_command(capture)
 
-
-@cli.group()
-def migrate() -> None:
-    """One-shot data migrations."""
-
-
-migrate.add_command(backfill_wer_breakdown_cli, name="backfill-wer-breakdown")
-migrate.add_command(backfill_normalized_storage_cli, name="backfill-normalized-storage")
-migrate.add_command(backfill_normalized_s2s_storage_cli, name="backfill-normalized-s2s-storage")
-migrate.add_command(import_legacy_cli, name="import-legacy")
 
 # Coval-backed workflows use standalone commands rather than a `run --kind` value.
 cli.add_command(fetch_s2s, name="fetch-s2s")
